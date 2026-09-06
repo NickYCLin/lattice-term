@@ -16,7 +16,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Install SSH verification client
-        run: python3 -m pip install --disable-pip-version-check --only-binary=:all: paramiko==5.0.0
+        run: |
+          python3 -m pip install --disable-pip-version-check --only-binary=:all: paramiko==5.0.0
       - name: Verify SSH and SFTP from outside the review host network
         env:
           IOS_REVIEW_HOST_CHECK: ${{ secrets.IOS_REVIEW_HOST_CHECK }}
