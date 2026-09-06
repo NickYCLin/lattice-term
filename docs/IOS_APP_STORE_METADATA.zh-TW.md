@@ -47,7 +47,7 @@ LatticeTerm 讓你從 iPhone 與 iPad 連接自己的伺服器，使用 SSH 終�
 
 2026-09-06 已人工檢閱 CI 的 iPhone 6.9 吋（1320 × 2868）與 iPad 13 吋（2064 × 2752）原始 JPEG，確認無 Alpha、呈現真實連線頁且沒有私人主機或認證資料。Apple 允許上傳 1–10 張截圖；現有每種必要尺寸各一張可先作為素材候選，但只呈現空白連線清單，不保證足以說明核心用途或通過審查。上傳前仍須確認與選定建置一致，不製作假的終端機／傳輸成功畫面。[Apple 截圖說明](https://developer.apple.com/help/app-store-connect/manage-app-information/upload-app-previews-and-screenshots/)
 
-審查主機已依 [隔離環境與驗收紀錄](IOS_REVIEW_HOST.zh-TW.md) 建立。最終[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34018880225)通過；此結果是主機層驗證，不是 iOS 實機操作驗證。
+審查主機已依 [隔離環境與驗收紀錄](IOS_REVIEW_HOST.zh-TW.md) 建立。以 Apple 私密備註實際地址執行的最新[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34021600038)通過；此結果是主機層驗證，不是 iOS 實機操作驗證。
 
 ## App Review Notes（已提交內容的公開節錄）
 

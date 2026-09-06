@@ -27,7 +27,7 @@
 
 DSA 依使用者確認的個人興趣用途申報非貿易商，Apple 顯示「已完成所有法規要求／通過審查」。這是 DSA 合規結果，不是 App Review 核准。加密問卷仍如實勾選 Apple 作業系統之外的標準加密，並依已儲存的供應設定回答不在法國發行；Apple 判定「無需上傳任何文件」。未捏造法國核准書，也未宣稱 App 不使用加密。既有建置元資料顯示「非豁免類加密：否」，此輪已核對文件要求，但沒有變更已上傳 IPA 的 Info.plist。[Apple 加密文件要求](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/)
 
-最終示範服務的[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34018880225)已通過 SSH 密碼／主機金鑰、PTY／尺寸變更、SFTP 上下載及隔離限制；暫存的 GitHub 驗收 secret 已刪除。Mac 上的服務為獨立背景程序，閒置睡眠抑制已啟用；LaunchAgent 未成功啟動，已卸載，不能聲稱重新開機後會自行恢復。審查期間需保持 Mac 開機、連網，詳細邊界見[審核主機紀錄](IOS_REVIEW_HOST.zh-TW.md)。
+以 Apple 審核備註實際地址執行的最新[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34021600038)已通過 SSH 密碼／主機金鑰、PTY／尺寸變更、SFTP 上下載及隔離限制；暫存的 GitHub 驗收 secret 已刪除。Mac 上的服務為獨立背景程序，閒置睡眠抑制已啟用；LaunchAgent 未成功啟動，已卸載，不能聲稱重新開機後會自行恢復。審查期間需保持 Mac 開機、連網，詳細邊界及續租誤判修復見[審核主機紀錄](IOS_REVIEW_HOST.zh-TW.md)。
 
 `d9cf335` 的 [CI](https://github.com/NickYCLin/lattice-term/actions/runs/34010245655)、[iOS verification](https://github.com/NickYCLin/lattice-term/actions/runs/34010245639) 及 [Release workflow](https://github.com/NickYCLin/lattice-term/actions/runs/34010245635) 均已完成且成功。這些新結果不改變前述簽章 IPA 的來源，也不補足尚未完成的 iOS 實機驗證。
 
