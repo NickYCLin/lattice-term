@@ -4,6 +4,13 @@
 
 ---
 
+## [1.0.2](https://github.com/NickYCLin/lattice-term/compare/v1.0.1...v1.0.2) (2026-09-06)
+
+
+### 🛠️ 問題修正
+
+* **更新:** 補齊 Intel Mac 更新包與發布檢查 ([d8257e0](https://github.com/NickYCLin/lattice-term/commit/d8257e06f9bb3f3949d37a2578d1972a7a793323))
+
 ## [1.0.1](https://github.com/NickYCLin/lattice-term/compare/v1.0.0...v1.0.1) (2026-09-06)
 
 
