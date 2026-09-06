@@ -4,6 +4,15 @@
 
 ---
 
+## [1.0.1](https://github.com/NickYCLin/lattice-term/compare/v1.0.0...v1.0.1) (2026-09-06)
+
+
+### 🛠️ 問題修正
+
+* **ci:** 修正審核主機工作語法 ([d9b6109](https://github.com/NickYCLin/lattice-term/commit/d9b6109177812d4ea66b3ffe9dbaa58c4572e8ff))
+* **ios:** 保留模擬器產物並支援本機驗證 ([64c886a](https://github.com/NickYCLin/lattice-term/commit/64c886a7397881dfc2526045b942f64549925269))
+* **對話:** 避免快速對話併入還原的舊分頁 ([ceff8da](https://github.com/NickYCLin/lattice-term/commit/ceff8da8c2bf28d4e44d0cdb06f1f4d0f1d7deb3))
+
 ## [1.0.0](https://github.com/NickYCLin/lattice-term/compare/v0.46.1...v1.0.0) (2026-09-05)
 
 
