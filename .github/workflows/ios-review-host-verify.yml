@@ -1,0 +1,23 @@
+name: iOS review host verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'NickYCLin/lattice-term' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install SSH verification client
+        run: python3 -m pip install --disable-pip-version-check --only-binary=:all: paramiko==5.0.0
+      - name: Verify SSH and SFTP from outside the review host network
+        env:
+          IOS_REVIEW_HOST_CHECK: ${{ secrets.IOS_REVIEW_HOST_CHECK }}
+        run: python3 scripts/verify-ios-review-host.py

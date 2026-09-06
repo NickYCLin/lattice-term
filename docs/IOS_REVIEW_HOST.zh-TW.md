@@ -1,10 +1,16 @@
 # Apple 審查用 SSH 環境
 
-這份文件與 [sshd 設定範本](review-host/sshd_config.example) 用來準備審查環境，目前沒有部署主機或建立公開帳密。主機位址、密碼、私鑰與實際指紋只保存於私密的作業紀錄及 Apple 審核欄位，不填入本文件。平台、費用與實際網路限制確定後，才能部署及驗證。
+這份文件與 [sshd 設定範本](review-host/sshd_config.example) 用來準備審查環境。主機位址、密碼、私鑰與實際指紋只保存於私密的作業紀錄及 Apple 審核欄位，不填入本文件。
+
+2026-09-06 使用者指定以自己的 Mac 承載示範服務。已透過 Apple Virtualization Framework 建立獨立 Alpine Linux VM，沒有網路介面、Mac 目錄掛載、SSH agent 或個人帳號。主機僅將專用 TCP 連接埠轉送到 VM 的 virtio-vsock，再進入只監聽 VM loopback 的 OpenSSH。這不會開啟 macOS 的「遠端登入」。
+
+VM 限制為 1 顆虛擬 CPU、768 MiB RAM，SSH 程序另受 128 個程序、256 MiB 記憶體與半顆 CPU 的 cgroup 限制。測試目錄為 128 MiB tmpfs，重啟 VM 後會重建測試資料；審核密碼與主機金鑰則保持不變。審查期間須保持 Mac 開機與網路連線。
+
+本機已通過密碼登入、拒絕錯誤密碼、主機金鑰核對、SSH 指令、PTY／尺寸變更、SFTP 清單、繁體中文下載、上傳內容核對及清理，並確認沒有外連網卡、無法讀取管理員資料及無法使用 SSH forwarding。這些是主機層的驗收，不代表 iOS 實機互動已通過；外網驗收另由下述工作確認。
 
 ## 隔離與帳號
 
-使用專供審查、可刪除重建的 Linux VM；不要使用個人 Mac、正式服務或含私人資料的主機。即使 SSH 帳號沒有管理員權限，互動式 shell 仍可以執行程式與發起網路連線。僅關閉 SSH forwarding、使用受限 shell 或 chroot 都不足以作為完整隔離邊界。
+使用專供審查、可刪除重建的 Linux VM；不要直接讓審查帳號進入個人 Mac、正式服務或含私人資料的作業系統。個人 Mac 可依上述方式承載無網卡、無主機目錄掛載的獨立 VM。一般 VM 即使 SSH 帳號沒有管理員權限，互動式 shell 仍可以執行程式與發起網路連線。僅關閉 SSH forwarding、使用受限 shell 或 chroot 都不足以作為完整隔離邊界。
 
 部署前須在 VM 外的網路層限制流量，並實際驗證：
 
@@ -42,5 +48,13 @@
 ## Apple 私密交付清單
 
 在 App Review Information 填入主機、連接埠、使用者名稱、密碼、主機金鑰演算法與 SHA-256 指紋；補充上述終端機及 SFTP 操作步驟、可寫目錄、網路限制及服務維持期間。帳號在審查期間須持續有效，不能加入需要聯絡管理者才能取得的第二階段驗證。這些資料完成前，不宣稱 Apple 已能連入測試環境。
+
+## 從外部網路驗收 Mac 隔離 VM
+
+`iOS review host verification` 是只允許手動啟動的 GitHub Actions 工作，在 Ubuntu runner 執行 `scripts/verify-ios-review-host.py`。它先核對管理端取得的完整主機公鑰，再驗證密碼、終端機、SFTP 與上述隔離限制；不會自動接受未知主機金鑰。
+
+連線設定透過私密的 `IOS_REVIEW_HOST_CHECK` repository secret 提供 JSON，欄位為 `host`、`port`、`username`、`password` 與 OpenSSH 格式的 `host_key`。工作只輸出檢查名稱及通過／失敗，例外僅輸出類型；不輸出主機、帳密或遠端檔案內容。驗收後刪除該 secret，後續需再次驗收時才重新提供。
+
+本機可使用 `--config` 指向已忽略且權限受限的設定檔，並以 `--unix-socket` 驗證 VM 入口。報告會將此結果標為 `unix_socket`，不能當成外網可達；外部 runner 的結果才是 `external_tcp`。兩者一律保留 `ios_device_tested: false`。
 
 參考：[Apple App Review](https://developer.apple.com/app-store/review/)；[OpenSSH sshd_config](https://man.openbsd.org/sshd_config)（包含 shell 存在時，停用 forwarding 的限制）。
