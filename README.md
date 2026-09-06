@@ -17,7 +17,7 @@ LatticeTerm 是一套現代、安全且跨平台的終端與遠端連線工作�
 | 安全與資料保護 | **可用** | 嚴格主機信任、作業系統認證儲存、主密碼加密保管庫、敏感剪貼簿與加密備份均已接入真實後端。 |
 | 本機 AI Agent Fleet | **可用** | 多 CLI PTY、Reporter、批次提示、同分頁加開 CLI 並帶入目前對話、安全啟動工作區與同程序重新 attach 已完成；另有不必打指令的對話模式（Claude Code、Codex 與 Gemini CLI，Claude 與 Codex 含逐項核准）與應用程式開著時執行的排程任務。 |
 | Lattice Remote | **基礎功能可用** | 已完成使用者主動啟動、Noise 端對端加密、主螢幕／純終端分享，以及由分享端分別授權的鍵盤／滑鼠或終端輸入與單一根目錄檔案瀏覽、上下載；另支援自架 lattice-relay 中繼、永久九位數裝置 ID、跨網路連線、裝置金鑰釘選與固定配對碼（無人值守）；以 ID 連線過的裝置會留在「我的連線」，中繼位址失效時可在連線對話框就地更正。目前仍是自架、小規模服務，NAT 直連穿透與多人租戶管理尚未加入。 |
-| 發行與更新 | **可用** | Windows x64、Linux x64／arm64、macOS Apple Silicon 安裝檔、更新簽章、Release PR 與應用程式內更新已自動化。 |
+| 發行與更新 | **可用** | Windows x64、Linux x64／arm64、macOS Intel／Apple Silicon 安裝檔、更新簽章、Release PR 與應用程式內更新已自動化。 |
 | Android | **預覽** | 共用的純 Rust SSH／SFTP／Tunnel／Vault 核心與行動介面可建置；需要桌面 sidecar 的 RDP、VNC 與 Agent Fleet 不提供。 |
 | iOS | **預覽／上架準備中** | 已有 Simulator 驗證；提供 App Store 匯出、獨立建置號、區網權限說明、隱私清單與發布檢查。簽章實機安裝、TestFlight 與 App Store 審核仍待完成，詳見 [iOS 發布流程](docs/IOS_RELEASE.zh-TW.md)。 |
 | 進階 Agent 與行動能力 | **部分完成** | 排程任務、接續執行與同時執行上限、提示佇列，Linux 的 bubblewrap 檔案範圍沙箱，以及跨程序背景服務（勾選「留在背景」的工作階段在關閉 LatticeTerm 後繼續執行、下次開啟自動接回）已完成；遠端 Fleet、macOS／Windows 的沙箱與 iOS 上架仍待完成。 |
@@ -57,7 +57,7 @@ LatticeTerm 是一套現代、安全且跨平台的終端與遠端連線工作�
 |---|---|---|
 | **Windows** | `.exe` (NSIS) | Windows 10 / 11 (x64) |
 | **Linux** | `.deb` / `.AppImage` | Ubuntu、Debian 及通用 Linux 發行版 (x64 / arm64) |
-| **macOS** | `.dmg` / `.app` | macOS 12+ (Apple Silicon) |
+| **macOS** | `.dmg` / `.app` | macOS 12+ (Intel／Apple Silicon) |
 
 > [!TIP]
 > 歡迎至 [Releases 列表](https://github.com/NickYCLin/lattice-term/releases) 下載對應平台的安裝檔或檢視各版本更新說明。

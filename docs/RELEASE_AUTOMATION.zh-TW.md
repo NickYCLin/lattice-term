@@ -62,8 +62,8 @@ PR 的 CI 會驗證每一筆非合併提交的格式。若需明確指定下一�
 3. 若有可發布變更，自動建立或更新一個 draft Release PR，內容包含新版本、`CHANGELOG.md` 與所有版本檔差異；workflow 會自動合併同一版本內由 merge commit 與原提交造成的重複 changelog 項目，並檢查版本檔是否同步。
 4. Release PR 不再重複派送原始碼 CI。同一個 workflow 在每次 push 後接著執行 `scripts/decide-release.mjs`；條件成立時就地把 PR 標示為 ready 並合併，再於**同一個 run** 內第二次執行 Release Please 來建立 tag 與 GitHub Release。之所以不等 push 事件，是因為以 `GITHUB_TOKEN` 完成的合併不會觸發新的 workflow run，等下去永遠等不到。
 5. 下一次 `Release` workflow 建立 `vX.Y.Z` tag 與 GitHub Release；發布提交會跳過一般 push CI。
-6. Linux amd64、Linux arm64、Windows amd64、macOS arm64 原生 runner 建置安裝檔，上傳更新簽章與 `latest.json`；Android 只在簽章金鑰齊全時建置並附加 APK。
-7. 發布 job 將同一份繁中版本說明同步到 GitHub Release 與 `latest.json`，確認所有桌面平台完成後才公開 Release。
+6. Linux amd64、Linux arm64、Windows amd64、macOS arm64、macOS Intel 原生 runner 建置安裝檔，上傳更新簽章與 `latest.json`；Android 只在簽章金鑰齊全時建置並附加 APK。Intel 使用明確的 `macos-15-intel` runner；`macos-latest` 是 Apple Silicon，無法取代 Intel 建置。
+7. 發布 job 先以 `scripts/validate-updater-manifest.mjs` 檢查必要平台鍵、版本、架構、已上傳的更新包與簽章檔，再將同一份繁中版本說明同步到 GitHub Release 與 `latest.json`，全部通過才公開 Release。
 
 Release PR 是唯一正式發布閘門。一般功能 PR 不應手動修改版本、建立 tag，或直接建立同版本 Release。
 
@@ -87,6 +87,7 @@ Release PR 會一起更新：
 - Tauri updater 簽章用來驗證更新內容，與 Windows Authenticode 或 Apple Developer ID／notarization 是不同層次。目前自動化保證 updater 簽章；正式對外散佈前仍應補齊各作業系統的發行者憑證。
 - 某個平台失敗時，在 GitHub Actions 重新執行失敗的 job；Tauri Action 會尋找既有 tag 的 Release 並補上資產，不需再建同版本 tag。
 - `latest.json` 的 `notes` 必須與 GitHub Release 本文一致，避免應用程式內的更新視窗顯示空白版本說明。
+- macOS 必須同時提供 `darwin-x86_64` 與 `darwin-aarch64`，並保留對應的 `-app` 平台鍵。漏掉 Intel 平台會使既有 Intel 安裝版直接回報檢查更新失敗，即使更新網址本身回應 HTTP 200；不可將其他架構的更新包填入缺少的平台。
 - `workflow_dispatch` 可重新整理 Release PR；若沒有可發布提交，它不會憑空增加版本。
 
 ## 維護規則
