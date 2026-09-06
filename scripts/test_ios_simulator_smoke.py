@@ -1,5 +1,6 @@
 """Regression checks for a live iPad process whose WebView is still blank."""
 import importlib.util
+import io
 import json
 import subprocess
 import tempfile
@@ -13,6 +14,78 @@ spec = importlib.util.spec_from_file_location(
 )
 smoke = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smoke)
+
+
+class RuntimeSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.info = {"CFBundleSupportedPlatforms": ["iPhoneSimulator"], "MinimumOSVersion": "14.0"}
+        self.ios18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-6"
+        self.ios26 = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
+        self.inventory = {self.ios18: [{"name": "iPhone 16"}]}
+
+    def test_local_accepts_compatible_runtime_without_weakening_ci(self):
+        self.assertEqual(smoke.select_runtime(self.inventory, self.info, local=True)[0], self.ios18)
+        with self.assertRaisesRegex(RuntimeError, "iOS 26"):
+            smoke.select_runtime(self.inventory, self.info)
+
+    def test_latest_compatible_ios_is_selected(self):
+        self.inventory[self.ios26] = [{"name": "iPhone 17"}]
+        self.inventory["com.apple.CoreSimulator.SimRuntime.tvOS-27-0"] = [{"name": "Apple TV"}]
+        self.inventory["com.apple.CoreSimulator.SimRuntime.iOS-27-0"] = []
+        for local in (False, True):
+            self.assertEqual(smoke.select_runtime(self.inventory, self.info, local)[0], self.ios26)
+
+    def test_runtime_must_meet_the_built_apps_minimum_version(self):
+        self.info["MinimumOSVersion"] = "18.6.1"
+        with self.assertRaisesRegex(RuntimeError, "18.6.1"):
+            smoke.select_runtime(self.inventory, self.info, local=True)
+
+    def test_device_build_and_unknown_minimum_are_rejected(self):
+        for info in ({**self.info, "CFBundleSupportedPlatforms": ["iPhoneOS"]},
+                     {**self.info, "MinimumOSVersion": "unknown"}):
+            with self.assertRaises(RuntimeError):
+                smoke.select_runtime(self.inventory, info, local=True)
+
+    def test_local_opt_in_cannot_relax_ci_requirements(self):
+        for environment, options in (({}, []), ({"CI": "true"}, ["--local"])):
+            with patch.dict(smoke.os.environ, environment, clear=True), \
+                    patch.object(smoke.sys, "argv", ["smoke", "App.app", "--output", "output", *options]), \
+                    patch.object(smoke.sys, "stderr", io.StringIO()), \
+                    patch.object(smoke, "simctl") as command:
+                with self.assertRaises(SystemExit) as raised:
+                    smoke.main()
+                self.assertEqual(raised.exception.code, 2)
+                command.assert_not_called()
+
+    def test_boot_wait_cannot_be_unbounded_or_negative(self):
+        for timeout in ("0", "-1", "1801"):
+            with patch.object(smoke.sys, "argv", ["smoke", "App.app", "--output", "output", "--boot-timeout", timeout]), \
+                    patch.object(smoke.sys, "stderr", io.StringIO()), \
+                    patch.object(smoke, "simctl") as command:
+                with self.assertRaises(SystemExit) as raised:
+                    smoke.main()
+                self.assertEqual(raised.exception.code, 2)
+                command.assert_not_called()
+
+    def test_previous_evidence_is_preserved_and_cannot_count_as_a_new_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "App.app"
+            app.mkdir()
+            (app / "Info.plist").write_bytes(b"not-read")
+            output = root / "evidence"
+            output.mkdir()
+            previous = output / "launch-report.json"
+            previous.write_text("previous successful run")
+            with patch.dict(smoke.os.environ, {}, clear=True), \
+                    patch.object(smoke.sys, "argv", ["smoke", str(app), "--local", "--output", str(output)]), \
+                    patch.object(smoke.sys, "stderr", io.StringIO()), \
+                    patch.object(smoke, "simctl") as command:
+                with self.assertRaises(SystemExit) as raised:
+                    smoke.main()
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(previous.read_text(), "previous successful run")
+                command.assert_not_called()
 
 
 class FrontendVisibilityTests(unittest.TestCase):
@@ -64,6 +137,42 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def test_success_checks_and_cleans_only_new_devices_and_saves_both_results(self):
+        commands = []
+        boot_waits = []
+        owned = iter(("new-phone", "new-tablet"))
+
+        def simctl(*args, **kwargs):
+            commands.append(args)
+            if args[0] == "bootstatus":
+                boot_waits.append(kwargs["timeout"])
+            if args[0] == "create":
+                return next(owned)
+            if args[0] == "launch":
+                return f"{smoke.BUNDLE_ID}: 123"
+            return ""
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "simctl", side_effect=simctl), \
+                patch.object(smoke, "wait_for_frontend", return_value={"renderedStartup": True}) as frontend:
+            output = Path(directory)
+            args = Namespace(app=output / "App.app", output=output, store_screenshots=False, boot_timeout=600)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone 16", "iPad Pro")]
+            smoke.check_simulators(args, "runtime", devices, output / "reader")
+            report = json.loads((output / "launch-report.json").read_text())
+            self.assertEqual([entry["family"] for entry in report], ["iPhone", "iPad"])
+            self.assertTrue(all(entry["renderedStartup"] for entry in report))
+            self.assertEqual([call.args[0] for call in frontend.call_args_list], ["new-phone", "new-tablet"])
+            self.assertEqual(boot_waits, [600, 600])
+            self.assertTrue(all("timeout" not in call.kwargs for call in frontend.call_args_list))
+        for command in commands:
+            if command[0] != "create":
+                self.assertIn(command[1], ("new-phone", "new-tablet"))
+        self.assertEqual([command for command in commands if command[0] in ("shutdown", "delete")], [
+            ("shutdown", "new-phone"), ("delete", "new-phone"),
+            ("shutdown", "new-tablet"), ("delete", "new-tablet"),
+        ])
+
     def test_slow_capture_can_finish_within_the_shared_readiness_deadline(self):
         now = [100.0]
 
@@ -102,7 +211,7 @@ class FailureEvidenceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, patch.object(smoke, "simctl", side_effect=simctl):
             output = Path(directory)
-            args = Namespace(app=output / "App.app", output=output, store_screenshots=False)
+            args = Namespace(app=output / "App.app", output=output, store_screenshots=False, boot_timeout=180)
             devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
             with self.assertRaises(subprocess.TimeoutExpired) as raised:
                 smoke.check_simulators(args, "runtime", devices, output / "reader")

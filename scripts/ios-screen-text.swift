@@ -1,4 +1,4 @@
-// CI-only OCR of screenshots from a newly created simulator.
+// OCR of screenshots from disposable iPhone and iPad test simulators.
 // https://developer.apple.com/documentation/vision/vnrecognizetextrequest
 import Foundation
 import Vision

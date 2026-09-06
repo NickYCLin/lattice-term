@@ -1,12 +1,61 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apiSigningProblems, manualSigningProblems, environmentProblems, releaseArguments, releaseConfig, simulatorArguments, simulatorXcodebuildScript, synchronizeNativeVersions, unsignedDeviceArguments } from "./ios-release.mjs";
+import { apiSigningProblems, manualSigningProblems, environmentProblems, preserveSimulatorOutput, releaseArguments, releaseConfig, simulatorArguments, simulatorXcodebuildScript, synchronizeNativeVersions, unsignedDeviceArguments } from "./ios-release.mjs";
 
 describe("iOS 發布準備", () => {
+  it.each([["x64", "x86_64"], ["arm64", "arm64-sim"]])("重建 %s 模擬器時保留舊 App，讓新版可搬入", (architecture, target) => {
+    const directory = mkdtempSync(join(tmpdir(), "ios-previous-"));
+    try {
+      const app = join(directory, "build", target, "LatticeTerm.app");
+      expect(preserveSimulatorOutput(directory, architecture)).toBeUndefined();
+      mkdirSync(app, { recursive: true });
+      writeFileSync(join(app, "previous.txt"), "previous working app");
+      const previous = preserveSimulatorOutput(directory, architecture);
+      expect(readFileSync(join(previous, "previous.txt"), "utf8")).toBe("previous working app");
+      expect(existsSync(app)).toBe(false);
+      // A subsequent build can publish its app without touching the backup.
+      mkdirSync(app);
+      writeFileSync(join(app, "current.txt"), "new app");
+      const second = preserveSimulatorOutput(directory, architecture);
+      expect(second).not.toBe(previous);
+      expect(readFileSync(join(second, "current.txt"), "utf8")).toBe("new app");
+      expect(readFileSync(join(previous, "previous.txt"), "utf8")).toBe("previous working app");
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(process.platform === "win32")("拒絕沿著符號連結移動外部 Simulator 產物", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ios-linked-output-"));
+    try {
+      const external = join(directory, "external");
+      mkdirSync(external);
+      writeFileSync(join(external, "keep.txt"), "keep external contents");
+      for (const relative of ["build", "build/x86_64", "build/x86_64/LatticeTerm.app", ".release"]) {
+        const appleDirectory = mkdtempSync(join(directory, "apple-"));
+        const linked = join(appleDirectory, relative);
+        mkdirSync(join(linked, ".."), { recursive: true });
+        symlinkSync(external, linked);
+        expect(() => preserveSimulatorOutput(appleDirectory, "x64")).toThrow("符號連結");
+        expect(readFileSync(join(external, "keep.txt"), "utf8")).toBe("keep external contents");
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("不將未知架構或同名一般檔案當成可移動的 App", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ios-invalid-output-"));
+    try {
+      expect(() => preserveSimulatorOutput(directory, "unknown")).toThrow("架構");
+      mkdirSync(join(directory, "build/x86_64"), { recursive: true });
+      const file = join(directory, "build/x86_64/LatticeTerm.app");
+      writeFileSync(file, "keep existing file");
+      expect(() => preserveSimulatorOutput(directory, "x64")).toThrow("一般目錄");
+      expect(readFileSync(file, "utf8")).toBe("keep existing file");
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   it("CI 的手動簽章輸入可取代本機憑證，但不能缺少任何一項", () => {
     const manual = { certificate: Buffer.from("PKCS12 fixture").toString("base64"), password: "", profile: Buffer.from("CMS fixture").toString("base64") };
     expect(environmentProblems({ platform: "darwin", xcode: "Xcode 26.3", sdk: "26.2", team: "ABCDEFGHIJ", identities: "0 valid identities found", manual })).toEqual([]);

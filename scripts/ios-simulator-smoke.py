@@ -1,7 +1,8 @@
-"""Boot the Release app on disposable iPhone and iPad simulators in CI."""
+"""Verify the app on disposable iPhone and iPad simulators locally or in CI."""
 import argparse
 import json
 import os
+import plistlib
 import re
 import subprocess
 import sys
@@ -10,6 +11,29 @@ import time
 from pathlib import Path
 
 BUNDLE_ID = "io.github.nickyclin.latticeterm"
+
+
+def select_runtime(inventory, info, local=False):
+    if info.get("CFBundleSupportedPlatforms") != ["iPhoneSimulator"]:
+        raise RuntimeError("啟動驗證需要 Simulator App，不能使用實機 archive")
+    minimum = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?", info.get("MinimumOSVersion", ""))
+    if minimum is None:
+        raise RuntimeError("無法確認 App 的最低 iOS 版本")
+    required = tuple(int(part or 0) for part in minimum.groups())
+    if not local:
+        required = max(required, (26, 0, 0))
+    runtimes = []
+    for name, devices in inventory.items():
+        match = re.fullmatch(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-(\d+)-(\d+)(?:-(\d+))?", name)
+        if match and devices:
+            version = tuple(int(part or 0) for part in match.groups())
+            if version >= required:
+                runtimes.append((version, name, devices))
+    if not runtimes:
+        version = ".".join(map(str, required))
+        raise RuntimeError(f"未安裝可用的 iOS {version} 以上模擬器 runtime")
+    _, runtime, devices = max(runtimes, key=lambda item: item[0])
+    return runtime, devices
 
 
 def store_model(devices, family):
@@ -141,22 +165,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--local", action="store_true", help="在本機以符合 App 最低版本的 runtime 驗證；只建立及清理本次測試裝置")
+    parser.add_argument("--boot-timeout", type=int, default=180, help="新裝置開機與系統資料移轉的等待秒數，預設 180，範圍 30–1800；不影響 App 畫面期限")
     parser.add_argument("--store-screenshots", action="store_true", help="另產生符合商店尺寸且不含 Alpha 的原始截圖候選素材")
     args = parser.parse_args()
-    if os.environ.get("CI") != "true":
-        parser.error("此測試只在 CI 執行，不操作個人模擬器")
+    if not 30 <= args.boot_timeout <= 1800:
+        parser.error("--boot-timeout 必須介於 30 與 1800 秒之間")
+    if os.environ.get("CI") != "true" and not args.local:
+        parser.error("本機執行請明確指定 --local；不操作既有個人模擬器")
+    if os.environ.get("CI") == "true" and args.local:
+        parser.error("CI 不接受 --local，必須保留 iOS 26 以上的驗證要求")
     if not (args.app / "Info.plist").is_file():
         parser.error("找不到已建置的 Simulator App")
+    if args.output.exists() and (not args.output.is_dir() or any(args.output.iterdir())):
+        parser.error("證據目錄必須為空，請指定新的 --output 路徑，以免混入前次驗證結果")
     args.output.mkdir(parents=True, exist_ok=True)
     inventory = json.loads(simctl("list", "devices", "available", "--json"))["devices"]
-    runtimes = []
-    for name, devices in inventory.items():
-        match = re.fullmatch(r"com\.apple\.CoreSimulator\.SimRuntime\.iOS-(\d+)-(\d+)(?:-(\d+))?", name)
-        if match and int(match[1]) >= 26 and devices:
-            runtimes.append((tuple(int(part or 0) for part in match.groups()), name, devices))
-    if not runtimes:
-        raise RuntimeError("CI 未安裝可用的 iOS 26 以上模擬器 runtime")
-    _, runtime, devices = max(runtimes, key=lambda item: item[0])
+    with (args.app / "Info.plist").open("rb") as source:
+        runtime, devices = select_runtime(inventory, plistlib.load(source), args.local)
     with tempfile.TemporaryDirectory(prefix="latticeterm-screen-reader-") as directory:
         reader = Path(directory) / "ios-screen-text"
         subprocess.run(
@@ -180,13 +206,13 @@ def check_simulators(args, runtime, devices, reader):
     for label, family, model, capture_store in targets:
         # Create clean devices so no existing profiles, secrets or simulator
         # data are read, modified or included in the screenshots.
-        device_id = simctl("create", f"LatticeTerm CI {label}", model["deviceTypeIdentifier"], runtime)
+        device_id = simctl("create", f"LatticeTerm Smoke {label}", model["deviceTypeIdentifier"], runtime)
         stage = "boot"
         try:
             print(f"{label}: 啟動新的 {model['name']} 模擬器", flush=True)
             simctl("boot", device_id)
             stage = "bootstatus"
-            simctl("bootstatus", device_id, "-b", timeout=180)
+            simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
             stage = "install"
             print(f"{label}: 開機完成，安裝 App", flush=True)
             simctl("install", device_id, args.app.resolve(), timeout=120)

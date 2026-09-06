@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createPrivateKey } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +34,29 @@ export function simulatorArguments(configPath, architecture, release = false) {
   const target = { arm64: "aarch64-sim", x64: "x86_64" }[architecture];
   if (!target) throw new Error(`不支援的模擬器主機架構：${architecture}`);
   return ["run", "tauri", "--", "ios", "build", ...(release ? [] : ["--debug"]), "--ci", "--target", target, "--no-sign", "--config", configPath];
+}
+
+export function preserveSimulatorOutput(appleDirectory, architecture) {
+  const target = { arm64: "arm64-sim", x64: "x86_64" }[architecture];
+  if (!target) throw new Error(`不支援的模擬器主機架構：${architecture}`);
+  const build = join(appleDirectory, "build");
+  const output = join(build, target);
+  const app = join(output, "LatticeTerm.app");
+  const staging = join(appleDirectory, ".release");
+  // Tauri renames the completed simulator app into this directory. POSIX
+  // rename cannot replace an existing non-empty app from a previous build.
+  // Preserve the old bundle atomically; never recursively remove artifacts.
+  for (const path of [build, output, app, staging]) {
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    if (entry && (entry.isSymbolicLink() || !entry.isDirectory())) {
+      throw new Error(`Simulator 產物路徑必須是一般目錄，不能使用符號連結：${path}`);
+    }
+  }
+  if (!lstatSync(app, { throwIfNoEntry: false })) return undefined;
+  mkdirSync(staging, { recursive: true });
+  const previous = join(mkdtempSync(join(staging, `previous-${target}-`)), "LatticeTerm.app");
+  renameSync(app, previous);
+  return previous;
 }
 
 export function simulatorXcodebuildScript(executable, architecture = process.arch) {
@@ -183,6 +206,10 @@ function main(args) {
   const buildNumber = parsed.buildNumber ?? (simulator || unsignedDevice ? "1" : undefined);
   const config = releaseConfig(version, buildNumber);
   if (mode === "build") preflight();
+  if (simulator) {
+    const previous = preserveSimulatorOutput(apple, process.arch);
+    if (previous) console.log(`舊 Simulator App 已保留：${previous}（本次失敗時仍可從此位置取回）`);
+  }
   syncVersions(version);
   const staging = join(apple, ".release");
   mkdirSync(staging, { recursive: true });
