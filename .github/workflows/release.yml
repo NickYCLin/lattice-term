@@ -377,7 +377,9 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/updater"
           gh release download "$TAG_NAME" --pattern latest.json --dir "$RUNNER_TEMP/updater"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME" > "$RUNNER_TEMP/updater/release.json"
+          # The by-tag endpoint only returns published releases. The release
+          # being validated is still a draft, so resolve it from the list.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/updater/release.json"
           node scripts/validate-updater-manifest.mjs "$RUNNER_TEMP/updater/latest.json" "$RUNNER_TEMP/updater/release.json" "$TAG_NAME"
           node scripts/sync-updater-release-notes.mjs "$RUNNER_TEMP/updater/latest.json" "$RUNNER_TEMP/release-metadata.json"
           gh release upload "$TAG_NAME" "$RUNNER_TEMP/updater/latest.json" --clobber

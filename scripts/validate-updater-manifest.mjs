@@ -13,7 +13,10 @@ const REQUIRED_TARGETS = {
   "windows-x86_64": "_x64-setup.exe",
 };
 
-export function validateUpdaterManifest(manifest, release, tag) {
+export function validateUpdaterManifest(manifest, releaseData, tag) {
+  const release = Array.isArray(releaseData)
+    ? releaseData.find((entry) => entry.tag_name === tag)
+    : releaseData;
   if (!/^v\d+\.\d+\.\d+$/.test(tag) ||
       manifest?.version !== tag.slice(1) || release?.tag_name !== tag) {
     throw new Error("更新清單、Release 與預期標籤的版本不一致");

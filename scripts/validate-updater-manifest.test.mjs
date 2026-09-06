@@ -26,6 +26,14 @@ function fixture() {
 }
 
 describe("validateUpdaterManifest", () => {
+  it("從包含已發布版本的清單選取指定草稿 Release", () => {
+    const { manifest, release } = fixture();
+    release.draft = true;
+    const releases = [{ tag_name: "v1.0.1", draft: false, assets: [] }, release];
+    expect(() => validateUpdaterManifest(manifest, releases, "v1.0.2")).not.toThrow();
+    expect(() => validateUpdaterManifest(manifest, releases.slice(0, 1), "v1.0.2")).toThrow("版本不一致");
+  });
+
   it("接受各平台已上傳的更新包與簽章檔", () => {
     const { manifest, release } = fixture();
     expect(() => validateUpdaterManifest(manifest, release, "v1.0.2")).not.toThrow();
