@@ -4,7 +4,7 @@
 
 已確認的 CI 基準：`6eb5805` 的 [iOS verification](https://github.com/NickYCLin/lattice-term/actions/runs/33976882169) 已通過 Release 模擬器封裝、無簽章實機封存檔檢查，以及 iPhone 17 Pro、iPhone 17 Pro Max、13 吋 iPad Pro 的 iOS 26.2 啟動畫面驗證；[既有封裝的獨立驗證](https://github.com/NickYCLin/lattice-term/actions/runs/33976882983) 也已通過。實機封存檔的 SDK 為 iOS 26.2，這些結果仍不包含簽章實機安裝或 SSH／SFTP 的 iOS 實際互動測試。
 
-已確認的簽章封裝：`60d2bcf` 的 [iOS signed release](https://github.com/NickYCLin/lattice-term/actions/runs/33969632159) 已產生 `1.0.0（2）` 的 App Store Connect IPA。2026-09-06 取回後，本機重新核對來源 SHA-256、`codesign --verify --deep --strict`、建置號及 iOS 26.2 SDK／隱私宣告皆通過。該 workflow 只完成簽章與匯出，沒有上傳 Apple；TestFlight 是否已處理、可安裝或可升級，仍須另查 App Store Connect 並以實機驗證。
+已確認的簽章封裝：`60d2bcf` 的 [iOS signed release](https://github.com/NickYCLin/lattice-term/actions/runs/33969632159) 已產生 `1.0.0（2）` 的 App Store Connect IPA。2026-09-06 取回後，本機重新核對來源 SHA-256、`codesign --verify --deep --strict`、建置號及 iOS 26.2 SDK／隱私宣告皆通過。該 workflow 只完成簽章與匯出，沒有上傳 Apple；後續 Apple 處理與送審證據見下方，TestFlight 實機安裝或升級仍未驗證。
 
 ## App Store Connect 實際狀態（2026-09-06）
 
@@ -15,15 +15,21 @@
 | 已準備 | 商店名稱、副標題、繁體中文描述、關鍵字、支援與行銷網址、iPhone 6.9 吋與 iPad 13 吋截圖已儲存；隱私頁已發布政策網址及「不收集資料」 |
 | 已上傳 | `1.0.0（2）` 的二進位檔狀態為「已驗證」，上傳日期顯示 2026-09-05 21:58；Bundle ID 相符，SDK build 為 `23C57` |
 | 已選取建置 | 版本草稿已選取建置 `2`，不得重複上傳同號 IPA |
-| 已送審 | 尚未；版本仍為「準備提交」 |
+| 已送審 | 2026-09-06 15:23（台灣時間）正式提交；版本及提交項目均顯示「等待審查」 |
 | 已核准 | 尚未 |
 | 已上架 | 尚未 |
 
-價格排程為免費，供應設定列出 175 個國家或地區；這是發行設定，不代表商店已可下載。免費 App 協議有效。版本發布方式已儲存為核准後自動發布。年齡分級七步問卷已核對，現有 4+ 分級不含社群媒體、廣告、聊天或 App 內網頁瀏覽功能；內容版權缺項已補填並儲存。
+正式[送審記錄](https://appstoreconnect.apple.com/apps/6808952335/distribution/reviewsubmissions/details/ed1bc1cf-b2e1-410a-9033-9160591d5a81)的提交 ID 為 `ed1bc1cf-b2e1-410a-9033-9160591d5a81`，項目為 `1.0.0（2）`。已依序完成「新增以供審查」及「提交以供審查」，Apple 顯示「已提交 1 個項目」。等待審查不等於已核准或已上架。
 
-已實際執行「新增以供審查」，Apple 回覆「無法新增以供審查」，並指出審核使用者名稱與密碼為必填，沒有建立成功的送審項目。這項回覆不代表其他欄位或加密申報已通過；聯絡電話與電子郵件也仍空白。
+價格排程為免費；使用者後續決定先排除法國，已儲存並確認法國為「未供應」，其他 174 個國家或地區保留供應設定。這是發行設定，不代表商店已可下載。免費 App 協議有效，版本發布方式為核准後自動發布。年齡分級七步問卷已核對，現有一般分級為 4+；內容版權缺項已補填並儲存。
 
-審核聯絡電話與電子郵件、可操作的 SSH／SFTP 示範主機資料、歐盟 DSA 身分仍待補齊。既有建置元資料顯示「App 使用非豁免類加密：否」，但 IPA 未設定該 Info.plist key，不能將頁面值當成已核實的豁免依據。以實際內建標準加密及法國發行回答 Apple 問卷，頁面要求「法國版加密聲明核准書」；因未取得文件，此次未儲存該份新申報，也未提交 App 審查。不能以上架所有地區的設定取代文件或 DSA 要求。[Apple 加密文件要求](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/)
+審核聯絡姓名、電話及電子郵件已填入 Apple 私密欄位。SSH／SFTP 示範服務依使用者指定由其 Mac 承載獨立 Linux VM；專用帳號、主機、連接埠與可信主機指紋均已交付 Apple，公開 repo 不保存這些資料。英文備註明確說明無需註冊 LatticeTerm 帳號，提供的登入資料屬於遠端示範主機。先前因帳密空白造成的加入審查失敗已解決。
+
+DSA 依使用者確認的個人興趣用途申報非貿易商，Apple 顯示「已完成所有法規要求／通過審查」。這是 DSA 合規結果，不是 App Review 核准。加密問卷仍如實勾選 Apple 作業系統之外的標準加密，並依已儲存的供應設定回答不在法國發行；Apple 判定「無需上傳任何文件」。未捏造法國核准書，也未宣稱 App 不使用加密。既有建置元資料顯示「非豁免類加密：否」，此輪已核對文件要求，但沒有變更已上傳 IPA 的 Info.plist。[Apple 加密文件要求](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/)
+
+最終示範服務的[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34018880225)已通過 SSH 密碼／主機金鑰、PTY／尺寸變更、SFTP 上下載及隔離限制；暫存的 GitHub 驗收 secret 已刪除。Mac 上的服務為獨立背景程序，閒置睡眠抑制已啟用；LaunchAgent 未成功啟動，已卸載，不能聲稱重新開機後會自行恢復。審查期間需保持 Mac 開機、連網，詳細邊界見[審核主機紀錄](IOS_REVIEW_HOST.zh-TW.md)。
+
+`d9cf335` 的 [CI](https://github.com/NickYCLin/lattice-term/actions/runs/34010245655)、[iOS verification](https://github.com/NickYCLin/lattice-term/actions/runs/34010245639) 及 [Release workflow](https://github.com/NickYCLin/lattice-term/actions/runs/34010245635) 均已完成且成功。這些新結果不改變前述簽章 IPA 的來源，也不補足尚未完成的 iOS 實機驗證。
 
 ## 目前路徑
 
@@ -39,7 +45,7 @@
 
 1. 在 App Store Connect 確認既有 App 記錄的 Bundle ID，查明 `1.0.0（2）` 是否已上傳；不要因本機沒有上傳紀錄而重複送同一建置號。
 2. 若尚未上傳，使用已驗證的 App Store Connect IPA，透過 Transporter 或已授權的上傳工具交付，等待 Apple 處理完成。上傳既有 IPA 不需要連接 iPhone，也不需要在這台 Mac 重新編譯；本機 Debug Simulator App 不能代替它。[Apple 上傳流程](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
-3. 填入[商店資料草稿](IOS_APP_STORE_METADATA.zh-TW.md)、iPhone／iPad 截圖、隱私表單與審核資訊。已授權免費、全部地區及直接操作發布流程；依實際功能填寫年齡分級與出口申報，不得為了略過問卷而虛填加密或隱私宣告。缺少的身分、聯絡或核准文件不能自行編造。
+3. 填入[商店資料草稿](IOS_APP_STORE_METADATA.zh-TW.md)、iPhone／iPad 截圖、隱私表單與審核資訊。首發已授權免費、法國以外地區及直接操作發布流程；依實際功能填寫年齡分級與出口申報，不得為了略過問卷而虛填加密或隱私宣告。缺少的身分、聯絡或核准文件不能自行編造。
 4. 確認 Apple 可使用審核資料實際操作 SSH／SFTP，選擇已處理完成的正確建置，再執行 Add for Review 與 Submit for Review。兩個動作不同，僅加入草稿不代表已送審。[Apple 送審流程](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app)
 5. 記錄送審狀態並處理 Apple 回覆；直到公開商店頁面可取得 App，才標示已上架。若在等待審查時補測，可另用 TestFlight 在手機接受邀請安裝，不需線材；這是可選的補測路徑，不再強制排在上傳前。
 

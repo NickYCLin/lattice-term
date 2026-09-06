@@ -1,6 +1,6 @@
 # iOS App Store 資料草稿
 
-本文件保留商店文案與審核備註來源。2026-09-06 已登入 App Store Connect，確認名稱、副標題、繁體中文描述、關鍵字與公開網址已填入草稿；App 仍未送審或上架。先以繁體中文上架內容為主，審核備註另提供英文。實際階段見[發布狀態紀錄](IOS_RELEASE.zh-TW.md#app-store-connect-實際狀態2026-09-06)。
+本文件保留商店文案與審核備註來源。2026-09-06 15:23 已正式提交 `1.0.0（2）`，Apple 顯示「等待審查」；尚未核准或上架。首版以繁體中文商店內容為主，審核備註另提供英文。實際階段見[發布狀態紀錄](IOS_RELEASE.zh-TW.md#app-store-connect-實際狀態2026-09-06)。
 
 ## 可直接使用的文案
 
@@ -35,27 +35,31 @@ LatticeTerm 讓你從 iPhone 與 iPad 連接自己的伺服器，使用 SSH 終�
 | 版權／銷售者 | 帳號持有人確認的真實姓名或公司名稱 |
 | 隱私權網址 | [公開隱私權政策](https://nickyclin.github.io/lattice-term/privacy.html)（2026-09-06 再次確認 HTTP 200） |
 | 支援網址 | [公開使用支援](https://nickyclin.github.io/lattice-term/support.html)（2026-09-06 再次確認 HTTP 200） |
-| 審核聯絡資訊 | Apple 草稿已有姓名，電話與電子郵件仍空白；只放 App Store Connect，不提交到公開 repo |
-| 價格與地區 | 已授權並查核免費、175 個國家或地區；區域合規資料仍須完成 |
+| 審核聯絡資訊 | 姓名、電話與電子郵件已填入 Apple 私密欄位，不提交到公開 repo |
+| 價格與地區 | 免費，法國已排除，其他 174 個國家或地區保留供應設定；DSA 非貿易商已通過合規審查 |
 | 發布方式 | 已儲存核准後自動發布 |
 | 年齡分級 | 已核對 Apple 七步問卷，現有一般分級為 4+；地區分級由 Apple 計算 |
-| 加密問卷 | 內建標準加密及法國發行的回答要求法國加密聲明核准書；缺件時不宣稱豁免已核實 |
-| 審核示範 | 可公開連線的隔離 SSH 測試主機、受限帳號與驗證步驟；憑證只交付 Apple 審核欄位 |
+| 加密問卷 | 如實選擇內建標準加密且不在法國發行，Apple 判定無需上傳文件 |
+| 審核示範 | Mac 承載的隔離 Linux VM 已通過外網 SSH／SFTP 驗收；帳密、主機、指紋及操作說明已交付 Apple 私密欄位 |
 | 螢幕截圖 | 實際 App 的 iPhone 與 iPad 畫面，依 App Store Connect 當時列出的尺寸匯出 |
 
 截圖建議依序呈現連線清單、SSH 終端機、SFTP 檔案傳輸與保管庫設定。只使用自有測試主機、示範帳號與無敏感內容的資料。模擬器啟動畫面可作為工作證據，但不等於完整商店截圖組。
 
 2026-09-06 已人工檢閱 CI 的 iPhone 6.9 吋（1320 × 2868）與 iPad 13 吋（2064 × 2752）原始 JPEG，確認無 Alpha、呈現真實連線頁且沒有私人主機或認證資料。Apple 允許上傳 1–10 張截圖；現有每種必要尺寸各一張可先作為素材候選，但只呈現空白連線清單，不保證足以說明核心用途或通過審查。上傳前仍須確認與選定建置一致，不製作假的終端機／傳輸成功畫面。[Apple 截圖說明](https://developer.apple.com/help/app-store-connect/manage-app-information/upload-app-previews-and-screenshots/)
 
-審查主機可依 [隔離環境準備與驗收清單](IOS_REVIEW_HOST.zh-TW.md) 建立；範本預設只監聽本機，不代表已提供可供 Apple 存取的服務。
+審查主機已依 [隔離環境與驗收紀錄](IOS_REVIEW_HOST.zh-TW.md) 建立。最終[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34018880225)通過；此結果是主機層驗證，不是 iOS 實機操作驗證。
 
-## App Review Notes（英文草稿）
+## App Review Notes（已提交內容的公開節錄）
 
-LatticeTerm is an SSH/SFTP client for connecting to servers controlled by the user. It does not require a LatticeTerm account. Commands entered in the terminal run on the remote SSH server; the iOS app does not download or execute local CLI tools. The iOS package does not contain the desktop RDP/VNC sidecar engines and does not offer local AI CLI sessions.
+實際交付 Apple 的備註另含私密主機、連接埠與 SHA-256 指紋；此處不刊出。
 
-To review the connection flow, add a connection using the dedicated review server and credentials supplied in the private App Review Information fields, select SSH, verify the host key against the supplied fingerprint, and connect. The same review account can be used for SFTP with a test directory. Local Network access is needed only when connecting to a host on the local network.
+LatticeTerm is a standalone SSH/SFTP client. No LatticeTerm registration, subscription, or app account is required. The sign-in credentials in the review fields are for the dedicated SSH/SFTP demo server.
 
-Before submitting these notes, the publisher must provision and verify the dedicated review server, supply its expected fingerprint and private credentials, and document the permitted commands and test directory. These details are not included in this public repository.
+Add an SSH connection using the private review server details and compare the host-key fingerprint before trusting the host. In the terminal, run pwd, ls -la, and cat review-data/README.txt. The account starts in /home/reviewer. In SFTP, browse review-data, download traditional-chinese.txt, and upload a small file into review-data/uploads.
+
+The demo is an isolated Linux VM hosted on the developer's Mac, with generated test files only. It has no external network access or Mac directory mounts. SSH forwarding is disabled on this demo host; tunnels can be tested against a server controlled by the review team. Test storage is limited to 128 MiB and is reset if the VM restarts. Credentials do not expire during review. We will keep this demo available during review; please contact us if access fails.
+
+Commands execute on the remote SSH server. The iOS app does not download or execute local CLI tools and excludes desktop RDP/VNC engines and local AI CLI sessions. Exported and downloaded files appear in Files > Browse > On My iPhone (or On My iPad) > LatticeTerm. Connection JSON exports exclude passwords and private keys. Encrypted vault backups require a backup password. Local Network access is used only for local-network hosts. iOS may pause or interrupt background connections. The app supports Traditional Chinese and English.
 
 ## 隱私表單盤點
 
@@ -63,4 +67,4 @@ Before submitting these notes, the publisher must provision and verify the dedic
 
 發行者需以最終 bundle、SDK Privacy Report 與實際提供的服務再次確認 App Privacy 答案。若加入自有雲端或遙測，不能照抄目前的不收集／不追蹤宣告。
 
-2026-09-06 已確認 App Store Connect 的隱私頁已發布「不收集資料」及上述隱私權政策網址。此次原始碼盤點未發現 iOS 廣告或分析服務，行動版也不註冊桌面更新外掛；使用者指定 SSH／SFTP 主機與 App 開發者收集資料需分開判斷。此查核不等於已產生 Xcode Privacy Report，也不包含尚未部署的審核主機或未來代管服務。[Apple 資料收集定義](https://developer.apple.com/app-store/app-privacy-details/)
+2026-09-06 已確認 App Store Connect 的隱私頁已發布「不收集資料」及上述隱私權政策網址。此次原始碼盤點未發現 iOS 廣告或分析服務，行動版也不註冊桌面更新外掛；使用者指定 SSH／SFTP 主機與 App 開發者收集資料需分開判斷。此查核不等於已產生 Xcode Privacy Report。示範主機僅供 Apple 審核，未向一般使用者提供代管服務；未來若加入代管服務，需重新盤點資料收集。[Apple 資料收集定義](https://developer.apple.com/app-store/app-privacy-details/)
