@@ -485,8 +485,26 @@
   color: var(--warn);
 }
 
-.remote-host-dialog {
+.dialog.remote-host-dialog {
+  display: flex;
+  flex-direction: column;
   max-width: 42rem;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.remote-host-dialog > .dialog__head,
+.remote-host-dialog > .dialog__actions {
+  flex: none;
+}
+
+.remote-host-dialog > .dialog__stack {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  /* Leave room for keyboard focus rings inside the scrollport. */
+  padding: var(--space-1);
 }
 
 .remote-host-active {

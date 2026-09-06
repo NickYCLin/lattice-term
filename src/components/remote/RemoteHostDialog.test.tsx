@@ -9,7 +9,10 @@ afterEach(() => {
 });
 
 describe("remote host dialog", () => {
-  function render(savedRelayAddress: string | null) {
+  function render(
+    savedRelayAddress: string | null,
+    status: RemoteHostApi["status"] = null,
+  ) {
     const storage: Storage = {
       length: 0,
       clear: vi.fn(),
@@ -24,7 +27,7 @@ describe("remote host dialog", () => {
       deviceId: "123456789",
       deviceIdError: null,
       ensureDeviceId: vi.fn(async () => {}),
-      status: null,
+      status,
       closedReason: null,
       start: vi.fn(),
       stop: vi.fn(),
@@ -60,5 +63,39 @@ describe("remote host dialog", () => {
     expect(markup).not.toContain("這台裝置的永久 ID");
     expect(markup).not.toContain("123 456 789");
     expect(markup).toContain("區網直連");
+  });
+
+  it("associates the footer submit with the settings form", () => {
+    const { markup } = render(null);
+    const formId = markup.match(/<form id="([^"]+)"/)?.[1];
+    expect(formId).toBeTruthy();
+    const footer = markup.slice(markup.indexOf("<footer"));
+
+    // Moving actions out of the scrolling form must retain native validation
+    // and submission, rather than turning Start into an unrelated button.
+    expect(markup.indexOf("</form>")).toBeLessThan(markup.indexOf("<footer"));
+    expect(footer).toContain(`type="submit" form="${formId}"`);
+    expect(footer).toContain("開始分享");
+    expect(footer).toContain("取消");
+  });
+
+  it("keeps stop and keep-running actions in the active sharing footer", () => {
+    const { markup } = render(null, {
+      hostId: "test-host",
+      address: "127.0.0.1:44900",
+      pairingCode: "",
+      expiresAt: 0,
+      viewOnly: true,
+      fileTransfer: false,
+      state: "waiting",
+      attemptsRemaining: 5,
+      persistent: true,
+    });
+    const footer = markup.slice(markup.indexOf("<footer"));
+
+    expect(footer).toContain("停止分享");
+    expect(footer).toContain("在背景繼續分享");
+    expect(footer).not.toContain('type="submit"');
+    expect(markup).not.toContain("<form");
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { SensitiveClipboardClearChoice } from "../../app/preferences";
 import { copyTextToClipboard } from "../../app/clipboardText";
@@ -47,6 +47,7 @@ export function RemoteHostDialog({
   );
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1_000));
   const dialogRef = useRef<HTMLDivElement>(null);
+  const formId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const copyTimerRef = useRef<number | null>(null);
   const copyRequestRef = useRef(0);
@@ -341,28 +342,9 @@ export function RemoteHostDialog({
                     : t("remote.host.copied")}
                 </p>
               )}
-
-              <div className="dialog__actions">
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  onClick={onClose}
-                  disabled={busy}
-                >
-                  {t("remote.host.keepRunning")}
-                </button>
-                <button
-                  type="button"
-                  className="button button--danger"
-                  onClick={() => void stop()}
-                  disabled={busy}
-                >
-                  {busy ? t("remote.host.stopping") : t("remote.host.stop")}
-                </button>
-              </div>
             </div>
           ) : (
-            <form onSubmit={submit}>
+            <form id={formId} onSubmit={submit}>
               {mode === "relay" &&
                 (host.deviceId ? (
                   <div className="remote-host-identity">
@@ -580,28 +562,43 @@ export function RemoteHostDialog({
                   </Callout>
                 </>
               )}
-
-              <div className="dialog__actions">
-                <button
-                  type="button"
-                  className="button button--ghost"
-                  onClick={onClose}
-                  disabled={busy}
-                >
-                  {t("common.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  className="button button--primary"
-                  disabled={busy}
-                >
-                  <ScreenShareIcon size={14} />
-                  {busy ? t("remote.host.starting") : t("remote.host.start")}
-                </button>
-              </div>
             </form>
           )}
         </div>
+
+        <footer className="dialog__actions">
+          <button
+            type="button"
+            className="button button--ghost"
+            onClick={onClose}
+            disabled={busy}
+          >
+            {host.status ? t("remote.host.keepRunning") : t("common.cancel")}
+          </button>
+          {/* Keep distinct buttons so stopping cannot submit a newly shown form. */}
+          {host.status ? (
+            <button
+              key="stop"
+              type="button"
+              className="button button--danger"
+              onClick={() => void stop()}
+              disabled={busy}
+            >
+              {busy ? t("remote.host.stopping") : t("remote.host.stop")}
+            </button>
+          ) : (
+            <button
+              key="start"
+              type="submit"
+              form={formId}
+              className="button button--primary"
+              disabled={busy}
+            >
+              <ScreenShareIcon size={14} />
+              {busy ? t("remote.host.starting") : t("remote.host.start")}
+            </button>
+          )}
+        </footer>
       </div>
     </div>
   );

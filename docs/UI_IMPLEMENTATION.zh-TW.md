@@ -25,6 +25,7 @@
 | **AI Agent Fleet** | `AgentsView` | `src/views/AgentsView.tsx` | 本機多 CLI 啟動、Reporter 狀態、批次提示與忙碌時排入佇列、帳號設定檔（`AgentAccountProfileDialog`，目錄由 LatticeTerm 自動建立）、Linux 的沙箱勾選（`runtime.agentSandboxAvailable` 才顯示）、可命名排序的安全啟動工作區，以及同程序 WebView 重載後的 PTY 重新 attach。 |
 | **對話** | `ChatView` | `src/views/ChatView.tsx` | 以聊天視窗跟 Claude Code、Codex 或 Gemini CLI 溝通（介面稱「助理」）：可建資料夾整理的對話串側欄（`ChatThreadTree`）、排程分頁（`AutomationPane`）、串流回覆、工具／思考／核准卡片、依助理分組的單一模型下拉（`ModelField`）、結束統計與卡片式輸入框。資料模型與事件折疊在 `src/app/agentChat.ts`，排程在 `agentAutomations.ts`，資料夾在 `chatThreadLayout.ts`，Markdown 讀取器在 `chatMarkdown.ts`；狀態由根層 lazy 元件 `ChatRuntime` 承載。 |
 | **SFTP 檔案工作區** | `SftpPane` | `src/components/sftp/SftpPane.tsx` | 遠端路徑瀏覽、上下載、建立資料夾、改名與確認刪除。 |
+| **分享這台裝置** | `RemoteHostDialog` | `src/components/remote/RemoteHostDialog.tsx` | 視窗高度限制在遮罩可用空間內，設定與警告內容獨立捲動，標題及開始／停止分享按鈕保持可見。底部送出按鈕透過 `form` 關聯保留原生欄位驗證與送出行為。 |
 | **Web RDP Canvas** | `RdpPane` | `src/components/rdp/RdpPane.tsx` | Canvas 畫面、座標縮放、滑鼠、滾輪、掃描碼鍵盤與失焦釋放。 |
 | **金鑰保管庫** | `VaultView` | `src/views/VaultView.tsx` | 管理 Rust 核心的主機信任、認證參照與 Argon2id／XChaCha20-Poly1305 加密保管庫；可建立、解鎖、鎖定、改主密碼及切換認證後端，但不把密碼內容交給前端。 |
 | **活動中心** | `ActivityView` | `src/views/ActivityView.tsx` | 以鈴鐺與未讀數提示 CLI 執行中、等待回覆及完成狀態；支援直接返回工作階段、全部標為已讀、跨重啟保存與 `Ctrl` + `Alt` + `U`。同頁保留連線操作日誌的搜尋、篩選與匯出。 |
