@@ -4,6 +4,13 @@
 
 ---
 
+## [1.0.3](https://github.com/NickYCLin/lattice-term/compare/v1.0.2...v1.0.3) (2026-09-06)
+
+
+### 🛠️ 問題修正
+
+* **分享:** 修正矮視窗無法操作底部按鈕 ([b57c13c](https://github.com/NickYCLin/lattice-term/commit/b57c13cff8109ac14b39b8fbc0090d15505eb457))
+
 ## [1.0.2](https://github.com/NickYCLin/lattice-term/compare/v1.0.1...v1.0.2) (2026-09-06)
 
 
