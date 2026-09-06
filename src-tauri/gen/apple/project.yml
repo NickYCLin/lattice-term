@@ -57,7 +57,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.46.0
+        CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1"
     entitlements:
       path: lattice-term_iOS/lattice-term_iOS.entitlements
