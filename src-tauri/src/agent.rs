@@ -1793,10 +1793,17 @@ impl AgentRegistry {
         Ok(registry)
     }
 
-    fn next_id(&self) -> String {
+    fn next_id(&self) -> Result<String, String> {
+        // A saved group defaults to its original session id and outlives this
+        // registry. A counter alone can join a new CLI to that old group after
+        // restart. Keep the routing prefix and add entropy for every launch.
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce)
+            .map_err(|error| format!("Cannot create an agent session identifier: {error}"))?;
         let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
         let prefix = self.id_prefix.as_deref().unwrap_or("agent-session-");
-        format!("{prefix}{n}")
+        let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(nonce);
+        Ok(format!("{prefix}{n}-{nonce}"))
     }
 
     fn insert(
@@ -5573,7 +5580,7 @@ pub fn launch_with_replay(
         profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
     let launch_model =
         model_from_arguments(&arguments).or_else(|| configured_agent_model(&definition_id));
-    let session_id = registry.next_id();
+    let session_id = registry.next_id()?;
     let reporter = registry.reporter.clone();
     let report_token = reporter
         .as_ref()
@@ -9553,6 +9560,107 @@ notify = ["notify.exe", "turn-ended"]"#,
             .unwrap()
             .iter()
             .any(|reason| reason.starts_with("Process exited:")));
+    }
+
+    #[test]
+    fn session_identifiers_do_not_repeat_after_registry_restart() {
+        for prefix in [
+            None,
+            Some(crate::agent_daemon::SESSION_ID_PREFIX.to_string()),
+        ] {
+            let previous = AgentRegistry {
+                id_prefix: prefix.clone(),
+                ..AgentRegistry::default()
+            };
+            let restarted = AgentRegistry {
+                id_prefix: prefix.clone(),
+                ..AgentRegistry::default()
+            };
+            let mut seen = HashSet::new();
+            for registry in [&previous, &restarted] {
+                for _ in 0..MAX_AGENT_SESSIONS {
+                    let id = registry.next_id().unwrap();
+                    assert_eq!(crate::agent_daemon::owns(&id), prefix.is_some());
+                    assert!(seen.insert(id), "a restarted registry reused a session id");
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_launch_stays_separate_from_restored_numeric_groups() {
+        for prefix in ["agent-session-", crate::agent_daemon::SESSION_ID_PREFIX] {
+            let collector = Arc::new(TestSink::default());
+            let sink: Arc<dyn AgentSink> = collector.clone();
+            let registry = Arc::new(AgentRegistry {
+                id_prefix: Some(prefix.to_string()),
+                ..AgentRegistry::default()
+            });
+            // An earlier run closed its first tab and saved only its second.
+            // Restoring that tab consumes id 1; a counter-based quick launch
+            // then gets id 2 and accidentally joins the saved tab's group.
+            let saved_group = format!("{prefix}2");
+            let request = AgentLaunchRequest {
+                definition_id: "custom".to_string(),
+                label: "Fresh chat".to_string(),
+                executable: "/bin/cat".to_string(),
+                arguments: Vec::new(),
+                resume_session_id: None,
+                group_id: None,
+                seed_input: None,
+                restore_existing_session: false,
+                profile_config_path: None,
+                sandbox: false,
+                detached: false,
+                working_directory: std::env::temp_dir().display().to_string(),
+                cols: 80,
+                rows: 24,
+            };
+            let restored = launch_with_replay(
+                sink.clone(),
+                registry.clone(),
+                AgentLaunchRequest {
+                    group_id: Some(saved_group.clone()),
+                    restore_existing_session: true,
+                    ..request.clone()
+                },
+                Some(b"previous conversation\r\n".to_vec()),
+            )
+            .unwrap();
+            registry
+                .rename(&restored.session_id, "Existing conversation")
+                .unwrap();
+            let fresh = launch(sink.clone(), registry.clone(), request.clone()).unwrap();
+            let joined = launch(
+                sink.clone(),
+                registry.clone(),
+                AgentLaunchRequest {
+                    group_id: Some(saved_group.clone()),
+                    ..request
+                },
+            )
+            .unwrap();
+            let snapshots = registry.output_snapshots();
+            for session in [&restored, &fresh, &joined] {
+                disconnect(sink.as_ref(), &registry, &session.session_id).unwrap();
+            }
+
+            assert_ne!(fresh.group_id, restored.group_id);
+            assert_eq!(fresh.group_id, fresh.session_id);
+            assert_eq!(fresh.group_label, "Fresh chat");
+            assert!(fresh.captured_session_id.is_none());
+            assert!(fresh.launch_arguments.is_empty());
+            assert!(!fresh.restore_existing_session);
+            let fresh_output = snapshots
+                .iter()
+                .find(|s| s.session_id == fresh.session_id)
+                .unwrap();
+            assert!(fresh_output.base64.is_empty());
+            // Explicitly adding a CLI to an existing tab still works.
+            assert_eq!(joined.group_id, saved_group);
+            assert_eq!(joined.group_label, "Existing conversation");
+        }
     }
 
     #[cfg(unix)]

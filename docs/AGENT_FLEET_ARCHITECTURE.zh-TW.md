@@ -27,6 +27,7 @@ flowchart LR
 - 介面提供 Codex、Claude Code、Gemini CLI、Google Antigravity CLI、OpenCode、Copilot CLI、Hermes、Cursor Agent、Aider、Qwen Code、Kimi、Droid 與 Grok 共 13 種目錄。Rust 核心仍可驗證並還原舊工作區中的自訂可執行檔。
 - 每個目錄項目都有經原始碼固定且可檢查來源的安裝方式；未偵測到 CLI 時，先顯示完整指令並要求確認，再以可見 PTY 執行。平台缺少必要安裝器或沒有合適的原生安裝路徑時，只提供可複製的上游安裝說明網址，不靜默改動系統。
 - 每個工作階段都有獨立程序、PTY、尺寸、輸入、輸出與停止控制，並與 SSH、SFTP、Lattice Remote、Web RDP 共用工作階段分頁。
+- 快速對話每次建立獨立的 CLI 與分頁群組。工作階段識別碼使用隨機值，保留桌面／背景服務的路由前綴，避免重啟後從 1 重新編號而撞上還原的舊群組。還原工作區與明確選擇「在此分頁加開 CLI」仍保留指定群組，不會更動既有對話紀錄。
 - 啟動時指定經過驗證的工作目錄；CLI 可依目前作業系統使用者權限操作該目錄。
 - PTY 位元組以 Base64 跨越 IPC，前端在終端機掛載前最多暫存 256 KiB，之後直接交給 xterm。
 - 未整合 hook 的 CLI 使用少量明確提示詞將狀態標成「可能等待輸入」；這只是提醒，不宣稱已理解完整語意。
