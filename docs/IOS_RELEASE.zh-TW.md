@@ -2,6 +2,16 @@
 
 本文件取代早期 Simulator 計畫中的企業 In-House 匯出步驟。Simulator 可啟動、已簽章的實機 App、TestFlight 可安裝與 App Store 已上架是不同狀態，須各自取得證據。
 
+## 最新審核狀態（2026-09-07）
+
+Apple 於 08:16（台灣時間）將 `1.0.0（2）` 退件，提交頁為「問題未解決／已拒絕」。原因為 **Guideline 2.1 — Information Needed — New App Submission**：開發者帳號審核歷史有限，需補充實體裝置操作錄影及五類產品說明。通知沒有指出具體閃退或程式錯誤。
+
+已查核送審建置的來源 `60d2bcf`，將用途與受眾、操作與存取方式、外部服務、地區差異及受管制內容說明附加至 Apple 私密 App Review Notes，儲存後重新載入確認保留；原有連線資料完整保留。實機錄影明確標示待補，尚未在訊息區送出完整回覆，也尚未重新提交。
+
+先前使用者延後接線測試的決定仍有效，但這次 Apple 明確要求最新版系統的**實體裝置錄影**。可用 TestFlight 無線安裝，不需要線材；模擬器、CI、桌面錄影與審核主機驗收都不能替代。補件內容與錄影流程見 [審核補件](IOS_REVIEW_RESPONSE.zh-TW.md)。目前為「已準備部分補件、已上傳、首次送審遭拒；尚未重新送審、未核准、未上架」。
+
+下方 2026-09-06 的等待審查記錄保留為首次送件歷史，不代表目前狀態。桌面主分支已進展至 2.0.0，也不會自動替換 Apple 的 `1.0.0（2）`。
+
 已確認的 CI 基準：`6eb5805` 的 [iOS verification](https://github.com/NickYCLin/lattice-term/actions/runs/33976882169) 已通過 Release 模擬器封裝、無簽章實機封存檔檢查，以及 iPhone 17 Pro、iPhone 17 Pro Max、13 吋 iPad Pro 的 iOS 26.2 啟動畫面驗證；[既有封裝的獨立驗證](https://github.com/NickYCLin/lattice-term/actions/runs/33976882983) 也已通過。實機封存檔的 SDK 為 iOS 26.2，這些結果仍不包含簽章實機安裝或 SSH／SFTP 的 iOS 實際互動測試。
 
 已確認的簽章封裝：`60d2bcf` 的 [iOS signed release](https://github.com/NickYCLin/lattice-term/actions/runs/33969632159) 已產生 `1.0.0（2）` 的 App Store Connect IPA。2026-09-06 取回後，本機重新核對來源 SHA-256、`codesign --verify --deep --strict`、建置號及 iOS 26.2 SDK／隱私宣告皆通過。該 workflow 只完成簽章與匯出，沒有上傳 Apple；後續 Apple 處理與送審證據見下方，TestFlight 實機安裝或升級仍未驗證。
