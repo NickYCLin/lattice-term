@@ -161,6 +161,9 @@ export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi
     handoffThreadAccount: vi.fn(),
     removeThread: vi.fn(),
     send: vi.fn(async () => {}),
+    enqueue: vi.fn(),
+    removeQueued: vi.fn(),
+    resumeQueue: vi.fn(),
     stop: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),
     models: {

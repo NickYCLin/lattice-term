@@ -968,6 +968,15 @@ button.chat-chip:hover {
     transform var(--duration-fast) var(--ease);
 }
 
+.chat-queue { display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.chat-queue__header { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-xs); }
+.chat-queue__header > span { color: var(--text-muted); flex: 1; }
+.chat-queue ol { margin: 0; padding-left: var(--space-4); max-height: 12rem; overflow-y: auto; }
+.chat-queue li { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; font-size: var(--text-sm); }
+.chat-queue li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat-queue small { display: block; color: var(--text-muted); }
+.chat-queue li > button { flex-shrink: 0; }
+
 .chat-send:hover:not(:disabled) {
   background: var(--accent-hover);
   transform: translateY(-1px);

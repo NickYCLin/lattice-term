@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
+import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInputQueue";
 import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
   applyChatEvent,
@@ -114,6 +115,9 @@ export interface AgentChatApi {
     profileConfigPath?: string | null,
   ) => Promise<void>;
   stop: (id: string) => Promise<void>;
+  enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
+  removeQueued: (id: string, inputId: string) => void;
+  resumeQueue: (id: string) => void;
   /** Answers an approval card; rejects with the reason when it cannot. */
   respond: (id: string, requestId: string, allow: boolean, message?: string) => Promise<void>;
   /** The models a CLI offers, fetched once per session on first request. */
@@ -165,6 +169,11 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
   }, [layout]);
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
+  const changeThreads = useCallback((update: (current: ChatThread[]) => ChatThread[]) => {
+    const next = update(threadsRef.current);
+    threadsRef.current = next;
+    setThreads(next);
+  }, []);
 
   // Persist a little after the last change so a streaming reply does not
   // rewrite storage on every token.
@@ -173,6 +182,14 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     const timer = setTimeout(() => saveStoredThreads(localStorage, threads), SAVE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [threads]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (typeof localStorage !== "undefined") saveStoredThreads(localStorage, threadsRef.current);
+    };
+    window.addEventListener?.("pagehide", flush);
+    return () => { window.removeEventListener?.("pagehide", flush); flush(); };
+  }, []);
 
   useEffect(() => {
     if (!hasDesktopBackend()) return;
@@ -199,7 +216,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
         if (completionTracker.current.accept(envelope)) {
           void playNotificationSound(soundRef.current);
         }
-        setThreads((current) =>
+        changeThreads((current) =>
           current.map((thread) =>
             thread.id === envelope.threadId ? applyChatEvent(thread, envelope) : thread,
           ),
@@ -223,8 +240,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     // The ref is what `send` consults, and a caller that creates a thread
     // and sends into it in the same tick (an automation firing) runs before
     // React has rendered the new state. Keep the ref current now.
-    threadsRef.current = [thread, ...threadsRef.current];
-    setThreads((current) => [thread, ...current]);
+    changeThreads((current) => [thread, ...current]);
     if (settings.activate !== false) setActiveThreadId(thread.id);
     return thread;
   }, []);
@@ -242,15 +258,14 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
         thread = applyChatEvent(thread, { threadId: thread.id, turnId, event }, startedAt);
       }
       thread = { ...thread, runningTurnId: null, unread: true };
-      threadsRef.current = [thread, ...threadsRef.current];
-      setThreads((current) => [thread, ...current]);
+      changeThreads((current) => [thread, ...current]);
       return thread;
     },
     [],
   );
 
   const markUnread = useCallback((id: string, unread: boolean) => {
-    setThreads((current) =>
+    changeThreads((current) =>
       current.map((thread) =>
         thread.id === id && thread.unread !== unread ? { ...thread, unread } : thread,
       ),
@@ -314,9 +329,9 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
   }, []);
 
   const update = useCallback((id: string, patch: Partial<ChatThreadSettings>) => {
-    setThreads((current) =>
+    changeThreads((current) =>
       current.map((thread) => {
-        if (thread.id !== id || thread.runningTurnId) return thread;
+        if (thread.id !== id || thread.runningTurnId || thread.pendingInputs?.length) return thread;
         const next = selectThreadModel(thread, {
           definitionId: patch.definitionId ?? thread.definitionId,
           accountProfileId: patch.accountProfileId === undefined
@@ -334,17 +349,17 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
   }, []);
 
   const handoff = useCallback((id: string, definitionId: ChatDefinitionId, model: string) => {
-    setThreads((current) =>
+    changeThreads((current) =>
       current.map((thread) =>
-        thread.id === id ? handoffThread(thread, definitionId, model) : thread,
+        thread.id === id && !thread.pendingInputs?.length ? handoffThread(thread, definitionId, model) : thread,
       ),
     );
   }, []);
 
   const handoffAccount = useCallback((id: string, accountProfileId: string | null) => {
-    setThreads((current) =>
+    changeThreads((current) =>
       current.map((thread) =>
-        thread.id === id ? handoffThreadAccount(thread, accountProfileId) : thread,
+        thread.id === id && !thread.pendingInputs?.length ? handoffThreadAccount(thread, accountProfileId) : thread,
       ),
     );
   }, []);
@@ -358,7 +373,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
         .then(({ invoke }) => invoke("agent_chat_close", { threadId: id }))
         .catch(() => {});
     }
-    setThreads((current) => current.filter((thread) => thread.id !== id));
+    changeThreads((current) => current.filter((thread) => thread.id !== id));
     setActiveThreadId((current) => {
       if (current !== id) return current;
       const remaining = threadsRef.current.filter((thread) => thread.id !== id);
@@ -371,17 +386,20 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     prompt: string,
     attachments: readonly ChatAttachment[] = [],
     profileConfigPath: string | null = null,
+    queuedInputId?: string,
   ) => {
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
     const turnId = crypto.randomUUID();
+    const next = beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
+    const snapshot = threadsRef.current.map(entry => entry.id === id ? next : entry);
+    if (queuedInputId && typeof localStorage !== "undefined" && !saveStoredThreads(localStorage, snapshot, [id])) {
+      changeThreads(current => current.map(entry => entry.id === id ? { ...entry, queuePaused: true, queueProblem: "storage" } : entry));
+      return;
+    }
     completionTracker.current.start(id, turnId);
     const visiblePrompt = prompt.trim() ? prompt : "Please inspect the attached files.";
-    setThreads((current) =>
-      current.map((entry) =>
-        entry.id === id ? beginTurn(entry, prompt, turnId, Date.now(), attachments) : entry,
-      ),
-    );
+    changeThreads(() => snapshot);
     try {
       const { invoke } = await core();
       await invoke("agent_chat_send", {
@@ -402,7 +420,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     } catch (reason) {
       completionTracker.current.cancel(id);
       const message = reason instanceof Error ? reason.message : String(reason);
-      setThreads((current) =>
+      changeThreads((current) =>
         current.map((entry) => (entry.id === id ? failTurn(entry, turnId, message) : entry)),
       );
     }
@@ -411,7 +429,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
   const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string) => {
     const { invoke } = await core();
     await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null });
-    setThreads((current) =>
+    changeThreads((current) =>
       current.map((entry) =>
         entry.id === id
           ? decideApproval(entry, requestId, allow ? "allowed" : "denied")
@@ -454,9 +472,38 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
 
   const stopTurn = useCallback(async (id: string) => {
     completionTracker.current.cancel(id);
+    changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: true } : thread));
     const { invoke } = await core();
     await invoke<boolean>("agent_chat_stop", { threadId: id });
   }, []);
+
+  const enqueue = useCallback((id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath: string | null = null) => {
+    const thread = threadsRef.current.find(entry => entry.id === id);
+    if (!thread) throw new Error("This chat no longer exists.");
+    const next = enqueueChatInput(thread, { id: crypto.randomUUID(), prompt,
+      attachments: [...attachments], profileConfigPath, createdAt: Date.now() });
+    const snapshot = threadsRef.current.map(entry => entry.id === id ? next : entry);
+    if (typeof localStorage !== "undefined" && !saveStoredThreads(localStorage, snapshot)) {
+      throw new ChatQueueError("storage");
+    }
+    changeThreads(() => snapshot);
+  }, []);
+  const removeQueued = useCallback((id: string, inputId: string) => {
+    changeThreads(current => current.map(thread => thread.id === id ? removeQueuedInput(thread, inputId) : thread));
+  }, []);
+  const resumeQueue = useCallback((id: string) => {
+    changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: false, queueProblem: null } : thread));
+  }, []);
+
+  useEffect(() => {
+    for (const thread of threadsRef.current) {
+      const next = thread.pendingInputs?.[0];
+      if (thread.runningTurnId || thread.queuePaused || !next) continue;
+      // Reserve this entry synchronously. Duplicate completion events and
+      // React effect replays must not start the same queued turn twice.
+      void send(thread.id, next.prompt, next.attachments, next.profileConfigPath, next.id);
+    }
+  }, [threads, send, changeThreads]);
 
   return useMemo(
     () => ({
@@ -472,6 +519,9 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       handoffThreadAccount: handoffAccount,
       removeThread: remove,
       send,
+      enqueue,
+      removeQueued,
+      resumeQueue,
       stop: stopTurn,
       respond,
       models,
@@ -496,6 +546,9 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       handoffAccount,
       remove,
       send,
+      enqueue,
+      removeQueued,
+      resumeQueue,
       stopTurn,
       respond,
       models,

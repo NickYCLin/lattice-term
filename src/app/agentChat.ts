@@ -9,6 +9,8 @@
 
 export type ChatDefinitionId = "claude" | "codex" | "gemini";
 
+import { restoreQueuedInputs, type QueuedChatInput } from "./chatInputQueue";
+
 /** What the CLI may do during a turn; see `ChatPermission` in Rust. */
 export type ChatPermission = "ask" | "readOnly" | "workspaceWrite" | "full";
 
@@ -177,6 +179,9 @@ export interface ChatThread {
   /** The turn in flight. Stored threads never carry one: a process does
    *  not outlive the window that started it. */
   runningTurnId: string | null;
+  pendingInputs?: QueuedChatInput[];
+  queuePaused?: boolean;
+  queueProblem?: "storage" | null;
   /** Set when a scheduled automation opened this thread for one of its runs. */
   automationId: string | null;
   /** A finished run nobody has looked at yet; the thread list is the inbox. */
@@ -399,6 +404,7 @@ export function beginTurn(
     ],
     updatedAt: now,
     runningTurnId: turnId,
+    queuePaused: thread.pendingInputs?.length ? thread.queuePaused === true : false,
   };
 }
 
@@ -412,6 +418,7 @@ export function failTurn(
   if (thread.runningTurnId !== turnId) return thread;
   return {
     ...thread,
+    queuePaused: true,
     items: [
       ...thread.items,
       {
@@ -566,6 +573,7 @@ export function applyChatEvent(
     case "finished":
       return {
         ...thread,
+        queuePaused: thread.queuePaused === true || !!event.error,
         nativeSessionId: event.nativeSessionId ?? thread.nativeSessionId,
         handoff: event.nativeSessionId ? null : thread.handoff,
         items: [
@@ -639,7 +647,7 @@ export function boundThreadForStorage(thread: ChatThread): ChatThread {
 export function boundThreadsForStorage(threads: ChatThread[]): ChatThread[] {
   const ordered = threads
     .map(boundThreadForStorage)
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .sort((a, b) => Number(!!b.pendingInputs?.length) - Number(!!a.pendingInputs?.length) || b.updatedAt - a.updatedAt)
     .slice(0, MAX_STORED_THREADS);
   let total = 0;
   const kept: ChatThread[] = [];
@@ -676,6 +684,9 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isThread).map((thread) => ({
       ...thread,
+      pendingInputs: restoreQueuedInputs(thread.pendingInputs),
+      queuePaused: restoreQueuedInputs(thread.pendingInputs).length > 0,
+      queueProblem: null,
       // A malformed stored item must not take persistence down with it:
       // saving re-bounds every tool output and would throw on a missing one.
       items: thread.items.filter(
@@ -726,17 +737,25 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
 export function saveStoredThreads(
   storage: Pick<Storage, "setItem" | "removeItem">,
   threads: ChatThread[],
-): void {
+  requiredThreadIds: readonly string[] = [],
+): boolean {
   try {
     const bounded = boundThreadsForStorage(threads);
+    if (requiredThreadIds.some(id => !bounded.some(thread => thread.id === id))) return false;
+    // Queued input has not reached a CLI transcript. Never silently evict it
+    // to fit the history budget or report such a write as successful.
+    if (threads.some(thread => thread.pendingInputs?.length &&
+      !bounded.some(saved => saved.id === thread.id && saved.pendingInputs?.length === thread.pendingInputs?.length))) return false;
     if (bounded.length === 0) {
       storage.removeItem(STORAGE_KEY);
-      return;
+      return true;
     }
     storage.setItem(STORAGE_KEY, JSON.stringify(bounded));
+    return true;
   } catch {
     // Storage full or unavailable: the conversation still works this
     // session, and the CLI keeps the transcript regardless.
+    return false;
   }
 }
 

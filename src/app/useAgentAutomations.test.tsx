@@ -91,7 +91,67 @@ function installFakeDom() {
 }
 
 describe("useAgentAutomations", () => {
+  it("sends queued chat input once, preserves profile context, and pauses after stop", async () => {
+    invoke.mockClear();
+    const root = installFakeDom();
+    const { createRoot } = await import("react-dom/client");
+    const { ChatRuntime } = await import("./ChatRuntime");
+    type Api = import("./ChatRuntime").ChatRuntimeApi;
+    let api: Api | null = null;
+    const reactRoot = createRoot(root as unknown as Element);
+    await act(async () => { reactRoot.render(React.createElement(ChatRuntime, { locale: "en", onChange: (next: Api) => { api = next; } })); });
+    const current = () => (api as unknown as Api).chat;
+    const sends = () => invoke.mock.calls.filter(call => call[0] === "agent_chat_send");
+    let id = "";
+    await act(async () => {
+      id = current().createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "" }).id;
+      await current().send(id, "first");
+      current().enqueue(id, "second", [], "/profiles/codex");
+      current().enqueue(id, "third", [], "/profiles/codex");
+      current().updateThread(id, { permission: "full" });
+    });
+    expect(sends()).toHaveLength(1);
+    expect(current().threads[0].permission).toBe("ask");
+    const finish = (turnId: string, error: string | null = null) => chatListener!({ payload: { threadId: id, turnId,
+      event: { kind: "finished", error, nativeSessionId: "native-queue", usage: null, costUsd: null, durationMs: null } } });
+    const first = current().threads[0].runningTurnId!;
+    await act(async () => { finish("stale"); finish(first); finish(first); });
+    expect(sends()).toHaveLength(2);
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_send", { request: expect.objectContaining({
+      prompt: "second", profileConfigPath: "/profiles/codex", nativeSessionId: "native-queue", permission: "ask",
+    }) });
+    expect(current().threads[0].pendingInputs?.map(message => message.prompt)).toEqual(["third"]);
+    const second = current().threads[0].runningTurnId!;
+    await act(async () => { await current().stop(id); finish(second); });
+    expect(sends()).toHaveLength(2);
+    expect(current().threads[0].queuePaused).toBe(true);
+    await act(async () => { current().resumeQueue(id); });
+    expect(sends()).toHaveLength(3);
+    expect(current().threads[0].pendingInputs).toEqual([]);
+    await act(async () => {
+      current().enqueue(id, "after error", []);
+      finish(current().threads[0].runningTurnId!, "failed");
+    });
+    expect(sends()).toHaveLength(3);
+    expect(current().threads[0].queuePaused).toBe(true);
+    const previousStorage = globalThis.localStorage;
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => { throw new Error("quota"); }, removeItem: () => {} });
+    try {
+      await act(async () => { current().resumeQueue(id); });
+      expect(sends()).toHaveLength(3);
+      expect(current().threads[0].queueProblem).toBe("storage");
+      expect(current().threads[0].pendingInputs?.map(message => message.prompt)).toEqual(["after error"]);
+      expect(() => current().enqueue(id, "not saved", [])).toThrow("storage");
+      expect(current().threads[0].pendingInputs).toHaveLength(1);
+    } finally {
+      vi.stubGlobal("localStorage", previousStorage);
+    }
+    await act(async () => { current().removeThread(id); reactRoot.unmount(); });
+  });
+
   it("a run started right after its thread is created still reaches the backend", async () => {
+    invoke.mockClear();
+    playSound.mockClear();
     const root = installFakeDom();
     const { createRoot } = await import("react-dom/client");
     const { ChatRuntime } = await import("./ChatRuntime");

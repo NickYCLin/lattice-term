@@ -42,6 +42,7 @@ import { accountModelKey, accountModelOptions, accountModelTargets, hasChatModel
 import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
+import { ChatQueueError } from "../app/chatInputQueue";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
@@ -456,6 +457,8 @@ function ThreadPane({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
+  const pendingInputs = thread.pendingInputs ?? [];
+  const settingsLocked = running || pendingInputs.length > 0;
   const cliInstalled = installed.includes(thread.definitionId);
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
@@ -469,7 +472,6 @@ function ThreadPane({
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
-    !running &&
     !activeProfileMissing &&
     !activeProfileSignedOut &&
     cliInstalled &&
@@ -527,7 +529,6 @@ function ThreadPane({
       try {
         const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
         const stop = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-          if (running) return;
           if (event.payload.type === "enter" || event.payload.type === "over") {
             setDraggingFiles(true);
           } else if (event.payload.type === "leave") {
@@ -580,11 +581,20 @@ function ThreadPane({
     event?.preventDefault();
     if (!canSend) return;
     const prompt = draft;
+    if (running || pendingInputs.length > 0) {
+      try {
+        chat.enqueue(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null);
+      } catch (reason) {
+        setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
+        return;
+      }
+    } else {
+      void chat.send(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null);
+    }
     setDraft("");
     setAttachments([]);
     pinnedToBottom.current = true;
     setSettingsOpen(false);
-    void chat.send(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -678,7 +688,7 @@ function ThreadPane({
             <AccountModelField
               options={modelOptions}
               value={thread}
-              disabled={running}
+              disabled={settingsLocked}
               onChange={({ definitionId, accountProfileId, model }) => {
                 if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model });
               }}
@@ -695,13 +705,13 @@ function ThreadPane({
                   type="button"
                   className="button button--secondary button--sm"
                   onClick={chooseDirectory}
-                  disabled={running}
+                  disabled={settingsLocked}
                 >
                   <FolderIcon />
                   {t("chat.directory.choose")}
                 </button>
                 {thread.workingDirectory && (
-                  <button type="button" className="button button--ghost button--sm" disabled={running}
+                  <button type="button" className="button button--ghost button--sm" disabled={settingsLocked}
                     onClick={() => chat.updateThread(thread.id, { workingDirectory: "" })}>
                     {t("chat.directory.clear")}
                   </button>
@@ -718,7 +728,7 @@ function ThreadPane({
               <select
                 className="select"
                 value={thread.permission}
-                disabled={running}
+                disabled={settingsLocked}
                 onChange={(event) =>
                   chat.updateThread(thread.id, {
                     permission: event.target.value as ChatPermission,
@@ -734,7 +744,7 @@ function ThreadPane({
             </label>
             {thread.definitionId === "codex" && (
               <label className="checkbox chat-settings__browser">
-                <input type="checkbox" checked={thread.browserEnabled === true} disabled={running}
+                <input type="checkbox" checked={thread.browserEnabled === true} disabled={settingsLocked}
                   onChange={(event) => chat.updateThread(thread.id, { browserEnabled: event.target.checked })} />
                 <span className="checkbox__box" aria-hidden="true">✓</span>
                 <span><strong>{t("chat.browser")}</strong><small>{t("chat.browser.hint")}</small></span>
@@ -826,6 +836,32 @@ function ThreadPane({
               ))}
             </div>
           )}
+          {pendingInputs.length > 0 && (
+            <section className="chat-queue" aria-label={t("chat.queue.title")}>
+              {thread.queueProblem === "storage" && <p role="alert">{t("chat.queue.saveFailed")}</p>}
+              <div className="chat-queue__header">
+                <strong>{t("chat.queue.title")} ({pendingInputs.length})</strong>
+                <span>{t(thread.queuePaused ? "chat.queue.paused" : "chat.queue.hint")}</span>
+                {thread.queuePaused && <button type="button" className="button button--secondary button--sm"
+                  disabled={running || !cliInstalled || activeProfileMissing || activeProfileSignedOut}
+                  onClick={() => chat.resumeQueue(thread.id)}>{t("chat.queue.resume")}</button>}
+              </div>
+              <ol>{pendingInputs.map(input => <li key={input.id}>
+                <span>{input.prompt || t("chat.attachment.files")}
+                  {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
+                </span>
+                <button type="button" className="button button--ghost button--sm"
+                  onClick={() => {
+                    setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
+                    addAttachments(input.attachments.map(file => file.path));
+                    chat.removeQueued(thread.id, input.id);
+                  }}>{t("chat.queue.edit")}</button>
+                <button type="button" className="icon-button icon-button--sm"
+                  aria-label={t("chat.queue.remove")} title={t("chat.queue.remove")}
+                  onClick={() => chat.removeQueued(thread.id, input.id)}><CloseIcon size={12} /></button>
+              </li>)}</ol>
+            </section>
+          )}
           <textarea
             className="chat-composer__input"
             value={draft}
@@ -837,7 +873,7 @@ function ThreadPane({
           />
           <div className="chat-composer__row">
             <span className="chat-composer__hint">
-              {thread.nativeSessionId
+              {running ? t("chat.queue.shortcut") : thread.nativeSessionId
                 ? t("chat.composer.shortcut")
                 : t("chat.storage.note")}
             </span>
@@ -846,7 +882,6 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("image")}
-                disabled={running}
                 title={t("chat.attachment.images")}
               >
                 <ImageFileIcon />
@@ -856,7 +891,6 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("file")}
-                disabled={running}
                 title={t("chat.attachment.files")}
               >
                 <FileIcon />
@@ -876,8 +910,8 @@ function ThreadPane({
                 type="submit"
                 className="chat-send"
                 disabled={!canSend}
-                aria-label={t("chat.send")}
-                title={t("chat.send")}
+                aria-label={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
+                title={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
               >
                 <SendIcon />
               </button>
