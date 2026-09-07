@@ -40,6 +40,7 @@ export function RemoteConnectFlow({
   const [pairingCode, setPairingCode] = useState("");
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
+  const [legacyPairing, setLegacyPairing] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
   const [relayAddress, setRelayAddress] = useState(profile.relayAddress ?? "");
   // A quick tunnel hands out a new hostname every restart, so a saved address
@@ -81,7 +82,7 @@ export function RemoteConnectFlow({
     if (relayUnreachable) relayRef.current?.focus();
   }, [relayUnreachable]);
 
-  const normalizedToken = normalizeViewerPairingToken(pairingCode, relay);
+  const normalizedToken = normalizeViewerPairingToken(pairingCode, relay, legacyPairing);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,6 +99,7 @@ export function RemoteConnectFlow({
       port: profile.port,
       pairingCode: useSavedPairingCode ? "" : normalizedToken!,
       useSavedPairingCode,
+      legacyPairing,
       rememberPairingCode:
         relay && !useSavedPairingCode && rememberPairingCode,
       // A remembered device has no address of its own; the relay finds it by
@@ -283,7 +285,7 @@ export function RemoteConnectFlow({
                   type="password"
                   autoComplete="off"
                   spellCheck={false}
-                  maxLength={256}
+                  maxLength={64}
                   disabled={busy}
                   onChange={(event) =>
                     setPairingCode(event.currentTarget.value)
@@ -293,6 +295,13 @@ export function RemoteConnectFlow({
               <p id="remote-pairing-code-hint" className="field__optional">{t(relay ? "remote.connect.relayCodeHint" : "remote.connect.codeHint")}</p>
             </div>
           )}
+
+          <label className="checkbox">
+            <input type="checkbox" checked={legacyPairing} disabled={busy}
+              onChange={(event) => setLegacyPairing(event.currentTarget.checked)} />
+            <span className="checkbox__box" aria-hidden="true"><CheckIcon size={11} /></span>
+            {t("remote.connect.legacyPairing")}
+          </label>
 
           {relay &&
             !useSavedPairingCode &&

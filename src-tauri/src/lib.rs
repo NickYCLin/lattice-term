@@ -2200,7 +2200,11 @@ async fn remote_connect(
     }
 
     let pairing_code_to_store = if request.remember_pairing_code {
-        match lattice_remote::normalize_viewer_pairing_code(&request.pairing_code) {
+        match if request.legacy_pairing {
+            lattice_remote::normalize_legacy_pairing_code(&request.pairing_code)
+        } else {
+            lattice_remote::normalize_viewer_pairing_code(&request.pairing_code)
+        } {
             Ok(code) => Some(Zeroizing::new(code)),
             Err(error) => {
                 return Ok(RemoteConnectOutcome::Failed {
@@ -3216,6 +3220,7 @@ mod tests {
             pairing_code: "12345678".to_string(),
             use_saved_pairing_code: true,
             remember_pairing_code: false,
+            legacy_pairing: false,
             device_id: "987654321".to_string(),
             relay_address: "wss://current-relay.example.test".to_string(),
         };
@@ -3243,6 +3248,7 @@ mod tests {
             pairing_code: "12345678".to_string(),
             use_saved_pairing_code: false,
             remember_pairing_code: true,
+            legacy_pairing: false,
             device_id: "987654321".to_string(),
             relay_address: "wss://attacker.example.test".to_string(),
         };

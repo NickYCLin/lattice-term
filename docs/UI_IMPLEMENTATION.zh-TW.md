@@ -181,10 +181,10 @@
 ## 12. Lattice Remote
 
 - `crates/lattice-remote` 定義版本化二進位訊息、分塊畫面與 Noise `XXpsk3_25519_ChaChaPoly_BLAKE2s` 傳輸。
-- 應用程式版本不同不會阻擋遠端連線。桌面檢視端與 `lattice-remote` CLI 支援以既有裝置 ID 信任紀錄連接舊八位數配對主機，在送出配對證明前核對永久金鑰；新版分享仍只接受高熵配對碼。首次使用及舊版 IP 直連的限制見 [版本相容](RELAY_SERVER.zh-TW.md#版本相容)。
+- 遠端連線依握手協定而非應用程式版號判斷相容性。新版分享使用 OPAQUE 密碼握手後建立 Noise 通道，支援自訂 6～64 字元密碼。桌面與 CLI 可明確選用舊版相容模式連線到長碼主機；舊八位數主機另需既有裝置 ID 信任紀錄，在送出證明前核對永久金鑰。詳見[固定配對密碼](PAIRING_PASSWORD.zh-TW.md)及[版本相容](RELAY_SERVER.zh-TW.md#版本相容)。
 - 協定送出、解碼與 frame assembler 共用同一組資源驗證：Agent 名稱最多 256 bytes 且不能含控制字元，Close 原因最多 1,024 bytes；JPEG 最多 8 MiB、單邊最多 16,384 px、總像素最多 32 Mi，異常尺寸不會進入 Tauri 事件或 WebView Canvas。
 - `lattice-agent` 的直連模式預設只監聽 `127.0.0.1:44900`，分享完整主螢幕並使用五分鐘、單一工作階段的一次性32 位十六進位隨機配對碼；中繼模式則主動連出，以永久九位數裝置 ID 註冊並在工作階段結束後繼續等候，配對碼在停止分享前有效。兩種模式連續五次配對失敗都會停止。
-- `RemoteHostDialog` 提供「分享這台裝置」的明確開始／停止操作。直連可指定 loopback 或特定 LAN IP、連接埠與 1–10 FPS，萬用與 multicast 位址會由原生層拒絕；中繼模式改填 `wss://`／私網 relay 位址，並可明確設定固定32 位十六進位隨機配對碼。永久身分檔位於 app data，含註冊 token 與 Noise 私鑰，Unix 建立或載入時都強制修正為 `0600`。
+- `RemoteHostDialog` 提供「分享這台裝置」的明確開始／停止操作。直連可指定 loopback 或特定 LAN IP、連接埠與 1–10 FPS，萬用與 multicast 位址會由原生層拒絕；中繼模式改填 `wss://`／私網 relay 位址，並可設定大小寫英文、數字與特殊符號的固定配對密碼。永久身分檔位於 app data，含註冊 token 與 Noise 私鑰，Unix 建立或載入時都強制修正為 `0600`。配對嘗試限制另以不含秘密的檔案保存，十分鐘五次未完成驗證，重啟不會歸零。
 - `RelayAddressField` 只在首次設定或按下修改時展開實際位址；成功保存後，分享與「以 ID 連線」的日常畫面只顯示已儲存狀態。位址保存在 WebView local storage，屬非機密連線 metadata；收合欄位是 UX，不是安全邊界。
 - 複製配對碼會走 `SensitiveClipboard` 原生狀態；只保存摘要並在可調整期限後比對、清除相同內容。新複製內容不會被覆蓋，設定頁亦可立即清除目前仍相符的敏感值；browser preview 以相同規則使用 Web Clipboard fallback。
 - Tauri 以 NDJSON 事件管理每次分享的 sidecar 生命週期。直連配對成功後立即從 UI 狀態移除一次性碼；中繼模式為了後續重連會保留本次碼到停止分享，但不寫入持久層，固定碼以 stdin 而非程序參數送入 sidecar。關閉對話框可選擇讓分享留在背景，停止分享或應用程式結束時會終止 Agent。

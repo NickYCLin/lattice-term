@@ -165,11 +165,15 @@ one folder; every remote path is then confined to that folder.\n\n\
 Terminal mode: --terminal shares an encrypted shell session instead of the\n\
 display, so a headless host (no desktop) works too. --allow-input lets the\n\
 viewer type; without it the terminal is watch-only. --fps is ignored.\n\n\
-Unattended access: a generated 128-bit pairing token lets a trusted viewer reconnect\n\
-any time (all modes). Prefer --pair-code-file with an owner-only file, or pipe\n\
+Unattended access: use a 6-64 character ASCII password (case-sensitive letters,\n\
+digits or symbols; no spaces), or keep the generated 128-bit pairing token.\n\
+New agents and viewers use OPAQUE password pairing followed by Noise.\n\
+Prefer --pair-code-file with an owner-only file, or pipe\n\
 the code to --pair-code-stdin, so it does not appear in the process list.\n\
 --pair-code remains available for interactive use. Without any of these a\n\
-fresh code is generated per run. Five failed pairings in a row stop the agent.\n\
+fresh code is generated per run. Five incomplete attempts per ten minutes are\n\
+allowed across restarts, using pairing-attempts.json next to the identity file.\n\
+Five failed pairings in a row also stop the agent.\n\
 Typical headless setup:\n\
   lattice-agent --relay wss://relay.example.com --terminal --allow-input \\\n\
                 --pair-code-file /secure/path/pair-code\n"
@@ -186,13 +190,28 @@ fn set_pairing_code(slot: &mut Option<String>, input: &str) -> Result<(), String
 fn read_pairing_code_stdin() -> Result<String, String> {
     let mut input = String::new();
     std::io::stdin()
-        .take(65)
+        .take(67)
         .read_to_string(&mut input)
         .map_err(|error| format!("cannot read --pair-code-stdin: {error}"))?;
-    if input.len() > 64 {
-        return Err("--pair-code-stdin must be at most 64 bytes".to_string());
+    if input.len() > 66 {
+        return Err(
+            "--pair-code-stdin must be at most 64 characters plus a line ending".to_string(),
+        );
     }
-    Ok(input)
+    Ok(input.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn reserve_pairing(
+    options: &Options,
+) -> Result<lattice_remote::pairing_limit::PairingPermit, String> {
+    let identity = options
+        .identity_file
+        .clone()
+        .or_else(default_identity_path)
+        .ok_or("No durable pairing-attempt state location is available.")?;
+    let path = std::path::absolute(identity.with_file_name("pairing-attempts.json"))
+        .map_err(|error| error.to_string())?;
+    lattice_remote::pairing_limit::PairingPermit::reserve(&path)
 }
 
 fn parse_options() -> Result<Options, String> {
@@ -234,7 +253,8 @@ fn parse_options() -> Result<Options, String> {
             }
             "--pair-code" => {
                 let input = arguments.next().ok_or_else(|| {
-                    "--pair-code needs a generated 32-character hexadecimal token".to_string()
+                    "--pair-code needs a 6-64 character ASCII password or a generated token"
+                        .to_string()
                 })?;
                 set_pairing_code(&mut pairing_code, &input)?;
             }
@@ -2373,15 +2393,43 @@ async fn run_relay_session(
         Ok(static_key) => static_key,
         Err(error) => return SessionOutcome::Ended(format!("Identity key unavailable: {error}")),
     };
+    let permit = match reserve_pairing(&options) {
+        Ok(permit) => permit,
+        Err(detail) => {
+            emit_event(
+                options.json,
+                &AgentEvent::Failed {
+                    stage: "pairing",
+                    detail,
+                },
+            );
+            return SessionOutcome::Rejected;
+        }
+    };
     let secure = match timeout(
         Duration::from_secs(10),
-        SecureConnection::accept_with_static_key(stream, &options.pairing_code, &static_key),
+        SecureConnection::accept_for_device(
+            stream,
+            &options.pairing_code,
+            &static_key,
+            Some(&identity.device_id),
+        ),
     )
     .await
     {
         Ok(Ok(secure)) => secure,
         Ok(Err(_)) | Err(_) => return SessionOutcome::Rejected,
     };
+    if let Err(detail) = permit.authenticated() {
+        emit_event(
+            options.json,
+            &AgentEvent::Failed {
+                stage: "pairing",
+                detail,
+            },
+        );
+        return SessionOutcome::Rejected;
+    }
     emit_event(
         options.json,
         &AgentEvent::Paired {
@@ -2745,6 +2793,10 @@ async fn main() {
         if !options.json {
             eprintln!("Pairing request from {peer}");
         }
+        let permit = match reserve_pairing(&options) {
+            Ok(permit) => permit,
+            Err(detail) => break detail,
+        };
         let secure = match timeout(
             Duration::from_secs(10),
             SecureConnection::accept(stream, &options.pairing_code),
@@ -2770,6 +2822,9 @@ async fn main() {
             }
         };
 
+        if let Err(detail) = permit.authenticated() {
+            break detail;
+        }
         emit_event(
             options.json,
             &AgentEvent::Paired {

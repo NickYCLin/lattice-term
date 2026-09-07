@@ -50,6 +50,8 @@ pub struct RemoteConnectRequest {
     pub use_saved_pairing_code: bool,
     #[serde(default)]
     pub remember_pairing_code: bool,
+    #[serde(default)]
+    pub legacy_pairing: bool,
     /// When set, the connection goes through a relay by nine-digit device ID
     /// instead of dialing hostname:port directly.
     #[serde(default)]
@@ -710,7 +712,11 @@ pub async fn connect(
     if request.profile_id.trim().is_empty() || (!via_relay && request.hostname.trim().is_empty()) {
         return failed("connect", "The connection target is incomplete.");
     }
-    let pairing_code = match normalize_viewer_pairing_code(&request.pairing_code) {
+    let pairing_code = match if request.legacy_pairing {
+        lattice_remote::normalize_legacy_pairing_code(&request.pairing_code)
+    } else {
+        normalize_viewer_pairing_code(&request.pairing_code)
+    } {
         Ok(code) => Zeroizing::new(code),
         Err(error) => return failed("pairing", error.to_string()),
     };
@@ -733,7 +739,7 @@ pub async fn connect(
         None
     };
     let expected_pin = trusted_device.as_ref().and_then(|(_, pin)| pin.as_deref());
-    if pairing_code.len() == 8 && expected_pin.is_none() {
+    if request.legacy_pairing && pairing_code.len() == 8 && expected_pin.is_none() {
         return failed(
             "legacyTrust",
             lattice_remote::RemoteError::LegacyRequiresTrustedDevice.to_string(),
@@ -770,10 +776,19 @@ pub async fn connect(
             }
             Err(_) => return failed("relay", "The relay did not answer within 15 seconds."),
         };
-        match timeout(
-            Duration::from_secs(12),
-            SecureConnection::initiate_for_device(stream, &pairing_code, expected_pin),
-        )
+        match timeout(Duration::from_secs(12), async {
+            if request.legacy_pairing {
+                SecureConnection::initiate_for_device(stream, &pairing_code, expected_pin).await
+            } else {
+                SecureConnection::initiate_for_target(
+                    stream,
+                    &pairing_code,
+                    expected_pin,
+                    Some(device_id),
+                )
+                .await
+            }
+        })
         .await
         {
             Ok(Ok(connection)) => connection,
@@ -790,10 +805,23 @@ pub async fn connect(
             Err(_) => return failed("connect", "The Agent did not answer within 12 seconds."),
         }
     } else {
-        match timeout(
-            Duration::from_secs(12),
-            SecureConnection::connect(request.hostname.as_str(), request.port, &pairing_code),
-        )
+        match timeout(Duration::from_secs(12), async {
+            if request.legacy_pairing {
+                let stream =
+                    tokio::net::TcpStream::connect((request.hostname.as_str(), request.port))
+                        .await?;
+                stream.set_nodelay(true)?;
+                SecureConnection::initiate_for_device(
+                    lattice_remote::Transport::from(stream),
+                    &pairing_code,
+                    None,
+                )
+                .await
+            } else {
+                SecureConnection::connect(request.hostname.as_str(), request.port, &pairing_code)
+                    .await
+            }
+        })
         .await
         {
             Ok(Ok(connection)) => connection,
@@ -1845,19 +1873,15 @@ mod tests {
         });
 
         let stream = TcpStream::connect(address).await.unwrap();
-        let mut viewer = SecureConnection::initiate(stream, "9999AAAABBBBCCCCDDDDEEEEFFFF0000")
-            .await
-            .expect("the initiator finishes locally before PSK rejection is observed");
+        let viewer = SecureConnection::initiate(stream, "9999AAAABBBBCCCCDDDDEEEEFFFF0000").await;
+        assert!(
+            viewer.is_err(),
+            "OPAQUE rejects before a pin candidate can be created"
+        );
         assert!(server.await.unwrap().is_err());
 
         let directory = tempfile::tempdir().unwrap();
         let pins_path = directory.path().join(crate::remote_pins::PINS_FILE);
-        let candidate = pin_candidate(pins_path.clone(), &viewer);
-        let (stage, _) = receive_authenticated_hello(&mut viewer, Some(candidate))
-            .await
-            .unwrap_err();
-
-        assert_eq!(stage, "pairing");
         assert!(!pins_path.exists());
     }
 

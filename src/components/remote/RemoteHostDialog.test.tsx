@@ -65,6 +65,16 @@ describe("remote host dialog", () => {
     expect(markup).toContain("區網直連");
   });
 
+  it("explains fixed password characters, privacy and the durable attempt limit", () => {
+    const { markup } = render("wss://relay.example/ws");
+    expect(markup).toContain("固定配對密碼（選填）");
+    expect(markup).toContain("6～64 個字元");
+    expect(markup).toContain("大小寫英文、數字與半形特殊符號");
+    expect(markup).toContain("重啟仍有效");
+    expect(markup).toMatch(/type="password"[^>]*maxLength="64"/i);
+    expect(markup).not.toContain("自行編造簡單碼");
+  });
+
   it("associates the footer submit with the settings form", () => {
     const { markup } = render(null);
     const formId = markup.match(/<form id="([^"]+)"/)?.[1];

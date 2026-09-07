@@ -10,7 +10,7 @@ import {
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
-import { CloseIcon, ScreenShareIcon, ShieldIcon } from "../icons";
+import { CheckIcon, CloseIcon, ScreenShareIcon, ShieldIcon } from "../icons";
 import { useModalFocus } from "../overlays/modalFocus";
 import { RelayAddressField } from "./RelayAddressField";
 
@@ -41,6 +41,7 @@ export function RemoteQuickConnect({
   const [relayAddress, setRelayAddress] = useState(savedRelay);
   const [deviceId, setDeviceId] = useState("");
   const [pairingCode, setPairingCode] = useState("");
+  const [legacyPairing, setLegacyPairing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const idRef = useRef<HTMLInputElement>(null);
@@ -57,7 +58,7 @@ export function RemoteQuickConnect({
     if (busy) dialogRef.current?.focus();
   }, [busy]);
 
-  const normalizedToken = normalizeViewerPairingToken(pairingCode, true);
+  const normalizedToken = normalizeViewerPairingToken(pairingCode, true, legacyPairing);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -81,6 +82,7 @@ export function RemoteQuickConnect({
       hostname: "",
       port: 0,
       pairingCode: normalizedToken,
+      legacyPairing,
       deviceId: normalizedId,
       relayAddress: relayAddress.trim(),
     });
@@ -186,7 +188,7 @@ export function RemoteQuickConnect({
                 type="password"
                 autoComplete="off"
                 spellCheck={false}
-                maxLength={256}
+                maxLength={64}
                 disabled={busy}
                 onChange={(event) =>
                   setPairingCode(event.currentTarget.value)
@@ -195,6 +197,13 @@ export function RemoteQuickConnect({
             </div>
             <p id="remote-quick-code-hint" className="field__optional">{t("remote.connect.relayCodeHint")}</p>
           </div>
+
+          <label className="checkbox">
+            <input type="checkbox" checked={legacyPairing} disabled={busy}
+              onChange={(event) => setLegacyPairing(event.currentTarget.checked)} />
+            <span className="checkbox__box" aria-hidden="true"><CheckIcon size={11} /></span>
+            {t("remote.connect.legacyPairing")}
+          </label>
 
           <RelayAddressField
             id="remote-quick-relay"

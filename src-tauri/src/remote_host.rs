@@ -387,7 +387,7 @@ pub async fn start(
     } else {
         Some(bind_target(&request)?)
     };
-    let fixed_code = if relay_mode && !request.pairing_code.trim().is_empty() {
+    let fixed_code = if relay_mode && !request.pairing_code.is_empty() {
         Some(
             lattice_remote::normalize_pairing_code(&request.pairing_code)
                 .map_err(|error| error.to_string())?,

@@ -17,7 +17,7 @@ const MAX_PLAINTEXT: usize = crate::wire::MAX_WIRE_MESSAGE - 16;
 
 #[derive(Debug, Error)]
 pub enum RemoteError {
-    #[error("pairing requires a generated 32-character hexadecimal token")]
+    #[error("pairing requires 6-64 ASCII characters (case-sensitive letters, numbers or symbols; no spaces), or a generated 32-character hexadecimal token")]
     InvalidPairingCode,
     #[error("Legacy eight-digit pairing requires a previously trusted device ID. This computer has no verified key for that device; use an existing trusted computer or update the host once to establish trust.")]
     LegacyRequiresTrustedDevice,
@@ -36,6 +36,27 @@ pub enum RemoteError {
 }
 
 pub fn normalize_pairing_code(input: &str) -> Result<String, RemoteError> {
+    // Only the exact uppercase grouped display of a generated token is a
+    // presentation alias. Raw passwords (even 32 hex characters) keep case.
+    if input.len() == 39
+        && input.split('-').count() == 8
+        && input.split('-').all(|part| {
+            part.len() == 4
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(&b))
+        })
+    {
+        return Ok(input.replace('-', ""));
+    }
+    if (6..=64).contains(&input.len()) && input.bytes().all(|byte| byte.is_ascii_graphic()) {
+        Ok(input.to_string())
+    } else {
+        Err(RemoteError::InvalidPairingCode)
+    }
+}
+
+fn normalize_generated_token(input: &str) -> Option<String> {
     let normalized: String = input
         .chars()
         .filter(|character| *character != '-' && !character.is_ascii_whitespace())
@@ -43,16 +64,20 @@ pub fn normalize_pairing_code(input: &str) -> Result<String, RemoteError> {
     if normalized.len() == PAIRING_TOKEN_HEX_LENGTH
         && normalized.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        Ok(normalized.to_ascii_uppercase())
+        Some(normalized.to_ascii_uppercase())
     } else {
-        Err(RemoteError::InvalidPairingCode)
+        None
     }
 }
 
-/// Validates viewer input only. Eight-digit codes still require an existing
-/// device pin in `initiate_for_device`; hosts must use `normalize_pairing_code`.
+/// New viewers use password pairing by default, including six/eight-digit PINs.
 pub fn normalize_viewer_pairing_code(input: &str) -> Result<String, RemoteError> {
-    if let Ok(token) = normalize_pairing_code(input) {
+    normalize_pairing_code(input)
+}
+
+/// Only for an explicitly selected legacy connection, never an automatic retry.
+pub fn normalize_legacy_pairing_code(input: &str) -> Result<String, RemoteError> {
+    if let Some(token) = normalize_generated_token(input) {
         return Ok(token);
     }
     let code: String = input
@@ -67,7 +92,8 @@ pub fn normalize_viewer_pairing_code(input: &str) -> Result<String, RemoteError>
 }
 
 fn pairing_key(input: &str) -> Result<Zeroizing<[u8; 32]>, RemoteError> {
-    let code = Zeroizing::new(normalize_pairing_code(input)?);
+    let code =
+        Zeroizing::new(normalize_generated_token(input).ok_or(RemoteError::InvalidPairingCode)?);
     let mut digest = Sha256::new();
     digest.update(b"lattice-remote-pairing-token-v2:");
     digest.update(code.as_bytes());
@@ -82,6 +108,13 @@ pub fn generate_pairing_code() -> Result<String, RemoteError> {
 
 /// Display only; callers validate or generate the token before formatting it.
 pub fn format_pairing_code(code: &str) -> String {
+    if code.len() != 32
+        || !code
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(&b))
+    {
+        return code.to_string();
+    }
     code.as_bytes()
         .chunks(4)
         .map(String::from_utf8_lossy)
@@ -101,10 +134,7 @@ impl SecureConnection<crate::Transport> {
     /// Dials a direct TCP connection and wraps it in [`crate::Transport`], so
     /// callers that also accept relayed WebSocket streams share one type.
     pub async fn connect(host: &str, port: u16, pairing_code: &str) -> Result<Self, RemoteError> {
-        let code = Zeroizing::new(normalize_viewer_pairing_code(pairing_code)?);
-        if code.len() == 8 {
-            return Err(RemoteError::LegacyRequiresTrustedDevice);
-        }
+        normalize_pairing_code(pairing_code)?;
         let stream = TcpStream::connect((host, port)).await?;
         stream.set_nodelay(true)?;
         Self::initiate(crate::Transport::from(stream), pairing_code).await
@@ -113,8 +143,24 @@ impl SecureConnection<crate::Transport> {
 
 impl<S: AsyncRead + AsyncWrite + Unpin + Send> SecureConnection<S> {
     pub async fn initiate(stream: S, pairing_code: &str) -> Result<Self, RemoteError> {
-        let psk = pairing_key(pairing_code)?;
-        Self::initiate_with_identity(stream, psk, PROLOGUE, None).await
+        Self::initiate_for_target(stream, pairing_code, None, None).await
+    }
+
+    pub async fn initiate_for_target(
+        mut stream: S,
+        pairing_code: &str,
+        expected_fingerprint: Option<&str>,
+        device_id: Option<&str>,
+    ) -> Result<Self, RemoteError> {
+        let code = Zeroizing::new(normalize_pairing_code(pairing_code)?);
+        let psk = crate::password_pairing::initiate(&mut stream, &code, device_id).await?;
+        Self::initiate_with_identity(
+            stream,
+            psk,
+            crate::password_pairing::PROLOGUE,
+            expected_fingerprint,
+        )
+        .await
     }
 
     /// Returning relay viewers may use the old pairing protocol only after
@@ -124,7 +170,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> SecureConnection<S> {
         pairing_code: &str,
         expected_fingerprint: Option<&str>,
     ) -> Result<Self, RemoteError> {
-        let code = Zeroizing::new(normalize_viewer_pairing_code(pairing_code)?);
+        // Compatibility API for explicitly opted-in, previously pinned v2 hosts.
+        // Desktop and CLI default to `initiate_for_target`, never this method.
+        let code = Zeroizing::new(normalize_legacy_pairing_code(pairing_code)?);
         if code.len() == 8 {
             let pin = expected_fingerprint
                 .filter(|pin| pin.len() == 64 && pin.bytes().all(|byte| byte.is_ascii_hexdigit()))
@@ -142,7 +190,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> SecureConnection<S> {
         } else {
             Self::initiate_with_identity(
                 stream,
-                pairing_key(&code)?,
+                pairing_key(pairing_code)?,
                 PROLOGUE,
                 expected_fingerprint,
             )
@@ -220,14 +268,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> SecureConnection<S> {
     /// Accepts with the device's permanent static key, so returning viewers
     /// can pin this device's public identity across sessions.
     pub async fn accept_with_static_key(
-        mut stream: S,
+        stream: S,
         pairing_code: &str,
         static_private_key: &[u8],
     ) -> Result<Self, RemoteError> {
-        let psk = pairing_key(pairing_code)?;
+        Self::accept_for_device(stream, pairing_code, static_private_key, None).await
+    }
+
+    pub async fn accept_for_device(
+        mut stream: S,
+        pairing_code: &str,
+        static_private_key: &[u8],
+        device_id: Option<&str>,
+    ) -> Result<Self, RemoteError> {
+        let code = Zeroizing::new(normalize_pairing_code(pairing_code)?);
+        let psk = crate::password_pairing::accept(&mut stream, &code, device_id).await?;
         let params: NoiseParams = NOISE_PATTERN.parse().map_err(|_| RemoteError::Pairing)?;
         let builder = Builder::new(params)
-            .prologue(PROLOGUE)
+            .prologue(crate::password_pairing::PROLOGUE)
             .map_err(|_| RemoteError::Pairing)?
             .local_private_key(static_private_key)
             .map_err(|_| RemoteError::Pairing)?
@@ -353,18 +411,40 @@ mod tests {
     use crate::{RemoteHello, PROTOCOL_VERSION};
     use tokio::net::TcpListener;
 
-    // Frozen responder recipe from v0.33.0. Deliberately does not call the
+    // Frozen responder recipes from v2/v3. Deliberately do not call the
     // production accept path or reuse its prologue / pairing-key helper.
     async fn legacy_responder(
         mut stream: tokio::io::DuplexStream,
         private_key: &[u8],
     ) -> Result<SecureConnection<tokio::io::DuplexStream>, RemoteError> {
+        old_responder(&mut stream, private_key, false)
+            .await
+            .map(|transport| SecureConnection { stream, transport })
+    }
+
+    async fn old_responder(
+        stream: &mut tokio::io::DuplexStream,
+        private_key: &[u8],
+        token: bool,
+    ) -> Result<TransportState, RemoteError> {
         let mut digest = Sha256::new();
-        digest.update(b"lattice-remote-pairing-v1:");
-        digest.update(b"12345678");
+        digest.update(if token {
+            b"lattice-remote-pairing-token-v2:".as_slice()
+        } else {
+            b"lattice-remote-pairing-v1:".as_slice()
+        });
+        digest.update(if token {
+            b"0123456789ABCDEF0123456789ABCDEF".as_slice()
+        } else {
+            b"12345678".as_slice()
+        });
         let psk: [u8; 32] = digest.finalize().into();
         let mut handshake = Builder::new("Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s".parse().unwrap())
-            .prologue(b"Lattice Remote v2 direct encrypted workspace")
+            .prologue(if token {
+                b"Lattice Remote v3 high-entropy pairing".as_slice()
+            } else {
+                b"Lattice Remote v2 direct encrypted workspace".as_slice()
+            })
             .unwrap()
             .local_private_key(private_key)
             .unwrap()
@@ -373,20 +453,17 @@ mod tests {
             .build_responder()
             .unwrap();
         let mut buffer = [0u8; 1024];
-        let first = read_wire(&mut stream).await?;
+        let first = read_wire(stream).await?;
         handshake
             .read_message(&first, &mut buffer)
             .map_err(|_| RemoteError::Pairing)?;
         let written = handshake.write_message(&[], &mut buffer).unwrap();
-        write_wire(&mut stream, &buffer[..written]).await?;
-        let third = read_wire(&mut stream).await?;
+        write_wire(stream, &buffer[..written]).await?;
+        let third = read_wire(stream).await?;
         handshake
             .read_message(&third, &mut buffer)
             .map_err(|_| RemoteError::Pairing)?;
-        Ok(SecureConnection {
-            stream,
-            transport: handshake.into_transport_mode().unwrap(),
-        })
+        Ok(handshake.into_transport_mode().unwrap())
     }
 
     #[tokio::test]
@@ -517,19 +594,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn modern_hosts_and_direct_viewers_still_reject_short_secrets() {
+    async fn modern_hosts_and_direct_viewers_reject_less_than_six_characters() {
         let (viewer, host) = tokio::io::duplex(8192);
         assert!(matches!(
-            SecureConnection::initiate(viewer, "12345678").await,
+            SecureConnection::initiate(viewer, "12345").await,
             Err(RemoteError::InvalidPairingCode)
         ));
         assert!(matches!(
-            SecureConnection::accept(host, "12345678").await,
+            SecureConnection::accept(host, "12345").await,
             Err(RemoteError::InvalidPairingCode)
         ));
         assert!(matches!(
-            SecureConnection::connect("127.0.0.1", 1, "12345678").await,
-            Err(RemoteError::LegacyRequiresTrustedDevice)
+            SecureConnection::connect("127.0.0.1", 1, "12345").await,
+            Err(RemoteError::InvalidPairingCode)
         ));
     }
 
@@ -540,15 +617,143 @@ mod tests {
             "0123456789ABCDEF0123456789ABCDEF"
         );
         assert_eq!(
-            normalize_pairing_code(" 0123 4567 89ab cdef 0123 4567 89ab cdef ").unwrap(),
+            normalize_legacy_pairing_code(" 0123 4567 89ab cdef 0123 4567 89ab cdef ").unwrap(),
             "0123456789ABCDEF0123456789ABCDEF"
         );
-        assert!(normalize_pairing_code("12345678").is_err());
-        assert!(normalize_pairing_code("1234567").is_err());
-        assert!(normalize_pairing_code(&"G".repeat(32)).is_err());
-        assert!(normalize_pairing_code(&"A".repeat(31)).is_err());
-        assert!(normalize_pairing_code(&"A".repeat(33)).is_err());
-        assert!(normalize_pairing_code("1234abcd").is_err());
+        for password in [
+            "123456",
+            "1234567",
+            "12345678",
+            "aB3!xY",
+            "aB-3!x",
+            "aB'\"`$\\x",
+            &"!".repeat(64),
+        ] {
+            assert_eq!(normalize_pairing_code(password).unwrap(), password);
+            assert_eq!(format_pairing_code(password), password);
+            assert!(
+                pairing_key(password).is_err(),
+                "password must never use a static Noise PSK"
+            );
+        }
+        for invalid in [
+            "12345",
+            "aB 3!xy",
+            " aB3!xy",
+            "aB3!xy\n",
+            "密碼123456",
+            "aB3!xy\u{200b}",
+            &"!".repeat(65),
+        ] {
+            assert!(normalize_pairing_code(invalid).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn fixed_passwords_pair_and_exchange_encrypted_messages() {
+        for password in ["123456", "12345678", "aB3!xY", "aB'\"`$\\x"] {
+            let (viewer, host) = tokio::io::duplex(8192);
+            let (viewer, host) = tokio::join!(
+                SecureConnection::initiate(viewer, password),
+                SecureConnection::accept(host, password)
+            );
+            let mut viewer = viewer.unwrap();
+            let mut host = host.unwrap();
+            let message = RemoteMessage::KeepAlive;
+            viewer.send(&message).await.unwrap();
+            assert_eq!(host.receive().await.unwrap(), message);
+        }
+    }
+
+    #[tokio::test]
+    async fn fixed_password_case_mismatch_fails_on_both_ends() {
+        let (viewer, host) = tokio::io::duplex(8192);
+        let (viewer, host) = tokio::join!(
+            SecureConnection::initiate(viewer, "Ab3!xY"),
+            SecureConnection::accept(host, "ab3!xy")
+        );
+        assert!(viewer.is_err());
+        assert!(host.is_err());
+    }
+
+    #[tokio::test]
+    async fn hex_shaped_passwords_still_use_case_sensitive_password_pairing() {
+        let (viewer, host) = tokio::io::duplex(8192);
+        let mixed_case = "aBcD".repeat(8);
+        let uppercase = "ABCD".repeat(8);
+        let (viewer, host) = tokio::join!(
+            SecureConnection::initiate(viewer, &mixed_case),
+            SecureConnection::accept(host, &uppercase)
+        );
+        assert!(viewer.is_err());
+        assert!(host.is_err());
+    }
+
+    #[tokio::test]
+    async fn explicit_compatibility_still_connects_to_a_v3_token_host() {
+        let key = Builder::new(NOISE_PATTERN.parse().unwrap())
+            .generate_keypair()
+            .unwrap();
+        let (viewer, mut host) = tokio::io::duplex(8192);
+        let (viewer, transport) = tokio::join!(
+            SecureConnection::initiate_for_device(
+                viewer,
+                "0123-4567-89ab-cdef-0123-4567-89ab-cdef",
+                None
+            ),
+            old_responder(&mut host, &key.private, true)
+        );
+        let mut viewer = viewer.unwrap();
+        let mut host = SecureConnection {
+            stream: host,
+            transport: transport.unwrap(),
+        };
+        host.send(&RemoteMessage::KeepAlive).await.unwrap();
+        assert_eq!(viewer.receive().await.unwrap(), RemoteMessage::KeepAlive);
+    }
+
+    #[tokio::test]
+    async fn password_pairing_binds_relay_device_id_and_existing_noise_pin() {
+        let params: NoiseParams = NOISE_PATTERN.parse().unwrap();
+        let key = Builder::new(params).generate_keypair().unwrap();
+        let pin = crate::device_pins::fingerprint(&key.public);
+        for (target, expected_pin, succeeds) in [
+            ("123456789", pin.clone(), true),
+            ("987654321", pin.clone(), false),
+            ("123456789", "0".repeat(64), false),
+        ] {
+            let (viewer, host) = tokio::io::duplex(8192);
+            let (viewer, host) = tokio::join!(
+                SecureConnection::initiate_for_target(
+                    viewer,
+                    "aB3!xy",
+                    Some(&expected_pin),
+                    Some(target)
+                ),
+                SecureConnection::accept_for_device(
+                    host,
+                    "aB3!xy",
+                    &key.private,
+                    Some("123456789")
+                )
+            );
+            assert_eq!(viewer.is_ok(), succeeds);
+            assert_eq!(host.is_ok(), succeeds);
+        }
+    }
+
+    #[tokio::test]
+    async fn password_pairing_never_retries_the_legacy_handshake() {
+        let (viewer, host) = tokio::io::duplex(8192);
+        let params: NoiseParams = NOISE_PATTERN.parse().unwrap();
+        let key = Builder::new(params).generate_keypair().unwrap();
+        let pin = crate::device_pins::fingerprint(&key.public);
+        let (viewer, host) = tokio::join!(
+            SecureConnection::initiate_for_target(viewer, "12345678", Some(&pin), None),
+            legacy_responder(host, &key.private)
+        );
+        assert!(viewer.is_err());
+        assert!(host.is_err());
     }
 
     #[test]
@@ -702,10 +907,11 @@ mod tests {
             let pin = seen
                 .first()
                 .map(|key: &Vec<u8>| crate::device_pins::fingerprint(key));
-            let client = SecureConnection::initiate_for_device(
+            let client = SecureConnection::initiate_for_target(
                 stream,
                 "0123456789ABCDEF0123456789ABCDEF",
                 pin.as_deref(),
+                None,
             )
             .await
             .unwrap();
@@ -754,7 +960,7 @@ mod tests {
         let initiator =
             SecureConnection::initiate(stream, "9999AAAABBBBCCCCDDDDEEEEFFFF0000").await;
         let responder = server.await.unwrap();
-        assert!(initiator.is_ok());
+        assert!(initiator.is_err());
         assert!(responder.is_err());
     }
 }

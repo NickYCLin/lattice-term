@@ -1,16 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { normalizePairingToken, normalizeViewerPairingToken } from "./pairingToken";
+import { normalizePairingToken, normalizePairingPassword, normalizeViewerPairingToken } from "./pairingToken";
 
 describe("pairing tokens", () => {
   it("accepts legacy viewer codes only for device-ID connections", () => {
-    expect(normalizeViewerPairingToken(" 1234-5678 ", true)).toBe("12345678");
-    expect(normalizeViewerPairingToken("12345678", false)).toBeNull();
+    expect(normalizeViewerPairingToken(" 1234-5678 ", true, true)).toBe("12345678");
+    expect(normalizeViewerPairingToken("12345678", false, true)).toBeNull();
     expect(normalizePairingToken("12345678")).toBeNull();
     for (const input of ["1234abcd", "１２３４５６７８", "1234567", "123456789", "12345678\u200b"]) {
-      expect(normalizeViewerPairingToken(input, true)).toBeNull();
+      expect(normalizeViewerPairingToken(input, true, true)).toBeNull();
     }
     for (const relay of [true, false]) {
-      expect(normalizeViewerPairingToken("abcd".repeat(8), relay)).toBe("ABCD".repeat(8));
+      expect(normalizeViewerPairingToken("abcd".repeat(8), relay)).toBe("abcd".repeat(8));
+    }
+  });
+  it("preserves case and all printable ASCII symbols in fixed passwords", () => {
+    const passwords = ["123456", "1234567", "12345678", "aB3!xY", "aB-3!x", "aB'\"`$\\x", "aBcD".repeat(8), "!".repeat(64)];
+    for (const password of passwords) {
+      expect(normalizePairingPassword(password)).toBe(password);
+      expect(normalizeViewerPairingToken(password, false)).toBe(password);
+      expect(normalizeViewerPairingToken(password, true)).toBe(password);
+    }
+    expect(normalizePairingPassword("Ab3!xY")).not.toBe(normalizePairingPassword("ab3!xy"));
+    for (const input of ["12345", "!".repeat(65), "aB 3!xy", " aB3!xy", "aB3!xy\n", "aB3!xy\u200b", "密碼123456", "aB3!xy\0"]) {
+      expect(normalizePairingPassword(input)).toBeNull();
     }
   });
   it("accepts the complete generated token with readable separators", () => {

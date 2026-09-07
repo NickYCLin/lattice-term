@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { normalizePairingPassword } from "../../app/pairingToken";
 import type { SensitiveClipboardClearChoice } from "../../app/preferences";
 import { copyTextToClipboard } from "../../app/clipboardText";
 import {
@@ -105,6 +106,11 @@ export function RemoteHostDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const password = mode === "relay" && fixedCode ? normalizePairingPassword(fixedCode) : "";
+    if (password === null) {
+      setProblem(t("remote.connect.codeInvalid"));
+      return;
+    }
     setBusy(true);
     setProblem(null);
     host.clearClosedReason();
@@ -118,7 +124,7 @@ export function RemoteHostDialog({
         fileRoot: fileRoot.trim(),
         mode,
         relayAddress: mode === "relay" ? relayAddress.trim() : "",
-        pairingCode: mode === "relay" ? fixedCode.trim() : "",
+        pairingCode: password,
       });
       if (mode === "relay") {
         saveRelayAddress(window.localStorage, relayAddress);
@@ -446,7 +452,7 @@ export function RemoteHostDialog({
                       type="password"
                       autoComplete="off"
                       spellCheck={false}
-                      maxLength={256}
+                      maxLength={64}
                       placeholder={t("remote.host.fixedCodePlaceholder")}
                       onChange={(event) => setFixedCode(event.currentTarget.value)}
                     />

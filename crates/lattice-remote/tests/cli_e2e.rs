@@ -21,7 +21,7 @@ fn client_binary() -> PathBuf {
 
 fn private_pairing_code_file(directory: &Path) -> PathBuf {
     let path = directory.join("pair-code");
-    std::fs::write(&path, "24681357\n").unwrap();
+    std::fs::write(&path, "aB3!\"'$`\\-xy\n").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -30,27 +30,58 @@ fn private_pairing_code_file(directory: &Path) -> PathBuf {
     path
 }
 
-fn start_agent(root: &Path, pairing_file: &Path) -> (Child, BufReader<ChildStdout>, String) {
+struct AgentGuard(Child);
+impl std::ops::Deref for AgentGuard {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for AgentGuard {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+impl Drop for AgentGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn start_agent(root: &Path, pairing_file: &Path) -> (AgentGuard, BufReader<ChildStdout>, String) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let address = format!("127.0.0.1:{port}");
-    let mut agent = Command::new(agent_binary())
-        .args([
-            "--json",
-            "--terminal",
-            "--allow-input",
-            "--bind",
-            &address,
-            "--pair-code-file",
-        ])
-        .arg(pairing_file)
-        .arg("--file-root")
-        .arg(root)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn Agent");
+    let mut agent = AgentGuard(
+        Command::new(agent_binary())
+            .args([
+                "--json",
+                "--terminal",
+                "--allow-input",
+                "--bind",
+                &address,
+                "--pair-code-file",
+            ])
+            .arg(pairing_file)
+            .arg("--file-root")
+            .arg(root)
+            .arg("--identity")
+            .arg(
+                pairing_file
+                    .parent()
+                    .unwrap()
+                    .canonicalize()
+                    .unwrap()
+                    .join("identity.json"),
+            )
+            .current_dir(root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn Agent"),
+    );
     let mut events = BufReader::new(agent.stdout.take().expect("Agent event stream"));
     let mut ready = String::new();
     events.read_line(&mut ready).expect("read Agent readiness");
@@ -76,7 +107,7 @@ fn assert_client_success(output: &Output) {
     );
 }
 
-fn wait_for_agent(mut agent: Child, _events: BufReader<ChildStdout>) {
+fn wait_for_agent(mut agent: AgentGuard, _events: BufReader<ChildStdout>) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(status) = agent.try_wait().expect("poll Agent") {
@@ -90,6 +121,33 @@ fn wait_for_agent(mut agent: Child, _events: BufReader<ChildStdout>) {
         }
         std::thread::sleep(Duration::from_millis(25));
     }
+}
+
+#[test]
+#[ignore = "spawns the real Agent; run manually"]
+fn password_attempt_budget_survives_agent_restarts() {
+    let directory = tempfile::tempdir().unwrap();
+    let shared = directory.path().join("shared");
+    std::fs::create_dir(&shared).unwrap();
+    let pairing_file = private_pairing_code_file(directory.path());
+    let wrong_file = directory.path().join("wrong-code");
+    std::fs::copy(&pairing_file, &wrong_file).unwrap();
+    std::fs::write(&wrong_file, "Ab3!wrong").unwrap();
+    for _ in 0..5 {
+        let (agent, _events, address) = start_agent(&shared, &pairing_file);
+        assert!(!run_client(&address, &wrong_file, &["list", "/"])
+            .status
+            .success());
+        drop(agent);
+    }
+    let (agent, events, address) = start_agent(&shared, &pairing_file);
+    // Even the correct password cannot bypass the persisted budget on restart.
+    assert!(!run_client(&address, &pairing_file, &["list", "/"])
+        .status
+        .success());
+    wait_for_agent(agent, events);
+    let state = std::fs::read_to_string(directory.path().join("pairing-attempts.json")).unwrap();
+    assert!(!state.contains("wrong") && !state.contains("xy"));
 }
 
 #[test]

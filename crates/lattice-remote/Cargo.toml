@@ -14,6 +14,11 @@ relay-server = []
 [dependencies]
 sha2 = "0.11.0"
 snow = "0.10.0"
+opaque-ke = { version = "4.0.1", default-features = false, features = ["ristretto255", "argon2"] }
+rand = "0.8"
+hkdf = "0.12"
+# opaque-ke uses digest 0.10; keep its suite separate from the existing hashes.
+sha2-opaque = { package = "sha2", version = "0.10" }
 getrandom = "0.4.3"
 thiserror = "2"
 tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

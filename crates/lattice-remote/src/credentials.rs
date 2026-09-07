@@ -10,7 +10,7 @@ use std::io::Read;
 use std::path::Path;
 use zeroize::Zeroizing;
 
-const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 64;
+const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 66;
 
 /// Reads and validates one pairing code from a regular, bounded file.
 ///
@@ -19,13 +19,20 @@ const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 64;
 /// not silently redirect the reader elsewhere.
 pub fn read_pairing_code_file(path: &Path) -> Result<String, String> {
     let input = read_private_code_file(path)?;
-    normalize_pairing_code(&input).map_err(|error| error.to_string())
+    normalize_pairing_code(input.trim_end_matches(['\r', '\n'])).map_err(|error| error.to_string())
 }
 
 /// Viewer-only reader; legacy codes still require a trusted device at pairing.
 pub fn read_viewer_pairing_code_file(path: &Path) -> Result<String, String> {
     let input = read_private_code_file(path)?;
-    crate::normalize_viewer_pairing_code(&input).map_err(|error| error.to_string())
+    crate::normalize_viewer_pairing_code(input.trim_end_matches(['\r', '\n']))
+        .map_err(|error| error.to_string())
+}
+
+/// Explicit legacy mode retains old whitespace/separator normalization.
+pub fn read_legacy_pairing_code_file(path: &Path) -> Result<String, String> {
+    let input = read_private_code_file(path)?;
+    crate::normalize_legacy_pairing_code(&input).map_err(|error| error.to_string())
 }
 
 fn read_private_code_file(path: &Path) -> Result<Zeroizing<String>, String> {
@@ -90,7 +97,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn legacy_file_is_viewer_only() {
+    fn password_file_preserves_symbols_for_host_and_viewer() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         #[cfg(unix)]
         {
@@ -99,12 +106,12 @@ mod tests {
                 .set_permissions(std::fs::Permissions::from_mode(0o600))
                 .unwrap();
         }
-        file.write_all(b"1234-5678\n").unwrap();
+        file.write_all(b"aB3!-xY\r\n").unwrap();
         assert_eq!(
             read_viewer_pairing_code_file(file.path()).unwrap(),
-            "12345678"
+            "aB3!-xY"
         );
-        assert!(read_pairing_code_file(file.path()).is_err());
+        assert_eq!(read_pairing_code_file(file.path()).unwrap(), "aB3!-xY");
     }
 
     #[test]
@@ -134,10 +141,10 @@ mod tests {
                 .set_permissions(std::fs::Permissions::from_mode(0o600))
                 .unwrap();
         }
-        file.write_all(&[b'1'; 65]).unwrap();
+        file.write_all(&[b'1'; 67]).unwrap();
         assert!(read_pairing_code_file(file.path())
             .unwrap_err()
-            .contains("at most 64 bytes"));
+            .contains("at most 66 bytes"));
     }
 
     #[cfg(unix)]

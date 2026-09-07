@@ -73,6 +73,8 @@ export interface RemoteConnectRequest {
   pairingCode: string;
   useSavedPairingCode?: boolean;
   rememberPairingCode?: boolean;
+  /** Explicit compatibility mode for an already trusted, old eight-digit host. */
+  legacyPairing?: boolean;
   /** When set, the backend dials this nine-digit ID through the relay. */
   deviceId?: string;
   relayAddress?: string;
