@@ -1562,7 +1562,30 @@ mod tests {
         );
         let reply: Value = serde_json::from_str(&out.writes[0]).unwrap();
         assert_eq!(reply["id"], 9);
+        assert_eq!(reply["result"], serde_json::json!({"answers": {}}));
+        assert!(out.events.is_empty());
+
+        let out = feed(
+            &server,
+            r#"{"method":"mcpServer/elicitation/request","id":10,"params":{"mode":"form","_meta":{"codex_approval_kind":"mcp_tool_call"},"requestedSchema":{"type":"object","properties":{}}}}"#,
+        );
+        let reply: Value = serde_json::from_str(&out.writes[0]).unwrap();
+        assert_eq!(reply["id"], 10);
+        assert_eq!(
+            reply["result"],
+            serde_json::json!({"action": "decline", "content": null})
+        );
+        assert!(out.events.is_empty());
+
+        let out = feed(
+            &server,
+            r#"{"method":"unknown/request","id":11,"params":{}}"#,
+        );
+        let reply: Value = serde_json::from_str(&out.writes[0]).unwrap();
+        assert_eq!(reply["id"], 11);
         assert!(reply.get("error").is_some());
+        assert!(out.events.is_empty());
+        assert!(server.state().active.is_none());
     }
 
     #[test]
