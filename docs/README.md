@@ -2,6 +2,11 @@
 
 這份索引讓第一次進入專案的工程師或程式型 Agent，能先找到真正負責功能的入口，不必只靠全文猜測。
 
+第一次使用請先看 [試用步驟](FIRST_RUN.zh-TW.md) 或 [English quick start](../README.en.md#get-started)。
+對話頁的公開介面與待補功能見 [Codex Desktop 功能對照](CHAT_DESKTOP_PARITY.zh-TW.md)。
+
+[完整功能與限制](FEATURES.zh-TW.md) · [本地開發與驗證](DEVELOPMENT.zh-TW.md) · [產品介紹參考](PRODUCT_PRESENTATION.zh-TW.md)
+
 ## 從需求找程式碼
 
 | 想了解或修改的範圍 | 前端入口 | Rust／協定入口 | 延伸文件 |
@@ -23,7 +28,7 @@
 - 前端：React、TypeScript、Vite、xterm.js。
 - 原生後端：Rust；桌面命令集中在 `src-tauri/src/`。
 - 獨立引擎：`crates/lattice-remote`、`crates/lattice-rdp`、`crates/lattice-vnc`。
-- 測試：Vitest 與 Rust `cargo test`；完整指令列在根目錄 [README](../README.md#專案驗證)。
+- 測試：Vitest 與 Rust `cargo test`；完整指令列在 [本地開發](DEVELOPMENT.zh-TW.md#專案驗證)。
 
 ## 專案邊界
 

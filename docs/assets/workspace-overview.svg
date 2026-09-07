@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="280" viewBox="0 0 1000 280" role="img" aria-labelledby="title desc">
+  <title id="title">LatticeTerm workflow overview</title>
+  <desc id="desc">Choose a project, open local AI assistants, and switch between agent and remote sessions in one desktop workspace. This is an illustration, not an application screenshot.</desc>
+  <rect width="1000" height="280" rx="16" fill="#191c1e"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="32" y="37" fill="#e9eeef" font-size="17" font-weight="600">LatticeTerm</text>
+    <text x="968" y="37" text-anchor="end" fill="#b2bdbf" font-size="12">WORKFLOW OVERVIEW</text>
+    <g fill="#222729" stroke="#475257">
+      <rect x="32" y="64" width="290" height="168" rx="10"/>
+      <rect x="355" y="64" width="290" height="168" rx="10"/>
+      <rect x="678" y="64" width="290" height="168" rx="10"/>
+    </g>
+    <g fill="#8bc8bc" font-size="12" font-weight="600">
+      <text x="52" y="94">01 / CHOOSE YOUR PROJECT</text>
+      <text x="375" y="94">02 / OPEN YOUR ASSISTANTS</text>
+      <text x="698" y="94">03 / KEEP YOUR PLACE</text>
+    </g>
+    <g fill="#e9eeef" font-size="20" font-weight="600">
+      <text x="52" y="131">One place to start</text>
+      <text x="375" y="131">Use the tools you know</text>
+      <text x="698" y="131">Switch between tasks</text>
+    </g>
+    <g fill="#b2bdbf" font-size="15">
+      <text x="52" y="167">Group sessions by project.</text>
+      <text x="52" y="193">Find them again in the sidebar.</text>
+      <text x="375" y="167">Codex / Claude Code / Gemini</text>
+      <text x="375" y="193">Each with its own terminal.</text>
+      <text x="698" y="167">Check progress. Open SSH.</text>
+      <text x="698" y="193">Transfer files. Return to work.</text>
+    </g>
+    <g stroke="#8bc8bc" fill="none" stroke-width="2">
+      <path d="M330 148h17m-5-5 5 5-5 5"/>
+      <path d="M653 148h17m-5-5 5 5-5 5"/>
+    </g>
+    <text x="32" y="257" fill="#b2bdbf" font-size="12">Windows · macOS · Linux</text>
+    <text x="968" y="257" text-anchor="end" fill="#b2bdbf" font-size="12">Local sessions. Your existing CLI accounts.</text>
+  </g>
+</svg>

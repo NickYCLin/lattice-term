@@ -1,10 +1,15 @@
 # LatticeTerm
 
-> Open-source, cross-platform Tauri desktop workspace for local AI coding CLIs and remote access. It combines native-PTY agent sessions with SSH, SFTP, tunnels, RDP, VNC and end-to-end encrypted remote desktop connections.
+> Keep local AI coding assistants and remote terminals in one desktop workspace. Organize native-PTY sessions by project and switch between agents, SSH, and file transfers.
 
 ## Start here
 
-- [Project overview, features, installation and development](README.md)
+- [Project overview and installation](README.md)
+- [English overview and first task](README.en.md)
+- [Full feature inventory and limitations](docs/FEATURES.zh-TW.md)
+- [Local development and verification](docs/DEVELOPMENT.zh-TW.md)
+- [First-run guide in Traditional Chinese](docs/FIRST_RUN.zh-TW.md)
+- [Chat and Codex Desktop feature comparison](docs/CHAT_DESKTOP_PARITY.zh-TW.md)
 - [Source and documentation map](docs/README.md)
 - [AI Agent Fleet architecture](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md)
 - [Storage and security decisions](docs/STORAGE_SECURITY_DECISION.zh-TW.md)

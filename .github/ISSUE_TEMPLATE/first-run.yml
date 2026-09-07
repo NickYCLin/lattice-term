@@ -1,0 +1,38 @@
+name: 第一次使用回饋 / First-run feedback
+description: 告訴我們第一次使用卡在哪裡 / Tell us where you got stuck
+title: "[First run] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        請勿附上 token、密碼、私有主機位址或未遮蔽的對話紀錄。
+        Do not include tokens, passwords, private hosts, or unredacted conversations.
+  - type: input
+    id: environment
+    attributes:
+      label: 使用環境 / Environment
+      description: 作業系統、LatticeTerm 版本、使用的 CLI 與版本 / OS, LatticeTerm version, CLI and version
+      placeholder: Windows 11, LatticeTerm 1.x, Codex ...
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: 卡在哪一步 / Where did you get stuck?
+      options:
+        - 下載或安裝 / Download or installation
+        - 找到並登入 CLI / CLI detection or login
+        - 啟動第一個工作階段 / Starting a session
+        - 送出第一則訊息 / Sending a prompt
+        - 切換或找回工作階段 / Switching or finding sessions
+        - 遠端連線 / Remote connection
+        - 已完成第一次操作，想提供建議 / Completed the first task and have feedback
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: 預期與實際結果 / Expected and actual result
+      description: 請附最短重現步驟；也歡迎說明哪個地方幫到了你 / Short reproduction steps or what worked for you
+    validations:
+      required: true
