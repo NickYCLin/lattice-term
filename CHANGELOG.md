@@ -4,6 +4,20 @@
 
 ---
 
+## [1.2.0](https://github.com/NickYCLin/lattice-term/compare/v1.1.0...v1.2.0) (2026-09-07)
+
+
+### 🚀 新增功能
+
+* **appearance:** 重設主題並加入可預覽的完整動態 ([91283f5](https://github.com/NickYCLin/lattice-term/commit/91283f5c00fe2632a97b3abc09dacf269d7ccea8))
+* **chat:** 補上一般對話、瀏覽器操作與完成提示 ([924e83c](https://github.com/NickYCLin/lattice-term/commit/924e83c39c93a34edf024b9804f75250a1440fd9))
+* **remote:** 讓已信任舊主機沿用原本的遠端配對 ([14e0140](https://github.com/NickYCLin/lattice-term/commit/14e01405d9679a7c0810ec971da14fa047658695))
+
+
+### 🛠️ 問題修正
+
+* **sessions:** 固定側欄頂列並修正執行狀態 ([5f23c00](https://github.com/NickYCLin/lattice-term/commit/5f23c00a6899b88bc8559df84f15f866955de897))
+
 ## [1.1.0](https://github.com/NickYCLin/lattice-term/compare/v1.0.3...v1.1.0) (2026-09-07)
 
 
