@@ -4,6 +4,7 @@ pub mod agent_daemon;
 pub mod agent_history;
 pub mod agent_plans;
 pub mod backup;
+mod chat_attachments;
 pub mod clipboard;
 pub mod credentials;
 pub mod domain;
@@ -782,6 +783,33 @@ async fn agent_broadcast(
         }
     }
     Ok(outcomes)
+}
+
+/// Saves an explicitly pasted chat image for later sends and queued turns.
+#[tauri::command]
+async fn agent_chat_paste_image(
+    app: AppHandle,
+    thread_id: String,
+    clipboard: State<'_, Arc<SensitiveClipboard>>,
+) -> Result<Option<String>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+    let clipboard = Arc::clone(clipboard.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        // Reject unsafe destinations before reading the clipboard.
+        crate::agent_chat::general_chat_directory(&data_dir, &thread_id)?;
+        let Some((width, height, rgba)) = clipboard.read_image_rgba(&app)? else {
+            return Ok(None);
+        };
+        let path = crate::chat_attachments::stage_clipboard_image(
+            &data_dir, &thread_id, width, height, &rgba,
+        )?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?
 }
 
 /// Writes an image sitting on the clipboard to a temp PNG and returns its path.
@@ -2832,6 +2860,7 @@ pub fn run() {
             agent_chat_models,
             agent_chat_skills,
             agent_paste_clipboard_image,
+            agent_chat_paste_image,
             agent_export_transcript,
             agent_import_memory_handoff,
             agent_write_handoff_file,

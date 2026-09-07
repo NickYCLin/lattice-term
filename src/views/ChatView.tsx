@@ -14,8 +14,10 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ClipboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsImage } from "../app/chatAttachments";
 import {
   defaultPermission,
   formatTokens,
@@ -82,24 +84,6 @@ function directoryName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return index === -1 ? trimmed : trimmed.slice(index + 1);
-}
-
-function attachmentName(path: string): string {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] || path;
-}
-
-function isImageAttachment(path: string): boolean {
-  return /\.(png|jpe?g|gif|webp|bmp)$/i.test(path);
-}
-
-function attachmentsFromPaths(paths: readonly string[]): ChatAttachment[] {
-  const seen = new Set<string>();
-  return paths.flatMap((path) => {
-    if (!path || seen.has(path)) return [];
-    seen.add(path);
-    return [{ path, name: attachmentName(path), isImage: isImageAttachment(path) }];
-  });
 }
 
 export function ChatView({
@@ -451,6 +435,12 @@ function ThreadPane({
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const [pastingImage, setPastingImage] = useState(false);
+  const pastingImageRef = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [steering, setSteering] = useState(false);
   const steeringRef = useRef(false);
@@ -475,6 +465,7 @@ function ThreadPane({
   const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
     !steering &&
+    !pastingImage &&
     !activeProfileMissing &&
     !activeProfileSignedOut &&
     cliInstalled &&
@@ -493,14 +484,41 @@ function ThreadPane({
     setAttachments([]);
   }, [thread.id]);
 
-  function addAttachments(paths: readonly string[]) {
-    if (steeringRef.current) return;
-    const added = attachmentsFromPaths(paths);
-    if (added.length === 0) return;
-    setAttachments((current) => {
-      const existing = new Set(current.map((attachment) => attachment.path));
-      return [...current, ...added.filter((attachment) => !existing.has(attachment.path))];
-    });
+  function addAttachments(paths: readonly string[]): boolean {
+    if (steeringRef.current) return false;
+    const next = mergeAttachmentPaths(attachmentsRef.current, paths);
+    if (!next) { setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return false; }
+    attachmentsRef.current = next;
+    setAttachments(next);
+    return true;
+  }
+
+  async function pasteImage() {
+    if (pastingImageRef.current || steeringRef.current) return;
+    if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
+      setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return;
+    }
+    pastingImageRef.current = true;
+    setPastingImage(true);
+    setNotice(null);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await invoke<string | null>("agent_chat_paste_image", { threadId: thread.id });
+      if (!mounted.current) return;
+      if (path) addAttachments([path]);
+      else setNotice(t("chat.attachment.clipboardEmpty"));
+    } catch (reason) {
+      if (mounted.current) setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
+    } finally {
+      pastingImageRef.current = false;
+      if (mounted.current) setPastingImage(false);
+    }
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!pasteContainsImage(event.clipboardData.items)) return;
+    event.preventDefault();
+    void pasteImage();
   }
 
   async function chooseAttachments(kind: "image" | "file") {
@@ -583,7 +601,7 @@ function ThreadPane({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (!canSend || steeringRef.current) return;
+    if (!canSend || steeringRef.current || pastingImageRef.current) return;
     const prompt = draft;
     if (running || pendingInputs.length > 0) {
       try {
@@ -603,7 +621,7 @@ function ThreadPane({
   }
 
   async function steer() {
-    if (!canSend || steeringRef.current || !running || thread.definitionId !== "codex") return;
+    if (!canSend || steeringRef.current || pastingImageRef.current || !running || thread.definitionId !== "codex") return;
     steeringRef.current = true;
     setSteering(true);
     setNotice(null);
@@ -875,10 +893,10 @@ function ThreadPane({
                   {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
                 </span>
                 <button type="button" className="button button--ghost button--sm"
-                  disabled={steering}
+                  disabled={steering || pastingImage}
                   onClick={() => {
+                    if (!addAttachments(input.attachments.map(file => file.path))) return;
                     setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
-                    addAttachments(input.attachments.map(file => file.path));
                     chat.removeQueued(thread.id, input.id);
                   }}>{t("chat.queue.edit")}</button>
                 <button type="button" className="icon-button icon-button--sm"
@@ -894,6 +912,7 @@ function ThreadPane({
             placeholder={t("chat.composer.placeholder", { assistant })}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             aria-label={t("chat.composer.label")}
             rows={2}
           />
@@ -908,7 +927,7 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("image")}
-                disabled={steering}
+                disabled={steering || pastingImage}
                 title={t("chat.attachment.images")}
               >
                 <ImageFileIcon />
@@ -918,12 +937,15 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("file")}
-                disabled={steering}
+                disabled={steering || pastingImage}
                 title={t("chat.attachment.files")}
               >
                 <FileIcon />
                 {t("chat.attachment.files")}
               </button>
+              <button type="button" className="button button--ghost button--sm"
+                onClick={() => void pasteImage()} disabled={steering || pastingImage}
+                title={t("chat.attachment.pasteHint")}>{t(pastingImage ? "chat.attachment.pasting" : "chat.attachment.paste")}</button>
               {running && thread.definitionId === "codex" && (
                 <button type="button" className="button button--secondary button--sm"
                   disabled={!canSend} title={t("chat.steer.hint")}
