@@ -4,6 +4,15 @@
 
 ---
 
+## [1.3.0](https://github.com/NickYCLin/lattice-term/compare/v1.2.0...v1.3.0) (2026-09-07)
+
+
+### 🚀 新增功能
+
+* **chat:** 加入可保存與暫停的訊息佇列 ([d2d0e45](https://github.com/NickYCLin/lattice-term/commit/d2d0e45d178b8a3d12173dd6949c88f6f015f87a))
+* **chat:** 支援在 Codex 執行中立即補充指示 ([13ca2a0](https://github.com/NickYCLin/lattice-term/commit/13ca2a0f8aa4cca5dafb5af4eda6e148644ad0d0))
+* **chat:** 支援貼上截圖並保存對話附件 ([405a092](https://github.com/NickYCLin/lattice-term/commit/405a092340d703629a9cfe28940a7b226bb17746))
+
 ## [1.2.0](https://github.com/NickYCLin/lattice-term/compare/v1.1.0...v1.2.0) (2026-09-07)
 
 
