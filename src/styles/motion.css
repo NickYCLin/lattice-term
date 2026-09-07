@@ -1,0 +1,157 @@
+/* Short feedback at interaction boundaries; no animation on terminal output. */
+.app,
+.glass,
+.chat-view,
+.session-projects,
+.session-projects__title {
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.session-launch-menu,
+.session-projects__search-results,
+.chat-settings,
+.session-projects__status-guide,
+.chat-msg,
+.chat-tool,
+.callout {
+  animation: surface-arrive var(--duration) var(--ease);
+}
+
+.rail__item.is-active > svg {
+  animation: icon-settle var(--duration-slow) var(--ease);
+}
+.theme-option__check {
+  animation: icon-settle var(--duration-slow) var(--ease);
+}
+.session-tree__project-branch > [role="group"],
+.session-tree__folder > [role="group"] {
+  animation: surface-arrive var(--duration) var(--ease);
+}
+
+@media (hover: hover) {
+  :root:not([data-motion="reduced"]) .button:not(:disabled):hover {
+    transform: translateY(-2px);
+  }
+  :root:not([data-motion="reduced"]) .button:not(:disabled):active {
+    transform: translateY(1px) scale(0.97);
+  }
+}
+
+@keyframes surface-arrive {
+  from {
+    opacity: 0;
+    translate: 0 7px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes icon-settle {
+  0% {
+    scale: 0.7;
+    opacity: 0.3;
+  }
+  65% {
+    scale: 1.12;
+    opacity: 1;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.motion-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.motion-preview__demo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 144px;
+  height: 58px;
+}
+.motion-preview__menu {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  width: 44px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  animation: demo-arrive 1.4s var(--ease);
+}
+.motion-preview__menu i,
+.motion-preview__message i {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+.motion-preview__message {
+  display: grid;
+  width: 52px;
+  gap: 6px;
+  padding: 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 8px 8px 2px 8px;
+  animation: demo-arrive 1.4s 0.18s var(--ease) backwards;
+}
+.motion-preview__message i:last-child {
+  width: 65%;
+}
+.motion-preview__done {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ok-soft);
+  color: var(--ok);
+  animation: icon-settle 0.5s 0.7s var(--ease) backwards;
+}
+.motion-preview__text {
+  display: grid;
+  flex: 1;
+  min-width: min(100%, 12rem);
+  gap: var(--space-1);
+}
+.motion-preview__text small {
+  color: var(--text-muted);
+}
+@keyframes demo-arrive {
+  0%,
+  15% {
+    opacity: 0;
+    translate: 0 14px;
+  }
+  55%,
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* Hover displacement also needs suppressing: disabling transitions alone
+   would merely make the same movement instantaneous. */
+:root[data-motion="reduced"] .theme-option:hover {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .button:hover,
+  :root:not([data-motion="full"]) .button:active,
+  :root:not([data-motion="full"]) .theme-option:hover {
+    transform: none;
+  }
+}

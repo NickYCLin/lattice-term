@@ -1,9 +1,4 @@
-/*
- * LatticeTerm design tokens.
- *
- * Distinctive, high-contrast, human-crafted themes for terminal & infrastructure operators.
- * Completely redesigned to eliminate generic AI templates and deliver a bespoke, premium aesthetic.
- */
+/* Shared layout tokens and application palettes. */
 
 :root {
   /* ---------------------------------------------------------------- Shape */
@@ -38,14 +33,15 @@
   --space-8: 2rem;
   --space-9: 2.75rem;
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
-  --duration-fast: 130ms;
-  --duration: 220ms;
+  --duration-fast: 180ms;
+  --duration: 280ms;
+  --duration-slow: 420ms;
   --ease: cubic-bezier(0.22, 0.68, 0.31, 1);
 
   --rail-width: 4rem;
@@ -54,444 +50,171 @@
   --statusbar-height: 1.875rem;
   --card-gap: 0.625rem;
   --control-height: 2.25rem;
-
-  /* ------------------------------------ 1. Default: 暗曜金珀 (Obsidian Amber) */
-  color-scheme: dark;
-
-  --accent: #f59e0b;
-  --accent-hover: #fbbf24;
-  --accent-press: #d97706;
-  --accent-ink: #1a0f00;
-  --accent-soft: rgba(245, 158, 11, 0.14);
-  --accent-line: rgba(245, 158, 11, 0.44);
-  --accent-glow: rgba(245, 158, 11, 0.22);
-
-  --canvas: #0b0d11;
-  --canvas-deep: #07080b;
-  --surface: rgba(24, 29, 38, 0.74);
-  --surface-solid: #181d26;
-  --surface-raised: rgba(32, 38, 50, 0.84);
-  --surface-overlay: rgba(20, 24, 32, 0.96);
-  --surface-hover: rgba(255, 235, 200, 0.06);
-  --surface-active: rgba(255, 235, 200, 0.1);
-  --surface-selected: rgba(245, 158, 11, 0.14);
-
-  --line: rgba(220, 200, 170, 0.12);
-  --line-strong: rgba(220, 200, 170, 0.26);
-
-  --text: #f3f4f6;
-  --text-muted: #9ca3af;
-  --text-faint: #6b7280;
-  --text-on-accent: var(--accent-ink);
-
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, 0.16);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, 0.16);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.16);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.16);
-  --danger-line: rgba(239, 68, 68, 0.45);
-  --planned: #a78bfa;
-  --planned-soft: rgba(167, 139, 250, 0.16);
-
-  --env-production: #f97316;
-  --env-production-soft: rgba(249, 115, 22, 0.16);
-  --env-staging: #f59e0b;
-  --env-staging-soft: rgba(245, 158, 11, 0.16);
-  --env-development: #38bdf8;
-  --env-development-soft: rgba(56, 189, 248, 0.16);
-  --env-unassigned: #9ca3af;
-  --env-unassigned-soft: rgba(156, 163, 175, 0.14);
-
-  --focus: #fbbf24;
-
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-2: 0 14px 36px rgba(0, 0, 0, 0.42);
-  --shadow-3: 0 28px 72px rgba(0, 0, 0, 0.55);
-
-  --glass-blur: 18px;
-  --glass-sheen: linear-gradient(
-    140deg,
-    rgba(255, 255, 255, 0.08),
-    rgba(255, 255, 255, 0) 42%
-  );
-
-  --app-gradient:
-    radial-gradient(120% 90% at 10% -10%, rgba(245, 158, 11, 0.12), transparent 55%),
-    radial-gradient(100% 80% at 100% 0%, rgba(99, 102, 241, 0.12), transparent 50%),
-    radial-gradient(90% 90% at 70% 110%, rgba(139, 92, 246, 0.08), transparent 60%);
 }
 
-/* ------------------------------------ 2. 星穹紫境 (Celestial Violet) */
-:root[data-theme="midnight"] {
-  color-scheme: dark;
-
-  --accent: #8b5cf6;
-  --accent-hover: #a78bfa;
-  --accent-press: #7c3aed;
-  --accent-ink: #0d001a;
-  --accent-soft: rgba(139, 92, 246, 0.16);
-  --accent-line: rgba(139, 92, 246, 0.44);
-  --accent-glow: rgba(139, 92, 246, 0.25);
-
-  --canvas: #090814;
-  --canvas-deep: #05040d;
-  --surface: rgba(24, 20, 46, 0.74);
-  --surface-solid: #18142e;
-  --surface-raised: rgba(34, 28, 64, 0.84);
-  --surface-overlay: rgba(20, 16, 40, 0.96);
-  --surface-hover: rgba(215, 200, 255, 0.07);
-  --surface-active: rgba(215, 200, 255, 0.12);
-  --surface-selected: rgba(139, 92, 246, 0.16);
-
-  --line: rgba(180, 165, 235, 0.14);
-  --line-strong: rgba(180, 165, 235, 0.28);
-
-  --text: #f5f3ff;
-  --text-muted: #a7a1c4;
-  --text-faint: #787299;
-
-  --ok: #34d399;
-  --ok-soft: rgba(52, 211, 153, 0.16);
-  --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.16);
-  --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.16);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.16);
-  --danger-line: rgba(248, 113, 113, 0.45);
-  --planned: #c084fc;
-  --planned-soft: rgba(192, 132, 252, 0.16);
-
-  --env-production: #fb923c;
-  --env-production-soft: rgba(251, 146, 60, 0.16);
-  --env-staging: #fbbf24;
-  --env-staging-soft: rgba(251, 191, 36, 0.16);
-  --env-development: #60a5fa;
-  --env-development-soft: rgba(96, 165, 250, 0.16);
-  --env-unassigned: #a7a1c4;
-  --env-unassigned-soft: rgba(167, 161, 196, 0.14);
-
-  --focus: #c084fc;
-
-  --app-gradient:
-    radial-gradient(120% 90% at 5% -10%, rgba(139, 92, 246, 0.2), transparent 58%),
-    radial-gradient(100% 80% at 100% 5%, rgba(236, 72, 153, 0.14), transparent 52%),
-    radial-gradient(90% 90% at 65% 110%, rgba(59, 130, 246, 0.12), transparent 60%);
-}
-
-/* ------------------------------------ 3. 極地冰霜 (Arctic Frost) */
-:root[data-theme="graphite"] {
-  color-scheme: dark;
-
-  --accent: #38bdf8;
-  --accent-hover: #7dd3fc;
-  --accent-press: #0284c7;
-  --accent-ink: #031826;
-  --accent-soft: rgba(56, 189, 248, 0.14);
-  --accent-line: rgba(56, 189, 248, 0.42);
-  --accent-glow: rgba(56, 189, 248, 0.22);
-
-  --canvas: #0b1017;
-  --canvas-deep: #070b10;
-  --surface: rgba(22, 32, 44, 0.74);
-  --surface-solid: #16202c;
-  --surface-raised: rgba(28, 42, 58, 0.84);
-  --surface-overlay: rgba(18, 26, 36, 0.96);
-  --surface-hover: rgba(200, 230, 255, 0.06);
-  --surface-active: rgba(200, 230, 255, 0.1);
-  --surface-selected: rgba(56, 189, 248, 0.14);
-
-  --line: rgba(160, 195, 225, 0.13);
-  --line-strong: rgba(160, 195, 225, 0.26);
-
-  --text: #f0f9ff;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
-
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, 0.16);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, 0.16);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.16);
-  --danger: #f43f5e;
-  --danger-soft: rgba(244, 63, 94, 0.16);
-  --danger-line: rgba(244, 63, 94, 0.45);
-  --planned: #818cf8;
-  --planned-soft: rgba(129, 140, 248, 0.16);
-
-  --env-production: #fb7185;
-  --env-production-soft: rgba(251, 113, 133, 0.16);
-  --env-staging: #f59e0b;
-  --env-staging-soft: rgba(245, 158, 11, 0.16);
-  --env-development: #38bdf8;
-  --env-development-soft: rgba(56, 189, 248, 0.16);
-  --env-unassigned: #94a3b8;
-  --env-unassigned-soft: rgba(148, 163, 184, 0.14);
-
-  --focus: #7dd3fc;
-
-  --app-gradient:
-    radial-gradient(120% 90% at 10% -10%, rgba(56, 189, 248, 0.14), transparent 55%),
-    radial-gradient(100% 80% at 100% 5%, rgba(99, 102, 241, 0.12), transparent 50%);
-}
-
-/* ------------------------------------ 4. 北歐墨翠 (Nordic Emerald) */
-:root[data-theme="nordic"] {
-  color-scheme: dark;
-
-  --accent: #10b981;
-  --accent-hover: #34d399;
-  --accent-press: #059669;
-  --accent-ink: #012015;
-  --accent-soft: rgba(16, 185, 129, 0.14);
-  --accent-line: rgba(16, 185, 129, 0.42);
-  --accent-glow: rgba(16, 185, 129, 0.22);
-
-  --canvas: #08120e;
-  --canvas-deep: #040a08;
-  --surface: rgba(19, 36, 29, 0.74);
-  --surface-solid: #13241d;
-  --surface-raised: rgba(26, 48, 39, 0.84);
-  --surface-overlay: rgba(15, 30, 24, 0.96);
-  --surface-hover: rgba(180, 245, 215, 0.06);
-  --surface-active: rgba(180, 245, 215, 0.1);
-  --surface-selected: rgba(16, 185, 129, 0.14);
-
-  --line: rgba(150, 210, 180, 0.13);
-  --line-strong: rgba(150, 210, 180, 0.26);
-
-  --text: #ecfdf5;
-  --text-muted: #86a798;
-  --text-faint: #5f7e71;
-
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, 0.16);
-  --info: #0ea5e9;
-  --info-soft: rgba(14, 165, 233, 0.16);
-  --warn: #eab308;
-  --warn-soft: rgba(234, 179, 8, 0.16);
-  --danger: #f43f5e;
-  --danger-soft: rgba(244, 63, 94, 0.16);
-  --danger-line: rgba(244, 63, 94, 0.45);
-  --planned: #8b5cf6;
-  --planned-soft: rgba(139, 92, 246, 0.16);
-
-  --env-production: #f97316;
-  --env-production-soft: rgba(249, 115, 22, 0.16);
-  --env-staging: #eab308;
-  --env-staging-soft: rgba(234, 179, 8, 0.16);
-  --env-development: #0ea5e9;
-  --env-development-soft: rgba(14, 165, 233, 0.16);
-  --env-unassigned: #86a798;
-  --env-unassigned-soft: rgba(134, 167, 152, 0.14);
-
-  --focus: #34d399;
-
-  --app-gradient:
-    radial-gradient(120% 90% at 5% -10%, rgba(16, 185, 129, 0.16), transparent 55%),
-    radial-gradient(100% 80% at 100% 0%, rgba(14, 165, 233, 0.12), transparent 50%);
-}
-
-/* ------------------------------------ 5. 雅緻亮白 (Ivory & Cobalt) */
-:root[data-theme="light"] {
-  color-scheme: light;
-
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-press: #1e40af;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(37, 99, 235, 0.1);
-  --accent-line: rgba(37, 99, 235, 0.38);
-  --accent-glow: rgba(37, 99, 235, 0.16);
-
-  --canvas: #f8fafc;
-  --canvas-deep: #edf2f7;
-  --surface: rgba(255, 255, 255, 0.88);
-  --surface-solid: #ffffff;
-  --surface-raised: rgba(255, 255, 255, 0.96);
-  --surface-overlay: rgba(255, 255, 255, 0.98);
-  --surface-hover: rgba(15, 23, 42, 0.05);
-  --surface-active: rgba(15, 23, 42, 0.09);
-  --surface-selected: rgba(37, 99, 235, 0.1);
-
-  --line: rgba(15, 23, 42, 0.1);
-  --line-strong: rgba(15, 23, 42, 0.22);
-
-  --text: #0f172a;
-  --text-muted: #475569;
-  --text-faint: #64748b;
-  --text-on-accent: #ffffff;
-
-  --ok: #059669;
-  --ok-soft: rgba(5, 150, 105, 0.12);
-  --info: #0284c7;
-  --info-soft: rgba(2, 132, 199, 0.12);
-  --warn: #d97706;
-  --warn-soft: rgba(217, 119, 6, 0.12);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.12);
-  --danger-line: rgba(220, 38, 38, 0.38);
-  --planned: #7c3aed;
-  --planned-soft: rgba(124, 58, 237, 0.12);
-
-  --env-production: #ea580c;
-  --env-production-soft: rgba(234, 88, 12, 0.12);
-  --env-staging: #d97706;
-  --env-staging-soft: rgba(217, 119, 6, 0.12);
-  --env-development: #0284c7;
-  --env-development-soft: rgba(2, 132, 199, 0.12);
-  --env-unassigned: #475569;
-  --env-unassigned-soft: rgba(71, 85, 105, 0.1);
-
-  --focus: #2563eb;
-
-  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.08);
-  --shadow-2: 0 14px 36px rgba(15, 23, 42, 0.12);
-  --shadow-3: 0 28px 72px rgba(15, 23, 42, 0.16);
-
-  --glass-sheen: linear-gradient(
-    140deg,
-    rgba(255, 255, 255, 0.7),
-    rgba(255, 255, 255, 0) 45%
-  );
-
-  --app-gradient:
-    radial-gradient(120% 90% at 5% -10%, rgba(37, 99, 235, 0.12), transparent 55%),
-    radial-gradient(100% 80% at 100% 0%, rgba(99, 102, 241, 0.1), transparent 50%);
-}
-
-/* ------------------------------------ 6. 暖陶赭石 (Terracotta Warm) */
-:root[data-theme="sand"] {
-  color-scheme: light;
-
-  --accent: #c2410c;
-  --accent-hover: #9a3412;
-  --accent-press: #7c2d12;
-  --accent-ink: #fffaf4;
-  --accent-soft: rgba(194, 65, 12, 0.1);
-  --accent-line: rgba(194, 65, 12, 0.36);
-  --accent-glow: rgba(194, 65, 12, 0.16);
-
-  --canvas: #fbf6ee;
-  --canvas-deep: #f1e7d8;
-  --surface: rgba(255, 252, 247, 0.88);
-  --surface-solid: #fffbf5;
-  --surface-raised: rgba(255, 252, 247, 0.96);
-  --surface-overlay: rgba(255, 252, 247, 0.98);
-  --surface-hover: rgba(67, 40, 18, 0.05);
-  --surface-active: rgba(67, 40, 18, 0.09);
-  --surface-selected: rgba(194, 65, 12, 0.1);
-
-  --line: rgba(120, 85, 50, 0.13);
-  --line-strong: rgba(120, 85, 50, 0.25);
-
-  --text: #291e14;
-  --text-muted: #5c4a3b;
-  --text-faint: #786656;
-  --text-on-accent: #fffaf4;
-
-  --ok: #15803d;
-  --ok-soft: rgba(21, 128, 61, 0.12);
-  --info: #0369a1;
-  --info-soft: rgba(3, 105, 161, 0.12);
-  --warn: #b45309;
-  --warn-soft: rgba(180, 83, 9, 0.12);
-  --danger: #b91c1c;
-  --danger-soft: rgba(185, 28, 28, 0.12);
-  --danger-line: rgba(185, 28, 28, 0.38);
-  --planned: #6d28d9;
-  --planned-soft: rgba(109, 40, 217, 0.12);
-
-  --env-production: #c2410c;
-  --env-production-soft: rgba(194, 65, 12, 0.12);
-  --env-staging: #b45309;
-  --env-staging-soft: rgba(180, 83, 9, 0.12);
-  --env-development: #0369a1;
-  --env-development-soft: rgba(3, 105, 161, 0.12);
-  --env-unassigned: #5c4a3b;
-  --env-unassigned-soft: rgba(92, 74, 59, 0.1);
-
-  --focus: #c2410c;
-
-  --shadow-1: 0 1px 2px rgba(67, 40, 18, 0.08);
-  --shadow-2: 0 14px 36px rgba(67, 40, 18, 0.12);
-  --shadow-3: 0 28px 72px rgba(67, 40, 18, 0.16);
-
-  --glass-sheen: linear-gradient(
-    140deg,
-    rgba(255, 255, 255, 0.6),
-    rgba(255, 255, 255, 0) 45%
-  );
-
-  --app-gradient:
-    radial-gradient(120% 90% at 0% -10%, rgba(249, 115, 22, 0.18), transparent 58%),
-    radial-gradient(100% 80% at 100% 5%, rgba(234, 88, 12, 0.14), transparent 55%);
-}
-
-/* ------------------------------------ 7. 極限高對比 (Matrix High Contrast) */
-:root[data-theme="contrast"] {
-  color-scheme: dark;
-
-  --accent: #fbbf24;
-  --accent-hover: #fde047;
-  --accent-press: #f59e0b;
-  --accent-ink: #000000;
-  --accent-soft: rgba(251, 191, 36, 0.22);
-  --accent-line: #fbbf24;
+/* Preview cards resolve these aliases against their own palette. */
+:root,
+.theme-option__preview {
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 52%, transparent);
   --accent-glow: transparent;
-
-  --canvas: #000000;
-  --canvas-deep: #000000;
-  --surface: #101010;
-  --surface-solid: #101010;
-  --surface-raised: #1c1c1c;
-  --surface-overlay: #101010;
-  --surface-hover: rgba(255, 255, 255, 0.14);
-  --surface-active: rgba(255, 255, 255, 0.22);
-  --surface-selected: rgba(251, 191, 36, 0.24);
-
-  --line: rgba(255, 255, 255, 0.55);
-  --line-strong: #ffffff;
-
-  --text: #ffffff;
-  --text-muted: #e4e4e4;
-  --text-faint: #c8c8c8;
-  --text-on-accent: #000000;
-
-  --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.22);
-  --info: #60a5fa;
-  --info-soft: rgba(96, 165, 250, 0.22);
-  --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, 0.22);
-  --danger: #f87171;
-  --danger-soft: rgba(248, 113, 113, 0.24);
-  --danger-line: #f87171;
-  --planned: #c084fc;
-  --planned-soft: rgba(192, 132, 252, 0.24);
-
-  --env-production: #fb923c;
-  --env-production-soft: rgba(251, 146, 60, 0.24);
-  --env-staging: #fbbf24;
-  --env-staging-soft: rgba(251, 191, 36, 0.24);
-  --env-development: #60a5fa;
-  --env-development-soft: rgba(96, 165, 250, 0.24);
-  --env-unassigned: #e4e4e4;
-  --env-unassigned-soft: rgba(228, 228, 228, 0.2);
-
-  --focus: #fde047;
-
-  --shadow-1: none;
-  --shadow-2: 0 0 0 1px #ffffff;
-  --shadow-3: 0 0 0 2px #ffffff;
-
+  --surface: var(--surface-solid);
+  --surface-overlay: var(--surface-raised);
+  --surface-hover: color-mix(in srgb, var(--text) 5%, var(--surface-solid));
+  --surface-active: color-mix(in srgb, var(--text) 9%, var(--surface-solid));
+  --surface-selected: color-mix(
+    in srgb,
+    var(--accent) 12%,
+    var(--surface-solid)
+  );
+  --surface-sunken: var(--canvas-deep);
+  --text-subtle: var(--text-muted);
+  --text-on-accent: var(--accent-ink);
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --danger-line: color-mix(in srgb, var(--danger) 48%, transparent);
+  --planned-soft: color-mix(in srgb, var(--planned) 12%, transparent);
+  --env-production: var(--danger);
+  --env-production-soft: var(--danger-soft);
+  --env-staging: var(--warn);
+  --env-staging-soft: var(--warn-soft);
+  --env-development: var(--info);
+  --env-development-soft: var(--info-soft);
+  --env-unassigned: var(--text-muted);
+  --env-unassigned-soft: var(--surface-hover);
+  --focus: var(--accent);
+  --shadow-lg: var(--shadow-3);
   --glass-blur: 0px;
   --glass-sheen: none;
   --app-gradient: none;
+}
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #191c1e;
+  --canvas-deep: #131617;
+  --surface-solid: #222729;
+  --surface-raised: #2c3235;
+  --text: #e9eeef;
+  --text-muted: #b2bdbf;
+  --text-faint: #97a4a7;
+  --line: #383f42;
+  --line-strong: #566165;
+  --accent: #8bc8bc;
+  --accent-hover: #a7dacc;
+  --accent-press: #75b2a6;
+  --accent-ink: #142e29;
+  --ok: #8dcca4;
+  --info: #99bfe7;
+  --warn: #e6c183;
+  --danger: #efaaa8;
+  --planned: #c4b1d9;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #eef0f2;
+  --canvas-deep: #e5e8eb;
+  --surface-solid: #fafbfc;
+  --surface-raised: #ffffff;
+  --text: #242a30;
+  --text-muted: #505e6b;
+  --text-faint: #64717d;
+  --line: #d5dbe0;
+  --line-strong: #a7b1bb;
+  --accent: #365e91;
+  --accent-hover: #294e7b;
+  --accent-press: #204268;
+  --accent-ink: #ffffff;
+  --ok: #286545;
+  --info: #315f96;
+  --warn: #82591c;
+  --danger: #a93f48;
+  --planned: #75518e;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dusk"] {
+  color-scheme: dark;
+  --canvas: #1b2230;
+  --canvas-deep: #151b27;
+  --surface-solid: #232d3d;
+  --surface-raised: #2d394d;
+  --text: #e8edf5;
+  --text-muted: #b3bed0;
+  --text-faint: #9aaac0;
+  --line: #3b4860;
+  --line-strong: #5f708a;
+  --accent: #d6b68e;
+  --accent-hover: #e6cbaa;
+  --accent-press: #bf9d74;
+  --accent-ink: #2d2418;
+  --ok: #97c6ad;
+  --info: #a5c7ee;
+  --warn: #e5c18a;
+  --danger: #eda7b1;
+  --planned: #c5b3df;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+
+[data-theme="linen"] {
+  color-scheme: light;
+  --canvas: #eeebe4;
+  --canvas-deep: #e4e0d6;
+  --surface-solid: #faf8f2;
+  --surface-raised: #fffdf7;
+  --text: #34352f;
+  --text-muted: #5c6055;
+  --text-faint: #707467;
+  --line: #d6d5c7;
+  --line-strong: #acafa0;
+  --accent: #52674b;
+  --accent-hover: #43563d;
+  --accent-press: #354630;
+  --accent-ink: #ffffff;
+  --ok: #3e6847;
+  --info: #416480;
+  --warn: #826025;
+  --danger: #a34140;
+  --planned: #785780;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="clarity"] {
+  color-scheme: dark;
+  --canvas: #080a0b;
+  --canvas-deep: #080a0b;
+  --surface-solid: #111517;
+  --surface-raised: #1c2327;
+  --text: #ffffff;
+  --text-muted: #e2e9ed;
+  --text-faint: #c3d0d8;
+  --line: #73818b;
+  --line-strong: #b9c8d1;
+  --accent: #b2e5ff;
+  --accent-hover: #d5f2ff;
+  --accent-press: #92d7fc;
+  --accent-ink: #091c28;
+  --ok: #b5ebc9;
+  --info: #b2d7ff;
+  --warn: #ffe0a2;
+  --danger: #ffbab7;
+  --planned: #e0c5ff;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.36);
 }
 
 /* Compact density keeps more hosts on screen for operators. */
@@ -501,5 +224,5 @@
   --space-5: 0.875rem;
   --space-6: 1rem;
   --space-7: 1.25rem;
-  --radius-lg: 14px;
+  --radius-lg: 10px;
 }

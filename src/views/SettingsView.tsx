@@ -51,6 +51,7 @@ const densityChoices: Choice<DensityChoice>[] = [
 ];
 
 const motionChoices: Choice<MotionChoice>[] = [
+  { value: "full", labelKey: "settings.motion.full" },
   { value: "system", labelKey: "settings.motion.system" },
   { value: "reduced", labelKey: "settings.motion.reduced" },
 ];
@@ -193,11 +194,15 @@ export function SettingsView({
   }, []);
 
   const motionHintKey: MessageKey =
-    preferences.motion === "reduced"
+    preferences.motion === "full"
+      ? "settings.motionHint.full"
+      : preferences.motion === "reduced"
       ? "settings.motionHint.reduced"
       : systemPrefersReducedMotion
         ? "settings.motionHint.systemReduced"
         : "settings.motionHint.systemActive";
+
+  const [motionPreview, setMotionPreview] = useState(0);
 
   return (
     <div className="stack">
@@ -234,10 +239,18 @@ export function SettingsView({
                   )
                 }
               >
-                <span className="theme-option__preview" aria-hidden="true">
-                  <span style={{ background: theme.swatch[0] }} />
-                  <span style={{ background: theme.swatch[1] }} />
-                  <span style={{ background: theme.swatch[2] }} />
+                <span className="theme-option__previews" aria-hidden="true">
+                  {(theme.id === "system" ? ["dark", "light"] : [theme.id]).map((id) => (
+                    <span className="theme-option__preview" data-theme={id} key={id}>
+                      <span className="theme-option__rail"><i /><i /><i /></span>
+                      <span className="theme-option__page">
+                        <span className="theme-option__toolbar"><i /><i /></span>
+                        <span className="theme-option__bubble" />
+                        <span className="theme-option__lines"><i /><i /><i /></span>
+                        <span className="theme-option__composer"><i /></span>
+                      </span>
+                    </span>
+                  ))}
                 </span>
                 <span className="theme-option__label">
                   {t(theme.labelKey)}
@@ -284,6 +297,20 @@ export function SettingsView({
             value={preferences.motion}
             onChange={(motion) => onChange({ motion })}
           />
+          <div className="motion-preview">
+            <div className="motion-preview__demo" key={`${preferences.motion}-${motionPreview}`} aria-hidden="true">
+              <span className="motion-preview__menu"><i /><i /><i /></span>
+              <span className="motion-preview__message"><i /><i /></span>
+              <span className="motion-preview__done"><CheckIcon size={14} /></span>
+            </div>
+            <div className="motion-preview__text">
+              <strong>{t("settings.motion.previewTitle")}</strong>
+              <small>{t("settings.motion.previewHint")}</small>
+            </div>
+            <button type="button" className="button button--secondary button--sm" onClick={() => setMotionPreview((value) => value + 1)}>
+              <PlayIcon size={13} />{t("settings.motion.preview")}
+            </button>
+          </div>
         </div>
       </section>
 

@@ -690,11 +690,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .remote-canvas__pulse {
+  :root:not([data-motion="full"]) .remote-canvas__pulse {
     animation: none;
   }
 
-  .capture-timer__dot {
+  :root:not([data-motion="full"]) .capture-timer__dot {
     animation: none;
   }
 }

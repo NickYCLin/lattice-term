@@ -35,6 +35,7 @@ import type { EncryptedBackupRestore } from "./app/encryptedBackup";
 import { rememberRelayDevice } from "./app/rememberRelayDevice";
 import { saveRelayAddress } from "./app/remoteRelay";
 import { findTheme, themeCatalog } from "./app/themes";
+import { useViewMotion } from "./app/useViewMotion";
 import { useRuntimeSummary } from "./app/useRuntimeSummary";
 import { APP_VERSION } from "./app/version";
 import { useStorageStatus } from "./app/useStorageStatus";
@@ -876,6 +877,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   }, [focusSearch, openCreate, toggleResourceSidebar]);
 
   const item = findNavigationItem(view);
+  const workspaceMotionRef = useViewMotion(view, preferences.motion);
   const showSidebar = view === "connections" && sidebarExpanded;
   const showInspector =
     view === "connections" && selected !== null && preferences.inspectorOpen;
@@ -970,7 +972,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         />
 
         <div className="workspace__body">
-          <div className="workspace__content glass glass--sheen">
+          <div ref={workspaceMotionRef} className="workspace__content glass glass--sheen">
             <Suspense fallback={<LazyViewFallback />}>
               {view === "connections" && (
                 <ConnectionsView

@@ -12,11 +12,11 @@
 }
 
 :root[data-theme="light"] .scrim,
-:root[data-theme="sand"] .scrim {
+:root[data-theme="linen"] .scrim {
   background: rgba(24, 32, 40, 0.28);
 }
 
-:root[data-theme="contrast"] .scrim {
+:root[data-theme="clarity"] .scrim {
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: none;
 }

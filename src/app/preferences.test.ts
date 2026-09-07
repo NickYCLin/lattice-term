@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { defaultPreferences, sanitizePreferences } from "./preferences";
 
 describe("sanitizePreferences", () => {
+  it.each([
+    ["sand", "linen"], ["midnight", "dusk"], ["contrast", "clarity"],
+    ["graphite", "dark"], ["nordic", "dark"], ["unknown", "dark"],
+    ["system", "system"], ["light", "light"],
+  ])("migrates theme %s to %s", (old, current) => {
+    expect(sanitizePreferences({ theme: old as never }).theme).toBe(current);
+  });
+  it("preserves explicit full motion and rejects unknown choices", () => {
+    expect(sanitizePreferences({ motion: "full" }).motion).toBe("full");
+    expect(sanitizePreferences({ motion: "invalid" as never }).motion).toBe("system");
+  });
   it("migrates older preferences to secure vault defaults", () => {
     const preferences = sanitizePreferences({ theme: "light" });
 

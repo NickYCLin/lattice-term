@@ -12,10 +12,10 @@ import {
   notificationSoundChoices,
   type NotificationSoundChoice,
 } from "./notificationSounds";
-import { resolveTheme, themeIds, type ThemeChoice, type ThemeId } from "./themes";
+import { normalizeTheme, resolveTheme, type ThemeChoice, type ThemeId } from "./themes";
 
 export type DensityChoice = "comfortable" | "compact";
-export type MotionChoice = "system" | "reduced";
+export type MotionChoice = "system" | "full" | "reduced";
 export type VaultAutoLockChoice = "off" | "5" | "15" | "30" | "60";
 export type SensitiveClipboardClearChoice =
   | "off"
@@ -54,7 +54,6 @@ export const defaultPreferences: Preferences = {
 
 const STORAGE_KEY = "latticeterm.preferences.v2";
 
-const knownThemes = new Set<string>([...themeIds, "system"]);
 const knownLocales = new Set<string>(localeCatalog.map((entry) => entry.id));
 const knownVaultAutoLockChoices = new Set<string>([
   "off",
@@ -78,14 +77,12 @@ const knownNotificationSounds = new Set<string>(notificationSoundChoices);
  */
 export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
   return {
-    theme: knownThemes.has(String(stored.theme))
-      ? (stored.theme as ThemeChoice)
-      : defaultPreferences.theme,
+    theme: normalizeTheme(stored.theme),
     locale: knownLocales.has(String(stored.locale))
       ? (stored.locale as Locale)
       : defaultPreferences.locale,
     density: stored.density === "compact" ? "compact" : "comfortable",
-    motion: stored.motion === "reduced" ? "reduced" : "system",
+    motion: stored.motion === "full" || stored.motion === "reduced" ? stored.motion : "system",
     vaultAutoLock: knownVaultAutoLockChoices.has(String(stored.vaultAutoLock))
       ? (stored.vaultAutoLock as VaultAutoLockChoice)
       : defaultPreferences.vaultAutoLock,

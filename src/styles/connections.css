@@ -777,12 +777,13 @@
 
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: var(--space-3);
   width: 100%;
 }
 
 .theme-option {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -807,26 +808,22 @@
   background: var(--accent-soft);
 }
 
-/* A miniature of the app, so the choice is visible before it is applied. */
-.theme-option__preview {
-  display: flex;
-  height: 3rem;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid var(--line);
-}
-
-.theme-option__preview span:first-child {
-  width: 22%;
-}
-
-.theme-option__preview span:nth-child(2) {
-  flex: 1;
-}
-
-.theme-option__preview span:last-child {
-  width: 18%;
-}
+/* These miniatures use the actual theme tokens rather than copied swatches. */
+.theme-option__previews { display: flex; height: 7rem; width: 100%; overflow: hidden; border-radius: 6px; }
+.theme-option__preview { display: flex; flex: 1; min-width: 0; background: var(--canvas); color: var(--text); border: 1px solid var(--line-strong); overflow: hidden; }
+.theme-option__rail { display: flex; flex-direction: column; gap: 9px; width: 24%; padding: 12px 8px; background: var(--surface-solid); border-right: 1px solid var(--line); }
+.theme-option__rail i { height: 4px; border-radius: 2px; background: var(--line-strong); }
+.theme-option__rail i:first-child { height: 12px; background: var(--accent); opacity: .85; }
+.theme-option__page { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; padding: 10px; }
+.theme-option__toolbar { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.theme-option__toolbar i:first-child { width: 42%; height: 4px; background: var(--text-muted); }
+.theme-option__toolbar i:last-child { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.theme-option__bubble { width: 60%; height: 14px; align-self: flex-end; border-radius: 5px 5px 1px 5px; background: var(--surface-selected); border: 1px solid var(--accent-line); }
+.theme-option__lines { display: flex; flex-direction: column; gap: 4px; }
+.theme-option__lines i { height: 3px; width: 80%; background: var(--text-muted); border-radius: 1px; opacity: .65; }
+.theme-option__lines i:last-child { width: 48%; }
+.theme-option__composer { display: flex; margin-top: auto; justify-content: flex-end; background: var(--surface-solid); border: 1px solid var(--line-strong); border-radius: 4px; padding: 3px; }
+.theme-option__composer i { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); }
 
 .theme-option__label {
   display: flex;
@@ -1813,9 +1810,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-tree__status.status-working > span,
-  .session-projects__status-guide .status-working,
-  .cli-switch__status.status-working {
+  :root:not([data-motion="full"]) .session-tree__status.status-working > span,
+  :root:not([data-motion="full"]) .session-projects__status-guide .status-working,
+  :root:not([data-motion="full"]) .cli-switch__status.status-working {
     animation: none;
   }
 }
