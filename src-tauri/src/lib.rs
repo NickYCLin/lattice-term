@@ -634,9 +634,19 @@ fn agent_chat_supported() -> Vec<String> {
 #[tauri::command]
 async fn agent_chat_send(
     app: AppHandle,
-    request: crate::agent_chat::ChatTurnRequest,
+    mut request: crate::agent_chat::ChatTurnRequest,
     registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
 ) -> Result<(), String> {
+    if request.working_directory.trim().is_empty() {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+        request.working_directory =
+            crate::agent_chat::general_chat_directory(&data_dir, &request.thread_id)?
+                .display()
+                .to_string();
+    }
     let registry = Arc::clone(registry.inner());
     crate::agent_chat::send(
         Arc::new(crate::agent_chat::EventSink(app)),

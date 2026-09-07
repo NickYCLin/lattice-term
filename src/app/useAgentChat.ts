@@ -9,6 +9,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChatCompletionTracker } from "./chatCompletion";
+import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
   applyChatEvent,
   beginTurn,
@@ -17,6 +19,7 @@ import {
   failTurn,
   handoffThreadAccount,
   handoffThread,
+  changeThreadDirectory,
   selectThreadModel,
   promptForTurn,
   loadStoredThreads,
@@ -63,6 +66,7 @@ const SAVE_DELAY_MS = 400;
 const FALLBACK_SUPPORTED: ChatDefinitionId[] = ["claude", "codex", "gemini"];
 
 export interface ChatThreadSettings {
+  browserEnabled?: boolean;
   definitionId: ChatDefinitionId;
   workingDirectory: string;
   permission: ChatPermission;
@@ -111,7 +115,7 @@ export interface AgentChatApi {
   ) => Promise<void>;
   stop: (id: string) => Promise<void>;
   /** Answers an approval card; rejects with the reason when it cannot. */
-  respond: (id: string, requestId: string, allow: boolean) => Promise<void>;
+  respond: (id: string, requestId: string, allow: boolean, message?: string) => Promise<void>;
   /** The models a CLI offers, fetched once per session on first request. */
   models: Record<ChatDefinitionId, ChatModelList>;
   loadModels: (definitionId: ChatDefinitionId) => void;
@@ -124,7 +128,10 @@ export interface AgentChatApi {
   toggleFolder: (folderId: string) => void;
 }
 
-export function useAgentChat(): AgentChatApi {
+export function useAgentChat(completionSound: NotificationSoundChoice = "off"): AgentChatApi {
+  const completionTracker = useRef(new ChatCompletionTracker());
+  const soundRef = useRef(completionSound);
+  soundRef.current = completionSound;
   const [threads, setThreads] = useState<ChatThread[]>(() =>
     typeof localStorage === "undefined" ? [] : loadStoredThreads(localStorage),
   );
@@ -189,6 +196,9 @@ export function useAgentChat(): AgentChatApi {
         });
       const unlisten = await listen<ChatEventEnvelope>(EVENT_CHAT, (event) => {
         const envelope = event.payload;
+        if (completionTracker.current.accept(envelope)) {
+          void playNotificationSound(soundRef.current);
+        }
         setThreads((current) =>
           current.map((thread) =>
             thread.id === envelope.threadId ? applyChatEvent(thread, envelope) : thread,
@@ -314,7 +324,11 @@ export function useAgentChat(): AgentChatApi {
             : patch.accountProfileId,
           model: patch.model ?? thread.model,
         });
-        return { ...next, workingDirectory: patch.workingDirectory ?? next.workingDirectory, permission: patch.permission ?? next.permission };
+        return {
+          ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
+          browserEnabled: next.definitionId === "codex" && (patch.browserEnabled ?? next.browserEnabled) === true,
+          permission: patch.permission ?? next.permission,
+        };
       }),
     );
   }, []);
@@ -336,6 +350,7 @@ export function useAgentChat(): AgentChatApi {
   }, []);
 
   const remove = useCallback((id: string) => {
+    completionTracker.current.cancel(id);
     // A Codex thread keeps a server alive between turns; closing the thread
     // must end it whether or not a turn is running.
     if (hasDesktopBackend()) {
@@ -360,6 +375,7 @@ export function useAgentChat(): AgentChatApi {
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
     const turnId = crypto.randomUUID();
+    completionTracker.current.start(id, turnId);
     const visiblePrompt = prompt.trim() ? prompt : "Please inspect the attached files.";
     setThreads((current) =>
       current.map((entry) =>
@@ -374,6 +390,7 @@ export function useAgentChat(): AgentChatApi {
           turnId,
           definitionId: thread.definitionId,
           workingDirectory: thread.workingDirectory,
+          browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
           prompt: promptForTurn(thread, visiblePrompt),
           permission: thread.permission,
           model: thread.model.trim() || null,
@@ -383,6 +400,7 @@ export function useAgentChat(): AgentChatApi {
         },
       });
     } catch (reason) {
+      completionTracker.current.cancel(id);
       const message = reason instanceof Error ? reason.message : String(reason);
       setThreads((current) =>
         current.map((entry) => (entry.id === id ? failTurn(entry, turnId, message) : entry)),
@@ -390,9 +408,9 @@ export function useAgentChat(): AgentChatApi {
     }
   }, []);
 
-  const respond = useCallback(async (id: string, requestId: string, allow: boolean) => {
+  const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string) => {
     const { invoke } = await core();
-    await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: null });
+    await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null });
     setThreads((current) =>
       current.map((entry) =>
         entry.id === id
@@ -435,6 +453,7 @@ export function useAgentChat(): AgentChatApi {
   }, []);
 
   const stopTurn = useCallback(async (id: string) => {
+    completionTracker.current.cancel(id);
     const { invoke } = await core();
     await invoke<boolean>("agent_chat_stop", { threadId: id });
   }, []);

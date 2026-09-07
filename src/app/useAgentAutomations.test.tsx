@@ -9,6 +9,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 import React, { act } from "react";
+import type { ChatEventEnvelope } from "./agentChat";
+
+let chatListener: ((event: { payload: ChatEventEnvelope }) => void) | null = null;
+const playSound = vi.fn(async () => "disabled");
+vi.mock("./notificationSounds", () => ({ playNotificationSound: (...args: unknown[]) => playSound(...(args as [])) }));
 
 const invoke = vi.fn(async (command: string) => {
   if (command === "agent_chat_supported") return ["claude", "codex", "gemini"];
@@ -17,7 +22,10 @@ const invoke = vi.fn(async (command: string) => {
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...(args as [string])),
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: async (name: string, listener: (event: { payload: ChatEventEnvelope }) => void) => {
+  if (name === "agent-chat://event") chatListener = listener;
+  return () => {};
+} }));
 
 // The runtime renders nothing, so a skeletal DOM is all react-dom needs.
 function fakeNode(): Record<string, unknown> {
@@ -94,6 +102,7 @@ describe("useAgentAutomations", () => {
       reactRoot.render(
         React.createElement(ChatRuntime, {
           locale: "en",
+          completionSound: "gentle",
           onChange: (next: Api) => {
             api = next;
           },
@@ -131,6 +140,24 @@ describe("useAgentAutomations", () => {
     expect(latest.automations.automations[0].runs[0].outcome).toBe("running");
     expect(latest.chat.threads[0].runningTurnId).not.toBeNull();
     expect(latest.chat.threads[0].items[0]).toMatchObject({ type: "user", text: "do it" });
+
+    const envelope: ChatEventEnvelope = {
+      threadId: latest.chat.threads[0].id,
+      turnId: latest.chat.threads[0].runningTurnId!,
+      event: { kind: "finished", error: null, nativeSessionId: null, usage: null, costUsd: null, durationMs: null },
+    };
+    await act(async () => {
+      chatListener!({ payload: envelope });
+      chatListener!({ payload: envelope });
+    });
+    expect(playSound).toHaveBeenCalledTimes(1);
+    expect(playSound).toHaveBeenLastCalledWith("gentle");
+
+    await act(async () => {
+      const general = runtime.chat.createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "", browserEnabled: true });
+      await runtime.chat.send(general.id, "hello");
+    });
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_send", { request: expect.objectContaining({ workingDirectory: "", browserEnabled: true, prompt: "hello" }) });
     reactRoot.unmount();
   });
 });

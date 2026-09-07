@@ -39,6 +39,7 @@ const RPC_THREAD_OPEN: u64 = 2;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RpcPurpose {
     ThreadOpen,
+    BrowserReady { model: Option<String> },
     TurnStart { turn_id: String },
     Interrupt,
 }
@@ -73,6 +74,7 @@ struct ServerState {
 }
 
 pub(super) struct CodexServer {
+    browser_enabled: bool,
     thread_id: String,
     profile_config_directory: Option<PathBuf>,
     child: Mutex<Option<Child>>,
@@ -274,6 +276,7 @@ fn opening_lines(
 
 /// Everything `send` has validated about one turn.
 pub(super) struct TurnRequest<'a> {
+    pub browser_enabled: bool,
     pub thread_id: &'a str,
     pub turn_id: &'a str,
     pub prompt: &'a str,
@@ -314,12 +317,14 @@ pub(super) async fn send_turn<S: ChatSink>(
                 None
             } else if state.active.is_some() || state.queued.is_some() {
                 return Err("This conversation is still answering.".to_string());
-            } else if !same_server_identity(
-                server.profile_config_directory.as_deref(),
-                state.codex_thread_id.as_deref(),
-                request.profile_config_directory,
-                request.native_session_id,
-            ) {
+            } else if server.browser_enabled != request.browser_enabled
+                || !same_server_identity(
+                    server.profile_config_directory.as_deref(),
+                    state.codex_thread_id.as_deref(),
+                    request.profile_config_directory,
+                    request.native_session_id,
+                )
+            {
                 // An account/provider handoff resets the native id. A live
                 // process from the old account must never answer that turn.
                 None
@@ -387,6 +392,9 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.profile_config_directory,
     );
     command.arg("app-server");
+    if request.browser_enabled {
+        command.args(super::browser::codex_arguments());
+    }
     command.current_dir(request.working_directory);
     let mut child = command
         .spawn()
@@ -416,6 +424,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.working_directory,
     );
     let server = Arc::new(CodexServer {
+        browser_enabled: request.browser_enabled,
         profile_config_directory: request.profile_config_directory.map(Path::to_path_buf),
         thread_id: request.thread_id.to_string(),
         child: Mutex::new(Some(child)),
@@ -532,6 +541,32 @@ struct LineOutcome {
     writes: Vec<String>,
 }
 
+fn start_queued_turn(state: &mut ServerState, out: &mut LineOutcome, model: Option<String>) {
+    let Some(codex_thread_id) = state.codex_thread_id.clone() else {
+        return;
+    };
+    let Some(mut queued) = state.queued.take() else {
+        return;
+    };
+    queued.params["threadId"] = Value::String(codex_thread_id.clone());
+    let id = state.next_rpc;
+    state.next_rpc += 1;
+    state.pending_rpc.insert(
+        id,
+        RpcPurpose::TurnStart {
+            turn_id: queued.turn_id.clone(),
+        },
+    );
+    out.events.push((
+        queued.turn_id,
+        ChatEvent::Started {
+            native_session_id: Some(codex_thread_id),
+            model,
+        },
+    ));
+    out.writes.push(rpc_line(id, "turn/start", queued.params));
+}
+
 fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
     let mut out = LineOutcome::default();
     let method = str_field(value, "method");
@@ -567,24 +602,23 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                         let model = result
                             .and_then(|result| str_field(result, "model"))
                             .map(str::to_string);
-                        if let Some(mut queued) = state.queued.take() {
-                            queued.params["threadId"] = Value::String(codex_thread_id.clone());
+                        if server.browser_enabled {
+                            // The first model request can otherwise race MCP
+                            // startup and be sent with no browser tools.
                             let id = state.next_rpc;
                             state.next_rpc += 1;
-                            state.pending_rpc.insert(
+                            state
+                                .pending_rpc
+                                .insert(id, RpcPurpose::BrowserReady { model });
+                            out.writes.push(rpc_line(
                                 id,
-                                RpcPurpose::TurnStart {
-                                    turn_id: queued.turn_id.clone(),
-                                },
-                            );
-                            out.events.push((
-                                queued.turn_id.clone(),
-                                ChatEvent::Started {
-                                    native_session_id: Some(codex_thread_id),
-                                    model,
-                                },
+                                "mcpServerStatus/list",
+                                serde_json::json!({
+                                    "threadId": codex_thread_id,
+                                }),
                             ));
-                            out.writes.push(rpc_line(id, "turn/start", queued.params));
+                        } else {
+                            start_queued_turn(&mut state, &mut out, model);
                         }
                     }
                     (error, _) => {
@@ -607,6 +641,32 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                         drop(state);
                         server.kill();
                     }
+                }
+            }
+            RpcPurpose::BrowserReady { model } => {
+                let available = value["result"]["data"].as_array().is_some_and(|servers| {
+                    servers.iter().any(|server| {
+                        server["name"] == "latticeterm_browser"
+                            && server["tools"].as_object().is_some_and(|tools| {
+                                tools.contains_key("browser_navigate")
+                                    && tools.contains_key("browser_click")
+                            })
+                    })
+                });
+                if error.is_none() && available {
+                    start_queued_turn(&mut state, &mut out, model);
+                } else {
+                    state.queued = None;
+                    if let Some(turn) = state.active.take() {
+                        out.events.push((turn.turn_id, ChatEvent::Finished {
+                            native_session_id: state.codex_thread_id.clone(),
+                            usage: None, cost_usd: None, duration_ms: None,
+                            error: Some(error.unwrap_or_else(|| "Browser tools did not start. Check Node.js and the browser installation, then retry.".to_string())),
+                        }));
+                    }
+                    state.exited = true;
+                    drop(state);
+                    server.kill();
                 }
             }
             RpcPurpose::TurnStart { turn_id } => {
@@ -649,12 +709,76 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
     // A server request: something that needs an answer.
     if let Some(rpc_id) = id {
         match method {
+            "mcpServer/elicitation/request" => {
+                let Some(turn) = state.active.as_mut() else {
+                    out.writes.push(
+                        serde_json::json!({
+                            "id": rpc_id, "result": {"action": "decline", "content": null},
+                        })
+                        .to_string(),
+                    );
+                    return out;
+                };
+                let request_id = codex_request_id(rpc_id);
+                out.events.push((
+                    turn.turn_id.clone(),
+                    ChatEvent::ApprovalRequested {
+                        request_id: request_id.clone(),
+                        tool_use_id: None,
+                        name: if is_mcp_tool_approval(&params) {
+                            "mcp_tool"
+                        } else {
+                            "unsupported_input"
+                        }
+                        .to_string(),
+                        summary: truncate(str_field(&params, "message").unwrap_or_default(), 200),
+                        input: bounded_output(
+                            &serde_json::to_string_pretty(&params).unwrap_or_default(),
+                        ),
+                    },
+                ));
+                turn.pending.insert(
+                    request_id,
+                    serde_json::json!({
+                        "latticeterm_rpc_id": rpc_id, "method": method, "params": params,
+                    }),
+                );
+            }
+            "item/tool/requestUserInput" | "tool/requestUserInput" => {
+                let Some(turn) = state.active.as_mut() else {
+                    out.writes.push(
+                        serde_json::json!({"id": rpc_id, "result": {"answers": {}}}).to_string(),
+                    );
+                    return out;
+                };
+                let request_id = codex_request_id(rpc_id);
+                out.events.push((
+                    turn.turn_id.clone(),
+                    ChatEvent::ApprovalRequested {
+                        request_id: request_id.clone(),
+                        tool_use_id: None,
+                        name: "user_input".to_string(),
+                        summary: "".to_string(),
+                        input: bounded_output(&params.to_string()),
+                    },
+                ));
+                turn.pending.insert(
+                    request_id,
+                    serde_json::json!({
+                        "latticeterm_rpc_id": rpc_id, "method": method, "params": params,
+                    }),
+                );
+            }
             "item/commandExecution/requestApproval"
             | "item/fileChange/requestApproval"
             | "item/permissions/requestApproval" => {
                 let Some(turn) = state.active.as_mut() else {
                     // No turn to attach the card to: decline rather than hang.
-                    out.writes.push(decline_line(rpc_id));
+                    let pending = serde_json::json!({"latticeterm_rpc_id": rpc_id, "method": method, "params": params});
+                    out.writes.push(
+                        response_line(&pending, false, None)
+                            .unwrap_or_else(|_| decline_line(rpc_id)),
+                    );
                     return out;
                 };
                 let request_id = codex_request_id(rpc_id);
@@ -683,6 +807,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                     "command": params.get("command"),
                     "cwd": params.get("cwd"),
                     "reason": params.get("reason"),
+                    "permissions": params.get("permissions"),
                 });
                 out.events.push((
                     turn.turn_id.clone(),
@@ -698,7 +823,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 ));
                 turn.pending.insert(
                     request_id,
-                    serde_json::json!({ "latticeterm_rpc_id": rpc_id }),
+                    serde_json::json!({ "latticeterm_rpc_id": rpc_id, "method": method, "params": params }),
                 );
             }
             _ => {
@@ -780,6 +905,11 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                         str_field(error, "message").unwrap_or("The turn failed."),
                         2048,
                     )
+                })
+                .or_else(|| match params["turn"]["status"].as_str() {
+                    Some("interrupted") => Some("The turn was interrupted.".to_string()),
+                    Some("failed") => Some("The turn failed.".to_string()),
+                    _ => None,
                 });
             if let Some(turn) = state.active.take() {
                 out.events.push((
@@ -821,27 +951,89 @@ pub(super) async fn respond(
     thread_id: &str,
     request_id: &str,
     allow: bool,
+    message: Option<&str>,
 ) -> Result<(), String> {
     let server = servers
         .get(thread_id)
         .ok_or_else(|| "This conversation is not waiting for an answer.".to_string())?;
-    let rpc_id = {
+    let response = {
         let mut state = server.state();
         let turn = state
             .active
             .as_mut()
             .ok_or_else(|| "This conversation is not waiting for an answer.".to_string())?;
-        turn.pending
-            .remove(request_id)
-            .ok_or_else(|| "This approval has already been answered.".to_string())?
+        let pending = turn
+            .pending
+            .get(request_id)
+            .ok_or_else(|| "This approval has already been answered.".to_string())?;
+        let response = response_line(pending, allow, message)?;
+        turn.pending.remove(request_id);
+        response
     };
-    let rpc_id = rpc_id
-        .get("latticeterm_rpc_id")
-        .cloned()
-        .unwrap_or(Value::Null);
-    server
-        .write_line(&codex_approval_line(&rpc_id, allow))
-        .await
+    server.write_line(&response).await
+}
+
+fn response_line(pending: &Value, allow: bool, message: Option<&str>) -> Result<String, String> {
+    let id = &pending["latticeterm_rpc_id"];
+    let result = match pending["method"].as_str() {
+        Some("mcpServer/elicitation/request") => {
+            if allow && !is_mcp_tool_approval(&pending["params"]) {
+                return Err("This input format is not supported yet.".to_string());
+            }
+            serde_json::json!({
+                "action": if allow { "accept" } else { "decline" },
+                "content": if allow { serde_json::json!({}) } else { Value::Null },
+            })
+        }
+        Some("item/tool/requestUserInput" | "tool/requestUserInput") => {
+            if !allow {
+                serde_json::json!({"answers": {}})
+            } else {
+                let raw = message.ok_or("Answer the questions first.")?;
+                if raw.len() > 16_384 {
+                    return Err("The answer is too long.".to_string());
+                }
+                let supplied: Value = serde_json::from_str(raw).map_err(|_| "Invalid answers.")?;
+                let questions = pending["params"]["questions"]
+                    .as_array()
+                    .ok_or("Invalid questions.")?;
+                let mut answers = serde_json::Map::new();
+                for question in questions {
+                    let key = question["id"].as_str().ok_or("Invalid question id.")?;
+                    let values = supplied["answers"][key]["answers"]
+                        .as_array()
+                        .ok_or("Answer every question.")?;
+                    if values.len() != 1
+                        || !values[0]
+                            .as_str()
+                            .is_some_and(|answer| !answer.trim().is_empty() && answer.len() <= 4096)
+                    {
+                        return Err("Provide one answer for each question.".to_string());
+                    }
+                    answers.insert(key.to_string(), serde_json::json!({"answers": values}));
+                }
+                serde_json::json!({"answers": answers})
+            }
+        }
+        Some("item/permissions/requestApproval") => serde_json::json!({
+            "permissions": if allow { pending["params"]["permissions"].clone() } else { serde_json::json!({}) },
+            "scope": "turn",
+        }),
+        _ => return Ok(codex_approval_line(id, allow)),
+    };
+    Ok(serde_json::json!({"id": id, "result": result}).to_string())
+}
+
+// Codex's MCP tool approval is an empty form with an explicit semantic tag.
+// Never turn a login form or another structured input into a generic Yes.
+fn is_mcp_tool_approval(params: &Value) -> bool {
+    let meta = params.get("_meta").or_else(|| params.get("meta"));
+    params["mode"] == "form"
+        && meta
+            .and_then(|meta| meta.get("codex_approval_kind"))
+            .and_then(Value::as_str)
+            == Some("mcp_tool_call")
+        && params["requestedSchema"] == serde_json::json!({"type": "object", "properties": {}})
 }
 
 /// Interrupts the turn in flight, keeping the server for the next one. A
@@ -904,6 +1096,74 @@ pub(super) fn stop(servers: &CodexServers, thread_id: &str) -> Result<bool, Stri
 mod tests {
     use super::*;
 
+    #[test]
+    fn question_responses_keep_rpc_ids_and_only_requested_answers() {
+        let pending = serde_json::json!({
+            "latticeterm_rpc_id": "question-1", "method": "item/tool/requestUserInput",
+            "params": {"questions": [{"id": "browser"}]},
+        });
+        let response: Value = serde_json::from_str(&response_line(&pending, true, Some(
+            r#"{"answers":{"browser":{"answers":["Accept"]},"unrequested":{"answers":["extra"]}}}"#,
+        )).unwrap()).unwrap();
+        assert_eq!(response["id"], "question-1");
+        assert_eq!(response["result"]["answers"].as_object().unwrap().len(), 1);
+        assert_eq!(
+            response["result"]["answers"]["browser"]["answers"][0],
+            "Accept"
+        );
+        assert!(response_line(&pending, true, Some("{}")).is_err());
+        let declined: Value =
+            serde_json::from_str(&response_line(&pending, false, None).unwrap()).unwrap();
+        assert_eq!(declined["result"], serde_json::json!({"answers": {}}));
+    }
+
+    #[test]
+    fn extra_permissions_grant_only_the_requested_scope() {
+        let permissions = serde_json::json!({"network": {"enabled": true}});
+        let pending = serde_json::json!({"latticeterm_rpc_id": 5, "method": "item/permissions/requestApproval", "params": {"permissions": permissions}});
+        let granted: Value =
+            serde_json::from_str(&response_line(&pending, true, None).unwrap()).unwrap();
+        assert_eq!(granted["result"]["permissions"], permissions);
+        assert_eq!(granted["result"]["scope"], "turn");
+        let denied: Value =
+            serde_json::from_str(&response_line(&pending, false, None).unwrap()).unwrap();
+        assert_eq!(denied["result"]["permissions"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn mcp_tool_approval_is_explicit_and_never_persisted() {
+        let params = serde_json::json!({
+            "mode": "form", "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": "always"},
+            "requestedSchema": {"type": "object", "properties": {}},
+        });
+        let pending = serde_json::json!({"latticeterm_rpc_id": "browser-1", "method": "mcpServer/elicitation/request", "params": params});
+        let accepted: Value =
+            serde_json::from_str(&response_line(&pending, true, None).unwrap()).unwrap();
+        assert_eq!(
+            accepted,
+            serde_json::json!({"id": "browser-1", "result": {"action": "accept", "content": {}}})
+        );
+        let declined: Value =
+            serde_json::from_str(&response_line(&pending, false, None).unwrap()).unwrap();
+        assert_eq!(
+            declined["result"],
+            serde_json::json!({"action": "decline", "content": null})
+        );
+    }
+
+    #[test]
+    fn unknown_mcp_forms_cannot_be_accepted_as_tool_approval() {
+        for params in [
+            serde_json::json!({"mode": "url", "url": "https://example.com"}),
+            serde_json::json!({"mode": "form", "requestedSchema": {"type": "object", "properties": {}}}),
+            serde_json::json!({"mode": "form", "_meta": {"codex_approval_kind": "mcp_tool_call"}, "requestedSchema": {"type": "object", "properties": {"password": {"type": "string"}}}}),
+        ] {
+            let pending = serde_json::json!({"latticeterm_rpc_id": 1, "method": "mcpServer/elicitation/request", "params": params});
+            assert!(response_line(&pending, true, None).is_err());
+            assert!(response_line(&pending, false, None).is_ok());
+        }
+    }
+
     struct RecordingSink(std::sync::mpsc::Sender<(String, ChatEvent)>);
 
     impl ChatSink for RecordingSink {
@@ -928,6 +1188,7 @@ mod tests {
                 Arc::clone(&sink),
                 &servers,
                 TurnRequest {
+                    browser_enabled: false,
                     thread_id: "e2e-codex",
                     turn_id,
                     prompt,
@@ -955,6 +1216,7 @@ mod tests {
                             "e2e-codex",
                             &request_id,
                             true,
+                            None,
                         ))
                         .expect("answer delivered");
                     }
@@ -1055,6 +1317,7 @@ mod tests {
         // A stdin nobody reads is fine for the parser: tests never write.
         let (_, child_stdin) = fake_stdin();
         CodexServer {
+            browser_enabled: false,
             thread_id: "thread-1".into(),
             profile_config_directory: None,
             child: Mutex::new(None),
@@ -1099,6 +1362,58 @@ mod tests {
 
     fn feed(server: &CodexServer, line: &str) -> LineOutcome {
         handle_line(server, &serde_json::from_str(line).unwrap())
+    }
+
+    #[tokio::test]
+    async fn browser_start_waits_for_tools_and_reports_startup_failures() {
+        for ready in [true, false] {
+            let mut server = server_with(fresh_state("turn-1"));
+            server.browser_enabled = true;
+            let opened = feed(
+                &server,
+                r#"{"id":2,"result":{"thread":{"id":"native"},"model":"test-model"}}"#,
+            );
+            let inventory: Value = serde_json::from_str(&opened.writes[0]).unwrap();
+            assert_eq!(inventory["method"], "mcpServerStatus/list");
+            assert!(opened.events.is_empty());
+            assert!(server.state().queued.is_some());
+            let data = if ready {
+                serde_json::json!([{"name":"latticeterm_browser","tools":{"browser_navigate":{},"browser_click":{}}}])
+            } else {
+                serde_json::json!([])
+            };
+            let out = handle_line(
+                &server,
+                &serde_json::json!({"id":inventory["id"],"result":{"data":data}}),
+            );
+            if ready {
+                let turn: Value = serde_json::from_str(&out.writes[0]).unwrap();
+                assert_eq!(turn["method"], "turn/start");
+                assert!(
+                    matches!(&out.events[0].1, ChatEvent::Started { model: Some(model), .. } if model == "test-model")
+                );
+            } else {
+                assert!(out.writes.is_empty());
+                assert!(matches!(
+                    &out.events[0].1,
+                    ChatEvent::Finished { error: Some(_), .. }
+                ));
+                assert!(server.state().exited);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn interrupted_turns_are_not_successful_completions() {
+        let server = server_with(fresh_state("turn-1"));
+        let out = feed(
+            &server,
+            r#"{"method":"turn/completed","params":{"turn":{"status":"interrupted","error":null}}}"#,
+        );
+        assert!(matches!(
+            &out.events[0].1,
+            ChatEvent::Finished { error: Some(_), .. }
+        ));
     }
 
     #[tokio::test]

@@ -32,6 +32,24 @@ function render(chat = fakeChatApi()): string {
 }
 
 describe("ChatView", () => {
+  it("does not offer approval for an unsupported MCP form", () => {
+    const thread = fakeThread({ items: [{
+      id: "form", type: "approval", requestId: "request", name: "unsupported_input",
+      summary: "Account details", input: "{}", decision: "pending",
+    }] });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(markup).toContain("目前還不支援這種提問格式");
+    expect(markup).toContain("拒絕");
+    expect(markup).not.toContain(">允許</button>");
+  });
+  it("offers general chat without a folder prerequisite", () => {
+    const thread = fakeThread({ workingDirectory: "" });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(markup).toContain("一般對話");
+    expect(markup).toContain("專案資料夾（選填）");
+    expect(markup).toContain("傳訊息給 OpenAI Codex");
+    expect(markup).not.toContain("先在上方選一個工作目錄");
+  });
   let restoreStorage: (() => void) | null = null;
   afterEach(() => {
     restoreStorage?.();

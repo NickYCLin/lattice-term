@@ -504,6 +504,7 @@ pub async fn execute(
 ) {
     let automation_id = planned.record.automation_id.clone();
     let request = ChatTurnRequest {
+        browser_enabled: false,
         thread_id: planned.record.thread_id.clone(),
         turn_id: planned.record.turn_id.clone(),
         definition_id: planned.record.definition_id.clone(),

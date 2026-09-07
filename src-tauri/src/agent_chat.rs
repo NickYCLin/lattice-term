@@ -26,6 +26,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
+mod browser;
 mod codex_server;
 
 pub const EVENT_CHAT: &str = "agent-chat://event";
@@ -74,6 +75,8 @@ pub enum ChatPermission {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatTurnRequest {
+    #[serde(default)]
+    pub browser_enabled: bool,
     pub thread_id: String,
     pub turn_id: String,
     pub definition_id: String,
@@ -373,6 +376,43 @@ fn validate_native_session_id(id: &str) -> Result<(), String> {
         return Err("The saved conversation id is invalid.".to_string());
     }
     Ok(())
+}
+
+/// General chats use their own durable scratch folder, never an implicit
+/// project or the user's home. Refuse links and existing non-directories.
+pub fn general_chat_directory(data_dir: &Path, thread_id: &str) -> Result<PathBuf, String> {
+    validate_id(thread_id, "thread id")?;
+    let mut directory = data_dir
+        .canonicalize()
+        .map_err(|error| format!("Cannot open the application data directory: {error}"))?;
+    for segment in ["chat-workspaces", thread_id] {
+        directory.push(segment);
+        let builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        let builder = {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
+        match builder.create(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("Cannot create the conversation folder: {error}")),
+        }
+        let metadata = fs::symlink_metadata(&directory)
+            .map_err(|error| format!("Cannot inspect the conversation folder: {error}"))?;
+        let unsafe_path = !metadata.is_dir() || metadata.file_type().is_symlink();
+        #[cfg(windows)]
+        let unsafe_path = {
+            use std::os::windows::fs::MetadataExt;
+            unsafe_path || metadata.file_attributes() & 0x400 != 0
+        };
+        if unsafe_path {
+            return Err("The conversation folder must be a regular directory.".to_string());
+        }
+    }
+    Ok(crate::agent::plain_win32_path(directory))
 }
 
 fn validate_working_directory(raw: &str) -> Result<PathBuf, String> {
@@ -1077,6 +1117,9 @@ fn send_with_retry<S: ChatSink>(
         validate_id(&request.turn_id, "turn id")?;
         let dialect = Dialect::from_definition(&request.definition_id)
             .ok_or_else(|| "This CLI has no chat mode.".to_string())?;
+        if request.browser_enabled && dialect != Dialect::Codex {
+            return Err("Browser control currently requires Codex.".to_string());
+        }
         let interactive = request.permission == ChatPermission::Ask;
         // Claude asks through its stream-json control protocol and Codex
         // through its app-server JSON-RPC; Gemini's headless mode has no
@@ -1117,6 +1160,7 @@ fn send_with_retry<S: ChatSink>(
                 sink,
                 &registry.codex,
                 codex_server::TurnRequest {
+                    browser_enabled: request.browser_enabled,
                     thread_id: &request.thread_id,
                     turn_id: &request.turn_id,
                     prompt: &prompt,
@@ -1516,10 +1560,10 @@ pub async fn respond(
     if request_id.is_empty() || request_id.len() > 256 {
         return Err("Invalid request id.".to_string());
     }
-    let message = message.map(|text| truncate(text.trim(), 1024));
     if registry.codex.get(thread_id).is_some() {
-        return codex_server::respond(&registry.codex, thread_id, request_id, allow).await;
+        return codex_server::respond(&registry.codex, thread_id, request_id, allow, message).await;
     }
+    let message = message.map(|text| truncate(text.trim(), 1024));
     let (stdin, input) = {
         let mut running = registry.lock();
         let turn = running
@@ -2127,6 +2171,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn general_chats_have_separate_durable_folders_and_preserve_content() {
+        let data = tempfile::tempdir().unwrap();
+        let first = general_chat_directory(data.path(), "one").unwrap();
+        fs::write(first.join("notes.txt"), "keep").unwrap();
+        assert_eq!(general_chat_directory(data.path(), "one").unwrap(), first);
+        assert_eq!(fs::read_to_string(first.join("notes.txt")).unwrap(), "keep");
+        assert_ne!(general_chat_directory(data.path(), "two").unwrap(), first);
+        for id in ["", "../escape", "a/b", "a\\b", "C:", ".", ".."] {
+            assert!(general_chat_directory(data.path(), id).is_err());
+        }
+        fs::write(data.path().join("chat-workspaces/conflict"), "keep").unwrap();
+        assert!(general_chat_directory(data.path(), "conflict").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn general_chats_reject_linked_workspace_roots() {
+        let data = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), data.path().join("chat-workspaces")).unwrap();
+        assert!(general_chat_directory(data.path(), "one").is_err());
+        assert!(!outside.path().join("one").exists());
+    }
+
+    #[test]
     fn skill_discovery_reads_only_local_skill_metadata() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path().join("project");
@@ -2436,6 +2505,7 @@ mod tests {
             Arc::new(RecordingSink(tx)),
             Arc::new(AgentChatRegistry::new()),
             ChatTurnRequest {
+                browser_enabled: false,
                 thread_id: "t".into(),
                 turn_id: "u".into(),
                 definition_id: "gemini".into(),
@@ -2807,6 +2877,7 @@ mod tests {
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                browser_enabled: false,
                 thread_id: "e2e-ask".into(),
                 turn_id: "e2e-ask-turn".into(),
                 definition_id: "claude".into(),
@@ -2866,6 +2937,7 @@ mod tests {
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                browser_enabled: false,
                 thread_id: "e2e-thread".into(),
                 turn_id: "e2e-turn".into(),
                 definition_id,

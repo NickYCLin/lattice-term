@@ -10,6 +10,7 @@
  */
 
 import { useEffect } from "react";
+import type { NotificationSoundChoice } from "./notificationSounds";
 import { useAgentAutomations, type AgentAutomationsApi } from "./useAgentAutomations";
 import { useAgentChat, type AgentChatApi } from "./useAgentChat";
 
@@ -20,12 +21,14 @@ export interface ChatRuntimeApi {
 
 export function ChatRuntime({
   locale,
+  completionSound = "off",
   onChange,
 }: {
   locale: string;
+  completionSound?: NotificationSoundChoice;
   onChange: (api: ChatRuntimeApi) => void;
 }) {
-  const chat = useAgentChat();
+  const chat = useAgentChat(completionSound);
   const automations = useAgentAutomations(chat, locale);
   useEffect(() => {
     onChange({ chat, automations });

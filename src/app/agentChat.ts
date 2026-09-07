@@ -155,6 +155,7 @@ export interface ChatHandoff {
 }
 
 export interface ChatThread {
+  browserEnabled?: boolean;
   id: string;
   definitionId: ChatDefinitionId;
   /** First message, shortened; what the thread list shows. */
@@ -296,6 +297,19 @@ export function handoffThreadAccount(
   };
 }
 
+/** A new working folder starts a new native session with a bounded reference. */
+export function changeThreadDirectory(thread: ChatThread, directory: string): ChatThread {
+  if (thread.runningTurnId || thread.workingDirectory === directory) return thread;
+  const transcript = handoffTranscript(thread.items, thread.definitionId);
+  return {
+    ...thread,
+    workingDirectory: directory,
+    nativeSessionId: null,
+    reportedModel: null,
+    handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
+  };
+}
+
 /** Apply the provider, account and model as one choice, never an intermediate identity. */
 export function selectThreadModel(
   thread: ChatThread,
@@ -337,12 +351,13 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
   return {
     id,
+    browserEnabled: settings.definitionId === "codex" && settings.browserEnabled === true,
     definitionId: settings.definitionId,
     title: settings.title ?? "",
     automationId: settings.automationId ?? null,
@@ -674,6 +689,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
             typeof (item as { output?: unknown }).output === "string"),
       ),
       title: typeof thread.title === "string" ? thread.title : "",
+      browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
       model: typeof thread.model === "string" ? thread.model : "",
       nativeSessionId:
         typeof thread.nativeSessionId === "string" ? thread.nativeSessionId : null,

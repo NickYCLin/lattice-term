@@ -48,6 +48,7 @@ import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
 import { AccountModelField } from "../components/agents/AccountModelField";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
+import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   ChatIcon,
   CloseIcon,
@@ -126,8 +127,7 @@ export function ChatView({
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
 
   function startThread() {
-    // A fresh thread borrows the last one's choices: the same project and
-    // CLI are the likely next conversation too.
+    // Keep the assistant choice; selecting a project is optional for each chat.
     const previous = chat.threads[0];
     const definitionId =
       previous && installed.includes(previous.definitionId)
@@ -135,7 +135,7 @@ export function ChatView({
         : (installed[0] ?? chat.supported[0] ?? "claude");
     chat.createThread({
       definitionId,
-      workingDirectory: previous?.workingDirectory ?? "",
+      workingDirectory: "",
       permission:
         previous && permissionsFor(definitionId).includes(previous.permission)
           ? previous.permission
@@ -452,9 +452,7 @@ function ThreadPane({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fresh = threadIsFresh(thread);
-  // A new thread needs its directory chosen, so its settings start open;
-  // an ongoing conversation keeps them tucked behind the summary chips.
-  const [settingsOpen, setSettingsOpen] = useState(fresh || thread.workingDirectory === "");
+  const [settingsOpen, setSettingsOpen] = useState(fresh);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
@@ -475,7 +473,6 @@ function ThreadPane({
     !activeProfileMissing &&
     !activeProfileSignedOut &&
     cliInstalled &&
-    thread.workingDirectory !== "" &&
     (draft.trim() !== "" || attachments.length > 0);
   const assistant = cliLabel(thread.definitionId);
 
@@ -598,10 +595,10 @@ function ThreadPane({
     submit();
   }
 
-  async function answer(requestId: string, allow: boolean) {
+  async function answer(requestId: string, allow: boolean, message?: string) {
     setNotice(null);
     try {
-      await chat.respond(thread.id, requestId, allow);
+      await chat.respond(thread.id, requestId, allow, message);
     } catch (reason) {
       setNotice(
         t("chat.approval.failed", {
@@ -703,6 +700,12 @@ function ThreadPane({
                   <FolderIcon />
                   {t("chat.directory.choose")}
                 </button>
+                {thread.workingDirectory && (
+                  <button type="button" className="button button--ghost button--sm" disabled={running}
+                    onClick={() => chat.updateThread(thread.id, { workingDirectory: "" })}>
+                    {t("chat.directory.clear")}
+                  </button>
+                )}
                 <span className="chat-directory__path" title={thread.workingDirectory}>
                   {thread.workingDirectory
                     ? displayPath(thread.workingDirectory)
@@ -729,6 +732,14 @@ function ThreadPane({
                 ))}
               </select>
             </label>
+            {thread.definitionId === "codex" && (
+              <label className="checkbox chat-settings__browser">
+                <input type="checkbox" checked={thread.browserEnabled === true} disabled={running}
+                  onChange={(event) => chat.updateThread(thread.id, { browserEnabled: event.target.checked })} />
+                <span className="checkbox__box" aria-hidden="true">✓</span>
+                <span><strong>{t("chat.browser")}</strong><small>{t("chat.browser.hint")}</small></span>
+              </label>
+            )}
             <p className="chat-settings__hint">
               {t(permissionHintKey[thread.permission])}
               {profileCapable(thread.definitionId) ? ` ${t("chat.accountProfile.hint")}` : ""}
@@ -818,11 +829,7 @@ function ThreadPane({
           <textarea
             className="chat-composer__input"
             value={draft}
-            placeholder={
-              thread.workingDirectory
-                ? t("chat.composer.placeholder", { assistant })
-                : t("chat.welcome.chooseDirectory")
-            }
+            placeholder={t("chat.composer.placeholder", { assistant })}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
             aria-label={t("chat.composer.label")}
@@ -893,7 +900,7 @@ function ChatItemView({
   assistant: string;
   streaming: boolean;
   tag: string;
-  onAnswer: (requestId: string, allow: boolean) => void;
+  onAnswer: (requestId: string, allow: boolean, message?: string) => Promise<void>;
 }) {
   const { t } = useI18n();
   switch (item.type) {
@@ -974,21 +981,32 @@ function ChatItemView({
                 : t(`chat.approval.${item.decision}` as MessageKey)}
             </span>
           </div>
-          {item.input && item.input !== "null" && (
+          {item.name === "user_input" && item.decision === "pending" && (
+            <ChatQuestions
+              input={item.input}
+              onAnswer={(allow, message) => onAnswer(item.requestId, allow, message)}
+            />
+          )}
+          {item.name === "unsupported_input" && item.decision === "pending" && (
+            <p className="chat-notice">{t("chat.question.unsupported")}</p>
+          )}
+          {item.name !== "user_input" && item.input && item.input !== "null" && (
             <details className="chat-card__details">
               <summary>{t("chat.approval.input")}</summary>
               <pre className="chat-card__output">{item.input}</pre>
             </details>
           )}
-          {item.decision === "pending" && (
+          {item.decision === "pending" && item.name !== "user_input" && (
             <div className="chat-card__actions">
-              <button
-                type="button"
-                className="button button--primary button--sm"
-                onClick={() => onAnswer(item.requestId, true)}
-              >
-                {t("chat.approval.allow")}
-              </button>
+              {item.name !== "unsupported_input" && (
+                <button
+                  type="button"
+                  className="button button--primary button--sm"
+                  onClick={() => onAnswer(item.requestId, true)}
+                >
+                  {t("chat.approval.allow")}
+                </button>
+              )}
               <button
                 type="button"
                 className="button button--secondary button--sm"

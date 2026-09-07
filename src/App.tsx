@@ -1033,7 +1033,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               />
             )}
             <Suspense fallback={null}>
-              <ChatRuntime locale={preferences.locale} onChange={setChatRuntime} />
+              <ChatRuntime locale={preferences.locale} completionSound={preferences.agentCompletionSound} onChange={setChatRuntime} />
             </Suspense>
             {view === "chat" && chatRuntime && (
               <ChatView

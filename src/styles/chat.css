@@ -4,6 +4,7 @@
   display: grid;
   grid-template-columns: 17rem minmax(0, 1fr);
   flex: 1;
+  min-width: 0;
   min-height: 0;
   background: var(--canvas);
 }
@@ -20,6 +21,7 @@
 
 .chat-threads__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -429,6 +431,16 @@ button.chat-chip:hover {
   background: var(--surface-raised);
 }
 
+.chat-settings__browser { flex: 1 0 100%; align-items: flex-start; }
+.chat-settings__browser > span:last-child { display: grid; gap: var(--space-1); }
+.chat-settings__browser small { color: var(--text-muted); }
+.chat-question { display: grid; gap: var(--space-3); padding: var(--space-4); }
+.chat-question fieldset { min-width: 0; display: grid; gap: var(--space-2); border: 0; padding: 0; margin: 0; }
+.chat-question legend { padding-bottom: var(--space-2); }
+.chat-question label { display: flex; align-items: flex-start; gap: var(--space-2); }
+.chat-question label > span { display: grid; }
+.chat-question small { color: var(--text-muted); }
+
 .chat-settings .field,
 .automation-schedule .field {
   min-width: 11rem;
@@ -819,6 +831,7 @@ button.chat-chip:hover {
 
 .chat-composer__box {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   max-width: 52rem;
   margin: 0 auto;
@@ -908,18 +921,18 @@ button.chat-chip:hover {
 
 .chat-composer__row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
 }
 
 .chat-composer__hint {
+  flex: 1 1 14rem;
   min-width: 0;
-  overflow: hidden;
   color: var(--text-faint);
   font-size: var(--text-2xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-composer__actions {
@@ -927,6 +940,17 @@ button.chat-chip:hover {
   flex: none;
   align-items: center;
   gap: var(--space-2);
+}
+
+.chat-threads__header > .chat-composer__actions,
+.chat-composer__row > .chat-composer__actions {
+  margin-left: auto;
+}
+
+.chat-composer__row > .chat-composer__actions {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .chat-send {

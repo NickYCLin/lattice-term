@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyChatEvent,
   beginTurn,
+  changeThreadDirectory,
   boundThreadsForStorage,
   createThread,
   decideApproval,
@@ -45,6 +46,15 @@ function envelope(
 }
 
 describe("beginTurn", () => {
+  it("keeps visible context but starts a new native session when leaving a project", () => {
+    const previous = thread({ nativeSessionId: "native-project", items: [{ type: "user", id: "u", text: "Explain this", at: 1 }, { type: "text", id: "a", text: "The answer" }] });
+    const next = changeThreadDirectory(previous, "");
+    expect(next.workingDirectory).toBe("");
+    expect(next.nativeSessionId).toBeNull();
+    expect(next.handoff?.transcript).toContain("The answer");
+    expect(next.items).toEqual(previous.items);
+    expect(changeThreadDirectory({ ...previous, runningTurnId: "busy" }, "").workingDirectory).toBe("/work");
+  });
   it("records the prompt, names the thread and marks the turn running", () => {
     const next = beginTurn(thread(), "幫我看看 README\n第二行", "turn-1", 2000);
 
