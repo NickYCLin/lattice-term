@@ -33,7 +33,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 russh-sftp = "2.4.0"
 sha2 = "0.11.0"
 base64 = "0.23.1"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-util", "net", "sync", "time", "process", "signal"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "net", "sync", "time", "process", "signal"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 lattice-remote = { path = "../crates/lattice-remote" }
@@ -46,6 +46,7 @@ getrandom = "0.4.3"
 argon2 = "0.6"
 chacha20poly1305 = "0.11.0"
 tempfile = "3.27.0"
+dirs = "6"
 png = "0.18.1"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]

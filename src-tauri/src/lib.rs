@@ -1079,14 +1079,46 @@ async fn agent_output_snapshots(
     Ok(snapshots)
 }
 
-/// Whether the background service is up and how many sessions it holds.
+/// Whether the background service is up, how many sessions it holds, which
+/// of them the user shared with MCP observers, and how an MCP client should
+/// start the adapter for this installation.
 #[tauri::command]
 async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemonStatus, String> {
     let sessions = daemon.sessions().await;
+    let shared = match daemon
+        .request(false, crate::agent_daemon::Request::Shared)
+        .await
+    {
+        Ok(value) => serde_json::from_value(value).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
     Ok(AgentDaemonStatus {
         running: daemon.is_running().await,
         sessions: sessions.len(),
+        shared,
+        mcp: crate::agent_daemon::mcp::launch_for(&daemon.paths().data_dir),
     })
+}
+
+/// Shares one background session with MCP observers, or stops sharing it.
+/// Only a session the daemon holds can be shared: the desktop's own
+/// sessions have no observer path at all.
+#[tauri::command]
+async fn agent_mcp_share(
+    session_id: String,
+    shared: bool,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Vec<String>, String> {
+    if !crate::agent_daemon::owns(&session_id) {
+        return Err("Only sessions kept in the background can be shared.".to_string());
+    }
+    let value = daemon
+        .request(
+            false,
+            crate::agent_daemon::Request::ShareSet { session_id, shared },
+        )
+        .await?;
+    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 /// Ends every background session and the service itself. The window asks
@@ -1161,6 +1193,9 @@ async fn agent_automations_take_runs(
 struct AgentDaemonStatus {
     running: bool,
     sessions: usize,
+    /// Session ids shared with MCP observers.
+    shared: Vec<String>,
+    mcp: crate::agent_daemon::mcp::McpLaunch,
 }
 
 #[tauri::command]
@@ -2875,6 +2910,7 @@ pub fn run() {
             agent_output_snapshots,
             agent_daemon_status,
             agent_daemon_stop,
+            agent_mcp_share,
             agent_automations_sync,
             agent_automations_state,
             agent_automations_take_runs,
