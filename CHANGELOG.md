@@ -4,6 +4,17 @@
 
 ---
 
+## [2.0.0](https://github.com/NickYCLin/lattice-term/compare/v1.3.0...v2.0.0) (2026-09-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **remote:** 新分享端使用 v4 握手，連線端需支援 v4。 舊主機可由新版連線端明確選用相容模式，不自動降級。
+
+### 🚀 新增功能
+
+* **remote:** 支援自訂配對密碼與跨重啟防猜 ([afe722f](https://github.com/NickYCLin/lattice-term/commit/afe722fa8ae8c8564d6b8f76222b2ed0923a344b))
+
 ## [1.3.0](https://github.com/NickYCLin/lattice-term/compare/v1.2.0...v1.3.0) (2026-09-07)
 
 
