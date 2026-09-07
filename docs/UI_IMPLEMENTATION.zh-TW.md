@@ -55,6 +55,7 @@
   - 只收集版本化 allowlist localStorage 鍵；Rust 完成驗證加密後才把密文交給瀏覽器下載，還原時精確移除備份中不存在的 allowlist 設定，避免混合兩台裝置的狀態。
 - **Agent Sessions Hook (`src/app/useAgentSessions.ts`)**：
   - 管理本機 PTY 工作階段、語意狀態事件、原生 Session ID 擷取、批次提示，以及安全啟動工作區的名稱、順序與 v3 儲存 command。
+  - Codex 的受管續接命令會以 `--cd` 明確指定已正規化的專案目錄，保留續接 ID，避免舊對話的 Windows `\\?\` 路徑或搬移前的目錄再次觸發目錄選擇。進階參數中自行指定的 `--cd`／`-C` 優先保留；不改寫 CLI 的對話檔案。行為依據 [Codex CLI 續接說明](https://learn.chatgpt.com/docs/developer-commands?surface=cli)。
 
 ---
 

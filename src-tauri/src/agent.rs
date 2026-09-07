@@ -17,6 +17,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+mod codex_resume;
+
 pub const EVENT_DATA: &str = "agent://data";
 pub const EVENT_CLOSED: &str = "agent://closed";
 pub const EVENT_STATE: &str = "agent://state";
@@ -5200,6 +5202,10 @@ fn resolve_launch(
     );
     if !working_directory.is_dir() {
         return Err("Working directory is not a directory.".to_string());
+    }
+
+    if definition_id == "codex" {
+        arguments = codex_resume::with_working_directory(arguments, &working_directory);
     }
 
     let label = if request.label.trim().is_empty() {
