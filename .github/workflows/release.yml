@@ -3,18 +3,16 @@ name: Release
 on:
   push:
     branches: [main]
-  # Release Please only opens the PR; something has to merge it or nothing
-  # ever ships. Every push to main re-checks whether enough work has
-  # accumulated and publishes the moment it has — see
-  # scripts/decide-release.mjs for what "enough" means.
+  # Daily at 10:17 Asia/Taipei. A new stable release needs seven days since
+  # the previous publication; pushes only maintain the pending draft PR.
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       force:
         description: >-
-          Publish the pending Release PR even below the accumulation
-          threshold. This is the maintainer decision the release policy
-          reserves for urgent fixes; it still refuses a version whose
-          changelog would hold nothing for the user.
+          Emergency override of the seven-day interval. Normal releases
+          are fully automatic; this never bypasses CI or permits empty releases.
         type: boolean
         default: false
 
@@ -26,27 +24,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
-    name: Plan or publish release
+  release-plan:
+    name: Maintain draft and check weekly eligibility
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
       pull-requests: write
-    # A release can be cut by either pass: the first when a human merged the
-    # Release PR, the second when this run merged it itself.
     outputs:
-      release_created: ${{ steps.release.outputs.release_created == 'true' && 'true' || steps.publish.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.release_created == 'true' && steps.release.outputs.tag_name || steps.publish.outputs.tag_name }}
-      sha: ${{ steps.release.outputs.release_created == 'true' && steps.release.outputs.sha || steps.publish.outputs.sha }}
+      ready: ${{ steps.candidate.outputs.ready }}
+      mode: ${{ steps.candidate.outputs.mode }}
+      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+      pr_number: ${{ steps.candidate.outputs.pr_number }}
+      tag_name: ${{ steps.candidate.outputs.tag_name }}
 
     steps:
+      - name: Check out the main snapshot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Read public release history and unfinished version
+        id: metadata
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const { inspectRelease, checkoutMetadata } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-gate.mjs`);
+            const state = await inspectRelease({ github, context, ...checkoutMetadata() });
+            core.setOutput('state', JSON.stringify(state));
+            core.setOutput('source_sha', state.sourceSha);
+            core.setOutput('recovery', String(Boolean(state.recovery)));
+
       - name: Create or update the Release PR
+        if: steps.metadata.outputs.recovery != 'true'
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: true
 
       - name: Resolve the generated Release PR branch
         if: steps.release.outputs.prs_created == 'true'
@@ -86,73 +105,95 @@ jobs:
           git commit -m "chore(版本): 正規化版本檔案"
           git push origin "HEAD:${{ steps.release-pr.outputs.result }}"
 
-      # Each source commit has already passed the single-runner CI. The steps
-      # above validate generated version files, so the Release PR does not
-      # dispatch another copy of the source CI.
-
-      # Deciding needs the tags and the commits since the last one, which the
-      # Release PR branch checked out above does not describe.
-      - name: Check out main for the release decision
-        if: steps.release.outputs.release_created != 'true'
+      - name: Return to the main snapshot for the release decision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: main
+          ref: ${{ steps.metadata.outputs.source_sha }}
           fetch-depth: 0
 
-      - name: Decide whether the pending release is due
-        if: steps.release.outputs.release_created != 'true'
-        id: due
+      - name: Select the immutable release candidate
+        id: candidate
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           RELEASE_FORCE: ${{ inputs.force }}
-        run: node scripts/decide-release.mjs
+          RELEASE_METADATA: ${{ steps.metadata.outputs.state }}
+        with:
+          script: |
+            const { prepareRelease, unreleasedCommits } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-gate.mjs`);
+            const metadata = JSON.parse(process.env.RELEASE_METADATA);
+            await prepareRelease({ github, context, core, metadata,
+              commits: metadata.recovery ? [] : unreleasedCommits(metadata.lastPublishedTag),
+              forced: process.env.RELEASE_FORCE === 'true' });
 
-      - name: Find the pending Release PR
-        if: steps.due.outputs.release == 'true'
-        id: pending
+  verify-candidate:
+    name: Verify the exact release candidate
+    needs: release-plan
+    if: needs.release-plan.outputs.ready == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.release-plan.outputs.candidate_sha }}
+
+  release-please:
+    name: Automatically merge or resume the verified release
+    needs: [release-plan, verify-candidate]
+    if: needs.release-plan.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.result.outputs.release_created }}
+      tag_name: ${{ steps.result.outputs.tag_name }}
+      sha: ${{ steps.result.outputs.sha }}
+    steps:
+      - name: Check out trusted release orchestration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release-plan.outputs.source_sha }}
+
+      - name: Merge only the CI-verified snapshot
+        id: merge
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          number="$(gh pr list --state open --label 'autorelease: pending' \
-            --json number,headRefName \
-            --jq '[.[] | select(.headRefName | startswith("release-please--"))][0].number // empty')"
-          echo "number=${number}" >> "$GITHUB_OUTPUT"
-          if [ -z "$number" ]; then
-            echo "No pending Release PR to publish."
-          else
-            echo "Publishing Release PR #${number}: ${{ steps.due.outputs.reason }}"
-          fi
+          RELEASE_PLAN: ${{ toJSON(needs.release-plan.outputs) }}
+        with:
+          script: |
+            const { mergeRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-gate.mjs`);
+            const sha = await mergeRelease({ github, context, plan: JSON.parse(process.env.RELEASE_PLAN) });
+            core.setOutput('sha', sha);
 
-      # The PR is opened as a draft so a human decides; publishing it here is
-      # that decision, made by the rule instead.
-      - name: Publish the pending Release PR
-        if: steps.pending.outputs.number != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          number="${{ steps.pending.outputs.number }}"
-          # Already-ready is not a failure: a human may have marked it.
-          gh pr ready "$number" || true
-          gh pr merge "$number" --squash --delete-branch
-          # The next step asks Release Please to cut the tag, which only works
-          # once GitHub reports the merge, so wait for it rather than racing.
-          for _ in $(seq 1 30); do
-            state="$(gh pr view "$number" --json state --jq .state)"
-            [ "$state" = "MERGED" ] && exit 0
-            sleep 2
-          done
-          echo "Release PR #${number} did not reach MERGED in time." >&2
-          exit 1
-
-      # A merge made with GITHUB_TOKEN does not start another workflow run, so
-      # the tag and GitHub Release have to be cut here rather than waiting for
-      # a push event that will never arrive.
-      - name: Cut the release for the PR just published
-        if: steps.pending.outputs.number != ''
+      # GITHUB_TOKEN merges do not trigger another workflow. Create the tag in
+      # this run, only after candidate CI. Existing draft builds reuse their tag.
+      - name: Create the verified release tag
+        if: needs.release-plan.outputs.mode != 'draft'
         id: publish
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      - name: Resolve the verified release for installer jobs
+        id: result
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PLAN: ${{ toJSON(needs.release-plan.outputs) }}
+          RELEASE: ${{ toJSON(steps.publish.outputs) }}
+          VERIFIED_SHA: ${{ steps.merge.outputs.sha }}
+        with:
+          script: |
+            const plan = JSON.parse(process.env.PLAN);
+            const release = JSON.parse(process.env.RELEASE);
+            const tag = plan.mode === 'draft' ? plan.tag_name : release.tag_name;
+            if (plan.mode !== 'draft' && (release.release_created !== 'true' || release.sha !== process.env.VERIFIED_SHA)) {
+              throw new Error('Release creation did not match the verified commit; do not publish.');
+            }
+            core.setOutput('release_created', 'true');
+            core.setOutput('tag_name', tag);
+            core.setOutput('sha', process.env.VERIFIED_SHA);
 
   build-release:
     name: Build & upload (${{ matrix.name }})

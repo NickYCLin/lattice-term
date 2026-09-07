@@ -1,24 +1,8 @@
 #!/usr/bin/env node
 /**
- * Decides whether the pending Release PR should be published now.
- *
- * Release Please only opens the PR; something has to merge it or nothing ever
- * ships. This encodes the policy already written in
- * `docs/RELEASE_AUTOMATION.zh-TW.md` so the daily pass applies exactly the
- * rule a maintainer would: publish a breaking change at once, otherwise wait
- * until enough independent user-visible work has accumulated.
- *
- * Only `feat`, `fix` and `perf` count toward the threshold. The document is
- * explicit that `docs`, `test`, `ci`, `chore`, `style`, `refactor` and
- * `build` do not — a version whose changelog holds nothing a user would
- * notice churns the updater for no reason. It is also explicit that nothing
- * is released merely because time has passed, so this has no timer and no
- * schedule: the check runs on every push to main and releases the moment
- * enough work has accumulated. An urgent fix ships through the workflow's
- * force input, which is the maintainer decision the document provides for.
- *
- * Run as a CLI it reads the unreleased commits from git and writes the
- * decision to GITHUB_OUTPUT; `decideRelease` is the pure rule underneath.
+ * One stable channel: pushes maintain the draft PR; daily checks may publish
+ * after seven days since the last public release. Commit count and breaking
+ * changes never bypass the interval. CI is a separate mandatory gate.
  */
 
 import { execFileSync } from "node:child_process";
@@ -26,14 +10,14 @@ import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
- * Types that count as an independent user-visible item.
+ * Types that make a non-empty user-facing release.
  *
  * Narrower than what Release Please renders: `style` and `refactor` appear in
  * the changelog but must not push a release over the line on their own.
  */
 export const RELEASABLE_TYPES = new Set(["feat", "fix", "perf"]);
 
-export const DEFAULT_MIN_ITEMS = 3;
+export const RELEASE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const HEADER = /^(?<type>[a-z]+)(?<scope>\([^)]*\))?(?<breaking>!)?:/;
 
@@ -57,55 +41,65 @@ export function classifyCommit({ subject, body = "" }) {
 
 /**
  * @param commits unreleased commits, each `{subject, body}`.
- * @param forced the maintainer asked for a release regardless of the count.
+ * `null` means the API confirmed there is no published release yet.
+ * Missing or invalid metadata must never be mistaken for a first release.
  */
 export function decideRelease({
   commits,
-  minItems = DEFAULT_MIN_ITEMS,
+  lastPublishedAt,
+  now = Date.now(),
+  eventName = "push",
   forced = false,
 }) {
+  if (!canPublishFrom(eventName)) {
+    return { release: false, reason: "pushes only update the draft release PR" };
+  }
   const classified = commits.map((commit) => ({
     ...commit,
     ...classifyCommit(commit),
   }));
-  const releasable = classified.filter((commit) => commit.releasable);
-
-  if (classified.some((commit) => commit.breaking)) {
-    return { release: true, reason: "a breaking change is waiting" };
-  }
+  const releasable = classified.filter((commit) => commit.releasable || commit.breaking);
   if (releasable.length === 0) {
     // Forcing a version with an empty changelog would ship nothing while
     // still prompting every installation to update.
     return { release: false, reason: "nothing releasable is waiting" };
   }
-  if (forced) {
-    return { release: true, reason: "the maintainer asked for a release" };
+  return releaseWindow({ lastPublishedAt, now, eventName, forced });
+}
+
+export function releaseWindow({ lastPublishedAt, now = Date.now(), eventName = "push", forced = false }) {
+  if (!canPublishFrom(eventName)) return { release: false, reason: "pushes only update the draft release PR" };
+  const publishedAt = typeof lastPublishedAt === "string" ? Date.parse(lastPublishedAt) : NaN;
+  if (!Number.isFinite(now) || (lastPublishedAt !== null && (!Number.isFinite(publishedAt) || publishedAt > now))) {
+    return { release: false, reason: "missing or invalid publication timestamp" };
   }
-  if (releasable.length >= minItems) {
-    return {
-      release: true,
-      reason: `${releasable.length} releasable changes are waiting (threshold ${minItems})`,
-    };
+  if (forced && eventName === "workflow_dispatch") {
+    return { release: true, reason: "explicit emergency release; CI is still required" };
+  }
+  if (lastPublishedAt === null || now - publishedAt >= RELEASE_INTERVAL_MS) {
+    return { release: true, reason: "new changes are ready for the weekly stable release" };
   }
   return {
     release: false,
-    reason: `only ${releasable.length} releasable change(s) waiting, below the threshold of ${minItems}`,
+    reason: "fewer than seven days since the last published stable release",
   };
+}
+
+export function canPublishFrom(eventName) {
+  return eventName === "schedule" || eventName === "workflow_dispatch";
 }
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
-/** Commits on the current branch that no release tag covers yet. */
-export function unreleasedCommits() {
-  let range = "HEAD";
-  try {
-    const tag = git("describe", "--tags", "--abbrev=0", "--match", "v*").trim();
-    if (tag) range = `${tag}..HEAD`;
-  } catch {
-    // No tag yet: everything on the branch is unreleased.
+/** Commits not yet included in the last publicly released stable version. */
+export function unreleasedCommits(lastPublishedTag) {
+  if (lastPublishedTag !== null && !/^v\d+\.\d+\.\d+$/.test(lastPublishedTag ?? "")) {
+    throw new Error("A confirmed stable release tag or explicit null is required.");
   }
+  // Draft/unpublished tags do not consume changes or restart the release clock.
+  const range = lastPublishedTag === null ? "HEAD" : `${lastPublishedTag}..HEAD`;
   // A record separator keeps multi-line bodies from being mistaken for the
   // start of the next commit.
   const raw = git("log", range, "--no-merges", "--format=%H%x1f%s%x1f%b%x1e");
@@ -120,10 +114,11 @@ export function unreleasedCommits() {
 }
 
 function main() {
-  const commits = unreleasedCommits();
+  const commits = unreleasedCommits(process.env.RELEASE_LAST_TAG === "none" ? null : process.env.RELEASE_LAST_TAG);
   const decision = decideRelease({
     commits,
-    minItems: Number(process.env.RELEASE_MIN_ITEMS ?? DEFAULT_MIN_ITEMS),
+    lastPublishedAt: process.env.RELEASE_LAST_PUBLISHED_AT === "none" ? null : process.env.RELEASE_LAST_PUBLISHED_AT,
+    eventName: process.env.GITHUB_EVENT_NAME,
     forced: process.env.RELEASE_FORCE === "true",
   });
   const summary = `release=${decision.release} (${decision.reason})`;
