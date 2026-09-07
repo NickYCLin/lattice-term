@@ -20,6 +20,7 @@
 
 pub mod automations;
 pub mod client;
+pub mod mcp;
 pub mod server;
 #[cfg(test)]
 mod tests;
@@ -38,15 +39,42 @@ pub const SESSION_ID_PREFIX: &str = "agent-bg-session-";
 /// The daemon exits once it has had no sessions and no clients this long.
 pub const IDLE_EXIT: std::time::Duration = std::time::Duration::from_secs(60);
 const TOKEN_FILE: &str = "agent-daemon.token";
+/// Where the daemon notes the socket path it actually bound, for clients
+/// spawned with a different environment (an MCP client that strips
+/// `XDG_RUNTIME_DIR`, say) to find it.
+const SOCKET_HINT_FILE: &str = "agent-daemon.socket";
 pub const LOG_FILE: &str = "agent-daemon.log";
 /// One frame at most: a launch carrying a 256 KiB restored tail as base64 is
 /// the largest legitimate message; a staged clipboard image the largest
 /// possible one.
 pub const MAX_FRAME_BYTES: usize = 24 * 1024 * 1024;
+/// The most output one `observe` request returns, after the caller's own cap.
+pub const MAX_OBSERVE_BYTES: usize = 64 * 1024;
 
 /// Whether a session id belongs to the daemon rather than the desktop.
 pub fn owns(session_id: &str) -> bool {
     session_id.starts_with(SESSION_ID_PREFIX)
+}
+
+/// Who is on the other end of a connection. The desktop owns everything;
+/// an observer (the MCP adapter) only ever sees the sessions the user chose
+/// to share, never receives terminal bytes as events, and cannot launch,
+/// send, or stop anything. The daemon enforces this per request; the role
+/// is a claim the client makes, but a wrong claim only ever narrows access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ClientRole {
+    #[default]
+    Desktop,
+    Observer,
+}
+
+/// Where this installation keeps its data when nobody passes `--data-dir`:
+/// the same directory Tauri resolves for the application identifier, so the
+/// MCP adapter finds the daemon the desktop started.
+pub fn default_data_dir() -> Option<PathBuf> {
+    const IDENTIFIER: &str = "io.github.nickyclin.latticeterm";
+    dirs::data_dir().map(|base| base.join(IDENTIFIER))
 }
 
 /// Where one installation's daemon listens and keeps its token.
@@ -76,12 +104,19 @@ fn installation_hash(data_dir: &Path) -> u64 {
 
 #[cfg(unix)]
 fn socket_path(data_dir: &Path) -> PathBuf {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    // The runtime directory by its variable, else by its conventional
+    // location, so a client started without the variable (MCP hosts often
+    // pass a minimal environment) still resolves the same place.
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
+        .or_else(|| {
+            let conventional = PathBuf::from(format!("/run/user/{uid}"));
+            conventional.is_dir().then_some(conventional)
+        })
         .unwrap_or_else(std::env::temp_dir);
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    let uid = unsafe { libc::geteuid() };
     base.join(format!("latticeterm-agent-{uid}"))
         .join(format!("{:016x}.sock", installation_hash(data_dir)))
 }
@@ -100,6 +135,41 @@ impl DaemonPaths {
         }
     }
 
+    /// For a client: the socket the running daemon says it bound, when it
+    /// left a note, else the path this environment resolves to. The note
+    /// is only a pointer; the transport still checks that whatever it
+    /// points at is this user's private socket before connecting.
+    pub fn for_client(data_dir: &Path) -> Self {
+        let mut paths = Self::new(data_dir);
+        if let Some(noted) = read_socket_hint(data_dir) {
+            paths.socket = noted;
+        }
+        paths
+    }
+
+    fn socket_hint(&self) -> PathBuf {
+        self.data_dir.join(SOCKET_HINT_FILE)
+    }
+
+    /// Called by the daemon once it listens.
+    pub(crate) fn write_socket_hint(&self) {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        if let Ok(mut file) = options.open(self.socket_hint()) {
+            use std::io::Write;
+            let _ = file.write_all(self.socket.to_string_lossy().as_bytes());
+        }
+    }
+
+    pub(crate) fn remove_socket_hint(&self) {
+        let _ = std::fs::remove_file(self.socket_hint());
+    }
+
     /// Windows has no socket files; the pipe name is derived from the data
     /// directory so two installations (or two users) never share one.
     #[cfg(windows)]
@@ -109,6 +179,12 @@ impl DaemonPaths {
             installation_hash(&self.data_dir)
         )
     }
+}
+
+fn read_socket_hint(data_dir: &Path) -> Option<PathBuf> {
+    let noted = std::fs::read_to_string(data_dir.join(SOCKET_HINT_FILE)).ok()?;
+    let noted = PathBuf::from(noted.trim());
+    (noted.is_absolute() && noted.exists()).then_some(noted)
 }
 
 /// Reads the shared token, creating it owner-only on first use. The token is
@@ -178,6 +254,8 @@ pub enum Request {
     Hello {
         token: String,
         protocol: u32,
+        #[serde(default)]
+        role: ClientRole,
     },
     Launch {
         request: Box<AgentLaunchRequest>,
@@ -230,6 +308,21 @@ pub enum Request {
     AutomationsState,
     /// Finished background runs, handed over once.
     AutomationsTakeRuns,
+    /// The user shares (or stops sharing) one session with observers.
+    ShareSet {
+        session_id: String,
+        shared: bool,
+    },
+    /// Session ids currently shared with observers.
+    Shared,
+    /// A bounded slice of one shared session's output from `cursor` on.
+    Observe {
+        session_id: String,
+        #[serde(default)]
+        cursor: u64,
+        #[serde(default)]
+        max_bytes: usize,
+    },
 }
 
 /// What `Hello` answers with: everything a fresh window needs to attach.
@@ -239,6 +332,10 @@ pub struct HelloReply {
     pub protocol: u32,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,
     pub snapshots: Vec<crate::agent::AgentOutputSnapshot>,
+    /// Sessions the user shared with observers; empty for observers who
+    /// see only those anyway.
+    #[serde(default)]
+    pub shared: Vec<String>,
 }
 
 /// Desktop event name for a forwarded sink event.
@@ -283,6 +380,34 @@ mod wire_tests {
         }
         assert!(owns("agent-bg-session-3"));
         assert!(!owns("agent-session-3"));
+
+        // A greeting from before roles existed is a desktop greeting.
+        let old = r#"{"kind":"request","id":1,"body":{"type":"hello","token":"t","protocol":1}}"#;
+        match serde_json::from_str::<Frame>(old).unwrap() {
+            Frame::Request {
+                body: Request::Hello { role, .. },
+                ..
+            } => assert_eq!(role, ClientRole::Desktop),
+            other => panic!("unexpected frame {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_client_follows_the_daemon_s_socket_note_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = DaemonPaths::new(dir.path());
+        // Nothing noted: the environment's own resolution.
+        assert_eq!(DaemonPaths::for_client(dir.path()).socket, paths.socket);
+        // A note pointing at something that exists wins; a stale one is ignored.
+        let elsewhere = dir.path().join("elsewhere.sock");
+        std::fs::write(&elsewhere, b"").unwrap();
+        paths.socket = elsewhere.clone();
+        paths.write_socket_hint();
+        assert_eq!(DaemonPaths::for_client(dir.path()).socket, elsewhere);
+        std::fs::remove_file(&elsewhere).unwrap();
+        assert_ne!(DaemonPaths::for_client(dir.path()).socket, elsewhere);
+        paths.remove_socket_hint();
+        assert!(!dir.path().join(SOCKET_HINT_FILE).exists());
     }
 
     #[cfg(unix)]

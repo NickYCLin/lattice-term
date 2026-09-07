@@ -29,6 +29,7 @@ import { SharedAgentRulesPanel } from "../components/agents/SharedAgentRulesPane
 import { Callout } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { useAgentDaemon } from "../app/useAgentDaemon";
+import { claudeCodeCommand, codexToml, mcpServersJson } from "../app/agentMcpConfig";
 import {
   AgentIcon,
   ChevronDownIcon,
@@ -114,6 +115,14 @@ export function AgentsView({
   const [detached, setDetached] = useState(false);
   const daemon = useAgentDaemon(agents.sessions.length);
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
+  const [mcpNotice, setMcpNotice] = useState<string | null>(null);
+  const sharedWithMcp = useMemo(() => new Set(daemon.status.shared), [daemon.status.shared]);
+  const toggleMcpShare = (sessionId: string, shared: boolean) => {
+    setMcpNotice(null);
+    void daemon.share(sessionId, shared).catch((reason: unknown) => {
+      setMcpNotice(t("agents.mcp.error.share", { error: (reason instanceof Error ? reason.message : String(reason)) }));
+    });
+  };
   const [launching, setLaunching] = useState<string | null>(null);
   const [accountProfiles, setAccountProfiles] = useState<ChatAccountProfile[]>(() =>
     typeof localStorage === "undefined" ? [] : loadChatAccountProfiles(localStorage),
@@ -705,6 +714,57 @@ export function AgentsView({
               {t("agents.daemon.stop")}
             </button>
           </p>
+        )}
+        {daemon.status.mcp && (
+          <details className="agents-mcp">
+            <summary>
+              <strong>{t("agents.mcp.title")}</strong>
+              <span className="agents-field-hint">
+                {daemon.status.shared.length > 0
+                  ? t("agents.mcp.sharedCount", { count: daemon.status.shared.length })
+                  : t("agents.mcp.none")}
+              </span>
+            </summary>
+            <p className="agents-field-hint">{t("agents.mcp.hint")}</p>
+            {mcpNotice && (
+              <p className="agents-field-hint agents-mcp__error" role="alert">
+                {mcpNotice}
+              </p>
+            )}
+            <div className="agents-mcp__snippets">
+              {(
+                [
+                  ["agents.mcp.claude", claudeCodeCommand(daemon.status.mcp)],
+                  ["agents.mcp.codex", codexToml(daemon.status.mcp)],
+                  ["agents.mcp.json", mcpServersJson(daemon.status.mcp)],
+                ] as const
+              ).map(([labelKey, snippet]) => (
+                <div className="agents-mcp__snippet" key={labelKey}>
+                  <div className="agents-mcp__snippet-heading">
+                    <span className="field__label">{t(labelKey)}</span>
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => {
+                        setMcpNotice(null);
+                        void copyTextToClipboard(snippet).then(
+                          () => setMcpNotice(t("agents.mcp.copied")),
+                          (reason: unknown) =>
+                            setMcpNotice(
+                              t("agents.mcp.error.copy", { error: (reason instanceof Error ? reason.message : String(reason)) }),
+                            ),
+                        );
+                      }}
+                    >
+                      {t("agents.mcp.copy")}
+                    </button>
+                  </div>
+                  <pre className="agents-mcp__code mono">{snippet}</pre>
+                </div>
+              ))}
+            </div>
+            <p className="agents-field-hint">{t("agents.mcp.docs")}</p>
+          </details>
         )}
 
         <section className="agents-startup-instructions">
@@ -1364,8 +1424,31 @@ export function AgentsView({
                   aria-hidden="true"
                 />
                 <div className="agent-session-row__main">
-                  <strong>{session.label}</strong>
+                  <strong>
+                    {session.label}
+                    {session.detached && (
+                      <span className="agents-sandbox__badge">{t("agents.detached.badge")}</span>
+                    )}
+                    {sharedWithMcp.has(session.sessionId) && (
+                      <span className="agents-sandbox__badge">{t("agents.mcp.badge")}</span>
+                    )}
+                  </strong>
                   <span className="mono">{displayPath(session.workingDirectory)}</span>
+                  {session.detached && (
+                    <label className="checkbox agents-mcp__toggle">
+                      <input
+                        type="checkbox"
+                        checked={sharedWithMcp.has(session.sessionId)}
+                        onChange={(event) =>
+                          toggleMcpShare(session.sessionId, event.currentTarget.checked)
+                        }
+                      />
+                      <span className="checkbox__box" aria-hidden="true">
+                        ✓
+                      </span>
+                      <span>{t("agents.mcp.share")}</span>
+                    </label>
+                  )}
                   {session.tokenUsage && (
                     <span
                       className="agent-token-usage"

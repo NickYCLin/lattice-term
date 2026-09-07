@@ -17,6 +17,21 @@ import {
 import { I18nProvider } from "../i18n";
 import { AgentsView } from "./AgentsView";
 
+// The background service is a desktop-only backend; the render tests feed
+// it a status directly.
+const daemonStatus = vi.hoisted(() => ({
+  current: { running: false, sessions: 0, shared: [] as string[], mcp: null as null | { command: string; args: string[] } },
+}));
+vi.mock("../app/useAgentDaemon", () => ({
+  EMPTY_DAEMON_STATUS: { running: false, sessions: 0, shared: [], mcp: null },
+  useAgentDaemon: () => ({
+    status: daemonStatus.current,
+    refresh: vi.fn(),
+    stop: vi.fn(),
+    share: vi.fn(),
+  }),
+}));
+
 function render(
   agents = fakeAgentApi(),
   { sandboxAvailable = false } = {},
@@ -38,6 +53,33 @@ describe("AgentsView", () => {
   afterEach(() => {
     restoreStorage?.();
     restoreStorage = null;
+    daemonStatus.current = { running: false, sessions: 0, shared: [], mcp: null };
+  });
+
+  it("offers MCP sharing only for background sessions and shows the client snippets", () => {
+    daemonStatus.current = {
+      running: true,
+      sessions: 1,
+      shared: ["agent-bg-session-1"],
+      mcp: { command: "/opt/lattice-term", args: ["mcp", "--data-dir", "/data dir"] },
+    };
+    const markup = render(
+      fakeAgentApi({
+        sessions: [
+          fakeSession({ sessionId: "agent-bg-session-1", label: "Codex 背景", detached: true }),
+          fakeSession({ sessionId: "agent-session-2", label: "Codex 桌面" }),
+        ],
+      }),
+    );
+
+    expect(markup).toContain("背景服務執行中：1 個工作階段");
+    expect(markup).toContain("分享給外部 AI（MCP）");
+    expect(markup).toContain("已分享 1 個工作階段");
+    expect(markup).toContain("claude mcp add latticeterm -- /opt/lattice-term mcp --data-dir &#x27;/data dir&#x27;");
+    expect(markup).toContain("[mcp_servers.latticeterm]");
+    // One toggle: the desktop-owned session has no observer path.
+    expect(markup.match(/<span>分享給 MCP<\/span>/g)).toHaveLength(1);
+    expect(markup).toContain("checked=\"\"");
   });
 
   it("offers the account picker with the signed-in default and a named account", () => {

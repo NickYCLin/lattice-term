@@ -101,7 +101,9 @@ impl DaemonClient {
     fn daemon_present(&self) -> bool {
         #[cfg(unix)]
         {
-            self.paths.socket.exists()
+            DaemonPaths::for_client(&self.paths.data_dir)
+                .socket
+                .exists()
         }
         #[cfg(not(unix))]
         {
@@ -111,7 +113,7 @@ impl DaemonClient {
 
     async fn open(&self) -> Result<Arc<Connection>, String> {
         let token = read_or_create_token(&self.paths)?;
-        let stream = transport::connect(&self.paths)
+        let stream = transport::connect(&DaemonPaths::for_client(&self.paths.data_dir))
             .await
             .map_err(|error| format!("Cannot reach the background service: {error}"))?;
         let (read_half, mut write_half) = tokio::io::split(stream);
@@ -142,6 +144,7 @@ impl DaemonClient {
             .request(Request::Hello {
                 token,
                 protocol: PROTOCOL_VERSION,
+                role: super::ClientRole::Desktop,
             })
             .await?;
         let reply: HelloReply = serde_json::from_value(reply)

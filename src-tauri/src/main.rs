@@ -7,6 +7,9 @@ fn main() {
     {
         std::process::exit(code);
     }
+    if let Some(code) = latticeterm_lib::agent_daemon::mcp::run_cli(std::env::args_os().skip(1)) {
+        std::process::exit(code);
+    }
     if let Some(code) = latticeterm_lib::agent::run_reporter_cli(std::env::args_os().skip(1)) {
         std::process::exit(code);
     }

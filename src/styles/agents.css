@@ -947,3 +947,66 @@
     justify-self: start;
   }
 }
+
+.agents-mcp {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.agents-mcp > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.agents-mcp__snippets {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.agents-mcp__snippet {
+  min-width: 0;
+}
+
+.agents-mcp__snippet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.agents-mcp__code {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--text-2xs);
+  line-height: var(--leading);
+  white-space: pre;
+}
+
+.agents-mcp__error {
+  color: var(--danger);
+}
+
+.agents-mcp__toggle {
+  font-size: var(--text-2xs);
+}
+
+.agent-session-row__main strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
