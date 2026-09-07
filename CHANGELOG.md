@@ -4,6 +4,19 @@
 
 ---
 
+## [1.1.0](https://github.com/NickYCLin/lattice-term/compare/v1.0.3...v1.1.0) (2026-09-07)
+
+
+### 🚀 新增功能
+
+* **模型:** 合併帳號選單並隱藏單帳號名稱 ([e89cc74](https://github.com/NickYCLin/lattice-term/commit/e89cc74317fdf6f9a9fcc052f8d6f0015abfcdc1))
+
+
+### 🛠️ 問題修正
+
+* **帳號:** 保留工作階段身分並隔離對話交接 ([0c070a0](https://github.com/NickYCLin/lattice-term/commit/0c070a0366f3cc03ac77b808a8cb11b0be81d279))
+* **帳號:** 新增帳號自動開啟登入並移除資料夾選擇 ([e8f8abb](https://github.com/NickYCLin/lattice-term/commit/e8f8abb285290a35ee14d92ca491e47aa3e29c40))
+
 ## [1.0.3](https://github.com/NickYCLin/lattice-term/compare/v1.0.2...v1.0.3) (2026-09-06)
 
 
