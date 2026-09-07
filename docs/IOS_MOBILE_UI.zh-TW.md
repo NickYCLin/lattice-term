@@ -25,9 +25,17 @@ SSH 工作階段原本會自動打開 SFTP，檔案面板至少占用 `17rem`，
 | 新增連線 | 320px 表單可捲動，底部儲存可點擊，新增展示連線成功 |
 | 通道、遠端配對彈窗 | 小螢幕欄位不橫向溢出，內容可捲動 |
 | 保管庫 | 320px 時資料卡寬 272px，指紋與操作不需橫向尋找 |
-| 單元測試 | 新增可視視窗變更、縮放、旋轉、事件合併與清理測試；既有前端完整測試第一輪 650 項通過，後續修改另跑相關回歸 |
-| 型別與正式前端封裝 | 已通過；最後交付前重新核對修改後產物 |
-| iOS 軟體鍵盤 | 獨立 WebKit 模擬器測試準備中，尚未列為通過 |
+| 單元測試 | 新增可視視窗變更、縮放、旋轉、事件合併與清理測試；交付 commit 的 CI 完整前端測試為 102 個檔案、651 項通過 |
+| 型別與正式前端封裝 | 本機及 CI 通過；本機缺少 npm 執行檔，使用 Node 直接執行同一份 TypeScript、Vitest、Vite CLI。前端入口 329.75 KiB，低於 500 KiB 限制 |
+| 一般 CI | Rust 格式、測試及 lint 通過；真實 OpenSSH subsystem 的 8 項 SFTP 整合測試通過，與前端展示資料測試分開計算 |
+| iOS Release CI | 模擬器 App、實機 archive、SDK 與隱私內容檢查已通過；本次 iPhone／iPad 啟動檢查仍在執行，尚未列為通過。[工作紀錄](https://github.com/NickYCLin/lattice-term/actions/runs/34129765046) |
+| iOS 軟體鍵盤 | 獨立 WebKit／XCUITest 在本機 iOS 18.6 模擬器啟動期間逾時，未完成鍵盤輸入斷言；當時系統負載很高，已停止該次模擬器。這不是已通過的實機或 Release 驗證 |
 | 使用者 iPhone 上的修正版 | 尚未安裝；目前手機仍為已上傳的 `1.0.0（2）` |
 
-目前僅為原始碼與本機前端修正。新簽章 IPA、上傳、TestFlight 可用性和重新送審各自需要確認，不能因 Git 推送或本機測試成功而宣稱已發布到手機。
+## 交付進度
+
+修正已推送至 `b24dce1de2eeba864a358b919d4c218a649c8251`。[一般 CI](https://github.com/NickYCLin/lattice-term/actions/runs/34129764944) 已通過；[簽章工作](https://github.com/NickYCLin/lattice-term/actions/runs/34129922242) 已產出 `2.0.0（3）`，版本沿用目前主線的 `2.0.0`。建置前已查 App Store Connect，尚無此版本或建置號，未重複上傳 `1.0.0（2）`。
+
+新 IPA 已下載至未提交的 `output/ios-signed-build-3/`，並重新通過 SHA-256、來源 commit、App Store 描述檔、簽章／憑證配對、禁止除錯、iOS 26.2 SDK 與隱私 C API 匯入類別檢查。這些檢查不替代 Xcode Privacy Report 或實際用途審查。IPA SHA-256：`7f81ce30e4b56dfc03ec749ebb095d0f66aebf7719087b3ac1ac099a54172102`。
+
+目前狀態是 **IPA 已準備，尚未上傳 Apple、尚未提供新版 TestFlight、尚未重新送審**。上傳需要 Apple 帳號授權，App Store Connect 的網頁登入與二進位上傳授權分開處理。使用者 iPhone 16 的 TestFlight 裝置資訊顯示 iOS 26.6.1；新版尚未安裝到該裝置，實機軟體鍵盤及審核影片仍待完成。
