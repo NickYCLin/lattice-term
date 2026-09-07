@@ -30,21 +30,23 @@ import {
 import type { AgentChatApi } from "../app/useAgentChat";
 import type { AgentAutomationsApi } from "../app/useAgentAutomations";
 import { AutomationPane, describeSchedule } from "../components/chat/AutomationPane";
-import type { AgentApi } from "../app/useAgentSessions";
+import type { AgentApi, AgentDefinition } from "../app/useAgentSessions";
 import { displayPath } from "../app/displayPath";
 import {
-  loadChatAccountProfiles,
   profileCapable,
   profilesFor,
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
-import { accountProfileOptionKey, useAccountProfileStatus } from "../app/useAccountProfileStatus";
+import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
+import { accountModelKey, accountModelOptions, accountModelTargets, hasChatModels } from "../app/accountModels";
+import { useAccountModels } from "../app/useAccountModels";
+import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
-import { ModelField } from "../components/chat/ModelField";
+import { AccountModelField } from "../components/agents/AccountModelField";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import {
   ChatIcon,
@@ -114,9 +116,7 @@ export function ChatView({
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [accountProfiles] = useState<ChatAccountProfile[]>(() =>
-    typeof localStorage === "undefined" ? [] : loadChatAccountProfiles(localStorage),
-  );
+  const accountProfiles = useChatAccountProfiles();
 
   const cliLabel = (id: ChatDefinitionId) =>
     agents.catalog.find((definition) => definition.id === id)?.label ?? id;
@@ -140,7 +140,8 @@ export function ChatView({
         previous && permissionsFor(definitionId).includes(previous.permission)
           ? previous.permission
           : defaultPermission(definitionId),
-      model: "",
+      model: previous?.definitionId === definitionId ? previous.model : "",
+      accountProfileId: previous?.definitionId === definitionId ? previous.accountProfileId : null,
     });
   }
 
@@ -398,6 +399,7 @@ export function ChatView({
             thread={active}
             chat={chat}
             installed={installed}
+            definitions={agents.catalog.filter((definition) => chat.supported.some((id) => id === definition.id) && definition.installed)}
             cliLabel={cliLabel}
             tag={tag}
             accountProfiles={accountProfiles}
@@ -429,6 +431,7 @@ function ThreadPane({
   thread,
   chat,
   installed,
+  definitions,
   cliLabel,
   tag,
   accountProfiles,
@@ -437,6 +440,7 @@ function ThreadPane({
   thread: ChatThread;
   chat: AgentChatApi;
   installed: readonly ChatDefinitionId[];
+  definitions: readonly AgentDefinition[];
   cliLabel: (id: ChatDefinitionId) => string;
   tag: string;
   accountProfiles: readonly ChatAccountProfile[];
@@ -457,11 +461,19 @@ function ThreadPane({
   const cliInstalled = installed.includes(thread.definitionId);
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
-  const { statuses: profileStatuses } = useAccountProfileStatus(availableProfiles);
-  const activeProfileSignedOut =
-    activeProfile !== null && profileStatuses[activeProfile.id]?.state === "signedOut";
+  const { statuses: profileStatuses } = useAccountProfileStatus(accountProfiles);
+  const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"));
+  const accountModels = useAccountModels(modelTargets, settingsOpen);
+  const modelOptions = accountModelOptions(modelTargets, accountModels, {
+    defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
+  }, thread);
+  const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(thread));
+  const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
+  const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
     !running &&
+    !activeProfileMissing &&
+    !activeProfileSignedOut &&
     cliInstalled &&
     thread.workingDirectory !== "" &&
     (draft.trim() !== "" || attachments.length > 0);
@@ -611,14 +623,7 @@ function ThreadPane({
     }
   }
 
-  const modelLabel = (() => {
-    const list = chat.models[thread.definitionId];
-    if (list.state === "ready") {
-      const match = list.models.find((model) => model.value === thread.model);
-      if (match) return match.label;
-    }
-    return thread.model || t("chat.model.default");
-  })();
+  const modelLabel = selectedOption?.label ?? (activeProfileMissing ? t("accountModel.missing") : thread.model || t("chat.model.default"));
 
   return (
     <>
@@ -639,7 +644,7 @@ function ThreadPane({
                   aria-controls={`chat-settings-${thread.id}`}
                 >
                   <SettingsIcon />
-                  {assistant}
+                  {modelLabel}
                 </button>
                 <span className="chat-chip" title={thread.workingDirectory}>
                   <FolderIcon />
@@ -648,7 +653,6 @@ function ThreadPane({
                     : t("chat.directory.none")}
                 </span>
                 <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>
-                <span className="chat-chip">{modelLabel}</span>
               </div>
             </div>
           </div>
@@ -674,55 +678,18 @@ function ThreadPane({
         </div>
         {settingsOpen && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
-            <ModelField
-              definitionId={thread.definitionId}
-              definitionIds={installed.length > 0 ? installed : chat.supported}
-              cliLabel={cliLabel}
-              value={thread.model}
+            <AccountModelField
+              options={modelOptions}
+              value={thread}
               disabled={running}
-              title={!fresh ? t("chat.model.handoff") : undefined}
-              models={chat.models}
-              loadModels={chat.loadModels}
-              onChange={({ definitionId, model }) => {
-                if (definitionId !== thread.definitionId) {
-                  chat.handoffThread(thread.id, definitionId, model);
-                } else {
-                  // Every assistant takes a model per turn now; Codex too,
-                  // since its server accepts one on `turn/start`.
-                  chat.updateThread(thread.id, { model });
-                }
+              onChange={({ definitionId, accountProfileId, model }) => {
+                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model });
               }}
             />
-            {profileCapable(thread.definitionId) && (
-              <div className="field field--grow">
-                <span className="field__label">{t("chat.accountProfile")}</span>
-                <div className="chat-directory">
-                  <select
-                    className="select"
-                    value={activeProfile?.id ?? ""}
-                    disabled={running}
-                    title={!fresh ? t("chat.accountProfile.handoff") : undefined}
-                    onChange={(event) =>
-                      chat.handoffThreadAccount(thread.id, event.target.value || null)
-                    }
-                  >
-                    <option value="">{t("chat.accountProfile.default")}</option>
-                    {availableProfiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {t(accountProfileOptionKey(profileStatuses[profile.id]), {
-                          name: profile.name,
-                          label: profileStatuses[profile.id]?.label ?? "",
-                        })}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {activeProfileSignedOut && (
-                  <p className="field__hint chat-settings__warning" role="status">
-                    {t("chat.accountProfile.notSignedIn")}
-                  </p>
-                )}
-              </div>
+            {(activeProfileSignedOut || activeProfileMissing) && (
+              <p className="field__hint chat-settings__warning" role="status">
+                {t(activeProfileMissing ? "accountModel.missing" : "chat.accountProfile.notSignedIn")}
+              </p>
             )}
             <div className="field field--grow">
               <span className="field__label">{t("chat.directory")}</span>

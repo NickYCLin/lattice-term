@@ -17,6 +17,7 @@ export interface ChatAccountProfile {
 }
 
 export const CHAT_ACCOUNT_PROFILES_KEY = "latticeterm.chatAccountProfiles.v1";
+export const CHAT_ACCOUNT_PROFILES_CHANGED = "latticeterm:accounts-changed";
 const MAX_PROFILES = 24;
 const MAX_NAME_LENGTH = 64;
 
@@ -65,6 +66,7 @@ export function saveChatAccountProfiles(
   const valid = profiles.filter(isProfile).slice(0, MAX_PROFILES);
   if (valid.length === 0) storage.removeItem(CHAT_ACCOUNT_PROFILES_KEY);
   else storage.setItem(CHAT_ACCOUNT_PROFILES_KEY, JSON.stringify(valid));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(CHAT_ACCOUNT_PROFILES_CHANGED));
 }
 
 export function profilesFor(

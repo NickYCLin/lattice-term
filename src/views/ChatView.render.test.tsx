@@ -44,12 +44,13 @@ describe("ChatView", () => {
     expect(markup).toContain("新對話");
   });
 
-  it("shows a fresh thread's settings with the default account and never says CLI", () => {
+  it("hides the account name when only the default account exists", () => {
     const thread = fakeThread();
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
-    expect(markup).toContain("使用帳號");
-    expect(markup).toContain("目前登入的帳號（預設）");
+    expect(markup).not.toContain("使用帳號");
+    expect(markup).not.toContain("me@example.com");
+    expect(markup).toContain("OpenAI Codex · 預設");
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
     // The interface talks about assistants; the CLI is an implementation detail.
@@ -66,7 +67,15 @@ describe("ChatView", () => {
     const thread = fakeThread({ accountProfileId: "work" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
-    expect(markup).toContain("公司帳號（登入狀態未知）");
-    expect(markup).toContain('value="work"');
+    expect(markup).toContain("公司帳號 · OpenAI Codex");
+    expect(markup).toContain('value="[&quot;codex&quot;,&quot;work&quot;,&quot;&quot;]" selected');
+    expect(markup).not.toContain("使用帳號");
+  });
+
+  it("keeps a removed account visibly missing instead of selecting the default", () => {
+    const thread = fakeThread({ accountProfileId: "removed" });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(markup).toContain("原帳號已移除，請重新選擇模型");
+    expect(markup).toContain('disabled="" selected=""');
   });
 });

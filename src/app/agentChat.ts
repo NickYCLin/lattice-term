@@ -250,6 +250,7 @@ export function handoffThread(
   return {
     ...thread,
     definitionId,
+    accountProfileId: null,
     model: model.trim(),
     permission: permissionsFor(definitionId).includes(thread.permission)
       ? thread.permission
@@ -293,6 +294,19 @@ export function handoffThreadAccount(
     ),
     updatedAt: now,
   };
+}
+
+/** Apply the provider, account and model as one choice, never an intermediate identity. */
+export function selectThreadModel(
+  thread: ChatThread,
+  selection: { definitionId: ChatDefinitionId; accountProfileId: string | null; model: string },
+  now: number = Date.now(),
+): ChatThread {
+  if (thread.runningTurnId) return thread;
+  const next = selection.definitionId !== thread.definitionId
+    ? { ...handoffThread(thread, selection.definitionId, selection.model, now), accountProfileId: selection.accountProfileId }
+    : handoffThreadAccount(thread, selection.accountProfileId, now);
+  return { ...next, model: selection.model.trim(), updatedAt: now };
 }
 
 /** Wraps a handoff transcript so the target treats it as reference, not authority. */

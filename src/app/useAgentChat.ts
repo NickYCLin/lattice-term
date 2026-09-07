@@ -17,6 +17,7 @@ import {
   failTurn,
   handoffThreadAccount,
   handoffThread,
+  selectThreadModel,
   promptForTurn,
   loadStoredThreads,
   saveStoredThreads,
@@ -304,7 +305,17 @@ export function useAgentChat(): AgentChatApi {
 
   const update = useCallback((id: string, patch: Partial<ChatThreadSettings>) => {
     setThreads((current) =>
-      current.map((thread) => (thread.id === id ? { ...thread, ...patch } : thread)),
+      current.map((thread) => {
+        if (thread.id !== id || thread.runningTurnId) return thread;
+        const next = selectThreadModel(thread, {
+          definitionId: patch.definitionId ?? thread.definitionId,
+          accountProfileId: patch.accountProfileId === undefined
+            ? (patch.definitionId && patch.definitionId !== thread.definitionId ? null : thread.accountProfileId)
+            : patch.accountProfileId,
+          model: patch.model ?? thread.model,
+        });
+        return { ...next, workingDirectory: patch.workingDirectory ?? next.workingDirectory, permission: patch.permission ?? next.permission };
+      }),
     );
   }, []);
 

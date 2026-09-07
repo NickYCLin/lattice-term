@@ -17,6 +17,18 @@ import type {
   AgentSessionSummary,
 } from "../app/useAgentSessions";
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
+import {
+  accountModelKey,
+  accountModelLaunchSettings,
+  accountModelOptions,
+  accountModelTargets,
+  accountSessionLabel,
+  type AccountModelSelection,
+} from "../app/accountModels";
+import { useAccountModels } from "../app/useAccountModels";
+import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
+import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
+import { AccountModelField } from "../components/agents/AccountModelField";
 import { displayPath } from "../app/displayPath";
 import type { SshApi } from "../app/useSshSessions";
 import type { SftpApi } from "../app/useSftpSessions";
@@ -338,6 +350,7 @@ export function SessionsView({
     Record<string, string>
   >({});
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
+  const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
   const addCliButtonRef = useRef<HTMLButtonElement>(null);
   const [carryContext, setCarryContext] = useState(true);
@@ -369,7 +382,7 @@ export function SessionsView({
   const [newProjectDirectory, setNewProjectDirectory] = useState<string | null>(
     null,
   );
-  const [selectedProjectCliId, setSelectedProjectCliId] = useState<string | null>(
+  const [selectedProjectModel, setSelectedProjectModel] = useState<AccountModelSelection | null>(
     null,
   );
   const [choosingProject, setChoosingProject] = useState(false);
@@ -461,6 +474,22 @@ export function SessionsView({
   const installedAgents = displayAgentCatalog.filter(
     (definition) => definition.installed,
   );
+  const accountProfiles = useChatAccountProfiles();
+  const { statuses: accountStatuses } = useAccountProfileStatus(accountProfiles);
+  const modelTargets = accountModelTargets(installedAgents, accountProfiles, accountStatuses, t("accountModel.defaultAccount"));
+  const modelLists = useAccountModels(modelTargets, newProjectDirectory !== null || addCliFor !== null);
+  // A terminal may also be opened to log in, so signed-out accounts can launch
+  // their default CLI here. Chat mode keeps those accounts disabled.
+  const modelOptions = accountModelOptions(modelTargets, modelLists, {
+    defaultModel: t("terminal.model.pending"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
+  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined).map((option) => ({ ...option, disabled: false }));
+  const defaultModelSelection = (definitionId?: string): AccountModelSelection | null => {
+    const candidates = modelTargets.filter((target) => !definitionId || target.definitionId === definitionId);
+    const target = candidates.find((candidate) => !candidate.signedOut) ?? candidates[0];
+    return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" } : null;
+  };
+  const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"));
+  const projectModelAvailable = selectedProjectModel !== null && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedProjectModel));
 
   async function chooseProjectDirectory() {
     setChoosingProject(true);
@@ -473,7 +502,7 @@ export function SessionsView({
       });
       if (typeof selected === "string") {
         setNewProjectDirectory(selected);
-        setSelectedProjectCliId(installedAgents[0]?.id ?? null);
+        setSelectedProjectModel(defaultModelSelection());
       }
     } catch (reason) {
       setNewProjectError(reason instanceof Error ? reason.message : String(reason));
@@ -758,7 +787,7 @@ export function SessionsView({
   function closeNewProjectDialog() {
     if (launchingProjectCli) return;
     setNewProjectDirectory(null);
-    setSelectedProjectCliId(null);
+    setSelectedProjectModel(null);
     setNewProjectError(null);
   }
 
@@ -786,7 +815,7 @@ export function SessionsView({
 
   async function addCli(
     group: { groupId: string; members: AgentSessionSummary[] },
-    definition: AgentDefinition,
+    selection: AccountModelSelection,
     carryContext: boolean,
   ) {
     setAddCliFor(null);
@@ -828,10 +857,10 @@ export function SessionsView({
     }
     try {
       const session = await agents.launch({
-        definitionId: definition.id,
+        definitionId: selection.definitionId,
         label: "",
         executable: "",
-        arguments: [],
+        ...accountModelLaunchSettings(selection, accountProfiles),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -987,9 +1016,9 @@ export function SessionsView({
   ) : null;
 
   async function launchNewProject() {
-    if (!newProjectDirectory) return;
+    if (!newProjectDirectory || !selectedProjectModel || !projectModelAvailable || launchingProjectCli) return;
     const definition = installedAgents.find(
-      (candidate) => candidate.id === selectedProjectCliId,
+      (candidate) => candidate.id === selectedProjectModel.definitionId,
     );
     if (!definition) return;
     setLaunchingProjectCli(definition.id);
@@ -999,7 +1028,7 @@ export function SessionsView({
         definitionId: definition.id,
         label: "",
         executable: "",
-        arguments: [],
+        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles),
         resumeSessionId: null,
         groupId: null,
         seedInput: null,
@@ -1008,7 +1037,7 @@ export function SessionsView({
         rows: 32,
       });
       setNewProjectDirectory(null);
-      setSelectedProjectCliId(null);
+      setSelectedProjectModel(null);
       setPendingRevealSessionId(launched.sessionId);
       onSelect(launched.sessionId);
     } catch (reason) {
@@ -1048,29 +1077,13 @@ export function SessionsView({
               {displayPath(newProjectDirectory)}
             </p>
           </div>
-          <div>
-            <span className="field__label">{t("terminal.projects.cli")}</span>
-            <div className="project-launcher__cli-list">
-              {installedAgents.map((definition) => (
-                <button
-                  key={definition.id}
-                  type="button"
-                  className={`button button--ghost project-launcher__cli${
-                    selectedProjectCliId === definition.id ? " is-selected" : ""
-                  }`}
-                  aria-pressed={selectedProjectCliId === definition.id}
-                  disabled={launchingProjectCli !== null}
-                  onClick={() => setSelectedProjectCliId(definition.id)}
-                >
-                  <AgentIcon size={15} />
-                  <span>{definition.label}</span>
-                </button>
-              ))}
-              {installedAgents.length === 0 && (
-                <p className="dialog__body">{t("terminal.addCli.none")}</p>
-              )}
-            </div>
-          </div>
+          <AccountModelField
+            options={modelOptions}
+            value={selectedProjectModel}
+            disabled={launchingProjectCli !== null}
+            onChange={setSelectedProjectModel}
+          />
+          {installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
           {newProjectError && (
             <Callout tone="danger" title={t("terminal.projects.launchFailed")}>
               <span className="mono">{newProjectError}</span>
@@ -1089,7 +1102,7 @@ export function SessionsView({
             <button
               type="button"
               className="button button--primary"
-              disabled={launchingProjectCli !== null || !selectedProjectCliId}
+              disabled={launchingProjectCli !== null || !projectModelAvailable}
               onClick={() => void launchNewProject()}
             >
               {launchingProjectCli
@@ -1203,13 +1216,13 @@ export function SessionsView({
         ),
         sessionId: member.sessionId,
         label: session.hasCustomGroupLabel
-          ? `${session.label} · ${member.label}`
-          : member.label,
+          ? `${session.label} · ${sessionCliLabel(member)}`
+          : sessionCliLabel(member),
         detail: member.model ?? t("terminal.model.pending"),
         kind: "agent" as const,
         searchText: [
           session.label,
-          member.label,
+          sessionCliLabel(member),
           member.definitionId,
           member.model ?? "",
         ].join(" "),
@@ -1543,7 +1556,7 @@ export function SessionsView({
   function openSavedProject(workingDirectory: string) {
     setNewProjectError(null);
     setNewProjectDirectory(workingDirectory);
-    setSelectedProjectCliId(installedAgents[0]?.id ?? null);
+    setSelectedProjectModel(defaultModelSelection());
   }
 
   const projectSidebar = (
@@ -1727,20 +1740,9 @@ export function SessionsView({
   async function launchQuickChat(definition: AgentDefinition) {
     try {
       const home = homeDirectory ?? (await homeDir());
-      const launched = await agents.launch({
-        definitionId: definition.id,
-        label: "",
-        executable: "",
-        arguments: [],
-        resumeSessionId: null,
-        groupId: null,
-        seedInput: null,
-        workingDirectory: home,
-        cols: 120,
-        rows: 32,
-      });
-      setPendingRevealSessionId(launched.sessionId);
-      onSelect(launched.sessionId);
+      setNewProjectError(null);
+      setSelectedProjectModel(defaultModelSelection(definition.id));
+      setNewProjectDirectory(home);
     } catch {
       // A failed quick chat leaves the workspace untouched.
     }
@@ -2039,7 +2041,7 @@ export function SessionsView({
                         )}
                         <AgentIcon size={12} />
                         <span className="cli-switch__identity">
-                          <span className="truncate">{member.label}</span>
+                          <span className="truncate">{sessionCliLabel(member)}</span>
                           <span
                             className="cli-switch__model truncate"
                             title={
@@ -2099,6 +2101,7 @@ export function SessionsView({
                     }
                     onClick={(event) => {
                       addCliButtonRef.current = event.currentTarget;
+                      setSelectedAddModel(defaultModelSelection());
                       setAddCliFor((current) =>
                         current === group.groupId ? null : group.groupId,
                       );
@@ -2158,16 +2161,17 @@ export function SessionsView({
                             </span>
                           )}
                           <div className="cli-switch__menu-sep" />
-                          {installed.map((definition) => (
-                            <button
-                              key={definition.id}
-                              type="button"
-                              className="cli-switch__menu-item"
-                              onClick={() => void addCli(group, definition, carry)}
-                            >
-                              {definition.label}
-                            </button>
-                          ))}
+                          <AccountModelField
+                            options={modelOptions}
+                            value={selectedAddModel}
+                            onChange={setSelectedAddModel}
+                          />
+                          <button
+                            type="button"
+                            className="button button--primary button--sm"
+                            disabled={!selectedAddModel || !modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedAddModel))}
+                            onClick={() => selectedAddModel && void addCli(group, selectedAddModel, carry)}
+                          >{t("terminal.projects.launch")}</button>
                           {installed.length === 0 && (
                             <span className="cli-switch__menu-empty">
                               {t("terminal.addCli.none")}
