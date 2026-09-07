@@ -94,6 +94,8 @@ export interface AgentSessionSummary {
   /** User-facing tab name shared by every CLI in this group. */
   groupLabel: string;
   definitionId: string;
+  /** Local account root; never part of a portable workspace export. */
+  profileConfigPath?: string | null;
   /** CLI name; independent from the user-facing tab name. */
   label: string;
   /** Model announced by the CLI or explicitly supplied through --model. */
@@ -133,7 +135,7 @@ export interface AgentLaunchRequest {
   seedInput?: string | null;
   /** Relaunches saved work and must not inject the new-session instructions. */
   restoreExistingSession?: boolean;
-  /** Ephemeral local config root for a Codex/Claude account profile. */
+  /** Local config root for a Codex/Claude account profile. */
   profileConfigPath?: string | null;
   /** Confine writes to the working directory and the CLI's own state. */
   sandbox?: boolean;

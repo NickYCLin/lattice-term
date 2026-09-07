@@ -14,6 +14,8 @@ export interface SavedAgentSession {
   launchArguments: string[];
   workingDirectory: string;
   resumeSessionId: string | null;
+  /** Local-only account root. Portable exports must not include this field. */
+  profileConfigPath?: string;
   /** Relaunch inside the file-scope sandbox. */
   sandbox?: boolean;
 }
@@ -26,7 +28,7 @@ export interface SavedSshSession {
 export type SavedWorkspaceSession = SavedAgentSession | SavedSshSession;
 
 export type SavedActiveSession =
-  | { kind: "agent"; groupKey: string; definitionId: string }
+  | { kind: "agent"; groupKey: string; definitionId: string; profileConfigPath?: string }
   | { kind: "ssh"; profileId: string }
   | null;
 
@@ -106,6 +108,8 @@ export function sanitizeWorkspaceSessionSnapshot(
           : [null];
     const workingDirectory = safeText(entry.workingDirectory, 4096);
     const resumeSessionId = optionalResumeId(entry.resumeSessionId);
+    const profileConfigPath = entry.profileConfigPath == null ? null : safeText(entry.profileConfigPath, 4096);
+    if (entry.profileConfigPath != null && !profileConfigPath) return null;
     if (
       !groupKey ||
       !groupLabel ||
@@ -129,6 +133,7 @@ export function sanitizeWorkspaceSessionSnapshot(
       launchArguments: launchArguments as string[],
       workingDirectory,
       resumeSessionId,
+      ...(profileConfigPath ? { profileConfigPath } : {}),
       ...(entry.sandbox === true ? { sandbox: true } : {}),
     });
   }
@@ -150,7 +155,9 @@ export function sanitizeWorkspaceSessionSnapshot(
       const groupKey = safeText(candidate.groupKey, 256);
       const definitionId = safeText(candidate.definitionId, 64);
       if (!groupKey || !definitionId) return null;
-      active = { kind: "agent", groupKey, definitionId };
+      const profileConfigPath = candidate.profileConfigPath == null ? null : safeText(candidate.profileConfigPath, 4096);
+      if (candidate.profileConfigPath != null && !profileConfigPath) return null;
+      active = { kind: "agent", groupKey, definitionId, ...(profileConfigPath ? { profileConfigPath } : {}) };
     } else {
       return null;
     }
@@ -219,7 +226,8 @@ function boundedSnapshot(
       active.kind === "agent"
         ? session.kind === "agent" &&
           session.groupKey === active.groupKey &&
-          session.definitionId === active.definitionId
+          session.definitionId === active.definitionId &&
+          session.profileConfigPath === active.profileConfigPath
         : session.kind === "ssh" && session.profileId === active.profileId,
     )
       ? active
@@ -240,6 +248,7 @@ function sameSavedSession(
     right.kind === "agent" &&
     left.groupKey === right.groupKey &&
     left.definitionId === right.definitionId &&
+    left.profileConfigPath === right.profileConfigPath &&
     left.executable === right.executable &&
     left.workingDirectory === right.workingDirectory
   );
@@ -301,6 +310,7 @@ export function snapshotLiveWorkspaceSessions(
     launchArguments: session.launchArguments,
     workingDirectory: session.workingDirectory,
     resumeSessionId: session.capturedSessionId,
+    ...(session.profileConfigPath ? { profileConfigPath: session.profileConfigPath } : {}),
     ...(session.sandboxed ? { sandbox: true } : {}),
   }));
   const seenProfiles = new Set<string>();
@@ -316,6 +326,7 @@ export function snapshotLiveWorkspaceSessions(
         kind: "agent",
         groupKey: activeAgent.groupId || activeAgent.sessionId,
         definitionId: activeAgent.definitionId,
+        ...(activeAgent.profileConfigPath ? { profileConfigPath: activeAgent.profileConfigPath } : {}),
       }
     : activeSsh
       ? { kind: "ssh", profileId: activeSsh.profileId }

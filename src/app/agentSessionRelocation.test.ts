@@ -88,7 +88,7 @@ describe("Agent session folder relocation", () => {
 
   it("restarts the group in the new folder before closing the old sessions", async () => {
     const members = [
-      session(),
+      session({ profileConfigPath: "/profiles/b" }),
       session({
         sessionId: "agent-old-2",
         definitionId: "claude",
@@ -139,6 +139,7 @@ describe("Agent session folder relocation", () => {
         resumeSessionId: "native-session-1",
         seedInput: null,
         restoreExistingSession: true,
+        profileConfigPath: "/profiles/b",
         workingDirectory: "D:\\new",
       }),
     );

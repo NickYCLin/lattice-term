@@ -115,6 +115,7 @@ export async function relocateAgentSessionGroup({
         // A relocation continues existing work and must not repeat the
         // workspace's new-session instructions before a resumed conversation.
         restoreExistingSession: true,
+        profileConfigPath: session.profileConfigPath ?? null,
         workingDirectory,
         cols: 120,
         rows: 32,

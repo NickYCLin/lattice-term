@@ -44,6 +44,22 @@ function agent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace session persistence", () => {
+  it("preserves both accounts, the selected account, and a failed account restore", () => {
+    const a = agent({ profileConfigPath: "/profiles/a" });
+    const b = agent({ sessionId: "b", profileConfigPath: "/profiles/b", capturedSessionId: "native-b" });
+    const snapshot = snapshotLiveWorkspaceSessions([a, b], [], "b");
+    const target = storage();
+    saveWorkspaceSessionSnapshot(target, snapshot);
+    expect(loadWorkspaceSessionSnapshot(target)).toEqual(snapshot);
+    expect(snapshot.active).toMatchObject({ profileConfigPath: "/profiles/b" });
+    const live = snapshotLiveWorkspaceSessions([a], [], null);
+    const merged = preserveUnrestoredWorkspaceSessions(live, [snapshot.sessions[1]], snapshot.active);
+    expect(merged.sessions).toHaveLength(2);
+    expect(merged.active).toEqual(snapshot.active);
+    const damaged = { ...snapshot, sessions: [{ ...snapshot.sessions[1], profileConfigPath: "\u0000" }] };
+    expect(sanitizeWorkspaceSessionSnapshot(damaged)).toBeNull();
+  });
+
   it("stores only restorable agent metadata and SSH profile IDs", () => {
     const snapshot = snapshotLiveWorkspaceSessions(
       [agent()],

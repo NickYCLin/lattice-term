@@ -886,11 +886,13 @@ async fn agent_export_transcript(
     // connections, or UI actions wait behind a handoff.
     let working_directory = summary.working_directory;
     let captured_session_id = summary.captured_session_id;
+    let profile_config_path = summary.profile_config_path;
     tauri::async_runtime::spawn_blocking(move || {
         crate::transcript::export(
             kind,
             &working_directory,
             captured_session_id.as_deref(),
+            profile_config_path.as_deref().map(std::path::Path::new),
             MAX_HANDOFF_CHARS,
         )
     })

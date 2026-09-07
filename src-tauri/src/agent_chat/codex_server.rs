@@ -11,7 +11,7 @@
 //! the permission mode: the mode only decides what Codex asks about.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -74,6 +74,7 @@ struct ServerState {
 
 pub(super) struct CodexServer {
     thread_id: String,
+    profile_config_directory: Option<PathBuf>,
     child: Mutex<Option<Child>>,
     stdin: SharedStdin,
     state: Mutex<ServerState>,
@@ -285,6 +286,17 @@ pub(super) struct TurnRequest<'a> {
     pub executable: &'a Path,
 }
 
+fn same_server_identity(
+    current_profile: Option<&Path>,
+    current_native_id: Option<&str>,
+    requested_profile: Option<&Path>,
+    requested_native_id: Option<&str>,
+) -> bool {
+    current_profile == requested_profile
+        && requested_native_id.is_some_and(|id| !id.is_empty())
+        && current_native_id == requested_native_id
+}
+
 /// Runs one turn on the thread's server, starting the server first when
 /// there is none. Returns once the request is on its way; everything else
 /// arrives through the sink.
@@ -302,6 +314,15 @@ pub(super) async fn send_turn<S: ChatSink>(
                 None
             } else if state.active.is_some() || state.queued.is_some() {
                 return Err("This conversation is still answering.".to_string());
+            } else if !same_server_identity(
+                server.profile_config_directory.as_deref(),
+                state.codex_thread_id.as_deref(),
+                request.profile_config_directory,
+                request.native_session_id,
+            ) {
+                // An account/provider handoff resets the native id. A live
+                // process from the old account must never answer that turn.
+                None
             } else {
                 let codex_thread_id = state
                     .codex_thread_id
@@ -395,6 +416,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.working_directory,
     );
     let server = Arc::new(CodexServer {
+        profile_config_directory: request.profile_config_directory.map(Path::to_path_buf),
         thread_id: request.thread_id.to_string(),
         child: Mutex::new(Some(child)),
         stdin: Arc::new(tokio::sync::Mutex::new(stdin)),
@@ -968,7 +990,7 @@ mod tests {
         run_turn(
             "t2",
             "Reply with exactly the word AGAIN and nothing else.",
-            None,
+            native.as_deref(),
         );
         let (error, native2, text) = wait_finished("t2");
         assert_eq!(error, None, "second turn failed");
@@ -986,11 +1008,55 @@ mod tests {
         assert!(servers.close("e2e-codex"));
     }
 
+    #[test]
+    fn account_or_native_conversation_changes_cannot_reuse_a_server() {
+        let a = Some(Path::new("/profiles/a"));
+        let b = Some(Path::new("/profiles/b"));
+        assert!(same_server_identity(
+            a,
+            Some("native-a"),
+            a,
+            Some("native-a")
+        ));
+        assert!(!same_server_identity(
+            a,
+            Some("native-a"),
+            b,
+            Some("native-a")
+        ));
+        assert!(!same_server_identity(
+            a,
+            Some("native-a"),
+            None,
+            Some("native-a")
+        ));
+        assert!(!same_server_identity(
+            None,
+            Some("native-a"),
+            a,
+            Some("native-a")
+        ));
+        assert!(!same_server_identity(a, Some("native-a"), a, None));
+        assert!(!same_server_identity(
+            a,
+            Some("native-a"),
+            a,
+            Some("native-b")
+        ));
+        assert!(same_server_identity(
+            None,
+            Some("native-a"),
+            None,
+            Some("native-a")
+        ));
+    }
+
     fn server_with(state: ServerState) -> CodexServer {
         // A stdin nobody reads is fine for the parser: tests never write.
         let (_, child_stdin) = fake_stdin();
         CodexServer {
             thread_id: "thread-1".into(),
+            profile_config_directory: None,
             child: Mutex::new(None),
             stdin: Arc::new(tokio::sync::Mutex::new(child_stdin)),
             state: Mutex::new(state),

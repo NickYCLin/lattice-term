@@ -26,6 +26,7 @@ function session(): AgentSessionSummary {
     tokenUsage: null,
     queuedPrompts: 0,
     capturedSessionId: "local-conversation-id",
+    profileConfigPath: "/local-only/account-b",
   };
 }
 
@@ -61,6 +62,8 @@ describe("workspace transfer", () => {
     expect(parsed?.sidebar).toEqual(layout);
     expect(encoded).not.toContain("local-conversation-id");
     expect(encoded).not.toContain("processId");
+    expect(encoded).not.toContain("profileConfigPath");
+    expect(encoded).not.toContain("/local-only/account-b");
   });
 
   it("rejects malformed files and unsafe nested values", () => {

@@ -948,19 +948,41 @@ pub fn export(
     kind: TranscriptKind,
     working_directory: &str,
     captured_session_id: Option<&str>,
+    profile_directory: Option<&Path>,
     max_chars: usize,
 ) -> Option<String> {
+    // A missing or malformed account root must not fall back to somebody
+    // else's default history, including when no native id was captured yet.
+    if let Some(profile) = profile_directory {
+        if !profile.is_absolute() || !profile.is_dir() {
+            return None;
+        }
+    }
     match kind {
         TranscriptKind::Antigravity => {
             let path = locate_antigravity(captured_session_id)?;
             parse_antigravity(&path, max_chars)
         }
         TranscriptKind::Claude => {
-            let path = locate_claude(working_directory, captured_session_id)?;
+            let path = match profile_directory {
+                Some(profile) => locate_claude_in(
+                    &profile.join("projects"),
+                    working_directory,
+                    captured_session_id,
+                ),
+                None => locate_claude(working_directory, captured_session_id),
+            }?;
             parse_claude(&path, max_chars)
         }
         TranscriptKind::Codex => {
-            let path = locate_codex(working_directory, captured_session_id)?;
+            let path = match profile_directory {
+                Some(profile) => locate_codex_in(
+                    &profile.join("sessions"),
+                    working_directory,
+                    captured_session_id,
+                ),
+                None => locate_codex(working_directory, captured_session_id),
+            }?;
             parse_codex(&path, max_chars)
         }
         TranscriptKind::Gemini => {
@@ -1119,6 +1141,52 @@ mod tests {
         ];
         fs::write(path, rows.join("\n")).unwrap();
         set_modified(path, modified);
+    }
+
+    #[test]
+    fn account_profile_exports_never_cross_into_another_accounts_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path();
+        let a = directory.path().join("account-a");
+        let b = directory.path().join("account-b");
+        for (root, id, modified) in [(&a, "session-a", 20), (&b, "session-b", 10)] {
+            write_codex_rollout(
+                &root.join("sessions").join(format!("rollout-{id}.jsonl")),
+                id,
+                cwd,
+                serde_json::json!("cli"),
+                "codex_cli_rs",
+                modified,
+            );
+            write_claude_session(
+                &root.join("projects").join(format!("{id}.jsonl")),
+                id,
+                cwd,
+                false,
+                modified,
+            );
+        }
+        for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
+            let text = export(kind, cwd.to_str().unwrap(), None, Some(&b), 5000).unwrap();
+            assert!(text.contains("session-b"));
+            assert!(!text.contains("session-a"));
+            assert!(export(
+                kind,
+                cwd.to_str().unwrap(),
+                Some("session-a"),
+                Some(&b),
+                5000
+            )
+            .is_none());
+            assert!(export(
+                kind,
+                cwd.to_str().unwrap(),
+                None,
+                Some(&directory.path().join("missing")),
+                5000
+            )
+            .is_none());
+        }
     }
 
     fn write_claude_session(path: &Path, id: &str, cwd: &Path, is_sidechain: bool, modified: u64) {

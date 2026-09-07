@@ -428,6 +428,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 groupId: saved.groupKey,
                 seedInput: null,
                 restoreExistingSession: true,
+                profileConfigPath: saved.profileConfigPath ?? null,
                 sandbox: saved.sandbox === true,
                 workingDirectory: saved.workingDirectory,
                 cols: 120,
@@ -449,6 +450,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     groupId: saved.groupKey,
                     seedInput: null,
                     restoreExistingSession: false,
+                    profileConfigPath: saved.profileConfigPath ?? null,
                     sandbox: saved.sandbox === true,
                     workingDirectory: saved.workingDirectory,
                     cols: 120,
@@ -540,7 +542,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           const matching = restoredAgents.filter(
             (session) =>
               session.groupId === savedActive.groupKey &&
-              session.definitionId === savedActive.definitionId,
+              session.definitionId === savedActive.definitionId &&
+              (session.profileConfigPath ?? null) === (savedActive.profileConfigPath ?? null),
           );
           const match =
             matching.find((session) => !session.closedReason) ?? matching[0];

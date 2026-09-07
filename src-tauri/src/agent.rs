@@ -317,6 +317,9 @@ pub struct AgentSessionSummary {
     /// User-facing tab name shared by every CLI in the same group.
     pub group_label: String,
     pub definition_id: String,
+    /// Local-only account identity, also needed when restoring this process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_config_path: Option<String>,
     /// CLI name. This stays independent from the user-facing tab name.
     pub label: String,
     /// Model announced by the CLI or explicitly supplied through `--model`.
@@ -5578,8 +5581,13 @@ pub fn launch_with_replay(
         resolve_launch(&request)?;
     let profile_config_path =
         profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
-    let launch_model =
-        model_from_arguments(&arguments).or_else(|| configured_agent_model(&definition_id));
+    let launch_model = model_from_arguments(&arguments).or_else(|| {
+        // The default login's configured model says nothing about a profile.
+        profile_config_path
+            .is_none()
+            .then(|| configured_agent_model(&definition_id))
+            .flatten()
+    });
     let session_id = registry.next_id()?;
     let reporter = registry.reporter.clone();
     let report_token = reporter
@@ -5811,6 +5819,9 @@ pub fn launch_with_replay(
         model: launch_model,
         executable: executable.display().to_string(),
         launch_arguments,
+        profile_config_path: profile_config_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
         restore_existing_session: request.restore_existing_session,
         working_directory: working_directory.display().to_string(),
         // Opening a CLI only creates an interactive prompt; it does not mean
@@ -9125,6 +9136,9 @@ notify = ["notify.exe", "turn-ended"]"#,
             group_id: Some("restored-project".to_string()),
             seed_input: None,
             restore_existing_session: true,
+            profile_config_path: None,
+            sandbox: false,
+            detached: false,
             working_directory: std::env::current_dir().unwrap().display().to_string(),
             cols: 80,
             rows: 24,
