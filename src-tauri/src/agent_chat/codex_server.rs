@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::Child;
+use tokio::sync::oneshot;
 
 use super::{
     apply_profile_environment, bounded_output, codex_approval_line, codex_request_id,
@@ -61,6 +62,11 @@ struct QueuedTurn {
     params: Value,
 }
 
+struct PendingSteer {
+    codex_turn_id: String,
+    reply: oneshot::Sender<Result<(), String>>,
+}
+
 struct ServerState {
     codex_thread_id: Option<String>,
     thread_ready: bool,
@@ -69,6 +75,7 @@ struct ServerState {
     queued: Option<QueuedTurn>,
     next_rpc: u64,
     pending_rpc: HashMap<u64, RpcPurpose>,
+    pending_steers: HashMap<u64, PendingSteer>,
     last_activity: Instant,
     exited: bool,
 }
@@ -95,6 +102,12 @@ impl CodexServer {
                 let _ = kill_turn(child);
             }
         }
+    }
+
+    fn mark_exited(&self) {
+        let mut state = self.state();
+        state.exited = true;
+        state.pending_steers.clear();
     }
 
     async fn write_line(&self, line: &str) -> Result<(), String> {
@@ -136,7 +149,7 @@ impl CodexServers {
         let server = self.lock().remove(thread_id);
         match server {
             Some(server) => {
-                server.state().exited = true;
+                server.mark_exited();
                 server.kill();
                 true
             }
@@ -147,7 +160,7 @@ impl CodexServers {
     pub(super) fn shutdown(&self) {
         let servers: Vec<Arc<CodexServer>> = self.lock().drain().map(|(_, s)| s).collect();
         for server in servers {
-            server.state().exited = true;
+            server.mark_exited();
             server.kill();
         }
     }
@@ -162,6 +175,7 @@ impl CodexServers {
                 let state = server.state();
                 state.active.is_none()
                     && state.queued.is_none()
+                    && state.pending_steers.is_empty()
                     && now.duration_since(state.last_activity) > IDLE_TIMEOUT
             })
             .map(|(id, _)| id.clone())
@@ -203,13 +217,7 @@ pub(super) fn turn_params(
     model: Option<&str>,
     working_directory: &Path,
 ) -> Value {
-    let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
-    for attachment in attachments.iter().filter(|attachment| attachment.is_image) {
-        input.push(serde_json::json!({
-            "type": "localImage",
-            "path": attachment.path.display().to_string(),
-        }));
-    }
+    let input = turn_input(prompt, attachments);
     let (approval_policy, sandbox_policy) = turn_policies(permission);
     let mut params = serde_json::json!({
         "threadId": codex_thread_id,
@@ -222,6 +230,109 @@ pub(super) fn turn_params(
         params["model"] = Value::String(model.to_string());
     }
     params
+}
+
+fn turn_input(prompt: &str, attachments: &[ChatAttachment]) -> Vec<Value> {
+    let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    for attachment in attachments.iter().filter(|attachment| attachment.is_image) {
+        input.push(serde_json::json!({
+            "type": "localImage",
+            "path": attachment.path.display().to_string(),
+        }));
+    }
+    input
+}
+
+fn prepare_steer(
+    state: &mut ServerState,
+    expected_turn_id: &str,
+    prompt: &str,
+    attachments: &[ChatAttachment],
+    reply: oneshot::Sender<Result<(), String>>,
+) -> Result<(u64, String), String> {
+    if state.exited || !state.thread_ready {
+        return Err("The Codex session is not ready. Keep this message queued instead.".into());
+    }
+    if !state.pending_steers.is_empty() {
+        return Err("Another instruction is still awaiting confirmation.".into());
+    }
+    let turn = state
+        .active
+        .as_ref()
+        .filter(|turn| turn.turn_id == expected_turn_id)
+        .ok_or("That turn has ended. Keep this message queued instead.")?;
+    let native_turn = turn
+        .codex_turn_id
+        .as_ref()
+        .ok_or("Codex has not started this turn yet. Keep this message queued instead.")?;
+    let native_thread = state
+        .codex_thread_id
+        .as_ref()
+        .ok_or("The Codex thread is not ready.")?;
+    let id = state.next_rpc;
+    let line = rpc_line(
+        id,
+        "turn/steer",
+        serde_json::json!({
+            "threadId": native_thread, "expectedTurnId": native_turn,
+            "input": turn_input(prompt, attachments),
+        }),
+    );
+    state.next_rpc += 1;
+    state.pending_steers.insert(
+        id,
+        PendingSteer {
+            codex_turn_id: native_turn.clone(),
+            reply,
+        },
+    );
+    state.last_activity = Instant::now();
+    Ok((id, line))
+}
+
+pub(super) async fn steer(
+    servers: &CodexServers,
+    thread_id: &str,
+    expected_turn_id: &str,
+    prompt: &str,
+    attachments: &[ChatAttachment],
+) -> Result<(), String> {
+    let server = servers
+        .get(thread_id)
+        .ok_or("No Codex turn is running in this chat.")?;
+    let (reply, accepted) = oneshot::channel();
+    let (id, line) = prepare_steer(
+        &mut server.state(),
+        expected_turn_id,
+        prompt,
+        attachments,
+        reply,
+    )?;
+    // Never silently retry: a transport failure may follow an accepted write.
+    let written = tokio::time::timeout(Duration::from_secs(10), server.write_line(&line))
+        .await
+        .unwrap_or_else(|_| Err("The Codex input channel stopped responding.".into()));
+    if let Err(error) = written {
+        // A cancelled or failed write may leave half a JSON line on stdin.
+        // End this server before another request can use that stream.
+        server.mark_exited();
+        server.kill();
+        return Err(error);
+    }
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
+        accepted.await.map_err(|_| {
+            "The Codex session closed before confirming the instruction.".to_string()
+        })?
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(
+            "Codex did not confirm receipt in time. Check the conversation before sending again."
+                .into(),
+        )
+    });
+    server.state().pending_steers.remove(&id);
+    result
 }
 
 fn rpc_line(id: u64, method: &str, params: Value) -> String {
@@ -445,6 +556,7 @@ pub(super) async fn send_turn<S: ChatSink>(
             }),
             next_rpc: RPC_THREAD_OPEN + 1,
             pending_rpc: HashMap::from([(RPC_THREAD_OPEN, RpcPurpose::ThreadOpen)]),
+            pending_steers: HashMap::new(),
             last_activity: Instant::now(),
             exited: false,
         }),
@@ -490,6 +602,7 @@ pub(super) async fn send_turn<S: ChatSink>(
             let mut state = reader_server.state();
             state.exited = true;
             state.queued = None;
+            state.pending_steers.clear();
             let codex_thread_id = state.codex_thread_id.clone();
             state.active.take().map(|turn| (turn, codex_thread_id))
         };
@@ -579,6 +692,20 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
         let Some(rpc_id) = id.and_then(Value::as_u64) else {
             return out;
         };
+        if let Some(pending) = state.pending_steers.remove(&rpc_id) {
+            let result = if let Some(error) = value.get("error") {
+                Err(truncate(
+                    str_field(error, "message").unwrap_or("Codex refused the instruction."),
+                    2048,
+                ))
+            } else if value["result"]["turnId"].as_str() == Some(pending.codex_turn_id.as_str()) {
+                Ok(())
+            } else {
+                Err("Codex did not confirm the expected turn. Check the conversation before sending again.".into())
+            };
+            let _ = pending.reply.send(result);
+            return out;
+        }
         let Some(purpose) = state.pending_rpc.remove(&rpc_id) else {
             return out;
         };
@@ -1355,6 +1482,7 @@ mod tests {
             }),
             next_rpc: RPC_THREAD_OPEN + 1,
             pending_rpc: HashMap::from([(RPC_THREAD_OPEN, RpcPurpose::ThreadOpen)]),
+            pending_steers: HashMap::new(),
             last_activity: Instant::now(),
             exited: false,
         }
@@ -1362,6 +1490,128 @@ mod tests {
 
     fn feed(server: &CodexServer, line: &str) -> LineOutcome {
         handle_line(server, &serde_json::from_str(line).unwrap())
+    }
+
+    fn steer_ready_state() -> ServerState {
+        let mut state = fresh_state("lattice-turn");
+        state.thread_ready = true;
+        state.codex_thread_id = Some("native-thread".into());
+        state.active.as_mut().unwrap().codex_turn_id = Some("native-turn".into());
+        state.queued = None;
+        state.pending_rpc.clear();
+        state
+    }
+
+    #[test]
+    fn steering_rejects_stale_starting_and_finished_turns_before_writing() {
+        for kind in ["stale", "starting", "finished", "exited", "unready"] {
+            let mut state = steer_ready_state();
+            match kind {
+                "starting" => state.active.as_mut().unwrap().codex_turn_id = None,
+                "finished" => state.active = None,
+                "exited" => state.exited = true,
+                "unready" => state.thread_ready = false,
+                _ => {}
+            }
+            let expected = if kind == "stale" {
+                "other-turn"
+            } else {
+                "lattice-turn"
+            };
+            let (tx, _) = oneshot::channel();
+            let id = state.next_rpc;
+            assert!(
+                prepare_steer(&mut state, expected, "extra", &[], tx).is_err(),
+                "{kind}"
+            );
+            assert_eq!(state.next_rpc, id);
+            assert!(state.pending_steers.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn steering_waits_for_matching_receipt_without_overriding_turn_settings() {
+        let server = server_with(steer_ready_state());
+        let (tx, mut rx) = oneshot::channel();
+        let attachments = [ChatAttachment {
+            path: PathBuf::from("/fixture/image.png"),
+            is_image: true,
+        }];
+        let (id, line) = prepare_steer(
+            &mut server.state(),
+            "lattice-turn",
+            "extra",
+            &attachments,
+            tx,
+        )
+        .unwrap();
+        let request: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(request["method"], "turn/steer");
+        assert_eq!(
+            request["params"],
+            serde_json::json!({
+                "threadId":"native-thread", "expectedTurnId":"native-turn",
+                "input":[{"type":"text","text":"extra"},{"type":"localImage","path":attachments[0].path.display().to_string()}]
+            })
+        );
+        assert!(matches!(
+            rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        let (other, _) = oneshot::channel();
+        assert!(
+            prepare_steer(&mut server.state(), "lattice-turn", "duplicate", &[], other).is_err()
+        );
+
+        // Completion may reach the client before the steering receipt.
+        let completed = feed(
+            &server,
+            r#"{"method":"turn/completed","params":{"turn":{"id":"native-turn","status":"completed"}}}"#,
+        );
+        assert_eq!(completed.events.len(), 1);
+        let receipt = handle_line(
+            &server,
+            &serde_json::json!({"id":id,"result":{"turnId":"native-turn"}}),
+        );
+        assert!(receipt.events.is_empty());
+        assert!(receipt.writes.is_empty());
+        assert_eq!(rx.await.unwrap(), Ok(()));
+        assert!(server.state().active.is_none());
+        assert!(server.state().pending_steers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejected_or_malformed_steering_does_not_end_the_active_turn() {
+        for response in [
+            serde_json::json!({"error":{"code":-32601,"message":"unsupported"}}),
+            serde_json::json!({"result":{"turnId":"different-turn"}}),
+            serde_json::json!({"result":{}}),
+        ] {
+            let server = server_with(steer_ready_state());
+            let (tx, rx) = oneshot::channel();
+            let (id, _) =
+                prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], tx).unwrap();
+            let mut response = response;
+            response["id"] = Value::from(id);
+            let out = handle_line(&server, &response);
+            assert!(out.events.is_empty());
+            assert!(rx.await.unwrap().is_err());
+            assert_eq!(
+                server.state().active.as_ref().unwrap().turn_id,
+                "lattice-turn"
+            );
+            assert!(server.state().pending_steers.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn closing_a_server_releases_pending_steering_receipts() {
+        let server = server_with(steer_ready_state());
+        let (tx, rx) = oneshot::channel();
+        prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], tx).unwrap();
+        server.mark_exited();
+        assert!(rx.await.is_err());
+        assert!(server.state().pending_steers.is_empty());
     }
 
     #[tokio::test]

@@ -408,6 +408,28 @@ export function beginTurn(
   };
 }
 
+/** A steering instruction appears only after the CLI acknowledges it. */
+export function appendSteeredInput(
+  thread: ChatThread,
+  turnId: string,
+  inputId: string,
+  prompt: string,
+  attachments: readonly ChatAttachment[],
+  now: number,
+): ChatThread {
+  const id = `${turnId}:steer:${inputId}`;
+  if (thread.items.some(item => item.id === id)) return thread;
+  // The completion event can overtake the RPC acknowledgement. Keep the
+  // accepted input with its original turn, ahead of any queued follow-up.
+  const end = thread.items.findIndex(item => item.id === `${turnId}:end`);
+  const items = [...thread.items];
+  items.splice(end < 0 ? items.length : end, 0, {
+    type: "user", id, text: prompt, at: now,
+    ...(attachments.length ? { attachments: [...attachments] } : {}),
+  });
+  return { ...thread, items, updatedAt: Math.max(thread.updatedAt, now) };
+}
+
 /** A turn that never started, or ended without the backend's say-so. */
 export function failTurn(
   thread: ChatThread,

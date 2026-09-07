@@ -656,6 +656,15 @@ async fn agent_chat_send(
     .await
 }
 
+/// Adds an instruction to the specified active Codex turn.
+#[tauri::command]
+async fn agent_chat_steer(
+    request: crate::agent_chat::ChatSteerRequest,
+    registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
+) -> Result<(), String> {
+    crate::agent_chat::steer(Arc::clone(registry.inner()), request).await
+}
+
 /// Stops the turn running on a thread, if any.
 #[tauri::command]
 fn agent_chat_stop(
@@ -2816,6 +2825,7 @@ pub fn run() {
             agent_account_profile_status,
             agent_account_profile_remove,
             agent_chat_send,
+            agent_chat_steer,
             agent_chat_stop,
             agent_chat_close,
             agent_chat_respond,

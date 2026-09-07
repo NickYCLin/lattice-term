@@ -14,6 +14,7 @@ import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInput
 import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
   applyChatEvent,
+  appendSteeredInput,
   beginTurn,
   createThread,
   decideApproval,
@@ -115,6 +116,7 @@ export interface AgentChatApi {
     profileConfigPath?: string | null,
   ) => Promise<void>;
   stop: (id: string) => Promise<void>;
+  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[]) => Promise<void>;
   enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
   removeQueued: (id: string, inputId: string) => void;
   resumeQueue: (id: string) => void;
@@ -168,6 +170,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     }
   }, [layout]);
   const threadsRef = useRef(threads);
+  const pendingSteers = useRef(new Set<string>());
   threadsRef.current = threads;
   const changeThreads = useCallback((update: (current: ChatThread[]) => ChatThread[]) => {
     const next = update(threadsRef.current);
@@ -426,6 +429,27 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     }
   }, []);
 
+  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[]) => {
+    const thread = threadsRef.current.find(entry => entry.id === id);
+    if (thread?.definitionId !== "codex" || !thread.runningTurnId) throw new Error("No Codex turn is running in this chat.");
+    if (pendingSteers.current.has(id)) throw new Error("Another instruction is still awaiting confirmation.");
+    pendingSteers.current.add(id);
+    const turnId = thread.runningTurnId;
+    const inputId = crypto.randomUUID();
+    const at = Date.now();
+    const files = attachments.map(file => ({ ...file }));
+    try {
+      const { invoke } = await core();
+      await invoke("agent_chat_steer", { request: { threadId: id, expectedTurnId: turnId,
+        prompt, attachments: files.map(file => ({ path: file.path })),
+      } });
+      changeThreads(current => current.map(entry => entry.id === id
+        ? appendSteeredInput(entry, turnId, inputId, prompt, files, at) : entry));
+    } finally {
+      pendingSteers.current.delete(id);
+    }
+  }, []);
+
   const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string) => {
     const { invoke } = await core();
     await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null });
@@ -519,6 +543,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       handoffThreadAccount: handoffAccount,
       removeThread: remove,
       send,
+      steer,
       enqueue,
       removeQueued,
       resumeQueue,
@@ -546,6 +571,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       handoffAccount,
       remove,
       send,
+      steer,
       enqueue,
       removeQueued,
       resumeQueue,

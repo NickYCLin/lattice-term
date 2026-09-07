@@ -105,6 +105,44 @@ pub struct ChatAttachmentRequest {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChatSteerRequest {
+    pub thread_id: String,
+    pub expected_turn_id: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachmentRequest>,
+}
+
+/// Adds input to exactly one active Codex turn, keeping its existing settings.
+pub async fn steer(
+    registry: Arc<AgentChatRegistry>,
+    request: ChatSteerRequest,
+) -> Result<(), String> {
+    validate_id(&request.thread_id, "thread id")?;
+    validate_id(&request.expected_turn_id, "turn id")?;
+    if request.prompt.trim().is_empty() && request.attachments.is_empty() {
+        return Err("Type a message first.".into());
+    }
+    if request.prompt.len() > MAX_PROMPT_BYTES {
+        return Err("The message is too long for one turn.".into());
+    }
+    let attachments = validate_attachments(&request.attachments)?;
+    let prompt = prompt_with_attachments(&request.prompt, &attachments);
+    if prompt.len() > MAX_PROMPT_BYTES {
+        return Err("The message is too long for one turn.".into());
+    }
+    codex_server::steer(
+        &registry.codex,
+        &request.thread_id,
+        &request.expected_turn_id,
+        &prompt,
+        &attachments,
+    )
+    .await
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ChatAttachment {
     path: PathBuf,

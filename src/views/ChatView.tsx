@@ -452,6 +452,8 @@ function ThreadPane({
   const [notice, setNotice] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [steering, setSteering] = useState(false);
+  const steeringRef = useRef(false);
   const fresh = threadIsFresh(thread);
   const [settingsOpen, setSettingsOpen] = useState(fresh);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -472,6 +474,7 @@ function ThreadPane({
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
+    !steering &&
     !activeProfileMissing &&
     !activeProfileSignedOut &&
     cliInstalled &&
@@ -491,6 +494,7 @@ function ThreadPane({
   }, [thread.id]);
 
   function addAttachments(paths: readonly string[]) {
+    if (steeringRef.current) return;
     const added = attachmentsFromPaths(paths);
     if (added.length === 0) return;
     setAttachments((current) => {
@@ -579,7 +583,7 @@ function ThreadPane({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (!canSend) return;
+    if (!canSend || steeringRef.current) return;
     const prompt = draft;
     if (running || pendingInputs.length > 0) {
       try {
@@ -595,6 +599,25 @@ function ThreadPane({
     setAttachments([]);
     pinnedToBottom.current = true;
     setSettingsOpen(false);
+    setNotice(null);
+  }
+
+  async function steer() {
+    if (!canSend || steeringRef.current || !running || thread.definitionId !== "codex") return;
+    steeringRef.current = true;
+    setSteering(true);
+    setNotice(null);
+    try {
+      await chat.steer(thread.id, draft, attachments);
+      setDraft("");
+      setAttachments([]);
+      pinnedToBottom.current = true;
+    } catch (reason) {
+      setNotice(t("chat.steer.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
+    } finally {
+      steeringRef.current = false;
+      setSteering(false);
+    }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -829,6 +852,7 @@ function ThreadPane({
                       )
                     }
                     aria-label={t("chat.attachment.remove", { name: attachment.name })}
+                    disabled={steering}
                   >
                     <CloseIcon size={12} />
                   </button>
@@ -851,6 +875,7 @@ function ThreadPane({
                   {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
                 </span>
                 <button type="button" className="button button--ghost button--sm"
+                  disabled={steering}
                   onClick={() => {
                     setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
                     addAttachments(input.attachments.map(file => file.path));
@@ -865,6 +890,7 @@ function ThreadPane({
           <textarea
             className="chat-composer__input"
             value={draft}
+            readOnly={steering}
             placeholder={t("chat.composer.placeholder", { assistant })}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
@@ -882,6 +908,7 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("image")}
+                disabled={steering}
                 title={t("chat.attachment.images")}
               >
                 <ImageFileIcon />
@@ -891,11 +918,17 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={() => void chooseAttachments("file")}
+                disabled={steering}
                 title={t("chat.attachment.files")}
               >
                 <FileIcon />
                 {t("chat.attachment.files")}
               </button>
+              {running && thread.definitionId === "codex" && (
+                <button type="button" className="button button--secondary button--sm"
+                  disabled={!canSend} title={t("chat.steer.hint")}
+                  onClick={() => void steer()}>{t(steering ? "chat.steer.sending" : "chat.steer.send")}</button>
+              )}
               {running && (
                 <button
                   type="button"

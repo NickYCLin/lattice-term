@@ -91,6 +91,48 @@ function installFakeDom() {
 }
 
 describe("useAgentAutomations", () => {
+  it("records steering only after receipt and keeps late receipts with the original turn", async () => {
+    invoke.mockClear();
+    const root = installFakeDom();
+    const { createRoot } = await import("react-dom/client");
+    const { ChatRuntime } = await import("./ChatRuntime");
+    type Api = import("./ChatRuntime").ChatRuntimeApi;
+    let api: Api | null = null;
+    const reactRoot = createRoot(root as unknown as Element);
+    await act(async () => { reactRoot.render(React.createElement(ChatRuntime, { locale: "en", onChange: (next: Api) => { api = next; } })); });
+    const current = () => (api as unknown as Api).chat;
+    let id = "";
+    await act(async () => {
+      id = current().createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "" }).id;
+      await current().send(id, "first");
+      current().enqueue(id, "next turn", []);
+    });
+    const originalTurn = current().threads[0].runningTurnId!;
+    let acknowledge!: () => void;
+    invoke.mockImplementationOnce(() => new Promise(resolve => { acknowledge = () => resolve(undefined); }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = current().steer(id, "extra", [{ path: "/fixture/a.png", name: "a.png", isImage: true }]); });
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_steer", { request: { threadId: id, expectedTurnId: originalTurn,
+      prompt: "extra", attachments: [{ path: "/fixture/a.png" }],
+    } });
+    expect(current().threads[0].items.filter(item => item.type === "user")).toHaveLength(1);
+    await expect(current().steer(id, "duplicate", [])).rejects.toThrow("awaiting confirmation");
+    await act(async () => { chatListener!({ payload: { threadId: id, turnId: originalTurn,
+      event: { kind: "finished", error: null, nativeSessionId: "native", usage: null, costUsd: null, durationMs: null } } }); });
+    const nextTurn = current().threads[0].runningTurnId!;
+    expect(nextTurn).not.toBe(originalTurn);
+    await act(async () => { acknowledge(); await pending; });
+    const thread = current().threads[0];
+    expect(thread.items.map(item => item.type === "user" ? item.text : item.type)).toEqual(["first", "extra", "turnEnd", "next turn"]);
+    expect(thread.runningTurnId).toBe(nextTurn);
+    expect(thread.permission).toBe("ask");
+    invoke.mockRejectedValueOnce(new Error("turn ended"));
+    await act(async () => { await expect(current().steer(id, "rejected", [])).rejects.toThrow("turn ended"); });
+    expect(current().threads[0].items).toEqual(thread.items);
+    expect(current().threads[0].runningTurnId).toBe(nextTurn);
+    await act(async () => { current().removeThread(id); reactRoot.unmount(); });
+  });
+
   it("sends queued chat input once, preserves profile context, and pauses after stop", async () => {
     invoke.mockClear();
     const root = installFakeDom();
