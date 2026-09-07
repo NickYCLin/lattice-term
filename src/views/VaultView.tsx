@@ -539,18 +539,18 @@ export function VaultView({
 
                     return (
                       <tr key={target}>
-                        <td>
+                        <td data-label={t("vault.table.target")}>
                           <span className="mono vault-target">{target}</span>
                         </td>
-                        <td>
+                        <td data-label={t("vault.table.algorithm")}>
                           <Chip tone="neutral">{record.algorithm}</Chip>
                         </td>
-                        <td>
+                        <td data-label={t("vault.table.fingerprint")}>
                           <span className="mono vault-fingerprint">
                             {record.fingerprint}
                           </span>
                         </td>
-                        <td>{formatTrustedAt(record.firstTrustedAt)}</td>
+                        <td data-label={t("vault.table.trustedAt")}>{formatTrustedAt(record.firstTrustedAt)}</td>
                         <td className="vault-table__actions">
                           <button
                             type="button"
@@ -667,13 +667,13 @@ export function VaultView({
                       if (!profile) return null;
                       return (
                         <tr key={entry.profileId + ":" + entry.kind}>
-                          <td>{profile.name}</td>
-                          <td>
+                          <td data-label={t("vault.credentials.table.connection")}>{profile.name}</td>
+                          <td data-label={t("vault.credentials.table.protocol")}>
                             <Chip tone="neutral">
                               {findProtocol(profile.protocol).acronym}
                             </Chip>
                           </td>
-                          <td>
+                          <td data-label={t("vault.credentials.table.target")}>
                             <span className="mono vault-target">
                               {connectionTarget(profile)}
                             </span>

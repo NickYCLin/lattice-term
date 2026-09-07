@@ -23,18 +23,21 @@ import {
 } from "./terminalTheme";
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
+import { KeyboardIcon } from "../icons";
 
 export function TerminalPane({
   sessionId,
   ssh,
   theme,
   onClosed,
+  mobile = false,
 }: {
   sessionId: string;
   ssh: SshApi;
   /** Only used to re-theme the terminal when the palette changes. */
   theme: ThemeId;
   onClosed: (reason: string) => void;
+  mobile?: boolean;
 }) {
   const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -61,7 +64,7 @@ export function TerminalPane({
 
     const terminal = new Terminal({
       fontFamily: terminalFontFamily(),
-      fontSize: 13,
+      fontSize: mobile ? 14 : 13,
       letterSpacing: TERMINAL_LETTER_SPACING,
       lineHeight: 1.2,
       // Keep the caret steady across SSH and Agent terminals. Multiple mounted
@@ -165,7 +168,8 @@ export function TerminalPane({
     const observer = new ResizeObserver(scheduleFit);
     observer.observe(host);
 
-    terminal.focus();
+    // On a phone, let the user open the keyboard after seeing the prompt.
+    if (!mobile) terminal.focus();
 
     return () => {
       observer.disconnect();
@@ -180,7 +184,7 @@ export function TerminalPane({
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, mobile]);
 
   // Re-colour in place rather than rebuilding, so scrollback survives a theme
   // change mid-session.
@@ -213,7 +217,17 @@ export function TerminalPane({
       <div className="terminal-pane" ref={hostRef} />
       {/* Touch helper row: keys a software keyboard hides or lacks. Hidden on
           fine-pointer desktops by the stylesheet. */}
-      <div className="terminal-keybar" role="toolbar" aria-label="terminal keys">
+      <div className="terminal-keybar" role="toolbar" aria-label={t("terminal.keybar.label")}
+        onPointerDown={(event) => event.preventDefault()}>
+        <button type="button" className="terminal-keybar__key terminal-keybar__keyboard"
+          aria-label={t("terminal.keybar.keyboard")}
+          onClick={() => {
+            const terminal = termRef.current;
+            if (terminal?.textarea === document.activeElement) terminal.blur();
+            else terminal?.focus();
+          }}>
+          <KeyboardIcon size={18} />
+        </button>
         <button
           type="button"
           className={`terminal-keybar__key${ctrlArmed ? " is-armed" : ""}`}
@@ -224,6 +238,9 @@ export function TerminalPane({
           }}
         >
           {t("terminal.keybar.ctrl")}
+        </button>
+        <button type="button" className="terminal-keybar__key" onClick={() => tap("\r")}>
+          Enter
         </button>
         {keybarKeys.map((key) => (
           <button

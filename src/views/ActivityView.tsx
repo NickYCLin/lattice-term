@@ -60,10 +60,12 @@ export function ActivityView({
   workspace,
   agentActivity,
   onOpenAgentActivity,
+  mobile = false,
 }: {
   workspace: Workspace;
   agentActivity: AgentActivityApi;
   onOpenAgentActivity: (groupId: string, sessionId: string | null) => void;
+  mobile?: boolean;
 }) {
   const { t, tag } = useI18n();
   const { activity, clearActivity } = workspace;
@@ -107,6 +109,7 @@ export function ActivityView({
 
   return (
     <div className="stack">
+      {!mobile && <>
       <Callout tone="info" title={t("activity.note.title")}>
         {t("activity.note.body")}
       </Callout>
@@ -207,6 +210,7 @@ export function ActivityView({
           </ul>
         )}
       </section>
+      </>}
 
       <section className="panel glass glass--sheen">
         <header className="panel__head">

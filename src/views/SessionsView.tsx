@@ -237,6 +237,7 @@ export function SessionsView({
   sessionRestoreComplete,
   restoredWorkspaceSessions,
   unrestoredWorkspaceSessions,
+  mobile = false,
 }: {
   agents: AgentApi;
   ssh: SshApi;
@@ -250,6 +251,7 @@ export function SessionsView({
   sessionRestoreComplete: boolean;
   restoredWorkspaceSessions: readonly SavedWorkspaceSession[];
   unrestoredWorkspaceSessions: readonly SavedWorkspaceSession[];
+  mobile?: boolean;
 }) {
   const { t, tag } = useI18n();
   const sessionTabsId = useId();
@@ -305,6 +307,8 @@ export function SessionsView({
   // while the first toggle's state update is still in flight.
   const autoOpenedFilesRef = useRef(new Set<string>());
   useEffect(() => {
+    // A phone needs the full width for the prompt. Open SFTP only when asked.
+    if (mobile) return;
     for (const session of ssh.sessions) {
       if (
         filesOpen[session.sessionId] === undefined &&
@@ -314,7 +318,7 @@ export function SessionsView({
         void toggleFiles(session.sessionId);
       }
     }
-  }, [ssh.sessions, filesOpen]);
+  }, [ssh.sessions, filesOpen, mobile]);
 
   // When an SSH tab goes away, tear down the browser channel it owned so the
   // panel and its SFTP session do not linger.
@@ -2220,10 +2224,24 @@ export function SessionsView({
           const showFiles = !!filesOpen[session.sessionId] && !!sftpSession;
           return (
             <div
-              className="terminal-slot"
+              className="terminal-slot terminal-slot--ssh"
               key={session.sessionId}
               hidden={!isActive}
             >
+              {mobile && (
+                <div className="ssh-pane-switch" role="group" aria-label={t("terminal.paneSwitch")}>
+                  <button type="button" className="button button--ghost"
+                    aria-pressed={!showFiles}
+                    onClick={() => setFilesOpen((prev) => ({ ...prev, [session.sessionId]: false }))}>
+                    <TerminalIcon size={16} /> {t("terminal.pane.terminal")}
+                  </button>
+                  <button type="button" className="button button--ghost"
+                    aria-pressed={showFiles}
+                    onClick={() => { if (!filesOpen[session.sessionId]) void toggleFiles(session.sessionId); }}>
+                    <FolderIcon size={16} /> {t("terminal.pane.files")}
+                  </button>
+                </div>
+              )}
               <div
                 className={`ssh-split${showFiles ? " ssh-split--files" : ""}`}
               >
@@ -2246,6 +2264,7 @@ export function SessionsView({
                 )}
                 <div className="ssh-split__term">
                   <TerminalPane
+                    mobile={mobile}
                     sessionId={session.sessionId}
                     ssh={ssh}
                     theme={theme}

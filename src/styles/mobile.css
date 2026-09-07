@@ -1,0 +1,158 @@
+/* Native mobile layouts. Keep these after component styles so a desktop
+   fixed-width dock cannot override the phone's usable viewport. */
+.rail__label { display: none; }
+.app--mobile {
+  position: fixed;
+  inset-inline: 0;
+  top: var(--app-viewport-top, 0px);
+  height: var(--app-viewport-height, 100dvh);
+  padding-left: max(var(--space-2), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-2), env(safe-area-inset-right, 0px));
+  --control-height: 2.75rem;
+}
+
+.app--mobile .view-header {
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+}
+
+.app--mobile .view-header__title { font-size: var(--text-lg); }
+.app--mobile .view-header__description { display: none; }
+.app--mobile .view-header__text { flex: 1 1 auto; }
+.app--mobile .view-header__actions { width: auto; }
+.app--mobile[data-view="terminal"] > .workspace > .view-header { display: none; }
+.app--mobile[data-view="terminal"] .workspace__content { padding: 0; }
+
+.app--mobile .rail__item,
+.app--mobile .icon-button,
+.app--mobile .icon-button--sm {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+}
+
+.app--mobile .button { min-height: 2.75rem; }
+.app--mobile .rail__item { height: 3.25rem; gap: 2px; padding-block: 4px; }
+.app--mobile .rail__label { display: block; font-size: 10px; line-height: 1.2; white-space: nowrap; }
+.app--mobile input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.app--mobile select,
+.app--mobile textarea { font-size: 16px; }
+.app--mobile .xterm-helper-textarea { font-size: 16px !important; }
+.app--mobile .input, .app--mobile .select { min-width: 0; max-width: 100%; }
+
+.app--mobile .session-header { padding: var(--space-1); flex: none; }
+.app--mobile .session-header__crumbs { flex: 1; overflow: hidden; }
+.app--mobile .session-header__project,
+.app--mobile .session-header__sep,
+.app--mobile .session-header__files-button { display: none; }
+.app--mobile .session-header__actions { flex: none; }
+.app--mobile .terminal-stack { padding: 0 var(--space-1) var(--space-1); }
+.app--mobile .terminal-slot--ssh { display: flex; flex-direction: column; min-width: 0; }
+.app--mobile .terminal-slot--ssh[hidden] { display: none; }
+.app--mobile .ssh-split { flex: 1; min-width: 0; height: auto; gap: 0; }
+.app--mobile .ssh-split__files { flex: 1; width: 100%; }
+.app--mobile .ssh-split--files .ssh-split__term,
+.app--mobile .ssh-split__metrics { display: none; }
+.app--mobile .terminal-pane .xterm { padding: var(--space-2); }
+.ssh-pane-switch { display: flex; gap: var(--space-1); flex: none; padding-bottom: var(--space-1); }
+.ssh-pane-switch .button { flex: 1; }
+.ssh-pane-switch [aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+
+.app--mobile .terminal-keybar { flex: none; gap: var(--space-1); padding: var(--space-1); touch-action: pan-x; overscroll-behavior-x: contain; }
+.app--mobile .terminal-keybar__key { min-width: 2.75rem; height: 2.75rem; }
+.terminal-keybar__keyboard { display: grid; place-items: center; }
+
+/* Fixed overlays follow the same keyboard-visible rectangle as the app. */
+.app--mobile .scrim {
+  top: var(--app-viewport-top, 0px);
+  bottom: auto;
+  height: var(--app-viewport-height, 100dvh);
+  padding: max(var(--space-2), env(safe-area-inset-top, 0px))
+    max(var(--space-2), env(safe-area-inset-right, 0px))
+    max(var(--space-2), env(safe-area-inset-bottom, 0px))
+    max(var(--space-2), env(safe-area-inset-left, 0px));
+}
+.app--mobile .dialog,
+.app--mobile .dialog--wide {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 100%;
+  min-width: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.app--mobile .drawer { height: 100%; margin: 0; min-width: 0; }
+.app--mobile .drawer__head,
+.app--mobile .drawer__foot { flex: none; }
+.app--mobile .drawer__head,
+.app--mobile .drawer__body,
+.app--mobile .drawer__foot { padding: var(--space-3); }
+.app--mobile .drawer__foot { flex-wrap: wrap; gap: var(--space-2); }
+.app--mobile .field-grid { grid-template-columns: minmax(0, 1fr); }
+.app--mobile .palette { max-height: 100%; }
+
+.app--mobile .sftp-actions { flex-wrap: wrap; }
+.app--mobile .sftp-path { min-width: 0; }
+.app--mobile .sftp-path .input { height: 2.75rem; min-width: 0; }
+.app--mobile .sftp-table th:nth-child(2),
+.app--mobile .sftp-table td:nth-child(2) { display: none; }
+.app--mobile .sftp-table th:last-child { width: 8.75rem; }
+.app--mobile .sftp-table th,
+.app--mobile .sftp-table td { padding-inline: var(--space-1); }
+.app--mobile .sftp-entry { min-height: 2.75rem; width: 100%; }
+.app--mobile .sftp-state { min-height: 0; padding: var(--space-4); }
+
+.app--mobile .stack { padding: var(--space-3); }
+.app--mobile .panel { padding: var(--space-4); min-width: 0; }
+.app--mobile .panel__actions,
+.app--mobile .panel__hero-badges { flex-wrap: wrap; }
+.app--mobile .panel--hero { flex-direction: column; }
+.app--mobile .setting__text { min-width: 0; flex-basis: 100%; }
+.app--mobile .segmented { max-width: 100%; flex-wrap: wrap; }
+.app--mobile .segmented__btn { min-height: 2.75rem; }
+.app--mobile .fingerprint-box__row { flex-wrap: wrap; }
+
+/* Keep every host fingerprint and its actions on the phone screen. */
+@media (max-width: 42rem) {
+  .app--mobile .vault-table,
+  .app--mobile .vault-table tbody { display: block; min-width: 0; }
+  .app--mobile .vault-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .app--mobile .vault-table tr { display: flex; flex-direction: column; padding: var(--space-3); border-bottom: 1px solid var(--line); }
+  .app--mobile .vault-table td { display: block; border: 0; padding: var(--space-2); overflow-wrap: anywhere; }
+  .app--mobile .vault-table td[data-label]::before { content: attr(data-label); display: block; color: var(--text-faint); font-size: var(--text-2xs); }
+  .app--mobile .vault-table td.vault-table__actions { display: flex; }
+  .app--mobile .vault-fingerprint { max-width: 100%; }
+}
+
+.app--mobile .tunnels__filters { min-width: 0; flex-wrap: wrap; }
+.app--mobile .tunnels .segmented-control { flex-wrap: wrap; width: 100%; }
+.app--mobile .tunnels .segmented-control .button { flex: 1 1 45%; }
+.app--mobile .tunnels__card-header,
+.app--mobile .tunnels__card-title { flex-wrap: wrap; gap: var(--space-2); }
+.app--mobile .tunnels__card-title { min-width: 0; overflow-wrap: anywhere; }
+.app--mobile .tunnel-form-scrim {
+  top: var(--app-viewport-top, 0px) !important;
+  bottom: auto !important;
+  height: var(--app-viewport-height, 100dvh);
+  padding: max(var(--space-2), env(safe-area-inset-top, 0px)) var(--space-2)
+    max(var(--space-2), env(safe-area-inset-bottom, 0px));
+}
+.app--mobile .tunnel-form { width: 100% !important; max-height: 100% !important; padding: var(--space-4) !important; overscroll-behavior: contain; }
+.app--mobile .tunnel-form__types .button { white-space: normal; height: auto !important; padding: var(--space-2); }
+.app--mobile .tunnel-form__address > div { min-width: 0; }
+.app--mobile .activity-row { grid-template-columns: minmax(0, 1fr) auto; }
+.app--mobile .activity-row__kind { justify-self: start; }
+.app--mobile .activity-row__message { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.app--mobile .activity-row__time { grid-column: 2; grid-row: 1; }
+
+:root[data-mobile-keyboard="true"] .app--mobile { padding-bottom: var(--space-1); }
+:root[data-mobile-keyboard="true"] .app--mobile > .rail { display: none; }
+:root[data-mobile-keyboard="true"] .app--mobile .ssh-pane-switch { display: none; }
+:root[data-mobile-keyboard="true"] .app--mobile .scrim { padding-bottom: var(--space-1); }
+
+@media (max-height: 500px) {
+  .app--mobile { padding-top: max(var(--space-1), env(safe-area-inset-top, 0px)); }
+  .app--mobile .view-header { padding-block: 0; }
+}

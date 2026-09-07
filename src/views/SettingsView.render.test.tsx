@@ -62,6 +62,8 @@ describe("Settings updater platform boundary", () => {
     expect(markup).toContain("透過原安裝來源更新");
     expect(markup).toContain("TestFlight");
     expect(markup).toContain("App Store");
+    expect(markup).toContain("iPhone／iPad App");
+    expect(markup).not.toContain("拿手機相機掃這個 QR");
     expect(markup).toContain("閱讀資料使用與隱私權說明");
     expect(markup).toContain("不內建廣告、使用分析或跨 App 追蹤");
     expect(markup).not.toContain("GitHub Releases");

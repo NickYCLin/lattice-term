@@ -552,7 +552,7 @@ export function SettingsView({
             <dt className="field-row__label">{t("settings.about.runtime")}</dt>
             <dd className="field-row__value">
               {host === "tauri"
-                ? t("settings.about.runtime.tauri")
+                ? t(usesAppleUpdates ? "settings.about.runtime.ios" : "settings.about.runtime.tauri")
                 : host === "browser"
                   ? t("settings.about.runtime.browser")
                   : t("common.detecting")}
@@ -736,6 +736,7 @@ export function SettingsView({
 
       {usesAppleUpdates && <PrivacyNotice />}
 
+      {!usesAppleUpdates && (
       <section className="panel glass glass--sheen">
         <header className="panel__head">
           <div>
@@ -770,6 +771,7 @@ export function SettingsView({
           </div>
         </div>
       </section>
+      )}
     </div>
   );
 }

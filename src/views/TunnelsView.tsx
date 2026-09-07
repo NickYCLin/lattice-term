@@ -21,6 +21,7 @@ import type { ConnectionProfile } from "../domain/connection";
 import { useI18n } from "../i18n/context";
 import { Chip } from "../components/common/Badge";
 import { Callout } from "../components/common/Callout";
+import { useModalFocus } from "../components/overlays/modalFocus";
 import {
   CheckIcon,
   CloseIcon,
@@ -200,7 +201,7 @@ export function TunnelsView({
   }
 
   return (
-    <div className="stack" style={{ gap: "var(--space-6)" }}>
+    <div className="stack tunnels" style={{ gap: "var(--space-6)" }}>
       {/* 1. Summary Metrics Bar */}
       <div className="metrics-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "var(--space-4)" }}>
         <div className="panel glass glass--sheen" style={{ padding: "var(--space-4)", borderRadius: "var(--radius-lg)" }}>
@@ -245,7 +246,7 @@ export function TunnelsView({
 
       {/* 2. Control Toolbar */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "var(--space-4)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flex: "1 1 300px" }}>
+        <div className="tunnels__filters" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flex: "1 1 300px" }}>
           <div style={{ position: "relative", width: "100%", maxWidth: "340px" }}>
             <span style={{ position: "absolute", left: "var(--space-3)", top: "50%", transform: "translateY(-50%)", color: "var(--text-faint)" }}>
               <SearchIcon size={16} />
@@ -361,8 +362,8 @@ export function TunnelsView({
                 }}
               >
                 {/* Header Row */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-4)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                <div className="tunnels__card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-4)" }}>
+                  <div className="tunnels__card-title" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
                     <h3 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: 600, color: "var(--text)" }}>
                       {tunnel.name}
                     </h3>
@@ -650,6 +651,8 @@ interface TunnelFormModalProps {
 
 function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModalProps) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus({ dialogRef, onEscape: onClose });
 
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState<TunnelType>(initial?.type || "local");
@@ -688,6 +691,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
 
   return (
     <div
+      className="tunnel-form-scrim"
       style={{
         position: "fixed",
         inset: 0,
@@ -699,7 +703,12 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
       }}
     >
       <div
-        className="panel glass glass--sheen"
+        className="panel glass glass--sheen tunnel-form"
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={initial ? t("tunnels.form.editTitle") : t("tunnels.form.createTitle")}
         style={{
           maxWidth: 540,
           width: "92%",
@@ -713,7 +722,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
           <h2 style={{ margin: 0, fontSize: "var(--text-lg)", fontWeight: 700, color: "var(--text)" }}>
             {initial ? t("tunnels.form.editTitle") : t("tunnels.form.createTitle")}
           </h2>
-          <button type="button" className="button button--ghost" onClick={onClose} style={{ padding: "0.25rem" }}>
+          <button type="button" className="button button--ghost" aria-label={t("common.close")} onClick={onClose} style={{ padding: "0.25rem" }}>
             <CloseIcon size={18} />
           </button>
         </div>
@@ -724,7 +733,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
             <label className="field-label" style={{ display: "block", marginBottom: "var(--space-2)" }}>
               {t("tunnels.form.type")}
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-2)" }}>
+            <div className="tunnel-form__types" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "var(--space-2)" }}>
               {(["local", "dynamic", "remote"] as const).map((tType) => (
                 <button
                   key={tType}
@@ -787,7 +796,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
           </div>
 
           {/* Local Binding */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--space-3)" }}>
+          <div className="tunnel-form__address" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: "var(--space-3)" }}>
             <div>
               <label className="field-label" style={{ display: "block", marginBottom: "var(--space-1)" }}>
                 {type === "remote"
@@ -828,7 +837,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
 
           {/* Remote Target (Hidden if Dynamic SOCKS5) */}
           {type !== "dynamic" && (
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "var(--space-3)" }}>
+            <div className="tunnel-form__address" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: "var(--space-3)" }}>
               <div>
                 <label className="field-label" style={{ display: "block", marginBottom: "var(--space-1)" }}>
                   {type === "remote"

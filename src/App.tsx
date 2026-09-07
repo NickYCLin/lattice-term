@@ -87,6 +87,7 @@ import {
   prepareNotificationAudio,
 } from "./app/notificationSounds";
 import { anyAgentSessionJustCompleted } from "./app/sessionStatus";
+import { useMobileViewport } from "./app/useMobileViewport";
 import { PlusIcon, ScreenShareIcon } from "./components/icons";
 import { useModalFocus } from "./components/overlays/modalFocus";
 import "./styles/index.css";
@@ -210,6 +211,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const runtime = useRuntimeSummary();
   const platform = runtime.summary?.platform;
   const onMobile = isMobilePlatform(platform);
+  useMobileViewport(onMobile);
   const supportedProtocols =
     runtime.summary?.supportedProtocols ?? NO_SUPPORTED_PROTOCOLS;
   const headerCapabilities = workspaceHeaderCapabilities(platform);
@@ -889,7 +891,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   );
 
   return (
-    <div className={`app${onMobile ? " app--mobile" : ""}`}>
+    <div className={`app${onMobile ? " app--mobile" : ""}`} data-view={view}>
       <NavRail
         current={view}
         onSelect={(next) => {
@@ -1004,6 +1006,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   }}
                 >
                   <SessionsView
+                    mobile={onMobile}
                     agents={agents}
                     ssh={ssh}
                     sftp={sftp}
@@ -1056,6 +1059,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             )}
             {view === "activity" && (
               <ActivityView
+                mobile={onMobile}
                 workspace={workspace}
                 agentActivity={agentActivity}
                 onOpenAgentActivity={(groupId, sessionId) => {

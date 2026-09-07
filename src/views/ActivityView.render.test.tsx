@@ -10,7 +10,7 @@ import { I18nProvider } from "../i18n";
 import { ActivityView } from "./ActivityView";
 
 describe("ActivityView", () => {
-  it("says there is nothing recorded yet", () => {
+  it.each([false, true])("shows only supported activity when mobile=%s", (mobile) => {
     const workspace = { activity: [], clearActivity: vi.fn() } as unknown as Workspace;
     const agentActivity: AgentActivityApi = {
       items: [],
@@ -22,6 +22,7 @@ describe("ActivityView", () => {
     const markup = renderToStaticMarkup(
       <I18nProvider locale="zh-TW">
         <ActivityView
+          mobile={mobile}
           workspace={workspace}
           agentActivity={agentActivity}
           onOpenAgentActivity={vi.fn()}
@@ -30,5 +31,7 @@ describe("ActivityView", () => {
     );
     expect(markup).toContain("還沒有任何紀錄");
     expect(markup).not.toContain("<table");
+    if (mobile) expect(markup).not.toContain("CLI 工作活動");
+    else expect(markup).toContain("CLI 工作活動");
   });
 });

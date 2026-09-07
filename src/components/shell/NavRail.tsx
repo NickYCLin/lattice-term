@@ -63,6 +63,7 @@ export function NavRail({
                 }
               >
                 <Glyph size={19} />
+                <span className="rail__label" aria-hidden="true">{label}</span>
                 <span className="visually-hidden">
                   {planned ? `${label}（${t("planned.badge")}）` : label}
                 </span>
