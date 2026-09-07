@@ -7,11 +7,11 @@
 
 use clap::{Parser, Subcommand};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use lattice_remote::credentials::read_pairing_code_file;
+use lattice_remote::credentials::read_viewer_pairing_code_file;
 use lattice_remote::device_pins::{verify_or_pin, PinOutcome, PINS_FILE};
 use lattice_remote::relay::{dial, normalize_device_id, normalize_relay_endpoint};
 use lattice_remote::{
-    negotiate_protocol_version, normalize_pairing_code, RemoteFileEntry, RemoteFileKind,
+    negotiate_protocol_version, normalize_viewer_pairing_code, RemoteFileEntry, RemoteFileKind,
     RemoteFileRequest, RemoteFileResponse, RemoteHello, RemoteMessage, SecureConnection, Transport,
     DEFAULT_PORT, FILE_CHUNK_SIZE, MAX_DIRECTORY_ENTRIES, MAX_REMOTE_PATH_BYTES,
 };
@@ -217,16 +217,16 @@ async fn run(cli: Cli) -> Result<(), String> {
 
 fn read_pairing_code(path: Option<&Path>) -> Result<PairingCode, String> {
     let mut input = match path {
-        Some(path) => read_pairing_code_file(path)?,
+        Some(path) => read_viewer_pairing_code_file(path)?,
         None => {
             if !std::io::stdin().is_terminal() {
                 return Err("標準輸入不是互動終端；自動化時請使用 --pair-code-file。".to_string());
             }
-            rpassword::prompt_password("Lattice Remote 32 位十六進位配對碼：")
+            rpassword::prompt_password("Lattice Remote 配對碼：")
                 .map_err(|error| format!("無法安全讀取配對碼：{error}"))?
         }
     };
-    let normalized = normalize_pairing_code(&input).map_err(|error| error.to_string());
+    let normalized = normalize_viewer_pairing_code(&input).map_err(|error| error.to_string());
     input.zeroize();
     normalized.map(PairingCode)
 }
@@ -291,13 +291,22 @@ async fn connect(cli: &Cli) -> Result<Connected, String> {
                 .ok_or_else(|| "--relay 需要 --device。".to_string())?,
         )
         .map_err(|error| error.to_string())?;
+        let pins_path = cli
+            .pins_file
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(default_pins_path)?;
+        let expected_pin = lattice_remote::device_pins::pinned_fingerprint(&pins_path, &device_id)?;
+        if pairing_code.0.len() == 8 && expected_pin.is_none() {
+            return Err(lattice_remote::RemoteError::LegacyRequiresTrustedDevice.to_string());
+        }
         let (stream, _) = timeout(CONNECT_TIMEOUT, dial(&endpoint, &device_id))
             .await
             .map_err(|_| "中繼伺服器在 15 秒內沒有回應。".to_string())?
             .map_err(|error| error.to_string())?;
         let connection = timeout(
             PAIRING_TIMEOUT,
-            SecureConnection::initiate(stream, &pairing_code.0),
+            SecureConnection::initiate_for_device(stream, &pairing_code.0, expected_pin.as_deref()),
         )
         .await
         .map_err(|_| "Agent 在 12 秒內沒有完成安全配對。".to_string())?
@@ -305,14 +314,7 @@ async fn connect(cli: &Cli) -> Result<Connected, String> {
         let key = connection
             .remote_static_key()
             .ok_or_else(|| "Agent 沒有提供可釘選的永久身分金鑰。".to_string())?;
-        relay_pin = Some((
-            device_id,
-            key,
-            cli.pins_file
-                .clone()
-                .map(Ok)
-                .unwrap_or_else(default_pins_path)?,
-        ));
+        relay_pin = Some((device_id, key, pins_path));
         connection
     } else {
         let (host, port) = parse_direct_target(

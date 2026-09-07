@@ -1291,7 +1291,11 @@ export const en: Messages = {
   "remote.connect.removeSavedCode": "Delete saved pairing code",
   "remote.connect.code": "Agent pairing code",
   "remote.connect.codeHint":
-    "Paste the generated 32-character hexadecimal token from the host. Legacy eight-digit codes are disabled; update both devices and generate a new token.",
+    "Paste the generated 32-character hexadecimal token from the host. For legacy eight-digit codes, connect by a device ID previously trusted on this computer.",
+  "remote.connect.relayCodeHint": "Versions do not have to match. Older devices previously trusted on this computer can keep their eight-digit codes; the device key is checked before pairing.",
+  "remote.connect.relayCodeInvalid": "Paste a 32-character hexadecimal token, or an eight-digit code for a trusted legacy device; separators are allowed.",
+  "remote.connect.legacyUntrusted": "This computer has no trusted key for this legacy device, so an eight-digit code cannot establish its identity. Connect from a computer that previously paired with it. If no trusted record is available, update the host once and pair with a new token.",
+  "remote.connect.identityChanged": "This device ID presented a different key from the one previously trusted. The connection was stopped. Check whether the host was rebuilt or its identity changed; do not delete the trust record to bypass this check.",
   "remote.connect.relayMovedTitle": "The relay did not answer",
   "remote.connect.relayMovedBody": "Its address may have changed — a free Cloudflare Quick Tunnel hands out a new one every restart. Enter the current address and connect again; this entry keeps the new one once it works.",
   "remote.connect.codeInvalid": "Use a newly generated 32-character hexadecimal token; separators are allowed.",

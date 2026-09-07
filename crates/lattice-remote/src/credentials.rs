@@ -8,6 +8,7 @@ use crate::normalize_pairing_code;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
+use zeroize::Zeroizing;
 
 const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 64;
 
@@ -17,6 +18,17 @@ const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 64;
 /// rejected on every platform so replacing a configured credential path does
 /// not silently redirect the reader elsewhere.
 pub fn read_pairing_code_file(path: &Path) -> Result<String, String> {
+    let input = read_private_code_file(path)?;
+    normalize_pairing_code(&input).map_err(|error| error.to_string())
+}
+
+/// Viewer-only reader; legacy codes still require a trusted device at pairing.
+pub fn read_viewer_pairing_code_file(path: &Path) -> Result<String, String> {
+    let input = read_private_code_file(path)?;
+    crate::normalize_viewer_pairing_code(&input).map_err(|error| error.to_string())
+}
+
+fn read_private_code_file(path: &Path) -> Result<Zeroizing<String>, String> {
     let path_metadata = std::fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect --pair-code-file: {error}"))?;
     if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
@@ -60,7 +72,7 @@ pub fn read_pairing_code_file(path: &Path) -> Result<String, String> {
         }
     }
 
-    let mut input = String::new();
+    let mut input = Zeroizing::new(String::new());
     file.take(MAX_PAIR_CODE_SOURCE_BYTES + 1)
         .read_to_string(&mut input)
         .map_err(|error| format!("cannot read --pair-code-file: {error}"))?;
@@ -69,13 +81,31 @@ pub fn read_pairing_code_file(path: &Path) -> Result<String, String> {
             "--pair-code-file must be at most {MAX_PAIR_CODE_SOURCE_BYTES} bytes"
         ));
     }
-    normalize_pairing_code(&input).map_err(|error| error.to_string())
+    Ok(input)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn legacy_file_is_viewer_only() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.as_file()
+                .set_permissions(std::fs::Permissions::from_mode(0o600))
+                .unwrap();
+        }
+        file.write_all(b"1234-5678\n").unwrap();
+        assert_eq!(
+            read_viewer_pairing_code_file(file.path()).unwrap(),
+            "12345678"
+        );
+        assert!(read_pairing_code_file(file.path()).is_err());
+    }
 
     #[test]
     fn reads_a_bounded_regular_pairing_code_file() {

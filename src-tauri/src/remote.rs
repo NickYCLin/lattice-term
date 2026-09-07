@@ -13,8 +13,8 @@ use lattice_remote::relay::{
     dial, format_device_id, normalize_device_id, normalize_relay_endpoint, RelayError,
 };
 use lattice_remote::{
-    negotiate_protocol_version, normalize_pairing_code, FrameAssembler, PointerButton, RemoteHello,
-    RemoteInput, RemoteMessage, SecureConnection, MAX_WHEEL_UNITS,
+    negotiate_protocol_version, normalize_viewer_pairing_code, FrameAssembler, PointerButton,
+    RemoteHello, RemoteInput, RemoteMessage, SecureConnection, MAX_WHEEL_UNITS,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -710,10 +710,35 @@ pub async fn connect(
     if request.profile_id.trim().is_empty() || (!via_relay && request.hostname.trim().is_empty()) {
         return failed("connect", "The connection target is incomplete.");
     }
-    let pairing_code = match normalize_pairing_code(&request.pairing_code) {
+    let pairing_code = match normalize_viewer_pairing_code(&request.pairing_code) {
         Ok(code) => Zeroizing::new(code),
         Err(error) => return failed("pairing", error.to_string()),
     };
+    let trusted_device = if let Some(device_id) = &device_id {
+        let path = match app.path().app_data_dir() {
+            Ok(base) => base.join(crate::remote_pins::PINS_FILE),
+            Err(error) => {
+                return failed(
+                    "pinning",
+                    format!("Cannot locate the app data folder: {error}"),
+                )
+            }
+        };
+        let pin = match crate::remote_pins::pinned_fingerprint(&path, device_id) {
+            Ok(pin) => pin,
+            Err(error) => return failed("pinning", error),
+        };
+        Some((path, pin))
+    } else {
+        None
+    };
+    let expected_pin = trusted_device.as_ref().and_then(|(_, pin)| pin.as_deref());
+    if pairing_code.len() == 8 && expected_pin.is_none() {
+        return failed(
+            "legacyTrust",
+            lattice_remote::RemoteError::LegacyRequiresTrustedDevice.to_string(),
+        );
+    }
     // Admission covers dialing, the Noise handshake, authenticated Hello, and
     // the live session. Reserving the profile in the same critical section
     // also preserves the product's one-active-session-per-profile contract.
@@ -747,12 +772,21 @@ pub async fn connect(
         };
         match timeout(
             Duration::from_secs(12),
-            SecureConnection::initiate(stream, &pairing_code),
+            SecureConnection::initiate_for_device(stream, &pairing_code, expected_pin),
         )
         .await
         {
             Ok(Ok(connection)) => connection,
-            Ok(Err(error)) => return failed("pairing", error.to_string()),
+            Ok(Err(error)) => {
+                return failed(
+                    if matches!(error, lattice_remote::RemoteError::PeerIdentityMismatch) {
+                        "identityChanged"
+                    } else {
+                        "pairing"
+                    },
+                    error.to_string(),
+                )
+            }
             Err(_) => return failed("connect", "The Agent did not answer within 12 seconds."),
         }
     } else {
@@ -772,18 +806,9 @@ pub async fn connect(
     // proves that the responder accepted the pairing code. In particular, do
     // not persist a first-use pin merely because the initiator produced Noise
     // handshake message 3.
-    let relay_pin = if let Some(device_id) = &device_id {
+    let relay_pin = if let (Some(device_id), Some((pins_path, _))) = (&device_id, trusted_device) {
         let Some(static_key) = connection.remote_static_key() else {
             return failed("pinning", "The Agent did not present an identity key.");
-        };
-        let pins_path = match app.path().app_data_dir() {
-            Ok(base) => base.join(crate::remote_pins::PINS_FILE),
-            Err(error) => {
-                return failed(
-                    "pinning",
-                    format!("Cannot locate the app data folder: {error}"),
-                )
-            }
         };
         Some(RelayPinCandidate {
             path: pins_path,

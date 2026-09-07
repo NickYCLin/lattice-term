@@ -181,6 +181,7 @@
 ## 12. Lattice Remote
 
 - `crates/lattice-remote` 定義版本化二進位訊息、分塊畫面與 Noise `XXpsk3_25519_ChaChaPoly_BLAKE2s` 傳輸。
+- 應用程式版本不同不會阻擋遠端連線。桌面檢視端與 `lattice-remote` CLI 支援以既有裝置 ID 信任紀錄連接舊八位數配對主機，在送出配對證明前核對永久金鑰；新版分享仍只接受高熵配對碼。首次使用及舊版 IP 直連的限制見 [版本相容](RELAY_SERVER.zh-TW.md#版本相容)。
 - 協定送出、解碼與 frame assembler 共用同一組資源驗證：Agent 名稱最多 256 bytes 且不能含控制字元，Close 原因最多 1,024 bytes；JPEG 最多 8 MiB、單邊最多 16,384 px、總像素最多 32 Mi，異常尺寸不會進入 Tauri 事件或 WebView Canvas。
 - `lattice-agent` 的直連模式預設只監聽 `127.0.0.1:44900`，分享完整主螢幕並使用五分鐘、單一工作階段的一次性32 位十六進位隨機配對碼；中繼模式則主動連出，以永久九位數裝置 ID 註冊並在工作階段結束後繼續等候，配對碼在停止分享前有效。兩種模式連續五次配對失敗都會停止。
 - `RemoteHostDialog` 提供「分享這台裝置」的明確開始／停止操作。直連可指定 loopback 或特定 LAN IP、連接埠與 1–10 FPS，萬用與 multicast 位址會由原生層拒絕；中繼模式改填 `wss://`／私網 relay 位址，並可明確設定固定32 位十六進位隨機配對碼。永久身分檔位於 app data，含註冊 token 與 Noise 私鑰，Unix 建立或載入時都強制修正為 `0600`。

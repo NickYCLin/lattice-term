@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { normalizePairingToken } from "../../app/pairingToken";
+import { normalizeViewerPairingToken } from "../../app/pairingToken";
 import { relayConnectFollowUp } from "../../app/relayAddressRecovery";
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import { useSavedCredential } from "../../app/useSavedCredential";
@@ -81,12 +81,12 @@ export function RemoteConnectFlow({
     if (relayUnreachable) relayRef.current?.focus();
   }, [relayUnreachable]);
 
-  const normalizedToken = normalizePairingToken(pairingCode);
+  const normalizedToken = normalizeViewerPairingToken(pairingCode, relay);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!useSavedPairingCode && !normalizedToken) {
-      setProblem(t("remote.connect.codeInvalid"));
+      setProblem(t(relay ? "remote.connect.relayCodeInvalid" : "remote.connect.codeInvalid"));
       return;
     }
     setBusy(true);
@@ -128,6 +128,8 @@ export function RemoteConnectFlow({
     }
     if (followUp.offerAddressRepair) setRelayUnreachable(true);
     setProblem(
+      outcome.stage === "legacyTrust" ? t("remote.connect.legacyUntrusted") :
+      outcome.stage === "identityChanged" ? t("remote.connect.identityChanged") :
       t("remote.connect.failedBody", {
         stage: outcome.stage,
         detail: outcome.detail,
@@ -274,6 +276,7 @@ export function RemoteConnectFlow({
                 <ShieldIcon size={16} />
                 <input
                   id="remote-pairing-code"
+                  aria-describedby="remote-pairing-code-hint"
                   ref={codeRef}
                   className="input mono"
                   value={pairingCode}
@@ -287,7 +290,7 @@ export function RemoteConnectFlow({
                   }
                 />
               </div>
-              <p className="field__optional">{t("remote.connect.codeHint")}</p>
+              <p id="remote-pairing-code-hint" className="field__optional">{t(relay ? "remote.connect.relayCodeHint" : "remote.connect.codeHint")}</p>
             </div>
           )}
 

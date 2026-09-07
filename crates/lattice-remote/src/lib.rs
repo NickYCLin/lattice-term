@@ -30,7 +30,7 @@ pub use protocol::{
     MIN_COMPATIBLE_PROTOCOL_VERSION, PROTOCOL_VERSION,
 };
 pub use secure::{
-    format_pairing_code, generate_pairing_code, normalize_pairing_code, RemoteError,
-    SecureConnection, SecureReader, SecureWriter,
+    format_pairing_code, generate_pairing_code, normalize_pairing_code,
+    normalize_viewer_pairing_code, RemoteError, SecureConnection, SecureReader, SecureWriter,
 };
 pub use transport::Transport;

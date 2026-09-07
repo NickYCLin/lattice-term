@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { normalizePairingToken } from "../../app/pairingToken";
+import { normalizeViewerPairingToken } from "../../app/pairingToken";
 import {
   formatDeviceId,
   loadRelayAddress,
@@ -57,7 +57,7 @@ export function RemoteQuickConnect({
     if (busy) dialogRef.current?.focus();
   }, [busy]);
 
-  const normalizedToken = normalizePairingToken(pairingCode);
+  const normalizedToken = normalizeViewerPairingToken(pairingCode, true);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,7 +67,7 @@ export function RemoteQuickConnect({
       return;
     }
     if (!normalizedToken) {
-      setProblem(t("remote.connect.codeInvalid"));
+      setProblem(t("remote.connect.relayCodeInvalid"));
       return;
     }
     if (!relayAddress.trim()) {
@@ -97,6 +97,8 @@ export function RemoteQuickConnect({
       });
     } else {
       setProblem(
+        outcome.stage === "legacyTrust" ? t("remote.connect.legacyUntrusted") :
+        outcome.stage === "identityChanged" ? t("remote.connect.identityChanged") :
         t("remote.connect.failedBody", {
           stage: outcome.stage,
           detail: outcome.detail,
@@ -178,6 +180,7 @@ export function RemoteQuickConnect({
               <ShieldIcon size={16} />
               <input
                 id="remote-quick-code"
+                aria-describedby="remote-quick-code-hint"
                 className="input mono"
                 value={pairingCode}
                 type="password"
@@ -190,6 +193,7 @@ export function RemoteQuickConnect({
                 }
               />
             </div>
+            <p id="remote-quick-code-hint" className="field__optional">{t("remote.connect.relayCodeHint")}</p>
           </div>
 
           <RelayAddressField

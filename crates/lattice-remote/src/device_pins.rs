@@ -21,6 +21,13 @@ pub enum PinOutcome {
     Matched,
 }
 
+/// Reads existing trust without creating a file or trusting a presented key.
+pub fn pinned_fingerprint(path: &Path, device_id: &str) -> Result<Option<String>, String> {
+    let device_id =
+        crate::relay::normalize_device_id(device_id).map_err(|error| error.to_string())?;
+    Ok(load(path)?.remove(&device_id))
+}
+
 pub fn fingerprint(static_key: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"lattice-remote-device-key-v1:");
@@ -226,6 +233,24 @@ mod tests {
             verify_or_pin(&path, "123456789", b"key-one").unwrap(),
             PinOutcome::Matched
         );
+    }
+
+    #[test]
+    fn lookup_requires_existing_valid_trust_without_writing() {
+        let (_directory, path) = scratch_file("existing-pins.json");
+        assert_eq!(pinned_fingerprint(&path, "123456789").unwrap(), None);
+        assert!(!path.exists());
+        assert!(!lock_path(&path).unwrap().exists());
+        verify_or_pin(&path, "123456789", b"known-key").unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            pinned_fingerprint(&path, "123 456 789").unwrap(),
+            Some(fingerprint(b"known-key"))
+        );
+        assert_eq!(pinned_fingerprint(&path, "987654321").unwrap(), None);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        std::fs::write(&path, b"invalid").unwrap();
+        assert!(pinned_fingerprint(&path, "123456789").is_err());
     }
 
     #[test]

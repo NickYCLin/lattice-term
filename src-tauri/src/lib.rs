@@ -2163,7 +2163,7 @@ async fn remote_connect(
     }
 
     let pairing_code_to_store = if request.remember_pairing_code {
-        match lattice_remote::normalize_pairing_code(&request.pairing_code) {
+        match lattice_remote::normalize_viewer_pairing_code(&request.pairing_code) {
             Ok(code) => Some(Zeroizing::new(code)),
             Err(error) => {
                 return Ok(RemoteConnectOutcome::Failed {
