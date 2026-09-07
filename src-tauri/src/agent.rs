@@ -371,6 +371,23 @@ pub struct AgentOutputSnapshot {
     pub base64: String,
 }
 
+/// A slice of one session's retained output for a reader that keeps its own
+/// cursor. `start_offset` is the oldest byte still retained: a cursor below
+/// it has missed output that is gone for good, which `truncated` says.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOutputRange {
+    pub session_id: String,
+    pub start_offset: u64,
+    pub end_offset: u64,
+    /// Offset of the first byte in `base64`.
+    pub cursor: u64,
+    /// Offset just past the last byte in `base64`: the next cursor.
+    pub next_cursor: u64,
+    pub truncated: bool,
+    pub base64: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentLaunchRequest {
@@ -1246,6 +1263,25 @@ impl OutputBuffer {
 
     fn tail(&self) -> Vec<u8> {
         self.bytes.iter().copied().collect()
+    }
+
+    /// At most `max` bytes from `cursor` on. A cursor older than the
+    /// retained window starts at the window instead and says so.
+    fn range(&self, session_id: &str, cursor: u64, max: usize) -> AgentOutputRange {
+        let truncated = cursor < self.start_offset;
+        let from = cursor.clamp(self.start_offset, self.end_offset);
+        let skip = (from - self.start_offset) as usize;
+        let bytes: Vec<u8> = self.bytes.iter().skip(skip).take(max).copied().collect();
+        let next = from + bytes.len() as u64;
+        AgentOutputRange {
+            session_id: session_id.to_string(),
+            start_offset: self.start_offset,
+            end_offset: self.end_offset,
+            cursor: from,
+            next_cursor: next,
+            truncated,
+            base64: encode(&bytes),
+        }
     }
 }
 
@@ -2254,6 +2290,18 @@ impl AgentRegistry {
             .collect::<Vec<_>>();
         snapshots.sort_by(|left, right| left.session_id.cmp(&right.session_id));
         snapshots
+    }
+
+    /// Retained output from `cursor` on, for an observer with its own cursor.
+    pub fn output_range(
+        &self,
+        session_id: &str,
+        cursor: u64,
+        max: usize,
+    ) -> Result<AgentOutputRange, String> {
+        let entry = self.get(session_id)?;
+        let output = entry.output.lock().map_err(|error| error.to_string())?;
+        Ok(output.range(session_id, cursor, max))
     }
 
     /// Retains an owner-only clipboard image only while its target PTY exists.
@@ -5270,7 +5318,7 @@ fn decode(value: &str) -> Result<Vec<u8>, String> {
 
 /// Drops ANSI escape sequences (CSI, OSC, and single-character escapes) so
 /// pattern matching sees the text a human sees.
-fn strip_ansi(text: &str) -> String {
+pub(crate) fn strip_ansi(text: &str) -> String {
     let mut cleaned = String::with_capacity(text.len());
     let mut characters = text.chars().peekable();
     while let Some(character) = characters.next() {
@@ -7913,6 +7961,38 @@ model = "gpt-5.3-codex"
         assert_eq!(wire["endOffset"], (MAX_OUTPUT_SNAPSHOT_BYTES + 2) as u64);
         assert_eq!(decoded.len(), MAX_OUTPUT_SNAPSHOT_BYTES);
         assert_eq!(&decoded[decoded.len() - 4..], b"bcde");
+    }
+
+    #[test]
+    fn output_buffer_ranges_follow_a_cursor_and_flag_lost_output() {
+        let mut output = OutputBuffer::default();
+        output.append(b"hello ");
+        output.append(b"world");
+        let decoded = |range: &AgentOutputRange| {
+            base64::engine::general_purpose::STANDARD
+                .decode(&range.base64)
+                .unwrap()
+        };
+
+        let first = output.range("s", 0, 4);
+        assert_eq!((first.cursor, first.next_cursor), (0, 4));
+        assert_eq!(decoded(&first), b"hell");
+        assert!(!first.truncated);
+        let rest = output.range("s", first.next_cursor, 1024);
+        assert_eq!(decoded(&rest), b"o world");
+        assert_eq!(rest.next_cursor, 11);
+        let nothing = output.range("s", rest.next_cursor, 1024);
+        assert!(decoded(&nothing).is_empty());
+        assert_eq!(nothing.next_cursor, 11);
+        // Past the end is clamped, never a panic.
+        assert_eq!(output.range("s", 999, 10).next_cursor, 11);
+
+        // Once the window rolled, an old cursor starts at the window and says so.
+        output.append(&vec![b'x'; MAX_OUTPUT_SNAPSHOT_BYTES]);
+        let stale = output.range("s", 0, 3);
+        assert!(stale.truncated);
+        assert_eq!(stale.cursor, stale.start_offset);
+        assert_eq!(decoded(&stale), b"xxx");
     }
 
     #[test]

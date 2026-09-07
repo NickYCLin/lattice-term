@@ -8,8 +8,8 @@
 
 use super::automations::{self, Scheduler};
 use super::{
-    read_or_create_token, transport, DaemonPaths, Frame, HelloReply, Request, LOG_FILE,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION, SESSION_ID_PREFIX,
+    read_or_create_token, transport, ClientRole, DaemonPaths, Frame, HelloReply, Request, LOG_FILE,
+    MAX_FRAME_BYTES, MAX_OBSERVE_BYTES, PROTOCOL_VERSION, SESSION_ID_PREFIX,
 };
 use crate::agent::{
     self, AgentLifecycle, AgentRegistry, AgentSessionSummary, AgentSink, AgentStateSource,
@@ -18,6 +18,7 @@ use crate::agent::{
 use crate::agent_chat::AgentChatRegistry;
 use base64::Engine;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -148,6 +149,7 @@ pub async fn serve(
     let mut listener = transport::bind(&paths)
         .await
         .map_err(|error| format!("Cannot listen for the desktop: {error}"))?;
+    paths.write_socket_hint();
     let context = Arc::new(Context {
         registry,
         sink,
@@ -203,6 +205,7 @@ pub async fn serve(
         }
     }
     drop(listener);
+    paths.remove_socket_hint();
     #[cfg(unix)]
     let _ = std::fs::remove_file(&paths.socket);
     Ok(())
@@ -242,7 +245,15 @@ where
         Ok(Ok(Some(Frame::Request { id, body }))) => (id, body),
         _ => return,
     };
-    let (hello_id, Request::Hello { token, protocol }) = hello else {
+    let (
+        hello_id,
+        Request::Hello {
+            token,
+            protocol,
+            role,
+        },
+    ) = hello
+    else {
         return;
     };
     if token != context.token || protocol != PROTOCOL_VERSION {
@@ -257,17 +268,29 @@ where
             .await;
         return;
     }
-    let reply = HelloReply {
-        protocol: PROTOCOL_VERSION,
-        sessions: detached_list(&context.registry),
-        snapshots: context.registry.output_snapshots(),
+    let reply = match role {
+        ClientRole::Desktop => HelloReply {
+            protocol: PROTOCOL_VERSION,
+            sessions: detached_list(&context.registry),
+            snapshots: context.registry.output_snapshots(),
+            shared: context.sink.shared(),
+        },
+        // An observer's greeting carries nothing it could not ask for.
+        ClientRole::Observer => HelloReply {
+            protocol: PROTOCOL_VERSION,
+            sessions: shared_list(&context),
+            snapshots: Vec::new(),
+            shared: Vec::new(),
+        },
     };
-    let (client_id, tx, mut rx) = context.sink.subscribe();
+    let (client_id, tx, mut rx) = context.sink.subscribe(role);
     let _ = tx.send(response_line(
         hello_id,
         serde_json::to_value(reply).map_err(|error| error.to_string()),
     ));
-    context.log.line(&format!("client {client_id} attached"));
+    context
+        .log
+        .line(&format!("client {client_id} attached as {role:?}"));
 
     let writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
@@ -285,7 +308,7 @@ where
                 let context = Arc::clone(&context);
                 let tx = tx.clone();
                 tokio::task::spawn_blocking(move || {
-                    let result = dispatch(&context, body);
+                    let result = dispatch_as(&context, role, body);
                     let _ = tx.send(response_line(id, result));
                 });
             }
@@ -343,6 +366,45 @@ fn detached(mut summary: AgentSessionSummary) -> AgentSessionSummary {
 
 fn detached_list(registry: &AgentRegistry) -> Vec<AgentSessionSummary> {
     registry.list().into_iter().map(detached).collect()
+}
+
+/// The sessions an observer may see: shared by the user and still alive.
+fn shared_list(context: &Context) -> Vec<AgentSessionSummary> {
+    let shared = context.sink.shared();
+    detached_list(&context.registry)
+        .into_iter()
+        .filter(|summary| shared.contains(&summary.session_id))
+        .collect()
+}
+
+/// Everything an observer can do, and nothing else: read the shared
+/// sessions and their output. Every other request is refused before it
+/// reaches the registry.
+pub fn dispatch_as(context: &Context, role: ClientRole, body: Request) -> Result<Value, String> {
+    match role {
+        ClientRole::Desktop => dispatch(context, body),
+        ClientRole::Observer => match body {
+            Request::Sessions => to_value(&shared_list(context)),
+            Request::Observe {
+                session_id,
+                cursor,
+                max_bytes,
+            } => {
+                if !context.sink.is_shared(&session_id) {
+                    return Err("This session is not shared with observers.".to_string());
+                }
+                dispatch(
+                    context,
+                    Request::Observe {
+                        session_id,
+                        cursor,
+                        max_bytes,
+                    },
+                )
+            }
+            _ => Err("Observers may only read shared sessions.".to_string()),
+        },
+    }
 }
 
 fn decode(encoded: &str) -> Result<Vec<u8>, String> {
@@ -427,6 +489,26 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         }
         Request::AutomationsState => to_value(&context.scheduler.status()),
         Request::AutomationsTakeRuns => to_value(&context.scheduler.take_runs()),
+        Request::ShareSet { session_id, shared } => {
+            if shared && registry.session_summary(&session_id).is_none() {
+                return Err("Agent session no longer exists.".to_string());
+            }
+            context.sink.set_shared(&session_id, shared);
+            to_value(&context.sink.shared())
+        }
+        Request::Shared => to_value(&context.sink.shared()),
+        Request::Observe {
+            session_id,
+            cursor,
+            max_bytes,
+        } => {
+            let max = if max_bytes == 0 {
+                MAX_OBSERVE_BYTES
+            } else {
+                max_bytes.min(MAX_OBSERVE_BYTES)
+            };
+            to_value(&registry.output_range(&session_id, cursor, max)?)
+        }
     }
 }
 
@@ -437,15 +519,31 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
 /// The registry sink: every event goes to every attached client, and to
 /// nobody at all when the window is closed — the registry keeps working
 /// regardless, which is the whole point.
+///
+/// Observers are told less: only the lifecycle events (`state`, `closed`,
+/// `model`, `usage`, `queue`) of sessions the user shared, never `data`
+/// — output is read on request, by cursor, so a slow observer can never
+/// pile up terminal bytes in a channel.
 #[derive(Default)]
 pub struct DaemonSink {
-    clients: Mutex<Vec<(u64, mpsc::UnboundedSender<String>)>>,
+    clients: Mutex<Vec<Client>>,
+    /// Session ids the user shared with observers. Lives with the daemon:
+    /// a session that ends is unshared with it, and sharing never outlives
+    /// the process that holds the session.
+    shared: Mutex<HashSet<String>>,
     next: AtomicU64,
+}
+
+struct Client {
+    id: u64,
+    role: ClientRole,
+    tx: mpsc::UnboundedSender<String>,
 }
 
 impl DaemonSink {
     pub fn subscribe(
         &self,
+        role: ClientRole,
     ) -> (
         u64,
         mpsc::UnboundedSender<String>,
@@ -454,25 +552,68 @@ impl DaemonSink {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = mpsc::unbounded_channel();
         if let Ok(mut clients) = self.clients.lock() {
-            clients.push((id, tx.clone()));
+            clients.push(Client {
+                id,
+                role,
+                tx: tx.clone(),
+            });
         }
         (id, tx, rx)
     }
 
     pub fn unsubscribe(&self, id: u64) {
         if let Ok(mut clients) = self.clients.lock() {
-            clients.retain(|(client, _)| *client != id);
+            clients.retain(|client| client.id != id);
         }
     }
 
+    /// Attached desktops. Observers do not count: they neither run
+    /// automations nor keep an otherwise idle daemon alive.
     pub fn client_count(&self) -> usize {
         self.clients
             .lock()
-            .map(|clients| clients.len())
+            .map(|clients| {
+                clients
+                    .iter()
+                    .filter(|client| client.role == ClientRole::Desktop)
+                    .count()
+            })
             .unwrap_or(0)
     }
 
+    pub fn shared(&self) -> Vec<String> {
+        let mut shared: Vec<String> = self
+            .shared
+            .lock()
+            .map(|shared| shared.iter().cloned().collect())
+            .unwrap_or_default();
+        shared.sort();
+        shared
+    }
+
+    pub fn is_shared(&self, session_id: &str) -> bool {
+        self.shared
+            .lock()
+            .map(|shared| shared.contains(session_id))
+            .unwrap_or(false)
+    }
+
+    pub fn set_shared(&self, session_id: &str, shared: bool) {
+        if let Ok(mut set) = self.shared.lock() {
+            if shared {
+                set.insert(session_id.to_string());
+            } else {
+                set.remove(session_id);
+            }
+        }
+    }
+
     fn broadcast(&self, name: &str, payload: Value) {
+        let session_id = payload
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let observable = name != "data" && name != "captured" && self.is_shared(session_id);
         let frame = Frame::Event {
             name: name.to_string(),
             payload,
@@ -481,7 +622,10 @@ impl DaemonSink {
             return;
         };
         if let Ok(mut clients) = self.clients.lock() {
-            clients.retain(|(_, tx)| tx.send(line.clone()).is_ok());
+            clients.retain(|client| match client.role {
+                ClientRole::Desktop => client.tx.send(line.clone()).is_ok(),
+                ClientRole::Observer => !observable || client.tx.send(line.clone()).is_ok(),
+            });
         }
     }
 }
@@ -510,6 +654,7 @@ impl AgentSink for DaemonSink {
             "closed",
             json!({ "sessionId": session_id, "reason": reason }),
         );
+        self.set_shared(session_id, false);
     }
 
     fn captured(&self, session_id: &str, native_session_id: &str) {

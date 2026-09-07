@@ -3,7 +3,9 @@
 //! desktop does. Unix only: the named-pipe transport has no CI here.
 
 use super::server::{serve, DaemonSink, Logger};
-use super::{read_or_create_token, transport, DaemonPaths, Frame, Request, PROTOCOL_VERSION};
+use super::{
+    read_or_create_token, transport, ClientRole, DaemonPaths, Frame, Request, PROTOCOL_VERSION,
+};
 use crate::agent::{AgentLaunchRequest, AgentRegistry, AgentSink};
 use serde_json::Value;
 use std::sync::Arc;
@@ -144,6 +146,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
         .request(Request::Hello {
             token: "nope".to_string(),
             protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
         })
         .await;
     assert!(refused.is_err());
@@ -153,6 +156,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
         .request(Request::Hello {
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
         })
         .await
         .unwrap();
@@ -194,6 +198,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
         .request(Request::Hello {
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
         })
         .await
         .unwrap();
@@ -263,6 +268,220 @@ async fn an_idle_daemon_exits_by_itself() {
     tokio::time::timeout(Duration::from_secs(15), server)
         .await
         .expect("idle exit")
+        .unwrap()
+        .unwrap();
+}
+
+/// The MCP adapter's view: an observer sees only what the user shared, is
+/// never fed terminal bytes as events, and cannot do anything but read.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let token = read_or_create_token(&paths).unwrap();
+    let sink = Arc::new(DaemonSink::default());
+    let registry = AgentRegistry::with_local_reporter_prefixed(
+        Arc::clone(&sink) as Arc<dyn AgentSink>,
+        super::SESSION_ID_PREFIX,
+    )
+    .unwrap();
+    let server = tokio::spawn(serve(
+        paths.clone(),
+        token.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&sink),
+        Arc::new(super::automations::Scheduler::open(dir.path())),
+        Arc::new(crate::agent_chat::AgentChatRegistry::new()),
+        Duration::from_secs(600),
+        Arc::new(Logger::silent()),
+    ));
+    for _ in 0..50 {
+        if paths.socket.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let mut desktop = RawClient::connect(&paths).await;
+    desktop
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
+        })
+        .await
+        .unwrap();
+    let launch = |command: &str| Request::Launch {
+        request: Box::new(launch_request(command)),
+        restored_output: None,
+    };
+    let secret = desktop
+        .request(launch("echo top-secret; sleep 30"))
+        .await
+        .unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let public = desktop
+        .request(launch("echo shared-line; sleep 30"))
+        .await
+        .unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for id in [&secret, &public] {
+        desktop
+            .wait_for_event("data", |payload| payload["sessionId"] == id.as_str())
+            .await;
+    }
+
+    // Nothing is shared until the user says so.
+    let mut observer = RawClient::connect(&paths).await;
+    let hello = observer
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: PROTOCOL_VERSION,
+            role: ClientRole::Observer,
+        })
+        .await
+        .unwrap();
+    assert_eq!(hello["sessions"].as_array().unwrap().len(), 0);
+    assert_eq!(hello["snapshots"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        observer.request(Request::Sessions).await.unwrap(),
+        Value::Array(Vec::new())
+    );
+    // Observers are not desktops: automations and idle exit ignore them.
+    assert_eq!(sink.client_count(), 1);
+
+    let shared = desktop
+        .request(Request::ShareSet {
+            session_id: public.clone(),
+            shared: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(shared, serde_json::json!([public.clone()]));
+    assert!(desktop
+        .request(Request::ShareSet {
+            session_id: "agent-bg-session-nope".to_string(),
+            shared: true,
+        })
+        .await
+        .is_err());
+
+    let listed = observer.request(Request::Sessions).await.unwrap();
+    let listed = listed.as_array().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["sessionId"], public.as_str());
+
+    // Output follows a cursor, only for the shared session.
+    let first = observer
+        .request(Request::Observe {
+            session_id: public.clone(),
+            cursor: 0,
+            max_bytes: 6,
+        })
+        .await
+        .unwrap();
+    let decoded = |value: &Value| {
+        String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(value["base64"].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(decoded(&first), "shared");
+    assert_eq!(first["nextCursor"], 6);
+    let rest = observer
+        .request(Request::Observe {
+            session_id: public.clone(),
+            cursor: first["nextCursor"].as_u64().unwrap(),
+            max_bytes: 0,
+        })
+        .await
+        .unwrap();
+    assert!(decoded(&rest).starts_with("-line"));
+    assert_eq!(rest["truncated"], false);
+    let refused = observer
+        .request(Request::Observe {
+            session_id: secret.clone(),
+            cursor: 0,
+            max_bytes: 0,
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.contains("not shared"), "{refused}");
+
+    // Nothing that changes state is allowed, whatever the request.
+    for request in [
+        Request::Send {
+            session_id: public.clone(),
+            data: "aGk=".to_string(),
+        },
+        Request::Disconnect {
+            session_id: public.clone(),
+        },
+        Request::Snapshots,
+        Request::Shared,
+        Request::ShareSet {
+            session_id: secret.clone(),
+            shared: true,
+        },
+        Request::Shutdown,
+        launch("echo nope"),
+    ] {
+        assert!(observer.request(request).await.is_err());
+    }
+    assert_eq!(registry.list().len(), 2, "the observer stopped nothing");
+
+    // Sharing is revocable, and ends with the session.
+    desktop
+        .request(Request::ShareSet {
+            session_id: public.clone(),
+            shared: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        observer.request(Request::Sessions).await.unwrap(),
+        Value::Array(Vec::new())
+    );
+    desktop
+        .request(Request::ShareSet {
+            session_id: public.clone(),
+            shared: true,
+        })
+        .await
+        .unwrap();
+    desktop
+        .request(Request::Disconnect {
+            session_id: public.clone(),
+        })
+        .await
+        .unwrap();
+    let closed = observer
+        .wait_for_event("closed", |payload| payload["sessionId"] == public.as_str())
+        .await;
+    assert!(closed["reason"].is_string());
+    assert_eq!(
+        desktop.request(Request::Shared).await.unwrap(),
+        Value::Array(Vec::new())
+    );
+    // The observer heard about the shared session's end but never saw a
+    // byte of either session's terminal as an event.
+    assert!(observer
+        .events
+        .iter()
+        .all(|(name, payload)| name != "data" && payload["sessionId"] != secret.as_str()));
+
+    desktop.request(Request::Shutdown).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("the daemon stops when told")
         .unwrap()
         .unwrap();
 }
