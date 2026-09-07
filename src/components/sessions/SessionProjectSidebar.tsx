@@ -848,88 +848,90 @@ export function SessionProjectSidebar({
         event.stopPropagation();
       }}
     >
-      <div className="session-projects__title">
-        <FolderIcon size={14} />
-        <span title={t("terminal.projects")}>{t("terminal.projects")}</span>
-        <button
-          type="button"
-          className="icon-button icon-button--sm session-projects__status-help"
-          onClick={() => setStatusLegendOpen((open) => !open)}
-          aria-label={t("terminal.projects.statusGuide")}
-          aria-expanded={statusLegendOpen}
-          aria-controls="session-project-status-guide"
-          title={t("terminal.projects.statusGuide")}
-        >
-          ?
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button--sm session-projects__folder-add"
-          onClick={() => onCreateFolder(null)}
-          aria-label={t("terminal.projects.addFolder")}
-          title={t("terminal.projects.addFolder")}
-        >
-          <FolderIcon size={11} />
-          <PlusIcon size={8} />
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button--sm"
-          onClick={(event) => openLaunchMenu(event, WORKSPACE_MANAGE_NODE)}
-          aria-label={t("terminal.projects.manage")}
-          aria-haspopup="menu"
-          aria-expanded={workspaceManageOpen}
-          title={t("terminal.projects.manage")}
-        >
-          <MoreIcon size={12} />
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button--sm"
-          onClick={(event) => openLaunchMenu(event, QUICK_LAUNCH_NODE)}
-          aria-label={t("terminal.quickChat")}
-          aria-haspopup="menu"
-          aria-expanded={launchMenu?.projectNodeId === QUICK_LAUNCH_NODE}
-          title={t("terminal.quickChat")}
-        >
-          <AgentIcon size={12} />
-        </button>
-        <button
-          type="button"
-          className="icon-button icon-button--sm"
-          disabled={choosingProject}
-          onClick={onChooseProject}
-          aria-label={t("terminal.projects.add")}
-          title={t("terminal.projects.add")}
-        >
-          <PlusIcon size={12} />
-        </button>
+      <div className="session-projects__header">
+        <div className="session-projects__title">
+          <FolderIcon size={14} />
+          <span title={t("terminal.projects")}>{t("terminal.projects")}</span>
+          <button
+            type="button"
+            className="icon-button icon-button--sm session-projects__status-help"
+            onClick={() => setStatusLegendOpen((open) => !open)}
+            aria-label={t("terminal.projects.statusGuide")}
+            aria-expanded={statusLegendOpen}
+            aria-controls="session-project-status-guide"
+            title={t("terminal.projects.statusGuide")}
+          >
+            ?
+          </button>
+          <button
+            type="button"
+            className="icon-button icon-button--sm session-projects__folder-add"
+            onClick={() => onCreateFolder(null)}
+            aria-label={t("terminal.projects.addFolder")}
+            title={t("terminal.projects.addFolder")}
+          >
+            <FolderIcon size={11} />
+            <PlusIcon size={8} />
+          </button>
+          <button
+            type="button"
+            className="icon-button icon-button--sm"
+            onClick={(event) => openLaunchMenu(event, WORKSPACE_MANAGE_NODE)}
+            aria-label={t("terminal.projects.manage")}
+            aria-haspopup="menu"
+            aria-expanded={workspaceManageOpen}
+            title={t("terminal.projects.manage")}
+          >
+            <MoreIcon size={12} />
+          </button>
+          <button
+            type="button"
+            className="icon-button icon-button--sm"
+            onClick={(event) => openLaunchMenu(event, QUICK_LAUNCH_NODE)}
+            aria-label={t("terminal.quickChat")}
+            aria-haspopup="menu"
+            aria-expanded={launchMenu?.projectNodeId === QUICK_LAUNCH_NODE}
+            title={t("terminal.quickChat")}
+          >
+            <AgentIcon size={12} />
+          </button>
+          <button
+            type="button"
+            className="icon-button icon-button--sm"
+            disabled={choosingProject}
+            onClick={onChooseProject}
+            aria-label={t("terminal.projects.add")}
+            title={t("terminal.projects.add")}
+          >
+            <PlusIcon size={12} />
+          </button>
+        </div>
+        {statusLegendOpen && (
+          <section
+            className="session-projects__status-guide"
+            id="session-project-status-guide"
+            aria-label={t("terminal.projects.statusGuide")}
+          >
+            <strong>{t("terminal.projects.statusGuide")}</strong>
+            <span>
+              <i className="status-working" aria-hidden="true" />
+              {t("terminal.projects.statusGuideWorking")}
+            </span>
+            <span>
+              <i className="status-attention" aria-hidden="true" />
+              {t("terminal.projects.statusGuideAttention")}
+            </span>
+            <span>
+              <i className="status-idle" aria-hidden="true" />
+              {t("terminal.projects.statusGuideIdle")}
+            </span>
+            <span>
+              <i className="status-done" aria-hidden="true" />
+              {t("terminal.projects.statusGuideDone")}
+            </span>
+          </section>
+        )}
       </div>
-      {statusLegendOpen && (
-        <section
-          className="session-projects__status-guide"
-          id="session-project-status-guide"
-          aria-label={t("terminal.projects.statusGuide")}
-        >
-          <strong>{t("terminal.projects.statusGuide")}</strong>
-          <span>
-            <i className="status-working" aria-hidden="true" />
-            {t("terminal.projects.statusGuideWorking")}
-          </span>
-          <span>
-            <i className="status-attention" aria-hidden="true" />
-            {t("terminal.projects.statusGuideAttention")}
-          </span>
-          <span>
-            <i className="status-idle" aria-hidden="true" />
-            {t("terminal.projects.statusGuideIdle")}
-          </span>
-          <span>
-            <i className="status-done" aria-hidden="true" />
-            {t("terminal.projects.statusGuideDone")}
-          </span>
-        </section>
-      )}
       {chooseError && (
         <div className="session-projects__error" role="alert">
           {t("terminal.projects.chooseFailed")}

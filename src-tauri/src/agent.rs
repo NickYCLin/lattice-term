@@ -1027,8 +1027,12 @@ enum PromptSubmission {
 struct CompletionReadiness {
     submitted: bool,
     typed: bool,
+    working_footer_seen: bool,
     control_window: Vec<u8>,
 }
+
+// Keep enough of one TUI redraw to relate an approval question to its choices.
+const COMPLETION_CONTROL_WINDOW_BYTES: usize = 4096;
 
 impl CompletionReadiness {
     /// Records one keystroke chunk and reports how it left the prompt.
@@ -1041,6 +1045,7 @@ impl CompletionReadiness {
         let carried_text = self.typed;
         self.typed = false;
         self.submitted = true;
+        self.working_footer_seen = false;
         self.control_window.clear();
         if carried_text {
             PromptSubmission::Text
@@ -1055,23 +1060,32 @@ impl CompletionReadiness {
         integrated_completion: bool,
     ) -> Option<AgentLifecycle> {
         self.control_window.extend_from_slice(bytes);
+        if self.control_window.len() > COMPLETION_CONTROL_WINDOW_BYTES {
+            let overflow = self.control_window.len() - COMPLETION_CONTROL_WINDOW_BYTES;
+            self.control_window.drain(..overflow);
+        }
+        let text = strip_ansi(&String::from_utf8_lossy(&self.control_window)).to_lowercase();
+        let working = has_explicit_working_status(&text);
+
+        // A real approval dialog can interrupt active work. Ordinary prose,
+        // diffs and the always-visible composer cannot establish that state.
+        let attention = has_attention_marker(&text)
+            && (!(self.working_footer_seen || working) || has_actionable_attention_prompt(&text));
+        if attention {
+            self.cancel();
+            return Some(AgentLifecycle::NeedsAttention);
+        }
 
         // Codex renders an explicit working footer while a foreground turn or
         // a background terminal is still active. A stale conversational
         // question must not leave the sidebar on "needs attention" after
         // this authoritative-looking activity signal arrives.
-        if has_explicit_working_status(bytes) {
+        // Read the accumulated, ANSI-free tail: both styles and PTY read
+        // boundaries can split the words the user sees on one line.
+        if working {
+            self.working_footer_seen = true;
             self.control_window.clear();
             return Some(AgentLifecycle::Working);
-        }
-
-        // PTY reads may split a human-input prompt anywhere, including in the
-        // middle of "permission required". Inspect the bounded tail instead
-        // of only the newest read, and let an attention prompt win when the
-        // same redraw also re-enables bracketed paste.
-        if lifecycle_from_output(&self.control_window) == AgentLifecycle::NeedsAttention {
-            self.cancel();
-            return Some(AgentLifecycle::NeedsAttention);
         }
 
         // Bracketed-paste mode is enabled when an interactive prompt is ready
@@ -1091,15 +1105,12 @@ impl CompletionReadiness {
             self.control_window.clear();
             return Some(AgentLifecycle::Done);
         }
-        if self.control_window.len() > STARTUP_CONTROL_WINDOW_BYTES {
-            let overflow = self.control_window.len() - STARTUP_CONTROL_WINDOW_BYTES;
-            self.control_window.drain(..overflow);
-        }
         None
     }
 
     fn cancel(&mut self) {
         self.submitted = false;
+        self.working_footer_seen = false;
         self.control_window.clear();
     }
 }
@@ -5531,7 +5542,17 @@ fn find_model_name(definition_id: &str, text: &str) -> Option<String> {
 }
 
 fn lifecycle_from_output(bytes: &[u8]) -> AgentLifecycle {
-    let text = String::from_utf8_lossy(bytes).to_lowercase();
+    let text = strip_ansi(&String::from_utf8_lossy(bytes)).to_lowercase();
+    if has_attention_marker(&text)
+        && (!has_explicit_working_status(&text) || has_actionable_attention_prompt(&text))
+    {
+        AgentLifecycle::NeedsAttention
+    } else {
+        AgentLifecycle::Working
+    }
+}
+
+fn has_attention_marker(text: &str) -> bool {
     const ATTENTION_MARKERS: [&str; 12] = [
         "do you want to",
         "would you like",
@@ -5546,16 +5567,31 @@ fn lifecycle_from_output(bytes: &[u8]) -> AgentLifecycle {
         "是否允許",
         "請確認",
     ];
-    if ATTENTION_MARKERS.iter().any(|marker| text.contains(marker)) {
-        AgentLifecycle::NeedsAttention
-    } else {
-        AgentLifecycle::Working
-    }
+    ATTENTION_MARKERS.iter().any(|marker| text.contains(marker))
 }
 
-fn has_explicit_working_status(bytes: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(bytes).to_lowercase();
-    text.contains("working (") || text.contains("background terminal running")
+fn has_explicit_working_status(text: &str) -> bool {
+    text.contains("working (")
+        || text.contains("esc to interrupt")
+        || text.contains("background terminal running")
+}
+
+fn has_actionable_attention_prompt(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, '│' | '┃' | '›' | '❯' | '>')
+        });
+        line.starts_with("permission required")
+            || line.starts_with("press enter")
+            || line.starts_with("1. yes")
+            || line.starts_with("1) yes")
+            || line.starts_with("1. 是")
+            || line.starts_with("[y/n]")
+            || line.starts_with("(y/n)")
+            || line.ends_with("[y/n]")
+            || line.ends_with("(y/n)")
+            || line.contains("enter to confirm")
+    })
 }
 
 pub fn launch(
@@ -7017,6 +7053,75 @@ session id: 0199aa11-"
             Some(AgentLifecycle::Working)
         );
         assert_eq!(readiness.observe_output(b"still compiling", false), None);
+    }
+
+    #[test]
+    fn codex_working_footer_survives_ansi_styles_and_every_read_boundary() {
+        let footer = b"\x1b[90mWorking\x1b[0m \x1b[2m(8m 12s \xc2\xb7 esc to interrupt)\x1b[0m";
+        for split in 0..=footer.len() {
+            let mut readiness = CompletionReadiness::default();
+            let first = readiness.observe_output(&footer[..split], true);
+            let second = readiness.observe_output(&footer[split..], true);
+            assert!(
+                first == Some(AgentLifecycle::Working) || second == Some(AgentLifecycle::Working),
+                "missed working footer at byte {split}"
+            );
+            assert_ne!(first, Some(AgentLifecycle::NeedsAttention));
+            assert_ne!(second, Some(AgentLifecycle::NeedsAttention));
+        }
+    }
+
+    #[test]
+    fn codex_busy_diff_and_permanent_composer_are_not_a_question() {
+        let mut readiness = CompletionReadiness::default();
+        readiness.observe_input(b"fix the task\r");
+        readiness.observe_output(b"Working (8m 12s; esc to interrupt)", true);
+        let redraw = concat!(
+            "+ throw new Error(\"請確認專案設定\");\n",
+            "The log contains 'would you like to' and 'do you want to'.\n",
+            "> Ask Codex to do anything\n",
+            "gpt-6-astra xhigh\x1b[?2004h"
+        );
+        // TUI redraws often update only a few cells, omitting the footer.
+        for chunk in redraw.as_bytes().chunks(3) {
+            assert_eq!(readiness.observe_output(chunk, true), None);
+        }
+    }
+
+    #[test]
+    fn codex_partial_spinner_redraw_still_recovers_working() {
+        let mut readiness = CompletionReadiness::default();
+        readiness.observe_output(b"Do you want to continue?", true);
+        assert_eq!(
+            readiness.observe_output(b"8m 13s; esc to inter", true),
+            None
+        );
+        assert_eq!(
+            readiness.observe_output(b"rupt)", true),
+            Some(AgentLifecycle::Working)
+        );
+    }
+
+    #[test]
+    fn an_actual_approval_menu_can_interrupt_a_working_turn() {
+        for prefix in ["", "Working (8m 12s; esc to interrupt)\n"] {
+            let mut readiness = CompletionReadiness::default();
+            readiness.observe_output(b"Working (1s; esc to interrupt)", true);
+            let menu = format!(
+                "{prefix}Would you like to run the following command?\n\
+                 $ npm test\n\x1b[36m\u{203a} 1. Yes, proceed (y)\x1b[0m\n\
+                 2. No, and tell Codex what to do differently (esc)\x1b[?2004h"
+            );
+            assert_eq!(
+                readiness.observe_output(menu.as_bytes(), true),
+                Some(AgentLifecycle::NeedsAttention)
+            );
+            readiness.observe_input(b"\r");
+            assert_eq!(
+                readiness.observe_output(b"Working (1s; esc to interrupt)", true),
+                Some(AgentLifecycle::Working)
+            );
+        }
     }
 
     #[test]
