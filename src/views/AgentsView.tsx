@@ -242,43 +242,57 @@ export function AgentsView({
   async function addAccountProfile(
     definition: AgentDefinition,
     name: string,
-    chosenDirectory: string | null,
   ) {
     if (!profileCapable(definition.id)) return;
     const id = crypto.randomUUID();
-    let configDirectory = chosenDirectory;
-    if (configDirectory === null) {
-      // No directory chosen: LatticeTerm keeps one of its own per profile,
-      // so a second account never shares the first one's login.
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        configDirectory = await invoke<string>("agent_account_profile_directory", {
-          definitionId: definition.id,
-          profileId: id,
-        });
-      } catch (reason) {
-        setError(
-          t("agents.account.profileFailed", {
-            detail: reason instanceof Error ? reason.message : String(reason),
-          }),
-        );
-        setAccountProfileDefinition(null);
-        return;
-      }
-    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    const configDirectory = await invoke<string>("agent_account_profile_directory", {
+      definitionId: definition.id,
+      profileId: id,
+    });
     const profile: ChatAccountProfile = {
       id,
       definitionId: definition.id,
       name: name.slice(0, 64),
       configDirectory,
-      managed: chosenDirectory === null,
+      managed: true,
     };
-    setAccountProfiles((current) => [...current, profile]);
+    // Persist before opening the terminal, which may unmount the Fleet view.
+    const profiles = [...accountProfiles, profile];
+    if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
+    setAccountProfiles(profiles);
     setSelectedAccountProfile((current) => ({
       ...current,
       [definition.id]: profile.id,
     }));
     setAccountProfileDefinition(null);
+    setLaunching(definition.id);
+    setError(null);
+    try {
+      const session = await agents.launch({
+        // Pass the new profile explicitly: the account selection above has
+        // not rendered yet. This is a fresh, visible session for signing in.
+        definitionId: definition.id,
+        executable: "",
+        arguments: [],
+        resumeSessionId: null,
+        profileConfigPath: profile.configDirectory,
+        label: `${definition.label} · ${profile.name}`,
+        sandbox: sandboxAvailable && sandbox,
+        detached: false,
+        workingDirectory: workingDirectory || agents.defaultWorkingDirectory,
+        cols: 120,
+        rows: 32,
+      });
+      onOpen(session.sessionId);
+    } catch (reason) {
+      // Keep the newly added account selected so Launch can retry sign-in.
+      setError(t("agents.account.loginLaunchFailed", {
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
+    } finally {
+      setLaunching(null);
+    }
   }
 
   // Confirmed in the app's own dialog: `window.confirm` is not a real
@@ -816,10 +830,13 @@ export function AgentsView({
                         <select
                           className="select"
                           value={selected?.id ?? ""}
-                          onChange={(event) => setSelectedAccountProfile((current) => ({
-                            ...current,
-                            [definition.id]: event.currentTarget.value,
-                          }))}
+                          onChange={(event) => {
+                            const profileId = event.currentTarget.value;
+                            setSelectedAccountProfile((current) => ({
+                              ...current,
+                              [definition.id]: profileId,
+                            }));
+                          }}
                         >
                           <option value="">
                             {definition.account.label
@@ -853,6 +870,7 @@ export function AgentsView({
                         <button
                           type="button"
                           className="button button--secondary button--sm"
+                          disabled={launching === definition.id}
                           onClick={() => setAccountProfileDefinition(definition)}
                         >
                           {t("agents.account.addProfile")}
@@ -1529,8 +1547,7 @@ export function AgentsView({
       {accountProfileDefinition && profileCapable(accountProfileDefinition.id) && (
         <AgentAccountProfileDialog
           agentLabel={accountProfileDefinition.label}
-          onSave={(name, configDirectory) =>
-            void addAccountProfile(accountProfileDefinition, name, configDirectory)}
+          onSave={(name) => addAccountProfile(accountProfileDefinition, name)}
           onCancel={() => setAccountProfileDefinition(null)}
         />
       )}

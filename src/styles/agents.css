@@ -514,46 +514,8 @@
   gap: var(--space-2);
 }
 
-.agent-account-profile-dialog__steps {
-  margin: 0;
-  padding-left: 1.5em;
-  list-style: decimal;
-  display: grid;
-  gap: var(--space-1);
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
-
 .agent-account-profile-dialog .dialog__title {
   margin-bottom: var(--space-1);
-}
-
-.agent-account-profile-dialog__advanced > summary {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.agent-account-profile-dialog__advanced[open] > summary {
-  margin-bottom: var(--space-3);
-}
-
-.agent-account-profile-dialog__directory {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.agent-account-profile-dialog__path {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .agent-card .agent-card__install-command {

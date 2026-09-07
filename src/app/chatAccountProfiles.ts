@@ -1,7 +1,7 @@
 /**
  * Named, local CLI configuration roots.  A profile is only a label and a
- * directory selected by the person using LatticeTerm: it never contains a
- * token, email address, or a copy of a CLI's auth file.
+ * directory managed by LatticeTerm (or selected in older versions). The
+ * profile metadata never contains a token, email, or a CLI's auth file.
  */
 import type { ChatDefinitionId } from "./agentChat";
 
