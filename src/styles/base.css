@@ -129,6 +129,9 @@ button:disabled:active {
  */
 .glass {
   position: relative;
+  /* Preserve panel stacking even when backdrop-filter is unavailable or off.
+     Sticky project headers must not escape above the navigation tooltips. */
+  isolation: isolate;
   background-color: var(--surface);
   backdrop-filter: blur(var(--glass-blur)) saturate(140%);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);

@@ -33,6 +33,10 @@
 | **加密備份面板** | `EncryptedBackupPanel` | `src/components/settings/EncryptedBackupPanel.tsx` | 收集 allowlist 設定、要求 12 字元以上密碼、匯出加密檔，並在明確確認後執行完整驗證、逐檔原子替換與失敗回滾。 |
 | **狀態列** | `StatusBar` | `src/components/shell/StatusBar.tsx` | 28 px 底部狀態列，顯示連線數、記憶體/儲存模式與認證儲存區就緒狀態。 |
 
+玻璃面板以 `isolation: isolate` 明確建立獨立堆疊，不依賴背景模糊效果。
+因此即使模糊效果停用或不可用，專案側欄的固定標題、搜尋列仍不會蓋過
+導覽提示；導覽列層級維持低於全域對話框，提示也不會攔截點擊。
+
 ---
 
 ## 2. 狀態管理與領域模型
