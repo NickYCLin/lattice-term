@@ -211,7 +211,7 @@ async function daemonPeer(role = "desktop") {
   clients.add(peer);
   await peer.request({
     type: "hello",
-    protocol: 1,
+    protocol: role === "observer" ? 2 : 1,
     token: readFileSync(join(dataDir, "agent-daemon.token"), "utf8").trim(),
     role,
     client: "windows-acceptance 1.0",

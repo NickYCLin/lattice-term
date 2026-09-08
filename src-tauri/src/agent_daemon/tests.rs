@@ -346,7 +346,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
     let hello = observer
         .request(Request::Hello {
             token: token.clone(),
-            protocol: PROTOCOL_VERSION,
+            protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
             client: Some("test-client 1.0".to_string()),
         })
@@ -562,7 +562,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     observer
         .request(Request::Hello {
             token: token.clone(),
-            protocol: PROTOCOL_VERSION,
+            protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
             client: Some("test-client 1.0".to_string()),
         })
@@ -715,7 +715,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     retrying_observer
         .request(Request::Hello {
             token: token.clone(),
-            protocol: PROTOCOL_VERSION,
+            protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
             client: Some("test-client 1.0".to_string()),
         })

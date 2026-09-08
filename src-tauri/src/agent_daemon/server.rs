@@ -12,7 +12,7 @@ use super::mcp::{read_bounded_line, LineRead};
 use super::{
     read_or_create_token, transport, CancelScope, ClientRole, DaemonPaths, Frame, HelloReply,
     McpActivity, McpPlan, PromptMode, Request, SharedSession, LOG_FILE, MAX_FRAME_BYTES,
-    MAX_MCP_PROMPT_CHARS, MAX_OBSERVE_BYTES, PROTOCOL_VERSION, SESSION_ID_PREFIX,
+    MAX_MCP_PROMPT_CHARS, MAX_OBSERVE_BYTES, OBSERVER_PROTOCOL_VERSION, SESSION_ID_PREFIX,
 };
 use crate::agent::{
     self, AgentLifecycle, AgentRegistry, AgentSessionSummary, AgentSink, AgentStateSource,
@@ -280,7 +280,7 @@ where
         return;
     };
     let client_name = client_label(client.as_deref());
-    if token != context.token || protocol != PROTOCOL_VERSION {
+    if token != context.token || protocol != role.protocol_version() {
         let _ = tokio::time::timeout(
             HELLO_TIMEOUT,
             write_half.write_all(
@@ -296,7 +296,8 @@ where
     }
     let reply = match role {
         ClientRole::Desktop => HelloReply {
-            protocol: PROTOCOL_VERSION,
+            protocol: role.protocol_version(),
+            mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: true,
             sessions: detached_list(&context.registry),
             snapshots: context.registry.output_snapshots(),
@@ -304,7 +305,8 @@ where
         },
         // An observer's greeting carries nothing it could not ask for.
         ClientRole::Observer => HelloReply {
-            protocol: PROTOCOL_VERSION,
+            protocol: role.protocol_version(),
+            mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: false,
             sessions: shared_list(&context),
             snapshots: Vec::new(),
@@ -1661,7 +1663,7 @@ mod observer_transport_tests {
             1,
             Request::Hello {
                 token: "test-token".into(),
-                protocol: PROTOCOL_VERSION,
+                protocol: role.protocol_version(),
                 role,
                 client: Some("transport-test".into()),
             },
@@ -1681,6 +1683,52 @@ mod observer_transport_tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn mismatched_role_protocols_are_rejected_before_subscribing() {
+        for (role, protocol) in [
+            (ClientRole::Observer, super::super::PROTOCOL_VERSION),
+            (ClientRole::Desktop, OBSERVER_PROTOCOL_VERSION),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let context = test_context(dir.path());
+            let (client, stream) = tokio::io::duplex(4096);
+            let handler = tokio::spawn(handle_client(stream, Arc::clone(&context)));
+            let mut client = BufReader::new(client);
+            send_request(
+                client.get_mut(),
+                1,
+                Request::Hello {
+                    token: "test-token".into(),
+                    protocol,
+                    role,
+                    client: None,
+                },
+            )
+            .await;
+            let frame = read_frame(&mut client, MAX_FRAME_BYTES)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                frame,
+                Frame::Response {
+                    ok: false,
+                    result: Value::Null,
+                    ..
+                }
+            ));
+            tokio::time::timeout(Duration::from_secs(2), handler)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(context.sink.clients.lock().unwrap().is_empty());
+            assert!(read_frame(&mut client, MAX_FRAME_BYTES)
+                .await
+                .unwrap()
+                .is_none());
+        }
     }
 
     #[tokio::test]

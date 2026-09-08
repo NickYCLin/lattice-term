@@ -847,6 +847,7 @@ export const en: Messages = {
   "agents.mcp.copy": "Copy",
   "agents.mcp.copied": "Copied to the clipboard.",
   "agents.mcp.docs": "Tools, permission boundaries and verification: docs/MCP.zh-TW.md.",
+  "agents.mcp.needsRestart": "MCP needs an updated background service. Existing sessions remain available. Finish background work before stopping and restarting the service; LatticeTerm will not interrupt CLIs automatically.",
   "agents.mcp.error.share": "Cannot change sharing: {error}",
   "agents.mcp.error.copy": "Cannot copy: {error}",
   "agents.mcp.control": "Let MCP send prompts and stop it",

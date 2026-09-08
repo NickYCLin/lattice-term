@@ -34,6 +34,9 @@ use std::path::{Path, PathBuf};
 
 /// Bumped when a frame changes shape; both sides refuse a mismatch.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// Legacy desktop daemons ignore the role field. A distinct version makes
+/// them reject observer greetings before returning any private session data.
+pub const OBSERVER_PROTOCOL_VERSION: u32 = 2;
 /// Session ids minted by the daemon's registry. The desktop routes every
 /// command by this prefix, so the two registries can never collide.
 pub const SESSION_ID_PREFIX: &str = "agent-bg-session-";
@@ -73,6 +76,15 @@ pub enum ClientRole {
     #[default]
     Desktop,
     Observer,
+}
+
+impl ClientRole {
+    pub const fn protocol_version(self) -> u32 {
+        match self {
+            Self::Desktop => PROTOCOL_VERSION,
+            Self::Observer => OBSERVER_PROTOCOL_VERSION,
+        }
+    }
 }
 
 /// Where this installation keeps its data when nobody passes `--data-dir`:
@@ -470,6 +482,9 @@ pub struct McpPlan {
 #[serde(rename_all = "camelCase")]
 pub struct HelloReply {
     pub protocol: u32,
+    /// Zero on legacy daemons, which must not receive MCP administration frames.
+    #[serde(default)]
+    pub mcp_protocol: u32,
     /// Optional desktop capability. Old daemons must never receive the new
     /// request variant: they may close the connection on an unknown frame.
     #[serde(default)]

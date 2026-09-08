@@ -817,6 +817,7 @@ export const zhTW = {
   "agents.mcp.copy": "複製",
   "agents.mcp.copied": "已複製到剪貼簿。",
   "agents.mcp.docs": "工具說明、權限邊界與驗證方式見 docs/MCP.zh-TW.md。",
+  "agents.mcp.needsRestart": "背景服務版本較舊，目前無法使用 MCP。既有工作階段仍可操作；請先完成背景工作，再停止並重新啟動背景服務。系統不會自動中斷 CLI。",
   "agents.mcp.error.share": "無法變更分享：{error}",
   "agents.mcp.error.copy": "無法複製：{error}",
   "agents.mcp.control": "允許 MCP 送指示與停止",

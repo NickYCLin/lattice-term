@@ -759,6 +759,11 @@ export function AgentsView({
             </button>
           </p>
         )}
+        {daemon.status.mcpNeedsRestart && (
+          <p className="agents-field-hint agents-mcp__error" role="status">
+            {t("agents.mcp.needsRestart")}
+          </p>
+        )}
         {daemon.status.mcp && (
           <details className="agents-mcp">
             <summary>
@@ -811,7 +816,7 @@ export function AgentsView({
               <input
                 type="checkbox"
                 checked={agents.mcpLaunch}
-                disabled={mcpLaunchBusy}
+                disabled={mcpLaunchBusy || daemon.status.mcpNeedsRestart}
                 onChange={(event) => toggleMcpLaunch(event.currentTarget.checked)}
               />
               <span className="checkbox__box" aria-hidden="true">
@@ -1509,6 +1514,7 @@ export function AgentsView({
                       <input
                         type="checkbox"
                         checked={sharedWithMcp.has(session.sessionId)}
+                        disabled={daemon.status.mcpNeedsRestart}
                         onChange={(event) =>
                           toggleMcpShare(session.sessionId, event.currentTarget.checked)
                         }
@@ -1524,6 +1530,7 @@ export function AgentsView({
                       <input
                         type="checkbox"
                         checked={sharedWithMcp.get(session.sessionId)?.control === true}
+                        disabled={daemon.status.mcpNeedsRestart}
                         onChange={(event) =>
                           toggleMcpControl(session.sessionId, event.currentTarget.checked)
                         }

@@ -27,6 +27,7 @@ type SharedEntry = {
 const daemonStatus = vi.hoisted(() => ({
   current: {
     running: false,
+    mcpNeedsRestart: false,
     sessions: 0,
     shared: [] as SharedEntry[],
     mcp: null as null | { command: string; args: string[] },
@@ -64,12 +65,13 @@ describe("AgentsView", () => {
   afterEach(() => {
     restoreStorage?.();
     restoreStorage = null;
-    daemonStatus.current = { running: false, sessions: 0, shared: [], mcp: null };
+    daemonStatus.current = { running: false, mcpNeedsRestart: false, sessions: 0, shared: [], mcp: null };
   });
 
   it("offers MCP sharing only for background sessions and shows the client snippets", () => {
     daemonStatus.current = {
       running: true,
+      mcpNeedsRestart: false,
       sessions: 1,
       shared: [
         {
@@ -108,6 +110,7 @@ describe("AgentsView", () => {
   it("offers no control grant on a session that is only shared", () => {
     daemonStatus.current = {
       running: true,
+      mcpNeedsRestart: false,
       sessions: 1,
       shared: [{ sessionId: "agent-bg-session-1", control: false }],
       mcp: { command: "/opt/lattice-term", args: ["mcp"] },
@@ -120,6 +123,20 @@ describe("AgentsView", () => {
     expect(markup).toContain("允許 MCP 送指示與停止");
     expect(markup).not.toContain("MCP 可控");
     expect(markup).not.toContain("MCP：");
+  });
+
+  it("keeps old daemon sessions visible and disables only MCP grants", () => {
+    daemonStatus.current = {
+      running: true, mcpNeedsRestart: true, sessions: 1, shared: [],
+      mcp: { command: "/opt/lattice-term", args: ["mcp"] },
+    };
+    const markup = render(fakeAgentApi({
+      sessions: [fakeSession({ sessionId: "agent-bg-session-1", label: "existing CLI", detached: true })],
+    }));
+    expect(markup).toContain("背景服務版本較舊，目前無法使用 MCP");
+    expect(markup).toContain("existing CLI");
+    expect(markup).toContain("系統不會自動中斷 CLI");
+    expect(markup).toMatch(/<input type="checkbox" disabled=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
   });
 
   it("offers the account picker with the signed-in default and a named account", () => {

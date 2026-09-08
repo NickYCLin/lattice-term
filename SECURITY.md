@@ -54,4 +54,6 @@ LatticeTerm is currently pre-1.0. The latest GitHub Release and the latest commi
 
 The desktop-only MCP write history keeps at most 256 metadata entries in daemon memory. It records accepted, replayed, failed or unknown outcomes, including requests for sessions that have since ended. Observers cannot read this history. It does not retain prompts, request IDs, raw errors, credentials or launch arguments, and does not persist across daemon restart. Client labels are self-reported, not authenticated identities; accepted operations are not proof of successful agent tasks. This is not a complete, durable or tamper-evident audit ledger.
 
+MCP observers use daemon protocol 2, distinct from desktop protocol 1. Legacy daemons ignore unknown role fields, so the adapter must use a version those daemons reject before returning private session data. The desktop negotiates MCP support before sending administration frames; unsupported commands fail locally without dropping existing desktop sessions. An outdated daemon must be restarted after existing work finishes; the application never forcibly restarts it for MCP. This protects protocol compatibility, not against a malicious process already running as the same OS user with access to the desktop token.
+
 These statements describe the current source tree, not a security audit or certification.

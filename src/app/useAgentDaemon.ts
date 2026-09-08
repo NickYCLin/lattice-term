@@ -41,6 +41,7 @@ export interface AgentMcpHistory {
 
 export interface AgentDaemonStatus {
   running: boolean;
+  mcpNeedsRestart: boolean;
   sessions: number;
   /** Background sessions the user shared with MCP observers, with grants. */
   shared: AgentSharedSession[];
@@ -54,6 +55,7 @@ const POLL_MS = 10_000;
 
 export const EMPTY_DAEMON_STATUS: AgentDaemonStatus = {
   running: false,
+  mcpNeedsRestart: false,
   sessions: 0,
   shared: [],
   mcp: null,
@@ -76,6 +78,7 @@ export function useAgentDaemon(sessionsHint: number): {
       const next = await invoke<AgentDaemonStatus>("agent_daemon_status");
       setStatus({
         ...next,
+        mcpNeedsRestart: next.mcpNeedsRestart ?? false,
         shared: next.shared ?? [],
         mcp: next.mcp ?? null,
         history: next.history ?? null,

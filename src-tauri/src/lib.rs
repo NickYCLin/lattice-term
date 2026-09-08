@@ -1107,6 +1107,7 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
         .and_then(|value| serde_json::from_value(value).ok());
     Ok(AgentDaemonStatus {
         running: daemon.is_running().await,
+        mcp_needs_restart: daemon.mcp_needs_restart().await,
         sessions: sessions.len(),
         shared,
         history,
@@ -1408,6 +1409,7 @@ async fn agent_automations_take_runs(
 #[serde(rename_all = "camelCase")]
 struct AgentDaemonStatus {
     running: bool,
+    mcp_needs_restart: bool,
     sessions: usize,
     /// Sessions shared with MCP observers, with their grants.
     shared: Vec<crate::agent_daemon::SharedSession>,
