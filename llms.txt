@@ -29,6 +29,7 @@
 - Desktop remote MCP: explicitly granted live SSH metrics/named exec plans and SFTP scoped file tools, via connection-owned reverse RPC (`src-tauri/src/mcp_desktop.rs`, `src-tauri/src/agent_daemon/desktop_bridge.rs`).
 - Agent UI and terminal: `src/views/AgentsView.tsx`, `src/components/agents/`
 - SSH, SFTP and tunnels: `src-tauri/src/ssh.rs`, `sftp.rs`, `tunnel.rs`
+- Remote text editing: `src/components/files/RemoteTextEditor.tsx`, `src-tauri/src/sftp_text.rs`, `crates/lattice-remote/src/host_text.rs`. UTF-8 up to 1 MiB, revision checks and retained recovery copies; SFTP ACL/hardlink and non-atomic replacement limits apply. Lattice Remote editing requires an updated Linux/macOS host; Windows viewers can connect, but Windows hosts do not advertise editing. See `docs/REMOTE_TEXT_EDITING.zh-TW.md`.
 - Lattice Remote: `src/components/remote/`, `src-tauri/src/remote.rs`, `crates/lattice-remote/`
 - RDP and VNC engines: `crates/lattice-rdp/`, `crates/lattice-vnc/`
 - Vault, backup and storage: `src-tauri/src/vault.rs`, `backup.rs`, `storage.rs`

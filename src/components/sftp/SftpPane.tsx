@@ -14,9 +14,11 @@ import { useI18n } from "../../i18n/context";
 import { formatBytes } from "../../domain/metrics";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
+import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
   CloseIcon,
+  CodeFileIcon,
   EditIcon,
   ExportIcon,
   FolderIcon,
@@ -49,6 +51,12 @@ export function SftpPane({
   active?: boolean;
 }) {
   const { t, tag } = useI18n();
+  const editor = useRemoteTextEditor();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [directory, setDirectory] = useState<SftpDirectory | null>(null);
   const [pathInput, setPathInput] = useState(session.currentPath);
   const [loading, setLoading] = useState(true);
@@ -193,6 +201,15 @@ export function SftpPane({
     }
   }
 
+  function edit(entry: SftpEntry) {
+    editor.open({
+      path: entry.path,
+      read: () => sftp.readTextFile(session.sessionId, entry.path),
+      save: (content, revision, acknowledgeAccessChange) => sftp.saveTextFile(session.sessionId, entry.path, content, revision, acknowledgeAccessChange),
+      onClosed: () => { if (mounted.current && directory) void open(directory.path); },
+    });
+  }
+
   async function upload(file: File | undefined) {
     if (!file || !directory) return;
     const existing = directory.entries.find((entry) => entry.name === file.name);
@@ -246,7 +263,7 @@ export function SftpPane({
   // OS drag-and-drop is delivered by Tauri as file paths (the webview's own
   // drop events are suppressed), so only the active pane binds the listener.
   useEffect(() => {
-    if (!active) {
+    if (!active || editor.active) {
       setDragging(false);
       return;
     }
@@ -258,6 +275,7 @@ export function SftpPane({
           "@tauri-apps/api/webviewWindow"
         );
         const stop = await getCurrentWebviewWindow().onDragDropEvent((event) => {
+          if (cancelled) return;
           if (event.payload.type === "enter" || event.payload.type === "over") {
             setDragging(true);
           } else if (event.payload.type === "leave") {
@@ -279,7 +297,7 @@ export function SftpPane({
       setDragging(false);
     };
     // Re-bind when the open directory changes so drops target the current one.
-  }, [active, directory?.path, session.sessionId]);
+  }, [active, editor.active, directory?.path, session.sessionId]);
 
   async function transferAction(operation: () => Promise<void>) {
     setProblem(null);
@@ -438,6 +456,18 @@ export function SftpPane({
                   <td className="mono">{entry.permissions}</td>
                   <td>
                     <div className="sftp-row-actions">
+                      {entry.kind === "file" && (
+                        <button
+                          type="button"
+                          className="icon-button icon-button--sm"
+                          disabled={busy || editor.active}
+                          onClick={() => edit(entry)}
+                          aria-label={t("fileEditor.edit")}
+                          data-tooltip={t("fileEditor.edit")}
+                        >
+                          <CodeFileIcon size={12} />
+                        </button>
+                      )}
                       {entry.kind !== "directory" && (
                         <button
                           type="button"

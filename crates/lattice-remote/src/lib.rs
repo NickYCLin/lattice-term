@@ -12,6 +12,8 @@ pub mod device_pins;
 pub mod host_files;
 #[cfg(feature = "agent")]
 pub mod host_input;
+#[cfg(feature = "agent")]
+pub mod host_text;
 pub mod pairing_limit;
 mod password_pairing;
 mod protocol;
@@ -28,8 +30,8 @@ pub use protocol::{
     RemoteFileRequest, RemoteFileResponse, RemoteHello, RemoteInput, RemoteMessage, DEFAULT_PORT,
     FILE_CHUNK_SIZE, FRAME_CHUNK_SIZE, MAX_AGENT_NAME_BYTES, MAX_CLOSE_REASON_BYTES,
     MAX_DIRECTORY_ENTRIES, MAX_FILE_ERROR_BYTES, MAX_FILE_ROOT_LABEL_BYTES, MAX_FRAME_BYTES,
-    MAX_FRAME_DIMENSION, MAX_FRAME_PIXELS, MAX_REMOTE_PATH_BYTES, MAX_WHEEL_UNITS,
-    MIN_COMPATIBLE_PROTOCOL_VERSION, PROTOCOL_VERSION,
+    MAX_FRAME_DIMENSION, MAX_FRAME_PIXELS, MAX_REMOTE_PATH_BYTES, MAX_TEXT_FILE_BYTES,
+    MAX_WHEEL_UNITS, MIN_COMPATIBLE_PROTOCOL_VERSION, PROTOCOL_VERSION,
 };
 pub use secure::{
     format_pairing_code, generate_pairing_code, normalize_legacy_pairing_code,

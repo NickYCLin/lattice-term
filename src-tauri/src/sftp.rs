@@ -15,7 +15,7 @@ use russh_sftp::protocol::{File as DirectoryEntry, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
@@ -111,7 +111,10 @@ struct SftpSessionEntry {
 pub struct SftpRegistry {
     sessions: Mutex<HashMap<String, SftpSessionEntry>>,
     counter: AtomicU64,
+    text_gates: Mutex<HashMap<TextTarget, Weak<tokio::sync::Mutex<()>>>>,
 }
+
+type TextTarget = (String, u16, String, String);
 
 impl SftpRegistry {
     pub fn new() -> Self {
@@ -137,6 +140,50 @@ impl SftpRegistry {
             .get(session_id)
             .map(|entry| Arc::clone(&entry.sftp))
             .ok_or_else(|| format!("no SFTP session called '{session_id}'"))
+    }
+
+    /// Editors of the same authenticated account/path share a gate, even when
+    /// opened through different tabs. Unrelated paths and sessions remain free.
+    pub(crate) fn text_gate(
+        &self,
+        session_id: &str,
+        path: &str,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+        let key = {
+            let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+            let entry = sessions
+                .get(session_id)
+                .ok_or_else(|| format!("no SFTP session called '{session_id}'"))?;
+            (
+                entry.summary.host.clone(),
+                entry.summary.port,
+                entry.summary.username.clone(),
+                path.to_owned(),
+            )
+        };
+        let mut gates = self.text_gates.lock().map_err(|error| error.to_string())?;
+        gates.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+            return Ok(gate);
+        }
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        gates.insert(key, Arc::downgrade(&gate));
+        Ok(gate)
+    }
+
+    pub(crate) async fn mutation_gate(
+        &self,
+        session_id: &str,
+        path: &str,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+        let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
+        let parent = if parent.is_empty() { "/" } else { parent };
+        let canonical = self
+            .session(session_id)?
+            .canonicalize(parent)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.text_gate(session_id, &join_path(&canonical, name))
     }
 
     /// A retained registry entry is not proof that its SSH transport is alive.
@@ -533,9 +580,22 @@ pub async fn rename(
         .map(|(parent, _)| if parent.is_empty() { "/" } else { parent })
         .unwrap_or(".")
         .to_string();
+    let target = join_path(&parent, &new_name);
+    let source_gate = registry.mutation_gate(session_id, &path).await?;
+    let _source = source_gate
+        .try_lock()
+        .map_err(|_| "Another file operation is already running for this path.".to_owned())?;
+    let target_gate = registry.mutation_gate(session_id, &target).await?;
+    let _target = if Arc::ptr_eq(&source_gate, &target_gate) {
+        None
+    } else {
+        Some(target_gate.try_lock().map_err(|_| {
+            "Another file operation is already running for the destination.".to_owned()
+        })?)
+    };
     registry
         .session(session_id)?
-        .rename(path, join_path(&parent, &new_name))
+        .rename(path, target)
         .await
         .map_err(|error| error.to_string())
 }
@@ -547,6 +607,10 @@ pub async fn remove(
     directory: bool,
 ) -> Result<(), String> {
     let path = validate_path(path)?;
+    let gate = registry.mutation_gate(session_id, &path).await?;
+    let _guard = gate
+        .try_lock()
+        .map_err(|_| "Another file operation is already running for this path.".to_owned())?;
     let session = registry.session(session_id)?;
     if directory {
         session

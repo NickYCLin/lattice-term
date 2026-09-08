@@ -32,7 +32,7 @@ Windows · macOS · Linux | Open-source desktop core, licensed under MPL-2.0
   <tr>
     <td width="50%" valign="top">
       <h3>Continue on a remote host</h3>
-      <p>Manage SSH connections, transfer files over SFTP, and create SSH tunnels. Use RDP, VNC, or Lattice Remote for desktop access. Remote connections work independently of AI tools.</p>
+      <p>Manage SSH connections, transfer files over SFTP, and create SSH tunnels. Edit UTF-8 text directly in SFTP and updated Lattice Remote file panes (Linux/macOS sharing hosts), with revision checks and recoverable original-file backups. Use RDP, VNC, or Lattice Remote for desktop access. Remote connections work independently of AI tools.</p>
     </td>
     <td width="50%" valign="top">
       <h3>Schedule recurring work</h3>

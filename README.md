@@ -31,7 +31,7 @@ Windows · macOS · Linux ｜ 桌面核心開源，採 MPL-2.0 授權
   <tr>
     <td width="50%" valign="top">
       <h3>連線與傳檔</h3>
-      <p>管理 SSH 連線、用 SFTP 傳檔、建立 SSH Tunnel。需要看桌面時，另有 RDP、VNC 與 Lattice Remote；也能單獨使用遠端連線。</p>
+      <p>管理 SSH 連線、用 SFTP 傳檔、建立 SSH Tunnel。SFTP 與新版 Lattice Remote（Linux／macOS 分享端）檔案頁可直接編輯 UTF-8 純文字，儲存前核對版本並保留原檔備份。需要看桌面時，另有 RDP、VNC 與 Lattice Remote；也能單獨使用遠端連線。</p>
     </td>
     <td width="50%" valign="top">
       <h3>排程與背景工作</h3>

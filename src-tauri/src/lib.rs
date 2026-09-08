@@ -4,6 +4,8 @@ pub mod agent_daemon;
 pub mod agent_history;
 pub mod agent_plans;
 mod agent_process;
+#[cfg(desktop)]
+pub mod app_menu;
 pub mod backup;
 mod chat_attachments;
 pub mod clipboard;
@@ -25,6 +27,7 @@ pub mod sftp;
 mod sftp_limits;
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod sftp_test_server;
+pub mod sftp_text;
 pub mod sftp_transfers;
 pub mod shared_agent_rules;
 mod sidecar;
@@ -2449,6 +2452,35 @@ async fn sftp_write_file(
 }
 
 #[tauri::command]
+async fn sftp_read_text_file(
+    session_id: String,
+    path: String,
+    registry: State<'_, Arc<SftpRegistry>>,
+) -> Result<crate::sftp_text::TextFile, String> {
+    crate::sftp_text::read_text_file(registry.inner(), &session_id, &path).await
+}
+
+#[tauri::command]
+async fn sftp_save_text_file(
+    session_id: String,
+    path: String,
+    content: String,
+    revision: String,
+    acknowledge_access_change: Option<bool>,
+    registry: State<'_, Arc<SftpRegistry>>,
+) -> Result<crate::sftp_text::TextFile, String> {
+    crate::sftp_text::save_text_file(
+        registry.inner(),
+        &session_id,
+        &path,
+        &content,
+        &revision,
+        acknowledge_access_change.unwrap_or(false),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn sftp_disconnect(
     app: AppHandle,
     session_id: String,
@@ -2662,6 +2694,26 @@ async fn remote_file_list(
     registry: State<'_, Arc<RemoteRegistry>>,
 ) -> Result<RemoteDirectory, String> {
     crate::remote::file_list(registry.inner(), &session_id, path).await
+}
+
+#[tauri::command]
+async fn remote_file_read_text(
+    session_id: String,
+    path: String,
+    registry: State<'_, Arc<RemoteRegistry>>,
+) -> Result<crate::remote_files::RemoteTextDocument, String> {
+    crate::remote::file_read_text(registry.inner(), &session_id, path).await
+}
+
+#[tauri::command]
+async fn remote_file_save_text(
+    session_id: String,
+    path: String,
+    content: String,
+    revision: String,
+    registry: State<'_, Arc<RemoteRegistry>>,
+) -> Result<crate::remote_files::RemoteTextDocument, String> {
+    crate::remote::file_save_text(registry.inner(), &session_id, path, content, revision).await
 }
 
 #[tauri::command]
@@ -3201,6 +3253,8 @@ pub fn run() {
                 &data_dir,
             )));
             app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::new()));
+            #[cfg(target_os = "macos")]
+            crate::app_menu::install_guarded_quit(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3294,6 +3348,8 @@ pub fn run() {
             sftp_remove,
             sftp_read_file,
             sftp_write_file,
+            sftp_read_text_file,
+            sftp_save_text_file,
             sftp_disconnect,
             sftp_download_start,
             sftp_upload_begin,
@@ -3311,6 +3367,8 @@ pub fn run() {
             remote_terminal_input,
             remote_terminal_resize,
             remote_file_list,
+            remote_file_read_text,
+            remote_file_save_text,
             remote_file_download_start,
             remote_file_upload_begin,
             remote_file_upload_chunk,

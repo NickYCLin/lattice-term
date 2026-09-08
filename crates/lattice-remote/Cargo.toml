@@ -46,6 +46,9 @@ enigo = { version = "0.6", optional = true }
 portable-pty = { version = "0.9", optional = true }
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [[bin]]
 name = "lattice-agent"
 path = "src/bin/lattice-agent.rs"

@@ -52,7 +52,7 @@ GitHub API 失敗、發布時間格式錯誤、主分支或 PR 快照不一致�
 
 ## 自動發布流程
 
-1. 一般 push 與功能 PR 只在 Linux amd64 執行前端檢查、Rust 格式、測試與 lint；PR 另外檢查 Conventional Commits。
+1. 一般 push 與功能 PR 在 Linux amd64 執行前端檢查、Rust 格式、測試與 lint，並於 macOS 驗證遠端文字編輯的原生權限、加密連線及桌面結束選單；PR 另外檢查 Conventional Commits。符合路徑條件的功能 PR 亦會建立 Windows 測試安裝包、驗證 Windows 分享端拒絕文字編輯的邊界，以及執行既有 iOS 未簽章建置驗證；這些測試產物不是正式發布。
 2. `Release` workflow 讀取最近公開正式版與目前版本的未完成發布狀態；舊草稿或預發行標記不重設週期。
 3. 若有可發布變更，自動建立或更新一個 draft Release PR，內容包含新版本、`CHANGELOG.md` 與所有版本檔差異；workflow 會自動合併同一版本內由 merge commit 與原提交造成的重複 changelog 項目，並檢查版本檔是否同步。
 4. 只有到期時，才透過可重用的 `ci.yml` 額外驗證 Release PR 的確切 SHA；一般 push 不會重複執行這份發布驗證。CI 失敗不合併 PR，也不建立新 tag。

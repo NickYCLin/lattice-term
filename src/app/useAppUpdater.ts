@@ -6,7 +6,10 @@
  * without manual reinstall.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useContext, useState } from "react";
+import { I18nContext } from "../i18n/context";
+import { zhTW, type MessageKey } from "../i18n/messages/zh-TW";
+import { appLifecycleGuard } from "./appLifecycleGuard";
 import { APP_VERSION } from "./version";
 
 export type UpdaterDownloadEvent =
@@ -101,6 +104,8 @@ export interface UpdateInfo {
 }
 
 export function useAppUpdater(currentVersion = APP_VERSION) {
+  const i18n = useContext(I18nContext);
+  const t = useCallback((key: MessageKey) => i18n?.t(key) ?? zhTW[key], [i18n]);
   const [info, setInfo] = useState<UpdateInfo>({
     status: "idle",
     currentVersion,
@@ -167,6 +172,13 @@ export function useAppUpdater(currentVersion = APP_VERSION) {
 
   const downloadAndInstall = useCallback(async () => {
     if (!pendingUpdate) return;
+    // Acquire before the first await and before invoking the plugin: Windows
+    // may quit inside downloadAndInstall, before our explicit restart callback.
+    const lease = appLifecycleGuard.acquire("update");
+    if (!lease) {
+      setInfo((prev) => ({ ...prev, status: "error", error: t(appLifecycleGuard.owner === "editor" ? "settings.updater.editorBlocked" : "settings.updater.alreadyRunning") }));
+      return;
+    }
 
     setInfo((prev) => ({
       ...prev,
@@ -205,26 +217,35 @@ export function useAppUpdater(currentVersion = APP_VERSION) {
         },
       );
     } catch (err: unknown) {
+      lease.release();
       setInfo((prev) => ({
         ...prev,
         status: installed ? "downloaded" : "error",
         error: err instanceof Error ? err.message : String(err),
       }));
     }
-  }, [pendingUpdate]);
+    // A successful restart request may resolve before the window exits. Keep
+    // this lease, even if the hook unmounts, until that process actually ends.
+  }, [pendingUpdate, t]);
 
   const relaunchApp = useCallback(async () => {
+    const lease = appLifecycleGuard.acquire("update");
+    if (!lease) {
+      setInfo((prev) => ({ ...prev, status: "downloaded", error: t(appLifecycleGuard.owner === "editor" ? "settings.updater.editorBlocked" : "settings.updater.alreadyRunning") }));
+      return;
+    }
     setInfo((prev) => ({ ...prev, status: "installing", error: null }));
     try {
       await restartAppSafely();
     } catch (err: unknown) {
+      lease.release();
       setInfo((prev) => ({
         ...prev,
         status: "downloaded",
         error: err instanceof Error ? err.message : String(err),
       }));
     }
-  }, []);
+  }, [t]);
 
   return {
     ...info,

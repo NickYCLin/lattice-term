@@ -6,11 +6,12 @@ use lattice_remote::relay::{
 };
 use lattice_remote::{
     frame_messages, generate_pairing_code,
-    host_files::{SharedFiles, UploadFinishOutcome},
+    host_files::{HostUpload, SharedFiles, UploadFinishOutcome},
     host_input::InputInjector,
+    host_text::{self, HostTextUpload, TextSaveOutcome},
     normalize_pairing_code, FrameFormat, RemoteFileRequest, RemoteFileResponse, RemoteHello,
     RemoteMessage, SecureConnection, SecureWriter, Transport, DEFAULT_PORT, FILE_CHUNK_SIZE,
-    MAX_FILE_ERROR_BYTES, PROTOCOL_VERSION,
+    MAX_FILE_ERROR_BYTES, MAX_TEXT_FILE_BYTES, PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -1253,11 +1254,45 @@ struct UploadJob {
     path: String,
     size: u64,
     overwrite: bool,
+    expected_revision: Option<[u8; 32]>,
     commands: mpsc::Receiver<UploadCommand>,
     outgoing: mpsc::Sender<RemoteMessage>,
     permit: OwnedSemaphorePermit,
     registration: FileJobRegistration,
     runtime: Handle,
+}
+
+enum PreparedUpload {
+    File(HostUpload),
+    Text(HostTextUpload),
+}
+
+enum UploadPublication {
+    File(UploadFinishOutcome),
+    Text(TextSaveOutcome),
+}
+
+impl PreparedUpload {
+    fn destination(&self) -> &Path {
+        match self {
+            Self::File(upload) => upload.destination(),
+            Self::Text(upload) => upload.destination(),
+        }
+    }
+
+    fn write_chunk(&mut self, bytes: &[u8]) -> Result<u64, String> {
+        match self {
+            Self::File(upload) => upload.write_chunk(bytes),
+            Self::Text(upload) => upload.write_chunk(bytes),
+        }
+    }
+
+    fn finish(self) -> Result<UploadPublication, String> {
+        match self {
+            Self::File(upload) => upload.finish().map(UploadPublication::File),
+            Self::Text(upload) => upload.finish().map(UploadPublication::Text),
+        }
+    }
 }
 
 struct UploadTargetReservation {
@@ -1309,6 +1344,7 @@ fn spawn_upload(job: UploadJob) -> Result<(), &'static str> {
             path,
             size,
             overwrite,
+            expected_revision,
             mut commands,
             outgoing,
             permit,
@@ -1351,7 +1387,16 @@ fn spawn_upload(job: UploadJob) -> Result<(), &'static str> {
                 return;
             }
         };
-        let mut upload = match files.begin_upload(transfer_id, &path, size, overwrite) {
+        let prepared = match expected_revision {
+            Some(revision) => files
+                .text_root()
+                .begin_save(&path, size, revision)
+                .map(PreparedUpload::Text),
+            None => files
+                .begin_upload(transfer_id, &path, size, overwrite)
+                .map(PreparedUpload::File),
+        };
+        let mut upload = match prepared {
             Ok(upload) => upload,
             Err(error) => {
                 finish_active_or_cancelled_file_job(
@@ -1462,7 +1507,10 @@ fn spawn_upload(job: UploadJob) -> Result<(), &'static str> {
                         registration
                             .registry
                             .commit_upload(transfer_id, &registration.control);
-                        if let UploadFinishOutcome::PublishedWithCleanupWarning(detail) = outcome {
+                        if let UploadPublication::File(
+                            UploadFinishOutcome::PublishedWithCleanupWarning(detail),
+                        ) = outcome
+                        {
                             eprintln!(
                                 "Remote upload {transfer_id} committed with a cleanup warning: {}",
                                 safe_file_error(detail)
@@ -1471,10 +1519,16 @@ fn spawn_upload(job: UploadJob) -> Result<(), &'static str> {
                     }
                     registration.control.finish_upload_commit();
                     let response = match result {
-                        Ok(UploadFinishOutcome::Published)
-                        | Ok(UploadFinishOutcome::PublishedWithCleanupWarning(_)) => {
+                        Ok(UploadPublication::File(_)) => {
                             RemoteMessage::FileResponse(RemoteFileResponse::Complete {
                                 transfer_id,
+                            })
+                        }
+                        Ok(UploadPublication::Text(outcome)) => {
+                            RemoteMessage::FileResponse(RemoteFileResponse::TextSaved {
+                                transfer_id,
+                                revision: outcome.revision,
+                                backup_path: outcome.backup_path,
                             })
                         }
                         Err(error) => file_error(transfer_id, error),
@@ -1636,6 +1690,80 @@ fn spawn_download(
     })
 }
 
+fn spawn_text_read(
+    files: Arc<SharedFiles>,
+    request_id: u64,
+    path: String,
+    outgoing: mpsc::Sender<RemoteMessage>,
+    permit: OwnedSemaphorePermit,
+    registration: FileJobRegistration,
+    runtime: Handle,
+) -> Result<(), &'static str> {
+    spawn_file_thread("lattice-file-text", move || {
+        let _permit = permit;
+        let mut cancelled = registration.subscribe();
+        if registration.control.is_cancelled() {
+            finish_cancelled_file_job(&runtime, &outgoing, request_id, &registration.control);
+            return;
+        }
+        let snapshot = match files.text_root().read(&path) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                finish_active_or_cancelled_file_job(
+                    &runtime,
+                    &outgoing,
+                    request_id,
+                    &registration.control,
+                    file_error(request_id, error),
+                );
+                return;
+            }
+        };
+        let start = RemoteFileResponse::TextStart {
+            request_id,
+            size: snapshot.bytes.len() as u64,
+            revision: snapshot.revision,
+        };
+        let responses =
+            std::iter::once(start).chain(snapshot.bytes.chunks(FILE_CHUNK_SIZE).map(|bytes| {
+                RemoteFileResponse::DownloadChunk {
+                    transfer_id: request_id,
+                    bytes: bytes.to_vec(),
+                }
+            }));
+        for response in responses {
+            match send_file_job_message(
+                &runtime,
+                &outgoing,
+                RemoteMessage::FileResponse(response),
+                &registration.control,
+                &mut cancelled,
+            ) {
+                FileSendOutcome::Sent => {}
+                FileSendOutcome::Cancelled => {
+                    finish_cancelled_file_job(
+                        &runtime,
+                        &outgoing,
+                        request_id,
+                        &registration.control,
+                    );
+                    return;
+                }
+                FileSendOutcome::Failed => return,
+            }
+        }
+        finish_active_or_cancelled_file_job(
+            &runtime,
+            &outgoing,
+            request_id,
+            &registration.control,
+            RemoteMessage::FileResponse(RemoteFileResponse::Complete {
+                transfer_id: request_id,
+            }),
+        );
+    })
+}
+
 /// Serves the shared-folder side of a session; both the screen stream and the
 /// terminal stream accept the same file requests over their receiver loops.
 struct FileRequestHandler {
@@ -1676,6 +1804,89 @@ impl FileRequestHandler {
 
     async fn handle(&mut self, request: RemoteFileRequest) -> bool {
         match request {
+            RemoteFileRequest::ReadText { request_id, path } => {
+                if !host_text::editing_supported() {
+                    return self
+                        .reject(request_id, host_text::UNSUPPORTED_PLATFORM)
+                        .await;
+                }
+                let Some(files) = self.files.clone() else {
+                    return self
+                        .reject(request_id, "File sharing is not enabled.")
+                        .await;
+                };
+                match try_admit_file_job(
+                    &self.permits,
+                    &self.registry,
+                    FileJobKind::Download,
+                    request_id,
+                    None,
+                ) {
+                    Ok((permit, registration)) => match spawn_text_read(
+                        files,
+                        request_id,
+                        path,
+                        self.outgoing.clone(),
+                        permit,
+                        registration,
+                        Handle::current(),
+                    ) {
+                        Ok(()) => true,
+                        Err(error) => self.reject(request_id, error).await,
+                    },
+                    Err(error) => self.reject(request_id, error).await,
+                }
+            }
+            RemoteFileRequest::SaveTextStart {
+                transfer_id,
+                path,
+                size,
+                expected_revision,
+            } => {
+                if !host_text::editing_supported() {
+                    return self
+                        .reject(transfer_id, host_text::UNSUPPORTED_PLATFORM)
+                        .await;
+                }
+                if size > MAX_TEXT_FILE_BYTES as u64 {
+                    return self
+                        .reject(transfer_id, "The text file is larger than 1 MiB.")
+                        .await;
+                }
+                let Some(files) = self.files.clone() else {
+                    return self
+                        .reject(transfer_id, "File sharing is not enabled.")
+                        .await;
+                };
+                let (commands_tx, commands_rx) = mpsc::channel(UPLOAD_COMMAND_QUEUE_CAPACITY);
+                match try_admit_file_job(
+                    &self.permits,
+                    &self.registry,
+                    FileJobKind::Upload {
+                        announced_bytes: size,
+                    },
+                    transfer_id,
+                    Some(commands_tx),
+                ) {
+                    Ok((permit, registration)) => match spawn_upload(UploadJob {
+                        files,
+                        transfer_id,
+                        path,
+                        size,
+                        overwrite: true,
+                        expected_revision: Some(expected_revision),
+                        commands: commands_rx,
+                        outgoing: self.outgoing.clone(),
+                        permit,
+                        registration,
+                        runtime: Handle::current(),
+                    }) {
+                        Ok(()) => true,
+                        Err(error) => self.reject(transfer_id, error).await,
+                    },
+                    Err(error) => self.reject(transfer_id, error).await,
+                }
+            }
             RemoteFileRequest::List { request_id, path } => {
                 let Some(files) = self.files.clone() else {
                     return self
@@ -1759,6 +1970,7 @@ impl FileRequestHandler {
                         path,
                         size,
                         overwrite,
+                        expected_revision: None,
                         commands: commands_rx,
                         outgoing: self.outgoing.clone(),
                         permit,
@@ -1879,6 +2091,7 @@ where
             height,
             view_only: !allow_input,
             file_transfer: shared_files.is_some(),
+            file_edit: shared_files.is_some() && host_text::editing_supported(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2162,6 +2375,7 @@ where
             height: u32::from(TERMINAL_ROWS),
             view_only: !allow_input,
             file_transfer: shared_files.is_some(),
+            file_edit: shared_files.is_some() && host_text::editing_supported(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -3715,6 +3929,222 @@ mod tests {
         );
         assert_eq!(root.private_upload_artifacts(), 0);
         assert_eq!(permits.available_permits(), FILE_JOB_LIMIT);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn text_editor_reads_saves_and_interlocks_with_ordinary_uploads() {
+        let root = FileTestRoot::new("text-editor-interlock");
+        std::fs::write(root.0.join("note.txt"), b"original").unwrap();
+        let shared = root.shared();
+        let permits = Arc::new(Semaphore::new(FILE_JOB_LIMIT));
+        let (outgoing_a, mut receiver_a) = mpsc::channel(8);
+        let (outgoing_b, mut receiver_b) = mpsc::channel(8);
+        let mut editor =
+            FileRequestHandler::new(Some(Arc::clone(&shared)), outgoing_a, Arc::clone(&permits));
+        let mut uploader =
+            FileRequestHandler::new(Some(Arc::clone(&shared)), outgoing_b, Arc::clone(&permits));
+        assert!(
+            editor
+                .handle(RemoteFileRequest::ReadText {
+                    request_id: 601,
+                    path: "/note.txt".into()
+                })
+                .await
+        );
+        let revision = match next_handler_file_response(&mut receiver_a).await {
+            RemoteFileResponse::TextStart {
+                request_id: 601,
+                size: 8,
+                revision,
+            } => revision,
+            response => panic!("unexpected text start: {response:?}"),
+        };
+        assert_eq!(
+            next_handler_file_response(&mut receiver_a).await,
+            RemoteFileResponse::DownloadChunk {
+                transfer_id: 601,
+                bytes: b"original".to_vec()
+            }
+        );
+        assert_eq!(
+            next_handler_file_response(&mut receiver_a).await,
+            RemoteFileResponse::Complete { transfer_id: 601 }
+        );
+        assert!(
+            editor
+                .handle(RemoteFileRequest::SaveTextStart {
+                    transfer_id: 602,
+                    path: "/note.txt".into(),
+                    size: 6,
+                    expected_revision: revision,
+                })
+                .await
+        );
+        assert_eq!(
+            next_handler_file_response(&mut receiver_a).await,
+            RemoteFileResponse::UploadReady { transfer_id: 602 }
+        );
+        assert!(
+            uploader
+                .handle(RemoteFileRequest::UploadStart {
+                    transfer_id: 603,
+                    path: "/note.txt".into(),
+                    size: 7,
+                    overwrite: true,
+                })
+                .await
+        );
+        assert!(matches!(next_handler_file_response(&mut receiver_b).await,
+            RemoteFileResponse::Error { operation_id: 603, detail } if detail.contains("Another upload")));
+        assert!(
+            editor
+                .handle(RemoteFileRequest::UploadChunk {
+                    transfer_id: 602,
+                    bytes: b"edited".to_vec()
+                })
+                .await
+        );
+        assert!(
+            editor
+                .handle(RemoteFileRequest::UploadFinish { transfer_id: 602 })
+                .await
+        );
+        let saved_revision = match next_handler_file_response(&mut receiver_a).await {
+            RemoteFileResponse::TextSaved {
+                transfer_id: 602,
+                revision,
+                backup_path,
+            } => {
+                assert_eq!(
+                    std::fs::read(root.0.join(&backup_path[1..])).unwrap(),
+                    b"original"
+                );
+                revision
+            }
+            response => panic!("unexpected text save: {response:?}"),
+        };
+        assert_eq!(std::fs::read(root.0.join("note.txt")).unwrap(), b"edited");
+        assert_eq!(
+            shared.text_root().read("/note.txt").unwrap().revision,
+            saved_revision
+        );
+        editor.shutdown().await;
+        uploader.shutdown().await;
+        assert_eq!(permits.available_permits(), FILE_JOB_LIMIT);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn text_editor_conflicts_and_cancellation_never_truncate_the_target() {
+        let root = FileTestRoot::new("text-editor-conflict-cancel");
+        let path = root.0.join("note.txt");
+        std::fs::write(&path, b"original").unwrap();
+        let shared = root.shared();
+        let revision = shared.text_root().read("/note.txt").unwrap().revision;
+        let permits = Arc::new(Semaphore::new(FILE_JOB_LIMIT));
+        let (outgoing, mut receiver) = mpsc::channel(8);
+        let mut editor =
+            FileRequestHandler::new(Some(Arc::clone(&shared)), outgoing, Arc::clone(&permits));
+        assert!(
+            editor
+                .handle(RemoteFileRequest::SaveTextStart {
+                    transfer_id: 701,
+                    path: "/note.txt".into(),
+                    size: 6,
+                    expected_revision: revision,
+                })
+                .await
+        );
+        assert_eq!(
+            next_handler_file_response(&mut receiver).await,
+            RemoteFileResponse::UploadReady { transfer_id: 701 }
+        );
+        assert!(
+            editor
+                .handle(RemoteFileRequest::UploadChunk {
+                    transfer_id: 701,
+                    bytes: b"edited".to_vec()
+                })
+                .await
+        );
+        std::fs::write(&path, b"external").unwrap();
+        assert!(
+            editor
+                .handle(RemoteFileRequest::UploadFinish { transfer_id: 701 })
+                .await
+        );
+        assert!(matches!(next_handler_file_response(&mut receiver).await,
+            RemoteFileResponse::Error { operation_id: 701, detail } if detail.contains("changed outside")));
+        timeout(Duration::from_secs(1), editor.registry.wait_for_idle())
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
+        let revision = shared.text_root().read("/note.txt").unwrap().revision;
+        assert!(
+            editor
+                .handle(RemoteFileRequest::SaveTextStart {
+                    transfer_id: 702,
+                    path: "/note.txt".into(),
+                    size: 6,
+                    expected_revision: revision,
+                })
+                .await
+        );
+        assert_eq!(
+            next_handler_file_response(&mut receiver).await,
+            RemoteFileResponse::UploadReady { transfer_id: 702 }
+        );
+        assert!(
+            editor
+                .handle(RemoteFileRequest::UploadChunk {
+                    transfer_id: 702,
+                    bytes: b"part".to_vec()
+                })
+                .await
+        );
+        assert!(
+            editor
+                .handle(RemoteFileRequest::Cancel { transfer_id: 702 })
+                .await
+        );
+        assert_eq!(
+            next_handler_file_response(&mut receiver).await,
+            RemoteFileResponse::Complete { transfer_id: 702 }
+        );
+        editor.shutdown().await;
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
+        assert_eq!(std::fs::read_dir(&root.0).unwrap().count(), 1);
+        assert_eq!(permits.available_permits(), FILE_JOB_LIMIT);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_text_requests_fail_closed_without_starting_workers() {
+        let root = FileTestRoot::new("windows-text-disabled");
+        std::fs::write(root.0.join("note.txt"), b"original").unwrap();
+        let permits = Arc::new(Semaphore::new(FILE_JOB_LIMIT));
+        let (outgoing, mut receiver) = mpsc::channel(8);
+        let mut handler =
+            FileRequestHandler::new(Some(root.shared()), outgoing, Arc::clone(&permits));
+        for request in [
+            RemoteFileRequest::ReadText {
+                request_id: 801,
+                path: "/note.txt".into(),
+            },
+            RemoteFileRequest::SaveTextStart {
+                transfer_id: 802,
+                path: "/note.txt".into(),
+                size: 0,
+                expected_revision: [0; 32],
+            },
+        ] {
+            assert!(handler.handle(request).await);
+            assert!(matches!(next_handler_file_response(&mut receiver).await,
+                RemoteFileResponse::Error { detail, .. } if detail.contains("Windows hosts are not yet supported")));
+        }
+        assert_eq!(permits.available_permits(), FILE_JOB_LIMIT);
+        assert_eq!(std::fs::read(root.0.join("note.txt")).unwrap(), b"original");
     }
 
     #[tokio::test]

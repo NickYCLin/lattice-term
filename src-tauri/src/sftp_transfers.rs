@@ -75,6 +75,9 @@ struct TransferEntry {
     /// after the expected byte count has arrived and the handle is closed.
     staging_path: Option<String>,
     overwrite: bool,
+    /// Serializes only publication with other uploads and text saves. Streaming
+    /// into private staging files does not hold this target-specific lock.
+    target_gate: Arc<AsyncMutex<()>>,
 }
 
 #[derive(Default)]
@@ -408,6 +411,9 @@ async fn abort_upload(
 }
 
 async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String> {
+    let _target = entry.target_gate.try_lock().map_err(|_| {
+        "another file operation is running for this target; the upload was not published".to_owned()
+    })?;
     let session = entry
         .upload_session
         .as_ref()
@@ -602,6 +608,7 @@ pub async fn start_download(
         upload_session: None,
         staging_path: None,
         overwrite: false,
+        target_gate: Arc::default(),
     });
     if let Err(error) = transfers.insert(Arc::clone(&entry)) {
         let cleanup = close_download_staging(staging);
@@ -749,6 +756,8 @@ pub async fn start_upload_from_path(
     let session = sessions.session(session_id)?;
     let remote_path = join_path(&parent, &name);
 
+    let target_gate = sessions.mutation_gate(session_id, &remote_path).await?;
+
     if !overwrite
         && session
             .try_exists(remote_path.clone())
@@ -781,6 +790,7 @@ pub async fn start_upload_from_path(
         upload_session: Some(session),
         staging_path: Some(staging_path),
         overwrite,
+        target_gate,
     });
     if let Err(error) = transfers.insert(Arc::clone(&entry)) {
         entry.upload.lock().await.take();
@@ -911,6 +921,7 @@ pub async fn begin_upload(
     let name = validate_name(&plan.name)?;
     let session = sessions.session(session_id)?;
     let remote_path = join_path(&parent, &name);
+    let target_gate = sessions.mutation_gate(session_id, &remote_path).await?;
 
     if !overwrite
         && session
@@ -942,6 +953,7 @@ pub async fn begin_upload(
         upload_session: Some(session),
         staging_path: Some(staging_path),
         overwrite,
+        target_gate,
     });
     if let Err(error) = transfers.insert(Arc::clone(&entry)) {
         entry.upload.lock().await.take();
@@ -1371,6 +1383,7 @@ mod tests {
                 upload_session: Some(Arc::clone(&session)),
                 staging_path: Some("/srv/.upload".into()),
                 overwrite,
+                target_gate: Arc::default(),
             };
             let result = promote_upload(&entry).await;
             let success = mode != 0o120777 && overwrite;
@@ -1566,6 +1579,7 @@ mod tests {
             upload_session: None,
             staging_path: None,
             overwrite: false,
+            target_gate: Arc::default(),
         });
         registry.insert(entry).unwrap();
 
@@ -1632,6 +1646,7 @@ mod tests {
             upload_session: None,
             staging_path: None,
             overwrite: false,
+            target_gate: Arc::default(),
         };
         let sink = RecordingSink::default();
 

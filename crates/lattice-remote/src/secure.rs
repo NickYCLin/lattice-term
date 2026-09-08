@@ -484,6 +484,7 @@ mod tests {
                     view_only: false,
                     file_transfer: false,
                     file_root_label: String::new(),
+                    file_edit: false,
                     terminal: true,
                 }))
                 .await
@@ -787,6 +788,7 @@ mod tests {
                     view_only: true,
                     file_transfer: false,
                     file_root_label: String::new(),
+                    file_edit: false,
                     terminal: false,
                 }))
                 .await

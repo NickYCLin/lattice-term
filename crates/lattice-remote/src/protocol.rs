@@ -11,6 +11,7 @@ pub const MIN_COMPATIBLE_PROTOCOL_VERSION: u16 = 2;
 pub const DEFAULT_PORT: u16 = 44_900;
 pub const FRAME_CHUNK_SIZE: usize = 48 * 1024;
 pub const FILE_CHUNK_SIZE: usize = 48 * 1024;
+pub const MAX_TEXT_FILE_BYTES: usize = 1024 * 1024;
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_AGENT_NAME_BYTES: usize = 256;
 pub const MAX_FILE_ROOT_LABEL_BYTES: usize = 256;
@@ -110,6 +111,8 @@ const FILE_REQUEST_UPLOAD_START: u8 = 3;
 const FILE_REQUEST_UPLOAD_CHUNK: u8 = 4;
 const FILE_REQUEST_UPLOAD_FINISH: u8 = 5;
 const FILE_REQUEST_CANCEL: u8 = 6;
+const FILE_REQUEST_READ_TEXT: u8 = 7;
+const FILE_REQUEST_SAVE_TEXT_START: u8 = 8;
 
 const FILE_RESPONSE_LIST_START: u8 = 1;
 const FILE_RESPONSE_LIST_ENTRY: u8 = 2;
@@ -119,6 +122,8 @@ const FILE_RESPONSE_DOWNLOAD_CHUNK: u8 = 5;
 const FILE_RESPONSE_UPLOAD_READY: u8 = 6;
 const FILE_RESPONSE_COMPLETE: u8 = 7;
 const FILE_RESPONSE_ERROR: u8 = 8;
+const FILE_RESPONSE_TEXT_START: u8 = 9;
+const FILE_RESPONSE_TEXT_SAVED: u8 = 10;
 
 /// One wheel message may scroll at most this many notches in either direction.
 pub const MAX_WHEEL_UNITS: i8 = 8;
@@ -140,6 +145,9 @@ pub struct RemoteHello {
     /// optional trailing byte so screen-mode hellos stay wire-identical for
     /// older viewers.
     pub terminal: bool,
+    /// Optional trailing capability. Never send text requests to a peer that
+    /// did not advertise it; older hosts continue to support ordinary files.
+    pub file_edit: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +190,16 @@ pub struct RemoteFileEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteFileRequest {
+    ReadText {
+        request_id: u64,
+        path: String,
+    },
+    SaveTextStart {
+        transfer_id: u64,
+        path: String,
+        size: u64,
+        expected_revision: [u8; 32],
+    },
     List {
         request_id: u64,
         path: String,
@@ -210,6 +228,16 @@ pub enum RemoteFileRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteFileResponse {
+    TextStart {
+        request_id: u64,
+        size: u64,
+        revision: [u8; 32],
+    },
+    TextSaved {
+        transfer_id: u64,
+        revision: [u8; 32],
+        backup_path: String,
+    },
     ListStart {
         request_id: u64,
         path: String,
@@ -410,6 +438,7 @@ fn validate_hello(hello: &RemoteHello) -> Result<(), ProtocolError> {
         || hello.file_root_label.chars().any(char::is_control)
         // Enabled sharing requires a label; disabled sharing requires none.
         || hello.file_transfer == hello.file_root_label.is_empty()
+        || (hello.file_edit && !hello.file_transfer)
         || !valid_frame_dimensions(hello.width, hello.height)
         // Terminal sessions carry a character grid, not pixels.
         || (hello.terminal
@@ -481,10 +510,13 @@ impl RemoteMessage {
                 output.extend_from_slice(&(root.len() as u16).to_be_bytes());
                 output.extend_from_slice(name);
                 output.extend_from_slice(root);
-                // Screen-mode hellos stay byte-identical to protocol v2, so
-                // older viewers keep working; only terminal agents append the
-                // flag they could not talk to anyway.
-                if hello.terminal {
+                // Hosts without optional capabilities stay byte-identical to
+                // the original protocol v2 hello. Editing appends a terminal
+                // placeholder and its own capability for tolerant v2 peers.
+                if hello.terminal || hello.file_edit {
+                    output.push(u8::from(hello.terminal));
+                }
+                if hello.file_edit {
                     output.push(1);
                 }
                 Ok(output)
@@ -611,12 +643,17 @@ impl RemoteMessage {
                 }
                 // `terminal` arrived as an optional trailing byte so that
                 // screen-mode hellos stayed wire-identical for viewers that
-                // predated it. Anything beyond it belongs to a protocol
+                // predated it. File editing uses the next optional byte.
+                // Anything beyond these capabilities belongs to a protocol
                 // version this build does not know, and is skipped rather
                 // than refused: an older machine has to stay reachable from a
                 // newer one, or it can never be updated. The frame cap still
                 // bounds how much can arrive.
                 let terminal = match body.get(base_len) {
+                    None => false,
+                    Some(byte) => decode_bool(*byte)?,
+                };
+                let file_edit = match body.get(base_len + 1) {
                     None => false,
                     Some(byte) => decode_bool(*byte)?,
                 };
@@ -638,6 +675,7 @@ impl RemoteMessage {
                     file_transfer,
                     file_root_label,
                     terminal,
+                    file_edit,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -794,6 +832,29 @@ fn encode_file_request(request: &RemoteFileRequest) -> Result<Vec<u8>, ProtocolE
     let mut output = Vec::with_capacity(64);
     output.push(MESSAGE_FILE_REQUEST);
     match request {
+        RemoteFileRequest::ReadText { request_id, path } => {
+            if !valid_remote_path(path) || path == "/" {
+                return Err(ProtocolError::InvalidMessage("invalid text file path"));
+            }
+            output.push(FILE_REQUEST_READ_TEXT);
+            output.extend_from_slice(&request_id.to_be_bytes());
+            put_text(&mut output, path)?;
+        }
+        RemoteFileRequest::SaveTextStart {
+            transfer_id,
+            path,
+            size,
+            expected_revision,
+        } => {
+            if !valid_remote_path(path) || path == "/" || *size > MAX_TEXT_FILE_BYTES as u64 {
+                return Err(ProtocolError::InvalidMessage("invalid text save request"));
+            }
+            output.push(FILE_REQUEST_SAVE_TEXT_START);
+            output.extend_from_slice(&transfer_id.to_be_bytes());
+            output.extend_from_slice(&size.to_be_bytes());
+            output.extend_from_slice(expected_revision);
+            put_text(&mut output, path)?;
+        }
         RemoteFileRequest::List { request_id, path } => {
             if !valid_remote_path(path) {
                 return Err(ProtocolError::InvalidMessage("invalid remote path"));
@@ -855,6 +916,37 @@ fn decode_file_request(body: &[u8]) -> Result<RemoteFileRequest, ProtocolError> 
     }
     let operation_id = read_u64(detail, 0)?;
     match subkind {
+        FILE_REQUEST_READ_TEXT => {
+            let mut offset = 8;
+            let path = read_text(detail, &mut offset)?.to_string();
+            finish_decode(detail, offset)?;
+            if !valid_remote_path(&path) || path == "/" {
+                return Err(ProtocolError::InvalidMessage("invalid text file path"));
+            }
+            Ok(RemoteFileRequest::ReadText {
+                request_id: operation_id,
+                path,
+            })
+        }
+        FILE_REQUEST_SAVE_TEXT_START => {
+            if detail.len() < 50 {
+                return Err(ProtocolError::InvalidMessage("truncated text save request"));
+            }
+            let size = read_u64(detail, 8)?;
+            let expected_revision = detail[16..48].try_into().expect("checked revision length");
+            let mut offset = 48;
+            let path = read_text(detail, &mut offset)?.to_string();
+            finish_decode(detail, offset)?;
+            if !valid_remote_path(&path) || path == "/" || size > MAX_TEXT_FILE_BYTES as u64 {
+                return Err(ProtocolError::InvalidMessage("invalid text save request"));
+            }
+            Ok(RemoteFileRequest::SaveTextStart {
+                transfer_id: operation_id,
+                path,
+                size,
+                expected_revision,
+            })
+        }
         FILE_REQUEST_LIST | FILE_REQUEST_DOWNLOAD => {
             let mut offset = 8;
             let path = read_text(detail, &mut offset)?.to_string();
@@ -917,6 +1009,32 @@ fn encode_file_response(response: &RemoteFileResponse) -> Result<Vec<u8>, Protoc
     let mut output = Vec::with_capacity(64);
     output.push(MESSAGE_FILE_RESPONSE);
     match response {
+        RemoteFileResponse::TextStart {
+            request_id,
+            size,
+            revision,
+        } => {
+            if *size > MAX_TEXT_FILE_BYTES as u64 {
+                return Err(ProtocolError::InvalidMessage("text file is too large"));
+            }
+            output.push(FILE_RESPONSE_TEXT_START);
+            output.extend_from_slice(&request_id.to_be_bytes());
+            output.extend_from_slice(&size.to_be_bytes());
+            output.extend_from_slice(revision);
+        }
+        RemoteFileResponse::TextSaved {
+            transfer_id,
+            revision,
+            backup_path,
+        } => {
+            if !valid_remote_path(backup_path) || backup_path == "/" {
+                return Err(ProtocolError::InvalidMessage("invalid text backup path"));
+            }
+            output.push(FILE_RESPONSE_TEXT_SAVED);
+            output.extend_from_slice(&transfer_id.to_be_bytes());
+            output.extend_from_slice(revision);
+            put_text(&mut output, backup_path)?;
+        }
         RemoteFileResponse::ListStart { request_id, path } => {
             if !valid_remote_path(path) {
                 return Err(ProtocolError::InvalidMessage("invalid remote path"));
@@ -1004,6 +1122,31 @@ fn decode_file_response(body: &[u8]) -> Result<RemoteFileResponse, ProtocolError
     }
     let operation_id = read_u64(detail, 0)?;
     match subkind {
+        FILE_RESPONSE_TEXT_START if detail.len() == 48 => {
+            let size = read_u64(detail, 8)?;
+            if size > MAX_TEXT_FILE_BYTES as u64 {
+                return Err(ProtocolError::InvalidMessage("text file is too large"));
+            }
+            Ok(RemoteFileResponse::TextStart {
+                request_id: operation_id,
+                size,
+                revision: detail[16..48].try_into().expect("checked revision length"),
+            })
+        }
+        FILE_RESPONSE_TEXT_SAVED if detail.len() >= 42 => {
+            let revision = detail[8..40].try_into().expect("checked revision length");
+            let mut offset = 40;
+            let backup_path = read_text(detail, &mut offset)?.to_string();
+            finish_decode(detail, offset)?;
+            if !valid_remote_path(&backup_path) || backup_path == "/" {
+                return Err(ProtocolError::InvalidMessage("invalid text backup path"));
+            }
+            Ok(RemoteFileResponse::TextSaved {
+                transfer_id: operation_id,
+                revision,
+                backup_path,
+            })
+        }
         FILE_RESPONSE_LIST_START => {
             let mut offset = 8;
             let path = read_text(detail, &mut offset)?.to_string();
@@ -1259,6 +1402,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: false,
         });
         assert_eq!(
@@ -1278,6 +1422,7 @@ mod tests {
                 view_only: false,
                 file_transfer: false,
                 file_root_label: String::new(),
+                file_edit: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1349,12 +1494,13 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: true,
         })
         .encode()
         .unwrap();
         // Whatever a later version appends after the fields this build knows.
-        encoded.extend_from_slice(&[7, 42, 200]);
+        encoded.extend_from_slice(&[0, 7, 42, 200]);
 
         let RemoteMessage::Hello(decoded) = RemoteMessage::decode(&encoded).unwrap() else {
             panic!("expected a hello");
@@ -1376,6 +1522,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: false,
         })
         .encode()
@@ -1390,11 +1537,80 @@ mod tests {
             view_only: false,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: true,
         })
         .encode()
         .unwrap();
         assert_eq!(terminal.len(), screen.len() + 1);
+    }
+
+    #[test]
+    fn text_capability_defaults_off_for_old_hosts_and_requires_file_sharing() {
+        let mut hello = RemoteHello {
+            protocol_version: PROTOCOL_VERSION,
+            agent_name: "Editor host".into(),
+            width: 640,
+            height: 480,
+            view_only: true,
+            file_transfer: true,
+            file_root_label: "Shared".into(),
+            terminal: false,
+            file_edit: false,
+        };
+        let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
+        assert_eq!(
+            RemoteMessage::decode(&legacy).unwrap(),
+            RemoteMessage::Hello(hello.clone())
+        );
+        hello.file_edit = true;
+        let current = RemoteMessage::Hello(hello.clone()).encode().unwrap();
+        assert_eq!(current.len(), legacy.len() + 2);
+        assert_eq!(&current[..legacy.len()], legacy.as_slice());
+        assert_eq!(&current[legacy.len()..], &[0, 1]);
+        assert_eq!(
+            RemoteMessage::decode(&current).unwrap(),
+            RemoteMessage::Hello(hello.clone())
+        );
+        hello.file_transfer = false;
+        hello.file_root_label.clear();
+        assert!(RemoteMessage::Hello(hello).encode().is_err());
+        let mut invalid_flag = current;
+        *invalid_flag.last_mut().unwrap() = 2;
+        assert!(RemoteMessage::decode(&invalid_flag).is_err());
+    }
+
+    #[test]
+    fn text_protocol_rejects_oversized_requests_responses_and_unsafe_backup_paths() {
+        let valid = RemoteMessage::FileRequest(RemoteFileRequest::SaveTextStart {
+            transfer_id: 17,
+            path: "/note.txt".into(),
+            size: MAX_TEXT_FILE_BYTES as u64,
+            expected_revision: [9; 32],
+        });
+        let encoded = valid.encode().unwrap();
+        for length in 0..encoded.len() {
+            assert!(RemoteMessage::decode(&encoded[..length]).is_err());
+        }
+        let mut oversized = encoded;
+        oversized[10..18].copy_from_slice(&(MAX_TEXT_FILE_BYTES as u64 + 1).to_be_bytes());
+        assert!(RemoteMessage::decode(&oversized).is_err());
+        assert!(RemoteMessage::FileResponse(RemoteFileResponse::TextStart {
+            request_id: 17,
+            size: MAX_TEXT_FILE_BYTES as u64 + 1,
+            revision: [0; 32],
+        })
+        .encode()
+        .is_err());
+        for backup_path in ["/", "/../outside", "/folder//note", "/bad\0name"] {
+            assert!(RemoteMessage::FileResponse(RemoteFileResponse::TextSaved {
+                transfer_id: 17,
+                revision: [0; 32],
+                backup_path: backup_path.into(),
+            })
+            .encode()
+            .is_err());
+        }
     }
 
     #[test]
@@ -1425,6 +1641,7 @@ mod tests {
             view_only: false,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: true,
         })
         .encode()
@@ -1434,6 +1651,26 @@ mod tests {
     #[test]
     fn file_workspace_messages_round_trip() {
         let messages = vec![
+            RemoteMessage::FileRequest(RemoteFileRequest::ReadText {
+                request_id: 11,
+                path: "/docs/note.txt".into(),
+            }),
+            RemoteMessage::FileRequest(RemoteFileRequest::SaveTextStart {
+                transfer_id: 12,
+                path: "/docs/note.txt".into(),
+                size: MAX_TEXT_FILE_BYTES as u64,
+                expected_revision: [0x42; 32],
+            }),
+            RemoteMessage::FileResponse(RemoteFileResponse::TextStart {
+                request_id: 11,
+                size: MAX_TEXT_FILE_BYTES as u64,
+                revision: [0x42; 32],
+            }),
+            RemoteMessage::FileResponse(RemoteFileResponse::TextSaved {
+                transfer_id: 12,
+                revision: [0x84; 32],
+                backup_path: "/docs/.latticeterm-edit-backup-test/note.txt".into(),
+            }),
             RemoteMessage::FileRequest(RemoteFileRequest::List {
                 request_id: 1,
                 path: "/docs".into(),
@@ -1512,6 +1749,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1524,6 +1762,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1536,6 +1775,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_root_label: String::new(),
+            file_edit: false,
             terminal: false,
         })
         .encode()

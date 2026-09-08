@@ -6,7 +6,9 @@
 //! handle. Frames and files are already encrypted on the wire before they
 //! reach here.
 
-use crate::remote_files::{RemoteDirectory, RemoteFileTransfer, RemoteFilesClient};
+use crate::remote_files::{
+    RemoteDirectory, RemoteFileTransfer, RemoteFilesClient, RemoteTextDocument,
+};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use lattice_remote::relay::{
@@ -80,6 +82,7 @@ pub struct RemoteSessionSummary {
     pub height: u32,
     pub view_only: bool,
     pub file_transfer: bool,
+    pub file_edit: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -866,6 +869,7 @@ pub async fn connect(
         height: hello.height,
         view_only: hello.view_only,
         file_transfer: hello.file_transfer,
+        file_edit: hello.file_edit,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1102,6 +1106,43 @@ pub async fn file_list(
         .await
 }
 
+fn text_file_access(
+    registry: &RemoteRegistry,
+    session_id: &str,
+) -> Result<RemoteSessionAccess, String> {
+    let access = file_access(registry, session_id)?;
+    if !access.summary.file_edit {
+        return Err("This remote host does not support text editing. Update LatticeTerm on the sharing device and reconnect.".into());
+    }
+    Ok(access)
+}
+
+pub async fn file_read_text(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    path: String,
+) -> Result<RemoteTextDocument, String> {
+    text_file_access(registry, session_id)?
+        .files
+        .expect("file access checked")
+        .read_text(path)
+        .await
+}
+
+pub async fn file_save_text(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    path: String,
+    content: String,
+    revision: String,
+) -> Result<RemoteTextDocument, String> {
+    text_file_access(registry, session_id)?
+        .files
+        .expect("file access checked")
+        .save_text(path, content, revision)
+        .await
+}
+
 pub async fn file_download_start(
     registry: &RemoteRegistry,
     session_id: &str,
@@ -1275,6 +1316,7 @@ mod tests {
             height: 24,
             view_only: true,
             file_transfer: false,
+            file_edit: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1300,6 +1342,7 @@ mod tests {
             height: 24,
             view_only: false,
             file_transfer: false,
+            file_edit: false,
             file_root_label: String::new(),
             terminal,
         }
