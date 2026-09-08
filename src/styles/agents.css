@@ -809,7 +809,7 @@
   min-width: 0;
 }
 
-.agent-session-row__main span {
+.agent-session-row__main > span {
   overflow: hidden;
   color: var(--text-faint);
   font-size: var(--text-2xs);
@@ -940,11 +940,28 @@
 
   .agent-session-row {
     grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
   }
 
-  .agent-session-row > .badge {
+  .agent-session-row__main,
+  .agent-session-row__status {
     grid-column: 2 / -1;
+  }
+
+  .agent-session-row__status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .agent-session-row > .button {
+    grid-column: 2;
     justify-self: start;
+  }
+
+  .agent-session-row > .icon-button {
+    grid-column: 3;
   }
 }
 
@@ -1002,6 +1019,20 @@
 
 .agents-mcp__toggle {
   font-size: var(--text-2xs);
+}
+
+.agent-session-row__main .agents-mcp__toggle {
+  min-width: 0;
+}
+
+.agent-session-row__main .agents-mcp__toggle > .checkbox__box {
+  flex: 0 0 1.125rem;
+}
+
+.agent-session-row__main .agents-mcp__toggle > span:not(.checkbox__box) {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .agent-session-row__main strong {
