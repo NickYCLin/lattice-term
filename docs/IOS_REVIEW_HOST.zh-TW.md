@@ -2,15 +2,29 @@
 
 這份文件與 [sshd 設定範本](review-host/sshd_config.example) 用來準備審查環境。主機位址、密碼、私鑰與實際指紋只保存於私密的作業紀錄及 Apple 審核欄位，不填入本文件。
 
+## 目前使用 Linux KVM（2026-09-08）
+
+使用者因 Mac 卡頓要求停止原審核服務，之後指定另一台 Linux 主機承載。現在以 QEMU／KVM 執行獨立 Alpine VM，Apple 使用 VM 內的 `reviewer` 帳號。VM 沒有網卡、主機目錄掛載或管理憑證，保留 1 顆虛擬 CPU、768 MiB RAM 與原本的 SSH／SFTP 資源限制。
+
+Linux 上的專用 systemd 服務以非管理員身分執行 VM 和 TCP／vsock 橋接，已設定開機啟動及專用 NAT-PMP 連接埠續租。開機啟動設定已核對，尚未用整台主機重開機測試。Mac 的 VM、橋接及租約維持停用，不能再依舊紀錄自動恢復。
+
+Linux 的 vsock 可讓沒有 IP 網卡的 VM 與主機或其他 VM 通訊，因此不能只檢查網卡。審核 sshd 及其子程序另繼承 seccomp 與 `no_new_privs`，拒絕建立 AF_VSOCK socket、使用 io_uring 建立 socket，以及切換至未允許的 syscall ABI。供 SSH 入口使用的 VM 內橋接程序與審核 shell 分開執行。
+
+VM 內部 Unix socket 與獨立 GitHub runner 的[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34236096622)均通過全部 8 項檢查，包括密碼、可信主機金鑰、SSH／PTY、繁體中文 SFTP 下載與上傳清理、資源隔離、拒絕 guest vsock 及停用 SSH forwarding。公開入口、審核帳密與主機金鑰和先前交付 Apple 的資料相同，暫存 GitHub 驗證 secret 已刪除。
+
+這些結果只證明審核主機可用，沒有代替 iOS 實機影片、修正版 IPA 上傳或重新送審。Apple 審核狀態與私密備註須另外在 App Store Connect 核對。
+
+## 先前的 Mac 部署（已停用）
+
 2026-09-06 使用者指定以自己的 Mac 承載示範服務。已透過 Apple Virtualization Framework 建立獨立 Alpine Linux VM，沒有網路介面、Mac 目錄掛載、SSH agent 或個人帳號。主機僅將專用 TCP 連接埠轉送到 VM 的 virtio-vsock，再進入只監聽 VM loopback 的 OpenSSH。這不會開啟 macOS 的「遠端登入」。
 
 VM 限制為 1 顆虛擬 CPU、768 MiB RAM，SSH 程序另受 128 個程序、256 MiB 記憶體與半顆 CPU 的 cgroup 限制。測試目錄為 128 MiB tmpfs，重啟 VM 後會重建測試資料；審核密碼與主機金鑰則保持不變。審查期間須保持 Mac 開機與網路連線。
 
-本機已通過密碼登入、拒絕錯誤密碼、主機金鑰核對、SSH 指令、PTY／尺寸變更、SFTP 清單、繁體中文下載、上傳內容核對及清理，並確認沒有外連網卡、無法讀取管理員資料及無法使用 SSH forwarding。獨立背景服務以 Apple 審核備註實際地址進行的最新[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34021600038)也已通過相同檢查，暫存 GitHub secret 已刪除。這些是主機層的驗收，不代表 iOS 實機互動已通過。
+當時本機已通過密碼登入、拒絕錯誤密碼、主機金鑰核對、SSH 指令、PTY／尺寸變更、SFTP 清單、繁體中文下載、上傳內容核對及清理，並確認沒有外連網卡、無法讀取管理員資料及無法使用 SSH forwarding。獨立背景服務以 Apple 審核備註實際地址進行的[外網驗收](https://github.com/NickYCLin/lattice-term/actions/runs/34021600038)也已通過相同檢查，暫存 GitHub secret 已刪除。這些是主機層的驗收，不代表 iOS 實機互動已通過。
 
 2026-09-06 15:49 的連接埠續租曾因路由器回報內部 WAN 位址而誤停服務，已恢復並修正判斷。服務保留與 Apple 私密欄位一致、經外網驗證的公開入口，不以路由器回覆自動覆寫審核地址；公開連接埠變更或租約無效仍須停止並處理。地址回覆變動時另從外網驗收，不能把路由器回覆或本機 VM banner 當成外網可達的證據。
 
-目前使用獨立背景程序與防閒置睡眠機制。LaunchAgent 的啟動未完成，已卸載；不能假設關機重開後自動恢復。重啟及關閉程序依本機私密作業紀錄執行，先核對專用 PID 與程序，不廣泛終止其他服務。正式上架且不再需要此次審核主機後，須撤銷專用連接埠租約並停止 VM。
+當時使用獨立背景程序與防閒置睡眠機制。LaunchAgent 的啟動未完成，已卸載；不能假設關機重開後自動恢復。這套 Mac 服務現已依使用者要求停用；歷史驗證紀錄不代表它仍在執行。
 
 ## 隔離與帳號
 
@@ -53,11 +67,13 @@ VM 限制為 1 顆虛擬 CPU、768 MiB RAM，SSH 程序另受 128 個程序、25
 
 在 App Review Information 填入主機、連接埠、使用者名稱、密碼、主機金鑰演算法與 SHA-256 指紋；補充上述終端機及 SFTP 操作步驟、可寫目錄、網路限制及服務維持期間。帳號在審查期間須持續有效，不能加入需要聯絡管理者才能取得的第二階段驗證。這些資料完成前，不宣稱 Apple 已能連入測試環境。
 
-## 從外部網路驗收 Mac 隔離 VM
+## 從外部網路驗收隔離 VM
 
 `iOS review host verification` 是只允許手動啟動的 GitHub Actions 工作，在 Ubuntu runner 執行 `scripts/verify-ios-review-host.py`。它先核對管理端取得的完整主機公鑰，再驗證密碼、終端機、SFTP 與上述隔離限制；不會自動接受未知主機金鑰。
 
 連線設定透過私密的 `IOS_REVIEW_HOST_CHECK` repository secret 提供 JSON，欄位為 `host`、`port`、`username`、`password` 與 OpenSSH 格式的 `host_key`。工作只輸出檢查名稱及通過／失敗，例外僅輸出類型；不輸出主機、帳密或遠端檔案內容。驗收後刪除該 secret，後續需再次驗收時才重新提供。
+
+Linux KVM 部署還必須設定 `deny_guest_vsock: true`，啟用第 8 項驗收。它會檢查審核程序的 seccomp／`no_new_privs`，並要求建立 guest vsock 連線時明確回報權限拒絕；單純連線逾時或沒有目標服務不算通過。
 
 本機可使用 `--config` 指向已忽略且權限受限的設定檔，並以 `--unix-socket` 驗證 VM 入口。報告會將此結果標為 `unix_socket`，不能當成外網可達；外部 runner 的結果才是 `external_tcp`。兩者一律保留 `ios_device_tested: false`。
 
