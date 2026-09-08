@@ -12,9 +12,9 @@ const render = (history: History | null, locale: "zh-TW" | "en" = "zh-TW") =>
 describe("MCP operation history", () => {
   it("distinguishes unavailable history from a verified empty history", () => {
     expect(render(null)).toContain("目前無法取得紀錄");
-    expect(render(null)).not.toContain("還沒有 MCP 寫入請求");
+    expect(render(null)).not.toContain("沒有可顯示的 MCP 操作紀錄");
     const empty = render({ entries: [], limit: 256, discarded: 0 });
-    expect(empty).toContain("還沒有 MCP 寫入請求");
+    expect(empty).toContain("沒有可顯示的 MCP 操作紀錄");
     expect(empty).not.toContain("目前無法取得紀錄");
   });
 
@@ -34,6 +34,16 @@ describe("MCP operation history", () => {
     expect(markup).toContain("10");
     expect(markup).toContain("<time dateTime=");
     expect(markup).not.toContain("agents.mcp.");
-    expect(markup).toContain(locale === "zh-TW" ? "背景服務結束就清除" : "clears when the service ends");
+    expect(markup).toContain(locale === "zh-TW" ? "目前只保留在記憶體" : "In memory only");
+  });
+
+  it("distinguishes persisted, pending and unsafe storage even with no entries", () => {
+    const base: History = { entries: [], limit: 256, discarded: 0 };
+    expect(render({ ...base, persistence: "ready" })).toContain("重啟後可還原");
+    expect(render({ ...base, persistence: "pending" })).toContain("尚未寫入的紀錄可能遺失");
+    const unsafe = render({ ...base, persistence: "unavailable", persistenceReason: "externalChange" });
+    expect(unsafe).toContain("不會自動清空既有紀錄");
+    expect(unsafe).toContain("紀錄檔已被其他程式修改");
+    expect(unsafe).not.toContain("重啟後可還原");
   });
 });

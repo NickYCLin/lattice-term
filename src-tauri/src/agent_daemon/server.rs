@@ -166,6 +166,11 @@ pub async fn serve(
         .await
         .map_err(|error| format!("Cannot listen for the desktop: {error}"))?;
     paths.write_socket_hint();
+    // Initialize only after acquiring this installation's daemon endpoint.
+    // An unreadable audit file must never prevent existing CLI sessions.
+    if let Ok(mut history) = sink.history.lock() {
+        *history = audit::History::open(&paths.data_dir);
+    }
     let context = Arc::new(Context {
         registry,
         sink,
@@ -222,6 +227,17 @@ pub async fn serve(
         }
     }
     drop(listener);
+    // Registry/reporting tasks may still own the sink. Flush an explicit
+    // boundary without holding its mutex or depending on Arc destruction.
+    let flush = context
+        .sink
+        .history
+        .lock()
+        .ok()
+        .and_then(|history| history.flush_handle());
+    if let Some(flush) = flush {
+        let _ = tokio::task::spawn_blocking(move || flush.flush(Duration::from_millis(250))).await;
+    }
     paths.remove_socket_hint();
     #[cfg(unix)]
     let _ = std::fs::remove_file(&paths.socket);

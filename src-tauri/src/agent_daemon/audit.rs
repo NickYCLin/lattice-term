@@ -1,8 +1,13 @@
-//! Desktop-only, bounded MCP write history. Never retain request bodies,
+//! Desktop-only, bounded MCP operation history. Never retain request bodies,
 //! request IDs, raw errors, terminal output, credentials or launch arguments.
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::path::Path;
+
+#[path = "audit_store.rs"]
+mod store;
+pub use store::FlushHandle;
 
 pub const HISTORY_LIMIT: usize = 256;
 
@@ -14,6 +19,15 @@ pub enum Action {
     Queue,
     ClearQueue,
     Stop,
+    RemoteMetrics,
+    RemoteList,
+    RemoteExec,
+    RemoteUpload,
+    RemoteDownload,
+    RemoteCancel,
+    RemoteStatus,
+    Grant,
+    Revoke,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,7 +40,7 @@ pub enum Outcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Entry {
     pub id: u64,
     pub at: u64,
@@ -35,6 +49,9 @@ pub struct Entry {
     pub outcome: Outcome,
     /// Only a known registry session ID, not arbitrary caller input.
     pub session_id: Option<String>,
+    /// Only a bridge-known opaque target ID, never a host or path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +60,34 @@ pub struct Snapshot {
     pub entries: Vec<Entry>,
     pub discarded: u64,
     pub limit: usize,
+    #[serde(default)]
+    pub persistence: PersistenceState,
+    #[serde(default)]
+    pub persisted_through_id: Option<u64>,
+    #[serde(default)]
+    pub persistence_reason: Option<PersistenceReason>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PersistenceState {
+    #[default]
+    MemoryOnly,
+    Pending,
+    Ready,
+    Unavailable,
+}
+
+/// Deliberately fixed codes: an OS error may contain a private path.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PersistenceReason {
+    UnsafePath,
+    InvalidData,
+    ExternalChange,
+    IoFailure,
+    Busy,
+    WorkerStopped,
 }
 
 #[derive(Default)]
@@ -50,15 +95,66 @@ pub struct History {
     entries: VecDeque<Entry>,
     next: u64,
     discarded: u64,
+    persistence: Option<store::Worker>,
+    unavailable: Option<PersistenceReason>,
 }
 
 impl History {
+    /// Capture the current metadata boundary without holding the history lock
+    /// during disk I/O. Flush this handle only after releasing that lock.
+    pub fn flush_handle(&self) -> Option<FlushHandle> {
+        self.persistence
+            .as_ref()
+            .map(|worker| worker.flush_handle(self.next))
+    }
+
+    /// Call only after the daemon exclusively binds its transport. A history
+    /// failure must never prevent ordinary CLI sessions from starting.
+    pub fn open(data_dir: &Path) -> Self {
+        match store::Worker::open(data_dir) {
+            Ok((disk, worker)) => Self {
+                entries: disk.entries.into(),
+                next: disk.next,
+                discarded: disk.discarded,
+                persistence: Some(worker),
+                unavailable: None,
+            },
+            Err(reason) => Self {
+                unavailable: Some(reason),
+                ..Self::default()
+            },
+        }
+    }
+
     pub fn record(
         &mut self,
         client: &str,
         action: Action,
         outcome: Outcome,
         session_id: Option<String>,
+        at: u64,
+    ) {
+        self.record_inner(client, action, outcome, session_id, None, at);
+    }
+
+    pub fn record_target(
+        &mut self,
+        client: &str,
+        action: Action,
+        outcome: Outcome,
+        target_id: Option<String>,
+        at: u64,
+    ) {
+        self.record_inner(client, action, outcome, None, target_id, at);
+    }
+
+    fn record_inner(
+        &mut self,
+        client: &str,
+        action: Action,
+        outcome: Outcome,
+        session_id: Option<String>,
+        target_id: Option<String>,
         at: u64,
     ) {
         self.next = self.next.saturating_add(1);
@@ -77,14 +173,33 @@ impl History {
             action,
             outcome,
             session_id,
+            target_id,
         });
+        if let Some(worker) = &self.persistence {
+            worker.submit(store::DiskHistory::new(
+                self.entries.iter().cloned().collect(),
+                self.next,
+                self.discarded,
+            ));
+        }
     }
 
     pub fn snapshot(&self) -> Snapshot {
+        let (persistence, persisted_through_id, persistence_reason) =
+            if let Some(worker) = &self.persistence {
+                worker.status()
+            } else if let Some(reason) = self.unavailable {
+                (PersistenceState::Unavailable, None, Some(reason))
+            } else {
+                (PersistenceState::MemoryOnly, None, None)
+            };
         Snapshot {
             entries: self.entries.iter().rev().cloned().collect(),
             discarded: self.discarded,
             limit: HISTORY_LIMIT,
+            persistence,
+            persisted_through_id,
+            persistence_reason,
         }
     }
 }

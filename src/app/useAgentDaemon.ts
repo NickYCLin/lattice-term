@@ -31,12 +31,17 @@ export interface AgentMcpHistory {
     id: number;
     at: number;
     client: string;
-    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop";
+    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "grant" | "revoke";
     outcome: "accepted" | "replayed" | "failed" | "unknown";
     sessionId: string | null;
+    targetId?: string | null;
   }[];
   discarded: number;
   limit: number;
+  /** Missing on older background services: never imply their history is saved. */
+  persistence?: "memoryOnly" | "pending" | "ready" | "unavailable";
+  persistedThroughId?: number | null;
+  persistenceReason?: "unsafePath" | "invalidData" | "externalChange" | "ioFailure" | "busy" | "workerStopped" | null;
 }
 
 export interface AgentDaemonStatus {
