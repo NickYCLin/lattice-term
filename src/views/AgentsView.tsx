@@ -113,14 +113,62 @@ export function AgentsView({
   const [launchNote, setLaunchNote] = useState("");
   const [sandbox, setSandbox] = useState(false);
   const [detached, setDetached] = useState(false);
-  const daemon = useAgentDaemon(agents.sessions.length);
+  const daemon = useAgentDaemon(
+    agents.sessions.length,
+    `${agents.mcpLaunch ? "on" : "off"}:${agents.plans
+      .map((plan) => `${plan.id}${plan.detached ? "+" : ""}`)
+      .join(",")}:${agents.startupInstructions.length}`,
+  );
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);
-  const sharedWithMcp = useMemo(() => new Set(daemon.status.shared), [daemon.status.shared]);
+  const sharedWithMcp = useMemo(
+    () => new Map(daemon.status.shared.map((entry) => [entry.sessionId, entry])),
+    [daemon.status.shared],
+  );
+  const reportMcpFailure = (reason: unknown) =>
+    setMcpNotice(
+      t("agents.mcp.error.share", {
+        error: reason instanceof Error ? reason.message : String(reason),
+      }),
+    );
   const toggleMcpShare = (sessionId: string, shared: boolean) => {
     setMcpNotice(null);
-    void daemon.share(sessionId, shared).catch((reason: unknown) => {
-      setMcpNotice(t("agents.mcp.error.share", { error: (reason instanceof Error ? reason.message : String(reason)) }));
+    void daemon.share(sessionId, shared).catch(reportMcpFailure);
+  };
+  const toggleMcpControl = (sessionId: string, control: boolean) => {
+    setMcpNotice(null);
+    void daemon.control(sessionId, control).catch(reportMcpFailure);
+  };
+  const [mcpLaunchBusy, setMcpLaunchBusy] = useState(false);
+  const toggleMcpLaunch = (enabled: boolean) => {
+    setMcpNotice(null);
+    setMcpLaunchBusy(true);
+    void agents
+      .updateMcpLaunch(enabled)
+      .catch(reportMcpFailure)
+      .finally(() => setMcpLaunchBusy(false));
+  };
+  const describeMcpActivity = (entry: { activity?: { client: string; action: string; at: number } | null }) => {
+    if (!entry.activity) return null;
+    const action = t(
+      (
+        {
+          launch: "agents.mcp.activity.launch",
+          prompt: "agents.mcp.activity.prompt",
+          queue: "agents.mcp.activity.queue",
+          clearQueue: "agents.mcp.activity.clearQueue",
+        } as const
+      )[entry.activity.action as "launch" | "prompt" | "queue" | "clearQueue"] ??
+        "agents.mcp.activity.other",
+    );
+    const minutes = Math.max(0, Math.round((Date.now() - entry.activity.at) / 60_000));
+    return t("agents.mcp.activity", {
+      client: entry.activity.client,
+      action,
+      when:
+        minutes === 0
+          ? t("agents.mcp.activity.justNow")
+          : t("agents.mcp.activity.minutesAgo", { count: minutes }),
     });
   };
   const [launching, setLaunching] = useState<string | null>(null);
@@ -763,6 +811,25 @@ export function AgentsView({
                 </div>
               ))}
             </div>
+            <label className="checkbox agents-sandbox">
+              <input
+                type="checkbox"
+                checked={agents.mcpLaunch}
+                disabled={mcpLaunchBusy}
+                onChange={(event) => toggleMcpLaunch(event.currentTarget.checked)}
+              />
+              <span className="checkbox__box" aria-hidden="true">
+                ✓
+              </span>
+              <span className="agents-sandbox__label">
+                <strong>{t("agents.mcp.launch")}</strong>
+                <span className="agents-field-hint">
+                  {t("agents.mcp.launch.hint", {
+                    count: agents.plans.filter((plan) => plan.detached).length,
+                  })}
+                </span>
+              </span>
+            </label>
             <p className="agents-field-hint">{t("agents.mcp.docs")}</p>
           </details>
         )}
@@ -1430,7 +1497,13 @@ export function AgentsView({
                       <span className="agents-sandbox__badge">{t("agents.detached.badge")}</span>
                     )}
                     {sharedWithMcp.has(session.sessionId) && (
-                      <span className="agents-sandbox__badge">{t("agents.mcp.badge")}</span>
+                      <span className="agents-sandbox__badge">
+                        {t(
+                          sharedWithMcp.get(session.sessionId)?.control
+                            ? "agents.mcp.badge.control"
+                            : "agents.mcp.badge",
+                        )}
+                      </span>
                     )}
                   </strong>
                   <span className="mono">{displayPath(session.workingDirectory)}</span>
@@ -1449,6 +1522,28 @@ export function AgentsView({
                       <span>{t("agents.mcp.share")}</span>
                     </label>
                   )}
+                  {session.detached && sharedWithMcp.has(session.sessionId) && (
+                    <label className="checkbox agents-mcp__toggle">
+                      <input
+                        type="checkbox"
+                        checked={sharedWithMcp.get(session.sessionId)?.control === true}
+                        onChange={(event) =>
+                          toggleMcpControl(session.sessionId, event.currentTarget.checked)
+                        }
+                      />
+                      <span className="checkbox__box" aria-hidden="true">
+                        ✓
+                      </span>
+                      <span>{t("agents.mcp.control")}</span>
+                    </label>
+                  )}
+                  {(() => {
+                    const entry = sharedWithMcp.get(session.sessionId);
+                    const activity = entry ? describeMcpActivity(entry) : null;
+                    return activity ? (
+                      <span className="agents-mcp__activity">{activity}</span>
+                    ) : null;
+                  })()}
                   {session.tokenUsage && (
                     <span
                       className="agent-token-usage"

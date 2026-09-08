@@ -12,7 +12,7 @@
 - [Chat and Codex Desktop feature comparison](docs/CHAT_DESKTOP_PARITY.zh-TW.md)
 - [Source and documentation map](docs/README.md)
 - [AI Agent Fleet architecture](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md)
-- [MCP server: read-only view of shared background sessions](docs/MCP.zh-TW.md)
+- [MCP server: shared background sessions for external AI clients](docs/MCP.zh-TW.md)
 - [Storage and security decisions](docs/STORAGE_SECURITY_DECISION.zh-TW.md)
 - [Current UI implementation boundaries](docs/UI_IMPLEMENTATION.zh-TW.md)
 - [Release automation](docs/RELEASE_AUTOMATION.zh-TW.md)
@@ -34,6 +34,6 @@
 ## Important boundaries
 
 - AI CLI credentials remain owned by each CLI and are not stored by LatticeTerm.
-- The MCP server is read-only and sees only background sessions the user explicitly shared; it cannot launch, prompt or stop anything.
+- The MCP server sees only background sessions the user explicitly shared; prompting, ending and launching each need a separate grant the user turns on in the interface, and launching is limited to saved plans.
 - Remote connections use real backends; planned capabilities are labelled rather than simulated.
 - Lattice Remote supports direct endpoint pairing and a self-hosted lattice-relay: permanent nine-digit device IDs reachable across networks, end-to-end encrypted with the relay forwarding ciphertext only. NAT hole-punching is planned, not implemented.

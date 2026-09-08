@@ -48,8 +48,13 @@ pub const LOG_FILE: &str = "agent-daemon.log";
 /// the largest legitimate message; a staged clipboard image the largest
 /// possible one.
 pub const MAX_FRAME_BYTES: usize = 24 * 1024 * 1024;
-/// The most output one `observe` request returns, after the caller's own cap.
-pub const MAX_OBSERVE_BYTES: usize = 64 * 1024;
+/// The most output one `observe` request returns, after the caller's own
+/// cap: the adapter's 64 KiB page plus the slack it needs to finish a
+/// character or control sequence cut by the cap.
+pub const MAX_OBSERVE_BYTES: usize = 68 * 1024;
+
+/// One prompt an MCP client may hand a session, in characters.
+pub const MAX_MCP_PROMPT_CHARS: usize = 16_000;
 
 /// Whether a session id belongs to the daemon rather than the desktop.
 pub fn owns(session_id: &str) -> bool {
@@ -94,12 +99,45 @@ pub struct DaemonPaths {
 
 /// FNV-1a of the data directory: stable, short, one per installation.
 fn installation_hash(data_dir: &Path) -> u64 {
+    let key = installation_key(data_dir);
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in data_dir.to_string_lossy().as_bytes() {
+    for byte in key.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
+}
+
+/// The string that identifies an installation. On Unix the path as given
+/// (a running daemon's socket must stay findable across upgrades, and the
+/// socket note covers spelling differences). On Windows the same directory
+/// can be spelled many ways — `C:/x`, `C:\x\`, `c:\X`, `\\?\C:\x` — and the
+/// pipe name is the only rendezvous, so it is normalised first.
+fn installation_key(data_dir: &Path) -> String {
+    #[cfg(windows)]
+    {
+        let resolved = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+        windows_installation_key(&resolved.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        data_dir.to_string_lossy().into_owned()
+    }
+}
+
+/// Lexical normalisation of a Windows path: verbatim prefix off, forward
+/// slashes to backslashes, trailing separators off, case folded.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_installation_key(raw: &str) -> String {
+    let raw = raw
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .unwrap_or_else(|| raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string());
+    let mut normalised = raw.replace('/', "\\");
+    while normalised.len() > 3 && normalised.ends_with('\\') {
+        normalised.pop();
+    }
+    normalised.to_lowercase()
 }
 
 #[cfg(unix)]
@@ -256,6 +294,10 @@ pub enum Request {
         protocol: u32,
         #[serde(default)]
         role: ClientRole,
+        /// Who the observer is acting for (the MCP client's name and
+        /// version), shown to the user next to what it did.
+        #[serde(default)]
+        client: Option<String>,
     },
     Launch {
         request: Box<AgentLaunchRequest>,
@@ -313,7 +355,13 @@ pub enum Request {
         session_id: String,
         shared: bool,
     },
-    /// Session ids currently shared with observers.
+    /// The user lets observers prompt and stop one shared session, or
+    /// takes that back. Reading and controlling are separate grants.
+    ControlSet {
+        session_id: String,
+        control: bool,
+    },
+    /// Sessions currently shared with observers, with their grants.
     Shared,
     /// A bounded slice of one shared session's output from `cursor` on.
     Observe {
@@ -323,6 +371,93 @@ pub enum Request {
         #[serde(default)]
         max_bytes: usize,
     },
+    /// The desktop's saved launch plans an observer may start, prepared
+    /// as launch requests; `enabled` false clears them.
+    McpPlansReplace {
+        enabled: bool,
+        plans: Vec<McpPlan>,
+    },
+    /// Observer: the plans it may launch.
+    Plans,
+    /// Observer: start one saved plan in the background.
+    LaunchPlan {
+        plan_id: String,
+        #[serde(default)]
+        request_id: String,
+    },
+    /// Observer: hand a controlled session a prompt.
+    Prompt {
+        session_id: String,
+        text: String,
+        #[serde(default)]
+        mode: PromptMode,
+        #[serde(default)]
+        request_id: String,
+    },
+    /// Observer: drop a controlled session's queue, or end it.
+    Cancel {
+        session_id: String,
+        scope: CancelScope,
+        #[serde(default)]
+        request_id: String,
+    },
+}
+
+/// How an observer's prompt reaches a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptMode {
+    /// Behind the current turn; released only when the CLI's own hooks
+    /// report it free, exactly like the interface's prompt queue.
+    #[default]
+    Queue,
+    /// Typed straight in, refused while the session is working or
+    /// waiting for a person.
+    Now,
+}
+
+/// What an observer's cancel ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CancelScope {
+    /// Prompts still waiting; the running turn is untouched.
+    Queue,
+    /// The whole PTY: the CLI process ends, nothing is recoverable.
+    Session,
+}
+
+/// One session's standing with observers, as the desktop shows it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedSession {
+    pub session_id: String,
+    pub control: bool,
+    /// The last thing an observer did to it, for the user to see.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<McpActivity>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpActivity {
+    pub client: String,
+    pub action: String,
+    /// Unix milliseconds.
+    pub at: u64,
+}
+
+/// A saved launch plan the user allowed observers to start, already turned
+/// into the request the desktop itself would send.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPlan {
+    pub plan_id: String,
+    pub label: String,
+    pub note: String,
+    pub definition_id: String,
+    pub working_directory: String,
+    pub sandbox: bool,
+    pub request: AgentLaunchRequest,
 }
 
 /// What `Hello` answers with: everything a fresh window needs to attach.
@@ -335,16 +470,18 @@ pub struct HelloReply {
     /// Sessions the user shared with observers; empty for observers who
     /// see only those anyway.
     #[serde(default)]
-    pub shared: Vec<String>,
+    pub shared: Vec<SharedSession>,
 }
 
 /// Desktop event name for a forwarded sink event.
 pub(crate) fn event_channel(name: &str) -> Option<&'static str> {
     use crate::agent::{
-        EVENT_CAPTURE, EVENT_CLOSED, EVENT_DATA, EVENT_MODEL, EVENT_QUEUE, EVENT_STATE, EVENT_USAGE,
+        EVENT_CAPTURE, EVENT_CLOSED, EVENT_DATA, EVENT_LAUNCHED, EVENT_MODEL, EVENT_QUEUE,
+        EVENT_STATE, EVENT_USAGE,
     };
     Some(match name {
         "data" => EVENT_DATA,
+        "launched" => EVENT_LAUNCHED,
         "state" => EVENT_STATE,
         "closed" => EVENT_CLOSED,
         "captured" => EVENT_CAPTURE,
@@ -390,6 +527,29 @@ mod wire_tests {
             } => assert_eq!(role, ClientRole::Desktop),
             other => panic!("unexpected frame {other:?}"),
         }
+    }
+
+    #[test]
+    fn windows_spellings_of_one_directory_share_an_installation_key() {
+        let expected = r"c:\mcp-repro\isolated-data";
+        for spelling in [
+            r"C:\MCP-Repro\isolated-data",
+            r"C:/MCP-Repro/isolated-data",
+            r"c:\mcp-repro\isolated-data\",
+            r"C:\MCP-Repro/isolated-data//",
+            r"\\?\C:\MCP-Repro\isolated-data",
+        ] {
+            assert_eq!(windows_installation_key(spelling), expected, "{spelling}");
+        }
+        assert_eq!(windows_installation_key(r"C:\"), r"c:\");
+        assert_eq!(
+            windows_installation_key(r"\\?\UNC\server\share\dir\"),
+            r"\\server\share\dir"
+        );
+        assert_ne!(
+            windows_installation_key(r"C:\a\b"),
+            windows_installation_key(r"C:\a\c")
+        );
     }
 
     #[test]

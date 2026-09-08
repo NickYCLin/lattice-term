@@ -26,6 +26,9 @@ pub const EVENT_CAPTURE: &str = "agent://capture";
 pub const EVENT_MODEL: &str = "agent://model";
 pub const EVENT_USAGE: &str = "agent://usage";
 pub const EVENT_QUEUE: &str = "agent://queue";
+/// A session somebody other than this window started (an MCP client through
+/// the background service); the payload is its summary.
+pub const EVENT_LAUNCHED: &str = "agent://launched";
 
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_ARGUMENTS: usize = 64;

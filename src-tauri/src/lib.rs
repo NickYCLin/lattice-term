@@ -1121,6 +1121,102 @@ async fn agent_mcp_share(
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
+/// Lets MCP clients prompt and end one shared background session, or takes
+/// that back. A separate grant from sharing: reading is not writing.
+#[tauri::command]
+async fn agent_mcp_control(
+    session_id: String,
+    control: bool,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
+    if !crate::agent_daemon::owns(&session_id) {
+        return Err("Only sessions kept in the background can be controlled.".to_string());
+    }
+    let value = daemon
+        .request(
+            false,
+            crate::agent_daemon::Request::ControlSet {
+                session_id,
+                control,
+            },
+        )
+        .await?;
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+/// Whether MCP clients may start saved plans; persisted with the plans.
+#[tauri::command]
+async fn agent_workspace_mcp_launch_update(
+    enabled: bool,
+    plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<bool, String> {
+    plans
+        .lock()
+        .map_err(|error| error.to_string())?
+        .update_mcp_launch(enabled)?;
+    sync_mcp_plans(&plans, &daemon).await?;
+    Ok(enabled)
+}
+
+/// Hands the background service the saved plans MCP clients may launch:
+/// only those marked "keep in the background", already prepared the way
+/// a restore prepares them, and only while the user allows launching.
+#[tauri::command]
+async fn agent_mcp_plans_sync(
+    plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<bool, String> {
+    sync_mcp_plans(&plans, &daemon).await
+}
+
+async fn sync_mcp_plans(plans: &AppAgentPlans, daemon: &AppDaemon) -> Result<bool, String> {
+    let (enabled, prepared) = {
+        let guard = plans.lock().map_err(|error| error.to_string())?;
+        let snapshot = guard.snapshot();
+        let prepared: Vec<crate::agent_daemon::McpPlan> = if snapshot.mcp_launch {
+            snapshot
+                .plans
+                .iter()
+                .filter(|plan| plan.detached)
+                .filter_map(|plan| {
+                    let mut request = crate::agent::launch_request_from_plan(plan, 120, 32).ok()?;
+                    crate::agent::apply_startup_instructions(
+                        &mut request,
+                        &snapshot.startup_instructions,
+                    )
+                    .ok()?;
+                    Some(crate::agent_daemon::McpPlan {
+                        plan_id: plan.id.clone(),
+                        label: plan.label.clone(),
+                        note: plan.note.clone(),
+                        definition_id: plan.definition_id.clone(),
+                        working_directory: plan.working_directory.clone(),
+                        sandbox: plan.sandbox,
+                        request,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (snapshot.mcp_launch, prepared)
+    };
+    if !enabled && !daemon.is_running().await {
+        return Ok(false);
+    }
+    daemon
+        .request(
+            enabled,
+            crate::agent_daemon::Request::McpPlansReplace {
+                enabled,
+                plans: prepared,
+            },
+        )
+        .await?;
+    Ok(enabled)
+}
+
 /// Ends every background session and the service itself. The window asks
 /// for confirmation first; nothing here is recoverable.
 #[tauri::command]
@@ -1193,8 +1289,8 @@ async fn agent_automations_take_runs(
 struct AgentDaemonStatus {
     running: bool,
     sessions: usize,
-    /// Session ids shared with MCP observers.
-    shared: Vec<String>,
+    /// Sessions shared with MCP observers, with their grants.
+    shared: Vec<crate::agent_daemon::SharedSession>,
     mcp: crate::agent_daemon::mcp::McpLaunch,
 }
 
@@ -2911,6 +3007,9 @@ pub fn run() {
             agent_daemon_status,
             agent_daemon_stop,
             agent_mcp_share,
+            agent_mcp_control,
+            agent_mcp_plans_sync,
+            agent_workspace_mcp_launch_update,
             agent_automations_sync,
             agent_automations_state,
             agent_automations_take_runs,

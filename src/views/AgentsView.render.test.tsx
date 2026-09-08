@@ -19,8 +19,18 @@ import { AgentsView } from "./AgentsView";
 
 // The background service is a desktop-only backend; the render tests feed
 // it a status directly.
+type SharedEntry = {
+  sessionId: string;
+  control: boolean;
+  activity?: { client: string; action: string; at: number } | null;
+};
 const daemonStatus = vi.hoisted(() => ({
-  current: { running: false, sessions: 0, shared: [] as string[], mcp: null as null | { command: string; args: string[] } },
+  current: {
+    running: false,
+    sessions: 0,
+    shared: [] as SharedEntry[],
+    mcp: null as null | { command: string; args: string[] },
+  },
 }));
 vi.mock("../app/useAgentDaemon", () => ({
   EMPTY_DAEMON_STATUS: { running: false, sessions: 0, shared: [], mcp: null },
@@ -29,6 +39,7 @@ vi.mock("../app/useAgentDaemon", () => ({
     refresh: vi.fn(),
     stop: vi.fn(),
     share: vi.fn(),
+    control: vi.fn(),
   }),
 }));
 
@@ -60,7 +71,13 @@ describe("AgentsView", () => {
     daemonStatus.current = {
       running: true,
       sessions: 1,
-      shared: ["agent-bg-session-1"],
+      shared: [
+        {
+          sessionId: "agent-bg-session-1",
+          control: true,
+          activity: { client: "Claude Code 2.1", action: "prompt", at: Date.now() },
+        },
+      ],
       mcp: { command: "/opt/lattice-term", args: ["mcp", "--data-dir", "/data dir"] },
     };
     const markup = render(
@@ -80,6 +97,29 @@ describe("AgentsView", () => {
     // One toggle: the desktop-owned session has no observer path.
     expect(markup.match(/<span>分享給 MCP<\/span>/g)).toHaveLength(1);
     expect(markup).toContain("checked=\"\"");
+    // A shared session offers the control grant and shows who acted on it.
+    expect(markup).toContain("允許 MCP 送指示與停止");
+    expect(markup).toContain("MCP 可控");
+    expect(markup).toContain("MCP：Claude Code 2.1 送出了指示（剛剛）");
+    // Launching is a separate, off-by-default switch.
+    expect(markup).toContain("允許 MCP 啟動已保存的背景啟動項目");
+  });
+
+  it("offers no control grant on a session that is only shared", () => {
+    daemonStatus.current = {
+      running: true,
+      sessions: 1,
+      shared: [{ sessionId: "agent-bg-session-1", control: false }],
+      mcp: { command: "/opt/lattice-term", args: ["mcp"] },
+    };
+    const markup = render(
+      fakeAgentApi({
+        sessions: [fakeSession({ sessionId: "agent-bg-session-1", detached: true })],
+      }),
+    );
+    expect(markup).toContain("允許 MCP 送指示與停止");
+    expect(markup).not.toContain("MCP 可控");
+    expect(markup).not.toContain("MCP：");
   });
 
   it("offers the account picker with the signed-in default and a named account", () => {
