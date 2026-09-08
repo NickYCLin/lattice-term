@@ -1113,7 +1113,7 @@ async fn agent_mcp_share(
     session_id: String,
     shared: bool,
     daemon: State<'_, AppDaemon>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     if !crate::agent_daemon::owns(&session_id) {
         return Err("Only sessions kept in the background can be shared.".to_string());
     }
@@ -1123,7 +1123,7 @@ async fn agent_mcp_share(
             crate::agent_daemon::Request::ShareSet { session_id, shared },
         )
         .await?;
-    serde_json::from_value(value).map_err(|error| error.to_string())
+    decode_mcp_shared_response(value)
 }
 
 /// Lets MCP clients prompt and end one shared background session, or takes
@@ -1146,6 +1146,12 @@ async fn agent_mcp_control(
             },
         )
         .await?;
+    decode_mcp_shared_response(value)
+}
+
+fn decode_mcp_shared_response(
+    value: serde_json::Value,
+) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
@@ -3288,6 +3294,25 @@ mod tests {
         Protocol,
     };
     use crate::storage::{InMemoryStorage, Storage};
+
+    #[test]
+    fn mcp_share_response_preserves_the_daemons_grants_and_activity() {
+        let sink = crate::agent_daemon::server::DaemonSink::default();
+        sink.set_shared("agent-bg-test", true);
+        sink.set_control("agent-bg-test", true).unwrap();
+        sink.note_activity("agent-bg-test", "test-client", "prompt");
+        let expected = sink.shared();
+        let response = serde_json::to_value(&expected).unwrap();
+        assert_eq!(decode_mcp_shared_response(response).unwrap(), expected);
+
+        sink.set_shared("agent-bg-test", false);
+        assert!(
+            decode_mcp_shared_response(serde_json::to_value(sink.shared()).unwrap())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(decode_mcp_shared_response(serde_json::json!(["agent-bg-test"])).is_err());
+    }
 
     fn mcp_plan_test_store(directory: &std::path::Path) -> (AppAgentPlans, AgentLaunchPlanDraft) {
         let draft = AgentLaunchPlanDraft {
