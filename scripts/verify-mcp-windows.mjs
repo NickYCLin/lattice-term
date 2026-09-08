@@ -1,5 +1,5 @@
 // Windows acceptance against an actual desktop/CI executable, without installing it.
-// Usage: node scripts/verify-mcp-windows.mjs <lattice-term.exe> [report.json]
+// Usage: node scripts/verify-mcp-windows.mjs <lattice-term.exe> [report.json] [--external-reporter]
 // All sessions, tokens and plans belong to a fresh temporary data directory.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -22,6 +22,17 @@ import { setTimeout as delay } from "node:timers/promises";
 if (process.platform !== "win32" || !process.argv[2])
   throw Error("Pass a Windows LatticeTerm executable.");
 const executable = resolve(process.argv[2]);
+const options = process.argv.slice(3);
+const externalReporter = options.includes("--external-reporter");
+const reportArguments = options.filter(
+  (value) => value !== "--external-reporter",
+);
+if (
+  reportArguments.length > 1 ||
+  reportArguments.some((value) => value.startsWith("--"))
+)
+  throw Error("Pass at most one report path and --external-reporter");
+const reportPath = reportArguments[0];
 const root = mkdtempSync(join(tmpdir(), "latticeterm-mcp-win-"));
 const dataDir = join(root, "Isolated Data");
 mkdirSync(dataDir);
@@ -32,6 +43,12 @@ writeFileSync(
   fixture,
   [
     "@echo off",
+    // Only the isolated fixture's credentials are exported, never user accounts.
+    ...(externalReporter
+      ? [
+          '>"report-%LATTICETERM_AGENT_SESSION%.json" echo {"LATTICETERM_AGENT_REPORT_ADDR":"%LATTICETERM_AGENT_REPORT_ADDR%","LATTICETERM_AGENT_SESSION":"%LATTICETERM_AGENT_SESSION%","LATTICETERM_AGENT_REPORT_TOKEN":"%LATTICETERM_AGENT_REPORT_TOKEN%"}',
+        ]
+      : []),
     "echo MCP_FIXTURE_READY",
     ":read",
     'set "line="',
@@ -48,6 +65,9 @@ writeFileSync(
 
 const report = {
   platform: `Windows ${release()} ${arch()}`,
+  lifecycleReporter: externalReporter
+    ? "external fixture callback"
+    : "ConPTY fixture callback",
   executableSha256: createHash("sha256")
     .update(readFileSync(executable))
     .digest("hex"),
@@ -55,10 +75,11 @@ const report = {
 };
 const children = new Set();
 const clients = new Set();
-function child(args) {
+function child(args, env = process.env) {
   const p = spawn(executable, args, {
     cwd: root,
     windowsHide: true,
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   children.add(p);
@@ -151,7 +172,10 @@ const ok = (value) => {
   return value.structuredContent;
 };
 function pipeName(directory) {
-  const key = realpathSync(directory)
+  // Match Rust canonicalize/GetFinalPathNameByHandle, including CI's RUNNER~1
+  // temporary path. The JavaScript realpath implementation retains 8.3 aliases.
+  const key = realpathSync
+    .native(directory)
     .replace(/^\\\\\?\\/, "")
     .replaceAll("/", "\\")
     .replace(/\\+$/, "")
@@ -479,11 +503,44 @@ try {
         ).isError,
         true,
       );
-      await desktop.request({
-        type: "send",
-        sessionId: plain,
-        data: Buffer.from("READY_FIXTURE\r").toString("base64"),
-      });
+      if (externalReporter) {
+        const credentials = JSON.parse(
+          readFileSync(join(root, `report-${plain}.json`), "utf8"),
+        );
+        assert.equal(credentials.LATTICETERM_AGENT_SESSION, plain);
+        if (
+          !/^(127\.0\.0\.1|\[::1\]):\d+$/.test(
+            credentials.LATTICETERM_AGENT_REPORT_ADDR,
+          )
+        )
+          throw Error("The fixture reporter must use loopback");
+        if (
+          !/^[A-Za-z0-9_-]+$/.test(credentials.LATTICETERM_AGENT_REPORT_TOKEN)
+        )
+          throw Error("Invalid fixture reporter token");
+        const reporter = child(["agent-report", "idle"], {
+          ...process.env,
+          LATTICETERM_AGENT_SESSION: plain,
+          LATTICETERM_AGENT_REPORT_ADDR:
+            credentials.LATTICETERM_AGENT_REPORT_ADDR,
+          LATTICETERM_AGENT_REPORT_TOKEN:
+            credentials.LATTICETERM_AGENT_REPORT_TOKEN,
+        });
+        const exitCode = await new Promise((resolve) =>
+          reporter.once("exit", resolve),
+        );
+        assert.equal(
+          exitCode,
+          0,
+          "fixture reporter must acknowledge readiness",
+        );
+      } else {
+        await desktop.request({
+          type: "send",
+          sessionId: plain,
+          data: Buffer.from("READY_FIXTURE\r").toString("base64"),
+        });
+      }
       await waitUntil(
         async () =>
           ok(await adapter.call("list_agent_sessions")).sessions.some(
@@ -727,10 +784,7 @@ try {
   }
 }
 report.passed = report.checks.every((check) => check.status === "passed");
-if (process.argv[3])
-  writeFileSync(
-    resolve(process.argv[3]),
-    JSON.stringify(report, null, 2) + "\n",
-  );
+if (reportPath)
+  writeFileSync(resolve(reportPath), JSON.stringify(report, null, 2) + "\n");
 console.log(JSON.stringify(report, null, 2));
 if (!report.passed) process.exitCode = 1;
