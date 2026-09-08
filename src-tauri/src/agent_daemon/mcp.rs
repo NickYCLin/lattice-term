@@ -532,6 +532,12 @@ impl McpServer {
             "launchEnabled": launch_enabled,
             "launchablePlans": plans,
             "desktopBridgeAvailable": desktop_bridge,
+            "promptTextRestrictions": [{
+                "platform": "windows",
+                "definitionId": "codex",
+                "modes": ["now", "queue"],
+                "rejectedCharacters": ["CR", "LF", "TAB"],
+            }],
             "tools": [
                 "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
                 "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
@@ -555,6 +561,7 @@ impl McpServer {
                 "There is no way to interrupt a running turn: cancel_agent_task drops queued prompts or ends the whole session.",
                 "Output is the retained terminal tail; a cursor older than it is reported as truncated.",
                 "Lifecycle states are the CLI's own hook reports when stateSource is integration, and a guess when it is heuristic; both immediate and queued prompts require an integration report that the CLI is free and no unfinished human input.",
+                "Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB are rejected before queueing or writing, in both now and queue modes. Do not silently flatten or rewrite rejected text.",
             ],
         }))
     }
@@ -962,6 +969,8 @@ it when retrying after a lost reply. \
 A state with stateSource \"heuristic\" is a guess from terminal output, not a report from the CLI. Both immediate \
 and queued prompts require a CLI integration report that it is free and no unfinished human input; a CLI \
 without these reports cannot receive MCP prompts. Prompts are text, not terminal control keys. \
+Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB are rejected before queueing \
+or writing in both now and queue modes. Ask for single-line text rather than silently flattening or rewriting it. \
 For remote work call list_authorized_connections first. Only a live desktop can grant SSH/SFTP scopes; \
 never request credentials, bypass host trust, or treat saved logins as permission. SSH executes only named \
 user-approved plans on a dedicated channel. File tools accept approved root IDs and relative paths, never \
@@ -1361,12 +1370,12 @@ fn tool_definitions() -> Value {
         {
             "name": "send_agent_prompt",
             "title": "Send a prompt to a controlled session",
-            "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Neither submits over unfinished human input, working/attention states, or a heuristic guess. Terminal control keys are rejected and multiline text is pasted as one submission. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
+            "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Neither submits over unfinished human input, working/attention states, or a heuristic guess. Terminal control keys are rejected. Windows Codex accepts only a single line without tabs: CR, LF and TAB are rejected before queueing or writing in both modes. Do not silently flatten or rewrite rejected text. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "sessionId": { "type": "string", "description": "A sessionId with access control." },
-                    "text": { "type": "string", "description": "The prompt; newlines are kept as one submission." },
+                    "text": { "type": "string", "description": "Prompt text. Windows Codex rejects CR, LF and TAB; provide a single line without tabs and do not automatically flatten or rewrite rejected text." },
                     "mode": { "type": "string", "enum": ["queue", "now"], "description": "queue (default) or now." },
                     "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required idempotency key, at most 128 UTF-8 bytes. Reuse only for an identical retry." }
                 },
@@ -2540,6 +2549,52 @@ mod tests {
         // The abandoned title bytes surface as text once the page has
         // stepped over the unfinished sequence; the real text follows.
         assert!(text.ends_with("after\n"));
+    }
+
+    #[tokio::test]
+    async fn windows_codex_prompt_restrictions_are_advertised_consistently() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = McpServer::new(DaemonPaths::new(dir.path()));
+        let capabilities = server
+            .get_capabilities()
+            .await
+            .unwrap_or_else(|_| panic!("capabilities should be available without a daemon"));
+        assert_eq!(
+            capabilities["promptTextRestrictions"],
+            json!([{
+                "platform": "windows",
+                "definitionId": "codex",
+                "modes": ["now", "queue"],
+                "rejectedCharacters": ["CR", "LF", "TAB"],
+            }])
+        );
+        let tools = tool_definitions();
+        let prompt = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "send_agent_prompt")
+            .unwrap();
+        for description in [
+            INSTRUCTIONS,
+            prompt["description"].as_str().unwrap(),
+            prompt["inputSchema"]["properties"]["text"]["description"]
+                .as_str()
+                .unwrap(),
+        ] {
+            assert!(description.contains("Windows Codex"));
+            assert!(description.contains("CR, LF and TAB"));
+            assert!(description.contains("single line"));
+            assert!(!description.contains("multiline text is pasted as one submission"));
+            assert!(!description.contains("newlines are kept as one submission"));
+        }
+        assert!(capabilities["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|limitation| limitation.as_str().is_some_and(|text| {
+                text.contains("Windows Codex") && text.contains("before queueing or writing")
+            })));
     }
 
     #[tokio::test]

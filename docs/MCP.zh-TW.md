@@ -114,7 +114,8 @@ MCP／observer 連線，不繼續補完舊內容；client 可重新連線，既�
 
 B 階段工具的語意：
 
-- `send_agent_prompt` 以 bracketed paste 保留多行文字，最後只補一次 Enter；拒絕 ESC、Ctrl+C 等控制字元。`queue` 與 `now` 都只有在 CLI 官方 hook 回報 `idle`／`done`、且使用者沒有編輯中的提示時才可派送。`queue` 會等待；`now` 在尚未就緒、等待人工操作或已有排隊指示時拒絕。沒有整合的 CLI（例如自訂 shell）不能用 `now` 略過檢查，需由使用者在終端操作。回傳的 `sentImmediately`／`queued` 只代表 PTY 寫入與排隊狀態，不代表 CLI 已開始新回合或任務成功；請用 `wait_agent_state` 與 `read_agent_output` 核對。
+- `send_agent_prompt` 以 bracketed paste 傳送文字，最後只補一次 Enter；拒絕 ESC、Ctrl+C 等控制字元。Windows Codex 的 MCP 提示另限單行、不可含 CR、LF 或 Tab，`now` 與 `queue` 都在寫入或入隊前拒絕，不會默默改字：ConPTY 可能將這些字元轉成提交按鍵。其他平台、CLI 與桌面手動輸入維持原行為。`queue` 與 `now` 都只有在 CLI 官方 hook 回報 `idle`／`done`、且使用者沒有編輯中的提示時才可派送。`queue` 會等待；`now` 在尚未就緒、等待人工操作或已有排隊指示時拒絕。沒有整合的 CLI（例如自訂 shell）不能用 `now` 略過檢查，需由使用者在終端操作。回傳的 `sentImmediately`／`queued` 只代表 PTY 寫入與排隊狀態，不代表 CLI 已開始新回合或任務成功；請用 `wait_agent_state` 與 `read_agent_output` 核對。
+- Windows Codex 將貼上與提交分成兩次寫入，中間至少間隔 250ms，避免最後的 Enter 被 CLI 當成貼上文字的一部分。提交前重查原授權與程序狀態；若途中撤權、取消或寫入失敗，可能留下未提交的草稿，結果會標成不確定，不補送 Enter 或自動重試。此時拒絕已排隊的人工輸入，終端顯示接管提示；請先檢查可見草稿，再決定如何繼續。這段間隔不是 CLI 接受任務的確認，仍須核對官方狀態與實際結果。
 - `cancel_agent_task` 只有兩種範圍：`queue` 丟掉還沒送出的 MCP 指示，保留使用者排隊的工作與正在跑的回合；`session` 結束整個 CLI 程序，不可復原，結束後自動取消分享。**沒有「中止本輪」**：各 CLI 的中斷鍵不一致，目前不假裝支援。
 - `launch_agent` 只能啟動 `list_launch_plans` 給的項目，永遠是背景工作階段；請求本身由桌面依保存的項目準備好交給背景服務，client 給不了任何指令或參數。
 - **request ID 去重**：三個寫入工具都必須帶非空、最多 128 bytes 的 `requestId`。同一個 client（以 `initialize.clientInfo` 名稱與版本區分）同時重送完全相同的請求，只執行一次；完成後 15 分鐘內回傳原結果並標 `duplicate: true`。同 id 換工具、目標或內容會拒絕。背景服務最多保留 256 筆；額滿時拒絕新的寫入，不提早淘汰尚在保留期的結果。重送仍需通過目前授權檢查；已結束工作階段的取消結果可重取。

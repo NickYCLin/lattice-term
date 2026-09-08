@@ -734,7 +734,9 @@ pub fn dispatch_as(
                     audit::Outcome::Accepted
                 }
             }
-            Err(error) if error == UNKNOWN_OUTCOME => audit::Outcome::Unknown,
+            Err(error) if error == UNKNOWN_OUTCOME || error == agent::MCP_DRAFT_RECOVERY_ERROR => {
+                audit::Outcome::Unknown
+            }
             Err(_) => audit::Outcome::Failed,
         };
         if let Ok(mut history) = context.sink.history.lock() {
@@ -2068,6 +2070,85 @@ mod observer_transport_tests {
         assert_eq!(history["entries"][1]["sessionId"], session_id);
         assert_eq!(history["entries"][1]["action"], "stop");
         assert!(context.registry.list().is_empty());
+    }
+
+    #[test]
+    fn mcp_history_records_unconfirmed_submissions_without_retrying_cached_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        let session_id = "agent-bg-session-uncertain-fixture";
+        let text = "owned prompt fixture";
+        let mode = PromptMode::Now;
+        let identity = json!(["prompt", session_id, text, mode]);
+        let attempts = std::cell::Cell::new(0);
+
+        // The first writer may have sent only part of the paste, or submitted
+        // the CR before flush failed. Retrying its id must return that same
+        // uncertainty rather than invoking the action a second time.
+        let first = once(
+            &context,
+            "client",
+            "uncertain",
+            &identity,
+            || Ok(()),
+            || {
+                attempts.set(attempts.get() + 1);
+                Err(agent::MCP_DRAFT_RECOVERY_ERROR.to_string())
+            },
+            |_| Ok(()),
+        );
+        assert_eq!(first.unwrap_err(), agent::MCP_DRAFT_RECOVERY_ERROR);
+
+        for _ in 0..2 {
+            let retry = dispatch_as(
+                &context,
+                ClientRole::Observer,
+                "client",
+                Request::Prompt {
+                    session_id: session_id.into(),
+                    text: text.into(),
+                    mode,
+                    request_id: "uncertain".into(),
+                },
+            );
+            assert_eq!(retry.unwrap_err(), agent::MCP_DRAFT_RECOVERY_ERROR);
+        }
+        assert_eq!(attempts.get(), 1);
+        assert!(context.registry.list().is_empty());
+        let history = dispatch(&context, Request::McpHistory).unwrap();
+        let entries = history["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| entry["outcome"] == "unknown"));
+        assert!(!history.to_string().contains(text));
+
+        // Match only the crate-owned fixed outcome, not arbitrary messages
+        // containing the same text. Definite pre-write denials remain failed.
+        for (id, error) in [
+            (
+                "near-match",
+                format!("{} (fixture)", agent::MCP_DRAFT_RECOVERY_ERROR),
+            ),
+            ("denied", "This session is not under MCP control.".into()),
+        ] {
+            let fingerprint: [u8; 32] =
+                Sha256::digest(serde_json::to_vec(&identity).unwrap()).into();
+            let (operation, _) = context.sink.reserve("client", id, fingerprint).unwrap();
+            operation.finish(Err(error.clone()));
+            let result = dispatch_as(
+                &context,
+                ClientRole::Observer,
+                "client",
+                Request::Prompt {
+                    session_id: session_id.into(),
+                    text: text.into(),
+                    mode,
+                    request_id: id.into(),
+                },
+            );
+            assert_eq!(result.unwrap_err(), error);
+            let history = dispatch(&context, Request::McpHistory).unwrap();
+            assert_eq!(history["entries"][0]["outcome"], "failed");
+        }
     }
 
     #[test]
