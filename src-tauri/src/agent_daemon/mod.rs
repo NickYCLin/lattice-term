@@ -18,6 +18,7 @@
 //! `agent-daemon.token` (owner-only file in the application data directory);
 //! anything else closes the connection.
 
+pub mod audit;
 pub mod automations;
 pub mod client;
 pub mod mcp;
@@ -363,6 +364,8 @@ pub enum Request {
     },
     /// Sessions currently shared with observers, with their grants.
     Shared,
+    /// Desktop-only bounded metadata history, including stopped sessions.
+    McpHistory,
     /// A bounded slice of one shared session's output from `cursor` on.
     Observe {
         session_id: String,
@@ -467,6 +470,10 @@ pub struct McpPlan {
 #[serde(rename_all = "camelCase")]
 pub struct HelloReply {
     pub protocol: u32,
+    /// Optional desktop capability. Old daemons must never receive the new
+    /// request variant: they may close the connection on an unknown frame.
+    #[serde(default)]
+    pub mcp_history: bool,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,
     pub snapshots: Vec<crate::agent::AgentOutputSnapshot>,
     /// Sessions the user shared with observers; empty for observers who

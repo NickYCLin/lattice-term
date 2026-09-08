@@ -52,4 +52,6 @@ LatticeTerm is currently pre-1.0. The latest GitHub Release and the latest commi
 - Tauri IPC exposes scoped profile-storage, Agent Fleet PTY, SSH/SFTP-session, Lattice Remote, Web RDP input/session, trusted-host, credential-status/existence/deletion, runtime-summary, and updater operations. Agent Fleet input events are capped at 64 KiB and target only an existing in-memory session. SFTP file bytes cross IPC only after an explicit upload or download. There is deliberately no IPC command that returns a saved password to the WebView, and no arbitrary local filesystem access.
 - Logs and screenshots must not contain secrets or private infrastructure details.
 
+The desktop-only MCP write history keeps at most 256 metadata entries in daemon memory. It records accepted, replayed, failed or unknown outcomes, including requests for sessions that have since ended. Observers cannot read this history. It does not retain prompts, request IDs, raw errors, credentials or launch arguments, and does not persist across daemon restart. Client labels are self-reported, not authenticated identities; accepted operations are not proof of successful agent tasks. This is not a complete, durable or tamper-evident audit ledger.
+
 These statements describe the current source tree, not a security audit or certification.

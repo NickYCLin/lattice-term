@@ -35,6 +35,7 @@ pub struct DaemonClient {
 }
 
 pub struct Connection {
+    mcp_history: AtomicBool,
     tx: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
     next_id: AtomicU64,
@@ -119,6 +120,7 @@ impl DaemonClient {
         let (read_half, mut write_half) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let connection = Arc::new(Connection {
+            mcp_history: AtomicBool::new(false),
             tx,
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -157,6 +159,9 @@ impl DaemonClient {
                 reply.protocol, PROTOCOL_VERSION
             ));
         }
+        connection
+            .mcp_history
+            .store(reply.mcp_history, Ordering::Relaxed);
         if let Ok(mut sessions) = connection.sessions.lock() {
             sessions.extend(reply.sessions.into_iter().map(|summary| summary.session_id));
         }
@@ -206,6 +211,9 @@ impl DaemonClient {
 
 impl Connection {
     pub async fn request(&self, request: Request) -> Result<Value, String> {
+        if matches!(&request, Request::McpHistory) && !self.mcp_history.load(Ordering::Relaxed) {
+            return Err("This background service does not support MCP history.".to_string());
+        }
         if !self.alive.load(Ordering::Relaxed) {
             return Err(DAEMON_GONE.to_string());
         }
@@ -385,4 +393,34 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
         })
         .map_err(|error| format!("Cannot watch the background service: {error}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_old_daemon_is_never_sent_an_unknown_history_request() {
+        let old: HelloReply = serde_json::from_value(json!({
+            "protocol": PROTOCOL_VERSION, "sessions": [], "snapshots": [],
+        }))
+        .unwrap();
+        assert!(!old.mcp_history);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let connection = Connection {
+            tx,
+            mcp_history: AtomicBool::new(old.mcp_history),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            alive: AtomicBool::new(true),
+            sessions: Mutex::new(HashSet::new()),
+        };
+        assert!(connection.request(Request::McpHistory).await.is_err());
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(connection.alive.load(Ordering::Relaxed));
+        assert!(connection.pending.lock().unwrap().is_empty());
+    }
 }

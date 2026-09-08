@@ -25,6 +25,7 @@
 - React application shell and views: `src/App.tsx`, `src/views/`
 - Local AI CLI PTY backend: `src-tauri/src/agent.rs`
 - Background service and MCP adapter (`lattice-term agent-daemon`, `lattice-term mcp`): `src-tauri/src/agent_daemon/`
+- MCP write history: desktop-only, latest 256 metadata entries for the current daemon lifetime; no prompts, request IDs or raw errors are retained (`src-tauri/src/agent_daemon/audit.rs`).
 - Agent UI and terminal: `src/views/AgentsView.tsx`, `src/components/agents/`
 - SSH, SFTP and tunnels: `src-tauri/src/ssh.rs`, `sftp.rs`, `tunnel.rs`
 - Lattice Remote: `src/components/remote/`, `src-tauri/src/remote.rs`, `crates/lattice-remote/`

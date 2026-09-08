@@ -1097,10 +1097,18 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
         Ok(value) => serde_json::from_value(value).unwrap_or_default(),
         Err(_) => Vec::new(),
     };
+    // Older running daemons may not implement history. Do not present an
+    // unavailable history as a verified empty one.
+    let history = daemon
+        .request(false, crate::agent_daemon::Request::McpHistory)
+        .await
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok());
     Ok(AgentDaemonStatus {
         running: daemon.is_running().await,
         sessions: sessions.len(),
         shared,
+        history,
         mcp: crate::agent_daemon::mcp::launch_for(&daemon.paths().data_dir),
     })
 }
@@ -1402,6 +1410,7 @@ struct AgentDaemonStatus {
     sessions: usize,
     /// Sessions shared with MCP observers, with their grants.
     shared: Vec<crate::agent_daemon::SharedSession>,
+    history: Option<crate::agent_daemon::audit::Snapshot>,
     mcp: crate::agent_daemon::mcp::McpLaunch,
 }
 

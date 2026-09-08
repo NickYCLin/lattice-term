@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentMcpHistory } from "../components/agents/AgentMcpHistory";
 import type {
   AgentApi,
   AgentDefinition,
@@ -826,6 +827,7 @@ export function AgentsView({
               </span>
             </label>
             <p className="agents-field-hint">{t("agents.mcp.docs")}</p>
+            <AgentMcpHistory history={daemon.status.history} />
           </details>
         )}
 
