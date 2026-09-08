@@ -21,6 +21,7 @@ static NEXT_STAGING_FILE: AtomicU64 = AtomicU64::new(1);
 pub struct SharedFiles {
     root: PathBuf,
     label: String,
+    text_root: crate::host_text::TextRoot,
 }
 
 pub struct DownloadFile {
@@ -63,7 +64,12 @@ impl SharedFiles {
             .chars()
             .take(MAX_FILE_ROOT_LABEL_BYTES)
             .collect();
-        Ok(Self { root, label })
+        let text_root = crate::host_text::TextRoot::open(&root)?;
+        Ok(Self {
+            root,
+            label,
+            text_root,
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -72,6 +78,10 @@ impl SharedFiles {
 
     pub fn label(&self) -> &str {
         &self.label
+    }
+
+    pub fn text_root(&self) -> &crate::host_text::TextRoot {
+        &self.text_root
     }
 
     pub fn list(&self, virtual_path: &str) -> Result<(String, Vec<RemoteFileEntry>), String> {

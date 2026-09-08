@@ -116,6 +116,8 @@ export function fakeRemoteApi(overrides: Partial<RemoteApi> = {}): RemoteApi {
     terminalResize: vi.fn(async () => {}),
     onTerminalData: vi.fn(() => () => {}),
     listFiles: vi.fn(async () => ({ path: "/", entries: [] }) as never),
+    readTextFile: vi.fn(async () => { throw new Error("not in this test"); }),
+    saveTextFile: vi.fn(async () => { throw new Error("not in this test"); }),
     downloadFile: vi.fn(async () => {
       throw new Error("not in this test");
     }),

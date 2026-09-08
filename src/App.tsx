@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { RemoteTextEditorProvider, useRemoteTextEditor } from "./components/files/RemoteTextEditorProvider";
 import {
   findNavigationItem,
   isMobilePlatform,
@@ -207,6 +208,7 @@ function LazyOverlayFallback() {
 
 function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const { t } = useI18n();
+  const textEditor = useRemoteTextEditor();
   const workspace = useWorkspace();
   const runtime = useRuntimeSummary();
   const platform = runtime.summary?.platform;
@@ -830,6 +832,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   // Global shortcuts. Anything typed into a field is left alone.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (textEditor.active) return;
       const target = event.target as HTMLElement | null;
       const typing =
         target instanceof HTMLInputElement ||
@@ -876,7 +879,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focusSearch, openCreate, toggleResourceSidebar]);
+  }, [focusSearch, openCreate, toggleResourceSidebar, textEditor.active]);
 
   const item = findNavigationItem(view);
   const workspaceMotionRef = useViewMotion(view, preferences.motion);
@@ -1381,7 +1384,9 @@ export default function App() {
 
   return (
     <I18nProvider locale={preferences.preferences.locale}>
-      <Workspace {...preferences} />
+      <RemoteTextEditorProvider>
+        <Workspace {...preferences} />
+      </RemoteTextEditorProvider>
     </I18nProvider>
   );
 }

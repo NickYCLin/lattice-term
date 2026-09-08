@@ -10,9 +10,11 @@ import { formatBytes } from "../../domain/metrics";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
+import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
   CloseIcon,
+  CodeFileIcon,
   ExportIcon,
   FolderIcon,
   ImportIcon,
@@ -34,6 +36,12 @@ export function RemoteFilesPane({
   remote: RemoteApi;
 }) {
   const { t, tag } = useI18n();
+  const editor = useRemoteTextEditor();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
   const [pathInput, setPathInput] = useState("/");
   const [loading, setLoading] = useState(true);
@@ -74,6 +82,15 @@ export function RemoteFilesPane({
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : String(reason));
     }
+  }
+
+  function edit(entry: RemoteFileEntry) {
+    editor.open({
+      path: entry.path,
+      read: () => remote.readTextFile(session.sessionId, entry.path),
+      save: (content, revision) => remote.saveTextFile(session.sessionId, entry.path, content, revision),
+      onClosed: () => { if (mounted.current && directory) void open(directory.path); },
+    });
   }
 
   const { confirm, dialogs } = useAppDialogs();
@@ -180,6 +197,9 @@ export function RemoteFilesPane({
           name: displayPath(session.fileRootLabel),
         })}
       </div>
+      {!session.fileEdit && (
+        <div className="remote-files-root">{t("fileEditor.unsupportedHost")}</div>
+      )}
 
       {problem && (
         <div className="remote-files-problem">
@@ -235,6 +255,18 @@ export function RemoteFilesPane({
                     </td>
                     <td>{modified(entry)}</td>
                     <td>
+                      {downloadable && session.fileEdit && (
+                        <button
+                          type="button"
+                          className="icon-button icon-button--sm"
+                          disabled={busy || editor.active}
+                          onClick={() => edit(entry)}
+                          aria-label={t("fileEditor.edit")}
+                          data-tooltip={t("fileEditor.edit")}
+                        >
+                          <CodeFileIcon size={12} />
+                        </button>
+                      )}
                       {downloadable && (
                         <button
                           type="button"

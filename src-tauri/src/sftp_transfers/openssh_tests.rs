@@ -37,6 +37,7 @@ async fn prepare_upload(
         upload_session: Some(session),
         staging_path: Some(staging),
         overwrite,
+        target_gate: Arc::default(),
     });
     let registry = TransferRegistry::new();
     registry.insert(Arc::clone(&entry)).unwrap();
@@ -66,6 +67,28 @@ fn assert_no_staging(server: &OpenSshServer) {
             .to_string_lossy()
             .starts_with(".latticeterm-"));
     }
+}
+
+#[tokio::test]
+#[ignore = "Requires the local OpenSSH sftp-server; CI runs these explicitly"]
+async fn openssh_upload_cannot_publish_while_text_editor_holds_target_gate() {
+    bounded(async {
+        let (server, stream) = OpenSshServer::start(None);
+        let session = Arc::new(SftpSession::new(stream).await.unwrap());
+        std::fs::write(server.path("notes"), b"original").unwrap();
+        let (registry, entry) = prepare_upload(&server, session, "notes", 3, true).await;
+        send(&registry, b"new").await;
+        let _editor = entry.target_gate.lock().await;
+        let error = finish_upload(&registry, &QuietSink, "test-upload")
+            .await
+            .unwrap_err();
+        assert!(error.contains("another file operation"), "{error}");
+        assert_eq!(std::fs::read(server.path("notes")).unwrap(), b"original");
+        assert_eq!(entry.state.lock().unwrap().state, "error");
+        assert_no_staging(&server);
+        server.stop().await;
+    })
+    .await;
 }
 
 #[tokio::test]

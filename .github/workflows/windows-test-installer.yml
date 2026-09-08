@@ -77,6 +77,14 @@ jobs:
       - name: Verify MCP through Windows named pipes and ConPTY
         run: node scripts/verify-mcp-windows.mjs src-tauri/target/release/lattice-term.exe mcp-windows-report.json --external-reporter
 
+      - name: Verify remote text protocol and Windows host safety boundary
+        shell: pwsh
+        run: |
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --bin lattice-agent windows_text_requests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify native regression runner contracts
         shell: pwsh
         run: ./scripts/verify-windows-lib-tests.ps1 -SelfTest

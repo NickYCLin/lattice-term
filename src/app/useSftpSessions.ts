@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HostKeyRecord } from "../domain/security";
+import type { RemoteTextDocument } from "../domain/remoteText";
 import { reconcileSessionSnapshot } from "./sessionSnapshot";
 
 export const SFTP_MAX_TRANSFER_BYTES = 32 * 1024 * 1024;
@@ -260,6 +261,8 @@ export interface SftpApi {
     directory: boolean,
   ) => Promise<void>;
   readFile: (sessionId: string, path: string) => Promise<Uint8Array>;
+  readTextFile: (sessionId: string, path: string) => Promise<RemoteTextDocument>;
+  saveTextFile: (sessionId: string, path: string, content: string, revision: string, acknowledgeAccessChange?: boolean) => Promise<RemoteTextDocument>;
   writeFile: (
     sessionId: string,
     parent: string,
@@ -453,6 +456,16 @@ export function useSftpSessions(): SftpApi {
     );
   }, []);
 
+  const readTextFile = useCallback(async (sessionId: string, path: string) => {
+    const { invoke } = await core();
+    return invoke<RemoteTextDocument>("sftp_read_text_file", { sessionId, path });
+  }, []);
+
+  const saveTextFile = useCallback(async (sessionId: string, path: string, content: string, revision: string, acknowledgeAccessChange = false) => {
+    const { invoke } = await core();
+    return invoke<RemoteTextDocument>("sftp_save_text_file", { sessionId, path, content, revision, acknowledgeAccessChange });
+  }, []);
+
   const writeFile = useCallback(
     async (
       sessionId: string,
@@ -597,6 +610,8 @@ export function useSftpSessions(): SftpApi {
     rename,
     remove,
     readFile,
+    readTextFile,
+    saveTextFile,
     writeFile,
     transfers,
     downloadToDisk,

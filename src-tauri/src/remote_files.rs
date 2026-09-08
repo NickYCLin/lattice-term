@@ -22,6 +22,9 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
+mod text;
+pub use text::RemoteTextDocument;
+
 static NEXT_OPERATION: AtomicU64 = AtomicU64::new(1);
 const TRANSFER_PREFIX: &str = "remote-file-";
 
@@ -90,6 +93,7 @@ pub struct RemoteFilesClient {
     app: AppHandle,
     outbound: mpsc::Sender<RemoteMessage>,
     state: Mutex<RemoteFileState>,
+    editor: text::TextClient,
 }
 
 impl RemoteFilesClient {
@@ -97,9 +101,23 @@ impl RemoteFilesClient {
         Self {
             session_id,
             app,
+            editor: text::TextClient::new(outbound.clone()),
             outbound,
             state: Mutex::new(RemoteFileState::default()),
         }
+    }
+
+    pub async fn read_text(&self, path: String) -> Result<RemoteTextDocument, String> {
+        self.editor.read(path).await
+    }
+
+    pub async fn save_text(
+        &self,
+        path: String,
+        content: String,
+        revision: String,
+    ) -> Result<RemoteTextDocument, String> {
+        self.editor.save(path, content, revision).await
     }
 
     pub async fn list(
@@ -421,7 +439,11 @@ impl RemoteFilesClient {
     }
 
     pub fn handle_response(&self, response: RemoteFileResponse) {
+        if self.editor.handle(&response) {
+            return;
+        }
         match response {
+            RemoteFileResponse::TextStart { .. } | RemoteFileResponse::TextSaved { .. } => {}
             RemoteFileResponse::ListStart { request_id, path } => {
                 if let Ok(mut state) = self.state.lock() {
                     if let Some(pending) = state.lists.get_mut(&request_id) {
@@ -485,6 +507,7 @@ impl RemoteFilesClient {
     }
 
     pub fn close(&self, reason: &str) {
+        self.editor.close(reason);
         let mut events = Vec::new();
         if let Ok(mut state) = self.state.lock() {
             for (_, mut pending) in state.lists.drain() {
@@ -522,6 +545,14 @@ impl RemoteFilesClient {
 
     fn download_started(&self, transfer_id: u64, name: String, size: u64) {
         let result = (|| -> Result<RemoteFileTransfer, String> {
+            let mut state = self.state.lock().map_err(|error| error.to_string())?;
+            let download = state
+                .downloads
+                .get_mut(&transfer_id)
+                .ok_or_else(|| "The remote download is no longer active.".to_string())?;
+            if download.temporary.is_some() {
+                return Err("The remote sent a second download start.".to_string());
+            }
             let download_dir = crate::user_download_directory(&self.app)?;
             std::fs::create_dir_all(&download_dir)
                 .map_err(|error| format!("Cannot create the download folder: {error}"))?;
@@ -531,14 +562,6 @@ impl RemoteFilesClient {
                 .suffix(".part")
                 .tempfile_in(&download_dir)
                 .map_err(|error| format!("Cannot create the download staging file: {error}"))?;
-            let mut state = self.state.lock().map_err(|error| error.to_string())?;
-            let download = state
-                .downloads
-                .get_mut(&transfer_id)
-                .ok_or_else(|| "The remote download is no longer active.".to_string())?;
-            if download.temporary.is_some() {
-                return Err("The remote sent a second download start.".to_string());
-            }
             download.temporary = Some(temporary);
             download.final_path = Some(final_path.clone());
             download.expected = Some(size);

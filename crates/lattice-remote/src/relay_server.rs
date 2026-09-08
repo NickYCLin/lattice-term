@@ -965,6 +965,7 @@ mod tests {
                     view_only: true,
                     file_transfer: false,
                     file_root_label: String::new(),
+                    file_edit: false,
                     terminal: false,
                 }))
                 .await

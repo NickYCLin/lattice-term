@@ -1,0 +1,206 @@
+.remote-text-editor-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  isolation: isolate;
+}
+
+.remote-text-editor {
+  display: flex;
+  flex-direction: column;
+  width: min(70rem, 100%);
+  height: min(52rem, 88dvh);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-3);
+}
+
+.remote-text-editor__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.remote-text-editor__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2.75rem;
+  height: 2.75rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
+}
+
+.remote-text-editor__heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.remote-text-editor__heading h2 {
+  overflow: hidden;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-text-editor__heading h2 span {
+  margin-inline-start: var(--space-3);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.remote-text-editor__path {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-text-editor__hint {
+  margin: 0;
+  padding: 0 var(--space-6) var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.remote-text-editor__input {
+  display: block;
+  flex: 1 1 10rem;
+  min-width: 0;
+  min-height: 4rem;
+  width: 100%;
+  resize: none;
+  overflow: auto;
+  padding: var(--space-6);
+  border: 0;
+  border-block: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.75;
+  tab-size: 4;
+}
+
+.remote-text-editor__input:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
+
+.remote-text-editor__empty {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  padding: var(--space-6);
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+}
+
+.remote-text-editor__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  max-height: 8rem;
+  overflow: auto;
+  padding: var(--space-4) var(--space-6);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.remote-text-editor__notice--error {
+  background: var(--danger-soft);
+}
+
+.remote-text-editor__notice--error strong,
+.remote-text-editor__validation {
+  color: var(--danger);
+}
+
+.remote-text-editor__validation {
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-xs);
+}
+
+.remote-text-editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+}
+
+.remote-text-editor__metadata {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.remote-text-editor__status {
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+.remote-text-editor__status--dirty {
+  color: var(--warn);
+}
+
+.remote-text-editor__actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.remote-text-editor__actions kbd {
+  margin-inline-start: var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  opacity: 0.8;
+}
+
+@media (max-width: 640px) {
+  .remote-text-editor-layer > .scrim {
+    padding: var(--space-3);
+  }
+
+  .remote-text-editor {
+    height: calc(100dvh - 1rem);
+    border-radius: var(--radius-lg);
+  }
+
+  .remote-text-editor__header,
+  .remote-text-editor__footer {
+    padding: var(--space-4);
+  }
+
+  .remote-text-editor__hint,
+  .remote-text-editor__notice,
+  .remote-text-editor__validation {
+    padding-inline: var(--space-4);
+  }
+
+  .remote-text-editor__input {
+    padding: var(--space-4);
+    font-size: 16px;
+  }
+
+  .remote-text-editor__actions kbd {
+    display: none;
+  }
+}

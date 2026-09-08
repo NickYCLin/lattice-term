@@ -1,6 +1,7 @@
 /** Lattice Remote sessions and their latest encrypted-stream frame. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RemoteTextDocument } from "../domain/remoteText";
 import {
   reconcileSessionSnapshot,
   SessionConnectRaceGuard,
@@ -33,6 +34,8 @@ export interface RemoteSessionSummary {
   height: number;
   viewOnly: boolean;
   fileTransfer: boolean;
+  /** Absent/false for older hosts: never send them editor protocol messages. */
+  fileEdit?: boolean;
   fileRootLabel: string;
   /** True when the agent shares a shell (headless host) instead of a display. */
   terminal: boolean;
@@ -138,6 +141,8 @@ export interface RemoteApi {
     handler: (bytes: Uint8Array) => void,
   ) => () => void;
   listFiles: (sessionId: string, path: string) => Promise<RemoteDirectory>;
+  readTextFile: (sessionId: string, path: string) => Promise<RemoteTextDocument>;
+  saveTextFile: (sessionId: string, path: string, content: string, revision: string) => Promise<RemoteTextDocument>;
   downloadFile: (sessionId: string, path: string) => Promise<RemoteFileTransfer>;
   uploadFile: (
     sessionId: string,
@@ -989,6 +994,16 @@ export function useRemoteSessions(): RemoteApi {
 
   const clearLastClosed = useCallback(() => setLastClosed(null), []);
 
+  const readTextFile = useCallback(async (sessionId: string, path: string) => {
+    const { invoke } = await core();
+    return invoke<RemoteTextDocument>("remote_file_read_text", { sessionId, path });
+  }, []);
+
+  const saveTextFile = useCallback(async (sessionId: string, path: string, content: string, revision: string) => {
+    const { invoke } = await core();
+    return invoke<RemoteTextDocument>("remote_file_save_text", { sessionId, path, content, revision });
+  }, []);
+
   return {
     sessions,
     transfers,
@@ -1000,6 +1015,8 @@ export function useRemoteSessions(): RemoteApi {
     terminalResize,
     onTerminalData,
     listFiles,
+    readTextFile,
+    saveTextFile,
     downloadFile,
     uploadFile,
     cancelFileTransfer,
