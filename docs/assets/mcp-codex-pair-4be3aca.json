@@ -1,0 +1,364 @@
+{
+  "schemaVersion": 1,
+  "mode": "run-live",
+  "startedAt": "2026-09-08T07:41:23.444Z",
+  "platform": "Windows 10.0.26200 x64",
+  "driver": "Node MCP orchestrator with real AI CLI workers",
+  "syntheticLifecycleReports": false,
+  "checks": [
+    {
+      "id": "native-provider-inventory",
+      "status": "passed",
+      "paidRequests": 0
+    },
+    {
+      "id": "codex-configured-mcp-disabled-for-test-invocation",
+      "status": "passed",
+      "configuredCount": 2,
+      "enabledAfterOverride": 0,
+      "userConfigurationChanged": false
+    },
+    {
+      "id": "native-compiler-inventory",
+      "status": "passed",
+      "identities": {
+        "frontend": {
+          "version": "7.0.2",
+          "executableName": "tsc.exe",
+          "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+        },
+        "rust": {
+          "version": "1.97.1",
+          "executableName": "rustc.exe",
+          "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+        }
+      },
+      "installedNativeCompilersOnly": true
+    },
+    {
+      "id": "frontend-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "5959d16b3493549e5acd8b94eb0d74bb8f42fc718702069078182f7cdd23feed",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "rust-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "9b0dfacb1eda4304669d0f0798b597d33011332e2024419f93493727c467a307",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "bfb5dcf9a0918315b878e8aff271998cc3e59068897d8865cc4b7b23f1bda728",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "two-isolated-real-cli-sessions",
+      "status": "passed",
+      "workers": [
+        "frontend",
+        "rust"
+      ],
+      "providers": {
+        "frontend": "codex",
+        "rust": "codex"
+      },
+      "explicitContentAndControlGrants": true,
+      "distinctWorkingDirectories": true,
+      "sameProviderDifferentSessions": true
+    },
+    {
+      "id": "frontend-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "rust-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "mcp-parallel-dispatch",
+      "status": "passed",
+      "accepted": 2,
+      "sameRequestIdRetriesDeduplicated": 2
+    },
+    {
+      "id": "frontend-verified-review",
+      "status": "failed",
+      "code": "frontend-review-not-confirmed",
+      "errorClass": "Error",
+      "scriptLine": 35,
+      "nodeCode": null
+    },
+    {
+      "id": "rust-verified-review",
+      "status": "failed",
+      "code": "rust-review-not-confirmed",
+      "errorClass": "Error",
+      "scriptLine": 35,
+      "nodeCode": null
+    },
+    {
+      "id": "frontend-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "5959d16b3493549e5acd8b94eb0d74bb8f42fc718702069078182f7cdd23feed",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "rust-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "9b0dfacb1eda4304669d0f0798b597d33011332e2024419f93493727c467a307",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "bfb5dcf9a0918315b878e8aff271998cc3e59068897d8865cc4b7b23f1bda728",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "read-only-fixture-integrity",
+      "status": "passed",
+      "sourceFilesUnchanged": true,
+      "newFiles": 0
+    },
+    {
+      "id": "mcp-session-cancel-isolation",
+      "status": "failed",
+      "code": "cancel-review-prerequisites-failed"
+    },
+    {
+      "id": "revocation",
+      "status": "passed",
+      "visibleSessions": 0
+    }
+  ],
+  "passed": false,
+  "boundaries": [
+    "Not a desktop UI or installed-application test",
+    "Does not test one AI acting as the MCP client",
+    "Only small read-only TypeScript and Rust review fixtures; not whole-project typecheck or cargo acceptance",
+    "No per-turn interrupt claim",
+    "Codex notify officially reports completion, not working; working is recorded with its actual heuristic source",
+    "Existing provider credentials and native provider session history remain provider-managed",
+    "Provider startup configuration, including existing Codex notification hooks, can still run; this harness is not an account or host security sandbox",
+    "Two isolated Codex sessions using the existing provider-managed login: frontend/Rust source reviews plus independently executed compiler checks, not proof that an AI tool executed a compiler. No Claude process launched.",
+    "Both Codex invocations request read-only sandboxing, no approval, web search disabled, and separate fresh working directories. TypeScript uses noEmit; Rust metadata is captured from stdout, never executed or written as a workspace artifact.",
+    "Compiler identities, immutable fixture hashes, real exit statuses, and matching pre/post output hashes corroborate the independent checks; they are not forensic attestation against a malicious process under the same account.",
+    "Review answers are verified only from authorized MCP read_agent_output with stripControlSequences:false and its local terminal renderer; this does not validate the default sanitized-output mode. Desktop output is diagnostic only."
+  ],
+  "client": {
+    "name": "live-agent-acceptance",
+    "version": "1.0",
+    "nodeVersion": "v24.13.1"
+  },
+  "fixtureTrustOptIn": false,
+  "workers": [
+    "frontend",
+    "rust"
+  ],
+  "workerProviders": {
+    "frontend": "codex",
+    "rust": "codex"
+  },
+  "agentCompilerExecution": "requested-not-independently-attested",
+  "requiredChecks": [
+    "native-provider-inventory",
+    "codex-configured-mcp-disabled-for-test-invocation",
+    "two-isolated-real-cli-sessions",
+    "frontend-official-readiness",
+    "rust-official-readiness",
+    "mcp-parallel-dispatch",
+    "frontend-verified-review",
+    "rust-verified-review",
+    "native-compiler-inventory",
+    "frontend-compiler-preflight",
+    "rust-compiler-preflight",
+    "frontend-independent-compiler-check",
+    "rust-independent-compiler-check",
+    "read-only-fixture-integrity",
+    "mcp-session-cancel-isolation",
+    "revocation"
+  ],
+  "latticeExecutableSha256": "154b2cc78116833b9e826d3862175e0f1ac3b73276ac184bebabcf394ac094e3",
+  "providers": {
+    "codex": {
+      "version": "0.153.4",
+      "executableName": "codex.exe",
+      "executableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b"
+    }
+  },
+  "compilers": {
+    "frontend": {
+      "version": "7.0.2",
+      "executableName": "tsc.exe",
+      "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+    },
+    "rust": {
+      "version": "1.97.1",
+      "executableName": "rustc.exe",
+      "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+    }
+  },
+  "fixtureHashes": {
+    "frontend": {
+      "checker.mjs": "045b5c407de27d09c0f1a5b657cc0b5bf12ecdff36677d331053c5d8e25794b7",
+      "review.ts": "5959d16b3493549e5acd8b94eb0d74bb8f42fc718702069078182f7cdd23feed",
+      "tsconfig.json": "283624c1caf7f5fce044574fd1e87c8cbd7c4f34ec61966877668c4976e7d406"
+    },
+    "rust": {
+      "checker.mjs": "36fc558e9f29f62b9f84b7730b35134900ac9e698a0dd897a6faca0770b0a3a5",
+      "review.rs": "9b0dfacb1eda4304669d0f0798b597d33011332e2024419f93493727c467a307"
+    }
+  },
+  "providerDiagnostics": {
+    "frontend": {
+      "terminalBytesSeen": 16995,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "working",
+        "source": "heuristic"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "idle",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": []
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": false
+      },
+      "closedBeforeCleanup": false,
+      "exitCode": null,
+      "rawOutputInReport": false
+    },
+    "rust": {
+      "terminalBytesSeen": 16688,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "working",
+        "source": "heuristic"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "idle",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": []
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": false
+      },
+      "closedBeforeCleanup": false,
+      "exitCode": null,
+      "rawOutputInReport": false
+    }
+  },
+  "ownedCliCleanup": {
+    "sessionCount": 2,
+    "exited": 2,
+    "stillRunning": 0,
+    "unknown": 0,
+    "confirmed": true
+  },
+  "cleanup": "owned-cli-pids-and-launchers-exited-fixtures-removed",
+  "finishedAt": "2026-09-08T07:44:38.859Z"
+}

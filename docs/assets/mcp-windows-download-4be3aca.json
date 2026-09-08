@@ -1,0 +1,87 @@
+{
+  "sourceHead": "4be3aca508d03498945dabcc2fd41ab7fb8b6dd6",
+  "ciCheckoutCommit": "4843f36b632de3b924beba13305a0f9534557f3c",
+  "headAndCheckoutTree": "de05eea28c37d92df8276192e13b631346cf43d2",
+  "windowsRun": "https://github.com/NickYCLin/lattice-term/actions/runs/34199229338",
+  "artifacts": [
+    {
+      "id": 10045334173,
+      "name": "LatticeTerm-Windows-amd64-test",
+      "bytes": 13795999,
+      "sha256": "8e46c30170c1c229c9694713f02b8cc67fad875dbcfeb5bca53656859c5f3fd1",
+      "metadataDigestVerified": true
+    },
+    {
+      "id": 10045333003,
+      "name": "LatticeTerm-Windows-MCP-acceptance",
+      "bytes": 1149,
+      "sha256": "70f12cfb58b26e981ad5b31f188a5b820d97d95ada13d446c5af8619e73ac8cd",
+      "metadataDigestVerified": true
+    }
+  ],
+  "installer": {
+    "name": "LatticeTerm_2.0.0_x64-setup.exe",
+    "sha256": "2120d614c5026892bf4dff8d9063e55dc7b6852e07121b971506a49c8d186103",
+    "matchesCiLog": true,
+    "executed": false
+  },
+  "packagedExecutable": {
+    "name": "lattice-term.exe",
+    "bytes": 33790976,
+    "sha256": "25c1c9abcef81de13ac744931b9d7abb33d1c7d375d723021e1bb87dc74b5e23",
+    "fileModified": false
+  },
+  "ciAcceptance": {
+    "passed": true,
+    "checks": 11,
+    "lifecycleReporter": "external fixture callback",
+    "executableSha256": "ac71e5a0eb299b9d70ce2b661ea2860738b509cca43aeeebffb30f4e234a470f"
+  },
+  "bundleMarkerComparison": {
+    "packagedMarker": "__TAURI_BUNDLE_TYPE_VAR_NSS",
+    "originalMarker": "__TAURI_BUNDLE_TYPE_VAR_UNK",
+    "packagedMarkerCount": 1,
+    "originalMarkerCountBeforeNormalization": 0,
+    "byteOffset": 25909530,
+    "normalizationInMemoryOnly": true,
+    "normalizedSha256": "ac71e5a0eb299b9d70ce2b661ea2860738b509cca43aeeebffb30f4e234a470f",
+    "matchesEntireCiExecutableHash": true,
+    "npmLockedTauriCliVersion": "2.11.4",
+    "cargoLockedTauriCoreVersion": "2.11.5",
+    "bundlerSourceCommit": "8909f221d1515955fc843808032bdc5d62209c96",
+    "bundlerSource": "https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle.rs"
+  },
+  "acceptanceScriptGitBlob": "a1ff3d8245c2f1437a717f0678cd3a49fd997662",
+  "consumerAcceptance": {
+    "report": "consumer-windows-report.json",
+    "reportSha256": "5c215a366bad022ddb0def7f46a3315bdc248f45a7e6ecfec184343e2f9de0cb",
+    "log": "consumer-windows.log",
+    "passed": true,
+    "checks": 11,
+    "lifecycleReporter": "ConPTY fixture callback",
+    "executableSha256": "25c1c9abcef81de13ac744931b9d7abb33d1c7d375d723021e1bb87dc74b5e23",
+    "originalPackagedFileStillUnmodified": true,
+    "remainingPackagedExeProcesses": 0
+  },
+  "ciRuns": {
+    "linux": {
+      "runId": 34199229340,
+      "conclusion": "success",
+      "frontendTestsPassed": 677,
+      "rustLibTestsPassed": 545,
+      "rustLibTestsIgnoredInDefaultRun": 20,
+      "explicitOpenSshTestsPassed": 12
+    },
+    "windows": {
+      "runId": 34199229338,
+      "conclusion": "success",
+      "mcpAcceptanceChecksPassed": 11
+    },
+    "ios": {
+      "runId": 34199229394,
+      "conclusion": "success",
+      "scope": "Unsigned simulator and device bundles, privacy checks, simulator startup and screenshot evidence"
+    }
+  },
+  "boundary": "Unsigned CI installer, not a published release or an installed application. Synthetic isolated MCP fixtures do not verify real AI provider turns."
+}
