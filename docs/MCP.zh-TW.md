@@ -127,6 +127,8 @@ node scripts/verify-mcp-windows.mjs "C:\path\to\lattice-term.exe" report.json --
 
 Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗收，報告放在 `LatticeTerm-Windows-MCP-acceptance` artifact；即使驗收失敗，已建好的安裝包仍會保留，方便重跑。這份驗收涵蓋命令列、具名管道與 ConPTY；未操作桌面勾選框或執行真實 AI 回合。macOS 尚未實機驗證。
 
+2026-09-08 的 Windows CI 與下載產物各通過 9 項檢查，結果、來源 commit、雜湊及驗證範圍見 [Windows MCP 驗收紀錄](MCP-WINDOWS-ACCEPTANCE.zh-TW.md)。
+
 ## 後續階段（未實作）
 
 - **B 的缺口**：沒有「中止本輪」；稽核只有日誌與最近一次操作，沒有完整歷史；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派（把這個 MCP 再傳給它啟動的 CLI）未支援，也沒有深度限制。
