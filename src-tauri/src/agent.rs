@@ -6306,6 +6306,20 @@ fn is_terminal_status_reply(bytes: &[u8]) -> bool {
                 b'R' | b'c' | b'n' | b't' => parameters
                     .iter()
                     .all(|byte| byte.is_ascii_digit() || matches!(byte, b';' | b'?' | b'>')),
+                // DECRPM is xterm's reply to DECRQM (CSI [ ? ] mode $ p).
+                // It is a terminal status report, not a human edit. Accept
+                // only one numeric mode and one defined status (0..=4).
+                b'y' => parameters.strip_suffix(b"$").is_some_and(|parameters| {
+                    let parameters = parameters.strip_prefix(b"?").unwrap_or(parameters);
+                    let mut fields = parameters.split(|byte| *byte == b';');
+                    matches!(
+                        (fields.next(), fields.next(), fields.next()),
+                        (Some(mode), Some([status]), None)
+                            if (1..=5).contains(&mode.len())
+                                && mode.iter().all(u8::is_ascii_digit)
+                                && (b'0'..=b'4').contains(status)
+                    )
+                }),
                 b'I' | b'O' => parameters.is_empty(),
                 _ => false,
             };
@@ -10419,6 +10433,8 @@ notify = ["notify.exe", "turn-ended"]"#,
             b"\x1b[1;1R".as_slice(),
             b"\x1b[?1;2c",
             b"\x1b[>0;1;0c",
+            b"\x1b[?2026;2$y",
+            b"\x1b[4;2$y",
             b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
             b"\x1b]11;rgb:0000/0000/0000\x07",
             b"\x1b[I\x1b[O",
@@ -10447,6 +10463,27 @@ notify = ["notify.exe", "turn-ended"]"#,
         let mut input = AgentInputControl::default();
         observe_desktop_input(&mut input, b"\x1b[A");
         assert!(input.desktop_busy(), "history selection is user editing");
+    }
+
+    #[test]
+    fn malformed_mode_reports_and_unknown_csi_keep_desktop_ownership() {
+        for sequence in [
+            b"\x1b[?2026;9$y".as_slice(),
+            b"\x1b[?2026;1;0$y",
+            b"\x1b[?;1$y",
+            b"\x1b[?2026;1y",
+            b"\x1b[>2026;1$y",
+            b"\x1b[?2026x",
+            b"\x1b[A",
+        ] {
+            assert!(!is_terminal_status_reply(sequence));
+            for split in 0..=sequence.len() {
+                let mut input = AgentInputControl::default();
+                observe_desktop_input(&mut input, &sequence[..split]);
+                observe_desktop_input(&mut input, &sequence[split..]);
+                assert!(input.desktop_busy(), "unknown input at split {split}");
+            }
+        }
     }
 
     #[cfg(unix)]
