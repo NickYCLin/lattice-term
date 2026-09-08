@@ -4836,6 +4836,28 @@ pub(crate) fn launch_parts(executable: &Path) -> (OsString, Vec<OsString>) {
 }
 
 #[cfg(windows)]
+fn inherit_process_environment_in(
+    command: &mut CommandBuilder,
+    environment: impl IntoIterator<Item = (OsString, OsString)>,
+) {
+    // portable-pty 0.9 reloads HKLM/HKCU after inheriting the process env.
+    // That can replace a working PATH with a stale/oversized registry value
+    // and fail in the Windows loader before a native CLI starts. Match normal
+    // child-process inheritance instead: keep the complete process snapshot,
+    // including SystemRoot/PATHEXT, without trimming any legitimate PATH entry.
+    // Profile, reporter, and terminal overrides must be applied afterwards.
+    command.env_clear();
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+}
+
+#[cfg(windows)]
+fn inherit_process_environment(command: &mut CommandBuilder) {
+    inherit_process_environment_in(command, std::env::vars_os());
+}
+
+#[cfg(windows)]
 fn configure_node_runtime_for_script_in(
     command: &mut CommandBuilder,
     executable: &Path,
@@ -4920,6 +4942,7 @@ fn configure_node_runtime_for_script(command: &mut CommandBuilder, executable: &
 #[cfg(windows)]
 pub(crate) fn node_runtime_path_for_script(executable: &Path) -> Option<OsString> {
     let mut command = CommandBuilder::new("cmd.exe");
+    inherit_process_environment(&mut command);
     configure_node_runtime_for_script(&mut command, executable);
     command.get_env("PATH").map(OsStr::to_os_string)
 }
@@ -5856,6 +5879,8 @@ pub fn launch_with_replay(
         prefix_args = wrapped;
     }
     let mut command = CommandBuilder::new(&program);
+    #[cfg(windows)]
+    inherit_process_environment(&mut command);
     clear_host_terminal_markers(&mut command);
     #[cfg(windows)]
     configure_node_runtime_for_script(&mut command, &executable);
@@ -7925,6 +7950,84 @@ model = "gpt-5.3-codex"
             "states={observed_states:?} usage={observed_usage:?} closed={closed:?} output={output:?}"
         );
         disconnect(sink.as_ref(), registry.as_ref(), &session.session_id).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_environment_uses_process_snapshot_not_registry_values() {
+        let mut command = CommandBuilder::new(r"C:\fixture\agent.exe");
+        command.env("PATH", "registry-entry;".repeat(4000));
+        command.env("REGISTRY_ONLY_FIXTURE", "not inherited by the parent");
+        let snapshot = [
+            (
+                "Path",
+                r"C:\Windows\System32;C:\tools one;C:\工具;C:\tools one",
+            ),
+            ("SystemRoot", r"C:\Windows"),
+            ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+            ("ComSpec", r"C:\Windows\System32\cmd.exe"),
+            ("USERPROFILE", r"C:\fixture-user"),
+        ];
+        inherit_process_environment_in(
+            &mut command,
+            snapshot.map(|(key, value)| (OsString::from(key), OsString::from(value))),
+        );
+        for (key, value) in snapshot {
+            assert_eq!(command.get_env(key), Some(OsStr::new(value)));
+        }
+        assert_eq!(command.get_env("PATH"), Some(OsStr::new(snapshot[0].1)));
+        assert!(command.get_env("REGISTRY_ONLY_FIXTURE").is_none());
+        assert_eq!(
+            command.get_argv(),
+            &[OsString::from(r"C:\fixture\agent.exe")]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_environment_preserves_explicit_launch_overrides() {
+        let mut command = CommandBuilder::new("agent.exe");
+        inherit_process_environment_in(
+            &mut command,
+            [
+                ("CODEX_HOME", r"C:\fixture-default-codex"),
+                ("CLAUDE_CONFIG_DIR", r"C:\fixture-default-claude"),
+                ("HERDR_ENV", "1"),
+                ("HERDR_PANE_ID", "old-pane"),
+                ("LATTICETERM_AGENT_REPORT_TOKEN", "old-fixture-token"),
+            ]
+            .map(|(key, value)| (OsString::from(key), OsString::from(value))),
+        );
+        clear_host_terminal_markers(&mut command);
+        command.env("CODEX_HOME", r"C:\fixture-account-b-codex");
+        command.env("CLAUDE_CONFIG_DIR", r"C:\fixture-account-b-claude");
+        command.env("LATTICETERM_AGENT_REPORT_TOKEN", "new-fixture-token");
+        assert_eq!(
+            command.get_env("CODEX_HOME"),
+            Some(OsStr::new(r"C:\fixture-account-b-codex"))
+        );
+        assert_eq!(
+            command.get_env("CLAUDE_CONFIG_DIR"),
+            Some(OsStr::new(r"C:\fixture-account-b-claude"))
+        );
+        assert_eq!(
+            command.get_env("LATTICETERM_AGENT_REPORT_TOKEN"),
+            Some(OsStr::new("new-fixture-token"))
+        );
+        assert!(command.get_env("HERDR_ENV").is_none());
+        assert!(command.get_env("HERDR_PANE_ID").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_environment_never_truncates_the_inherited_path() {
+        let mut command = CommandBuilder::new("agent.exe");
+        let path = OsString::from(format!(
+            "{};C:\\last-legitimate-entry",
+            "C:\\fixture;".repeat(4000)
+        ));
+        inherit_process_environment_in(&mut command, [(OsString::from("PATH"), path.clone())]);
+        assert_eq!(command.get_env("PATH"), Some(path.as_os_str()));
     }
 
     #[cfg(windows)]
