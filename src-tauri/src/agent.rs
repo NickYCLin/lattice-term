@@ -778,6 +778,13 @@ impl AgentSink for EventSink {
 
 struct AgentSessionEntry {
     summary: Mutex<AgentSessionSummary>,
+    /// Serializes input, lifecycle readiness and MCP grant changes for this
+    /// PTY only. A user editing a prompt owns it until submitting it.
+    input: Mutex<AgentInputControl>,
+    /// Revocation and stopping must stay available when a PTY write blocks.
+    /// Odd epochs grant control; even epochs revoke it. A new grant cannot
+    /// revive a prompt accepted under an earlier one.
+    mcp_grant_epoch: AtomicU64,
     report_token: Option<String>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -814,12 +821,45 @@ struct AgentSessionEntry {
     /// guess that the CLI went idle is not proof that it stopped reading, and
     /// typing into a session that is still working would land the prompt in
     /// the middle of whatever it was doing.
-    queued_prompts: Mutex<VecDeque<Vec<u8>>>,
+    queued_prompts: Mutex<VecDeque<QueuedPrompt>>,
     /// Keeps per-session integration files alive only as long as their PTY.
     _integration_settings: Option<AgentIntegrationSettings>,
     /// Clipboard images may contain sensitive material. Keep their temporary
     /// paths tied to this PTY instead of leaking permanent files into /tmp.
     staged_images: Mutex<StagedAgentImages>,
+}
+
+#[derive(Default)]
+struct AgentInputControl {
+    desktop_editing: bool,
+    desktop_paste: bool,
+    desktop_escape: Vec<u8>,
+    startup_seed_pending: bool,
+}
+
+impl AgentInputControl {
+    fn desktop_busy(&self) -> bool {
+        self.desktop_editing || self.desktop_paste || !self.desktop_escape.is_empty()
+    }
+}
+
+struct QueuedPrompt {
+    bytes: Vec<u8>,
+    /// Desktop prompts have no MCP grant; external prompts remember the
+    /// exact authorization under which they entered the queue.
+    mcp_grant_epoch: Option<u64>,
+}
+
+fn current_mcp_grant(entry: &AgentSessionEntry) -> Option<u64> {
+    let epoch = entry.mcp_grant_epoch.load(Ordering::Acquire);
+    (epoch & 1 == 1).then_some(epoch)
+}
+
+fn prompt_grant_matches(entry: &AgentSessionEntry, epoch: Option<u64>) -> bool {
+    match epoch {
+        Some(expected) => current_mcp_grant(entry) == Some(expected),
+        None => true,
+    }
 }
 
 #[derive(Default)]
@@ -1901,6 +1941,15 @@ impl AgentRegistry {
         source: AgentStateSource,
     ) -> bool {
         let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        // A PTY reader must keep draining output while a large write waits
+        // for the child to consume stdin. Never block it on the input lock.
+        let input = match source {
+            AgentStateSource::Heuristic => entry.input.try_lock().ok(),
+            AgentStateSource::Integration => entry.input.lock().ok(),
+        };
+        let Some(_input) = input else {
             return false;
         };
         let Ok(mut summary) = entry.summary.lock() else {
@@ -5968,6 +6017,14 @@ pub fn launch_with_replay(
         )),
         startup_gate: StartupGate::default(),
         completion_gate: Mutex::new(CompletionReadiness::default()),
+        input: Mutex::new(AgentInputControl {
+            startup_seed_pending: request
+                .seed_input
+                .as_ref()
+                .is_some_and(|seed| !seed.trim().is_empty()),
+            ..AgentInputControl::default()
+        }),
+        mcp_grant_epoch: AtomicU64::new(0),
         last_output_at: Mutex::new(launched_at),
         prompt_ready_at: Mutex::new(None),
         integrated_completion: AtomicBool::new(integrated_completion),
@@ -6102,6 +6159,7 @@ pub fn launch_with_replay(
         let seed_id = session_id.clone();
         let seed_registry = Arc::clone(&registry);
         let seed_entry = Arc::clone(&entry);
+        let seed_sink = Arc::clone(&sink);
         std::thread::spawn(move || {
             // Each terminal starts at a different speed, especially when the
             // user launches several CLIs together. Wait for this PTY to enable
@@ -6111,15 +6169,16 @@ pub fn launch_with_replay(
             }
             let payload = startup_seed_payload(&seed);
             if let Ok(entry) = seed_registry.get(&seed_id) {
-                if let Ok(mut completion) = entry.completion_gate.lock() {
-                    let _ = completion.observe_input(&payload);
-                }
-                if let Ok(mut capture) = entry.model_capture.lock() {
-                    capture.input(&payload);
-                }
-                if let Ok(mut writer) = entry.writer.lock() {
-                    let _ = writer.write_all(&payload);
-                    let _ = writer.flush();
+                if let Ok(mut input) = entry.input.lock() {
+                    if input.startup_seed_pending && !input.desktop_busy() {
+                        let _ = send_bytes_locked(
+                            seed_sink.as_ref(),
+                            &seed_registry,
+                            &seed_id,
+                            &payload,
+                        );
+                    }
+                    input.startup_seed_pending = false;
                 }
             }
         });
@@ -6151,6 +6210,119 @@ pub fn send(
 }
 
 fn send_bytes(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let entry = registry.get(session_id)?;
+    let mut input = entry.input.lock().map_err(|error| error.to_string())?;
+    let desktop_input = observe_desktop_input(&mut input, bytes);
+    if desktop_input && input.startup_seed_pending {
+        let choosing_trust = entry
+            .startup_gate
+            .readiness
+            .lock()
+            .map(|readiness| readiness.interactive_gate_open)
+            .unwrap_or(false);
+        if !choosing_trust {
+            input.startup_seed_pending = false;
+        }
+    }
+    send_bytes_locked(sink, registry, session_id, bytes)?;
+    Ok(())
+}
+
+/// xterm uses the same channel for typing and terminal query replies. Track
+/// escape/paste boundaries across chunks; only an Enter outside a paste
+/// completes an edit, and trailing text starts another edit immediately.
+fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
+    let mut activity = false;
+    for &byte in bytes {
+        if !input.desktop_escape.is_empty() {
+            input.desktop_escape.push(byte);
+            let sequence = &input.desktop_escape;
+            let complete = if sequence.starts_with(b"\x1b[") {
+                sequence.len() > 2 && (0x40..=0x7e).contains(&byte)
+            } else if sequence.starts_with(b"\x1b]") {
+                byte == 7 || sequence.ends_with(b"\x1b\\")
+            } else {
+                sequence.len() >= 2
+            };
+            if complete || sequence.len() >= 4096 {
+                match sequence.as_slice() {
+                    b"\x1b[200~" => {
+                        input.desktop_paste = true;
+                    }
+                    b"\x1b[201~" => {
+                        input.desktop_paste = false;
+                    }
+                    sequence if is_terminal_status_reply(sequence) => {}
+                    _ => {
+                        input.desktop_editing = true;
+                        activity = true;
+                    }
+                }
+                input.desktop_escape.clear();
+            }
+        } else if byte == 27 {
+            input.desktop_escape.push(byte);
+        } else {
+            input.desktop_editing = input.desktop_paste || !matches!(byte, b'\r' | b'\n');
+            activity = true;
+        }
+    }
+    activity
+}
+
+fn is_terminal_status_reply(bytes: &[u8]) -> bool {
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        if let Some(body) = remaining.strip_prefix(b"\x1b[") {
+            let Some(end) = body.iter().position(|byte| (0x40..=0x7e).contains(byte)) else {
+                return false;
+            };
+            let parameters = &body[..end];
+            let reply = match body[end] {
+                b'R' | b'c' | b'n' | b't' => parameters
+                    .iter()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b';' | b'?' | b'>')),
+                b'I' | b'O' => parameters.is_empty(),
+                _ => false,
+            };
+            if !reply {
+                return false;
+            }
+            remaining = &body[end + 1..];
+        } else if let Some(body) = remaining.strip_prefix(b"\x1b]") {
+            let Some(end) = body.iter().position(|byte| *byte == 7 || *byte == 27) else {
+                return false;
+            };
+            let payload = &body[..end];
+            if ![b"4;".as_slice(), b"10;", b"11;", b"12;"]
+                .iter()
+                .any(|prefix| payload.starts_with(prefix))
+            {
+                return false;
+            }
+            let terminator = if body[end] == 7 {
+                1
+            } else if body.get(end + 1) == Some(&b'\\') {
+                2
+            } else {
+                return false;
+            };
+            remaining = &body[end + terminator..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// The caller holds this session's input lock through the readiness check,
+/// write and lifecycle change. Never acquire it recursively here.
+fn send_bytes_locked(
     sink: &dyn AgentSink,
     registry: &AgentRegistry,
     session_id: &str,
@@ -6220,6 +6392,19 @@ pub fn enqueue(
         return Err("A queued prompt is required.".to_string());
     }
     let entry = registry.get(session_id)?;
+    let input = entry.input.lock().map_err(|error| error.to_string())?;
+    enqueue_locked(sink, registry, session_id, bytes, None, &input)
+}
+
+fn enqueue_locked(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    bytes: Vec<u8>,
+    mcp_grant_epoch: Option<u64>,
+    input: &AgentInputControl,
+) -> Result<usize, String> {
+    let entry = registry.get(session_id)?;
 
     let (state, source) = {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
@@ -6230,8 +6415,15 @@ pub fn enqueue(
         .lock()
         .map(|queue| queue.is_empty())
         .unwrap_or(false);
-    if queue_is_empty && releases_queued_prompt(state, source) {
-        send_bytes(sink, registry, session_id, &bytes)?;
+    if queue_is_empty
+        && !input.desktop_busy()
+        && !input.startup_seed_pending
+        && releases_queued_prompt(state, source)
+    {
+        if !prompt_grant_matches(&entry, mcp_grant_epoch) {
+            return Err("This session is not under MCP control.".to_string());
+        }
+        send_bytes_locked(sink, registry, session_id, &bytes)?;
         return Ok(0);
     }
 
@@ -6240,12 +6432,18 @@ pub fn enqueue(
             .queued_prompts
             .lock()
             .map_err(|error| error.to_string())?;
+        if !prompt_grant_matches(&entry, mcp_grant_epoch) {
+            return Err("This session is not under MCP control.".to_string());
+        }
         if queue.len() >= MAX_QUEUED_PROMPTS {
             return Err(format!(
                 "This agent already has {MAX_QUEUED_PROMPTS} prompts waiting."
             ));
         }
-        queue.push_back(bytes);
+        queue.push_back(QueuedPrompt {
+            bytes,
+            mcp_grant_epoch,
+        });
         queue.len()
     };
     store_queue_depth(registry, session_id, depth);
@@ -6260,17 +6458,28 @@ pub fn clear_queue(
     session_id: &str,
 ) -> Result<usize, String> {
     let entry = registry.get(session_id)?;
-    let dropped = {
+    let _input = entry.input.lock().map_err(|error| error.to_string())?;
+    clear_queue_locked(sink, registry, session_id, false)
+}
+
+fn clear_queue_locked(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    mcp_only: bool,
+) -> Result<usize, String> {
+    let entry = registry.get(session_id)?;
+    let (dropped, depth) = {
         let mut queue = entry
             .queued_prompts
             .lock()
             .map_err(|error| error.to_string())?;
-        let dropped = queue.len();
-        queue.clear();
-        dropped
+        let before = queue.len();
+        queue.retain(|prompt| mcp_only && prompt.mcp_grant_epoch.is_none());
+        (before - queue.len(), queue.len())
     };
-    store_queue_depth(registry, session_id, 0);
-    sink.queue(session_id, 0);
+    store_queue_depth(registry, session_id, depth);
+    sink.queue(session_id, depth);
     Ok(dropped)
 }
 
@@ -6282,13 +6491,25 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
     let Ok(entry) = registry.get(session_id) else {
         return;
     };
+    let Ok(input) = entry.input.lock() else {
+        return;
+    };
+    let ready = entry
+        .summary
+        .lock()
+        .map(|summary| releases_queued_prompt(summary.state, summary.state_source))
+        .unwrap_or(false);
+    if input.desktop_busy() || input.startup_seed_pending || !ready {
+        return;
+    }
     let next = {
         let Ok(mut queue) = entry.queued_prompts.lock() else {
             return;
         };
+        queue.retain(|prompt| prompt_grant_matches(&entry, prompt.mcp_grant_epoch));
         queue.pop_front()
     };
-    let Some(bytes) = next else {
+    let Some(prompt) = next else {
         return;
     };
     let depth = entry
@@ -6300,7 +6521,132 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
     sink.queue(session_id, depth);
     // A write that fails means the PTY is gone; the remaining prompts are
     // dropped with the session rather than retried into a dead terminal.
-    let _ = send_bytes(sink, registry, session_id, &bytes);
+    let _ = send_queued_prompt_locked(sink, registry, session_id, prompt);
+}
+
+/// The caller holds input, but revocation remains out-of-band. Recheck the
+/// original grant immediately before writing, including after dequeueing.
+fn send_queued_prompt_locked(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    prompt: QueuedPrompt,
+) -> Result<bool, String> {
+    let entry = registry.get(session_id)?;
+    if !prompt_grant_matches(&entry, prompt.mcp_grant_epoch) {
+        return Ok(false);
+    }
+    send_bytes_locked(sink, registry, session_id, &prompt.bytes)?;
+    Ok(true)
+}
+
+/// Revoke before touching the queue, without waiting for a blocked PTY
+/// writer. Already accepted writes cannot be undone, but can still be stopped.
+pub fn set_mcp_control(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    enabled: bool,
+) -> Result<usize, String> {
+    let entry = registry.get(session_id)?;
+    let _ = entry
+        .mcp_grant_epoch
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| {
+            ((epoch & 1 == 1) != enabled).then(|| epoch.wrapping_add(1))
+        });
+    if enabled {
+        Ok(0)
+    } else {
+        clear_queue_locked(sink, registry, session_id, true)
+    }
+}
+
+/// Natural-language MCP prompts never carry arbitrary terminal key input.
+/// Even immediate delivery requires an official ready report, and never
+/// appends to a prompt the user is editing.
+pub fn mcp_prompt(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    text: &str,
+    send_now: bool,
+) -> Result<usize, String> {
+    let bytes = mcp_prompt_payload(text)?;
+    let entry = registry.get(session_id)?;
+    let input = entry.input.lock().map_err(|error| error.to_string())?;
+    let grant_epoch = current_mcp_grant(&entry)
+        .ok_or_else(|| "This session is not under MCP control.".to_string())?;
+    if send_now {
+        let summary = entry.summary.lock().map_err(|error| error.to_string())?;
+        if input.desktop_busy()
+            || input.startup_seed_pending
+            || !releases_queued_prompt(summary.state, summary.state_source)
+        {
+            return Err("The CLI has not confirmed it is ready, or the user is editing its prompt. Queue the prompt or wait for an official idle/done report.".to_string());
+        }
+        if !entry
+            .queued_prompts
+            .lock()
+            .map_err(|error| error.to_string())?
+            .is_empty()
+        {
+            return Err(
+                "This session already has queued prompts. Use queue mode to preserve their order."
+                    .to_string(),
+            );
+        }
+        drop(summary);
+        if !prompt_grant_matches(&entry, Some(grant_epoch)) {
+            return Err("This session is not under MCP control.".to_string());
+        }
+        send_bytes_locked(sink, registry, session_id, &bytes)?;
+        Ok(0)
+    } else {
+        enqueue_locked(sink, registry, session_id, bytes, Some(grant_epoch), &input)
+    }
+}
+
+fn mcp_prompt_payload(text: &str) -> Result<Vec<u8>, String> {
+    validate_mcp_prompt(text)?;
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    Ok(startup_seed_payload(&text))
+}
+
+pub(crate) fn validate_mcp_prompt(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() || text.chars().count() > crate::agent_daemon::MAX_MCP_PROMPT_CHARS {
+        return Err("A prompt must contain 1 to 16000 characters.".to_string());
+    }
+    if text
+        .chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\r' | '\n' | '\t'))
+    {
+        return Err("A prompt must not contain terminal control characters.".to_string());
+    }
+    Ok(())
+}
+
+pub fn mcp_cancel_queue(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+) -> Result<usize, String> {
+    let entry = registry.get(session_id)?;
+    if current_mcp_grant(&entry).is_none() {
+        return Err("This session is not under MCP control.".to_string());
+    }
+    clear_queue_locked(sink, registry, session_id, true)
+}
+
+pub fn mcp_disconnect(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+) -> Result<(), String> {
+    let entry = registry.get(session_id)?;
+    if current_mcp_grant(&entry).is_none() {
+        return Err("This session is not under MCP control.".to_string());
+    }
+    disconnect_locked(sink, registry, session_id, &entry)
 }
 
 pub fn broadcast(
@@ -6382,7 +6728,16 @@ pub fn disconnect(
     let Ok(entry) = registry.get(session_id) else {
         return Ok(());
     };
-    terminate_agent_entry(entry.as_ref())?;
+    disconnect_locked(sink, registry, session_id, &entry)
+}
+
+fn disconnect_locked(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    entry: &AgentSessionEntry,
+) -> Result<(), String> {
+    terminate_agent_entry(entry)?;
     if registry.remove(session_id).is_some() {
         sink.closed(session_id, "Stopped by user");
     }
@@ -9944,6 +10299,402 @@ notify = ["notify.exe", "turn-ended"]"#,
         }
     }
 
+    #[test]
+    fn mcp_prompt_preserves_multiline_text_but_rejects_terminal_keys() {
+        assert_eq!(
+            mcp_prompt_payload("第一行\r\n第二行\t內容").unwrap(),
+            b"\x1b[200~\xe7\xac\xac\xe4\xb8\x80\xe8\xa1\x8c\n\xe7\xac\xac\xe4\xba\x8c\xe8\xa1\x8c\t\xe5\x85\xa7\xe5\xae\xb9\x1b[201~\r"
+        );
+        for text in [
+            "\x03stop",
+            "\x1b[201~exit",
+            "delete\x7f",
+            "\u{009b}31m",
+            "\0",
+        ] {
+            assert!(mcp_prompt_payload(text).is_err());
+        }
+    }
+
+    #[test]
+    fn terminal_replies_and_multiline_paste_preserve_desktop_ownership_across_chunks() {
+        for reply in [
+            b"\x1b[1;1R".as_slice(),
+            b"\x1b[?1;2c",
+            b"\x1b[>0;1;0c",
+            b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+            b"\x1b]11;rgb:0000/0000/0000\x07",
+            b"\x1b[I\x1b[O",
+        ] {
+            for split in 0..=reply.len() {
+                let mut input = AgentInputControl::default();
+                assert!(!observe_desktop_input(&mut input, &reply[..split]));
+                assert!(!observe_desktop_input(&mut input, &reply[split..]));
+                assert!(!input.desktop_busy());
+            }
+        }
+        let paste = b"\x1b[200~first\nsecond\x1b[201~";
+        for split in 0..=paste.len() {
+            let mut input = AgentInputControl::default();
+            observe_desktop_input(&mut input, &paste[..split]);
+            observe_desktop_input(&mut input, &paste[split..]);
+            assert!(
+                input.desktop_busy(),
+                "paste is not submitted at split {split}"
+            );
+            observe_desktop_input(&mut input, b"\r");
+            assert!(!input.desktop_busy());
+            observe_desktop_input(&mut input, b"submitted\rstill editing");
+            assert!(input.desktop_busy());
+        }
+        let mut input = AgentInputControl::default();
+        observe_desktop_input(&mut input, b"\x1b[A");
+        assert!(input.desktop_busy(), "history selection is user editing");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_blocked_terminal_write_cannot_block_revocation_or_stopping() {
+        struct BlockedWriter {
+            entered: std::sync::mpsc::SyncSender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+        }
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                let _ = self.entered.send(());
+                let _ = self.release.recv();
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Blocked input");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let _original_writer = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(BlockedWriter {
+                entered: entered_tx,
+                release: release_rx,
+            }),
+        );
+        let writer = {
+            let sink = sink.clone();
+            let registry = registry.clone();
+            let id = id.clone();
+            std::thread::spawn(move || send_bytes(sink.as_ref(), &registry, &id, b"blocked\r"))
+        };
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        // The output reader's heuristic update must also return promptly,
+        // otherwise output backpressure can deadlock the blocked writer.
+        let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+        let stop = {
+            let sink = sink.clone();
+            let registry = registry.clone();
+            let id = id.clone();
+            std::thread::spawn(move || {
+                let _ =
+                    registry.update_state(&id, AgentLifecycle::Idle, AgentStateSource::Heuristic);
+                let revoked = set_mcp_control(sink.as_ref(), &registry, &id, false);
+                let stopped = disconnect(sink.as_ref(), &registry, &id);
+                let _ = result_tx.send((revoked, stopped));
+            })
+        };
+        let result = result_rx.recv_timeout(Duration::from_secs(2));
+        // Always release our synthetic writer before assertions or joining.
+        let _ = release_tx.send(());
+        let _ = writer.join();
+        stop.join().unwrap();
+        let (revoked, stopped) = result.expect("revocation and stop waited for the writer");
+        assert!(
+            revoked.is_ok() && stopped.is_ok(),
+            "revoke: {revoked:?}, stop: {stopped:?}"
+        );
+        assert!(registry.session_summary(id).is_none());
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pending_startup_instructions_precede_mcp_prompts() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch(
+            sink.clone(),
+            registry.clone(),
+            AgentLaunchRequest {
+                definition_id: "custom".into(),
+                label: "Seed ordering".into(),
+                executable: "/bin/cat".into(),
+                arguments: Vec::new(),
+                resume_session_id: None,
+                group_id: None,
+                seed_input: Some("startup-first".into()),
+                restore_existing_session: false,
+                profile_config_path: None,
+                sandbox: false,
+                detached: false,
+                working_directory: std::env::current_dir().unwrap().display().to_string(),
+                cols: 80,
+                rows: 24,
+            },
+        )
+        .unwrap();
+        let id = &session.session_id;
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        registry.update_state(id, AgentLifecycle::Idle, AgentStateSource::Integration);
+        assert!(mcp_prompt(sink.as_ref(), &registry, id, "too-early", true).is_err());
+        assert_eq!(
+            mcp_prompt(sink.as_ref(), &registry, id, "external-second", false).unwrap(),
+            1
+        );
+        let entry = registry.get(id).unwrap();
+        entry.startup_gate.observe(b"\x1b[?2004h");
+        assert!(received_within(
+            &collector,
+            id,
+            "startup-first",
+            Duration::from_secs(4)
+        ));
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert!(received_within(
+            &collector,
+            id,
+            "external-second",
+            Duration::from_secs(3)
+        ));
+        let output = collector.session_data.lock().unwrap()[id].clone();
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.find("startup-first") < output.find("external-second"));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_now_requires_authoritative_readiness_and_a_current_grant() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "MCP readiness");
+        let id = &session.session_id;
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        assert!(mcp_prompt(sink.as_ref(), &registry, id, "not-ready", true).is_err());
+        for state in [AgentLifecycle::Working, AgentLifecycle::NeedsAttention] {
+            registry.update_state(id, state, AgentStateSource::Integration);
+            assert!(mcp_prompt(sink.as_ref(), &registry, id, "not-ready", true).is_err());
+        }
+        registry.update_state(id, AgentLifecycle::Idle, AgentStateSource::Integration);
+        assert_eq!(
+            mcp_prompt(sink.as_ref(), &registry, id, "official-ready", true).unwrap(),
+            0
+        );
+        assert!(received_within(
+            &collector,
+            id,
+            "official-ready",
+            Duration::from_secs(3)
+        ));
+        assert!(mcp_prompt(sink.as_ref(), &registry, id, "second-turn", true).is_err());
+        set_mcp_control(sink.as_ref(), &registry, id, false).unwrap();
+        assert!(mcp_prompt(sink.as_ref(), &registry, id, "revoked", false).is_err());
+        assert!(mcp_cancel_queue(sink.as_ref(), &registry, id).is_err());
+        assert!(mcp_disconnect(sink.as_ref(), &registry, id).is_err());
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revoking_mcp_control_drops_external_queue_but_preserves_desktop_work() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "MCP revoke");
+        let id = &session.session_id;
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Integration);
+        mcp_prompt(sink.as_ref(), &registry, id, "external-revoked", false).unwrap();
+        enqueue(
+            sink.as_ref(),
+            &registry,
+            id,
+            &encode(b"desktop-preserved\r"),
+        )
+        .unwrap();
+        assert_eq!(
+            set_mcp_control(sink.as_ref(), &registry, id, false).unwrap(),
+            1
+        );
+        assert_eq!(registry.session_summary(id).unwrap().queued_prompts, 1);
+        // Re-granting never revives a prompt submitted under the old grant.
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert!(received_within(
+            &collector,
+            id,
+            "desktop-preserved",
+            Duration::from_secs(3)
+        ));
+        assert!(!received_within(
+            &collector,
+            id,
+            "external-revoked",
+            Duration::from_millis(100)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regranting_control_cannot_revive_a_prompt_already_taken_from_the_queue() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "MCP grant epochs");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        let first_grant = current_mcp_grant(&entry).unwrap();
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        assert_eq!(current_mcp_grant(&entry), Some(first_grant));
+        registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Integration);
+        mcp_prompt(sink.as_ref(), &registry, id, "popped-old-grant", false).unwrap();
+        enqueue(
+            sink.as_ref(),
+            &registry,
+            id,
+            &encode(b"desktop-unaffected\r"),
+        )
+        .unwrap();
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+
+        {
+            let _input = entry.input.lock().unwrap();
+            let old_prompt = entry.queued_prompts.lock().unwrap().pop_front().unwrap();
+            assert_eq!(old_prompt.mcp_grant_epoch, Some(first_grant));
+            // Revoke after dequeueing, while the delivery still holds input.
+            // The old prompt is no longer visible to queue cleanup.
+            assert_eq!(
+                set_mcp_control(sink.as_ref(), &registry, id, false).unwrap(),
+                0
+            );
+            let revoked_epoch = entry.mcp_grant_epoch.load(Ordering::Acquire);
+            set_mcp_control(sink.as_ref(), &registry, id, false).unwrap();
+            assert_eq!(entry.mcp_grant_epoch.load(Ordering::Acquire), revoked_epoch);
+            set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+            assert_ne!(current_mcp_grant(&entry), Some(first_grant));
+            assert!(!send_queued_prompt_locked(sink.as_ref(), &registry, id, old_prompt).unwrap());
+
+            let desktop_prompt = entry.queued_prompts.lock().unwrap().pop_front().unwrap();
+            assert!(desktop_prompt.mcp_grant_epoch.is_none());
+            assert!(
+                send_queued_prompt_locked(sink.as_ref(), &registry, id, desktop_prompt).unwrap()
+            );
+            store_queue_depth(&registry, id, 0);
+        }
+        assert!(received_within(
+            &collector,
+            id,
+            "desktop-unaffected",
+            Duration::from_secs(3)
+        ));
+        let output = collector.session_data.lock().unwrap()[id].clone();
+        assert!(!String::from_utf8_lossy(&output).contains("popped-old-grant"));
+
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        assert_eq!(
+            mcp_prompt(sink.as_ref(), &registry, id, "new-grant-works", true).unwrap(),
+            0
+        );
+        assert!(received_within(
+            &collector,
+            id,
+            "new-grant-works",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_prompt_never_appends_to_a_desktop_edit_in_progress() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "MCP manual input");
+        let id = &session.session_id;
+        set_mcp_control(sink.as_ref(), &registry, id, true).unwrap();
+        registry.update_state(id, AgentLifecycle::Idle, AgentStateSource::Integration);
+        send_bytes(sink.as_ref(), &registry, id, b"unfinished-desktop").unwrap();
+        assert!(mcp_prompt(sink.as_ref(), &registry, id, "must-not-append", true).is_err());
+        assert_eq!(
+            mcp_prompt(sink.as_ref(), &registry, id, "queued-external", false).unwrap(),
+            1
+        );
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert_eq!(registry.session_summary(id).unwrap().queued_prompts, 1);
+        send_bytes(sink.as_ref(), &registry, id, b"\r").unwrap();
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert!(received_within(
+            &collector,
+            id,
+            "queued-external",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_mcp_prompts_cannot_both_claim_the_same_ready_turn() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "MCP concurrent input");
+        set_mcp_control(sink.as_ref(), &registry, &session.session_id, true).unwrap();
+        registry.update_state(
+            &session.session_id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Integration,
+        );
+        let gate = Arc::new(std::sync::Barrier::new(3));
+        let workers = (0..2)
+            .map(|index| {
+                let sink = sink.clone();
+                let registry = registry.clone();
+                let gate = gate.clone();
+                let id = session.session_id.clone();
+                std::thread::spawn(move || {
+                    gate.wait();
+                    mcp_prompt(
+                        sink.as_ref(),
+                        &registry,
+                        &id,
+                        &format!("prompt-{index}"),
+                        true,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        gate.wait();
+        let successes = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().unwrap().ok())
+            .count();
+        assert_eq!(successes, 1);
+        registry.stop_all();
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_free_agent_takes_a_queued_prompt_immediately() {
@@ -10026,6 +10777,11 @@ notify = ["notify.exe", "turn-ended"]"#,
 
         // One turn end releases exactly one prompt, so a queue cannot empty
         // itself into a CLI that has only reported finishing once.
+        registry.update_state(
+            &session.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
         deliver_next_queued(sink.as_ref(), &registry, &session.session_id);
         assert!(received_within(
             &collector,

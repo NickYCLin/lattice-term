@@ -77,6 +77,11 @@ type AppAgentHistory = Mutex<AgentTerminalHistoryStore>;
 type AppDaemon = Arc<crate::agent_daemon::client::DaemonClient>;
 type AppAgentPlans = Mutex<FileAgentPlanStore>;
 
+/// Serialize persisted launch settings and their daemon grant. A late sync
+/// must never restore an older grant after the user has withdrawn it.
+#[derive(Default)]
+struct McpPlanSync(tokio::sync::Mutex<()>);
+
 const MAX_CLIPBOARD_IMAGE_EDGE: u32 = 16_384;
 const MAX_CLIPBOARD_IMAGE_PIXELS: usize = 32 * 1024 * 1024;
 const CLIPBOARD_EXIT_TIMEOUT: Duration = Duration::from_millis(750);
@@ -1150,13 +1155,15 @@ async fn agent_workspace_mcp_launch_update(
     enabled: bool,
     plans: State<'_, AppAgentPlans>,
     daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
 ) -> Result<bool, String> {
-    plans
-        .lock()
-        .map_err(|error| error.to_string())?
-        .update_mcp_launch(enabled)?;
-    sync_mcp_plans(&plans, &daemon).await?;
-    Ok(enabled)
+    change_mcp_plan_settings(
+        &plans,
+        &sync,
+        |store| store.update_mcp_launch(enabled),
+        |snapshot| publish_mcp_plans(snapshot, &daemon),
+    )
+    .await
 }
 
 /// Hands the background service the saved plans MCP clients may launch:
@@ -1166,44 +1173,142 @@ async fn agent_workspace_mcp_launch_update(
 async fn agent_mcp_plans_sync(
     plans: State<'_, AppAgentPlans>,
     daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
 ) -> Result<bool, String> {
-    sync_mcp_plans(&plans, &daemon).await
+    sync_mcp_plan_settings(&plans, &sync, |snapshot| {
+        publish_mcp_plans(snapshot, &daemon)
+    })
+    .await
 }
 
-async fn sync_mcp_plans(plans: &AppAgentPlans, daemon: &AppDaemon) -> Result<bool, String> {
-    let (enabled, prepared) = {
-        let guard = plans.lock().map_err(|error| error.to_string())?;
-        let snapshot = guard.snapshot();
-        let prepared: Vec<crate::agent_daemon::McpPlan> = if snapshot.mcp_launch {
-            snapshot
-                .plans
-                .iter()
-                .filter(|plan| plan.detached)
-                .filter_map(|plan| {
-                    let mut request = crate::agent::launch_request_from_plan(plan, 120, 32).ok()?;
-                    crate::agent::apply_startup_instructions(
-                        &mut request,
-                        &snapshot.startup_instructions,
-                    )
-                    .ok()?;
-                    Some(crate::agent_daemon::McpPlan {
-                        plan_id: plan.id.clone(),
-                        label: plan.label.clone(),
-                        note: plan.note.clone(),
-                        definition_id: plan.definition_id.clone(),
-                        working_directory: plan.working_directory.clone(),
-                        sandbox: plan.sandbox,
-                        request,
-                    })
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        (snapshot.mcp_launch, prepared)
+async fn sync_mcp_plan_settings<P, Fut>(
+    plans: &AppAgentPlans,
+    sync: &McpPlanSync,
+    publish: P,
+) -> Result<bool, String>
+where
+    P: Fn(AgentPlanSnapshot) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let _sync = sync.0.lock().await;
+    let snapshot = plans.lock().map_err(|error| error.to_string())?.snapshot();
+    let enabled = snapshot.mcp_launch;
+    // Reopening a window only hands over the current settings. The daemon
+    // preserves the generation of an equivalent plan list, so this does not
+    // cancel a launch that is already in progress.
+    if let Err(error) = publish(snapshot.clone()).await {
+        return Err(disable_failed_mcp_plan_sync(plans, snapshot, &publish, error).await);
+    }
+    Ok(enabled)
+}
+
+async fn change_mcp_plan_settings<T, F, P, Fut>(
+    plans: &AppAgentPlans,
+    sync: &McpPlanSync,
+    change: F,
+    publish: P,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut FileAgentPlanStore) -> Result<T, String>,
+    P: Fn(AgentPlanSnapshot) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let _sync = sync.0.lock().await;
+    let previous = plans.lock().map_err(|error| error.to_string())?.snapshot();
+    let result = {
+        let mut store = plans.lock().map_err(|error| error.to_string())?;
+        change(&mut store)
     };
+    let snapshot = plans.lock().map_err(|error| error.to_string())?.snapshot();
+    let synchronized = async {
+        // A failed save must never reactivate a grant, especially when that
+        // save was the user's request to turn it off.
+        result.as_ref().map_err(Clone::clone)?;
+        // Compare all persisted fields after normalization/upsert. An
+        // unchanged autosave must not interrupt an in-flight MCP launch.
+        if serde_json::to_value(&previous).map_err(|error| error.to_string())?
+            == serde_json::to_value(&snapshot).map_err(|error| error.to_string())?
+        {
+            return Ok(());
+        }
+        if previous.mcp_launch {
+            let mut disabled = previous;
+            disabled.mcp_launch = false;
+            disabled.plans.clear();
+            publish(disabled).await?;
+        }
+        publish(snapshot.clone()).await
+    }
+    .await;
+    if let Err(error) = synchronized {
+        return Err(disable_failed_mcp_plan_sync(plans, snapshot, &publish, error).await);
+    }
+    result
+}
+
+async fn disable_failed_mcp_plan_sync<P, Fut>(
+    plans: &AppAgentPlans,
+    mut snapshot: AgentPlanSnapshot,
+    publish: &P,
+    error: String,
+) -> String
+where
+    P: Fn(AgentPlanSnapshot) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    // Keep the plans but persist a disabled grant, so a failed enable is not
+    // retried on the next window open. Failure to confirm live withdrawal
+    // remains an explicit error rather than a successful checkbox update.
+    let persisted = plans
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|mut store| store.update_mcp_launch(false));
+    snapshot.mcp_launch = false;
+    snapshot.plans.clear();
+    let revoked = publish(snapshot).await;
+    let mut reason = format!("MCP launch settings could not be synchronized: {error}");
+    if let Err(error) = persisted {
+        reason.push_str(&format!("; could not save the disabled grant: {error}"));
+    }
+    if let Err(error) = revoked {
+        reason.push_str(&format!(
+            "; could not confirm withdrawal from the background service: {error}"
+        ));
+    }
+    reason
+}
+
+fn prepare_mcp_plans(
+    snapshot: &AgentPlanSnapshot,
+) -> Result<Vec<crate::agent_daemon::McpPlan>, String> {
+    if !snapshot.mcp_launch {
+        return Ok(Vec::new());
+    }
+    snapshot
+        .plans
+        .iter()
+        .filter(|plan| plan.detached)
+        .map(|plan| {
+            let mut request = crate::agent::launch_request_from_plan(plan, 120, 32)?;
+            crate::agent::apply_startup_instructions(&mut request, &snapshot.startup_instructions)?;
+            Ok(crate::agent_daemon::McpPlan {
+                plan_id: plan.id.clone(),
+                label: plan.label.clone(),
+                note: plan.note.clone(),
+                definition_id: plan.definition_id.clone(),
+                working_directory: plan.working_directory.clone(),
+                sandbox: plan.sandbox,
+                request,
+            })
+        })
+        .collect()
+}
+
+async fn publish_mcp_plans(snapshot: AgentPlanSnapshot, daemon: &AppDaemon) -> Result<(), String> {
+    let enabled = snapshot.mcp_launch;
+    let prepared = prepare_mcp_plans(&snapshot)?;
     if !enabled && !daemon.is_running().await {
-        return Ok(false);
+        return Ok(());
     }
     daemon
         .request(
@@ -1214,7 +1319,7 @@ async fn sync_mcp_plans(plans: &AppAgentPlans, daemon: &AppDaemon) -> Result<boo
             },
         )
         .await?;
-    Ok(enabled)
+    Ok(())
 }
 
 /// Ends every background session and the service itself. The window asks
@@ -1316,16 +1421,35 @@ fn agent_plan_snapshot(plans: State<'_, AppAgentPlans>) -> Result<AgentPlanSnaps
 }
 
 #[tauri::command]
-fn agent_plan_save(
+async fn agent_plan_save(
     draft: AgentLaunchPlanDraft,
     plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
 ) -> Result<AgentLaunchPlan, String> {
-    plans.lock().map_err(|error| error.to_string())?.save(draft)
+    change_mcp_plan_settings(
+        &plans,
+        &sync,
+        |store| store.save(draft),
+        |snapshot| publish_mcp_plans(snapshot, &daemon),
+    )
+    .await
 }
 
 #[tauri::command]
-fn agent_plan_delete(id: String, plans: State<'_, AppAgentPlans>) -> Result<bool, String> {
-    plans.lock().map_err(|error| error.to_string())?.delete(&id)
+async fn agent_plan_delete(
+    id: String,
+    plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
+) -> Result<bool, String> {
+    change_mcp_plan_settings(
+        &plans,
+        &sync,
+        |store| store.delete(&id),
+        |snapshot| publish_mcp_plans(snapshot, &daemon),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1337,14 +1461,19 @@ fn agent_workspace_rename(name: String, plans: State<'_, AppAgentPlans>) -> Resu
 }
 
 #[tauri::command]
-fn agent_workspace_instructions_update(
+async fn agent_workspace_instructions_update(
     instructions: String,
     plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
 ) -> Result<String, String> {
-    plans
-        .lock()
-        .map_err(|error| error.to_string())?
-        .update_startup_instructions(&instructions)
+    change_mcp_plan_settings(
+        &plans,
+        &sync,
+        |store| store.update_startup_instructions(&instructions),
+        |snapshot| publish_mcp_plans(snapshot, &daemon),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2933,6 +3062,7 @@ pub fn run() {
             app.manage(Mutex::new(storage));
             let agent_plans = FileAgentPlanStore::open(&dir).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(agent_plans));
+            app.manage(McpPlanSync::default());
             app.manage(Mutex::new(AgentTerminalHistoryStore::open(&dir)));
 
             // A trust store that cannot be read is carried as a reason rather
@@ -3158,6 +3288,266 @@ mod tests {
         Protocol,
     };
     use crate::storage::{InMemoryStorage, Storage};
+
+    fn mcp_plan_test_store(directory: &std::path::Path) -> (AppAgentPlans, AgentLaunchPlanDraft) {
+        let draft = AgentLaunchPlanDraft {
+            definition_id: "codex".to_string(),
+            label: "Test agent".to_string(),
+            executable: "codex".to_string(),
+            arguments: vec!["--model".to_string(), "test-model".to_string()],
+            resume_session_id: None,
+            note: String::new(),
+            sandbox: false,
+            detached: true,
+            working_directory: directory.display().to_string(),
+        };
+        let mut store = FileAgentPlanStore::open(directory).unwrap();
+        store.save(draft.clone()).unwrap();
+        store.update_mcp_launch(true).unwrap();
+        (Mutex::new(store), draft)
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_publishes_same_id_sandbox_and_same_length_instruction_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, mut draft) = mcp_plan_test_store(directory.path());
+        store
+            .lock()
+            .unwrap()
+            .update_startup_instructions("before")
+            .unwrap();
+        let original_id = store.lock().unwrap().snapshot().plans[0].id.clone();
+        draft.sandbox = true;
+        draft.note = "Changed memo".to_string();
+        let published = Mutex::new(Vec::new());
+        change_mcp_plan_settings(
+            &store,
+            &McpPlanSync::default(),
+            |store| {
+                store.save(draft)?;
+                store.update_startup_instructions("after!")
+            },
+            |snapshot| {
+                published.lock().unwrap().push(snapshot);
+                std::future::ready(Ok(()))
+            },
+        )
+        .await
+        .unwrap();
+        let published = published.lock().unwrap();
+        assert_eq!(published.len(), 2);
+        assert!(!published[0].mcp_launch);
+        assert!(published[0].plans.is_empty());
+        assert!(published[1].mcp_launch);
+        assert_eq!(published[1].plans[0].id, original_id);
+        let prepared = prepare_mcp_plans(&published[1]).unwrap();
+        assert!(prepared[0].sandbox);
+        assert!(prepared[0].request.sandbox);
+        assert_eq!(prepared[0].note, "Changed memo");
+        assert_eq!(prepared[0].request.seed_input.as_deref(), Some("after!"));
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_failure_withdraws_persisted_grant_and_cached_plans() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, mut draft) = mcp_plan_test_store(directory.path());
+        draft.sandbox = true;
+        let published = Mutex::new(Vec::new());
+        let error = change_mcp_plan_settings(
+            &store,
+            &McpPlanSync::default(),
+            |store| store.save(draft),
+            |snapshot| {
+                let enabled = snapshot.mcp_launch;
+                published.lock().unwrap().push(snapshot);
+                std::future::ready(if enabled {
+                    Err("lost acknowledgement".to_string())
+                } else {
+                    Ok(())
+                })
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("lost acknowledgement"));
+        let snapshot = FileAgentPlanStore::open(directory.path())
+            .unwrap()
+            .snapshot();
+        assert!(!snapshot.mcp_launch);
+        assert!(snapshot.plans[0].sandbox);
+        let published = published.lock().unwrap();
+        assert_eq!(
+            published
+                .iter()
+                .map(|entry| entry.mcp_launch)
+                .collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
+        assert!(published.last().unwrap().plans.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_does_not_claim_revocation_if_daemon_cannot_acknowledge() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _) = mcp_plan_test_store(directory.path());
+        let error = change_mcp_plan_settings(
+            &store,
+            &McpPlanSync::default(),
+            |store| store.update_mcp_launch(false),
+            |_| std::future::ready(Err("daemon not responding".to_string())),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("daemon not responding"));
+        assert!(error.contains("could not confirm withdrawal"));
+        assert!(!store.lock().unwrap().snapshot().mcp_launch);
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_never_reenables_a_grant_after_a_failed_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _) = mcp_plan_test_store(directory.path());
+        let published = Mutex::new(Vec::new());
+        let error = change_mcp_plan_settings::<(), _, _, _>(
+            &store,
+            &McpPlanSync::default(),
+            |_| Err("settings could not be saved".to_string()),
+            |snapshot| {
+                published.lock().unwrap().push(snapshot.mcp_launch);
+                std::future::ready(Ok(()))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("settings could not be saved"));
+        assert!(!store.lock().unwrap().snapshot().mcp_launch);
+        assert_eq!(*published.lock().unwrap(), vec![false]);
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_initialization_publishes_without_temporary_revocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _) = mcp_plan_test_store(directory.path());
+        let published = Mutex::new(Vec::new());
+        assert!(
+            sync_mcp_plan_settings(&store, &McpPlanSync::default(), |snapshot| {
+                published.lock().unwrap().push(snapshot.mcp_launch);
+                std::future::ready(Ok(()))
+            })
+            .await
+            .unwrap()
+        );
+        assert_eq!(*published.lock().unwrap(), vec![true]);
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_initialization_failure_still_withdraws_the_grant() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _) = mcp_plan_test_store(directory.path());
+        let published = Mutex::new(Vec::new());
+        let error = sync_mcp_plan_settings(&store, &McpPlanSync::default(), |snapshot| {
+            let enabled = snapshot.mcp_launch;
+            published.lock().unwrap().push(enabled);
+            std::future::ready(if enabled {
+                Err("initial sync failed".to_string())
+            } else {
+                Ok(())
+            })
+        })
+        .await
+        .unwrap_err();
+        assert!(error.contains("initial sync failed"));
+        assert_eq!(*published.lock().unwrap(), vec![true, false]);
+        assert!(
+            !FileAgentPlanStore::open(directory.path())
+                .unwrap()
+                .snapshot()
+                .mcp_launch
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_unchanged_autosaves_do_not_publish_or_revoke() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, draft) = mcp_plan_test_store(directory.path());
+        let sync = McpPlanSync::default();
+        let published = Mutex::new(Vec::new());
+        let publish = |snapshot: AgentPlanSnapshot| {
+            published.lock().unwrap().push(snapshot.mcp_launch);
+            std::future::ready(Ok(()))
+        };
+        let original = store.lock().unwrap().snapshot().plans[0].clone();
+        let saved = change_mcp_plan_settings(&store, &sync, |store| store.save(draft), &publish)
+            .await
+            .unwrap();
+        assert_eq!(saved, original);
+        change_mcp_plan_settings(
+            &store,
+            &sync,
+            |store| store.update_startup_instructions(""),
+            &publish,
+        )
+        .await
+        .unwrap();
+        change_mcp_plan_settings(
+            &store,
+            &sync,
+            |store| store.update_mcp_launch(true),
+            &publish,
+        )
+        .await
+        .unwrap();
+        assert!(published.lock().unwrap().is_empty());
+        assert!(store.lock().unwrap().snapshot().mcp_launch);
+    }
+
+    #[tokio::test]
+    async fn mcp_plan_sync_serializes_pending_enable_before_revocation() {
+        let directory = tempfile::tempdir().unwrap();
+        let (store, _) = mcp_plan_test_store(directory.path());
+        store.lock().unwrap().update_mcp_launch(false).unwrap();
+        let sync = McpPlanSync::default();
+        let pending = tokio::sync::Notify::new();
+        let proceed = tokio::sync::Notify::new();
+        let published = Mutex::new(Vec::new());
+        let enable = change_mcp_plan_settings(
+            &store,
+            &sync,
+            |store| store.update_mcp_launch(true),
+            |snapshot| {
+                let pending = &pending;
+                let proceed = &proceed;
+                let published = &published;
+                async move {
+                    if snapshot.mcp_launch {
+                        pending.notify_one();
+                        proceed.notified().await;
+                    }
+                    published.lock().unwrap().push(snapshot.mcp_launch);
+                    Ok(())
+                }
+            },
+        );
+        let revoke = async {
+            pending.notified().await;
+            proceed.notify_one();
+            change_mcp_plan_settings(
+                &store,
+                &sync,
+                |store| store.update_mcp_launch(false),
+                |snapshot| {
+                    published.lock().unwrap().push(snapshot.mcp_launch);
+                    std::future::ready(Ok(()))
+                },
+            )
+            .await
+        };
+        let (enabled, revoked) = tokio::join!(enable, revoke);
+        assert!(enabled.unwrap());
+        assert!(!revoked.unwrap());
+        assert!(!store.lock().unwrap().snapshot().mcp_launch);
+        assert_eq!(*published.lock().unwrap(), vec![true, false, false]);
+    }
 
     fn saved_profile(id: &str, protocol: Protocol) -> ConnectionProfile {
         ConnectionProfile {

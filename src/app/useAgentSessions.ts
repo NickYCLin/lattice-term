@@ -702,6 +702,34 @@ export function useAgentSessions(): AgentApi {
   >(null);
   sessionsRef.current = sessions;
 
+  const applyPlanSnapshot = useCallback((snapshot: AgentPlanSnapshot) => {
+    setWorkspaceName(snapshot.workspaceName);
+    setStartupInstructions(snapshot.startupInstructions);
+    setMcpLaunch(snapshot.mcpLaunch === true);
+    setPlans(snapshot.plans);
+    setPlanRecovery(snapshot.recovery);
+  }, []);
+
+  const refreshPlans = useCallback(async () => {
+    const { invoke } = await core();
+    applyPlanSnapshot(await invoke<AgentPlanSnapshot>("agent_plan_snapshot"));
+  }, [applyPlanSnapshot]);
+
+  const mutatePlanSettings = useCallback(async <T,>(
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<T> => {
+    const { invoke } = await core();
+    try {
+      return await invoke<T>(command, args);
+    } catch (reason) {
+      // The backend withdraws launch permission when publishing a changed
+      // plan fails. Reflect what was actually saved before showing the error.
+      await refreshPlans().catch(() => {});
+      throw reason;
+    }
+  }, [refreshPlans]);
+
   const refreshCatalog = useCallback(async () => {
     try {
       const { invoke } = await core();
@@ -712,11 +740,7 @@ export function useAgentSessions(): AgentApi {
       ]);
       setCatalog(definitions);
       setDefaultWorkingDirectory(directory);
-      setWorkspaceName(planSnapshot.workspaceName);
-      setStartupInstructions(planSnapshot.startupInstructions);
-      setMcpLaunch(planSnapshot.mcpLaunch === true);
-      setPlans(planSnapshot.plans);
-      setPlanRecovery(planSnapshot.recovery);
+      applyPlanSnapshot(planSnapshot);
       setError(null);
       setMode("ready");
     } catch (reason) {
@@ -724,7 +748,7 @@ export function useAgentSessions(): AgentApi {
       setError(reason instanceof Error ? reason.message : String(reason));
       setMode("unavailable");
     }
-  }, []);
+  }, [applyPlanSnapshot]);
 
   useEffect(() => {
     let disposed = false;
@@ -736,6 +760,7 @@ export function useAgentSessions(): AgentApi {
     const captureDuringHydration = new Map<string, string>();
     const modelDuringHydration = new Map<string, string>();
     const usageDuringHydration = new Map<string, AgentTokenUsage>();
+    const launchedDuringHydration = new Map<string, AgentSessionSummary>();
 
     function keep(cleanup: () => void): boolean {
       if (disposed) {
@@ -967,13 +992,16 @@ export function useAgentSessions(): AgentApi {
         if (!keep(stopQueue)) return;
 
         // A session somebody else started through the background service
-        // (an MCP client): show it like one of ours. During hydration the
-        // snapshot that follows already includes it.
+        // (an MCP client): show it like one of ours. Keep launches during
+        // hydration too: the session snapshot may already have been read.
         const stopLaunched = await listen<AgentSessionSummary>(
           "agent://launched",
           (event) => {
-            if (hydrating) return;
             const launched = { ...event.payload, detached: true };
+            if (hydrating) {
+              launchedDuringHydration.set(launched.sessionId, launched);
+              return;
+            }
             setSessions((current) => {
               if (current.some((session) => session.sessionId === launched.sessionId)) {
                 return current;
@@ -992,13 +1020,25 @@ export function useAgentSessions(): AgentApi {
           existingSessions,
           planSnapshot,
           outputSnapshots,
+          mcpSyncError,
         ] = await Promise.all([
           invoke<AgentDefinition[]>("agent_catalog"),
           invoke<string>("agent_default_working_directory"),
           invoke<AgentSessionSummary[]>("agent_sessions"),
           invoke<AgentPlanSnapshot>("agent_plan_snapshot"),
           invoke<AgentOutputSnapshot[]>("agent_output_snapshots"),
+          invoke<boolean>("agent_mcp_plans_sync").then(
+            () => null,
+            (reason: unknown) => reason instanceof Error ? reason.message : String(reason),
+          ),
         ]);
+        if (disposed) return;
+
+        // A failed sync may have withdrawn the persisted launch grant.
+        // Read after it settles so the checkbox never shows the old grant.
+        const syncedPlanSnapshot = mcpSyncError
+          ? await invoke<AgentPlanSnapshot>("agent_plan_snapshot")
+          : planSnapshot;
         if (disposed) return;
 
         const closedSnapshot = snapshotSessionIds(closedDuringHydration);
@@ -1006,10 +1046,11 @@ export function useAgentSessions(): AgentApi {
         const captureSnapshot = snapshotHydrationMap(captureDuringHydration);
         const modelSnapshot = snapshotHydrationMap(modelDuringHydration);
         const usageSnapshot = snapshotHydrationMap(usageDuringHydration);
+        const launchedSnapshot = snapshotHydrationMap(launchedDuringHydration);
         setSessions((current) => {
           let restored = reconcileSessionSnapshot(
             current,
-            existingSessions,
+            [...existingSessions, ...launchedSnapshot.values()],
             closedSnapshot,
           );
           for (const event of stateSnapshot.values()) {
@@ -1059,13 +1100,11 @@ export function useAgentSessions(): AgentApi {
         captureDuringHydration.clear();
         modelDuringHydration.clear();
         usageDuringHydration.clear();
+        launchedDuringHydration.clear();
         setCatalog(definitions);
         setDefaultWorkingDirectory(directory);
-        setWorkspaceName(planSnapshot.workspaceName);
-        setStartupInstructions(planSnapshot.startupInstructions);
-        setPlans(planSnapshot.plans);
-        setPlanRecovery(planSnapshot.recovery);
-        setError(null);
+        applyPlanSnapshot(syncedPlanSnapshot);
+        setError(mcpSyncError);
         setMode("ready");
       } catch (reason) {
         hydrating = false;
@@ -1075,6 +1114,7 @@ export function useAgentSessions(): AgentApi {
         captureDuringHydration.clear();
         modelDuringHydration.clear();
         usageDuringHydration.clear();
+        launchedDuringHydration.clear();
         setCatalog(FALLBACK_CATALOG);
         setError(reason instanceof Error ? reason.message : String(reason));
         setMode("unavailable");
@@ -1086,7 +1126,7 @@ export function useAgentSessions(): AgentApi {
       disposed = true;
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, []);
+  }, [applyPlanSnapshot]);
 
   const launch = useCallback(async (request: AgentLaunchRequest) => {
     const { invoke } = await core();
@@ -1172,15 +1212,14 @@ export function useAgentSessions(): AgentApi {
   }, []);
 
   const savePlan = useCallback(async (draft: AgentLaunchPlanDraft) => {
-    const { invoke } = await core();
-    const plan = await invoke<AgentLaunchPlan>("agent_plan_save", { draft });
+    const plan = await mutatePlanSettings<AgentLaunchPlan>("agent_plan_save", { draft });
     setPlans((current) => {
       const index = current.findIndex((existing) => existing.id === plan.id);
       if (index < 0) return [...current, plan];
       return current.map((existing) => (existing.id === plan.id ? plan : existing));
     });
     return plan;
-  }, []);
+  }, [mutatePlanSettings]);
 
   const renameWorkspace = useCallback(async (name: string) => {
     const { invoke } = await core();
@@ -1190,20 +1229,18 @@ export function useAgentSessions(): AgentApi {
   }, []);
 
   const updateStartupInstructions = useCallback(async (instructions: string) => {
-    const { invoke } = await core();
-    const saved = await invoke<string>("agent_workspace_instructions_update", {
+    const saved = await mutatePlanSettings<string>("agent_workspace_instructions_update", {
       instructions,
     });
     setStartupInstructions(saved);
     return saved;
-  }, []);
+  }, [mutatePlanSettings]);
 
   const updateMcpLaunch = useCallback(async (enabled: boolean) => {
-    const { invoke } = await core();
-    const saved = await invoke<boolean>("agent_workspace_mcp_launch_update", { enabled });
+    const saved = await mutatePlanSettings<boolean>("agent_workspace_mcp_launch_update", { enabled });
     setMcpLaunch(saved);
     return saved;
-  }, []);
+  }, [mutatePlanSettings]);
 
   const reorderPlans = useCallback(async (orderedIds: string[]) => {
     const { invoke } = await core();
@@ -1215,13 +1252,12 @@ export function useAgentSessions(): AgentApi {
   }, []);
 
   const deletePlan = useCallback(async (id: string) => {
-    const { invoke } = await core();
-    const deleted = await invoke<boolean>("agent_plan_delete", { id });
+    const deleted = await mutatePlanSettings<boolean>("agent_plan_delete", { id });
     if (deleted) {
       setPlans((current) => current.filter((plan) => plan.id !== id));
     }
     return deleted;
-  }, []);
+  }, [mutatePlanSettings]);
 
   const restorePlans = useCallback(async (planIds: string[]) => {
     const { invoke } = await core();

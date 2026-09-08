@@ -7,6 +7,7 @@
 //! [`super::IDLE_EXIT`].
 
 use super::automations::{self, Scheduler};
+use super::mcp::{read_bounded_line, LineRead};
 use super::{
     read_or_create_token, transport, CancelScope, ClientRole, DaemonPaths, Frame, HelloReply,
     McpActivity, McpPlan, PromptMode, Request, SharedSession, LOG_FILE, MAX_FRAME_BYTES,
@@ -19,26 +20,34 @@ use crate::agent::{
 use crate::agent_chat::AgentChatRegistry;
 use base64::Engine;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch, Notify, Semaphore};
+use tokio::task::JoinSet;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const IDLE_CHECK: Duration = Duration::from_secs(5);
 /// A pasted image after PNG encoding; the desktop already bounds pixels.
 const MAX_STAGED_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOG_BYTES: u64 = 1024 * 1024;
+const MAX_OBSERVER_QUEUED_FRAMES: usize = 64;
+const MAX_OBSERVER_IN_FLIGHT: usize = 48;
+const MAX_TOTAL_OBSERVER_REQUESTS: usize = 96;
+const MAX_OBSERVER_REQUEST_BYTES: usize = 1024 * 1024;
 /// How long an observer's request id is remembered, so a retried call
 /// after a lost reply gets the first outcome instead of a second launch or
 /// a second prompt.
 const RECENT_OUTCOME_TTL: Duration = Duration::from_secs(15 * 60);
 const MAX_RECENT_OUTCOMES: usize = 256;
+const DUPLICATE_WAIT: Duration = Duration::from_secs(10);
+const UNKNOWN_OUTCOME: &str = "Operation outcome is unknown; retry only with the same requestId while this daemon is running. Do not submit a new requestId.";
 
 /// Handles `agent-daemon`; `None` when the arguments are for something else.
 pub fn run_cli<I, S>(args: I) -> Option<i32>
@@ -248,7 +257,12 @@ where
     let mut reader = BufReader::new(read_half);
 
     // The greeting decides whether this is our desktop at all.
-    let hello = match tokio::time::timeout(HELLO_TIMEOUT, read_frame(&mut reader)).await {
+    let hello = match tokio::time::timeout(
+        HELLO_TIMEOUT,
+        read_frame(&mut reader, MAX_OBSERVER_REQUEST_BYTES),
+    )
+    .await
+    {
         Ok(Ok(Some(Frame::Request { id, body }))) => (id, body),
         _ => return,
     };
@@ -266,15 +280,17 @@ where
     };
     let client_name = client_label(client.as_deref());
     if token != context.token || protocol != PROTOCOL_VERSION {
-        let _ = write_half
-            .write_all(
+        let _ = tokio::time::timeout(
+            HELLO_TIMEOUT,
+            write_half.write_all(
                 (response_line(
                     hello_id,
                     Err("The background service refused the greeting.".to_string()),
                 ) + "\n")
                     .as_bytes(),
-            )
-            .await;
+            ),
+        )
+        .await;
         return;
     }
     let reply = match role {
@@ -301,7 +317,7 @@ where
         "client {client_id} attached as {role:?} ({client_name})"
     ));
 
-    let writer = tokio::spawn(async move {
+    let mut writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
             if write_half.write_all(line.as_bytes()).await.is_err()
                 || write_half.write_all(b"\n").await.is_err()
@@ -310,14 +326,56 @@ where
             }
         }
     });
-
+    let mut disconnected = tx.disconnected.subscribe();
+    let allowance = Arc::new(Semaphore::new(MAX_OBSERVER_IN_FLIGHT));
+    let mut tasks = JoinSet::new();
+    let mut writer_finished = false;
+    let frame_limit = if role == ClientRole::Observer {
+        MAX_OBSERVER_REQUEST_BYTES
+    } else {
+        MAX_FRAME_BYTES
+    };
     loop {
-        match read_frame(&mut reader).await {
+        if *disconnected.borrow() {
+            break;
+        }
+        let frame = tokio::select! {
+            biased;
+            _ = disconnected.changed() => break,
+            _ = &mut writer => {
+                writer_finished = true;
+                break;
+            }
+            frame = read_frame(&mut reader, frame_limit) => frame,
+        };
+        while tasks.try_join_next().is_some() {}
+        match frame {
             Ok(Some(Frame::Request { id, body })) => {
+                // Reserve before spawning, never put an unlimited number
+                // of observer jobs on Tokio's blocking work queue. Keep a
+                // daemon-wide reservation until even a disconnected
+                // client's already running operation has actually ended.
+                let permits = if role == ClientRole::Observer {
+                    let Ok(local) = Arc::clone(&allowance).try_acquire_owned() else {
+                        break;
+                    };
+                    let Ok(global) =
+                        Arc::clone(&context.sink.observer_requests.0).try_acquire_owned()
+                    else {
+                        break;
+                    };
+                    Some((local, global))
+                } else {
+                    None
+                };
                 let context = Arc::clone(&context);
                 let tx = tx.clone();
                 let client_name = client_name.clone();
-                tokio::task::spawn_blocking(move || {
+                tasks.spawn_blocking(move || {
+                    let _permits = permits;
+                    if role == ClientRole::Observer && tx.is_disconnected() {
+                        return;
+                    }
                     let result = dispatch_as(&context, role, &client_name, body);
                     let _ = tx.send(response_line(id, result));
                 });
@@ -326,23 +384,42 @@ where
             Ok(None) | Err(_) => break,
         }
     }
+    if role == ClientRole::Observer {
+        tx.disconnect();
+    }
     context.sink.unsubscribe(client_id);
     drop(tx);
-    let _ = writer.await;
+    // Blocking work that has already started is not abortable, but its
+    // permits remain held by the closure. Cancel queued jobs and release
+    // the socket immediately rather than waiting behind a slow observer.
+    if role == ClientRole::Observer || writer_finished {
+        tasks.abort_all();
+        if !writer_finished {
+            writer.abort();
+            let _ = writer.await;
+        }
+    } else {
+        // Preserve the desktop's existing EOF behavior: accepted work
+        // and its final responses may finish before its writer closes.
+        let _ = writer.await;
+    }
     context.log.line(&format!("client {client_id} detached"));
 }
 
-async fn read_frame<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> std::io::Result<Option<Frame>> {
+async fn read_frame<R: AsyncBufReadExt + Unpin>(
+    reader: &mut R,
+    limit: usize,
+) -> std::io::Result<Option<Frame>> {
     let mut line = Vec::new();
-    let read = reader.read_until(b'\n', &mut line).await?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if line.len() > MAX_FRAME_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "frame too large",
-        ));
+    match read_bounded_line(reader, &mut line, limit).await? {
+        LineRead::Eof => return Ok(None),
+        LineRead::TooLong => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "frame too large",
+            ));
+        }
+        LineRead::Ready => {}
     }
     serde_json::from_slice(&line)
         .map(Some)
@@ -458,24 +535,70 @@ pub fn dispatch_as(
             Request::LaunchPlan {
                 plan_id,
                 request_id,
-            } => once(context, client, &request_id, || {
-                launch_plan(context, client, &plan_id)
-            }),
+            } => once(
+                context,
+                client,
+                &request_id,
+                &json!(["launch", plan_id]),
+                || {
+                    context
+                        .sink
+                        .plan(&plan_id)
+                        .ok_or_else(|| {
+                            "No authorized launch plan with that id is available.".to_string()
+                        })
+                        .map(|_| ())
+                },
+                || launch_plan(context, client, &plan_id),
+                |value| {
+                    if context.sink.plan(&plan_id).is_none()
+                        || !value["sessionId"]
+                            .as_str()
+                            .is_some_and(|id| context.sink.has_control(id))
+                    {
+                        return Err("The launch or session authorization has been revoked.".into());
+                    }
+                    Ok(())
+                },
+            ),
             Request::Prompt {
                 session_id,
                 text,
                 mode,
                 request_id,
-            } => once(context, client, &request_id, || {
-                prompt(context, client, &session_id, &text, mode)
-            }),
+            } => once(
+                context,
+                client,
+                &request_id,
+                &json!(["prompt", session_id, text, mode]),
+                || {
+                    require_control(context, &session_id)?;
+                    agent::validate_mcp_prompt(&text)
+                },
+                || prompt(context, client, &session_id, &text, mode),
+                |_| require_control(context, &session_id),
+            ),
             Request::Cancel {
                 session_id,
                 scope,
                 request_id,
-            } => once(context, client, &request_id, || {
-                cancel(context, client, &session_id, scope)
-            }),
+            } => once(
+                context,
+                client,
+                &request_id,
+                &json!(["cancel", session_id, scope]),
+                || require_control(context, &session_id),
+                || cancel(context, client, &session_id, scope),
+                |_| {
+                    // An acknowledged termination removes the grant itself.
+                    // Its replay contains only the caller's id and `ended`.
+                    if scope == CancelScope::Session {
+                        Ok(())
+                    } else {
+                        require_control(context, &session_id)
+                    }
+                },
+            ),
             _ => Err("Observers may only read shared sessions.".to_string()),
         },
     }
@@ -487,30 +610,56 @@ fn once(
     context: &Context,
     client: &str,
     request_id: &str,
+    identity: &Value,
+    preflight: impl FnOnce() -> Result<(), String>,
     action: impl FnOnce() -> Result<Value, String>,
+    authorize_replay: impl FnOnce(&Value) -> Result<(), String>,
 ) -> Result<Value, String> {
-    if request_id.is_empty() {
-        return action();
+    if request_id.trim().is_empty() {
+        return Err("A non-empty requestId is required for MCP writes.".to_string());
     }
     if request_id.len() > 128 {
         return Err("requestId is too long.".to_string());
     }
-    let key = format!("{client}\u{1f}{request_id}");
-    if let Some(previous) = context.sink.recall(&key) {
-        return previous.map(|mut value| {
-            if let Some(object) = value.as_object_mut() {
-                object.insert("duplicate".to_string(), json!(true));
-            }
-            value
-        });
+    let fingerprint: [u8; 32] =
+        Sha256::digest(serde_json::to_vec(identity).map_err(|error| error.to_string())?).into();
+    let (operation, fresh) =
+        if let Some(operation) = context.sink.existing(client, request_id, fingerprint)? {
+            (operation, false)
+        } else {
+            // Invalid/unauthorized requests must not consume the bounded write
+            // history. Recheck inside the atomic reservation in case another
+            // connection claimed this id while preflight was running.
+            preflight()?;
+            context.sink.reserve(client, request_id, fingerprint)?
+        };
+    if !fresh {
+        let mut value = operation.wait()?;
+        authorize_replay(&value)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert("duplicate".to_string(), json!(true));
+        }
+        return Ok(value);
     }
+    let mut guard = OutcomeGuard {
+        operation,
+        completed: false,
+    };
     let outcome = action();
-    context.sink.remember(key, outcome.clone());
+    guard.complete(outcome.clone());
     outcome
 }
 
+fn require_control(context: &Context, session_id: &str) -> Result<(), String> {
+    if context.sink.has_control(session_id) {
+        Ok(())
+    } else {
+        Err("This session is not under MCP control.".to_string())
+    }
+}
+
 fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, String> {
-    let Some(plan) = context.sink.plan(plan_id) else {
+    let Some((plan, generation)) = context.sink.plan_with_generation(plan_id) else {
         return Err(if context.sink.plans_enabled() {
             "No saved plan with that id is available to MCP clients.".to_string()
         } else {
@@ -528,8 +677,7 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
     let summary = detached(summary);
     // What a client started, it may watch and drive; the user allowed the
     // plan for exactly that.
-    context.sink.set_shared(&summary.session_id, true);
-    let _ = context.sink.set_control(&summary.session_id, true);
+    finish_plan_launch(context, &summary.session_id, generation)?;
     context
         .sink
         .note_activity(&summary.session_id, client, "launch");
@@ -542,6 +690,25 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
     Ok(value)
 }
 
+fn finish_plan_launch(context: &Context, session_id: &str, generation: u64) -> Result<(), String> {
+    let grant = context.sink.grant_change_lock(session_id)?;
+    let _grant = grant.lock().map_err(|error| error.to_string())?;
+    let plans = context
+        .sink
+        .plans
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if !plans.enabled || plans.generation != generation {
+        drop(plans);
+        drop(_grant);
+        agent::disconnect(context.sink.as_ref(), &context.registry, session_id)?;
+        return Err("The launch authorization changed while this plan was starting; the new session was stopped.".into());
+    }
+    agent::set_mcp_control(context.sink.as_ref(), &context.registry, session_id, true)?;
+    context.sink.set_shared(session_id, true);
+    context.sink.set_control(session_id, true)
+}
+
 fn prompt(
     context: &Context,
     client: &str,
@@ -549,50 +716,19 @@ fn prompt(
     text: &str,
     mode: PromptMode,
 ) -> Result<Value, String> {
-    if !context.sink.has_control(session_id) {
-        return Err("This session is not under MCP control.".to_string());
-    }
-    let text = text.trim_end_matches(['\r', '\n']);
-    if text.trim().is_empty() {
-        return Err("A prompt is required.".to_string());
-    }
+    require_control(context, session_id)?;
     if text.chars().count() > MAX_MCP_PROMPT_CHARS {
         return Err(format!(
             "A prompt may have at most {MAX_MCP_PROMPT_CHARS} characters."
         ));
     }
-    // Exactly what the interface types: newlines become carriage returns
-    // so multi-line text stays one submission, then Enter.
-    let mut typed = text.replace("\r\n", "\n").replace('\n', "\r");
-    typed.push('\r');
-    let encoded = base64::engine::general_purpose::STANDARD.encode(typed.as_bytes());
     let registry = &context.registry;
     let sink: &dyn AgentSink = context.sink.as_ref();
     let before = registry
         .session_summary(session_id)
         .ok_or_else(|| "Agent session no longer exists.".to_string())?;
-    let (queued, sent_now) = match mode {
-        PromptMode::Queue => {
-            let depth = agent::enqueue(sink, registry, session_id, &encoded)?;
-            (depth, depth == 0)
-        }
-        PromptMode::Now => {
-            if matches!(
-                before.state,
-                AgentLifecycle::Working | AgentLifecycle::NeedsAttention
-            ) {
-                return Err(format!(
-                    "The session is {} right now; queue the prompt or wait for it to finish.",
-                    match before.state {
-                        AgentLifecycle::Working => "working",
-                        _ => "waiting for a person",
-                    }
-                ));
-            }
-            agent::send(sink, registry, session_id, &encoded)?;
-            (0, true)
-        }
-    };
+    let queued = agent::mcp_prompt(sink, registry, session_id, text, mode == PromptMode::Now)?;
+    let sent_now = queued == 0;
     context.sink.note_activity(
         session_id,
         client,
@@ -626,7 +762,7 @@ fn cancel(
     let sink: &dyn AgentSink = context.sink.as_ref();
     match scope {
         CancelScope::Queue => {
-            let dropped = agent::clear_queue(sink, registry, session_id)?;
+            let dropped = agent::mcp_cancel_queue(sink, registry, session_id)?;
             context.sink.note_activity(session_id, client, "clearQueue");
             context.log.line(&format!(
                 "mcp {client}: cleared {dropped} queued prompt(s) on {session_id}"
@@ -634,7 +770,7 @@ fn cancel(
             Ok(json!({ "sessionId": session_id, "scope": "queue", "dropped": dropped }))
         }
         CancelScope::Session => {
-            agent::disconnect(sink, registry, session_id)?;
+            agent::mcp_disconnect(sink, registry, session_id)?;
             context
                 .log
                 .line(&format!("mcp {client}: ended {session_id}"));
@@ -726,8 +862,13 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         Request::AutomationsState => to_value(&context.scheduler.status()),
         Request::AutomationsTakeRuns => to_value(&context.scheduler.take_runs()),
         Request::ShareSet { session_id, shared } => {
+            let grant = context.sink.grant_change_lock(&session_id)?;
+            let _grant = grant.lock().map_err(|error| error.to_string())?;
             if shared && registry.session_summary(&session_id).is_none() {
                 return Err("Agent session no longer exists.".to_string());
+            }
+            if !shared && registry.session_summary(&session_id).is_some() {
+                agent::set_mcp_control(sink, registry, &session_id, false)?;
             }
             context.sink.set_shared(&session_id, shared);
             context.log.line(&format!(
@@ -740,6 +881,12 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
             session_id,
             control,
         } => {
+            let grant = context.sink.grant_change_lock(&session_id)?;
+            let _grant = grant.lock().map_err(|error| error.to_string())?;
+            if control && !context.sink.is_shared(&session_id) {
+                return Err("Share the session with observers first.".to_string());
+            }
+            agent::set_mcp_control(sink, registry, &session_id, control)?;
             context.sink.set_control(&session_id, control)?;
             context.log.line(&format!(
                 "desktop: {} control of {session_id}",
@@ -790,22 +937,87 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
 #[derive(Default)]
 pub struct DaemonSink {
     clients: Mutex<Vec<Client>>,
+    observer_requests: ObserverRequestLimit,
+    /// Serialize only grant changes, keeping the registry's authoritative
+    /// input grant and this sink's display/observation mirror consistent.
+    grant_changes: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     /// Sessions the user shared with observers, with what each observer may
     /// do to them. Lives with the daemon: a session that ends is unshared
     /// with it, and sharing never outlives the process that holds the
     /// session.
     shared: Mutex<HashMap<String, ShareEntry>>,
     /// Saved plans the user allowed observers to launch.
-    plans: Mutex<(bool, Vec<McpPlan>)>,
+    plans: Mutex<LaunchPlans>,
     /// Outcomes of recent observer actions, by client and request id.
-    recent: Mutex<VecDeque<RecentOutcome>>,
+    recent: Mutex<VecDeque<Arc<RecentOutcome>>>,
     next: AtomicU64,
 }
 
 struct Client {
     id: u64,
     role: ClientRole,
-    tx: mpsc::UnboundedSender<String>,
+    tx: ClientSender,
+}
+
+struct ObserverRequestLimit(Arc<Semaphore>);
+
+impl Default for ObserverRequestLimit {
+    fn default() -> Self {
+        Self(Arc::new(Semaphore::new(MAX_TOTAL_OBSERVER_REQUESTS)))
+    }
+}
+
+/// Desktop terminal delivery retains its existing queue. Observers have a
+/// bounded queue; synchronous registry broadcasts must never wait for them.
+#[derive(Clone)]
+pub struct ClientSender {
+    channel: ClientChannel,
+    disconnected: watch::Sender<bool>,
+}
+
+#[derive(Clone)]
+enum ClientChannel {
+    Desktop(mpsc::UnboundedSender<String>),
+    Observer(mpsc::Sender<String>),
+}
+
+pub enum ClientReceiver {
+    Desktop(mpsc::UnboundedReceiver<String>),
+    Observer(mpsc::Receiver<String>),
+}
+
+impl ClientSender {
+    fn send(&self, line: String) -> Result<(), ()> {
+        if self.is_disconnected() {
+            return Err(());
+        }
+        let sent = match &self.channel {
+            ClientChannel::Desktop(tx) => tx.send(line).map_err(|_| ()),
+            ClientChannel::Observer(_) if line.len() >= MAX_FRAME_BYTES => Err(()),
+            ClientChannel::Observer(tx) => tx.try_send(line).map_err(|_| ()),
+        };
+        if sent.is_err() {
+            self.disconnect();
+        }
+        sent
+    }
+
+    fn is_disconnected(&self) -> bool {
+        *self.disconnected.borrow()
+    }
+
+    fn disconnect(&self) {
+        self.disconnected.send_replace(true);
+    }
+}
+
+impl ClientReceiver {
+    async fn recv(&mut self) -> Option<String> {
+        match self {
+            Self::Desktop(rx) => rx.recv().await,
+            Self::Observer(rx) => rx.recv().await,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -814,10 +1026,72 @@ struct ShareEntry {
     activity: Option<McpActivity>,
 }
 
+#[derive(Default)]
+struct LaunchPlans {
+    enabled: bool,
+    generation: u64,
+    plans: Vec<McpPlan>,
+}
+
 struct RecentOutcome {
-    key: String,
-    at: Instant,
-    outcome: Result<Value, String>,
+    key: (String, String),
+    fingerprint: [u8; 32],
+    completion: Mutex<Option<(Instant, Result<Value, String>)>>,
+    ready: Condvar,
+}
+
+impl RecentOutcome {
+    fn expired(&self) -> bool {
+        self.completion
+            .lock()
+            .map(|completion| {
+                completion
+                    .as_ref()
+                    .is_some_and(|(at, _)| at.elapsed() >= RECENT_OUTCOME_TTL)
+            })
+            .unwrap_or(false)
+    }
+
+    fn finish(&self, outcome: Result<Value, String>) {
+        if let Ok(mut completion) = self.completion.lock() {
+            *completion = Some((Instant::now(), outcome));
+            self.ready.notify_all();
+        }
+    }
+
+    fn wait(&self) -> Result<Value, String> {
+        let completion = self.completion.lock().map_err(|_| UNKNOWN_OUTCOME)?;
+        let (completion, _) = self
+            .ready
+            .wait_timeout_while(completion, DUPLICATE_WAIT, |value| value.is_none())
+            .map_err(|_| UNKNOWN_OUTCOME)?;
+        completion
+            .as_ref()
+            .map(|(_, outcome)| outcome.clone())
+            .unwrap_or_else(|| Err(UNKNOWN_OUTCOME.into()))
+    }
+}
+
+/// A panic can leave a write partially performed. Preserve that uncertainty
+/// instead of forgetting the reservation and executing a retry again.
+struct OutcomeGuard {
+    operation: Arc<RecentOutcome>,
+    completed: bool,
+}
+
+impl OutcomeGuard {
+    fn complete(&mut self, outcome: Result<Value, String>) {
+        self.operation.finish(outcome);
+        self.completed = true;
+    }
+}
+
+impl Drop for OutcomeGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.operation.finish(Err(UNKNOWN_OUTCOME.into()));
+        }
+    }
 }
 
 fn now_millis() -> u64 {
@@ -828,17 +1102,41 @@ fn now_millis() -> u64 {
 }
 
 impl DaemonSink {
+    fn grant_change_lock(&self, session_id: &str) -> Result<Arc<Mutex<()>>, String> {
+        let mut changes = self
+            .grant_changes
+            .lock()
+            .map_err(|error| error.to_string())?;
+        changes.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = changes.get(session_id).and_then(Weak::upgrade) {
+            return Ok(lock);
+        }
+        let lock = Arc::new(Mutex::new(()));
+        changes.insert(session_id.to_string(), Arc::downgrade(&lock));
+        Ok(lock)
+    }
+
     pub fn subscribe(
         &self,
         role: ClientRole,
         _client: String,
-    ) -> (
-        u64,
-        mpsc::UnboundedSender<String>,
-        mpsc::UnboundedReceiver<String>,
-    ) {
+    ) -> (u64, ClientSender, ClientReceiver) {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (channel, rx) = match role {
+            ClientRole::Desktop => {
+                let (tx, rx) = mpsc::unbounded_channel();
+                (ClientChannel::Desktop(tx), ClientReceiver::Desktop(rx))
+            }
+            ClientRole::Observer => {
+                let (tx, rx) = mpsc::channel(MAX_OBSERVER_QUEUED_FRAMES);
+                (ClientChannel::Observer(tx), ClientReceiver::Observer(rx))
+            }
+        };
+        let (disconnected, _) = watch::channel(false);
+        let tx = ClientSender {
+            channel,
+            disconnected,
+        };
         if let Ok(mut clients) = self.clients.lock() {
             clients.push(Client {
                 id,
@@ -948,19 +1246,41 @@ impl DaemonSink {
 
     pub fn plans_replace(&self, enabled: bool, plans: Vec<McpPlan>) {
         if let Ok(mut current) = self.plans.lock() {
-            *current = (enabled, if enabled { plans } else { Vec::new() });
+            let plans = if enabled { plans } else { Vec::new() };
+            if current.enabled == enabled
+                && serde_json::to_value(&current.plans).ok() == serde_json::to_value(&plans).ok()
+            {
+                return;
+            }
+            current.enabled = enabled;
+            current.generation = current.generation.wrapping_add(1);
+            current.plans = plans;
         }
     }
 
     pub fn plans_enabled(&self) -> bool {
-        self.plans.lock().map(|plans| plans.0).unwrap_or(false)
+        self.plans
+            .lock()
+            .map(|plans| plans.enabled)
+            .unwrap_or(false)
     }
 
     fn plan(&self, plan_id: &str) -> Option<McpPlan> {
+        self.plan_with_generation(plan_id).map(|(plan, _)| plan)
+    }
+
+    fn plan_with_generation(&self, plan_id: &str) -> Option<(McpPlan, u64)> {
         self.plans.lock().ok().and_then(|plans| {
             plans
-                .0
-                .then(|| plans.1.iter().find(|plan| plan.plan_id == plan_id).cloned())
+                .enabled
+                .then(|| {
+                    plans
+                        .plans
+                        .iter()
+                        .find(|plan| plan.plan_id == plan_id)
+                        .cloned()
+                        .map(|plan| (plan, plans.generation))
+                })
                 .flatten()
         })
     }
@@ -970,7 +1290,7 @@ impl DaemonSink {
         let (enabled, plans) = self
             .plans
             .lock()
-            .map(|plans| (plans.0, plans.1.clone()))
+            .map(|plans| (plans.enabled, plans.plans.clone()))
             .unwrap_or_default();
         json!({
             "enabled": enabled,
@@ -985,25 +1305,52 @@ impl DaemonSink {
         })
     }
 
-    fn recall(&self, key: &str) -> Option<Result<Value, String>> {
-        let mut recent = self.recent.lock().ok()?;
-        recent.retain(|entry| entry.at.elapsed() < RECENT_OUTCOME_TTL);
-        recent
-            .iter()
-            .find(|entry| entry.key == key)
-            .map(|entry| entry.outcome.clone())
+    fn reserve(
+        &self,
+        client: &str,
+        request_id: &str,
+        fingerprint: [u8; 32],
+    ) -> Result<(Arc<RecentOutcome>, bool), String> {
+        let key = (client.to_string(), request_id.to_string());
+        let mut recent = self.recent.lock().map_err(|error| error.to_string())?;
+        recent.retain(|entry| !entry.expired());
+        if let Some(existing) = recent.iter().find(|entry| entry.key == key) {
+            if existing.fingerprint != fingerprint {
+                return Err("This requestId was already used for a different operation.".into());
+            }
+            return Ok((Arc::clone(existing), false));
+        }
+        // Never evict a still-valid result: doing so would turn an ordinary
+        // retry into a second side effect within the promised retention time.
+        if recent.len() >= MAX_RECENT_OUTCOMES {
+            return Err("MCP operation history is full; wait for its 15-minute retention period before submitting a new operation.".into());
+        }
+        let operation = Arc::new(RecentOutcome {
+            key,
+            fingerprint,
+            completion: Mutex::new(None),
+            ready: Condvar::new(),
+        });
+        recent.push_back(Arc::clone(&operation));
+        Ok((operation, true))
     }
 
-    fn remember(&self, key: String, outcome: Result<Value, String>) {
-        if let Ok(mut recent) = self.recent.lock() {
-            while recent.len() >= MAX_RECENT_OUTCOMES {
-                recent.pop_front();
+    fn existing(
+        &self,
+        client: &str,
+        request_id: &str,
+        fingerprint: [u8; 32],
+    ) -> Result<Option<Arc<RecentOutcome>>, String> {
+        let recent = self.recent.lock().map_err(|error| error.to_string())?;
+        let existing = recent
+            .iter()
+            .find(|entry| entry.key.0 == client && entry.key.1 == request_id && !entry.expired());
+        match existing {
+            Some(existing) if existing.fingerprint != fingerprint => {
+                Err("This requestId was already used for a different operation.".into())
             }
-            recent.push_back(RecentOutcome {
-                key,
-                at: Instant::now(),
-                outcome,
-            });
+            Some(existing) => Ok(Some(Arc::clone(existing))),
+            None => Ok(None),
         }
     }
 
@@ -1129,5 +1476,467 @@ impl Logger {
                 let _ = writeln!(file, "{seconds} {message}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod observer_transport_tests {
+    use super::*;
+
+    fn test_context(dir: &Path) -> Arc<Context> {
+        Arc::new(Context {
+            registry: Arc::new(AgentRegistry::new()),
+            sink: Arc::new(DaemonSink::default()),
+            scheduler: Arc::new(Scheduler::open(dir)),
+            chat: Arc::new(AgentChatRegistry::new()),
+            token: "test-token".into(),
+            shutdown: Arc::new(Notify::new()),
+            log: Arc::new(Logger::silent()),
+        })
+    }
+
+    async fn send_request<W: AsyncWrite + Unpin>(writer: &mut W, id: u64, body: Request) {
+        let mut bytes = serde_json::to_vec(&Frame::Request { id, body }).unwrap();
+        bytes.push(b'\n');
+        writer.write_all(&bytes).await.unwrap();
+    }
+
+    async fn greeting(client: &mut BufReader<tokio::io::DuplexStream>, role: ClientRole) {
+        send_request(
+            client.get_mut(),
+            1,
+            Request::Hello {
+                token: "test-token".into(),
+                protocol: PROTOCOL_VERSION,
+                role,
+                client: Some("transport-test".into()),
+            },
+        )
+        .await;
+        let frame =
+            tokio::time::timeout(Duration::from_secs(2), read_frame(client, MAX_FRAME_BYTES))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        assert!(matches!(
+            frame,
+            Frame::Response {
+                id: 1,
+                ok: true,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_slow_observer_is_disconnected_without_stalling_other_clients() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        context.sink.set_shared("shared-session", true);
+        let (client, stream) = tokio::io::duplex(256);
+        let handler = tokio::spawn(handle_client(stream, Arc::clone(&context)));
+        let mut client = BufReader::new(client);
+        greeting(&mut client, ClientRole::Observer).await;
+        let (_desktop_id, _desktop_tx, mut desktop_rx) = context
+            .sink
+            .subscribe(ClientRole::Desktop, "desktop".into());
+        let (_healthy_id, healthy_tx, mut healthy_rx) = context
+            .sink
+            .subscribe(ClientRole::Observer, "healthy".into());
+
+        // This observer stops reading after hello. Its first model frame
+        // fills the duplex socket, then its bounded queue fills as well.
+        for index in 0..MAX_OBSERVER_QUEUED_FRAMES + 3 {
+            context.sink.broadcast(
+                "model",
+                json!({ "sessionId": "shared-session", "model": "x".repeat(512),
+                    "sequence": index }),
+            );
+            for receiver in [&mut desktop_rx, &mut healthy_rx] {
+                let line = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let frame: Frame = serde_json::from_str(&line).unwrap();
+                assert!(matches!(frame, Frame::Event { name, payload }
+                    if name == "model" && payload["sequence"] == index));
+            }
+            tokio::task::yield_now().await;
+        }
+        tokio::time::timeout(Duration::from_secs(2), handler)
+            .await
+            .expect("a full observer queue must close its blocked socket")
+            .unwrap();
+        assert!(!healthy_tx.is_disconnected());
+        assert_eq!(context.sink.client_count(), 1);
+        assert_eq!(context.sink.clients.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn observer_work_overload_closes_only_that_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        // Leave two global slots, then make those two accepted requests
+        // wait on the plans registry while a third request overloads it.
+        let reserved = Arc::clone(&context.sink.observer_requests.0)
+            .acquire_many_owned((MAX_TOTAL_OBSERVER_REQUESTS - 2) as u32)
+            .await
+            .unwrap();
+        let (client, stream) = tokio::io::duplex(4096);
+        let handler = tokio::spawn(handle_client(stream, Arc::clone(&context)));
+        let mut client = BufReader::new(client);
+        greeting(&mut client, ClientRole::Observer).await;
+        let locked_context = Arc::clone(&context);
+        let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let held_plans = tokio::task::spawn_blocking(move || {
+            let _plans = locked_context.sink.plans.lock().unwrap();
+            let _ = locked_tx.send(());
+            // Dropping the sender on assertion failure also releases the
+            // lock, so a failing test cannot strand blocking workers.
+            let _ = release_rx.blocking_recv();
+        });
+        locked_rx.await.unwrap();
+        for id in 2..=3 {
+            send_request(client.get_mut(), id, Request::Plans).await;
+        }
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while context.sink.observer_requests.0.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        send_request(client.get_mut(), 4, Request::Plans).await;
+        tokio::time::timeout(Duration::from_secs(2), handler)
+            .await
+            .expect("overload closes without waiting for blocking dispatch")
+            .unwrap();
+
+        // Desktops do not consume the observer allowance, so a saturated
+        // observer cannot exhaust their ability to list ordinary sessions.
+        let (desktop, stream) = tokio::io::duplex(4096);
+        let desktop_handler = tokio::spawn(handle_client(stream, Arc::clone(&context)));
+        let mut desktop = BufReader::new(desktop);
+        greeting(&mut desktop, ClientRole::Desktop).await;
+        send_request(desktop.get_mut(), 2, Request::Sessions).await;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_frame(&mut desktop, MAX_FRAME_BYTES),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            reply,
+            Frame::Response {
+                id: 2,
+                ok: true,
+                ..
+            }
+        ));
+        release_tx.send(()).unwrap();
+        held_plans.await.unwrap();
+        drop(reserved);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while context.sink.observer_requests.0.available_permits()
+                != MAX_TOTAL_OBSERVER_REQUESTS
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(desktop);
+        tokio::time::timeout(Duration::from_secs(2), desktop_handler)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn frame_limit_rejects_an_unterminated_frame_before_eof() {
+        let (mut client, stream) = tokio::io::duplex(65);
+        let mut reader = BufReader::new(stream);
+        client.write_all(&[b'x'; 65]).await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), read_frame(&mut reader, 64))
+            .await
+            .expect("oversized frames must not wait for newline or EOF")
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+
+        let frame = Frame::Request {
+            id: 1,
+            body: Request::Sessions,
+        };
+        let mut bytes = serde_json::to_vec(&frame).unwrap();
+        bytes.push(b'\n');
+        let mut reader = BufReader::new(bytes.as_slice());
+        assert!(matches!(
+            read_frame(&mut reader, bytes.len()).await.unwrap(),
+            Some(Frame::Request {
+                id: 1,
+                body: Request::Sessions
+            })
+        ));
+        assert!(read_frame(&mut reader, bytes.len())
+            .await
+            .unwrap()
+            .is_none());
+    }
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    #[test]
+    fn concurrent_requests_reserve_one_operation_and_share_its_result() {
+        let sink = Arc::new(DaemonSink::default());
+        let start = Arc::new(Barrier::new(12));
+        let workers: Vec<_> = (0..12)
+            .map(|_| {
+                let sink = Arc::clone(&sink);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    let (operation, fresh) = sink.reserve("client", "request", [7; 32]).unwrap();
+                    if fresh {
+                        operation.finish(Ok(json!({ "sessionId": "one-session" })));
+                    }
+                    assert_eq!(operation.wait().unwrap()["sessionId"], "one-session");
+                    usize::from(fresh)
+                })
+            })
+            .collect();
+        let executed: usize = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .sum();
+        assert_eq!(executed, 1);
+    }
+
+    #[test]
+    fn pending_operation_does_not_block_other_sessions_or_allow_content_changes() {
+        let sink = DaemonSink::default();
+        let (pending, first) = sink.reserve("client", "request-a", [1; 32]).unwrap();
+        assert!(first);
+        let (other, first) = sink.reserve("client", "request-b", [2; 32]).unwrap();
+        assert!(first);
+        other.finish(Ok(json!({ "queued": 1 })));
+        assert_eq!(other.wait().unwrap()["queued"], 1);
+        assert!(pending.completion.lock().unwrap().is_none());
+        assert!(sink.reserve("client", "request-a", [3; 32]).is_err());
+        let (retry, fresh) = sink.reserve("client", "request-a", [1; 32]).unwrap();
+        assert!(!fresh);
+        assert!(Arc::ptr_eq(&pending, &retry));
+        assert!(
+            sink.reserve("another client", "request-a", [3; 32])
+                .unwrap()
+                .1
+        );
+    }
+
+    #[test]
+    fn cache_capacity_never_evicts_valid_or_inflight_requests() {
+        let sink = DaemonSink::default();
+        let mut oldest = None;
+        for index in 0..MAX_RECENT_OUTCOMES {
+            let (entry, _) = sink.reserve("client", &index.to_string(), [0; 32]).unwrap();
+            if index == 0 {
+                entry.finish(Ok(json!({ "ended": true })));
+                oldest = Some(entry);
+            }
+        }
+        assert!(sink.reserve("client", "overflow", [0; 32]).is_err());
+        assert!(!sink.reserve("client", "0", [0; 32]).unwrap().1);
+        assert!(!sink.reserve("client", "1", [0; 32]).unwrap().1);
+
+        // Only an actually expired, completed operation frees capacity.
+        *oldest.unwrap().completion.lock().unwrap() = Some((
+            Instant::now() - RECENT_OUTCOME_TTL,
+            Ok(json!({ "ended": true })),
+        ));
+        assert!(sink.reserve("client", "overflow", [0; 32]).unwrap().1);
+        assert_eq!(sink.recent.lock().unwrap().len(), MAX_RECENT_OUTCOMES);
+    }
+
+    #[test]
+    fn interrupted_operation_stays_unknown_instead_of_reexecuting() {
+        let sink = DaemonSink::default();
+        let (operation, _) = sink.reserve("client", "request", [0; 32]).unwrap();
+        drop(OutcomeGuard {
+            operation: Arc::clone(&operation),
+            completed: false,
+        });
+        assert_eq!(operation.wait().unwrap_err(), UNKNOWN_OUTCOME);
+        let (retry, fresh) = sink.reserve("client", "request", [0; 32]).unwrap();
+        assert!(!fresh);
+        assert_eq!(retry.wait().unwrap_err(), UNKNOWN_OUTCOME);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plan_revoked_during_launch_stops_only_its_new_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Arc::new(DaemonSink::default());
+        let registry = AgentRegistry::with_local_reporter_prefixed(
+            Arc::clone(&sink) as Arc<dyn AgentSink>,
+            SESSION_ID_PREFIX,
+        )
+        .unwrap();
+        let context = Context {
+            registry: Arc::clone(&registry),
+            sink: Arc::clone(&sink),
+            scheduler: Arc::new(Scheduler::open(dir.path())),
+            chat: Arc::new(AgentChatRegistry::new()),
+            token: String::new(),
+            shutdown: Arc::new(Notify::new()),
+            log: Arc::new(Logger::silent()),
+        };
+        let plan: McpPlan = serde_json::from_value(json!({
+            "planId": "test-plan", "label": "launch authorization test", "note": "",
+            "definitionId": "custom", "workingDirectory": dir.path(), "sandbox": false,
+            "request": {
+                "definitionId": "custom", "label": "launch authorization test",
+                "executable": "/bin/cat", "workingDirectory": dir.path(),
+                "cols": 80, "rows": 24,
+            },
+        }))
+        .unwrap();
+        let launch = || {
+            agent::launch_with_replay(
+                Arc::clone(&sink) as Arc<dyn AgentSink>,
+                Arc::clone(&registry),
+                plan.request.clone(),
+                None,
+            )
+            .unwrap()
+            .session_id
+        };
+        let existing = launch();
+        for replacement_enabled in [false, true] {
+            sink.plans_replace(true, vec![plan.clone()]);
+            let generation = sink.plans.lock().unwrap().generation;
+            let new_session = launch();
+            // The user disables launch or replaces the approved plans while
+            // process creation is in progress, before the result is shared.
+            let mut replacement = plan.clone();
+            replacement.request.arguments = vec!["--help".into()];
+            sink.plans_replace(replacement_enabled, vec![replacement]);
+            assert!(finish_plan_launch(&context, &new_session, generation).is_err());
+            assert!(registry.session_summary(&new_session).is_none());
+            assert!(!sink.is_shared(&new_session));
+            assert!(registry.session_summary(&existing).is_some());
+        }
+        // Reattaching a desktop with the exact same snapshot changes no
+        // authorization and must not cancel an in-flight launch.
+        sink.plans_replace(true, vec![plan.clone()]);
+        let generation = sink.plans.lock().unwrap().generation;
+        let new_session = launch();
+        sink.plans_replace(true, vec![plan.clone()]);
+        finish_plan_launch(&context, &new_session, generation).unwrap();
+        assert!(sink.has_control(&new_session));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unauthorized_and_invalid_writes_cannot_exhaust_operation_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let sink = Arc::new(DaemonSink::default());
+        let registry = Arc::new(AgentRegistry::new());
+        let context = Context {
+            registry: Arc::clone(&registry),
+            sink: Arc::clone(&sink),
+            scheduler: Arc::new(Scheduler::open(dir.path())),
+            chat: Arc::new(AgentChatRegistry::new()),
+            token: String::new(),
+            shutdown: Arc::new(Notify::new()),
+            log: Arc::new(Logger::silent()),
+        };
+        for index in 0..(MAX_RECENT_OUTCOMES + 1) {
+            assert!(dispatch_as(
+                &context,
+                ClientRole::Observer,
+                "read-only observer",
+                Request::Prompt {
+                    session_id: "unshared-session".into(),
+                    text: "not authorized".into(),
+                    mode: PromptMode::Queue,
+                    request_id: format!("denied-{index}"),
+                },
+            )
+            .is_err());
+        }
+        assert!(sink.recent.lock().unwrap().is_empty());
+        assert!(dispatch_as(
+            &context,
+            ClientRole::Observer,
+            "read-only observer",
+            Request::LaunchPlan {
+                plan_id: "not-authorized".into(),
+                request_id: "denied-launch".into(),
+            },
+        )
+        .is_err());
+        assert!(sink.recent.lock().unwrap().is_empty());
+
+        let session = agent::launch_with_replay(
+            Arc::clone(&sink) as Arc<dyn AgentSink>,
+            Arc::clone(&registry),
+            serde_json::from_value(json!({
+                "definitionId": "custom", "label": "validation test",
+                "executable": "/bin/cat", "workingDirectory": dir.path(),
+                "cols": 80, "rows": 24,
+            }))
+            .unwrap(),
+            None,
+        )
+        .unwrap()
+        .session_id;
+        sink.set_shared(&session, true);
+        sink.set_control(&session, true).unwrap();
+        agent::set_mcp_control(sink.as_ref(), &registry, &session, true).unwrap();
+        for text in ["\x1b[201~", "\x03", "", "\n  "] {
+            assert!(dispatch_as(
+                &context,
+                ClientRole::Observer,
+                "authorized observer",
+                Request::Prompt {
+                    session_id: session.clone(),
+                    text: text.into(),
+                    mode: PromptMode::Queue,
+                    request_id: format!("invalid-{}", text.len()),
+                },
+            )
+            .is_err());
+        }
+        assert!(sink.recent.lock().unwrap().is_empty());
+        let valid = dispatch_as(
+            &context,
+            ClientRole::Observer,
+            "authorized observer",
+            Request::Prompt {
+                session_id: session,
+                text: "valid work remains possible".into(),
+                mode: PromptMode::Queue,
+                request_id: "valid".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(valid["queued"], 1);
+        assert_eq!(sink.recent.lock().unwrap().len(), 1);
+        registry.stop_all();
+    }
+
+    #[test]
+    fn claimed_client_names_cannot_insert_log_lines_or_terminal_controls() {
+        assert_eq!(client_label(Some("client\nforged\r\x1b\t")), "clientforged");
+        assert_eq!(client_label(Some("\n\r\t")), "MCP client");
+        assert_eq!(client_label(Some(&"x".repeat(200))).len(), 80);
     }
 }
