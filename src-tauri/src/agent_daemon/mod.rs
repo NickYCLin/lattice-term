@@ -113,6 +113,10 @@ pub struct DaemonPaths {
 /// FNV-1a of the data directory: stable, short, one per installation.
 fn installation_hash(data_dir: &Path) -> u64 {
     let key = installation_key(data_dir);
+    hash_installation_key(&key)
+}
+
+fn hash_installation_key(key: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in key.as_bytes() {
         hash ^= u64::from(*byte);
@@ -228,6 +232,16 @@ impl DaemonPaths {
         format!(
             r"\\.\pipe\latticeterm-agent-{:016x}",
             installation_hash(&self.data_dir)
+        )
+    }
+
+    /// Before path normalization, the original spelling identified the pipe.
+    /// The desktop must still reach that running daemon after an upgrade.
+    #[cfg(windows)]
+    pub(crate) fn legacy_pipe_name(&self) -> String {
+        format!(
+            r"\\.\pipe\latticeterm-agent-{:016x}",
+            hash_installation_key(&self.data_dir.to_string_lossy())
         )
     }
 }

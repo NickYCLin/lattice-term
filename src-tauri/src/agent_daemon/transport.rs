@@ -177,9 +177,24 @@ mod windows {
 
     pub async fn connect(paths: &DaemonPaths) -> io::Result<ClientStream> {
         let name = paths.pipe_name();
+        match connect_named_pipe(&name).await {
+            // Only absence permits fallback. Do not hide access-denied or a
+            // busy current daemon by attaching to a different instance.
+            Err(error) if error.raw_os_error() == Some(2) => {
+                let legacy = paths.legacy_pipe_name();
+                if legacy == name {
+                    return Err(error);
+                }
+                connect_named_pipe(&legacy).await
+            }
+            result => result,
+        }
+    }
+
+    async fn connect_named_pipe(name: &str) -> io::Result<ClientStream> {
         let mut attempts = 0;
         loop {
-            match ClientOptions::new().open(&name) {
+            match ClientOptions::new().open(name) {
                 Ok(client) => return Ok(client),
                 // ERROR_PIPE_BUSY: every instance is mid-connect; wait a moment.
                 Err(error) if error.raw_os_error() == Some(231) && attempts < 20 => {
@@ -188,6 +203,34 @@ mod windows {
                 }
                 Err(error) => return Err(error),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn a_client_reaches_the_legacy_pipe_without_replacing_it() {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = DaemonPaths::new(&dir.path().join("Legacy Data"));
+            std::fs::create_dir_all(&paths.data_dir).unwrap();
+            assert_ne!(paths.pipe_name(), paths.legacy_pipe_name());
+            let old = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(paths.legacy_pipe_name())
+                .unwrap();
+            let connection = connect(&paths).await.unwrap();
+            old.connect().await.unwrap();
+            drop(connection);
+            // The fallback did not bind a second daemon at the new name.
+            assert_eq!(
+                ClientOptions::new()
+                    .open(paths.pipe_name())
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(2)
+            );
         }
     }
 }

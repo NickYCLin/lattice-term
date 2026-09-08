@@ -14,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { arch, release, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -171,10 +171,10 @@ const ok = (value) => {
   assert.equal(value.isError, false, JSON.stringify(value.content));
   return value.structuredContent;
 };
-function pipeName(directory) {
+function pipeName(directory, legacy = false) {
   // Match Rust canonicalize/GetFinalPathNameByHandle, including CI's RUNNER~1
   // temporary path. The JavaScript realpath implementation retains 8.3 aliases.
-  const key = realpathSync
+  const key = legacy ? directory : realpathSync
     .native(directory)
     .replace(/^\\\\\?\\/, "")
     .replaceAll("/", "\\")
@@ -281,6 +281,50 @@ async function check(id, action) {
   }
 }
 try {
+  await check("legacy pipe and observer protocol isolation", async () => {
+    const directory = join(root, "Legacy Data");
+    mkdirSync(directory);
+    // An isolated fixture, never an account credential or the desktop token.
+    writeFileSync(join(directory, "agent-daemon.token"), "a".repeat(64));
+    const sockets = new Set();
+    const greetings = [];
+    const legacy = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("error", () => {});
+      socket.on("close", () => sockets.delete(socket));
+      socket.setEncoding("utf8");
+      let pending = "";
+      socket.on("data", (chunk) => {
+        pending += chunk;
+        if (pending.length > 16384) return socket.destroy();
+        const end = pending.indexOf("\n");
+        if (end < 0) return;
+        const { id, body } = JSON.parse(pending.slice(0, end));
+        // Keep only protocol metadata. The legacy server ignores role, but
+        // rejects version 2 before returning any sessions or output snapshots.
+        greetings.push({ type: body.type, protocol: body.protocol, role: body.role });
+        socket.end(JSON.stringify({ kind: "response", id, ok: false,
+          result: null, error: "The background service refused the greeting." }) + "\n");
+      });
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        legacy.once("error", reject);
+        legacy.listen(pipeName(directory, true), resolve);
+      });
+      const probe = await mcp(directory, "legacy-upgrade-check");
+      const value = ok(await probe.call("list_agent_sessions"));
+      assert.equal(value.daemonRunning, false);
+      assert.ok(greetings.length > 0, "adapter must reach the existing legacy pipe");
+      assert.ok(greetings.every((entry) => entry.type === "hello" &&
+        entry.protocol === 2 && entry.role === "observer"));
+      probe.close();
+      return { reachedLegacyPipe: true, observerProtocol: 2, privateDataReturned: false };
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => legacy.close(resolve));
+    }
+  });
   daemon = child(["agent-daemon", "--data-dir", dataDir]);
   await waitUntil(
     () => existsSync(join(dataDir, "agent-daemon.token")),
