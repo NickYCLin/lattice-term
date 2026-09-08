@@ -920,9 +920,31 @@ mod tests {
     fn normal_drop_flushes_the_latest_snapshot_before_reopening() {
         let (_dir, path) = scratch();
         let mut history = History::open(&path);
+        let worker = history
+            .persistence
+            .as_mut()
+            .expect("persistence should be enabled");
+        let (drop_sender, drop_receiver) = mpsc::channel();
+        let completed = std::mem::replace(&mut worker.completed, drop_receiver);
+        let (observed_sender, observed) = mpsc::channel();
+        let relay = std::thread::spawn(move || {
+            completed
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the audit worker must finish and release its file lock");
+            let _ = drop_sender.send(());
+            let _ = observed_sender.send(());
+        });
         history.record("client", Action::Stop, Outcome::Failed, None, 1);
         drop(history);
+        // Drop keeps its production 250 ms best-effort budget. A loaded
+        // filesystem can finish later; observe actual worker completion
+        // without pre-flushing the pending snapshot or weakening assertions.
+        observed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the audit worker must complete before reopening its store");
+        relay.join().unwrap();
         let reopened = History::open(&path);
+        assert_eq!(reopened.snapshot().persistence, State::Ready);
         assert_eq!(reopened.snapshot().entries.len(), 1);
         assert_eq!(reopened.snapshot().entries[0].outcome, Outcome::Failed);
     }
@@ -1246,7 +1268,9 @@ mod tests {
     fn unix_fifo_cannot_block_history_startup() {
         use std::os::unix::ffi::OsStrExt;
         let (_dir, path) = scratch();
-        drop(Store::open(&path).unwrap());
+        // This fixture only needs the private folder. Opening a Store also
+        // takes an unrelated lock that a parallel process fork can inherit.
+        create_private_directory(&path.join(DIRECTORY)).unwrap();
         let file = path.join(DIRECTORY).join(FILE_NAME);
         let name = std::ffi::CString::new(file.as_os_str().as_bytes()).unwrap();
         // SAFETY: name is a NUL-terminated path inside this test's directory.
