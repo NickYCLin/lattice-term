@@ -165,7 +165,7 @@ Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重�
 | 工具專用語意 Adapter | 部分完成 | Codex `notify`、Claude Code、Gemini CLI、Hermes Agent、Qwen Code lifecycle hooks，以及 OpenCode、GitHub Copilot CLI plugin events 已接上 Reporter；Hermes 已提供 token buckets，舊工作區續接 recipe 與保守的 session ID 擷取仍保留，其他工具 hook、token 與 cost 擷取尚未完成 |
 | 跨程序背景 daemon 與重新 attach | 已完成（第一版） | 勾選「留在背景」的工作階段由 `lattice-term agent-daemon` 持有：同一份 `AgentRegistry` 在 daemon 程序裡跑，桌面透過使用者專屬本機 socket 以 JSON 行協定 attach，關閉視窗後 CLI 繼續，下次開啟接回並重播 256 KiB 尾端；未勾選的仍隨桌面結束。保存的啟動項目記住此選項，還原時直接交給 daemon；對話排程在沒有視窗連著時由 daemon 執行，結果交回桌面成為未讀對話 |
 | 跨重啟還原 | 部分完成 | 已保存的 Codex 項目會續接同工作目錄最近的對話，Cursor 項目會使用 `agent --continue` 續接最近對話；正常關閉時，每個 Agent 最近 256 KiB 終端輸出會以 OS 安全儲存區中的裝置金鑰加密保存，重啟同一項目後先重播。若安全儲存區不可用就不落地輸出；原 PTY 程序與可互動 pane 仍無法跨程序存活 |
-| MCP Server | A／B 協作與 C 遠端工具已實作 | observer 角色連 daemon，分享、可控、啟動分開授權；派送需官方就緒且無人工編輯。C 需桌面逐項授權既有 SSH／SFTP，專用 exec channel 與核准檔案根目錄，不代登入或信任主機。操作紀錄支援私有快照跨重啟還原。沒有 PTY「中止本輪」或遠端畫面；各平台與真實 CLI 驗收分開記錄，見 [MCP Server](MCP.zh-TW.md) |
+| MCP Server | A／B 協作與 C 遠端工具已實作 | observer 角色連 daemon，metadata 分享、內容讀取、可控、啟動分開授權；派送需官方就緒且無人工編輯。C 需桌面逐項授權既有 SSH／SFTP，專用 exec channel 與核准檔案根目錄，不代登入或信任主機。操作紀錄支援私有快照跨重啟還原。沒有 PTY「中止本輪」或遠端畫面；各平台與真實 CLI 驗收分開記錄，見 [MCP Server](MCP.zh-TW.md) |
 | 遠端 Agent Fleet | 未完成 | 尚未透過 SSH 或 Lattice Remote 控制遠端 PTY |
 | 對話模式 | 已完成 | Claude Code 與 Gemini CLI 以官方 headless JSON 模式逐輪執行，Codex 每個對話常駐一個 app-server 加速追問；串流文字、工具卡片、用量統計與以 CLI 對話 ID 續接；Claude（stream-json 控制協定）與 Codex（app-server JSON-RPC）支援逐項核准；Gemini 的非互動模式無對應機制 |
 | 任務編排 | 部分完成 | broadcast prompt 與每個工作階段的提示佇列已完成；佇列上限 16 則，只有官方整合回報 `Done`／`Idle` 才放行一則，heuristic 猜測不放行；對話模式的排程任務與「接在某個排程之後」的依賴鏈已完成（見下）；Fleet 工作階段之間的依賴與資源限制仍待實作 |

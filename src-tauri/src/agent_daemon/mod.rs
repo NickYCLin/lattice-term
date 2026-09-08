@@ -382,6 +382,10 @@ pub enum Request {
     ShareSet {
         session_id: String,
         shared: bool,
+        /// None preserves an existing grant; legacy first-time sharing
+        /// includes output. New desktops explicitly start with false.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read_output: Option<bool>,
     },
     /// The user lets observers prompt and stop one shared session, or
     /// takes that back. Reading and controlling are separate grants.
@@ -475,10 +479,16 @@ pub enum CancelScope {
 #[serde(rename_all = "camelCase")]
 pub struct SharedSession {
     pub session_id: String,
+    #[serde(default = "legacy_output_access")]
+    pub read_output: bool,
     pub control: bool,
     /// The last thing an observer did to it, for the user to see.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<McpActivity>,
+}
+
+pub(super) fn legacy_output_access() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -516,6 +526,10 @@ pub struct HelloReply {
     /// request variant: they may close the connection on an unknown frame.
     #[serde(default)]
     pub mcp_history: bool,
+    /// Older daemons ignore unknown ShareSet fields; never request reduced
+    /// output access before this capability has been confirmed.
+    #[serde(default)]
+    pub mcp_output_scopes: bool,
     #[serde(default)]
     pub desktop_bridge_protocol: u32,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,

@@ -1,6 +1,6 @@
 # LatticeTerm MCP Server（Agent 協作與受控遠端操作）
 
-LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出狀態、讀取終端輸出、等待狀態改變；對你另外勾選「可控」的工作階段送指示、清佇列或結束它；以及在你打開啟動開關後，啟動你保存過的背景啟動項目。
+LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
 這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 遠端畫面尚未實作。實作、測試與實機驗收分開記錄，見文末。
 
@@ -21,9 +21,9 @@ lattice-term agent-daemon（背景服務）
 ```
 
 - **只有背景 Agent 工作階段可分享。** 啟動 CLI 時勾「留在背景」的工作階段由背景服務持有；桌面自己的 Agent 工作階段、對話頁及遠端畫面沒有對外路徑。SSH／SFTP 走下方獨立的桌面授權流程。
-- **預設不分享，可隨時撤銷。** 在 Agent Fleet 頁「執行中」清單裡，每個背景工作階段旁有「分享給 MCP」勾選框；分享狀態存在背景服務的記憶體裡，工作階段結束或背景服務結束就自動取消。
-- **讀跟寫是兩個授權。** 分享只給看；要讓 MCP client 對某個工作階段送指示、清除 MCP 指示佇列或結束它，得再勾「允許 MCP 送指示與停止」。取消可控或分享時，尚未送出的 MCP 指示一併移除；你自己排隊的工作保留。取消可控不影響分享。
-- **啟動是第三個授權。** MCP 區塊裡的「允許 MCP 啟動已保存的背景啟動項目」打開後，client 才能用 `launch_agent` 啟動「跨重啟還原」清單裡勾了「留在背景」的項目，內容完全照你保存的（CLI、參數、工作目錄、沙箱、共用啟動指示），不能自訂指令；它啟動的工作階段自動分享並可控。這個開關存在啟動項目檔裡，開著時背景服務會保持常駐。
+- **預設不分享，可隨時撤銷。** 每個背景工作階段旁的「分享給 MCP」第一次勾選只開放 metadata：工作階段資訊、狀態與狀態等待，不開放終端輸出或內容片段。分享狀態存在背景服務記憶體，工作階段或背景服務結束就自動取消。
+- **內容讀取與控制分開授權。** 「允許 MCP 讀取內容」開放終端輸出；「允許 MCP 送指示與停止」開放指示、清除 MCP 佇列與結束工作階段。取消內容讀取不取消狀態分享，也不改控制權；取消控制不改內容讀取權。取消控制或全部分享時，尚未送出的 MCP 指示一併移除，使用者自己排隊的工作保留。內容與 metadata 都可能含敏感資訊，請選擇合適的分享對象。
+- **啟動也有獨立授權。** 「允許 MCP 啟動已保存的背景啟動項目」打開後，client 才能用 `launch_agent` 啟動保存清單裡勾了「留在背景」的項目，完全沿用保存的 CLI、參數、工作目錄、沙箱與共用指示。它啟動的工作階段會自動分享、開放內容讀取並可控；介面會明示這三個效果。開關存在啟動項目檔裡，開著時背景服務保持常駐。
 - **你看得到誰做了什麼。** MCP 區塊列最近 256 筆 Agent 寫入、遠端操作與遠端授權變更，包含已接受、重送、失敗或結果未確認。撤權或工作階段結束不移除紀錄；安全寫入此裝置後可跨背景服務重啟還原。介面區分已儲存、尚在儲存、只在記憶體與無法儲存。client 名稱由對方自報，不是已驗證身分，請勿包含敏感資訊。
 - **adapter 不會啟動背景服務。** 背景服務沒在跑時，`list_agent_sessions` 回 `daemonRunning: false` 與空清單，讀取與等待回 `isError` 說明原因；不會為了讓模型有東西看而拉起程序。
 - **權限由背景服務端強制。** adapter 以 `observer` 角色打招呼，背景服務只接受已分享工作階段的觀測、另外授權的操作，以及允許的啟動項目查詢；其他管理請求一律拒絕。`readOnlyHint` 等 MCP annotation 只是描述。
@@ -43,6 +43,12 @@ MCP 觀察者使用獨立的背景服務協定 2；桌面仍用協定 1，以便
 若看到「背景服務版本較舊」，既有 CLI 仍可操作，但 MCP 分享、控制與啟動
 開關暫停使用。請先完成背景工作，再停止並重啟背景服務；更新不會自動
 終止工作階段。這是安全相容性限制，重開桌面視窗不等於重啟背景服務。
+
+另一個獨立能力 `mcpOutputScopes` 表示可分開授權內容讀取。沒有這個能力
+時，介面禁用新分享與內容權限切換，絕不把舊服務標成 metadata-only。
+既有分享維持原先可讀內容的權限，仍可取消；等背景工作完成後再手動
+停止並重啟服務。新版第一次分享會以單一請求送出
+`shared: true, readOutput: false`，不先短暫開放內容再降權。
 
 Windows 會優先使用正規化後的管道名稱；只有新管道不存在時，才嘗試同一
 資料目錄原始寫法的舊管道。這可保留桌面更新前的背景連線，不會在權限被拒
@@ -86,16 +92,25 @@ Gemini CLI、Cursor 等使用 `mcpServers` JSON 的工具：
 
 | 工具 | 參數 | 回傳 |
 | --- | --- | --- |
-| `get_capabilities` | 無 | `daemonRunning`、`backends`（目前只有 `agentFleetBackground`，依授權回 `access: readOnly` 或 `control`）、`sharedSessions`、`controlledSessions`、`launchEnabled`、`launchablePlans`、`limits`、`limitations` 文字清單 |
+| `get_capabilities` | 無 | `daemonRunning`、`backends`（背景 Fleet 與桌面 SSH/SFTP 的支援、可用狀態）、`mcpOutputScopes`、`sharedSessions`、`outputReadableSessions`、`controlledSessions`、`launchEnabled`、`launchablePlans`、`limits`、`limitations` 文字清單 |
 | `list_agent_sessions` | 無 | `daemonRunning` 與 `sessions[]`：`sessionId`、`label`、`groupLabel`、`definitionId`、`model`、`workingDirectory`、`state`（`working`／`needsAttention`／`idle`／`done`）、`stateSource`（`integration` 為 CLI 官方 hook 回報，`heuristic` 為由輸出猜測）、`queuedPrompts`、`tokenUsage`（有才附）、`sandboxed`。不含執行檔、啟動參數、帳號目錄、PID 與原生對話 ID |
-| `read_agent_output` | `sessionId`（必填）、`cursor`（位元組位移，預設 0）、`maxBytes`（分頁大小，預設 16384，上限 65536，可超額至多 4096） 、`stripControlSequences`（預設 true） | `text`、`cursor`（實際起點）、`nextCursor`、`endOffset`、`availableFrom`、`truncated`、`hasMore` |
+| `read_agent_output` | `sessionId`（必填，需 `readOutput: true`）、`cursor`（位元組位移，預設 0）、`maxBytes`（分頁大小，預設 16384，上限 65536，可超額至多 4096） 、`stripControlSequences`（預設 true） | `text`、`cursor`（實際起點）、`nextCursor`、`endOffset`、`availableFrom`、`truncated`、`hasMore` |
 | `wait_agent_state` | `sessionId`（必填）、`timeoutMs`（預設 30000，上限 120000）、`state`（上次看到的狀態） | `session`（同 list 的單筆）、`changed`、`closed`（附 `reason`）、`revoked`（使用者取消分享，附 `reason`）、`timedOut` |
 | `list_launch_plans` | 無 | `enabled` 與 `plans[]`：`planId`、`label`、`note`、`definitionId`、`workingDirectory`、`sandbox`。不含指令與參數 |
 | `launch_agent` | `planId`、`requestId`（皆必填） | `session`（同 list 的單筆，`access: control`）、`duplicate` |
 | `send_agent_prompt` | `sessionId`（必填，需 `access: control`）、`text`（必填，≤16000 字元）、`mode`（`queue` 預設／`now`）、`requestId`（必填） | `sentImmediately`、`queued`（還在排隊的數量）、`state`、`stateSource`、`duplicate` |
 | `cancel_agent_task` | `sessionId`（必填，需 `access: control`）、`scope`（`queue`／`session`）、`requestId`（必填） | `queue`：`dropped`；`session`：`ended` |
 
-`list_agent_sessions` 的每筆多了 `access`：`read` 或 `control`。
+`list_agent_sessions` 的每筆含 `access`（`metadata`／`read`／`control`）與
+獨立的 `readOutput` 布林值；`access: control` 不代表可讀內容。
+`wait_agent_state` 在 metadata-only 下仍可等待狀態；內容降權會更新其權限
+資訊，不把仍然有效的狀態分享誤報為全部撤銷。舊分享缺少 `readOutput`
+時保持原本可讀內容的語意，不悄悄改掉使用者現有權限。
+
+撤銷內容權限會拒絕仍在處理或排隊中的舊讀取，重新開放也不會讓舊回覆
+恢復有效。若慢 client 的回覆已經送出部分 JSON frame，系統會關閉該
+MCP／observer 連線，不繼續補完舊內容；client 可重新連線，既有 CLI、
+狀態分享與控制權不會因此終止。已經傳出的位元組無法收回。
 
 B 階段工具的語意：
 

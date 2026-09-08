@@ -1181,6 +1181,7 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
     Ok(AgentDaemonStatus {
         running: daemon.is_running().await,
         mcp_needs_restart: daemon.mcp_needs_restart().await,
+        mcp_output_scopes: daemon.mcp_output_scopes().await,
         sessions: sessions.len(),
         shared,
         history,
@@ -1195,6 +1196,7 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
 async fn agent_mcp_share(
     session_id: String,
     shared: bool,
+    read_output: Option<bool>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     if !crate::agent_daemon::owns(&session_id) {
@@ -1203,7 +1205,11 @@ async fn agent_mcp_share(
     let value = daemon
         .request(
             false,
-            crate::agent_daemon::Request::ShareSet { session_id, shared },
+            crate::agent_daemon::Request::ShareSet {
+                session_id,
+                shared,
+                read_output,
+            },
         )
         .await?;
     decode_mcp_shared_response(value)
@@ -1483,6 +1489,7 @@ async fn agent_automations_take_runs(
 struct AgentDaemonStatus {
     running: bool,
     mcp_needs_restart: bool,
+    mcp_output_scopes: bool,
     sessions: usize,
     /// Sessions shared with MCP observers, with their grants.
     shared: Vec<crate::agent_daemon::SharedSession>,

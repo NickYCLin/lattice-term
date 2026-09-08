@@ -315,6 +315,7 @@ where
             protocol: role.protocol_version(),
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: true,
+            mcp_output_scopes: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: detached_list(&context.registry),
             snapshots: context.registry.output_snapshots(),
@@ -325,6 +326,7 @@ where
             protocol: role.protocol_version(),
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: false,
+            mcp_output_scopes: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: shared_list(&context),
             snapshots: Vec::new(),
@@ -344,10 +346,8 @@ where
     ));
 
     let mut writer = tokio::spawn(async move {
-        while let Some(line) = rx.recv().await {
-            if write_half.write_all(line.as_bytes()).await.is_err()
-                || write_half.write_all(b"\n").await.is_err()
-            {
+        while let Some(frame) = rx.recv().await {
+            if frame.write_to(&mut write_half).await.is_err() {
                 break;
             }
         }
@@ -487,8 +487,26 @@ where
                     if role == ClientRole::Observer && tx.is_disconnected() {
                         return;
                     }
+                    // Carry the original content grant all the way through the
+                    // bounded reply queue. A later false -> true toggle cannot
+                    // make bytes copied under the earlier grant readable again.
+                    let output_access = match &body {
+                        Request::Observe { session_id, .. } if role == ClientRole::Observer => {
+                            match context.sink.output_access(session_id) {
+                                Ok(access) => Some(access),
+                                Err(error) => {
+                                    let _ = tx.send(response_line(id, Err(error)));
+                                    return;
+                                }
+                            }
+                        }
+                        _ => None,
+                    };
                     let result = dispatch_as(&context, role, &client_name, body);
-                    let _ = tx.send(response_line(id, result));
+                    let _ = tx.send_frame(ClientFrame {
+                        line: response_line(id, result),
+                        output: output_access.map(|access| (id, access)),
+                    });
                 });
             }
             Ok(Some(Frame::Response {
@@ -584,6 +602,32 @@ fn detached_list(registry: &AgentRegistry) -> Vec<AgentSessionSummary> {
     registry.list().into_iter().map(detached).collect()
 }
 
+/// Keep the existing wire DTO readable by older adapters, but remove local
+/// launch/account material at the observer boundary, not just in MCP views.
+fn observer_summary(summary: AgentSessionSummary) -> AgentSessionSummary {
+    AgentSessionSummary {
+        session_id: summary.session_id,
+        group_id: summary.group_id,
+        group_label: summary.group_label,
+        definition_id: summary.definition_id,
+        label: summary.label,
+        model: summary.model,
+        working_directory: summary.working_directory,
+        state: summary.state,
+        state_source: summary.state_source,
+        token_usage: summary.token_usage,
+        queued_prompts: summary.queued_prompts,
+        sandboxed: summary.sandboxed,
+        detached: summary.detached,
+        profile_config_path: None,
+        executable: String::new(),
+        launch_arguments: Vec::new(),
+        restore_existing_session: false,
+        process_id: None,
+        captured_session_id: None,
+    }
+}
+
 /// The sessions an observer may see: shared by the user and still alive.
 fn shared_list(context: &Context) -> Vec<AgentSessionSummary> {
     let shared = context.sink.shared();
@@ -594,13 +638,14 @@ fn shared_list(context: &Context) -> Vec<AgentSessionSummary> {
                 .iter()
                 .any(|entry| entry.session_id == summary.session_id)
         })
+        .map(observer_summary)
         .collect()
 }
 
 /// The same, with each session's grant attached (`mcpControl`).
 fn observed_list(context: &Context) -> Vec<Value> {
     let shared = context.sink.shared();
-    detached_list(&context.registry)
+    shared_list(context)
         .into_iter()
         .filter_map(|summary| {
             let entry = shared
@@ -608,6 +653,7 @@ fn observed_list(context: &Context) -> Vec<Value> {
                 .find(|entry| entry.session_id == summary.session_id)?;
             let mut value = serde_json::to_value(&summary).ok()?;
             value["mcpControl"] = json!(entry.control);
+            value["mcpReadOutput"] = json!(entry.read_output);
             Some(value)
         })
         .collect()
@@ -713,17 +759,17 @@ fn dispatch_as_inner(
                 cursor,
                 max_bytes,
             } => {
-                if !context.sink.is_shared(&session_id) {
-                    return Err("This session is not shared with observers.".to_string());
-                }
-                dispatch(
+                let access = context.sink.output_access(&session_id)?;
+                let result = dispatch(
                     context,
                     Request::Observe {
                         session_id,
                         cursor,
                         max_bytes,
                     },
-                )
+                );
+                access.check()?;
+                result
             }
             Request::Plans => Ok(context.sink.plans_view()),
             Request::LaunchPlan {
@@ -754,7 +800,16 @@ fn dispatch_as_inner(
                     }
                     Ok(())
                 },
-            ),
+            )
+            .map(|mut value| {
+                // Refresh permissions even on a deduplicated launch response.
+                // Revoking output does not revoke control of the launched job.
+                let read_output = value["sessionId"]
+                    .as_str()
+                    .is_some_and(|id| context.sink.output_access(id).is_ok());
+                value["mcpReadOutput"] = json!(read_output);
+                value
+            }),
             Request::Prompt {
                 session_id,
                 text,
@@ -881,7 +936,7 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
     ));
     let value = to_value(&summary)?;
     context.sink.broadcast("launched", value.clone());
-    Ok(value)
+    to_value(&observer_summary(summary))
 }
 
 fn finish_plan_launch(context: &Context, session_id: &str, generation: u64) -> Result<(), String> {
@@ -1060,7 +1115,11 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         }
         Request::AutomationsState => to_value(&context.scheduler.status()),
         Request::AutomationsTakeRuns => to_value(&context.scheduler.take_runs()),
-        Request::ShareSet { session_id, shared } => {
+        Request::ShareSet {
+            session_id,
+            shared,
+            read_output,
+        } => {
             let grant = context.sink.grant_change_lock(&session_id)?;
             let _grant = grant.lock().map_err(|error| error.to_string())?;
             if shared && registry.session_summary(&session_id).is_none() {
@@ -1069,7 +1128,9 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
             if !shared && registry.session_summary(&session_id).is_some() {
                 agent::set_mcp_control(sink, registry, &session_id, false)?;
             }
-            context.sink.set_shared(&session_id, shared);
+            context
+                .sink
+                .set_shared_output(&session_id, shared, read_output);
             context.log.line(&format!(
                 "desktop: {} {session_id} with observers",
                 if shared { "shared" } else { "unshared" }
@@ -1207,17 +1268,59 @@ pub struct ClientSender {
 
 #[derive(Clone)]
 enum ClientChannel {
-    Desktop(mpsc::UnboundedSender<String>),
-    Observer(mpsc::Sender<String>),
+    Desktop(mpsc::UnboundedSender<ClientFrame>),
+    Observer(mpsc::Sender<ClientFrame>),
 }
 
 pub enum ClientReceiver {
-    Desktop(mpsc::UnboundedReceiver<String>),
-    Observer(mpsc::Receiver<String>),
+    Desktop(mpsc::UnboundedReceiver<ClientFrame>),
+    Observer(mpsc::Receiver<ClientFrame>),
+}
+
+pub struct ClientFrame {
+    line: String,
+    output: Option<(u64, OutputAccess)>,
+}
+
+impl std::ops::Deref for ClientFrame {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.line
+    }
+}
+
+impl ClientFrame {
+    async fn write_to<W: AsyncWrite + Unpin>(mut self, writer: &mut W) -> std::io::Result<()> {
+        if let Some((id, access)) = &self.output {
+            if access.check().is_err() {
+                self.line = response_line(*id, Err(OUTPUT_NOT_SHARED.into()));
+                self.output = None;
+            }
+        }
+        let write = async {
+            writer.write_all(self.line.as_bytes()).await?;
+            writer.write_all(b"\n").await
+        };
+        match self.output.as_mut() {
+            Some((_, access)) => tokio::select! {
+                biased;
+                _ = access.revoked() => Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied, OUTPUT_NOT_SHARED,
+                )),
+                result = write => result,
+            },
+            None => write.await,
+        }
+    }
 }
 
 impl ClientSender {
     pub(super) fn send(&self, line: String) -> Result<(), ()> {
+        self.send_frame(ClientFrame { line, output: None })
+    }
+
+    fn send_frame(&self, line: ClientFrame) -> Result<(), ()> {
         if self.is_disconnected() {
             return Err(());
         }
@@ -1242,7 +1345,7 @@ impl ClientSender {
 }
 
 impl ClientReceiver {
-    async fn recv(&mut self) -> Option<String> {
+    async fn recv(&mut self) -> Option<ClientFrame> {
         match self {
             Self::Desktop(rx) => rx.recv().await,
             Self::Observer(rx) => rx.recv().await,
@@ -1250,10 +1353,45 @@ impl ClientReceiver {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 struct ShareEntry {
     control: bool,
+    read_output: bool,
+    output_revoked: watch::Sender<bool>,
     activity: Option<McpActivity>,
+}
+
+impl Default for ShareEntry {
+    fn default() -> Self {
+        Self {
+            control: false,
+            read_output: true,
+            output_revoked: watch::channel(false).0,
+            activity: None,
+        }
+    }
+}
+
+const OUTPUT_NOT_SHARED: &str = "This session's output is not shared with observers.";
+
+#[derive(Clone)]
+struct OutputAccess(watch::Receiver<bool>);
+
+impl OutputAccess {
+    fn check(&self) -> Result<(), String> {
+        if *self.0.borrow() || self.0.has_changed().is_err() {
+            Err(OUTPUT_NOT_SHARED.into())
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn revoked(&mut self) {
+        if self.check().is_err() {
+            return;
+        }
+        let _ = self.0.changed().await;
+    }
 }
 
 #[derive(Default)]
@@ -1406,6 +1544,7 @@ impl DaemonSink {
                     .iter()
                     .map(|(session_id, entry)| SharedSession {
                         session_id: session_id.clone(),
+                        read_output: entry.read_output,
                         control: entry.control,
                         activity: entry.activity.clone(),
                     })
@@ -1434,19 +1573,55 @@ impl DaemonSink {
     /// tells observers, so a wait on that session ends now rather than at
     /// its timeout.
     pub fn set_shared(&self, session_id: &str, shared: bool) {
+        self.set_shared_output(session_id, shared, None);
+    }
+
+    fn output_access(&self, session_id: &str) -> Result<OutputAccess, String> {
+        let shared = self.shared.lock().map_err(|_| OUTPUT_NOT_SHARED)?;
+        let entry = shared
+            .get(session_id)
+            .filter(|entry| entry.read_output)
+            .ok_or(OUTPUT_NOT_SHARED)?;
+        let access = OutputAccess(entry.output_revoked.subscribe());
+        access.check()?;
+        Ok(access)
+    }
+
+    pub fn set_shared_output(&self, session_id: &str, shared: bool, read_output: Option<bool>) {
+        let mut changed_output = None;
         let revoked = match self.shared.lock() {
             Ok(mut set) => {
                 if shared {
-                    set.entry(session_id.to_string()).or_default();
+                    let entry = set.entry(session_id.to_string()).or_default();
+                    if let Some(read_output) = read_output {
+                        if entry.read_output != read_output {
+                            entry.output_revoked.send_replace(true);
+                            entry.read_output = read_output;
+                            if read_output {
+                                // Never reuse a revoked generation: delayed reads
+                                // from before a false -> true toggle stay denied.
+                                entry.output_revoked = watch::channel(false).0;
+                            }
+                            changed_output = Some(read_output);
+                        }
+                    }
                     false
                 } else {
-                    set.remove(session_id).is_some()
+                    set.remove(session_id).is_some_and(|entry| {
+                        entry.output_revoked.send_replace(true);
+                        true
+                    })
                 }
             }
             Err(_) => false,
         };
         if revoked {
             self.broadcast("unshared", json!({ "sessionId": session_id }));
+        } else if let Some(read_output) = changed_output {
+            self.broadcast(
+                "outputAccess",
+                json!({ "sessionId": session_id, "readOutput": read_output }),
+            );
         }
     }
 
@@ -1593,8 +1768,20 @@ impl DaemonSink {
         // that a session stopped being shared); never terminal bytes,
         // native ids, or launches.
         let observable = name == "unshared"
-            || (matches!(name, "state" | "closed" | "model" | "usage" | "queue")
-                && self.is_shared(session_id));
+            || (matches!(
+                name,
+                "state" | "closed" | "model" | "usage" | "queue" | "outputAccess"
+            ) && self.is_shared(session_id));
+        let observer_line = observable
+            .then(|| observer_event(name, &payload))
+            .flatten()
+            .and_then(|payload| {
+                serde_json::to_string(&Frame::Event {
+                    name: name.into(),
+                    payload,
+                })
+                .ok()
+            });
         let frame = Frame::Event {
             name: name.to_string(),
             payload,
@@ -1605,10 +1792,38 @@ impl DaemonSink {
         if let Ok(mut clients) = self.clients.lock() {
             clients.retain(|client| match client.role {
                 ClientRole::Desktop => client.tx.send(line.clone()).is_ok(),
-                ClientRole::Observer => !observable || client.tx.send(line.clone()).is_ok(),
+                ClientRole::Observer => observer_line
+                    .as_ref()
+                    .is_none_or(|line| client.tx.send(line.clone()).is_ok()),
             });
         }
     }
+}
+
+fn observer_event(name: &str, payload: &Value) -> Option<Value> {
+    let id = payload["sessionId"].as_str()?;
+    let mut view = json!({ "sessionId": id });
+    match name {
+        "state" => {
+            let state: AgentLifecycle = serde_json::from_value(payload["state"].clone()).ok()?;
+            let source: AgentStateSource =
+                serde_json::from_value(payload["source"].clone()).ok()?;
+            view["state"] = json!(state);
+            view["source"] = json!(source);
+        }
+        "closed" => view["reason"] = json!("The agent session ended."),
+        "model" => view["model"] = json!(payload["model"].as_str()?),
+        "usage" => {
+            let usage: AgentTokenUsage =
+                serde_json::from_value(payload["tokenUsage"].clone()).ok()?;
+            view["tokenUsage"] = json!(usage);
+        }
+        "queue" => view["queuedPrompts"] = json!(payload["queuedPrompts"].as_u64()?),
+        "outputAccess" => view["readOutput"] = json!(payload["readOutput"].as_bool()?),
+        "unshared" => {}
+        _ => return None,
+    }
+    Some(view)
 }
 
 impl AgentSink for DaemonSink {
@@ -1637,7 +1852,9 @@ impl AgentSink for DaemonSink {
         );
         // Observers already heard `closed`; drop the grant quietly.
         if let Ok(mut set) = self.shared.lock() {
-            set.remove(session_id);
+            if let Some(entry) = set.remove(session_id) {
+                entry.output_revoked.send_replace(true);
+            }
         }
     }
 
@@ -1712,6 +1929,109 @@ impl Logger {
 #[cfg(test)]
 mod observer_transport_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn raw_observer_summaries_and_events_never_include_launch_or_account_material() {
+        let source: AgentSessionSummary = serde_json::from_value(json!({
+            "sessionId": "shared", "groupId": "group", "groupLabel": "Approved project",
+            "definitionId": "test", "label": "Approved CLI", "model": "known-model",
+            "profileConfigPath": "/private-account-sentinel", "executable": "private-executable-sentinel",
+            "launchArguments": ["--prompt", "private-prompt-sentinel"], "restoreExistingSession": true,
+            "workingDirectory": "/approved/project", "state": "idle", "stateSource": "integration",
+            "processId": 1234, "tokenUsage": null, "queuedPrompts": 0,
+            "capturedSessionId": "private-native-sentinel", "sandboxed": true, "detached": true,
+        })).unwrap();
+        let desktop = serde_json::to_string(&source).unwrap();
+        let observer = serde_json::to_value(observer_summary(source)).unwrap();
+        assert!(!observer.to_string().contains("sentinel"));
+        assert!(desktop.contains("private-account-sentinel"));
+        assert!(desktop.contains("private-prompt-sentinel"));
+        assert_eq!(observer["launchArguments"], json!([]));
+        assert_eq!(observer["workingDirectory"], "/approved/project");
+        assert_eq!(observer["label"], "Approved CLI");
+
+        let sink = DaemonSink::default();
+        sink.set_shared_output("shared", true, Some(false));
+        let (_, _, mut desktop_events) = sink.subscribe(ClientRole::Desktop, "desktop".into());
+        let (_, _, mut observer_events) = sink.subscribe(ClientRole::Observer, "observer".into());
+        sink.broadcast("state", json!({ "sessionId": "shared", "state": "idle", "source": "integration",
+            "launchArguments": ["private-prompt-sentinel"], "profileConfigPath": "private-account-sentinel" }));
+        assert!(desktop_events.recv().await.unwrap().contains("sentinel"));
+        let event = observer_events.recv().await.unwrap();
+        assert!(!event.contains("sentinel"));
+        sink.closed("shared", "private-executable-sentinel: failed");
+        let event = observer_events.recv().await.unwrap();
+        assert!(!event.contains("sentinel"));
+        assert!(event.contains("The agent session ended"));
+    }
+
+    #[tokio::test]
+    async fn output_scopes_preserve_metadata_control_and_invalidate_prior_reads() {
+        let sink = DaemonSink::default();
+        sink.set_shared_output("session", true, Some(false));
+        assert!(sink.is_shared("session"));
+        assert!(sink.output_access("session").is_err());
+        sink.set_control("session", true).unwrap();
+        sink.set_shared("session", true);
+        assert!(
+            sink.output_access("session").is_err(),
+            "legacy refresh preserves explicit false"
+        );
+        sink.set_shared_output("session", true, Some(true));
+        let mut before_revoke = sink.output_access("session").unwrap();
+        let queued_reply = ClientFrame {
+            line: response_line(4, Ok(json!({ "base64": "private-output" }))),
+            output: Some((4, before_revoke.clone())),
+        };
+        sink.set_shared_output("session", true, Some(false));
+        tokio::time::timeout(Duration::from_millis(100), before_revoke.revoked())
+            .await
+            .unwrap();
+        assert!(sink.is_shared("session"));
+        assert!(sink.has_control("session"));
+        sink.set_shared_output("session", true, Some(true));
+        assert!(sink.output_access("session").is_ok());
+        assert!(before_revoke.check().is_err());
+        let mut bytes = Vec::new();
+        queued_reply.write_to(&mut bytes).await.unwrap();
+        let frame: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(frame["ok"], false);
+        assert!(!String::from_utf8(bytes).unwrap().contains("private-output"));
+        sink.set_shared("legacy", true);
+        assert!(sink.output_access("legacy").is_ok());
+    }
+
+    #[tokio::test]
+    async fn revoking_content_aborts_a_stalled_observer_writer_without_a_complete_reply() {
+        use tokio::io::AsyncReadExt;
+        let sink = DaemonSink::default();
+        sink.set_shared("session", true);
+        let frame = ClientFrame {
+            line: response_line(5, Ok(json!({ "base64": "x".repeat(4096) }))),
+            output: Some((5, sink.output_access("session").unwrap())),
+        };
+        let (mut writer, mut reader) = tokio::io::duplex(16);
+        let writing = tokio::spawn(async move { frame.write_to(&mut writer).await });
+        let mut prefix = [0; 8];
+        reader.read_exact(&mut prefix).await.unwrap();
+        sink.set_shared_output("session", true, Some(false));
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(500), writing)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        let mut remainder = Vec::new();
+        reader.read_to_end(&mut remainder).await.unwrap();
+        assert!(
+            !remainder.contains(&b'\n'),
+            "never complete a revoked JSON reply"
+        );
+        assert!(sink.is_shared("session"));
+    }
 
     #[test]
     fn mcp_history_distinguishes_replays_and_unknown_outcomes_after_session_exit() {
@@ -1905,14 +2225,15 @@ mod observer_transport_tests {
                 json!({ "sessionId": "shared-session", "model": "x".repeat(512),
                     "sequence": index }),
             );
-            for receiver in [&mut desktop_rx, &mut healthy_rx] {
+            for (position, receiver) in [&mut desktop_rx, &mut healthy_rx].into_iter().enumerate() {
                 let line = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
                     .await
                     .unwrap()
                     .unwrap();
                 let frame: Frame = serde_json::from_str(&line).unwrap();
                 assert!(matches!(frame, Frame::Event { name, payload }
-                    if name == "model" && payload["sequence"] == index));
+                    if name == "model" && payload["model"] == "x".repeat(512)
+                    && if position == 0 { payload["sequence"] == index } else { payload.get("sequence").is_none() }));
             }
             tokio::task::yield_now().await;
         }

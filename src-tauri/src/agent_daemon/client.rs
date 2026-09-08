@@ -37,6 +37,7 @@ pub struct DaemonClient {
 pub struct Connection {
     mcp_protocol: AtomicU32,
     mcp_history: AtomicBool,
+    mcp_output_scopes: AtomicBool,
     desktop_bridge_protocol: AtomicU32,
     bridge_allowance: Arc<tokio::sync::Semaphore>,
     /// Only grants published through this connection; a late disconnect must
@@ -128,6 +129,7 @@ impl DaemonClient {
         let connection = Arc::new(Connection {
             mcp_protocol: AtomicU32::new(0),
             mcp_history: AtomicBool::new(false),
+            mcp_output_scopes: AtomicBool::new(false),
             desktop_bridge_protocol: AtomicU32::new(0),
             bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
             remote_grants: Mutex::new(HashSet::new()),
@@ -175,6 +177,9 @@ impl DaemonClient {
         connection
             .mcp_history
             .store(reply.mcp_history, Ordering::Relaxed);
+        connection
+            .mcp_output_scopes
+            .store(reply.mcp_output_scopes, Ordering::Relaxed);
         connection
             .desktop_bridge_protocol
             .store(reply.desktop_bridge_protocol, Ordering::Relaxed);
@@ -263,10 +268,27 @@ impl DaemonClient {
             connection.mcp_protocol.load(Ordering::Relaxed) != OBSERVER_PROTOCOL_VERSION
         })
     }
+
+    pub async fn mcp_output_scopes(&self) -> bool {
+        self.attached()
+            .await
+            .is_some_and(|connection| connection.mcp_output_scopes.load(Ordering::Relaxed))
+    }
 }
 
 impl Connection {
     pub async fn request(&self, request: Request) -> Result<Value, String> {
+        if matches!(
+            &request,
+            Request::ShareSet {
+                shared: true,
+                read_output: Some(_),
+                ..
+            }
+        ) && !self.mcp_output_scopes.load(Ordering::Relaxed)
+        {
+            return Err("Separating MCP status from conversation access requires an updated background service. Finish its sessions before restarting it; existing CLI sessions have not been stopped.".into());
+        }
         if matches!(&request, Request::DesktopGrants { .. })
             && self.desktop_bridge_protocol.load(Ordering::Relaxed)
                 != super::desktop_bridge::PROTOCOL
@@ -544,11 +566,58 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
 mod history_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn a_legacy_mcp_daemon_never_receives_a_scope_it_would_silently_ignore() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let connection = Connection {
+            tx,
+            mcp_protocol: AtomicU32::new(OBSERVER_PROTOCOL_VERSION),
+            mcp_history: AtomicBool::new(true),
+            mcp_output_scopes: AtomicBool::new(false),
+            desktop_bridge_protocol: AtomicU32::new(0),
+            bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
+            remote_grants: Mutex::new(HashSet::new()),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            alive: AtomicBool::new(true),
+            sessions: Mutex::new(HashSet::new()),
+        };
+        for read_output in [false, true] {
+            assert!(connection
+                .request(Request::ShareSet {
+                    session_id: "existing".into(),
+                    shared: true,
+                    read_output: Some(read_output),
+                })
+                .await
+                .unwrap_err()
+                .contains("updated background service"));
+        }
+        assert!(rx.try_recv().is_err());
+        assert!(connection.pending.lock().unwrap().is_empty());
+        let (result, ()) = tokio::join!(
+            connection.request(Request::ShareSet {
+                session_id: "existing".into(),
+                shared: false,
+                read_output: None,
+            }),
+            async {
+                let message: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+                assert_eq!(message["body"]["shared"], false);
+                assert!(message["body"].get("readOutput").is_none());
+                connection.resolve(message["id"].as_u64().unwrap(), Ok(json!([])));
+            }
+        );
+        assert_eq!(result.unwrap(), json!([]));
+        assert!(connection.alive.load(Ordering::Relaxed));
+    }
+
     #[test]
     fn late_disconnect_only_revokes_its_own_grants_and_rejects_late_publication() {
         let make = || Connection {
             mcp_protocol: AtomicU32::new(OBSERVER_PROTOCOL_VERSION),
             mcp_history: AtomicBool::new(true),
+            mcp_output_scopes: AtomicBool::new(true),
             desktop_bridge_protocol: AtomicU32::new(super::super::desktop_bridge::PROTOCOL),
             bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
             remote_grants: Mutex::new(HashSet::new()),
@@ -586,6 +655,7 @@ mod history_tests {
             tx,
             mcp_protocol: AtomicU32::new(old.mcp_protocol),
             mcp_history: AtomicBool::new(old.mcp_history),
+            mcp_output_scopes: AtomicBool::new(old.mcp_output_scopes),
             desktop_bridge_protocol: AtomicU32::new(0),
             bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
             remote_grants: Mutex::new(HashSet::new()),
@@ -599,6 +669,7 @@ mod history_tests {
             Request::ShareSet {
                 session_id: "existing".into(),
                 shared: false,
+                read_output: None,
             },
             Request::ControlSet {
                 session_id: "existing".into(),

@@ -20,6 +20,8 @@ export interface AgentMcpActivity {
 
 export interface AgentSharedSession {
   sessionId: string;
+  /** Terminal contents are a separate grant; legacy shares already allowed them. */
+  readOutput: boolean;
   /** MCP clients may prompt and end it, not only read it. */
   control: boolean;
   /** The last thing an MCP client did to it. */
@@ -47,6 +49,8 @@ export interface AgentMcpHistory {
 export interface AgentDaemonStatus {
   running: boolean;
   mcpNeedsRestart: boolean;
+  /** A missing capability is never treated as metadata-only support. */
+  mcpOutputScopes: boolean;
   sessions: number;
   /** Background sessions the user shared with MCP observers, with grants. */
   shared: AgentSharedSession[];
@@ -61,6 +65,7 @@ const POLL_MS = 10_000;
 export const EMPTY_DAEMON_STATUS: AgentDaemonStatus = {
   running: false,
   mcpNeedsRestart: false,
+  mcpOutputScopes: false,
   sessions: 0,
   shared: [],
   mcp: null,
@@ -71,7 +76,7 @@ export function useAgentDaemon(sessionsHint: number): {
   status: AgentDaemonStatus;
   refresh: () => Promise<void>;
   stop: () => Promise<boolean>;
-  share: (sessionId: string, shared: boolean) => Promise<void>;
+  share: (sessionId: string, shared: boolean, readOutput?: boolean) => Promise<void>;
   control: (sessionId: string, control: boolean) => Promise<void>;
 } {
   const [status, setStatus] = useState<AgentDaemonStatus>(EMPTY_DAEMON_STATUS);
@@ -84,7 +89,8 @@ export function useAgentDaemon(sessionsHint: number): {
       setStatus({
         ...next,
         mcpNeedsRestart: next.mcpNeedsRestart ?? false,
-        shared: next.shared ?? [],
+        mcpOutputScopes: next.mcpOutputScopes === true,
+        shared: (next.shared ?? []).map(normalizeSharedSession),
         mcp: next.mcp ?? null,
         history: next.history ?? null,
       });
@@ -114,12 +120,19 @@ export function useAgentDaemon(sessionsHint: number): {
 
   // Sharing and control live in the background service, so the answer is
   // its list.
-  const share = useCallback(async (sessionId: string, shared: boolean) => {
+  const share = useCallback(async (sessionId: string, shared: boolean, readOutput = false) => {
     if (!hasDesktopBackend()) return;
+    if (shared && !status.mcpOutputScopes) {
+      throw new Error("Restart the background service after existing work finishes to set separate output permissions.");
+    }
     const { invoke } = await import("@tauri-apps/api/core");
-    const next = await invoke<AgentSharedSession[]>("agent_mcp_share", { sessionId, shared });
-    setStatus((current) => ({ ...current, shared: next }));
-  }, []);
+    const next = await invoke<AgentSharedSession[]>("agent_mcp_share", {
+      sessionId,
+      shared,
+      ...(shared ? { readOutput } : {}),
+    });
+    setStatus((current) => ({ ...current, shared: next.map(normalizeSharedSession) }));
+  }, [status.mcpOutputScopes]);
 
   const control = useCallback(async (sessionId: string, control: boolean) => {
     if (!hasDesktopBackend()) return;
@@ -128,8 +141,12 @@ export function useAgentDaemon(sessionsHint: number): {
       sessionId,
       control,
     });
-    setStatus((current) => ({ ...current, shared: next }));
+    setStatus((current) => ({ ...current, shared: next.map(normalizeSharedSession) }));
   }, []);
 
   return { status, refresh, stop, share, control };
+}
+
+function normalizeSharedSession(entry: AgentSharedSession): AgentSharedSession {
+  return { ...entry, readOutput: entry.readOutput ?? true };
 }

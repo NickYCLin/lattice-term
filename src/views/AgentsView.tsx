@@ -129,7 +129,11 @@ export function AgentsView({
     );
   const toggleMcpShare = (sessionId: string, shared: boolean) => {
     setMcpNotice(null);
-    void daemon.share(sessionId, shared).catch(reportMcpFailure);
+    void daemon.share(sessionId, shared, false).catch(reportMcpFailure);
+  };
+  const toggleMcpOutput = (sessionId: string, readOutput: boolean) => {
+    setMcpNotice(null);
+    void daemon.share(sessionId, true, readOutput).catch(reportMcpFailure);
   };
   const toggleMcpControl = (sessionId: string, control: boolean) => {
     setMcpNotice(null);
@@ -762,6 +766,11 @@ export function AgentsView({
         {daemon.status.mcpNeedsRestart && (
           <p className="agents-field-hint agents-mcp__error" role="status">
             {t("agents.mcp.needsRestart")}
+          </p>
+        )}
+        {daemon.status.running && !daemon.status.mcpNeedsRestart && !daemon.status.mcpOutputScopes && (
+          <p className="agents-field-hint agents-mcp__error" role="status">
+            {t("agents.mcp.output.needsRestart")}
           </p>
         )}
         {daemon.status.mcp && (
@@ -1499,13 +1508,15 @@ export function AgentsView({
                       <span className="agents-sandbox__badge">{t("agents.detached.badge")}</span>
                     )}
                     {sharedWithMcp.has(session.sessionId) && (
-                      <span className="agents-sandbox__badge">
-                        {t(
-                          sharedWithMcp.get(session.sessionId)?.control
-                            ? "agents.mcp.badge.control"
-                            : "agents.mcp.badge",
+                      <>
+                        <span className="agents-sandbox__badge">
+                          {t(!daemon.status.mcpOutputScopes || sharedWithMcp.get(session.sessionId)?.readOutput !== false
+                            ? "agents.mcp.badge.output" : "agents.mcp.badge.metadata")}
+                        </span>
+                        {sharedWithMcp.get(session.sessionId)?.control && (
+                          <span className="agents-sandbox__badge">{t("agents.mcp.badge.control")}</span>
                         )}
-                      </span>
+                      </>
                     )}
                   </strong>
                   <span className="mono">{displayPath(session.workingDirectory)}</span>
@@ -1514,7 +1525,8 @@ export function AgentsView({
                       <input
                         type="checkbox"
                         checked={sharedWithMcp.has(session.sessionId)}
-                        disabled={daemon.status.mcpNeedsRestart}
+                        disabled={!sharedWithMcp.has(session.sessionId)
+                          && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes)}
                         onChange={(event) =>
                           toggleMcpShare(session.sessionId, event.currentTarget.checked)
                         }
@@ -1523,6 +1535,18 @@ export function AgentsView({
                         ✓
                       </span>
                       <span>{t("agents.mcp.share")}</span>
+                    </label>
+                  )}
+                  {session.detached && sharedWithMcp.has(session.sessionId) && (
+                    <label className="checkbox agents-mcp__toggle">
+                      <input
+                        type="checkbox"
+                        checked={!daemon.status.mcpOutputScopes || sharedWithMcp.get(session.sessionId)?.readOutput !== false}
+                        disabled={daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes}
+                        onChange={(event) => toggleMcpOutput(session.sessionId, event.currentTarget.checked)}
+                      />
+                      <span className="checkbox__box" aria-hidden="true">✓</span>
+                      <span>{t("agents.mcp.output")}</span>
                     </label>
                   )}
                   {session.detached && sharedWithMcp.has(session.sessionId) && (

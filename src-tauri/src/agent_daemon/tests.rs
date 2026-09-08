@@ -365,17 +365,19 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
         .request(Request::ShareSet {
             session_id: public.clone(),
             shared: true,
+            read_output: Some(false),
         })
         .await
         .unwrap();
     assert_eq!(
         shared,
-        serde_json::json!([{ "sessionId": public.clone(), "control": false }])
+        serde_json::json!([{ "sessionId": public.clone(), "control": false, "readOutput": false }])
     );
     assert!(desktop
         .request(Request::ShareSet {
             session_id: "agent-bg-session-nope".to_string(),
             shared: true,
+            read_output: None,
         })
         .await
         .is_err());
@@ -385,6 +387,65 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["sessionId"], public.as_str());
     assert_eq!(listed[0]["mcpControl"], false);
+    assert_eq!(listed[0]["mcpReadOutput"], false);
+    assert_eq!(listed[0]["launchArguments"], serde_json::json!([]));
+    assert_eq!(listed[0]["executable"], "");
+    assert!(listed[0]["processId"].is_null());
+    assert!(!listed[0].to_string().contains("echo shared-line"));
+    let mut additional_observer = RawClient::connect(&paths).await;
+    let hello = additional_observer
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: ClientRole::Observer.protocol_version(),
+            role: ClientRole::Observer,
+            client: Some("metadata observer".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        hello["sessions"][0]["launchArguments"],
+        serde_json::json!([])
+    );
+    assert!(!hello.to_string().contains("echo shared-line"));
+    assert!(!hello.to_string().contains("top-secret"));
+    drop(additional_observer);
+    assert!(observer
+        .request(Request::Observe {
+            session_id: public.clone(),
+            cursor: 0,
+            max_bytes: 6,
+        })
+        .await
+        .unwrap_err()
+        .contains("not shared"));
+
+    desktop
+        .request(Request::ControlSet {
+            session_id: public.clone(),
+            control: true,
+        })
+        .await
+        .unwrap();
+    let changed = desktop
+        .request(Request::ShareSet {
+            session_id: public.clone(),
+            shared: true,
+            read_output: Some(true),
+        })
+        .await
+        .unwrap();
+    assert_eq!(changed[0]["readOutput"], true);
+    assert_eq!(
+        changed[0]["control"], true,
+        "content access does not change control"
+    );
+    desktop
+        .request(Request::ControlSet {
+            session_id: public.clone(),
+            control: false,
+        })
+        .await
+        .unwrap();
 
     // Output follows a cursor, only for the shared session.
     let first = observer
@@ -439,6 +500,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
         Request::ShareSet {
             session_id: secret.clone(),
             shared: true,
+            read_output: None,
         },
         Request::Shutdown,
         launch("echo nope"),
@@ -470,6 +532,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
         .request(Request::ShareSet {
             session_id: public.clone(),
             shared: false,
+            read_output: None,
         })
         .await
         .unwrap();
@@ -486,6 +549,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
         .request(Request::ShareSet {
             session_id: public.clone(),
             shared: true,
+            read_output: None,
         })
         .await
         .unwrap();
@@ -584,6 +648,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
         .request(Request::ShareSet {
             session_id: session.clone(),
             shared: true,
+            read_output: None,
         })
         .await
         .unwrap();
@@ -764,6 +829,27 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     assert_eq!(repeat["sessionId"], planned.as_str());
     assert_eq!(repeat["duplicate"], true);
     assert_eq!(registry.list().len(), 2, "a retry launched nothing new");
+    assert_eq!(repeat["launchArguments"], serde_json::json!([]));
+    assert_eq!(repeat["executable"], "");
+    assert_eq!(repeat["mcpReadOutput"], true);
+    desktop
+        .request(Request::ShareSet {
+            session_id: planned.clone(),
+            shared: true,
+            read_output: Some(false),
+        })
+        .await
+        .unwrap();
+    let metadata_repeat = observer
+        .request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".into(),
+            request_id: "launch-1".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(metadata_repeat["mcpReadOutput"], false);
+    assert_eq!(metadata_repeat["launchArguments"], serde_json::json!([]));
+    assert!(sink.has_control(&planned));
 
     // Ending what it started; the session is unshared with it.
     let ended = observer
@@ -916,6 +1002,7 @@ async fn a_wait_ends_when_sharing_is_revoked() {
         .request(Request::ShareSet {
             session_id: session.clone(),
             shared: true,
+            read_output: None,
         })
         .await
         .unwrap();
@@ -949,6 +1036,7 @@ async fn a_wait_ends_when_sharing_is_revoked() {
         .request(Request::ShareSet {
             session_id: session.clone(),
             shared: false,
+            read_output: None,
         })
         .await
         .unwrap();
@@ -977,6 +1065,7 @@ async fn a_wait_ends_when_sharing_is_revoked() {
         .request(Request::ShareSet {
             session_id: session.clone(),
             shared: true,
+            read_output: None,
         })
         .await
         .unwrap();

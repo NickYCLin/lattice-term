@@ -22,12 +22,14 @@ import { AgentsView } from "./AgentsView";
 type SharedEntry = {
   sessionId: string;
   control: boolean;
+  readOutput?: boolean;
   activity?: { client: string; action: string; at: number } | null;
 };
 const daemonStatus = vi.hoisted(() => ({
   current: {
     running: false,
     mcpNeedsRestart: false,
+    mcpOutputScopes: undefined as boolean | undefined,
     sessions: 0,
     shared: [] as SharedEntry[],
     mcp: null as null | { command: string; args: string[] },
@@ -65,13 +67,14 @@ describe("AgentsView", () => {
   afterEach(() => {
     restoreStorage?.();
     restoreStorage = null;
-    daemonStatus.current = { running: false, mcpNeedsRestart: false, sessions: 0, shared: [], mcp: null };
+    daemonStatus.current = { running: false, mcpNeedsRestart: false, mcpOutputScopes: undefined, sessions: 0, shared: [], mcp: null };
   });
 
   it("offers MCP sharing only for background sessions and shows the client snippets", () => {
     daemonStatus.current = {
       running: true,
       mcpNeedsRestart: false,
+      mcpOutputScopes: true,
       sessions: 1,
       shared: [
         {
@@ -111,6 +114,7 @@ describe("AgentsView", () => {
     daemonStatus.current = {
       running: true,
       mcpNeedsRestart: false,
+      mcpOutputScopes: true,
       sessions: 1,
       shared: [{ sessionId: "agent-bg-session-1", control: false }],
       mcp: { command: "/opt/lattice-term", args: ["mcp"] },
@@ -127,7 +131,7 @@ describe("AgentsView", () => {
 
   it("keeps old daemon sessions visible and disables only MCP grants", () => {
     daemonStatus.current = {
-      running: true, mcpNeedsRestart: true, sessions: 1, shared: [],
+      running: true, mcpNeedsRestart: true, mcpOutputScopes: false, sessions: 1, shared: [],
       mcp: { command: "/opt/lattice-term", args: ["mcp"] },
     };
     const markup = render(fakeAgentApi({
@@ -137,6 +141,38 @@ describe("AgentsView", () => {
     expect(markup).toContain("existing CLI");
     expect(markup).toContain("系統不會自動中斷 CLI");
     expect(markup).toMatch(/<input type="checkbox" disabled=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
+  });
+
+  it("shows metadata and content separately from control", () => {
+    daemonStatus.current = {
+      running: true, mcpNeedsRestart: false, mcpOutputScopes: true, sessions: 1,
+      shared: [{ sessionId: "agent-bg-session-1", control: true, readOutput: false }],
+      mcp: { command: "/opt/lattice-term", args: ["mcp"] },
+    };
+    const markup = render(fakeAgentApi({ sessions: [fakeSession({ sessionId: "agent-bg-session-1", detached: true })] }));
+    expect(markup).toContain("MCP 狀態分享");
+    expect(markup).toContain("MCP 可控");
+    expect(markup).not.toContain("MCP 可讀內容");
+    expect(markup).toMatch(/<input type="checkbox"\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>允許 MCP 讀取內容<\/span>/);
+    expect(markup).toContain("自動分享、允許讀取內容，並允許送指示與停止");
+  });
+
+  it.each([undefined, false])("keeps unnegotiated content access visible and revocable (%s)", (readOutput) => {
+    daemonStatus.current = {
+      running: true, mcpNeedsRestart: false, mcpOutputScopes: undefined, sessions: 2,
+      shared: [{ sessionId: "agent-bg-session-1", control: false, readOutput }],
+      mcp: { command: "/opt/lattice-term", args: ["mcp"] },
+    };
+    const markup = render(fakeAgentApi({ sessions: [
+      fakeSession({ sessionId: "agent-bg-session-1", detached: true }),
+      fakeSession({ sessionId: "agent-bg-session-2", detached: true }),
+    ] }));
+    expect(markup).toContain("背景服務尚不支援分開授權內容讀取");
+    expect(markup).toContain("MCP 可讀內容");
+    expect(markup).not.toContain("MCP 狀態分享");
+    expect(markup).toMatch(/<input type="checkbox" checked=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
+    expect(markup).toMatch(/<input type="checkbox" disabled=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
+    expect(markup).toMatch(/<input type="checkbox" disabled="" checked=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>允許 MCP 讀取內容<\/span>/);
   });
 
   it("offers the account picker with the signed-in default and a named account", () => {
