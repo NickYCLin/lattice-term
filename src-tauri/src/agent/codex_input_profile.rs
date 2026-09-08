@@ -650,6 +650,7 @@ impl ProbeChild {
         let (Some(stdout), Some(mut stderr), Some(mut stdin)) =
             (child.stdout.take(), child.stderr.take(), child.stdin.take())
         else {
+            #[cfg(windows)]
             drop(job);
             let _ = child.kill();
             let _ = child.wait();
