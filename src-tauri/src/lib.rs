@@ -4,6 +4,8 @@ pub mod agent_daemon;
 pub mod agent_history;
 pub mod agent_plans;
 mod agent_process;
+#[cfg(desktop)]
+pub mod app_menu;
 pub mod backup;
 mod chat_attachments;
 pub mod clipboard;
@@ -3251,6 +3253,8 @@ pub fn run() {
                 &data_dir,
             )));
             app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::new()));
+            #[cfg(target_os = "macos")]
+            crate::app_menu::install_guarded_quit(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

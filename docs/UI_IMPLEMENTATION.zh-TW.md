@@ -244,6 +244,8 @@
 
 `RemoteTextEditorProvider` 位於工作階段之外，以延遲載入的共用編輯器接上 SFTP 與 Lattice Remote 檔案列。分頁切換或斷線不會卸載草稿；編輯器開啟時停用背景 SFTP 拖放上傳。草稿不寫入 localStorage、下載目錄或紀錄。儲存期間仍可輸入，舊回覆只更新已儲存基準，不覆蓋新的輸入。未儲存關閉與重新載入須由應用程式對話框確認，原生視窗關閉也受保護；不攔截作業系統強制終止。
 
+macOS 的預設 Quit／Cmd+Q 會直接呼叫原生終止程序，不會先送出視窗關閉事件。`app_menu` 保留 Tauri 預設選單，只將唯一的預設 Quit 換成自訂項目並轉送 `main.close()`；使用者取消時不進入剪貼簿退出封鎖，允許關閉後才沿用既有 `ExitRequested` 清理。Dock 的「結束」、作業系統直接終止與強制退出仍不受此選單保護，退出前應先儲存草稿。應用程式更新的重新啟動流程不改動，仍由更新／編輯互斥租約防止重疊。
+
 SFTP 使用獨立 `sftp_read_text_file`／`sftp_save_text_file` 指令，沿用已認證工作階段。Lattice Remote 在 Hello 尾端宣告 `file_edit`，舊主機缺省 false，不向它傳送未知的編輯請求；支援的主機透過 48 KiB 加密分塊傳送有界內容。詳細流程與競態／權限限制見 [遠端文字編輯](REMOTE_TEXT_EDITING.zh-TW.md)。
 
 ### 串流傳輸
