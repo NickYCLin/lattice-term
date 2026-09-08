@@ -4,6 +4,113 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 import { cancellationWorkers, cancelPrerequisiteFailure, classifyProviderOutput, codexProgressSignals, compilerResultMatches, disabledMcpArguments, fixtureSnapshot, fixtureTrustArguments, liveChecksPassed, liveWorkers, makeFixtures, MCP_REVIEW_OUTPUT_OPTIONS, McpReviewVerifier, nativeExitClassification, nativeInputProbeScript, ownedCliCleanupEvidence, ownedFixtureTrustReady, pairCheckerScript, pairCodexArguments, pairCompilerArguments, pairPrompt, parseOptions, recordLifecycle, requiredLiveChecks, reviewPrompt, startupSignals, taskFailureSignals, TerminalQueryResponder, verifiedResult } from "./verify-mcp-live-agents.mjs";
+import { composerHints, recordTaskSignals, reportedCheckerFailures, settleDiagnosticParsers, taskSignalSnapshot } from "./verify-mcp-live-agents.mjs";
+
+test("an integer followed by sentence punctuation keeps the exact answer boundary", () => {
+  const nonce = "88888888-2222-4333-8444-555555555555";
+  for (const ending of ["; checker failed with exit code 1.", ".", ", additional context", ": explanation"]) {
+    assert.equal(verifiedResult(`LATTICE_RESULT ${nonce} 22${ending}`, nonce, 22), true);
+  }
+  for (const suffix of [".5", ",000", ":11", ";9", "wrong", "0"]) {
+    assert.equal(verifiedResult(`LATTICE_RESULT ${nonce} 22${suffix}`, nonce, 22), false);
+  }
+  assert.equal(verifiedResult(`LATTICE_RESULT ${nonce} 21; explanation`, nonce, 22), false);
+  assert.equal(verifiedResult("LATTICE_RESULT 77777777-2222-4333-8444-555555555555 22; explanation", nonce, 22), false);
+});
+
+test("correct source review does not erase a reported compiler failure", async () => {
+  const nonce = "88888888-2222-4333-8444-555555555555";
+  const verifier = new McpReviewVerifier(nonce, 22);
+  try {
+    const evidence = await verifier.feed(`LATTICE_RESULT ${nonce} 22; checker failed with exit code 1.`);
+    assert.equal(evidence.correctNonceAndComputedValue, true);
+    assert.deepEqual(evidence.reportedCheckerFailures, [1]);
+    assert.equal(evidence.checkerFailureSource, "untrusted-cli-text-not-independent-compiler-execution-proof");
+    // Simulate the bounded raw tail aging out, then clear the rendered view.
+    verifier.text = "";
+    const later = await verifier.feed("\x1b[2J\x1b[HNo current result");
+    assert.equal(later.correctNonceAndComputedValue, false);
+    assert.equal(later.reportedCheckerFailure, true);
+    assert.deepEqual(later.reportedCheckerFailures, [1]);
+  } finally { verifier.dispose(); }
+});
+
+test("reported compiler failure metadata is bounded and excludes arbitrary error text", () => {
+  assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1. private-secret\nChecker failed with exit code 1; private-path"), [1]);
+  assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1.5\nchecker failed with exit code 1wrong"), []);
+  assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1234567890.\nchecker failed with exit code -999."), []);
+  assert.equal(reportedCheckerFailures(Array.from({ length: 20 }, (_, i) => `checker failed with exit code ${i}.`).join("\n")).length, 8);
+});
+
+test("diagnostic parser draining is bounded and reports incomplete rather than hanging cleanup", async () => {
+  assert.equal(await settleDiagnosticParsers([{ chain: Promise.resolve() }], 10), true);
+  assert.equal(await settleDiagnosticParsers([{ chain: Promise.reject(Error("private diagnostic failure")) }], 10), false);
+  assert.equal(await settleDiagnosticParsers([{ chain: new Promise(() => {}) }], 1), false);
+  assert.equal(await settleDiagnosticParsers([], 10), true);
+});
+
+test("task diagnostics retain fixed signals across redraws without retaining private text", () => {
+  const diagnostic = {};
+  recordTaskSignals(diagnostic, "Working (esc to interrupt) private@example.invalid C:/private/token", 15.9);
+  recordTaskSignals(diagnostic, "Login expired. Please run /login token=secret", 30);
+  recordTaskSignals(diagnostic, "Working", 45);
+  recordTaskSignals(diagnostic, "", 50);
+  recordTaskSignals(diagnostic, "new raw text", Number.NaN);
+  const snapshot = taskSignalSnapshot(diagnostic);
+  assert.deepEqual(snapshot.progressSignals, [{ signal: "working-footer", firstSeenMs: 15, lastSeenMs: 45 }]);
+  assert.ok(snapshot.fixedErrorExcerpts.some((entry) => entry.signal === "Login expired" && entry.firstSeenMs === 30));
+  assert.doesNotMatch(JSON.stringify(snapshot), /private|secret|example.invalid|token=/);
+  assert.deepEqual(taskSignalSnapshot({}), { classifications: [], fixedErrorExcerpts: [], progressSignals: [] });
+});
+
+test("a local provider metadata fallback is not classified as a model refusing the task", () => {
+  assert.deepEqual(codexProgressSignals("Model metadata for `fixture` not found. Defaulting to fallback metadata."), ["model-metadata-fallback"]);
+  assert.deepEqual(codexProgressSignals("Model fixture unavailable"), ["model-refusal-or-unavailable"]);
+});
+
+test("composer hints never authorize input or leak a draft, path, or account", () => {
+  const prompt = "Inspect the private fixture";
+  const hints = composerHints(`private@example.invalid\nC:/private\n${prompt}\n› Ask Codex to do anything`, "› ", prompt);
+  assert.equal(hints.cursorOnPromptLikeLine, true);
+  assert.equal(hints.cursorOnEmptyPromptLikeLine, true);
+  assert.equal(hints.emptyComposerPlaceholderVisible, true);
+  assert.equal(hints.expectedPromptVisibleSomewhere, true);
+  assert.equal(hints.authorizesInput, false);
+  assert.equal(hints.source, "heuristic-rendered-terminal-hints");
+  assert.doesNotMatch(JSON.stringify(hints), /private|example.invalid|Inspect/);
+  assert.equal(composerHints("Please run /login", "not a composer", prompt).blockingPromptHintVisible, true);
+  assert.equal(composerHints("", "", "").expectedPromptVisibleSomewhere, false);
+});
+
+test("terminal composer diagnostics use viewport and current cursor instead of assuming a transcript line is active", async () => {
+  const renderer = new TerminalQueryResponder();
+  try {
+    await renderer.feed("› old transcript prompt\r\n› Ask Codex to do anything\r\n› ");
+    const hints = renderer.composerHints("old transcript prompt");
+    assert.equal(hints.cursorOnEmptyPromptLikeLine, true);
+    assert.equal(hints.expectedPromptVisibleSomewhere, true);
+    assert.equal(hints.authorizesInput, false);
+    await renderer.feed("\x1b[2J\x1b[Hnot a composer");
+    assert.equal(renderer.composerHints("old transcript prompt").expectedPromptVisibleSomewhere, false);
+  } finally { renderer.dispose(); }
+});
+
+test("rendered answer history is diagnostic only and does not replace the current verification gate", async () => {
+  const nonce = "88888888-2222-4333-8444-555555555555";
+  const verifier = new McpReviewVerifier(nonce, 51);
+  try {
+    const prefix = `LATTICE_RESULT ${nonce} `;
+    let evidence = await verifier.feed(`${prefix}00\x1b[${prefix.length + 1}G51`);
+    assert.equal(evidence.correctRawNow, false);
+    assert.equal(evidence.correctRenderedNow, true);
+    evidence = await verifier.feed("\x1b[2J\x1b[Hredrawn");
+    assert.equal(evidence.correctRenderedNow, false);
+    assert.equal(evidence.correctRenderedEverSeen, true);
+    assert.equal(evidence.correctRawEverSeen, false);
+    assert.equal(evidence.correctNonceAndComputedValue, false);
+    assert.doesNotMatch(JSON.stringify(evidence), /88888888|redrawn/);
+  } finally { verifier.dispose(); }
+});
 
 test("Codex pair is explicit, excludes Claude/single mode, and requires an installed compiler path", () => {
   const paths = ["--lattice", "lattice.exe", "--codex", "codex.exe", "--rustc", "toolchain/bin/rustc.exe"];

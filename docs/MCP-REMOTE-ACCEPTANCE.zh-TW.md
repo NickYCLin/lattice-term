@@ -34,7 +34,45 @@
 
 後續延遲消費端 1 秒的對照顯示，即使寫入端間隔 250ms，讀取端仍可能在同批事件內處理最後文字與 Enter，觀測間隔為 0ms。因此固定等待不能保證 Codex 已離開貼上判定；尚不能把它當成真實派工失敗的唯一原因。
 
+### Codex 真實輸入框的零付費對照
+
+使用相同的 Codex 0.153.4 原生程式，但改用全新、未登入的設定目錄，模型端只連本機 loopback HTTP 固定回應；不複製原帳號設定、不呼叫外部模型、不發出工具操作。正常消費輸入時，250ms 與候選 End／Enter 路徑都能把 637 字正文完整交給 HTTP fixture，並取得第二輪官方完成通知與 MCP 讀回結果。這排除了「只要用 250ms 就必定失敗」的錯誤判斷。
+
+另在每組新建 CLI 的啟動回合完成後，短暫暫停該自建程序的全部執行緒約 1 秒；身份、執行緒集合與恢復數量都有核對，不操作既有使用者程序。先在暫停期間完成一次輸入，再恢復程序：
+
+| 同樣的輸入積壓條件 | 既有 MCP 250ms | 候選貼上／End／Enter |
+| --- | --- | --- |
+| 寫入在恢復前完成 | 是，303ms | 是，47ms |
+| 原文完整到達模型 HTTP | 否 | 是，唯一一份 637 字正文 |
+| 第二輪官方完成通知 | 無 | 有 |
+| MCP 讀回固定結果 | 無 | 有 |
+| 執行緒恢復／自建程序清理 | 全部確認 | 全部確認 |
+
+完整 metadata 見 [消費端積壓對照](assets/mcp-codex-consumer-backlog-20260908.json)。這確定了固定寫入間隔無法抵抗消費端積壓，也支持在已核對預設快捷鍵的範圍使用 End；[Codex 貼上狀態機](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/bottom_pane/paste_burst.rs#L417)與[輸入處理](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/bottom_pane/chat_composer.rs#L3771)是對照依據。候選組由桌面測試通道送入，不是最終 MCP 產品路徑或真實模型驗收，也不證明先前付費派工失敗當下具有相同排程。
+
 ## 安全檢查
+
+### 已驗證設定的產品路徑
+
+後續主程式改為「核對啟動設定 → 貼上 → End → 單次 Enter」，不再以 250ms 等待判定輸入已被消費。只支援經核對的原生版本及預設鍵位；人工輸入、設定變動、撤權或停止都會重新檢查，無法確認時不送出、不自動重試。啟動計時也移到設定探測之後，避免探測時間提前觸發初始提示。
+
+`72296d16fabf1d8b99f71b869ac262cccca5169d1ed7dfd714745689c54ab123` 的主程式通過 [11 項具名管道／ConPTY 驗收](assets/mcp-windows-native-qualified-20260908.json)。另以真正 Codex、全新未登入目錄及本機固定模型回應，驗證以下產品路徑；[報告摘要](assets/mcp-codex-input-qualified-20260908.json) 不含畫面、提示全文或機器路徑。
+
+- 正常情境：真正 `send_agent_prompt` 接受完整設定資格，637 字正文完整且只送達一次，第二輪官方完成與 MCP 讀回均通過。
+- 1 秒暫停：寫入請求約需 6 秒，消費端已先恢復，因此沒有形成指定積壓條件。原報告保留未通過，不當作回合失敗或積壓驗收成功。
+- 獨立的新工作階段改固定暫停 10 秒：寫入在 5437ms 回覆、暫停實測 10014ms；60 個自建執行緒全部恢復，15 秒獨立保護計時未觸發。原文、第二輪官方完成及 MCP 讀回均通過。模型結果期限仍為 30 秒，未重送任何一個工作階段的提示。
+
+Debug 版的正常啟動請求實測 14802ms、送指示請求 5718ms；包含設定重驗、PTY 與 RPC，不是單獨磁碟雜湊耗時，也不能當作 release 版效能數據。所有測試自建 CLI、launcher 與 fixture 均已清理；這一組是合成模型回應，不是真實 AI 工作結果。
+
+新版原生 library 測試副本在進入測試前遭本機 Windows 回覆 `Access is denied`；未修改安全設定、未改名繞過，也未將未執行的測試算通過。沒有找到足以歸因的防護事件。已將指定範圍的 Windows library 回歸接入隔離 CI：精確選取 Cargo 產物，只在自有副本加入 manifest，核對實際測試數、原始產物雜湊與清理結果；忽略的供應商驗收仍不執行。CI 結果另行記錄。
+
+前端完整回歸為 110 個檔案、715 passed／2 skipped（`--maxWorkers=4`），型別、production build、原生 runner 純邏輯自測與 Actions pinning 通過。先前高並行執行曾有一組既有 React 測試逾時；沒有放寬測試期限，降低並行數後全數通過。
+
+### 首字元保護後的原生驗收
+
+加入首字元 `?` 防護後，主程式 SHA-256 為 `d5b4d3611559497f1a158b4a01954b0dc1cd6364ba8eb1e58162861c2b32721f`。以這份主程式重新執行 [11 項具名管道／ConPTY 驗收](assets/mcp-windows-native-final-20260908.json)，全部通過，包含 metadata-only、獨立內容權限、撤權、去重與工作階段取消隔離。reporter 仍由 ConPTY 內的合成 fixture 呼叫，沒有外部注入；這不是供應商模型回合或安裝版驗收，也不會取代先前 `72296d16` 產物的報告。
+
+### 權限與資料保護
 
 - 遠端 scope 預設關閉，grant 綁定既有 live registry handle；失聯後原 ID 永久失效，重新授權必須取得新 ID。
 - 連線摘要與主機指標只提供核准名稱、opaque ID 與數值，不附帶 host、帳號、指令、絕對根目錄、掛載路徑或 filesystem。另行授權的終端輸出、命令結果與檔名仍可能含敏感內容，會交給所選 client。
@@ -68,7 +106,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib openssh_ -- --ignored
 
 直接使用解出的原始主程式，在新建的隔離環境重跑 11 項 MCP 驗收，全部通過；本次由 ConPTY 內的 fixture 呼叫 reporter，沒有使用外部 reporter。完整結果見 [下載產物驗收](assets/mcp-windows-consumer-4be3aca.json)。所有測試自建程序已退出。這是未簽署 CI 產物的消費端檢查，不是正式 release、安裝流程或真實 AI 回合驗收。
 
-## 真實 CLI 與未完成驗收
+## 真實 CLI 驗收歷程
 
 真實 Claude Code 2.1.222 與 Codex 0.153.4 已在隔離 ConPTY 工作階段啟動，並取得各自官方就緒依據；MCP 同時派送及相同 request ID 去重已通過，但雙 Agent 檔案檢查尚未通過。
 
@@ -89,4 +127,31 @@ Issue 不限定兩種供應商，因此另以 `4be3aca` 主程式和 Codex 0.153
 
 可重現腳本為 `scripts/verify-mcp-live-agents.mjs`，`--codex-pair` 使用同一供應商的兩個工作階段。預檢與原生探針不呼叫模型；`--run-live` 才執行真實模型回合，會使用現有帳號額度。這是 Node MCP client 操作真實 AI worker，不是另一個 AI 自主呼叫 MCP 的示範。
 
-雙 Agent 協作仍須取得官方回報與各自結果，不能用合成狀態或本文件的原生測試替代。PR 保持 Draft，issue 尚未關閉。macOS 桌面、外部主機與 D 遠端畫面不在本次已通過範圍；D 並非原提案 A／B 的前置要求。
+### 已驗證輸入設定的雙 Codex：通過
+
+同一天以修正後的主程式重跑兩個真實 Codex 0.153.4 工作階段，完整 [雙 Agent 報告](assets/mcp-codex-pair-qualified-20260908.json) 保留主程式、CLI、編譯器與 fixture 雜湊。本次 16 項檢查全部通過：
+
+- 兩個獨立工作目錄分別檢查 TypeScript／Rust fixture；兩份派工都只送出一次，相同 request ID 重送取得去重結果。
+- 各自取得正確的 nonce 與計算答案，以及該輪官方完成通知。輸出從真正 MCP 分頁讀回並還原終端畫面，沒有用桌面旁路或 heuristic 工作狀態當成功證據。
+- 獨立原生編譯器前後檢查 exit 0，來源檔案雜湊不變，未執行編譯後程式。模型被要求執行 checker，但報告不冒稱已獨立證明模型執行了編譯器。
+- 透過 MCP 結束前端 CLI，確認官方關閉事件及自有 PID 退出；Rust CLI 同時仍存活並保持分享。最後撤權後清單為空，兩個自有 CLI 與 fixture 均完成清理。
+
+本次未更動登入、使用者原有 CLI、已安裝程式或正式主機。這是 Node MCP client 派工給兩個真實 AI worker，不是另一個 AI 自主呼叫 MCP 的示範。先前失敗報告仍保留，不能因本次通過就改寫先前結果。
+
+### 首字元保護後的雙 Codex：舊解析器未通過
+
+以同一份 `d5b4d361` 主程式執行的 [舊解析器報告](assets/mcp-codex-pair-final-guard-20260908.json) 保留 `passed: false`。該次 Rust 回合已有官方完成通知，但答案驗證未通過，取消隔離也因前置條件不足而失敗。後續診斷發現，正確 nonce 與計算值 `22` 後接分號，被舊版結果正規表示式排除；不能把這個解析器問題描述成 CLI 沒有完成回合。
+
+另僅從該次自建 fixture 的供應商最終回覆，確認有 checker exit 1 的回報，原因仍不明。這是診斷線索，不是模型編譯成功或編譯器實際執行狀態的獨立證明；測試程式自行執行的編譯器前後檢查 exit 0 也不能消除這項差異。沒有從供應商歷史重新判綠舊 MCP 報告；原始失敗、撤權及兩個自有 CLI 清理結果全部保留。
+
+### 同一主程式與修正解析器的新驗收：協作檢查通過
+
+修正解析器後，以相同 `d5b4d361` 主程式、新建的兩個 Codex 工作階段與 fixture 重新執行，沒有沿用舊回合。這次自 2026-09-08 10:11:47 UTC 至 10:13:05 UTC 的 [新報告](assets/mcp-codex-pair-final-parser-20260908.json) 為 16 項通過：
+
+- TypeScript／Rust 來源檢閱均透過 MCP 取得正確 nonce、計算值及該回合官方完成通知；相同 request ID 重送沒有再次派工。
+- 取消前端工作階段後，官方關閉事件與自有 PID 退出均確認，Rust 工作階段仍存活且保持分享。最後撤權清單為空，兩個自有 CLI 均退出，fixture 已清理。
+- 獨立原生編譯器的前後檢查均 exit 0，fixture 來源與輸出雜湊一致，未執行編譯後程式。
+
+通過的是協作、來源檢閱、獨立編譯器檢查與取消／撤權邊界，不是「兩個模型都成功執行編譯器」。新的 MCP 讀回證據另外保存 checker 失敗回報：前端為空，Rust 為 `[1]`，不因後續畫面更新而清除；來源明示為未受信任的 CLI 文字，原因仍不明。驗收由 Node MCP client 派工給真實 AI worker，不是模型自主呼叫 MCP；輸出驗證使用 raw MCP 分頁及終端 renderer，也不是預設去除控制碼模式的驗收。
+
+最終 head 的 CI 與 Windows 下載產物仍須核對後才能合併並關閉 issue。macOS 桌面、外部主機與 D 遠端畫面不在已驗證範圍；D 並非原提案 A／B 的前置要求。

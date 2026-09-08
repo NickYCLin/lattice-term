@@ -17,6 +17,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod codex_input_profile;
 mod codex_resume;
 
 pub const EVENT_DATA: &str = "agent://data";
@@ -788,6 +791,13 @@ struct AgentSessionEntry {
     /// Tickets are acquired before waiting on input, so a cancelled split
     /// paste can reject already-waiting desktop writes instead of merging them.
     desktop_input_ticket: AtomicU64,
+    /// A control re-grant never restores the launch-time keyboard attestation.
+    /// Human input invalidates it before waiting for the shared input lock.
+    mcp_input_profile_invalidated: AtomicBool,
+    #[cfg(windows)]
+    codex_input_profile: Option<CodexInputAttestation>,
+    #[cfg(all(windows, test))]
+    codex_input_profile_test_supported: AtomicBool,
     stopping: AtomicBool,
     report_token: Option<String>,
     writer: Mutex<Box<dyn Write + Send>>,
@@ -853,6 +863,82 @@ struct QueuedPrompt {
     /// Desktop prompts have no MCP grant; external prompts remember the
     /// exact authorization under which they entered the queue.
     mcp_grant_epoch: Option<u64>,
+}
+
+#[cfg(windows)]
+struct CodexInputAttestation {
+    context: codex_input_profile::ProbeContext,
+    profile: codex_input_profile::SupportedProfile,
+}
+
+fn invalidate_mcp_input_profile(entry: &AgentSessionEntry, bytes: &[u8]) {
+    if !bytes.is_empty() && !is_terminal_status_reply(bytes) {
+        entry
+            .mcp_input_profile_invalidated
+            .store(true, Ordering::Release);
+    }
+}
+
+fn next_desktop_input_ticket(entry: &AgentSessionEntry, bytes: &[u8]) -> Result<u64, String> {
+    let ticket = entry
+        .desktop_input_ticket
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |ticket| {
+            ticket.checked_add(1)
+        })
+        .map_err(|_| "The terminal input ticket limit was reached.".to_string())?
+        + 1;
+    invalidate_mcp_input_profile(entry, bytes);
+    Ok(ticket)
+}
+
+fn mcp_input_profile_valid(entry: &AgentSessionEntry) -> bool {
+    #[cfg(windows)]
+    let supported = entry.codex_input_profile.is_some() || {
+        #[cfg(test)]
+        {
+            entry
+                .codex_input_profile_test_supported
+                .load(Ordering::Acquire)
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    };
+    #[cfg(not(windows))]
+    let supported = false;
+    supported && !entry.mcp_input_profile_invalidated.load(Ordering::Acquire)
+}
+
+fn revalidate_mcp_input_profile(
+    entry: &AgentSessionEntry,
+    definition_id: &str,
+) -> Result<(), String> {
+    require_mcp_input_profile(entry, definition_id)?;
+    #[cfg(windows)]
+    if definition_id == "codex" {
+        if let Some(attestation) = entry.codex_input_profile.as_ref() {
+            if attestation
+                .profile
+                .revalidate(&attestation.context)
+                .is_err()
+            {
+                entry
+                    .mcp_input_profile_invalidated
+                    .store(true, Ordering::Release);
+            }
+        }
+        // A human waiter can invalidate the profile while source hashing runs.
+        require_mcp_input_profile(entry, definition_id)?;
+    }
+    Ok(())
+}
+
+fn require_mcp_input_profile(entry: &AgentSessionEntry, definition_id: &str) -> Result<(), String> {
+    if cfg!(windows) && definition_id == "codex" && !mcp_input_profile_valid(entry) {
+        return Err(MCP_INPUT_PROFILE_UNSUPPORTED.to_string());
+    }
+    Ok(())
 }
 
 fn current_mcp_grant(entry: &AgentSessionEntry) -> Option<u64> {
@@ -4866,6 +4952,48 @@ fn inherit_process_environment(command: &mut CommandBuilder) {
 }
 
 #[cfg(windows)]
+fn final_codex_launch_environment(
+    command: &CommandBuilder,
+    inherited: &[(OsString, OsString)],
+) -> Vec<(OsString, OsString)> {
+    // Match portable-pty's case-insensitive Windows environment map without
+    // converting non-Unicode names or values to a lossy string. Values must
+    // come from the final command, after account/reporter overrides.
+    let mut keys = std::collections::BTreeMap::new();
+    for key in inherited
+        .iter()
+        .map(|(key, _)| key.clone())
+        .chain(command.iter_full_env_as_str().map(|(key, _)| key.into()))
+        .chain(
+            [
+                "TERM",
+                "COLORTERM",
+                "CODEX_HOME",
+                "LATTICETERM_AGENT_SESSION",
+                "LATTICETERM_REMOTE_CLI",
+                "LATTICETERM_AGENT_REPORTER",
+                "LATTICETERM_AGENT_REPORT_ADDR",
+                "LATTICETERM_AGENT_REPORT_TOKEN",
+            ]
+            .map(OsString::from),
+        )
+    {
+        let normalized = key
+            .to_str()
+            .map(|key| OsString::from(key.to_lowercase()))
+            .unwrap_or_else(|| key.clone());
+        keys.insert(normalized, key);
+    }
+    keys.into_values()
+        .filter_map(|key| {
+            command
+                .get_env(&key)
+                .map(|value| (key.clone(), value.to_os_string()))
+        })
+        .collect()
+}
+
+#[cfg(windows)]
 fn configure_node_runtime_for_script_in(
     command: &mut CommandBuilder,
     executable: &Path,
@@ -5738,7 +5866,6 @@ pub fn launch_with_replay(
 ) -> Result<AgentSessionSummary, String> {
     let request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
-    let launched_at = Instant::now();
     let size = validated_size(request.cols, request.rows)?;
     let launch_arguments = request.arguments.clone();
     let (definition_id, label, executable, mut arguments, working_directory) =
@@ -5888,7 +6015,9 @@ pub fn launch_with_replay(
     }
     let mut command = CommandBuilder::new(&program);
     #[cfg(windows)]
-    inherit_process_environment(&mut command);
+    let launch_environment = std::env::vars_os().collect::<Vec<_>>();
+    #[cfg(windows)]
+    inherit_process_environment_in(&mut command, launch_environment.clone());
     clear_host_terminal_markers(&mut command);
     #[cfg(windows)]
     configure_node_runtime_for_script(&mut command, &executable);
@@ -5945,6 +6074,30 @@ pub fn launch_with_replay(
         }
     }
 
+    #[cfg(windows)]
+    let codex_input_profile = if definition_id == "codex"
+        && program == executable.as_os_str()
+        && prefix_args.is_empty()
+        && seed_preserves_codex_input_profile(request.seed_input.as_deref())
+    {
+        // Capture the exact final child environment, including account and
+        // reporter overrides. Keep values local; never log this snapshot.
+        let context = codex_input_profile::ProbeContext {
+            native_executable: executable.clone(),
+            cwd: working_directory.clone(),
+            environment: final_codex_launch_environment(&command, &launch_environment),
+            arguments: command.get_argv().iter().skip(1).cloned().collect(),
+        };
+        codex_input_profile::inspect(&context)
+            .ok()
+            .map(|profile| CodexInputAttestation { context, profile })
+    } else {
+        None
+    };
+
+    // Configuration preflight may take seconds. The seed's minimum wait and
+    // fallback deadline must begin at the actual PTY launch, not before it.
+    let launched_at = Instant::now();
     let mut child = pair
         .slave
         .spawn_command(command)
@@ -6053,6 +6206,13 @@ pub fn launch_with_replay(
         }),
         mcp_grant_epoch: AtomicU64::new(0),
         desktop_input_ticket: AtomicU64::new(0),
+        mcp_input_profile_invalidated: AtomicBool::new(!seed_preserves_codex_input_profile(
+            request.seed_input.as_deref(),
+        )),
+        #[cfg(windows)]
+        codex_input_profile,
+        #[cfg(all(windows, test))]
+        codex_input_profile_test_supported: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
         last_output_at: Mutex::new(launched_at),
         prompt_ready_at: Mutex::new(None),
@@ -6245,17 +6405,12 @@ fn send_bytes(
     bytes: &[u8],
 ) -> Result<(), String> {
     let entry = registry.get(session_id)?;
-    let ticket = entry
-        .desktop_input_ticket
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |ticket| {
-            ticket.checked_add(1)
-        })
-        .map_err(|_| "The terminal input ticket limit was reached.".to_string())?
-        + 1;
+    let ticket = next_desktop_input_ticket(&entry, bytes)?;
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if rejects_interrupted_desktop_input(&input, ticket, bytes) {
         return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
     }
+    discard_profile_invalidated_queue(sink, registry, session_id, &entry);
     let desktop_input = observe_desktop_input(&mut input, bytes);
     if desktop_input && input.startup_seed_pending {
         let choosing_trust = entry
@@ -6451,7 +6606,7 @@ fn record_sent_input(
 }
 
 pub(crate) const MCP_DRAFT_RECOVERY_ERROR: &str = "MCP submission could not be confirmed. Inspect the visible draft before typing or retrying; pending input was rejected and nothing was automatically retried.";
-const CODEX_PASTE_SUBMIT_DELAY: Duration = Duration::from_millis(250);
+const MCP_INPUT_PROFILE_UNSUPPORTED: &str = "Windows Codex automatic MCP input is unsupported for this session: the launch-time default keymap and Vim-off profile was not verified, changed, or has been taken over by human input. No input was sent or queued. Reading output and session cancellation remain available; do not automatically restart or retry.";
 
 fn rejects_interrupted_desktop_input(input: &AgentInputControl, ticket: u64, bytes: &[u8]) -> bool {
     // Only complete, recognized reports bypass this recovery cutoff. Unknown
@@ -6459,7 +6614,7 @@ fn rejects_interrupted_desktop_input(input: &AgentInputControl, ticket: u64, byt
     ticket <= input.rejected_desktop_through && !is_terminal_status_reply(bytes)
 }
 
-fn needs_delayed_mcp_submit(
+fn needs_codex_mcp_submit(
     windows: bool,
     definition_id: &str,
     grant: Option<u64>,
@@ -6473,42 +6628,47 @@ fn needs_delayed_mcp_submit(
 }
 
 #[derive(Debug)]
-struct DelayedSubmitError {
+struct CodexSubmitError {
     draft_may_remain: bool,
 }
 
-fn write_delayed_mcp_submit(
+fn write_codex_mcp_submit(
     writer: &mut dyn Write,
     bytes: &[u8],
     mut authorized_and_alive: impl FnMut() -> bool,
-    mut wait: impl FnMut(Duration),
-) -> Result<(), DelayedSubmitError> {
+) -> Result<(), CodexSubmitError> {
     if !authorized_and_alive() {
-        return Err(DelayedSubmitError {
+        return Err(CodexSubmitError {
             draft_may_remain: false,
         });
     }
     // Windows ConPTY turns bracketed paste into native Char/Enter events.
-    // Codex treats an Enter in the same paste burst as a newline (120 ms
-    // suppression; 60 ms Windows idle flush in Codex 0.153.4). Keep
-    // bracketed-paste framing, but submit outside that burst.
-    let paste = bytes.strip_suffix(b"\r").ok_or(DelayedSubmitError {
+    // Default Codex 0.153.4 End flushes a pending paste burst and clears its
+    // Enter-suppression window before the following Enter is handled. Native
+    // event order survives a delayed consumer; sender-side sleeps do not.
+    // The caller must verify the launch-time default keyboard profile first.
+    let paste = bytes.strip_suffix(b"\r").ok_or(CodexSubmitError {
         draft_may_remain: false,
     })?;
     writer
         .write_all(paste)
         .and_then(|_| writer.flush())
-        .map_err(|_| DelayedSubmitError {
+        .map_err(|_| CodexSubmitError {
             draft_may_remain: true,
         })?;
     if !authorized_and_alive() {
-        return Err(DelayedSubmitError {
+        return Err(CodexSubmitError {
             draft_may_remain: true,
         });
     }
-    wait(CODEX_PASTE_SUBMIT_DELAY);
+    writer
+        .write_all(b"\x1b[F")
+        .and_then(|_| writer.flush())
+        .map_err(|_| CodexSubmitError {
+            draft_may_remain: true,
+        })?;
     if !authorized_and_alive() {
-        return Err(DelayedSubmitError {
+        return Err(CodexSubmitError {
             draft_may_remain: true,
         });
     }
@@ -6516,13 +6676,13 @@ fn write_delayed_mcp_submit(
     writer
         .write_all(b"\r")
         .and_then(|_| writer.flush())
-        .map_err(|_| DelayedSubmitError {
+        .map_err(|_| CodexSubmitError {
             draft_may_remain: true,
         })
 }
 
 /// All immediate and queued MCP writes use the same framing and grant check.
-/// The caller holds input through both writes; desktop typing can only follow
+/// The caller holds input through paste/End/Enter; desktop typing can only follow
 /// the complete submit, or receive an explicit recovery error after aborting.
 fn send_prompt_bytes_locked(
     sink: &dyn AgentSink,
@@ -6536,31 +6696,30 @@ fn send_prompt_bytes_locked(
     if !prompt_grant_matches(&entry, grant) || entry.stopping.load(Ordering::Acquire) {
         return Err("This session is not under active MCP control.".to_string());
     }
-    let delayed = {
+    let codex_submit = {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
-        needs_delayed_mcp_submit(cfg!(windows), &summary.definition_id, grant, bytes)
+        if grant.is_some() {
+            require_mcp_input_profile(&entry, &summary.definition_id)?;
+        }
+        needs_codex_mcp_submit(cfg!(windows), &summary.definition_id, grant, bytes)
     };
-    if !delayed {
+    if !codex_submit {
         return send_bytes_locked(sink, registry, session_id, bytes);
     }
     let result = {
         let mut writer = entry.writer.lock().map_err(|error| error.to_string())?;
-        write_delayed_mcp_submit(
-            writer.as_mut(),
-            bytes,
-            || {
-                prompt_grant_matches(&entry, grant)
-                    && !entry.stopping.load(Ordering::Acquire)
-                    && registry
-                        .get(session_id)
-                        .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
-            },
-            std::thread::sleep,
-        )
+        write_codex_mcp_submit(writer.as_mut(), bytes, || {
+            registry
+                .get(session_id)
+                .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
+                && !entry.stopping.load(Ordering::Acquire)
+                && prompt_grant_matches(&entry, grant)
+                && mcp_input_profile_valid(&entry)
+        })
     };
     if let Err(error) = result {
         if !error.draft_may_remain {
-            return Err("The MCP prompt was not written because its original control grant or session is no longer active.".to_string());
+            return Err("The MCP prompt was not written because its original control grant, session, or verified input profile is no longer active.".to_string());
         }
         if error.draft_may_remain {
             input.desktop_editing = true;
@@ -6632,8 +6791,44 @@ pub fn enqueue(
         return Err("A queued prompt is required.".to_string());
     }
     let entry = registry.get(session_id)?;
+    let ticket = next_desktop_input_ticket(&entry, &bytes)?;
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
+    if rejects_interrupted_desktop_input(&input, ticket, &bytes) {
+        return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
+    }
+    discard_profile_invalidated_queue(sink, registry, session_id, &entry);
     enqueue_locked(sink, registry, session_id, bytes, None, &mut input)
+}
+
+fn publish_mcp_input_notice(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    id: &str,
+    message: &str,
+) {
+    let notice = format!("\r\n[LatticeTerm] {message}\r\n");
+    if let Ok(offset) = registry.record_output(id, notice.as_bytes()) {
+        sink.data(id, offset, notice.as_bytes());
+    }
+}
+
+fn discard_profile_invalidated_queue(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    id: &str,
+    entry: &AgentSessionEntry,
+) {
+    if cfg!(windows)
+        && entry.mcp_input_profile_invalidated.load(Ordering::Acquire)
+        && entry
+            .summary
+            .lock()
+            .is_ok_and(|summary| summary.definition_id == "codex")
+        && clear_queue_locked(sink, registry, id, true).is_ok_and(|count| count > 0)
+    {
+        publish_mcp_input_notice(sink, registry, id,
+            "Pending MCP prompts were cancelled because this Windows Codex session's input profile is no longer verified. Human input remains available; nothing was automatically retried.");
+    }
 }
 
 fn enqueue_locked(
@@ -6646,9 +6841,13 @@ fn enqueue_locked(
 ) -> Result<usize, String> {
     let entry = registry.get(session_id)?;
 
-    let (state, source) = {
+    let (state, source, definition_id) = {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
-        (summary.state, summary.state_source)
+        (
+            summary.state,
+            summary.state_source,
+            summary.definition_id.clone(),
+        )
     };
     let queue_is_empty = entry
         .queued_prompts
@@ -6679,6 +6878,20 @@ fn enqueue_locked(
             return Err(format!(
                 "This agent already has {MAX_QUEUED_PROMPTS} prompts waiting."
             ));
+        }
+        if mcp_grant_epoch.is_some() {
+            // Human input/cancellation can arrive after the expensive source
+            // check while this call waits for the queue. Recheck only cheap
+            // state here, without taking summary while holding the queue lock.
+            if !registry
+                .get(session_id)
+                .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
+                || entry.stopping.load(Ordering::Acquire)
+                || !prompt_grant_matches(&entry, mcp_grant_epoch)
+            {
+                return Err("This session is not under active MCP control.".to_string());
+            }
+            require_mcp_input_profile(&entry, &definition_id)?;
         }
         queue.push_back(QueuedPrompt {
             bytes,
@@ -6761,7 +6974,14 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
     sink.queue(session_id, depth);
     // A write that fails means the PTY is gone; the remaining prompts are
     // dropped with the session rather than retried into a dead terminal.
-    let _ = send_queued_prompt_locked(sink, registry, session_id, prompt, &mut input);
+    let is_mcp = prompt.mcp_grant_epoch.is_some();
+    if let Err(error) = send_queued_prompt_locked(sink, registry, session_id, prompt, &mut input) {
+        if is_mcp && error != MCP_DRAFT_RECOVERY_ERROR {
+            let _ = clear_queue_locked(sink, registry, session_id, true);
+            publish_mcp_input_notice(sink, registry, session_id,
+                "A queued MCP prompt could not be delivered safely. Remaining MCP prompts were cancelled; nothing was automatically retried. Check this session's control grant and verified input profile before trying again.");
+        }
+    }
 }
 
 /// The caller holds input, but revocation remains out-of-band. Recheck the
@@ -6776,6 +6996,16 @@ fn send_queued_prompt_locked(
     let entry = registry.get(session_id)?;
     if !prompt_grant_matches(&entry, prompt.mcp_grant_epoch) {
         return Ok(false);
+    }
+    if prompt.mcp_grant_epoch.is_some() {
+        revalidate_mcp_input_profile(
+            &entry,
+            &entry
+                .summary
+                .lock()
+                .map_err(|error| error.to_string())?
+                .definition_id,
+        )?;
     }
     send_prompt_bytes_locked(
         sink,
@@ -6847,11 +7077,27 @@ fn mcp_prompt_with_grant_observer(
             .definition_id,
         text,
     )?;
+    require_mcp_input_profile(
+        &entry,
+        &entry
+            .summary
+            .lock()
+            .map_err(|error| error.to_string())?
+            .definition_id,
+    )?;
     after_grant_snapshot();
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if !prompt_grant_matches(&entry, Some(grant_epoch)) {
         return Err("This session is not under the original MCP control grant.".to_string());
     }
+    revalidate_mcp_input_profile(
+        &entry,
+        &entry
+            .summary
+            .lock()
+            .map_err(|error| error.to_string())?
+            .definition_id,
+    )?;
     if send_now {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
         if input.desktop_busy()
@@ -6902,6 +7148,14 @@ fn mcp_prompt_payload(text: &str) -> Result<Vec<u8>, String> {
     Ok(startup_seed_payload(&text))
 }
 
+fn seed_preserves_codex_input_profile(seed: Option<&str>) -> bool {
+    seed.is_none_or(|seed| {
+        seed.trim().is_empty()
+            || (validate_mcp_prompt(seed).is_ok()
+                && validate_mcp_prompt_transport(true, "codex", seed).is_ok())
+    })
+}
+
 fn validate_mcp_prompt_transport(
     windows: bool,
     definition_id: &str,
@@ -6910,9 +7164,14 @@ fn validate_mcp_prompt_transport(
     // ConPTY turns body LF/Tab into native Enter/Tab events. Codex can treat
     // them as submission keys before paste-burst detection becomes active.
     // Reject before enqueueing; never silently rewrite a controlled prompt.
-    if windows && definition_id == "codex" && text.contains(['\r', '\n', '\t']) {
+    if windows
+        && definition_id == "codex"
+        && (text.contains(['\r', '\n', '\t', '@', '$'])
+            || text.starts_with('?')
+            || text.trim_start().starts_with(['/', '!']))
+    {
         return Err(
-            "Windows Codex MCP requires a single-line prompt without carriage returns, newlines, or tabs. No input was sent or queued."
+            "Windows Codex MCP requires a single-line prompt without carriage returns, newlines, tabs, @ or $. Leading slash and ! commands, and text starting with ?, are unsupported. No input was sent or queued; do not silently rewrite rejected text."
                 .to_string(),
         );
     }
@@ -7552,6 +7811,23 @@ session id: 0199aa11-"
         prompt_then_screen.extend(vec![b'x'; STARTUP_CONTROL_WINDOW_BYTES * 2]);
         noisy.observe(&prompt_then_screen, prompt_at);
         assert!(noisy.should_deliver(started_at, started_at + STARTUP_SEED_MIN_WAIT));
+    }
+
+    #[test]
+    fn startup_seed_clock_excludes_configuration_preflight() {
+        let preflight_started_at = Instant::now();
+        let launched_at = preflight_started_at + STARTUP_SEED_TIMEOUT + Duration::from_secs(5);
+        let mut readiness = StartupReadiness::default();
+        let prompt_at = launched_at + Duration::from_millis(1);
+
+        assert!(readiness.should_deliver(preflight_started_at, prompt_at));
+        assert!(!readiness.should_deliver(launched_at, prompt_at));
+        readiness.observe(b"\x1b[?2004h", prompt_at);
+        assert!(!readiness.should_deliver(
+            launched_at,
+            launched_at + STARTUP_SEED_MIN_WAIT - Duration::from_millis(1)
+        ));
+        assert!(readiness.should_deliver(launched_at, launched_at + STARTUP_SEED_MIN_WAIT));
     }
 
     #[test]
@@ -8238,6 +8514,48 @@ model = "gpt-5.3-codex"
             "states={observed_states:?} usage={observed_usage:?} closed={closed:?} output={output:?}"
         );
         disconnect(sink.as_ref(), registry.as_ref(), &session.session_id).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pty_environment_profile_snapshot_deduplicates_case_and_keeps_final_values() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let opaque = OsString::from_wide(&[0xD800, b'x' as u16]);
+        let inherited = vec![
+            (OsString::from("Codex_Home"), OsString::from("inherited")),
+            (OsString::from("tErM"), OsString::from("inherited-term")),
+            (OsString::from("OPAQUE"), opaque.clone()),
+            (opaque.clone(), OsString::from("opaque-name-value")),
+        ];
+        let mut command = CommandBuilder::new("owned-fixture.exe");
+        inherit_process_environment_in(&mut command, inherited.clone());
+        command.env("CODEX_HOME", "final-account-home");
+        command.env("TERM", "xterm-256color");
+        // Additional overrides with a non-Unicode value cannot be found by
+        // iter_full_env_as_str, but their fixed known keys still must survive.
+        command.env("LATTICETERM_AGENT_REPORTER", &opaque);
+        let environment = final_codex_launch_environment(&command, &inherited);
+        assert_eq!(environment.len(), 5);
+        for (key, value) in [
+            (
+                OsString::from("CODEX_HOME"),
+                OsString::from("final-account-home"),
+            ),
+            (OsString::from("TERM"), OsString::from("xterm-256color")),
+            (OsString::from("OPAQUE"), opaque.clone()),
+            (opaque.clone(), OsString::from("opaque-name-value")),
+            (OsString::from("LATTICETERM_AGENT_REPORTER"), opaque),
+        ] {
+            assert_eq!(
+                environment
+                    .iter()
+                    .filter(|(actual, _)| actual == &key)
+                    .count(),
+                1
+            );
+            assert!(environment.contains(&(key, value)));
+        }
     }
 
     #[cfg(windows)]
@@ -10702,6 +11020,36 @@ notify = ["notify.exe", "turn-ended"]"#,
     }
 
     #[test]
+    fn codex_mcp_submit_unsafe_seed_loses_profile_without_rewriting_seed() {
+        for seed in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("Read the fixture and report the result."),
+            Some("Can you check this?"),
+            Some(" ?literal"),
+        ] {
+            assert!(seed_preserves_codex_input_profile(seed));
+        }
+        for seed in [
+            "first\nsecond",
+            "/vim",
+            " !echo test",
+            "read @file",
+            "inspect $skill",
+            "?help",
+            "\x1b[A",
+        ] {
+            assert!(!seed_preserves_codex_input_profile(Some(seed)));
+            // The eligibility check neither consumes nor rewrites startup text.
+            let payload = startup_seed_payload(seed);
+            assert!(payload
+                .windows(seed.len())
+                .any(|part| part == seed.as_bytes()));
+        }
+    }
+
+    #[test]
     fn codex_mcp_submit_transport_rejects_only_windows_codex_body_keys() {
         for windows in [false, true] {
             for provider in ["codex", "claude", "gemini", "custom"] {
@@ -10710,6 +11058,14 @@ notify = ["notify.exe", "turn-ended"]"#,
                     "first\nsecond",
                     "first\r\nsecond",
                     "first\tsecond",
+                    "/vim",
+                    "  /keymap",
+                    "!echo test",
+                    "  !echo test",
+                    "email@example.test",
+                    "use $variable",
+                    "?",
+                    "?help",
                 ] {
                     assert_eq!(
                         validate_mcp_prompt_transport(windows, provider, text).is_err(),
@@ -10717,7 +11073,13 @@ notify = ["notify.exe", "turn-ended"]"#,
                         "windows={windows}, provider={provider}, text={text:?}"
                     );
                 }
-                for text in ["single line", "單行中文", "甲乙🙂"] {
+                for text in [
+                    "single line",
+                    "單行中文",
+                    "甲乙🙂",
+                    "Check this?",
+                    " ?literal",
+                ] {
                     assert!(validate_mcp_prompt_transport(windows, provider, text).is_ok());
                 }
             }
@@ -10725,26 +11087,26 @@ notify = ["notify.exe", "turn-ended"]"#,
     }
 
     #[test]
-    fn codex_mcp_submit_only_delays_windows_controlled_complete_pastes() {
+    fn codex_mcp_submit_only_frames_windows_controlled_complete_pastes() {
         let bytes = mcp_prompt_payload("first second").unwrap();
-        assert!(needs_delayed_mcp_submit(true, "codex", Some(1), &bytes));
-        assert!(!needs_delayed_mcp_submit(false, "codex", Some(1), &bytes));
+        assert!(needs_codex_mcp_submit(true, "codex", Some(1), &bytes));
+        assert!(!needs_codex_mcp_submit(false, "codex", Some(1), &bytes));
         for provider in ["claude", "custom", "gemini", "Codex"] {
-            assert!(!needs_delayed_mcp_submit(true, provider, Some(1), &bytes));
+            assert!(!needs_codex_mcp_submit(true, provider, Some(1), &bytes));
         }
-        assert!(!needs_delayed_mcp_submit(true, "codex", None, &bytes));
+        assert!(!needs_codex_mcp_submit(true, "codex", None, &bytes));
         for bytes in [
             b"\r".as_slice(),
             b"text\r",
             b"\x1b[?2026;1$y",
             b"\x1b[200~draft\x1b[201~",
         ] {
-            assert!(!needs_delayed_mcp_submit(true, "codex", Some(1), bytes));
+            assert!(!needs_codex_mcp_submit(true, "codex", Some(1), bytes));
         }
     }
 
     #[test]
-    fn codex_mcp_submit_flushes_paste_then_waits_and_sends_one_enter() {
+    fn codex_mcp_submit_flushes_paste_then_end_and_sends_one_enter() {
         use std::cell::RefCell;
         struct Writer<'a>(&'a RefCell<Vec<Vec<u8>>>);
         impl Write for Writer<'_> {
@@ -10759,22 +11121,14 @@ notify = ["notify.exe", "turn-ended"]"#,
         }
         let events = RefCell::new(Vec::new());
         let bytes = mcp_prompt_payload("first second").unwrap();
-        write_delayed_mcp_submit(
-            &mut Writer(&events),
-            &bytes,
-            || true,
-            |duration| {
-                assert_eq!(duration, Duration::from_millis(250));
-                events.borrow_mut().push(b"wait".to_vec());
-            },
-        )
-        .unwrap();
+        write_codex_mcp_submit(&mut Writer(&events), &bytes, || true).unwrap();
         assert_eq!(
             *events.borrow(),
             vec![
                 b"\x1b[200~first second\x1b[201~".to_vec(),
                 b"flush".to_vec(),
-                b"wait".to_vec(),
+                b"\x1b[F".to_vec(),
+                b"flush".to_vec(),
                 b"\r".to_vec(),
                 b"flush".to_vec(),
             ]
@@ -10785,27 +11139,40 @@ notify = ["notify.exe", "turn-ended"]"#,
     fn codex_mcp_submit_rechecks_original_grant_and_liveness_without_retry() {
         use std::cell::Cell;
         let bytes = mcp_prompt_payload("owned prompt").unwrap();
-        for change in ["revoke", "regrant", "cancel"] {
-            let grant = Cell::new(1_u64);
-            let alive = Cell::new(true);
-            let mut writer = Vec::new();
-            let result = write_delayed_mcp_submit(
-                &mut writer,
-                &bytes,
-                || grant.get() == 1 && alive.get(),
-                |_| match change {
-                    "revoke" => grant.set(2),
-                    "regrant" => grant.set(3),
-                    _ => alive.set(false),
-                },
-            );
-            assert!(result.unwrap_err().draft_may_remain);
-            assert_eq!(writer, &bytes[..bytes.len() - 1]);
-            assert!(!writer.contains(&b'\r'));
+        for change in ["revoke", "regrant", "cancel", "profile-invalidated"] {
+            for change_at in [1, 2, 3] {
+                let grant = Cell::new(1_u64);
+                let alive = Cell::new(true);
+                let supported = Cell::new(true);
+                let mut checks = 0;
+                let mut writer = Vec::new();
+                let result = write_codex_mcp_submit(&mut writer, &bytes, || {
+                    checks += 1;
+                    if checks == change_at {
+                        match change {
+                            "revoke" => grant.set(2),
+                            "regrant" => grant.set(3),
+                            "cancel" => alive.set(false),
+                            _ => supported.set(false),
+                        }
+                    }
+                    grant.get() == 1 && alive.get() && supported.get()
+                });
+                assert_eq!(result.unwrap_err().draft_may_remain, change_at > 1);
+                let mut expected = if change_at > 1 {
+                    bytes[..bytes.len() - 1].to_vec()
+                } else {
+                    Vec::new()
+                };
+                if change_at == 3 {
+                    expected.extend_from_slice(b"\x1b[F");
+                }
+                assert_eq!(writer, expected);
+                assert!(!writer.contains(&b'\r'));
+            }
         }
         let mut writer = Vec::new();
-        let result =
-            write_delayed_mcp_submit(&mut writer, &bytes, || false, |_| panic!("must not wait"));
+        let result = write_codex_mcp_submit(&mut writer, &bytes, || false);
         assert!(!result.unwrap_err().draft_may_remain);
         assert!(writer.is_empty());
     }
@@ -10832,10 +11199,46 @@ notify = ["notify.exe", "turn-ended"]"#,
         }
         let mut writer = FailAfterPrefix { bytes: Vec::new() };
         let bytes = mcp_prompt_payload("test").unwrap();
-        let result =
-            write_delayed_mcp_submit(&mut writer, &bytes, || true, |_| panic!("must not wait"));
+        let result = write_codex_mcp_submit(&mut writer, &bytes, || true);
         assert!(result.unwrap_err().draft_may_remain);
         assert_eq!(writer.bytes, b"\x1b[2");
+    }
+
+    #[test]
+    fn codex_mcp_submit_body_end_and_enter_write_errors_never_retry() {
+        struct FailingWriter {
+            writes: Vec<Vec<u8>>,
+            call: usize,
+            fail_at: usize,
+        }
+        impl Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.call += 1;
+                if self.call == self.fail_at {
+                    return Err(std::io::Error::other("owned fixture"));
+                }
+                self.writes.push(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        for fail_at in [1, 2, 3] {
+            let mut writer = FailingWriter {
+                writes: Vec::new(),
+                call: 0,
+                fail_at,
+            };
+            assert!(
+                write_codex_mcp_submit(&mut writer, &mcp_prompt_payload("owned").unwrap(), || true)
+                    .unwrap_err()
+                    .draft_may_remain
+            );
+            assert_eq!(writer.call, fail_at);
+            assert_eq!(writer.writes.len(), fail_at - 1);
+            assert!(writer.writes.iter().all(|bytes| !bytes.contains(&b'\r')));
+        }
     }
 
     #[test]
@@ -10903,22 +11306,18 @@ notify = ["notify.exe", "turn-ended"]"#,
                 }
             }
         }
-        for fail_at in [1, 2] {
+        for fail_at in [1, 2, 3] {
             let mut writer = FlushFailure {
                 bytes: Vec::new(),
                 calls: 0,
                 fail_at,
             };
-            let result = write_delayed_mcp_submit(
-                &mut writer,
-                &mcp_prompt_payload("test").unwrap(),
-                || true,
-                |_| {},
-            );
+            let result =
+                write_codex_mcp_submit(&mut writer, &mcp_prompt_payload("test").unwrap(), || true);
             assert!(result.unwrap_err().draft_may_remain);
             assert_eq!(
                 writer.bytes.iter().filter(|byte| **byte == b'\r').count(),
-                usize::from(fail_at == 2)
+                usize::from(fail_at == 3)
             );
             assert!(MCP_DRAFT_RECOVERY_ERROR.contains("could not be confirmed"));
         }
@@ -10936,6 +11335,8 @@ notify = ["notify.exe", "turn-ended"]"#,
     #[cfg(windows)]
     struct CodexSubmitWriter {
         writes: Arc<Mutex<Vec<Vec<u8>>>>,
+        flushes: usize,
+        gate_at_flush: usize,
         gate: Option<(
             std::sync::mpsc::SyncSender<()>,
             std::sync::mpsc::Receiver<()>,
@@ -10949,11 +11350,14 @@ notify = ["notify.exe", "turn-ended"]"#,
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
-            if let Some((entered, release)) = self.gate.take() {
-                entered.send(()).map_err(std::io::Error::other)?;
-                release
-                    .recv_timeout(Duration::from_secs(5))
-                    .map_err(std::io::Error::other)?;
+            self.flushes += 1;
+            if self.flushes == self.gate_at_flush {
+                if let Some((entered, release)) = self.gate.take() {
+                    entered.send(()).map_err(std::io::Error::other)?;
+                    release
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(std::io::Error::other)?;
+                }
             }
             Ok(())
         }
@@ -10966,6 +11370,16 @@ notify = ["notify.exe", "turn-ended"]"#,
                 std::sync::mpsc::SyncSender<()>,
                 std::sync::mpsc::Receiver<()>,
             )>,
+        ) -> Self {
+            Self::with_flush_gate(gate, 1)
+        }
+
+        fn with_flush_gate(
+            gate: Option<(
+                std::sync::mpsc::SyncSender<()>,
+                std::sync::mpsc::Receiver<()>,
+            )>,
+            gate_at_flush: usize,
         ) -> Self {
             let registry = Arc::new(AgentRegistry::new());
             let sink = Arc::new(TestSink::default());
@@ -10995,11 +11409,17 @@ notify = ["notify.exe", "turn-ended"]"#,
             .unwrap();
             let entry = registry.get(&session.session_id).unwrap();
             entry.summary.lock().unwrap().definition_id = "codex".into();
+            // Explicit unit-only attestation; no provider config/model probe.
+            entry
+                .codex_input_profile_test_supported
+                .store(true, Ordering::Release);
             let writes = Arc::new(Mutex::new(Vec::new()));
             let original_writer = std::mem::replace(
                 &mut *entry.writer.lock().unwrap(),
                 Box::new(CodexSubmitWriter {
                     writes: writes.clone(),
+                    flushes: 0,
+                    gate_at_flush,
                     gate,
                 }),
             );
@@ -11028,6 +11448,319 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     #[cfg(windows)]
     #[test]
+    fn codex_mcp_submit_unknown_or_invalidated_profile_never_writes_or_queues() {
+        for unavailable in ["unknown", "human-input"] {
+            let fixture = CodexSubmitFixture::new(None);
+            let entry = fixture.registry.get(&fixture.id).unwrap();
+            if unavailable == "unknown" {
+                entry
+                    .codex_input_profile_test_supported
+                    .store(false, Ordering::Release);
+            } else {
+                invalidate_mcp_input_profile(&entry, b"manual");
+            }
+            for mode in ["now", "queue-ready", "queue-busy"] {
+                fixture.registry.update_state(
+                    &fixture.id,
+                    if mode == "queue-busy" {
+                        AgentLifecycle::Working
+                    } else {
+                        AgentLifecycle::Done
+                    },
+                    AgentStateSource::Integration,
+                );
+                for _ in 0..2 {
+                    assert_eq!(
+                        mcp_prompt(
+                            fixture.sink.as_ref(),
+                            &fixture.registry,
+                            &fixture.id,
+                            "owned prompt",
+                            mode == "now"
+                        )
+                        .unwrap_err(),
+                        MCP_INPUT_PROFILE_UNSUPPORTED
+                    );
+                    set_mcp_control(fixture.sink.as_ref(), &fixture.registry, &fixture.id, false)
+                        .unwrap();
+                    set_mcp_control(fixture.sink.as_ref(), &fixture.registry, &fixture.id, true)
+                        .unwrap();
+                }
+                assert!(fixture.writes.lock().unwrap().is_empty());
+                assert!(entry.queued_prompts.lock().unwrap().is_empty());
+            }
+            // Input capability does not revoke metadata/output or cancellation.
+            assert!(fixture.registry.output_range(&fixture.id, 0, 64).is_ok());
+            assert_eq!(
+                mcp_cancel_queue(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap(),
+                0
+            );
+            mcp_disconnect(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+            assert!(fixture.registry.get(&fixture.id).is_err());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_busy_queue_rechecks_profile_and_control_after_preflight() {
+        for change in ["human-input", "unknown-profile", "stopping", "regrant"] {
+            let fixture = CodexSubmitFixture::new(None);
+            let entry = fixture.registry.get(&fixture.id).unwrap();
+            fixture.registry.update_state(
+                &fixture.id,
+                AgentLifecycle::Working,
+                AgentStateSource::Integration,
+            );
+            let original_grant = current_mcp_grant(&entry);
+            let mut input = entry.input.lock().unwrap();
+            revalidate_mcp_input_profile(&entry, "codex").unwrap();
+            // Model a change after launch/source qualification but before the
+            // busy queue's final insertion. It must not acknowledge a new task.
+            match change {
+                "human-input" => invalidate_mcp_input_profile(&entry, b"manual"),
+                "unknown-profile" => entry
+                    .codex_input_profile_test_supported
+                    .store(false, Ordering::Release),
+                "stopping" => entry.stopping.store(true, Ordering::Release),
+                _ => {
+                    set_mcp_control(fixture.sink.as_ref(), &fixture.registry, &fixture.id, false)
+                        .unwrap();
+                    set_mcp_control(fixture.sink.as_ref(), &fixture.registry, &fixture.id, true)
+                        .unwrap();
+                }
+            }
+            let result = enqueue_locked(
+                fixture.sink.as_ref(),
+                &fixture.registry,
+                &fixture.id,
+                mcp_prompt_payload("must not queue").unwrap(),
+                original_grant,
+                &mut input,
+            );
+            assert!(result.is_err(), "change={change}");
+            if matches!(change, "human-input" | "unknown-profile") {
+                assert_eq!(result.unwrap_err(), MCP_INPUT_PROFILE_UNSUPPORTED);
+            }
+            assert!(fixture.writes.lock().unwrap().is_empty());
+            assert!(entry.queued_prompts.lock().unwrap().is_empty());
+            assert_eq!(entry.summary.lock().unwrap().queued_prompts, 0);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_human_send_and_enqueue_invalidate_before_waiting_for_input() {
+        for queued in [false, true] {
+            let fixture = CodexSubmitFixture::new(None);
+            let entry = fixture.registry.get(&fixture.id).unwrap();
+            let input = entry.input.lock().unwrap();
+            let human = {
+                let (sink, registry, id) = (
+                    fixture.sink.clone(),
+                    fixture.registry.clone(),
+                    fixture.id.clone(),
+                );
+                std::thread::spawn(move || {
+                    if queued {
+                        enqueue(sink.as_ref(), &registry, &id, &encode(b"manual prompt\r"))
+                            .map(|_| ())
+                    } else {
+                        send_bytes(sink.as_ref(), &registry, &id, b"manual prompt\r")
+                    }
+                })
+            };
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !entry.mcp_input_profile_invalidated.load(Ordering::Acquire)
+                && Instant::now() < deadline
+            {
+                std::thread::yield_now();
+            }
+            assert!(entry.mcp_input_profile_invalidated.load(Ordering::Acquire));
+            assert_eq!(entry.desktop_input_ticket.load(Ordering::Acquire), 1);
+            // The rejected MCP call must not wait behind the held input lock.
+            assert_eq!(
+                mcp_prompt(
+                    fixture.sink.as_ref(),
+                    &fixture.registry,
+                    &fixture.id,
+                    "must not merge",
+                    false
+                )
+                .unwrap_err(),
+                MCP_INPUT_PROFILE_UNSUPPORTED
+            );
+            assert!(fixture.writes.lock().unwrap().is_empty());
+            drop(input);
+            human.join().unwrap().unwrap();
+            assert_eq!(
+                *fixture.writes.lock().unwrap(),
+                vec![b"manual prompt\r".to_vec()]
+            );
+            assert!(!mcp_input_profile_valid(&entry));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_only_complete_terminal_reports_preserve_profile() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        for reply in [
+            b"\x1b[1;1R".as_slice(),
+            b"\x1b[?2026;1$y",
+            b"\x1b]11;rgb:0000/0000/0000\x07",
+        ] {
+            send_bytes(fixture.sink.as_ref(), &fixture.registry, &fixture.id, reply).unwrap();
+            assert!(mcp_input_profile_valid(&entry));
+        }
+        fixture.writes.lock().unwrap().clear();
+        mcp_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "owned prompt",
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            fixture
+                .writes
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|bytes| bytes.as_slice() == b"\r")
+                .count(),
+            1
+        );
+        for bytes in [
+            b"\x1b".as_slice(),
+            b"\x1b[?2026;",
+            b"\x1b]10;draft\r\x07",
+            b"\x1b[1;1Rtext",
+        ] {
+            let fixture = CodexSubmitFixture::new(None);
+            let entry = fixture.registry.get(&fixture.id).unwrap();
+            send_bytes(fixture.sink.as_ref(), &fixture.registry, &fixture.id, bytes).unwrap();
+            assert!(!mcp_input_profile_valid(&entry));
+            // Conservative capability loss must not swallow the original input.
+            assert_eq!(*fixture.writes.lock().unwrap(), vec![bytes.to_vec()]);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_queued_profile_loss_is_visible_and_does_not_write() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        for text in ["first task", "second task"] {
+            mcp_prompt(
+                fixture.sink.as_ref(),
+                &fixture.registry,
+                &fixture.id,
+                text,
+                false,
+            )
+            .unwrap();
+        }
+        entry
+            .codex_input_profile_test_supported
+            .store(false, Ordering::Release);
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+        deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        assert!(String::from_utf8_lossy(&fixture.sink.data.lock().unwrap())
+            .contains("could not be delivered safely"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_desktop_queue_failure_does_not_report_mcp_profile_failure() {
+        struct BrokenWriter;
+        impl Write for BrokenWriter {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("owned desktop fixture"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        *entry.writer.lock().unwrap() = Box::new(BrokenWriter);
+        entry
+            .queued_prompts
+            .lock()
+            .unwrap()
+            .push_back(QueuedPrompt {
+                bytes: b"owned desktop prompt\r".to_vec(),
+                mcp_grant_epoch: None,
+            });
+        // A desktop failure must not incorrectly clear another kind of entry
+        // or label its cause as a verified MCP input-profile failure.
+        entry
+            .queued_prompts
+            .lock()
+            .unwrap()
+            .push_back(QueuedPrompt {
+                bytes: mcp_prompt_payload("queued MCP prompt").unwrap(),
+                mcp_grant_epoch: current_mcp_grant(&entry),
+            });
+        deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        assert_eq!(entry.queued_prompts.lock().unwrap().len(), 1);
+        assert!(!String::from_utf8_lossy(&fixture.sink.data.lock().unwrap())
+            .contains("A queued MCP prompt could not be delivered safely"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_manual_takeover_discards_only_mcp_queue_with_notice() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        assert_eq!(
+            mcp_prompt(
+                fixture.sink.as_ref(),
+                &fixture.registry,
+                &fixture.id,
+                "MCP draft",
+                false
+            )
+            .unwrap(),
+            1
+        );
+        enqueue(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &encode(b"human draft\r"),
+        )
+        .unwrap();
+        let queue = entry.queued_prompts.lock().unwrap();
+        assert_eq!(queue.len(), 1);
+        assert!(queue[0].mcp_grant_epoch.is_none());
+        assert_eq!(queue[0].bytes, b"human draft\r");
+        drop(queue);
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert!(String::from_utf8_lossy(&fixture.sink.data.lock().unwrap())
+            .contains("Pending MCP prompts were cancelled"));
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn codex_mcp_submit_registry_rejects_body_keys_before_send_or_queue() {
         let fixture = CodexSubmitFixture::new(None);
         let entry = fixture.registry.get(&fixture.id).unwrap();
@@ -11037,6 +11770,12 @@ notify = ["notify.exe", "turn-ended"]"#,
                 "first\nsecond",
                 "first\r\nsecond",
                 "first\tsecond",
+                "/vim",
+                "  /keymap",
+                "!echo test",
+                "  !echo test",
+                "email@example.test",
+                "use $variable",
             ] {
                 fixture.registry.update_state(
                     &fixture.id,
@@ -11102,9 +11841,102 @@ notify = ["notify.exe", "turn-ended"]"#,
             }
             assert_eq!(
                 *fixture.writes.lock().unwrap(),
-                vec![b"\x1b[200~first second\x1b[201~".to_vec(), b"\r".to_vec()]
+                vec![
+                    b"\x1b[200~first second\x1b[201~".to_vec(),
+                    b"\x1b[F".to_vec(),
+                    b"\r".to_vec()
+                ]
             );
             fixture.writes.lock().unwrap().clear();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_mcp_submit_human_waiter_stops_end_or_enter_without_revoking_grant() {
+        for gate_at_flush in [1, 2] {
+            for queued_human in [false, true] {
+                let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+                let (release_tx, release_rx) = std::sync::mpsc::channel();
+                let fixture = CodexSubmitFixture::with_flush_gate(
+                    Some((entered_tx, release_rx)),
+                    gate_at_flush,
+                );
+                let entry = fixture.registry.get(&fixture.id).unwrap();
+                let submit = {
+                    let (sink, registry, id) = (
+                        fixture.sink.clone(),
+                        fixture.registry.clone(),
+                        fixture.id.clone(),
+                    );
+                    std::thread::spawn(move || {
+                        mcp_prompt(sink.as_ref(), &registry, &id, "owned draft", true)
+                    })
+                };
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let human = {
+                    let (sink, registry, id) = (
+                        fixture.sink.clone(),
+                        fixture.registry.clone(),
+                        fixture.id.clone(),
+                    );
+                    std::thread::spawn(move || {
+                        if queued_human {
+                            enqueue(sink.as_ref(), &registry, &id, &encode(b"old human input\r"))
+                                .map(|_| ())
+                        } else {
+                            send_bytes(sink.as_ref(), &registry, &id, b"old human input\r")
+                        }
+                    })
+                };
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !entry.mcp_input_profile_invalidated.load(Ordering::Acquire)
+                    && Instant::now() < deadline
+                {
+                    std::thread::yield_now();
+                }
+                assert!(entry.mcp_input_profile_invalidated.load(Ordering::Acquire));
+                assert_eq!(
+                    current_mcp_grant(&entry),
+                    Some(1),
+                    "no revoke masks the profile check"
+                );
+                release_tx.send(()).unwrap();
+                assert_eq!(
+                    submit.join().unwrap().unwrap_err(),
+                    MCP_DRAFT_RECOVERY_ERROR
+                );
+                assert_eq!(human.join().unwrap().unwrap_err(), MCP_DRAFT_RECOVERY_ERROR);
+                let mut expected = vec![b"\x1b[200~owned draft\x1b[201~".to_vec()];
+                if gate_at_flush == 2 {
+                    expected.push(b"\x1b[F".to_vec());
+                }
+                assert_eq!(*fixture.writes.lock().unwrap(), expected);
+                assert!(entry.queued_prompts.lock().unwrap().is_empty());
+                assert!(entry.input.lock().unwrap().desktop_busy());
+                send_bytes(
+                    fixture.sink.as_ref(),
+                    &fixture.registry,
+                    &fixture.id,
+                    b"manual review",
+                )
+                .unwrap();
+                assert_eq!(
+                    fixture.writes.lock().unwrap().last().unwrap(),
+                    b"manual review"
+                );
+                assert_eq!(
+                    mcp_prompt(
+                        fixture.sink.as_ref(),
+                        &fixture.registry,
+                        &fixture.id,
+                        "must not restart",
+                        false
+                    )
+                    .unwrap_err(),
+                    MCP_INPUT_PROFILE_UNSUPPORTED
+                );
+            }
         }
     }
 
@@ -11177,7 +12009,7 @@ notify = ["notify.exe", "turn-ended"]"#,
             "queued next",
             false,
         )
-        .unwrap();
+        .unwrap_err();
         fixture.registry.update_state(
             &fixture.id,
             AgentLifecycle::Done,

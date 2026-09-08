@@ -536,7 +536,11 @@ impl McpServer {
                 "platform": "windows",
                 "definitionId": "codex",
                 "modes": ["now", "queue"],
-                "rejectedCharacters": ["CR", "LF", "TAB"],
+                "rejectedCharacters": ["CR", "LF", "TAB", "@", "$"],
+                "rejectedLeadingCommands": ["/", "!"],
+                "requiredInputProfile": "launch-verified-default-keymap-vim-off",
+                "humanInputInvalidatesProfile": true,
+                "terminalReplyException": "complete-strictly-recognized-status-reports-only",
             }],
             "tools": [
                 "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
@@ -561,7 +565,8 @@ impl McpServer {
                 "There is no way to interrupt a running turn: cancel_agent_task drops queued prompts or ends the whole session.",
                 "Output is the retained terminal tail; a cursor older than it is reported as truncated.",
                 "Lifecycle states are the CLI's own hook reports when stateSource is integration, and a guess when it is heuristic; both immediate and queued prompts require an integration report that the CLI is free and no unfinished human input.",
-                "Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB are rejected before queueing or writing, in both now and queue modes. Do not silently flatten or rewrite rejected text.",
+                "Windows Codex MCP prompts require a launch-verified default keymap with Vim off. Human input, unrecognized or split terminal replies, and changed input configuration permanently disable automatic prompting for that session; regranting control does not restore it. Reading output and cancelling a session remain separately authorized. Do not automatically restart or retry an unsupported session.",
+                "Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB, @ and $, and leading / or ! commands or text starting with ? are rejected before queueing or writing, in both now and queue modes. Do not silently flatten or rewrite rejected text.",
             ],
         }))
     }
@@ -970,7 +975,11 @@ A state with stateSource \"heuristic\" is a guess from terminal output, not a re
 and queued prompts require a CLI integration report that it is free and no unfinished human input; a CLI \
 without these reports cannot receive MCP prompts. Prompts are text, not terminal control keys. \
 Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB are rejected before queueing \
-or writing in both now and queue modes. Ask for single-line text rather than silently flattening or rewriting it. \
+or writing in both now and queue modes; @ and $ and leading / or ! commands or text starting with ? are also rejected. \
+Windows Codex requires a launch-verified default keymap with Vim off. Human input or an unknown input profile \
+disables automatic prompting; regranting control does not restore it. Complete recognized terminal status \
+reports are exempt, but split or unknown replies conservatively invalidate the profile. Reading and \
+session cancellation remain separately authorized. Do not automatically restart, retry, or rewrite rejected text. \
 For remote work call list_authorized_connections first. Only a live desktop can grant SSH/SFTP scopes; \
 never request credentials, bypass host trust, or treat saved logins as permission. SSH executes only named \
 user-approved plans on a dedicated channel. File tools accept approved root IDs and relative paths, never \
@@ -1370,12 +1379,12 @@ fn tool_definitions() -> Value {
         {
             "name": "send_agent_prompt",
             "title": "Send a prompt to a controlled session",
-            "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Neither submits over unfinished human input, working/attention states, or a heuristic guess. Terminal control keys are rejected. Windows Codex accepts only a single line without tabs: CR, LF and TAB are rejected before queueing or writing in both modes. Do not silently flatten or rewrite rejected text. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
+            "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Neither submits over unfinished human input, working/attention states, or a heuristic guess. Terminal control keys are rejected. Windows Codex requires a launch-verified default keymap with Vim off and no subsequent human input; regranting cannot restore an invalidated profile. It accepts only a single line without tabs: CR, LF and TAB, @ and $, and leading / or ! commands or text starting with ? are rejected before queueing or writing in both modes. Do not automatically restart, retry, flatten or rewrite rejected text. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "sessionId": { "type": "string", "description": "A sessionId with access control." },
-                    "text": { "type": "string", "description": "Prompt text. Windows Codex rejects CR, LF and TAB; provide a single line without tabs and do not automatically flatten or rewrite rejected text." },
+                    "text": { "type": "string", "description": "Prompt text. Windows Codex requires a launch-verified default keymap with Vim off and no subsequent human input. It rejects CR, LF and TAB, @ and $, and leading / or ! commands or text starting with ?; provide a single line without tabs and do not automatically restart, retry, flatten or rewrite rejected text." },
                     "mode": { "type": "string", "enum": ["queue", "now"], "description": "queue (default) or now." },
                     "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required idempotency key, at most 128 UTF-8 bytes. Reuse only for an identical retry." }
                 },
@@ -2565,7 +2574,11 @@ mod tests {
                 "platform": "windows",
                 "definitionId": "codex",
                 "modes": ["now", "queue"],
-                "rejectedCharacters": ["CR", "LF", "TAB"],
+                "rejectedCharacters": ["CR", "LF", "TAB", "@", "$"],
+                "rejectedLeadingCommands": ["/", "!"],
+                "requiredInputProfile": "launch-verified-default-keymap-vim-off",
+                "humanInputInvalidatesProfile": true,
+                "terminalReplyException": "complete-strictly-recognized-status-reports-only",
             }])
         );
         let tools = tool_definitions();
@@ -2585,6 +2598,9 @@ mod tests {
             assert!(description.contains("Windows Codex"));
             assert!(description.contains("CR, LF and TAB"));
             assert!(description.contains("single line"));
+            assert!(description.contains("default keymap with Vim off"));
+            assert!(description.contains("@ and $"));
+            assert!(description.contains("leading / or !"));
             assert!(!description.contains("multiline text is pasted as one submission"));
             assert!(!description.contains("newlines are kept as one submission"));
         }

@@ -154,9 +154,17 @@ export function compilerResultMatches(before, after, kind) {
 
 export function verifiedResult(text, nonce, expected) {
   // Neither the random nonce nor the computed answer occurs in the prompt.
-  // TUI wrapping may put whitespace between the fixed fields.
-  const matches = [...text.matchAll(/LATTICE_RESULT\s+([0-9a-f-]{36})\s+(-?\d+)(?=\s|$)/g)];
+  // TUI wrapping may put whitespace between the fixed fields. Sentence
+  // punctuation may precede an honest checker-failure explanation; it must
+  // not turn a decimal, thousands separator, or word suffix into an integer.
+  const matches = [...text.matchAll(/LATTICE_RESULT\s+([0-9a-f-]{36})\s+(-?\d+)(?=\s|$|[;.,:](?=\s|$))/g)];
   return matches.some((match) => match[1] === nonce && Number(match[2]) === expected);
+}
+
+export function reportedCheckerFailures(text) {
+  const codes = [...text.matchAll(/checker\s+failed\s+with\s+exit\s+code\s+(-?\d{1,10})(?=\s|$|[;.,:](?=\s|$))/gi)]
+    .map((match) => Number(match[1])).filter((code) => code >= -1 && code <= 255);
+  return [...new Set(codes)].slice(0, 8);
 }
 
 export function requiredLiveChecks(codexOnly = false, codexPair = false) {
@@ -314,8 +322,59 @@ export function codexProgressSignals(text) {
     ["enter-to-send", /enter to (?:send|submit)/i],
     ["queued-message", /queued messages?|tab to queue/i],
     ["needs-user-action", /would you like to run the following command|approve this command|approve (?:once|for this session)|permission required|approval required|do you (?:want to )?allow/i],
-    ["model-refusal-or-unavailable", /unable to (?:read|access)|cannot (?:read|access)|model.{0,40}(?:not found|not supported|unavailable)/i],
+    ["model-metadata-fallback", /model metadata.{0,80}not found|defaulting to fallback metadata/i],
+    ["model-refusal-or-unavailable", /unable to (?:read|access)|cannot (?:read|access)|\bmodel(?! metadata).{0,40}(?:not found|not supported|unavailable)/i],
   ].filter(([, expression]) => expression.test(plain)).map(([fixed]) => fixed);
+}
+
+export function recordTaskSignals(diagnostic, screen, elapsedMs) {
+  const at = Math.max(0, Math.min(3_600_000, Math.floor(elapsedMs)));
+  if (!Number.isFinite(at)) return;
+  diagnostic.taskSignals ||= {};
+  for (const [kind, values] of [
+    ["classifications", classifyProviderOutput(screen)],
+    ["fixedErrorExcerpts", taskFailureSignals(screen)],
+    ["progressSignals", codexProgressSignals(screen)],
+  ]) {
+    const entries = diagnostic.taskSignals[kind] ||= {};
+    for (const value of values) {
+      const previous = entries[value];
+      entries[value] = { firstSeenMs: previous?.firstSeenMs ?? at, lastSeenMs: at };
+    }
+  }
+}
+
+export function taskSignalSnapshot(diagnostic) {
+  return Object.fromEntries(["classifications", "fixedErrorExcerpts", "progressSignals"].map((kind) =>
+    [kind, Object.entries(diagnostic.taskSignals?.[kind] || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([signal, times]) => ({ signal, ...times }))]));
+}
+
+export function composerHints(screen, cursorLine, prompt) {
+  // Diagnostic hints, not a focus/readiness proof. The prompt can occur in
+  // transcript history as well as a draft. No captured text leaves this helper.
+  return {
+    source: "heuristic-rendered-terminal-hints",
+    authorizesInput: false,
+    cursorOnPromptLikeLine: /^\s*[›❯>]\s/.test(cursorLine),
+    cursorOnEmptyPromptLikeLine: /^\s*[›❯>]\s*$/.test(cursorLine),
+    emptyComposerPlaceholderVisible: /[›❯>]\s*Ask Codex to do anything\b/.test(screen),
+    expectedPromptVisibleSomewhere: Boolean(prompt) && screen.replace(/\s/g, "").includes(prompt.replace(/\s/g, "")),
+    blockingPromptHintVisible: codexProgressSignals(screen).includes("needs-user-action")
+      || classifyProviderOutput(screen).some((kind) => ["workspace-trust-required", "authentication-required", "startup-confirmation-required"].includes(kind)),
+  };
+}
+
+export async function settleDiagnosticParsers(responders, timeoutMs = 1000) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.allSettled(responders.map((responder) => responder.chain))
+        .then((results) => results.every((result) => result.status === "fulfilled")),
+      new Promise((resolveTimeout) => { timer = setTimeout(() => resolveTimeout(false), timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 export function recordLifecycle(diagnostic, state, source) {
@@ -452,6 +511,14 @@ export class TerminalQueryResponder {
       buffer.getLine(Math.max(0, buffer.length - 120) + offset)?.translateToString(true) || "").join("\n");
   }
 
+  composerHints(prompt) {
+    const buffer = this.terminal.buffer.active;
+    const screen = Array.from({ length: this.terminal.rows }, (_, row) =>
+      buffer.getLine(buffer.baseY + row)?.translateToString(true) || "").join("\n");
+    const cursorLine = buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(true) || "";
+    return composerHints(screen, cursorLine, prompt);
+  }
+
   dispose() { this.terminal.dispose(); }
 }
 
@@ -460,6 +527,9 @@ export const MCP_REVIEW_OUTPUT_OPTIONS = Object.freeze({ maxBytes: 65536, stripC
 export class McpReviewVerifier {
   renderer = new TerminalQueryResponder();
   text = "";
+  correctRawEverSeen = false;
+  correctRenderedEverSeen = false;
+  reportedCheckerFailureCodes = new Set();
 
   constructor(nonce, expected) { this.nonce = nonce; this.expected = expected; }
 
@@ -470,11 +540,22 @@ export class McpReviewVerifier {
     // terminal queries are discarded: this evidence parser never writes stdin.
     await this.renderer.feed(text);
     const screen = this.renderer.screenText();
+    const correctRaw = verifiedResult(this.text, this.nonce, this.expected);
+    const correctRendered = verifiedResult(screen, this.nonce, this.expected);
+    this.correctRawEverSeen ||= correctRaw;
+    this.correctRenderedEverSeen ||= correctRendered;
+    for (const code of reportedCheckerFailures(`${this.text}\n${screen}`)) {
+      if (this.reportedCheckerFailureCodes.size < 8) this.reportedCheckerFailureCodes.add(code);
+    }
     return {
       source: "mcp-raw-output-and-renderer", stripControlSequences: false,
       resultMarkerSeen: /LATTICE_RESULT/.test(this.text) || /LATTICE_RESULT/.test(screen),
-      correctNonceAndComputedValue: verifiedResult(this.text, this.nonce, this.expected)
-        || verifiedResult(screen, this.nonce, this.expected),
+      correctNonceAndComputedValue: correctRaw || correctRendered,
+      correctRawNow: correctRaw, correctRenderedNow: correctRendered,
+      correctRawEverSeen: this.correctRawEverSeen, correctRenderedEverSeen: this.correctRenderedEverSeen,
+      reportedCheckerFailure: this.reportedCheckerFailureCodes.size > 0,
+      reportedCheckerFailures: [...this.reportedCheckerFailureCodes],
+      checkerFailureSource: "untrusted-cli-text-not-independent-compiler-execution-proof",
     };
   }
 
@@ -796,6 +877,7 @@ async function main(args) {
         if (diagnostic.taskResponder) {
           void diagnostic.taskResponder.feed(bytes).then(() => {
             diagnostic.taskScreen = diagnostic.taskResponder.screenText();
+            recordTaskSignals(diagnostic, diagnostic.taskScreen, performance.now() - diagnostic.taskStartedAt);
           }).catch(() => { diagnostic.classes.add("terminal-parser-error"); });
         }
       }
@@ -858,7 +940,10 @@ async function main(args) {
       const session = await desktop.request({ type: "launch", request: { definitionId,
         executable: entry.executable || (provider === "claude" ? claude : codex),
         label: `${name} acceptance`, arguments: entry.args || (entry.restrictedHelp ? ["--help", ...argumentsForCli] : argumentsForCli), workingDirectory: directory,
-        cols: 180, rows: 40, detached: true, sandbox: false } });
+        cols: 180, rows: 40, detached: true, sandbox: false } }, undefined,
+      // Windows Codex now performs a bounded metadata-only profile preflight.
+      // This changes only launch RPC waiting, not the model-turn deadline.
+      definitionId === "codex" ? 30000 : 15000);
       sessionIds.add(session.sessionId);
       ownedSessionIds.add(session.sessionId);
       const launchedDiagnostic = diagnostics.get(session.sessionId) || { bytes: 0, tail: "", classes: new Set(), closed: false };
@@ -953,7 +1038,13 @@ async function main(args) {
       // Exclude all startup text and prompt echoes from previous work.
       baselines[provider] = (await adapter.call("read_agent_output", { sessionId: id })).endOffset;
       const diagnostic = diagnostics.get(id);
+      const responder = terminalResponders.get(id);
+      const parserSettled = await settleDiagnosticParsers(responder ? [responder] : []);
+      diagnostic.expectedPrompt = options.codexPair ? pairPrompt(workerFixtures.get(provider).kind) : reviewPrompt(provider);
+      diagnostic.composer = { beforeDispatchParserSettled: parserSettled,
+        beforeDispatch: responder?.composerHints(diagnostic.expectedPrompt) || null };
       diagnostic.phase = "review";
+      diagnostic.taskStartedAt = performance.now();
       diagnostic.taskResponder = new TerminalQueryResponder();
     }
     stage = options.codexOnly ? "mcp-codex-dispatch" : "mcp-parallel-dispatch";
@@ -962,6 +1053,9 @@ async function main(args) {
         mode: "now", requestId: `${provider}-${randomUUID()}` };
       const first = await adapter.call("send_agent_prompt", prompt);
       if (!first.sentImmediately || first.queued !== 0) fail("mcp-prompt-not-delivered");
+      const responder = terminalResponders.get(id);
+      diagnostics.get(id).composer.afterWriteParserSettled = await settleDiagnosticParsers(responder ? [responder] : []);
+      diagnostics.get(id).composer.afterWrite = responder?.composerHints(prompt.text) || null;
       const retry = await adapter.call("send_agent_prompt", prompt);
       if (retry.duplicate !== true) fail("mcp-retry-not-deduplicated");
     }));
@@ -971,6 +1065,7 @@ async function main(args) {
       let cursor = baselines[provider];
       const worker = workerFixtures.get(provider);
       const verifier = new McpReviewVerifier(worker.nonce, worker.score);
+      let totalPagesRead = 0, totalTextBytes = 0;
       try {
         await waitUntil(async () => {
           let page, evidence, pagesRead = 0;
@@ -980,11 +1075,14 @@ async function main(args) {
             if (page.truncated) fail("review-output-truncated");
             if (!Number.isSafeInteger(page.nextCursor) || page.nextCursor < cursor
               || (page.hasMore && page.nextCursor <= cursor)) fail("output-cursor-stalled");
+            totalPagesRead++;
+            totalTextBytes += Buffer.byteLength(page.text);
             cursor = page.nextCursor;
             evidence = await verifier.feed(page.text);
           } while (page.hasMore);
           const diagnostic = diagnostics.get(id);
-          diagnostic.reviewEvidence = { outputReadAfterBaseline: cursor > baselines[provider], ...evidence };
+          diagnostic.reviewEvidence = { outputReadAfterBaseline: cursor > baselines[provider],
+            totalPagesRead, totalTextBytes, cursorAdvanceBytes: cursor - baselines[provider], ...evidence };
           const state = await currentSession(id);
           return state.stateSource === "integration" && ["idle", "done"].includes(state.state)
             && diagnostic.reviewEvidence.outputReadAfterBaseline && evidence.correctNonceAndComputedValue;
@@ -995,6 +1093,7 @@ async function main(args) {
         return { id: `${provider}-verified-review`, status: "passed", correctNonceAndComputedValue: true, officialCompletion: true,
           evidenceSource: "mcp-raw-output-and-renderer", stripControlSequences: false,
           workerId: worker.id, provider: worker.provider, providerStillRunning: sessionIds.has(id), workingStateSources: workingSources,
+          reportedCheckerFailures: diagnostics.get(id).reviewEvidence.reportedCheckerFailures,
           ...(options.codexPair ? { task: "model-source-review", agentCompilerExecution: "requested-not-independently-attested" } : {}) };
       } finally { verifier.dispose(); }
     }));
@@ -1063,13 +1162,21 @@ async function main(args) {
   } catch (error) {
     report.checks.push({ id: stage, status: "failed", ...safeError(error) });
   } finally {
+    // Drain only already-enqueued parser work. Do not wait for new provider
+    // output or extend the model deadline to turn missing evidence into a pass.
+    report.diagnosticParsersSettled = await settleDiagnosticParsers([
+      ...terminalResponders.values(), ...[...diagnostics.values()].map((item) => item.taskResponder).filter(Boolean),
+    ]);
     report.providerDiagnostics = Object.fromEntries([...providerIds].map(([provider, id]) => {
       const diagnostic = diagnostics.get(id);
       return [provider, diagnostic ? { terminalBytesSeen: diagnostic.bytes, classifications: [...diagnostic.classes].sort(),
         startupSignals: startupSignals(diagnostic.screen || diagnostic.tail), terminalQueries: diagnostic.terminalQueries || {}, lifecycle: diagnostic.lifecycle || null,
         lifecycleSequence: diagnostic.lifecycleSequence || [], lifecycleSequenceTruncated: Boolean(diagnostic.lifecycleSequenceTruncated),
         taskDiagnostics: diagnostic.taskResponder ? { baseline: "only output after MCP dispatch baseline", classifications: classifyProviderOutput(diagnostic.taskScreen || ""), fixedErrorExcerpts: taskFailureSignals(diagnostic.taskScreen || ""),
-          progressSignals: codexProgressSignals(diagnostic.taskScreen || "") } : null,
+          progressSignals: codexProgressSignals(diagnostic.taskScreen || ""),
+          finalScreenOnly: true, accumulated: taskSignalSnapshot(diagnostic) } : null,
+        composer: diagnostic.composer ? { ...diagnostic.composer,
+          final: terminalResponders.get(id)?.composerHints(diagnostic.expectedPrompt) || null } : null,
         reviewEvidence: diagnostic.reviewEvidence || null,
         closedBeforeCleanup: diagnostic.closed, exitCode: diagnostic.exitCode ?? null, rawOutputInReport: false }
         : { terminalBytesSeen: 0, classifications: [], closedBeforeCleanup: false, rawOutputInReport: false }];

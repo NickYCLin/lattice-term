@@ -1,0 +1,120 @@
+{
+  "platform": "Windows 10.0.26200 x64",
+  "lifecycleReporter": "ConPTY fixture callback",
+  "executableSha256": "72296d16fabf1d8b99f71b869ac262cccca5169d1ed7dfd714745689c54ab123",
+  "checks": [
+    {
+      "id": "legacy pipe and observer protocol isolation",
+      "status": "passed",
+      "evidence": {
+        "reachedLegacyPipe": true,
+        "observerProtocol": 2,
+        "privateDataReturned": false
+      }
+    },
+    {
+      "id": "A tools and sharing",
+      "status": "passed",
+      "evidence": {
+        "tools": 15,
+        "onlySharedVisible": true,
+        "privateFieldsAbsent": true
+      }
+    },
+    {
+      "id": "A metadata-only sharing and independent content scope",
+      "status": "passed",
+      "evidence": {
+        "atomicMetadataOnly": true,
+        "listAndWaitAllowed": true,
+        "rawObserveAndMcpReadDenied": true,
+        "rawObserverLaunchDetailsAbsent": true,
+        "explicitContentGrantAllowsRead": true,
+        "contentRevocationPreservesMetadataAndControl": true,
+        "cliStillRunning": true
+      }
+    },
+    {
+      "id": "F1 revoke wakes wait and does not block following requests",
+      "status": "passed",
+      "evidence": {
+        "listMs": 1,
+        "revokeMs": 1,
+        "revoked": true
+      }
+    },
+    {
+      "id": "F2 default ANSI page boundary",
+      "status": "passed",
+      "evidence": {
+        "firstCursor": 16382,
+        "secondPrefix": "RED\n中文\n"
+      }
+    },
+    {
+      "id": "F3 UTF-8 small pages advance",
+      "status": "passed",
+      "evidence": [
+        {
+          "text": "é",
+          "advance": 2
+        },
+        {
+          "text": "中",
+          "advance": 3
+        },
+        {
+          "text": "😀",
+          "advance": 4
+        }
+      ]
+    },
+    {
+      "id": "F4 equivalent Windows paths find the same daemon",
+      "status": "passed",
+      "evidence": {
+        "equivalentForms": 8,
+        "differentDirectoryIsolated": true
+      }
+    },
+    {
+      "id": "B independent grants, queue, prompt deduplication and revocation",
+      "status": "passed",
+      "evidence": {
+        "readDoesNotGrantControl": true,
+        "nowDeliveredOnce": true,
+        "queueCleared": 1,
+        "controlRevoked": true
+      }
+    },
+    {
+      "id": "B saved plan launch and session cancellation",
+      "status": "passed",
+      "evidence": {
+        "savedPlanOnly": true,
+        "launchDeliveredOnce": true,
+        "desktopNotified": true,
+        "closed": true,
+        "processExited": true,
+        "otherSessionPreserved": true
+      }
+    },
+    {
+      "id": "B concurrent retries across connections launch only once",
+      "status": "passed",
+      "evidence": {
+        "requests": 4,
+        "sessions": 1
+      }
+    },
+    {
+      "id": "F1 daemon loss is an error",
+      "status": "passed",
+      "evidence": {
+        "daemonLossIsError": true,
+        "lossMs": 5
+      }
+    }
+  ],
+  "passed": true
+}

@@ -1,0 +1,524 @@
+{
+  "schemaVersion": 1,
+  "mode": "run-live",
+  "startedAt": "2026-09-08T10:11:47.718Z",
+  "platform": "Windows 10.0.26200 x64",
+  "driver": "Node MCP orchestrator with real AI CLI workers",
+  "syntheticLifecycleReports": false,
+  "checks": [
+    {
+      "id": "native-provider-inventory",
+      "status": "passed",
+      "paidRequests": 0
+    },
+    {
+      "id": "codex-configured-mcp-disabled-for-test-invocation",
+      "status": "passed",
+      "configuredCount": 2,
+      "enabledAfterOverride": 0,
+      "userConfigurationChanged": false
+    },
+    {
+      "id": "native-compiler-inventory",
+      "status": "passed",
+      "identities": {
+        "frontend": {
+          "version": "7.0.2",
+          "executableName": "tsc.exe",
+          "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+        },
+        "rust": {
+          "version": "1.97.1",
+          "executableName": "rustc.exe",
+          "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+        }
+      },
+      "installedNativeCompilersOnly": true
+    },
+    {
+      "id": "frontend-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "796eb984ade64f09b0e9375e3ecc4a9abccc5aa987f02672bdde6292891f46c3",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "rust-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "95a140f6c5ed2988e8de6ffe2179bb0de119cf8aec14ad12f7c33958493a0eb6",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "0a434b7df0fd3882c772bad06d4fa39d3ead1f311bae0a8bca89ad27c537587c",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "two-isolated-real-cli-sessions",
+      "status": "passed",
+      "workers": [
+        "frontend",
+        "rust"
+      ],
+      "providers": {
+        "frontend": "codex",
+        "rust": "codex"
+      },
+      "explicitContentAndControlGrants": true,
+      "distinctWorkingDirectories": true,
+      "sameProviderDifferentSessions": true
+    },
+    {
+      "id": "frontend-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "rust-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "mcp-parallel-dispatch",
+      "status": "passed",
+      "accepted": 2,
+      "sameRequestIdRetriesDeduplicated": 2
+    },
+    {
+      "id": "frontend-verified-review",
+      "status": "passed",
+      "correctNonceAndComputedValue": true,
+      "officialCompletion": true,
+      "evidenceSource": "mcp-raw-output-and-renderer",
+      "stripControlSequences": false,
+      "workerId": "frontend",
+      "provider": "codex",
+      "providerStillRunning": true,
+      "workingStateSources": [
+        "heuristic"
+      ],
+      "reportedCheckerFailures": [],
+      "task": "model-source-review",
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "rust-verified-review",
+      "status": "passed",
+      "correctNonceAndComputedValue": true,
+      "officialCompletion": true,
+      "evidenceSource": "mcp-raw-output-and-renderer",
+      "stripControlSequences": false,
+      "workerId": "rust",
+      "provider": "codex",
+      "providerStillRunning": true,
+      "workingStateSources": [
+        "heuristic"
+      ],
+      "reportedCheckerFailures": [
+        1
+      ],
+      "task": "model-source-review",
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "frontend-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "796eb984ade64f09b0e9375e3ecc4a9abccc5aa987f02672bdde6292891f46c3",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "rust-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "95a140f6c5ed2988e8de6ffe2179bb0de119cf8aec14ad12f7c33958493a0eb6",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "0a434b7df0fd3882c772bad06d4fa39d3ead1f311bae0a8bca89ad27c537587c",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "read-only-fixture-integrity",
+      "status": "passed",
+      "sourceFilesUnchanged": true,
+      "newFiles": 0
+    },
+    {
+      "id": "mcp-session-cancel-isolation",
+      "status": "passed",
+      "scope": "session",
+      "officialClosedEvent": true,
+      "ownedProcessExited": true,
+      "cleanupNotUsedAsEvidence": true,
+      "cancelledWorker": "frontend",
+      "survivingWorker": "rust",
+      "otherWorkerStillAliveAndShared": true,
+      "bothReviewsPassed": true
+    },
+    {
+      "id": "revocation",
+      "status": "passed",
+      "visibleSessions": 0
+    }
+  ],
+  "passed": true,
+  "boundaries": [
+    "Not a desktop UI or installed-application test",
+    "Does not test one AI acting as the MCP client",
+    "Only small read-only TypeScript and Rust review fixtures; not whole-project typecheck or cargo acceptance",
+    "No per-turn interrupt claim",
+    "Codex notify officially reports completion, not working; working is recorded with its actual heuristic source",
+    "Existing provider credentials and native provider session history remain provider-managed",
+    "Provider startup configuration, including existing Codex notification hooks, can still run; this harness is not an account or host security sandbox",
+    "Two isolated Codex sessions using the existing provider-managed login: frontend/Rust source reviews plus independently executed compiler checks, not proof that an AI tool executed a compiler. No Claude process launched.",
+    "Both Codex invocations request read-only sandboxing, no approval, web search disabled, and separate fresh working directories. TypeScript uses noEmit; Rust metadata is captured from stdout, never executed or written as a workspace artifact.",
+    "Compiler identities, immutable fixture hashes, real exit statuses, and matching pre/post output hashes corroborate the independent checks; they are not forensic attestation against a malicious process under the same account.",
+    "Review answers are verified only from authorized MCP read_agent_output with stripControlSequences:false and its local terminal renderer; this does not validate the default sanitized-output mode. Desktop output is diagnostic only."
+  ],
+  "client": {
+    "name": "live-agent-acceptance",
+    "version": "1.0",
+    "nodeVersion": "v24.13.1"
+  },
+  "fixtureTrustOptIn": false,
+  "workers": [
+    "frontend",
+    "rust"
+  ],
+  "workerProviders": {
+    "frontend": "codex",
+    "rust": "codex"
+  },
+  "agentCompilerExecution": "requested-not-independently-attested",
+  "requiredChecks": [
+    "native-provider-inventory",
+    "codex-configured-mcp-disabled-for-test-invocation",
+    "two-isolated-real-cli-sessions",
+    "frontend-official-readiness",
+    "rust-official-readiness",
+    "mcp-parallel-dispatch",
+    "frontend-verified-review",
+    "rust-verified-review",
+    "native-compiler-inventory",
+    "frontend-compiler-preflight",
+    "rust-compiler-preflight",
+    "frontend-independent-compiler-check",
+    "rust-independent-compiler-check",
+    "read-only-fixture-integrity",
+    "mcp-session-cancel-isolation",
+    "revocation"
+  ],
+  "latticeExecutableSha256": "d5b4d3611559497f1a158b4a01954b0dc1cd6364ba8eb1e58162861c2b32721f",
+  "providers": {
+    "codex": {
+      "version": "0.153.4",
+      "executableName": "codex.exe",
+      "executableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b"
+    }
+  },
+  "compilers": {
+    "frontend": {
+      "version": "7.0.2",
+      "executableName": "tsc.exe",
+      "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+    },
+    "rust": {
+      "version": "1.97.1",
+      "executableName": "rustc.exe",
+      "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+    }
+  },
+  "fixtureHashes": {
+    "frontend": {
+      "checker.mjs": "ff2c7a2b36e3e8c106aac62abba95bf62210765aa6c913994a797599317b7c4f",
+      "review.ts": "796eb984ade64f09b0e9375e3ecc4a9abccc5aa987f02672bdde6292891f46c3",
+      "tsconfig.json": "283624c1caf7f5fce044574fd1e87c8cbd7c4f34ec61966877668c4976e7d406"
+    },
+    "rust": {
+      "checker.mjs": "1a4376885f7004332cd2ebea2d14b4223caebac73de52f6814cbbb73e397d673",
+      "review.rs": "95a140f6c5ed2988e8de6ffe2179bb0de119cf8aec14ad12f7c33958493a0eb6"
+    }
+  },
+  "diagnosticParsersSettled": true,
+  "providerDiagnostics": {
+    "frontend": {
+      "terminalBytesSeen": 64175,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "done",
+        "source": "integration"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": [
+          "command-running-or-ran"
+        ],
+        "finalScreenOnly": true,
+        "accumulated": {
+          "classifications": [],
+          "fixedErrorExcerpts": [],
+          "progressSignals": [
+            {
+              "signal": "command-running-or-ran",
+              "firstSeenMs": 17963,
+              "lastSeenMs": 31953
+            },
+            {
+              "signal": "working-footer",
+              "firstSeenMs": 7777,
+              "lastSeenMs": 31769
+            }
+          ]
+        }
+      },
+      "composer": {
+        "beforeDispatchParserSettled": true,
+        "beforeDispatch": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "afterWriteParserSettled": true,
+        "afterWrite": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "final": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": true,
+          "blockingPromptHintVisible": false
+        }
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "totalPagesRead": 220,
+        "totalTextBytes": 49039,
+        "cursorAdvanceBytes": 49039,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": true,
+        "correctRawNow": false,
+        "correctRenderedNow": true,
+        "correctRawEverSeen": false,
+        "correctRenderedEverSeen": true,
+        "reportedCheckerFailure": false,
+        "reportedCheckerFailures": [],
+        "checkerFailureSource": "untrusted-cli-text-not-independent-compiler-execution-proof"
+      },
+      "closedBeforeCleanup": true,
+      "exitCode": null,
+      "rawOutputInReport": false
+    },
+    "rust": {
+      "terminalBytesSeen": 72502,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "done",
+        "source": "integration"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "idle",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": [
+          "command-running-or-ran"
+        ],
+        "finalScreenOnly": true,
+        "accumulated": {
+          "classifications": [],
+          "fixedErrorExcerpts": [],
+          "progressSignals": [
+            {
+              "signal": "command-running-or-ran",
+              "firstSeenMs": 19976,
+              "lastSeenMs": 33868
+            },
+            {
+              "signal": "working-footer",
+              "firstSeenMs": 7793,
+              "lastSeenMs": 33716
+            }
+          ]
+        }
+      },
+      "composer": {
+        "beforeDispatchParserSettled": true,
+        "beforeDispatch": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "afterWriteParserSettled": true,
+        "afterWrite": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "final": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": true,
+          "blockingPromptHintVisible": false
+        }
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "totalPagesRead": 235,
+        "totalTextBytes": 57397,
+        "cursorAdvanceBytes": 57397,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": true,
+        "correctRawNow": false,
+        "correctRenderedNow": true,
+        "correctRawEverSeen": false,
+        "correctRenderedEverSeen": true,
+        "reportedCheckerFailure": true,
+        "reportedCheckerFailures": [
+          1
+        ],
+        "checkerFailureSource": "untrusted-cli-text-not-independent-compiler-execution-proof"
+      },
+      "closedBeforeCleanup": false,
+      "exitCode": null,
+      "rawOutputInReport": false
+    }
+  },
+  "ownedCliCleanup": {
+    "sessionCount": 2,
+    "exited": 2,
+    "stillRunning": 0,
+    "unknown": 0,
+    "confirmed": true
+  },
+  "cleanup": "owned-cli-pids-and-launchers-exited-fixtures-removed",
+  "finishedAt": "2026-09-08T10:13:05.406Z"
+}
