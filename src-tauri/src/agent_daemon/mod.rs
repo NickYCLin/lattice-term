@@ -18,6 +18,7 @@
 //! `agent-daemon.token` (owner-only file in the application data directory);
 //! anything else closes the connection.
 
+pub mod audit;
 pub mod automations;
 pub mod client;
 pub mod mcp;
@@ -33,6 +34,9 @@ use std::path::{Path, PathBuf};
 
 /// Bumped when a frame changes shape; both sides refuse a mismatch.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// Legacy desktop daemons ignore the role field. A distinct version makes
+/// them reject observer greetings before returning any private session data.
+pub const OBSERVER_PROTOCOL_VERSION: u32 = 2;
 /// Session ids minted by the daemon's registry. The desktop routes every
 /// command by this prefix, so the two registries can never collide.
 pub const SESSION_ID_PREFIX: &str = "agent-bg-session-";
@@ -74,6 +78,15 @@ pub enum ClientRole {
     Observer,
 }
 
+impl ClientRole {
+    pub const fn protocol_version(self) -> u32 {
+        match self {
+            Self::Desktop => PROTOCOL_VERSION,
+            Self::Observer => OBSERVER_PROTOCOL_VERSION,
+        }
+    }
+}
+
 /// Where this installation keeps its data when nobody passes `--data-dir`:
 /// the same directory Tauri resolves for the application identifier, so the
 /// MCP adapter finds the daemon the desktop started.
@@ -100,6 +113,10 @@ pub struct DaemonPaths {
 /// FNV-1a of the data directory: stable, short, one per installation.
 fn installation_hash(data_dir: &Path) -> u64 {
     let key = installation_key(data_dir);
+    hash_installation_key(&key)
+}
+
+fn hash_installation_key(key: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in key.as_bytes() {
         hash ^= u64::from(*byte);
@@ -215,6 +232,16 @@ impl DaemonPaths {
         format!(
             r"\\.\pipe\latticeterm-agent-{:016x}",
             installation_hash(&self.data_dir)
+        )
+    }
+
+    /// Before path normalization, the original spelling identified the pipe.
+    /// The desktop must still reach that running daemon after an upgrade.
+    #[cfg(windows)]
+    pub(crate) fn legacy_pipe_name(&self) -> String {
+        format!(
+            r"\\.\pipe\latticeterm-agent-{:016x}",
+            hash_installation_key(&self.data_dir.to_string_lossy())
         )
     }
 }
@@ -363,6 +390,8 @@ pub enum Request {
     },
     /// Sessions currently shared with observers, with their grants.
     Shared,
+    /// Desktop-only bounded metadata history, including stopped sessions.
+    McpHistory,
     /// A bounded slice of one shared session's output from `cursor` on.
     Observe {
         session_id: String,
@@ -467,6 +496,13 @@ pub struct McpPlan {
 #[serde(rename_all = "camelCase")]
 pub struct HelloReply {
     pub protocol: u32,
+    /// Zero on legacy daemons, which must not receive MCP administration frames.
+    #[serde(default)]
+    pub mcp_protocol: u32,
+    /// Optional desktop capability. Old daemons must never receive the new
+    /// request variant: they may close the connection on an unknown frame.
+    #[serde(default)]
+    pub mcp_history: bool,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,
     pub snapshots: Vec<crate::agent::AgentOutputSnapshot>,
     /// Sessions the user shared with observers; empty for observers who

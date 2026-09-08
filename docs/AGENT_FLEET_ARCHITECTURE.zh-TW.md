@@ -190,6 +190,8 @@ Reporter 傳輸與狀態模型已完成，Codex、Claude Code、Gemini CLI、Ope
 - **重播**：daemon 的 `OutputBuffer` offset 跨 attach 單調遞增；新視窗從 `hello`／`snapshots` 拿到 `startOffset`／`endOffset` 尾端，前端既有的依 offset 去重直接適用。連線斷掉時桌面端把 daemon 的每個工作階段以 `closed` 事件關掉。
 - **範圍與限制**：只有啟動表單勾選「留在背景」的工作階段走 daemon；工作區快照不保存 detached 的工作階段（它們自己會接回）；保存的啟動項目帶著 `detached`，`agent_plan_restore` 依它決定交給 daemon 還是本機；daemon 本身若被殺，PTY 隨之消失；對話排程由 daemon 在無視窗時執行（見對話模式一節）；daemon 只在 LatticeTerm 開過之後才會存在，開機後未曾開啟 LatticeTerm 就不會有人跑排程；Windows 具名管道路徑尚未在 CI 驗證。
 
+MCP 寫入另有桌面專用 `mcpHistory` 查詢：由 daemon 保存本次生命週期最近 256 筆中繼資料，撤權或工作階段結束不移除，超額回報淘汰筆數。observer 一律拒絕此查詢，沒有對外工具入口。桌面每 10 秒更新，舊服務不支援或失聯時顯示無法取得，不當成空紀錄；沒有提示、request ID、錯誤原文或憑證，也不寫入磁碟。詳細限制見 [MCP 操作紀錄](MCP.zh-TW.md#操作紀錄的邊界)。
+
 ### 3. 自建遠端 Fleet
 
 Lattice Remote 現已能透過自架 Relay 端對端加密分享單一 shell PTY，但這只是通用純終端工作階段：它不認識 Agent Fleet 工作區、既有 CLI 程序、Reporter 或多 pane 狀態，不能宣稱為遠端 Fleet。真正的遠端 Fleet 仍須在目前裝置身分與 Relay transport 上建立獨立的 `terminal-control` capability、金鑰與授權畫面：

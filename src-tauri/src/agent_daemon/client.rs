@@ -10,13 +10,13 @@
 
 use super::{
     event_channel, read_or_create_token, transport, DaemonPaths, Frame, HelloReply, Request,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    MAX_FRAME_BYTES, OBSERVER_PROTOCOL_VERSION, PROTOCOL_VERSION,
 };
 use crate::agent::{AgentOutputSnapshot, AgentSessionSummary, EVENT_CLOSED};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -35,6 +35,8 @@ pub struct DaemonClient {
 }
 
 pub struct Connection {
+    mcp_protocol: AtomicU32,
+    mcp_history: AtomicBool,
     tx: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
     next_id: AtomicU64,
@@ -119,6 +121,8 @@ impl DaemonClient {
         let (read_half, mut write_half) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let connection = Arc::new(Connection {
+            mcp_protocol: AtomicU32::new(0),
+            mcp_history: AtomicBool::new(false),
             tx,
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -157,6 +161,12 @@ impl DaemonClient {
                 reply.protocol, PROTOCOL_VERSION
             ));
         }
+        connection
+            .mcp_protocol
+            .store(reply.mcp_protocol, Ordering::Relaxed);
+        connection
+            .mcp_history
+            .store(reply.mcp_history, Ordering::Relaxed);
         if let Ok(mut sessions) = connection.sessions.lock() {
             sessions.extend(reply.sessions.into_iter().map(|summary| summary.session_id));
         }
@@ -202,10 +212,30 @@ impl DaemonClient {
     pub async fn is_running(&self) -> bool {
         self.attached().await.is_some()
     }
+
+    pub async fn mcp_needs_restart(&self) -> bool {
+        self.attached().await.is_some_and(|connection| {
+            connection.mcp_protocol.load(Ordering::Relaxed) != OBSERVER_PROTOCOL_VERSION
+        })
+    }
 }
 
 impl Connection {
     pub async fn request(&self, request: Request) -> Result<Value, String> {
+        if matches!(
+            &request,
+            Request::Shared
+                | Request::ShareSet { .. }
+                | Request::ControlSet { .. }
+                | Request::McpPlansReplace { .. }
+                | Request::McpHistory
+        ) && self.mcp_protocol.load(Ordering::Relaxed) != OBSERVER_PROTOCOL_VERSION
+        {
+            return Err("MCP requires an updated background service. Finish existing background sessions before stopping and restarting it; desktop sessions remain available.".to_string());
+        }
+        if matches!(&request, Request::McpHistory) && !self.mcp_history.load(Ordering::Relaxed) {
+            return Err("This background service does not support MCP history.".to_string());
+        }
         if !self.alive.load(Ordering::Relaxed) {
             return Err(DAEMON_GONE.to_string());
         }
@@ -385,4 +415,70 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
         })
         .map_err(|error| format!("Cannot watch the background service: {error}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_old_daemon_rejects_mcp_locally_but_desktop_requests_still_work() {
+        let old: HelloReply = serde_json::from_value(json!({
+            "protocol": PROTOCOL_VERSION, "sessions": [], "snapshots": [],
+        }))
+        .unwrap();
+        assert!(!old.mcp_history);
+        assert_eq!(old.mcp_protocol, 0);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let connection = Connection {
+            tx,
+            mcp_protocol: AtomicU32::new(old.mcp_protocol),
+            mcp_history: AtomicBool::new(old.mcp_history),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            alive: AtomicBool::new(true),
+            sessions: Mutex::new(HashSet::new()),
+        };
+        for request in [
+            Request::Shared,
+            Request::ShareSet {
+                session_id: "existing".into(),
+                shared: false,
+            },
+            Request::ControlSet {
+                session_id: "existing".into(),
+                control: false,
+            },
+            Request::McpPlansReplace {
+                enabled: false,
+                plans: vec![],
+            },
+            Request::McpHistory,
+        ] {
+            assert!(connection
+                .request(request)
+                .await
+                .unwrap_err()
+                .contains("updated background service"));
+        }
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(connection.alive.load(Ordering::Relaxed));
+        assert!(connection.pending.lock().unwrap().is_empty());
+        let (result, ()) = tokio::join!(connection.request(Request::Sessions), async {
+            let line = rx.recv().await.unwrap();
+            let Frame::Request {
+                id,
+                body: Request::Sessions,
+            } = serde_json::from_str(&line).unwrap()
+            else {
+                panic!("expected ordinary desktop request");
+            };
+            connection.resolve(id, Ok(json!([])));
+        });
+        assert_eq!(result.unwrap(), json!([]));
+        assert!(connection.alive.load(Ordering::Relaxed));
+    }
 }

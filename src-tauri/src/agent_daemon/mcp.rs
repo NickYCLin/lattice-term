@@ -20,7 +20,7 @@
 
 use super::{
     read_or_create_token, transport, CancelScope, ClientRole, DaemonPaths, Frame, HelloReply,
-    PromptMode, Request, MAX_FRAME_BYTES, MAX_MCP_PROMPT_CHARS, PROTOCOL_VERSION,
+    PromptMode, Request, MAX_FRAME_BYTES, MAX_MCP_PROMPT_CHARS, OBSERVER_PROTOCOL_VERSION,
 };
 use crate::agent::{AgentLifecycle, AgentOutputRange, AgentSessionSummary, AgentStateSource};
 use base64::Engine;
@@ -425,7 +425,7 @@ impl McpServer {
             "readOnly"
         };
         Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": OBSERVER_PROTOCOL_VERSION,
             "server": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
             "daemonRunning": connection.is_some(),
             "platform": std::env::consts::OS,
@@ -1273,24 +1273,31 @@ impl Connection {
             .await
             .map_err(|error| format!("Cannot reach the background service: {error}"))?;
         let connection = Self::from_stream(stream);
-        let reply = connection
+        if let Err(error) = connection.greet(token, client).await {
+            connection.lost();
+            return Err(format!("MCP could not negotiate observer access: {error} Finish background sessions before restarting an outdated service."));
+        }
+        Ok(connection)
+    }
+
+    async fn greet(&self, token: String, client: Option<String>) -> Result<(), String> {
+        let reply = self
             .request(Request::Hello {
                 token,
-                protocol: PROTOCOL_VERSION,
+                protocol: OBSERVER_PROTOCOL_VERSION,
                 role: ClientRole::Observer,
                 client,
             })
             .await?;
         let reply: HelloReply = serde_json::from_value(reply)
             .map_err(|error| format!("The background service greeted oddly: {error}"))?;
-        if reply.protocol != PROTOCOL_VERSION {
-            connection.lost();
+        if reply.protocol != OBSERVER_PROTOCOL_VERSION {
             return Err(format!(
                 "The background service speaks protocol {} but this adapter expects {}.",
-                reply.protocol, PROTOCOL_VERSION
+                reply.protocol, OBSERVER_PROTOCOL_VERSION
             ));
         }
-        Ok(connection)
+        Ok(())
     }
 
     fn from_stream<S>(stream: S) -> Arc<Self>
@@ -1526,6 +1533,37 @@ mod tests {
             "processId": null, "tokenUsage": null, "capturedSessionId": null,
             "mcpControl": true,
         })
+    }
+
+    #[tokio::test]
+    async fn legacy_desktop_daemon_rejects_observer_before_returning_private_data() {
+        // Mirrors the v2.0.0 greeting: serde ignores the newer role field,
+        // but its protocol check must reject us before constructing a reply.
+        #[derive(serde::Deserialize)]
+        struct LegacyHello {
+            token: String,
+            protocol: u32,
+        }
+        let (adapter, stream) = tokio::io::duplex(4096);
+        let connection = Connection::from_stream(adapter);
+        let mut legacy = BufReader::new(stream);
+        let (result, ()) = tokio::join!(connection.greet("test-token".into(), None), async {
+            let request = read_test_message(&mut legacy).await;
+            assert_eq!(request["body"]["role"], "observer");
+            let hello: LegacyHello = serde_json::from_value(request["body"].clone()).unwrap();
+            assert_eq!(hello.token, "test-token");
+            assert_ne!(hello.protocol, super::super::PROTOCOL_VERSION);
+            let response = serde_json::to_value(Frame::Response {
+                id: request["id"].as_u64().unwrap(),
+                ok: false,
+                result: Value::Null,
+                error: Some("The background service refused the greeting.".into()),
+            })
+            .unwrap();
+            write_line(legacy.get_mut(), &response).await.unwrap();
+        });
+        assert!(result.unwrap_err().contains("refused the greeting"));
+        connection.lost();
     }
 
     async fn connected_test_server(

@@ -1015,3 +1015,41 @@
   color: var(--accent);
   font-size: var(--text-2xs);
 }
+
+.agents-mcp__history {
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.agents-mcp__history-list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 24rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-2xs);
+}
+
+.agents-mcp__history-list li {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.agents-mcp__history-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.agents-mcp__history-heading time {
+  color: var(--text-muted);
+  margin-inline-start: auto;
+}

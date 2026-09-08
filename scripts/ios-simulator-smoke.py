@@ -110,10 +110,19 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        result = subprocess.run(
-            [str(reader), str(screenshot.resolve())],
-            check=True, capture_output=True, text=True, timeout=min(45, remaining),
-        )
+        try:
+            result = subprocess.run(
+                [str(reader), str(screenshot.resolve())],
+                check=True, capture_output=True, text=True, timeout=min(45, remaining),
+            )
+        except subprocess.TimeoutExpired:
+            # Vision may stall on the first capture while Springboard hands
+            # over to the app. run() has reaped that helper; retry a fresh
+            # capture only within the original app-readiness deadline.
+            if time.monotonic() >= deadline:
+                raise
+            print(f"{device_id}: 截圖辨識逾時，在原啟動畫面期限內重新擷取", flush=True)
+            continue
         texts = json.loads(result.stdout)
         if not isinstance(texts, list) or not all(isinstance(text, str) for text in texts):
             raise RuntimeError("Invalid screenshot recognition result")

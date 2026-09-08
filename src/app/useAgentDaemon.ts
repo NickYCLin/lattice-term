@@ -26,22 +26,40 @@ export interface AgentSharedSession {
   activity?: AgentMcpActivity | null;
 }
 
+export interface AgentMcpHistory {
+  entries: {
+    id: number;
+    at: number;
+    client: string;
+    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop";
+    outcome: "accepted" | "replayed" | "failed" | "unknown";
+    sessionId: string | null;
+  }[];
+  discarded: number;
+  limit: number;
+}
+
 export interface AgentDaemonStatus {
   running: boolean;
+  mcpNeedsRestart: boolean;
   sessions: number;
   /** Background sessions the user shared with MCP observers, with grants. */
   shared: AgentSharedSession[];
   /** How an MCP client starts the adapter for this installation. */
   mcp: AgentMcpLaunch | null;
+  /** null means unavailable, not a verified empty history. */
+  history: AgentMcpHistory | null;
 }
 
 const POLL_MS = 10_000;
 
 export const EMPTY_DAEMON_STATUS: AgentDaemonStatus = {
   running: false,
+  mcpNeedsRestart: false,
   sessions: 0,
   shared: [],
   mcp: null,
+  history: null,
 };
 
 export function useAgentDaemon(sessionsHint: number): {
@@ -58,7 +76,13 @@ export function useAgentDaemon(sessionsHint: number): {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const next = await invoke<AgentDaemonStatus>("agent_daemon_status");
-      setStatus({ ...next, shared: next.shared ?? [], mcp: next.mcp ?? null });
+      setStatus({
+        ...next,
+        mcpNeedsRestart: next.mcpNeedsRestart ?? false,
+        shared: next.shared ?? [],
+        mcp: next.mcp ?? null,
+        history: next.history ?? null,
+      });
     } catch {
       setStatus(EMPTY_DAEMON_STATUS);
     }
