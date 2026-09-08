@@ -108,6 +108,24 @@ def verify(config, unix_socket=None):
             assert channel.recv_exit_status() == 0
         passed('no_network_adapter_no_mac_files_and_resource_limits')
 
+        if config.get('deny_guest_vsock'):
+            # Linux guests can otherwise reach host/other-VM vsock services
+            # even without an IP network adapter. Check the inherited filter.
+            with transport.open_session(timeout=15) as channel:
+                channel.settimeout(15)
+                channel.exec_command(
+                    "grep -E '^(NoNewPrivs|Seccomp):' /proc/self/status; "
+                    'exec socat -T1 - VSOCK-CONNECT:2:1 </dev/null'
+                )
+                output = channel.makefile('rb').read(4096)
+                error = channel.makefile_stderr('rb').read(4096)
+                assert channel.recv_exit_status() != 0
+                flags = dict(line.split(b':', 1) for line in output.splitlines())
+                assert flags[b'NoNewPrivs'].strip() == b'1'
+                assert flags[b'Seccomp'].strip() == b'2'
+                assert b'Operation not permitted' in error
+            passed('guest_vsock_access_denied')
+
         try:
             forwarded = transport.open_channel('direct-tcpip', ('127.0.0.1', 2222), ('127.0.0.1', 0), timeout=15)
         except paramiko.ChannelException:
