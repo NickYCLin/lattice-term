@@ -137,6 +137,46 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def test_ocr_timeout_retries_a_fresh_capture_without_extending_deadline(self):
+        now = [0.0]
+        attempts = []
+
+        def recognize(*args, **kwargs):
+            attempts.append(kwargs["timeout"])
+            if len(attempts) == 1:
+                now[0] += kwargs["timeout"]
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            now[0] += 2
+            return subprocess.CompletedProcess(args, 0, stdout='["No connections yet", "Add connection"]')
+
+        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                patch.object(smoke.os, "kill"), \
+                patch.object(smoke, "simctl") as capture, \
+                patch.object(smoke.subprocess, "run", side_effect=recognize):
+            result = smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"))
+        self.assertTrue(result["renderedStartup"])
+        self.assertEqual(result["renderWaitSeconds"], 47)
+        self.assertEqual(capture.call_count, 2)
+        self.assertEqual(attempts, [45, 45])
+
+    def test_persistent_ocr_timeouts_fail_at_the_original_deadline(self):
+        now = [0.0]
+        attempts = []
+
+        def recognize(*args, **kwargs):
+            attempts.append(kwargs["timeout"])
+            now[0] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                patch.object(smoke.os, "kill"), \
+                patch.object(smoke, "simctl"), \
+                patch.object(smoke.subprocess, "run", side_effect=recognize):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"), timeout=70)
+        self.assertEqual(now[0], 70)
+        self.assertEqual(attempts, [45, 25])
+
     def test_success_checks_and_cleans_only_new_devices_and_saves_both_results(self):
         commands = []
         boot_waits = []
