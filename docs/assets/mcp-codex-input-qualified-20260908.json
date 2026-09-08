@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-09-08",
+  "mode": "zero-paid-real-codex-tui-product-mcp-input",
+  "latticeExecutableSha256": "72296d16fabf1d8b99f71b869ac262cccca5169d1ed7dfd714745689c54ab123",
+  "codexExecutableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b",
+  "codexVersion": "0.153.4",
+  "paidRequests": 0,
+  "sourceReportScreensOmitted": true,
+  "rawRequestBodiesOmitted": true,
+  "promptTextOmitted": true,
+  "machinePathsOmitted": true,
+  "limits": {
+    "maximumHttpRequestsPerCase": 4,
+    "maximumConversationTurnsPerCase": 2,
+    "modelResultDeadlineMs": 30000,
+    "deadlineUnchangedForTenSecondCase": true,
+    "tenSecondConsumerHoldMs": 10000,
+    "tenSecondHelperWatchdogMs": 15000
+  },
+  "boundaries": [
+    "Real Codex TUI and product MCP transport, with deterministic loopback Responses; not real-AI task acceptance",
+    "Every case used a fresh authless home and working directory; no user configuration, authentication, proxy or token environment was copied",
+    "ProgramData was inherited only to verify the system configuration source; no model tool calls were emitted",
+    "Each case sent one unique body once through send_agent_prompt; no desktop candidate keystrokes or resubmission",
+    "Successful MCP acceptance exercised the launch-time input-profile qualification and pre-write revalidation",
+    "The one-second case did not meet write-before-resume and remains inconclusive; its original report remains failed",
+    "The ten-second case is an independent fresh run referencing the previously passed normal case, not a retry of the one-second session",
+    "The ten-second hold accommodates pre-write validation time; it does not extend the unchanged 30-second model-result deadline",
+    "Timing includes profile revalidation, PTY writing and RPC overhead, not an isolated disk-hashing benchmark",
+    "Only owned Codex thread handles were suspended and resumed; lifecycle working/heuristic is not treated as official model acknowledgement",
+    "Null second-result fields mean they were not verified after a failed prerequisite, not that the model was proved to fail"
+  ],
+  "sourceReports": [
+    {
+      "id": "normal-and-one-second",
+      "sha256": "43a09be874bedec2310dd97b1de41ed74d79e232565c7d5523b7f59dd4bcfa2c",
+      "originalOverallPassed": false,
+      "latticeExecutableSha256": "72296d16fabf1d8b99f71b869ac262cccca5169d1ed7dfd714745689c54ab123",
+      "codexExecutableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b"
+    },
+    {
+      "id": "independent-ten-second",
+      "sha256": "bebcc3842b02365d80ed249eda30f5d096c43a0006388d6dea679cc804272c43",
+      "originalOverallPassed": true,
+      "latticeExecutableSha256": "72296d16fabf1d8b99f71b869ac262cccca5169d1ed7dfd714745689c54ab123",
+      "codexExecutableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b"
+    }
+  ],
+  "cases": [
+    {
+      "id": "product-normal",
+      "sourceReport": "normal-and-one-second",
+      "status": "passed",
+      "productMcpInput": true,
+      "candidateTransport": false,
+      "paidRequests": 0,
+      "authlessFreshHome": true,
+      "inputAccepted": true,
+      "profileVerifiedByMcpAcceptance": true,
+      "promptCharacters": 637,
+      "promptSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d",
+      "bootstrapOfficialDone": true,
+      "launchRequestDurationMs": 14802,
+      "sendAgentPromptDurationMs": 5718,
+      "sendDurationIncludes": "profile-revalidation-and-PTY-write-and-RPC; not isolated disk hashing",
+      "totalHttpRequests": 3,
+      "conversationTurnRequests": 2,
+      "auxiliaryTitleRequests": 1,
+      "authorizationHeaderSeen": false,
+      "unexpectedRouteCount": 0,
+      "conversationBodyRequests": [
+        {
+          "expectedPromptItemExact": true,
+          "lastUserTextExact": true,
+          "lastUserTextCharacters": 637,
+          "lastUserTextSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d"
+        }
+      ],
+      "consumerSuspension": false,
+      "secondOfficialDone": true,
+      "secondMarkerViaMcp": true,
+      "secondTurnVerified": true,
+      "lifecycle": [
+        {
+          "phase": "startup",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "startup",
+          "state": "done",
+          "source": "integration"
+        },
+        {
+          "phase": "second-turn",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "second-turn",
+          "state": "done",
+          "source": "integration"
+        }
+      ],
+      "ownedCliProcessCount": 1,
+      "launchIdentityConfirmed": true,
+      "cleanupConfirmed": true,
+      "fixturesRemoved": true
+    },
+    {
+      "id": "product-suspended-one-second",
+      "sourceReport": "normal-and-one-second",
+      "status": "inconclusive-precondition-not-met",
+      "productMcpInput": true,
+      "candidateTransport": false,
+      "paidRequests": 0,
+      "authlessFreshHome": true,
+      "inputAccepted": true,
+      "profileVerifiedByMcpAcceptance": true,
+      "promptCharacters": 637,
+      "promptSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d",
+      "bootstrapOfficialDone": true,
+      "launchRequestDurationMs": 13472,
+      "sendAgentPromptDurationMs": 6383,
+      "sendDurationIncludes": "profile-revalidation-and-PTY-write-and-RPC; not isolated disk hashing",
+      "totalHttpRequests": 2,
+      "conversationTurnRequests": 1,
+      "auxiliaryTitleRequests": 1,
+      "authorizationHeaderSeen": false,
+      "unexpectedRouteCount": 0,
+      "conversationBodyRequests": [],
+      "consumerSuspension": true,
+      "suspension": {
+        "event": "complete",
+        "success": false,
+        "identityReverified": true,
+        "threadSetStable": true,
+        "suspendedThreadCount": 78,
+        "resumedThreadCount": 78,
+        "resumeErrors": 0,
+        "writerCompletedBeforeResume": false,
+        "writerAckMilliseconds": -1,
+        "heldMilliseconds": 1003,
+        "failure": "writer-missed-release-deadline"
+      },
+      "consumerBacklogPreconditionMet": false,
+      "secondOfficialDone": null,
+      "secondMarkerViaMcp": null,
+      "secondTurnVerified": false,
+      "failure": "consumer-pause-inconclusive",
+      "lifecycle": [
+        {
+          "phase": "startup",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "startup",
+          "state": "done",
+          "source": "integration"
+        },
+        {
+          "phase": "second-turn",
+          "state": "working",
+          "source": "heuristic"
+        }
+      ],
+      "ownedCliProcessCount": 1,
+      "launchIdentityConfirmed": true,
+      "cleanupConfirmed": true,
+      "fixturesRemoved": true,
+      "resultVerification": "Stopped after the backlog prerequisite failed; no claim that the product failed to complete a model turn",
+      "configuredConsumerHoldMs": 1000
+    },
+    {
+      "id": "product-suspended-ten-seconds",
+      "sourceReport": "independent-ten-second",
+      "status": "passed",
+      "productMcpInput": true,
+      "candidateTransport": false,
+      "paidRequests": 0,
+      "authlessFreshHome": true,
+      "inputAccepted": true,
+      "profileVerifiedByMcpAcceptance": true,
+      "promptCharacters": 637,
+      "promptSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d",
+      "bootstrapOfficialDone": true,
+      "launchRequestDurationMs": 10736,
+      "sendAgentPromptDurationMs": 5371,
+      "sendDurationIncludes": "profile-revalidation-and-PTY-write-and-RPC; not isolated disk hashing",
+      "totalHttpRequests": 3,
+      "conversationTurnRequests": 2,
+      "auxiliaryTitleRequests": 1,
+      "authorizationHeaderSeen": false,
+      "unexpectedRouteCount": 0,
+      "conversationBodyRequests": [
+        {
+          "expectedPromptItemExact": true,
+          "lastUserTextExact": true,
+          "lastUserTextCharacters": 637,
+          "lastUserTextSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d"
+        }
+      ],
+      "consumerSuspension": true,
+      "suspension": {
+        "event": "complete",
+        "success": true,
+        "identityReverified": true,
+        "threadSetStable": true,
+        "suspendedThreadCount": 60,
+        "resumedThreadCount": 60,
+        "resumeErrors": 0,
+        "writerCompletedBeforeResume": true,
+        "writerAckMilliseconds": 5437,
+        "heldMilliseconds": 10014,
+        "holdTargetMilliseconds": 10000,
+        "maximumHoldMilliseconds": 15000,
+        "watchdogReleased": false,
+        "failure": null
+      },
+      "consumerBacklogPreconditionMet": true,
+      "secondOfficialDone": true,
+      "secondMarkerViaMcp": true,
+      "secondTurnVerified": true,
+      "lifecycle": [
+        {
+          "phase": "startup",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "startup",
+          "state": "done",
+          "source": "integration"
+        },
+        {
+          "phase": "second-turn",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "second-turn",
+          "state": "done",
+          "source": "integration"
+        }
+      ],
+      "ownedCliProcessCount": 1,
+      "launchIdentityConfirmed": true,
+      "cleanupConfirmed": true,
+      "fixturesRemoved": true,
+      "configuredConsumerHoldMs": 10000,
+      "independentFreshRun": true,
+      "prerequisiteNormalSourceReportSha256": "43a09be874bedec2310dd97b1de41ed74d79e232565c7d5523b7f59dd4bcfa2c"
+    }
+  ]
+}

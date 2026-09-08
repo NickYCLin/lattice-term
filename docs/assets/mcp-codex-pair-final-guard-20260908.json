@@ -1,0 +1,497 @@
+{
+  "schemaVersion": 1,
+  "mode": "run-live",
+  "startedAt": "2026-09-08T09:50:55.543Z",
+  "platform": "Windows 10.0.26200 x64",
+  "driver": "Node MCP orchestrator with real AI CLI workers",
+  "syntheticLifecycleReports": false,
+  "checks": [
+    {
+      "id": "native-provider-inventory",
+      "status": "passed",
+      "paidRequests": 0
+    },
+    {
+      "id": "codex-configured-mcp-disabled-for-test-invocation",
+      "status": "passed",
+      "configuredCount": 2,
+      "enabledAfterOverride": 0,
+      "userConfigurationChanged": false
+    },
+    {
+      "id": "native-compiler-inventory",
+      "status": "passed",
+      "identities": {
+        "frontend": {
+          "version": "7.0.2",
+          "executableName": "tsc.exe",
+          "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+        },
+        "rust": {
+          "version": "1.97.1",
+          "executableName": "rustc.exe",
+          "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+        }
+      },
+      "installedNativeCompilersOnly": true
+    },
+    {
+      "id": "frontend-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "722ae779c32c8411504b72c36c5e8851fc05c448a3a11d72e2739617984288f9",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "rust-compiler-preflight",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "bc6eb5e80c75fb36db56674bc84daadbc7ddc230aa6433532113188eb14f8d3d",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "6a3ddedfce660f95b8ebed9698fa2b31637f078f4998657de2f5219d1518a554",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "paidRequests": 0
+    },
+    {
+      "id": "two-isolated-real-cli-sessions",
+      "status": "passed",
+      "workers": [
+        "frontend",
+        "rust"
+      ],
+      "providers": {
+        "frontend": "codex",
+        "rust": "codex"
+      },
+      "explicitContentAndControlGrants": true,
+      "distinctWorkingDirectories": true,
+      "sameProviderDifferentSessions": true
+    },
+    {
+      "id": "frontend-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "rust-official-readiness",
+      "status": "passed",
+      "state": "done",
+      "stateSource": "integration",
+      "bootstrap": "actual CLI prompt and official completion notification"
+    },
+    {
+      "id": "mcp-parallel-dispatch",
+      "status": "passed",
+      "accepted": 2,
+      "sameRequestIdRetriesDeduplicated": 2
+    },
+    {
+      "id": "frontend-verified-review",
+      "status": "passed",
+      "correctNonceAndComputedValue": true,
+      "officialCompletion": true,
+      "evidenceSource": "mcp-raw-output-and-renderer",
+      "stripControlSequences": false,
+      "workerId": "frontend",
+      "provider": "codex",
+      "providerStillRunning": true,
+      "workingStateSources": [
+        "heuristic"
+      ],
+      "task": "model-source-review",
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "rust-verified-review",
+      "status": "failed",
+      "code": "rust-review-not-confirmed",
+      "errorClass": "Error",
+      "scriptLine": 35,
+      "nodeCode": null
+    },
+    {
+      "id": "frontend-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7",
+      "sourceSha256": "722ae779c32c8411504b72c36c5e8851fc05c448a3a11d72e2739617984288f9",
+      "stdoutBytes": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "rust-independent-compiler-check",
+      "status": "passed",
+      "exitCode": 0,
+      "interrupted": false,
+      "compilerSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55",
+      "sourceSha256": "bc6eb5e80c75fb36db56674bc84daadbc7ddc230aa6433532113188eb14f8d3d",
+      "stdoutBytes": 2804,
+      "stdoutSha256": "6a3ddedfce660f95b8ebed9698fa2b31637f078f4998657de2f5219d1518a554",
+      "stderrBytes": 0,
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "compiledCodeExecuted": false,
+      "evidenceSource": "harness-spawned-native-compiler",
+      "outputDestination": "bounded-pipes",
+      "compilerOutputMatchesPreflight": true,
+      "fixtureFilesUnchanged": true,
+      "agentCompilerExecution": "requested-not-independently-attested"
+    },
+    {
+      "id": "read-only-fixture-integrity",
+      "status": "passed",
+      "sourceFilesUnchanged": true,
+      "newFiles": 0
+    },
+    {
+      "id": "mcp-session-cancel-isolation",
+      "status": "failed",
+      "code": "cancel-review-prerequisites-failed"
+    },
+    {
+      "id": "revocation",
+      "status": "passed",
+      "visibleSessions": 0
+    }
+  ],
+  "passed": false,
+  "boundaries": [
+    "Not a desktop UI or installed-application test",
+    "Does not test one AI acting as the MCP client",
+    "Only small read-only TypeScript and Rust review fixtures; not whole-project typecheck or cargo acceptance",
+    "No per-turn interrupt claim",
+    "Codex notify officially reports completion, not working; working is recorded with its actual heuristic source",
+    "Existing provider credentials and native provider session history remain provider-managed",
+    "Provider startup configuration, including existing Codex notification hooks, can still run; this harness is not an account or host security sandbox",
+    "Two isolated Codex sessions using the existing provider-managed login: frontend/Rust source reviews plus independently executed compiler checks, not proof that an AI tool executed a compiler. No Claude process launched.",
+    "Both Codex invocations request read-only sandboxing, no approval, web search disabled, and separate fresh working directories. TypeScript uses noEmit; Rust metadata is captured from stdout, never executed or written as a workspace artifact.",
+    "Compiler identities, immutable fixture hashes, real exit statuses, and matching pre/post output hashes corroborate the independent checks; they are not forensic attestation against a malicious process under the same account.",
+    "Review answers are verified only from authorized MCP read_agent_output with stripControlSequences:false and its local terminal renderer; this does not validate the default sanitized-output mode. Desktop output is diagnostic only."
+  ],
+  "client": {
+    "name": "live-agent-acceptance",
+    "version": "1.0",
+    "nodeVersion": "v24.13.1"
+  },
+  "fixtureTrustOptIn": false,
+  "workers": [
+    "frontend",
+    "rust"
+  ],
+  "workerProviders": {
+    "frontend": "codex",
+    "rust": "codex"
+  },
+  "agentCompilerExecution": "requested-not-independently-attested",
+  "requiredChecks": [
+    "native-provider-inventory",
+    "codex-configured-mcp-disabled-for-test-invocation",
+    "two-isolated-real-cli-sessions",
+    "frontend-official-readiness",
+    "rust-official-readiness",
+    "mcp-parallel-dispatch",
+    "frontend-verified-review",
+    "rust-verified-review",
+    "native-compiler-inventory",
+    "frontend-compiler-preflight",
+    "rust-compiler-preflight",
+    "frontend-independent-compiler-check",
+    "rust-independent-compiler-check",
+    "read-only-fixture-integrity",
+    "mcp-session-cancel-isolation",
+    "revocation"
+  ],
+  "latticeExecutableSha256": "d5b4d3611559497f1a158b4a01954b0dc1cd6364ba8eb1e58162861c2b32721f",
+  "providers": {
+    "codex": {
+      "version": "0.153.4",
+      "executableName": "codex.exe",
+      "executableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b"
+    }
+  },
+  "compilers": {
+    "frontend": {
+      "version": "7.0.2",
+      "executableName": "tsc.exe",
+      "executableSha256": "f9ecfbdc93753d2c972d66a8d0d75f5bd737fd4a5f88b422d9091ea282bcb2c7"
+    },
+    "rust": {
+      "version": "1.97.1",
+      "executableName": "rustc.exe",
+      "executableSha256": "cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55"
+    }
+  },
+  "fixtureHashes": {
+    "frontend": {
+      "checker.mjs": "e946b3c7c759161a954229dcde3356d3a59b3e1aeee633f77bdea370cfc73f51",
+      "review.ts": "722ae779c32c8411504b72c36c5e8851fc05c448a3a11d72e2739617984288f9",
+      "tsconfig.json": "283624c1caf7f5fce044574fd1e87c8cbd7c4f34ec61966877668c4976e7d406"
+    },
+    "rust": {
+      "checker.mjs": "bf0cda0f7092b9558e16f63269113bf8e6b072ddba0fcd8d222a106c9f4c72d2",
+      "review.rs": "bc6eb5e80c75fb36db56674bc84daadbc7ddc230aa6433532113188eb14f8d3d"
+    }
+  },
+  "diagnosticParsersSettled": true,
+  "providerDiagnostics": {
+    "frontend": {
+      "terminalBytesSeen": 64335,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "done",
+        "source": "integration"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": [
+          "command-running-or-ran"
+        ],
+        "finalScreenOnly": true,
+        "accumulated": {
+          "classifications": [],
+          "fixedErrorExcerpts": [],
+          "progressSignals": [
+            {
+              "signal": "command-running-or-ran",
+              "firstSeenMs": 18266,
+              "lastSeenMs": 29253
+            },
+            {
+              "signal": "working-footer",
+              "firstSeenMs": 6181,
+              "lastSeenMs": 29102
+            }
+          ]
+        }
+      },
+      "composer": {
+        "beforeDispatchParserSettled": true,
+        "beforeDispatch": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "afterWriteParserSettled": true,
+        "afterWrite": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "final": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": true,
+          "blockingPromptHintVisible": false
+        }
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "totalPagesRead": 213,
+        "totalTextBytes": 47540,
+        "cursorAdvanceBytes": 47540,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": true,
+        "correctRawNow": false,
+        "correctRenderedNow": true,
+        "correctRawEverSeen": false,
+        "correctRenderedEverSeen": true
+      },
+      "closedBeforeCleanup": false,
+      "exitCode": null,
+      "rawOutputInReport": false
+    },
+    "rust": {
+      "terminalBytesSeen": 81160,
+      "classifications": [],
+      "startupSignals": [
+        "directory"
+      ],
+      "terminalQueries": {
+        "cursor-position": 1
+      },
+      "lifecycle": {
+        "state": "done",
+        "source": "integration"
+      },
+      "lifecycleSequence": [
+        {
+          "state": "idle",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "startup"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "startup"
+        },
+        {
+          "state": "working",
+          "source": "heuristic",
+          "phase": "review"
+        },
+        {
+          "state": "done",
+          "source": "integration",
+          "phase": "review"
+        }
+      ],
+      "lifecycleSequenceTruncated": false,
+      "taskDiagnostics": {
+        "baseline": "only output after MCP dispatch baseline",
+        "classifications": [],
+        "fixedErrorExcerpts": [],
+        "progressSignals": [
+          "command-running-or-ran"
+        ],
+        "finalScreenOnly": true,
+        "accumulated": {
+          "classifications": [],
+          "fixedErrorExcerpts": [],
+          "progressSignals": [
+            {
+              "signal": "command-running-or-ran",
+              "firstSeenMs": 19521,
+              "lastSeenMs": 40018
+            },
+            {
+              "signal": "working-footer",
+              "firstSeenMs": 6210,
+              "lastSeenMs": 39743
+            }
+          ]
+        }
+      },
+      "composer": {
+        "beforeDispatchParserSettled": true,
+        "beforeDispatch": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "afterWriteParserSettled": true,
+        "afterWrite": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": false,
+          "blockingPromptHintVisible": false
+        },
+        "final": {
+          "source": "heuristic-rendered-terminal-hints",
+          "authorizesInput": false,
+          "cursorOnPromptLikeLine": true,
+          "cursorOnEmptyPromptLikeLine": false,
+          "emptyComposerPlaceholderVisible": true,
+          "expectedPromptVisibleSomewhere": true,
+          "blockingPromptHintVisible": false
+        }
+      },
+      "reviewEvidence": {
+        "outputReadAfterBaseline": true,
+        "totalPagesRead": 1671,
+        "totalTextBytes": 62081,
+        "cursorAdvanceBytes": 62081,
+        "source": "mcp-raw-output-and-renderer",
+        "stripControlSequences": false,
+        "resultMarkerSeen": true,
+        "correctNonceAndComputedValue": false,
+        "correctRawNow": false,
+        "correctRenderedNow": false,
+        "correctRawEverSeen": false,
+        "correctRenderedEverSeen": false
+      },
+      "closedBeforeCleanup": false,
+      "exitCode": null,
+      "rawOutputInReport": false
+    }
+  },
+  "ownedCliCleanup": {
+    "sessionCount": 2,
+    "exited": 2,
+    "stillRunning": 0,
+    "unknown": 0,
+    "confirmed": true
+  },
+  "cleanup": "owned-cli-pids-and-launchers-exited-fixtures-removed",
+  "finishedAt": "2026-09-08T09:54:41.016Z"
+}

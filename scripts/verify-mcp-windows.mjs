@@ -209,7 +209,7 @@ async function daemonPeer(role = "desktop") {
   );
   const peer = new JsonPeer(socket, socket, "daemon");
   clients.add(peer);
-  await peer.request({
+  peer.hello = await peer.request({
     type: "hello",
     protocol: role === "observer" ? 2 : 1,
     token: readFileSync(join(dataDir, "agent-daemon.token"), "utf8").trim(),
@@ -358,7 +358,19 @@ try {
   await share(plain);
   await check("A tools and sharing", async () => {
     const tools = await adapter.request("tools/list", {});
-    assert.equal(tools.tools.length, 8);
+    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
+      "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
+      "list_authorized_connections", "get_host_metrics", "sftp_list_directory",
+      "ssh_exec_job", "sftp_transfer", "get_remote_operation", "cancel_remote_operation",
+    ].sort());
+    const capabilities = ok(await adapter.call("get_capabilities"));
+    const remote = capabilities.backends.find((backend) => backend.id === "desktopSshSftp");
+    assert.equal(remote.supported, true);
+    assert.equal(remote.available, false);
+    assert.equal(remote.authorizedConnections, 0);
+    assert.deepEqual(ok(await adapter.call("list_authorized_connections")).connections, []);
+    assert.equal((await adapter.call("get_host_metrics", { targetId: "not-granted" })).isError, true);
     const list = ok(await adapter.call("list_agent_sessions"));
     assert.deepEqual(
       list.sessions.map((s) => s.sessionId),
@@ -381,6 +393,94 @@ try {
       onlySharedVisible: true,
       privateFieldsAbsent: true,
     };
+  });
+  await check("A metadata-only sharing and independent content scope", async () => {
+    const marker = "MCP_METADATA_SCOPE_PRIVATE_FIXTURE";
+    const id = await launch(`${marker}\n`);
+    let observer;
+    const listed = async () => {
+      const view = ok(await adapter.call("list_agent_sessions")).sessions.find(
+        (session) => session.sessionId === id,
+      );
+      assert.ok(view, "metadata-shared session must stay visible");
+      return view;
+    };
+    try {
+      assert.equal(ok(await adapter.call("get_capabilities")).mcpOutputScopes, true);
+      const shared = await desktop.request({
+        type: "shareSet", sessionId: id, shared: true, readOutput: false,
+      });
+      assert.equal(shared.find((entry) => entry.sessionId === id)?.readOutput, false);
+      const metadata = await listed();
+      assert.equal(metadata.access, "metadata");
+      assert.equal(metadata.readOutput, false);
+      assert.equal(JSON.stringify(metadata).includes(marker), false);
+      const waited = ok(await adapter.call("wait_agent_state", { sessionId: id, timeoutMs: 0 }));
+      assert.equal(waited.session.sessionId, id);
+      assert.equal(waited.session.readOutput, false);
+      assert.notEqual(waited.revoked, true);
+      observer = await daemonPeer("observer");
+      assert.equal(observer.hello.mcpOutputScopes, true);
+      assert.deepEqual(observer.hello.snapshots, []);
+      assert.equal(JSON.stringify(observer.hello).includes(marker), false);
+      for (const summary of [
+        observer.hello.sessions.find((session) => session.sessionId === id),
+        (await observer.request({ type: "sessions" })).find((session) => session.sessionId === id),
+      ]) {
+        assert.ok(summary);
+        assert.equal(summary.executable ?? "", "");
+        assert.deepEqual(summary.launchArguments ?? [], []);
+        for (const key of ["profileConfigPath", "processId", "capturedSessionId"])
+          assert.equal(summary[key] ?? null, null, `raw observer ${key}`);
+      }
+      await assert.rejects(observer.request({
+        type: "observe", sessionId: id, cursor: 0, maxBytes: 4096,
+      }), /not shared|not authorized|revoked/i);
+      assert.equal((await adapter.call("read_agent_output", { sessionId: id })).isError, true);
+
+      await desktop.request({ type: "shareSet", sessionId: id, shared: true, readOutput: true });
+      await desktop.request({ type: "controlSet", sessionId: id, control: true });
+      assert.equal((await listed()).readOutput, true);
+      assert.ok(ok(await adapter.call("read_agent_output", { sessionId: id })).text.includes(marker));
+      const range = await observer.request({ type: "observe", sessionId: id, cursor: 0, maxBytes: 4096 });
+      assert.ok(Buffer.from(range.base64, "base64").toString("utf8").includes(marker));
+
+      const reduced = await desktop.request({
+        type: "shareSet", sessionId: id, shared: true, readOutput: false,
+      });
+      const grant = reduced.find((entry) => entry.sessionId === id);
+      assert.equal(grant?.readOutput, false);
+      assert.equal(grant?.control, true);
+      const controlledMetadata = await listed();
+      assert.equal(controlledMetadata.access, "control");
+      assert.equal(controlledMetadata.readOutput, false);
+      assert.equal((await adapter.call("read_agent_output", { sessionId: id })).isError, true);
+      await assert.rejects(observer.request({
+        type: "observe", sessionId: id, cursor: 0, maxBytes: 4096,
+      }), /not shared|not authorized|revoked/i);
+      // This write needs control but not content access, and sends no prompt.
+      ok(await adapter.call("cancel_agent_task", {
+        sessionId: id, scope: "queue", requestId: "metadata-scope-clear-queue",
+      }));
+      const after = ok(await adapter.call("wait_agent_state", { sessionId: id, timeoutMs: 0 }));
+      assert.equal(after.session.readOutput, false);
+      assert.equal(after.session.access, "control");
+      assert.notEqual(after.revoked, true);
+      assert.ok((await desktop.request({ type: "sessions" })).some((session) => session.sessionId === id));
+      return {
+        atomicMetadataOnly: true,
+        listAndWaitAllowed: true,
+        rawObserveAndMcpReadDenied: true,
+        rawObserverLaunchDetailsAbsent: true,
+        explicitContentGrantAllowsRead: true,
+        contentRevocationPreservesMetadataAndControl: true,
+        cliStillRunning: true,
+      };
+    } finally {
+      observer?.close();
+      await desktop.request({ type: "shareSet", sessionId: id, shared: false }).catch(() => {});
+      await desktop.request({ type: "disconnect", sessionId: id }).catch(() => {});
+    }
   });
   await check(
     "F1 revoke wakes wait and does not block following requests",

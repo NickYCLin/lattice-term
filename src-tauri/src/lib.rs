@@ -13,6 +13,7 @@ pub mod file_exports;
 pub mod hostkeys;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
+pub mod mcp_desktop;
 pub mod metrics;
 pub mod notification_sound;
 pub mod rdp;
@@ -82,6 +83,78 @@ type AppAgentPlans = Mutex<FileAgentPlanStore>;
 /// must never restore an older grant after the user has withdrawn it.
 #[derive(Default)]
 struct McpPlanSync(tokio::sync::Mutex<()>);
+
+#[derive(Default)]
+struct McpRemoteSync(tokio::sync::Mutex<()>);
+
+#[tauri::command]
+fn mcp_remote_targets(
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Vec<mcp_desktop::TargetView> {
+    service.targets()
+}
+
+#[tauri::command]
+async fn mcp_remote_grant(
+    request: mcp_desktop::GrantRequest,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpRemoteSync>,
+) -> Result<Vec<mcp_desktop::TargetView>, String> {
+    let _guard = sync.0.lock().await;
+    // Ensure and negotiate before creating a grant. No implicit remote login.
+    let connection = daemon.ensure().await?;
+    connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: service.targets(),
+        })
+        .await?;
+    let grant = service
+        .grant(request)
+        .await
+        .map_err(|error| error.message)?;
+    let targets = service.targets();
+    if let Err(error) = connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: targets.clone(),
+        })
+        .await
+    {
+        let _ = service.revoke(&grant.id);
+        if connection
+            .request(agent_daemon::Request::DesktopGrants {
+                targets: service.targets(),
+            })
+            .await
+            .is_err()
+        {
+            return Err(format!("{error} Local access was revoked, but the remote grant display could not be synchronized."));
+        }
+        return Err(error);
+    }
+    Ok(targets)
+}
+
+#[tauri::command]
+async fn mcp_remote_revoke(
+    target_id: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpRemoteSync>,
+) -> Result<Vec<mcp_desktop::TargetView>, String> {
+    let _guard = sync.0.lock().await;
+    // Backend withdrawal succeeds even when the daemon is unavailable.
+    service.revoke(&target_id).map_err(|error| error.message)?;
+    let targets = service.targets();
+    if let Some(connection) = daemon.attached().await {
+        connection
+            .request(agent_daemon::Request::DesktopGrants {
+                targets: targets.clone(),
+            })
+            .await?;
+    }
+    Ok(targets)
+}
 
 const MAX_CLIPBOARD_IMAGE_EDGE: u32 = 16_384;
 const MAX_CLIPBOARD_IMAGE_PIXELS: usize = 32 * 1024 * 1024;
@@ -1108,6 +1181,7 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
     Ok(AgentDaemonStatus {
         running: daemon.is_running().await,
         mcp_needs_restart: daemon.mcp_needs_restart().await,
+        mcp_output_scopes: daemon.mcp_output_scopes().await,
         sessions: sessions.len(),
         shared,
         history,
@@ -1122,6 +1196,7 @@ async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemon
 async fn agent_mcp_share(
     session_id: String,
     shared: bool,
+    read_output: Option<bool>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     if !crate::agent_daemon::owns(&session_id) {
@@ -1130,7 +1205,11 @@ async fn agent_mcp_share(
     let value = daemon
         .request(
             false,
-            crate::agent_daemon::Request::ShareSet { session_id, shared },
+            crate::agent_daemon::Request::ShareSet {
+                session_id,
+                shared,
+                read_output,
+            },
         )
         .await?;
     decode_mcp_shared_response(value)
@@ -1410,6 +1489,7 @@ async fn agent_automations_take_runs(
 struct AgentDaemonStatus {
     running: bool,
     mcp_needs_restart: bool,
+    mcp_output_scopes: bool,
     sessions: usize,
     /// Sessions shared with MCP observers, with their grants.
     shared: Vec<crate::agent_daemon::SharedSession>,
@@ -3093,6 +3173,11 @@ pub fn run() {
             app.manage(trust);
             app.manage(Arc::new(SshRegistry::new()));
             app.manage(Arc::new(SftpRegistry::new()));
+            app.manage(Arc::new(mcp_desktop::DesktopService::new(
+                app.state::<Arc<SshRegistry>>().inner().clone(),
+                app.state::<Arc<SftpRegistry>>().inner().clone(),
+            )));
+            app.manage(McpRemoteSync::default());
             app.manage(Arc::new(TransferRegistry::new()));
             app.manage(Arc::new(RemoteRegistry::new()));
             app.manage(Arc::new(RemoteHostRegistry::new()));
@@ -3120,6 +3205,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             runtime_summary,
+            mcp_remote_targets,
+            mcp_remote_grant,
+            mcp_remote_revoke,
             play_notification_sound,
             ios_export_document,
             encrypted_backup_export,

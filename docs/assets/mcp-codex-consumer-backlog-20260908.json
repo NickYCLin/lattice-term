@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "4be3aca508d03498945dabcc2fd41ab7fb8b6dd6",
+  "mode": "zero-paid-real-codex-tui-suspended-consumer-fixture",
+  "latticeExecutableSha256": "154b2cc78116833b9e826d3862175e0f1ac3b73276ac184bebabcf394ac094e3",
+  "codexExecutableSha256": "444a3f0008050605cae73cd9b7a2dcac61294062dfaab56dd20430fd6498518b",
+  "paidRequests": 0,
+  "boundaries": [
+    "Synthetic model HTTP responses, not real-AI acceptance",
+    "Each case has a fresh authless Codex home and working directory; no user config/auth copied",
+    "No tool calls are emitted; model requests are handled by a loopback-only HTTP server",
+    "Case B is a candidate transport probe, not a product capability or retry into case A",
+    "No auth, proxy, token, or external MCP configuration is inherited; CLI sandbox is read-only",
+    "Only the exact owned Codex PID threads are suspended once; an independent helper resumes its own suspend count after 1 second",
+    "Controlled consumer backlog, not a claim that the real paid failure had this cause"
+  ],
+  "sourceReportScreensOmitted": true,
+  "comparison": [
+    {
+      "id": "mcp-current-250ms",
+      "candidateTransport": false,
+      "bootstrapOfficialDone": true,
+      "inputAccepted": true,
+      "suspension": {
+        "event": "complete",
+        "success": true,
+        "identityReverified": true,
+        "threadSetStable": true,
+        "suspendedThreadCount": 75,
+        "resumedThreadCount": 75,
+        "resumeErrors": 0,
+        "writerCompletedBeforeResume": true,
+        "writerAckMilliseconds": 303,
+        "heldMilliseconds": 1003,
+        "failure": null
+      },
+      "conversationBodyRequests": [],
+      "totalHttpRequests": 2,
+      "authorizationHeaderSeen": false,
+      "unexpectedRouteCount": 0,
+      "secondOfficialDone": false,
+      "secondMarkerViaMcp": false,
+      "secondTurnVerified": false,
+      "failure": "diagnostic-timeout",
+      "lifecycle": [
+        {
+          "phase": "startup",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "startup",
+          "state": "done",
+          "source": "integration"
+        },
+        {
+          "phase": "second-turn",
+          "state": "working",
+          "source": "heuristic"
+        }
+      ],
+      "cleanupConfirmed": true,
+      "fixturesRemoved": true
+    },
+    {
+      "id": "desktop-end-enter",
+      "candidateTransport": true,
+      "bootstrapOfficialDone": true,
+      "inputAccepted": true,
+      "suspension": {
+        "event": "complete",
+        "success": true,
+        "identityReverified": true,
+        "threadSetStable": true,
+        "suspendedThreadCount": 66,
+        "resumedThreadCount": 66,
+        "resumeErrors": 0,
+        "writerCompletedBeforeResume": true,
+        "writerAckMilliseconds": 47,
+        "heldMilliseconds": 1005,
+        "failure": null
+      },
+      "conversationBodyRequests": [
+        {
+          "expectedPromptItemExact": true,
+          "lastUserTextExact": true,
+          "lastUserTextCharacters": 637,
+          "lastUserTextSha256": "1fdd707018aab7f56a7c78f42d16c4fdb299bcd85b322827ada0559525a5170d"
+        }
+      ],
+      "totalHttpRequests": 3,
+      "authorizationHeaderSeen": false,
+      "unexpectedRouteCount": 0,
+      "secondOfficialDone": true,
+      "secondMarkerViaMcp": true,
+      "secondTurnVerified": true,
+      "lifecycle": [
+        {
+          "phase": "startup",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "startup",
+          "state": "done",
+          "source": "integration"
+        },
+        {
+          "phase": "second-turn",
+          "state": "working",
+          "source": "heuristic"
+        },
+        {
+          "phase": "second-turn",
+          "state": "done",
+          "source": "integration"
+        }
+      ],
+      "cleanupConfirmed": true,
+      "fixturesRemoved": true
+    }
+  ]
+}

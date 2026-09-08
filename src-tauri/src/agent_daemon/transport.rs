@@ -162,11 +162,24 @@ mod windows {
     }
 
     pub async fn accept(listener: &mut Listener) -> io::Result<Stream> {
-        let server = match listener.next.take() {
-            Some(server) => server,
-            None => ServerOptions::new().create(&listener.name)?,
-        };
-        server.connect().await?;
+        if listener.next.is_none() {
+            listener.next = Some(ServerOptions::new().create(&listener.name)?);
+        }
+        // `serve` races this future against its timer and shutdown signal.
+        // Keep the pipe owned by Listener while awaiting: taking it first
+        // would drop even an already connected client when select cancels us.
+        let connecting = listener
+            .next
+            .as_ref()
+            .ok_or_else(|| io::Error::other("the pending daemon pipe was not initialized"))?;
+        if let Err(error) = connecting.connect().await {
+            listener.next = None;
+            return Err(error);
+        }
+        let server = listener
+            .next
+            .take()
+            .ok_or_else(|| io::Error::other("the connected daemon pipe was not retained"))?;
         // Have the next instance ready before handing this one out so a
         // client arriving meanwhile finds a pipe to connect to.
         listener.next = ServerOptions::new().create(&listener.name).ok();
@@ -209,6 +222,45 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[tokio::test]
+        async fn cancelling_accept_preserves_a_connected_client_for_the_next_poll() {
+            use std::time::Duration;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let dir = tempfile::tempdir().unwrap();
+            let paths = DaemonPaths::new(dir.path());
+            let mut listener = bind(&paths).await.unwrap();
+            let mut accepting = Box::pin(accept(&mut listener));
+            // Poll once so accept is waiting on ConnectNamedPipe. Keep that
+            // future alive until a client has actually connected to its pipe.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(10), &mut accepting)
+                    .await
+                    .is_err()
+            );
+            let mut client = connect(&paths).await.unwrap();
+            // Equivalent to the daemon's ticker winning tokio::select! before
+            // the now-ready accept branch is polled again.
+            drop(accepting);
+            let mut server = tokio::time::timeout(Duration::from_secs(2), accept(&mut listener))
+                .await
+                .expect("the pending client must survive cancellation")
+                .unwrap();
+            client.write_all(b"still connected").await.unwrap();
+            let mut received = [0; 15];
+            tokio::time::timeout(Duration::from_secs(2), server.read_exact(&mut received))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&received, b"still connected");
+            server.write_all(b"ok").await.unwrap();
+            let mut reply = [0; 2];
+            tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut reply))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&reply, b"ok");
+        }
 
         #[tokio::test]
         async fn a_client_reaches_the_legacy_pipe_without_replacing_it() {

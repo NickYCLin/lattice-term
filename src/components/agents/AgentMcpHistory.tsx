@@ -7,6 +7,14 @@ export function AgentMcpHistory({ history }: { history: History | null }) {
     <section className="agents-mcp__history" aria-label={t("agents.mcp.history.title")}>
       <h3 className="field__label">{t("agents.mcp.history.title")}</h3>
       <p className="agents-field-hint">{t("agents.mcp.history.hint")}</p>
+      {history && (
+        <p role="status" className="agents-field-hint">
+          {t(`agents.mcp.history.persistence.${history.persistence ?? "memoryOnly"}`)}
+          {history.persistence === "unavailable" && history.persistenceReason && (
+            <> {t(`agents.mcp.history.reason.${history.persistenceReason}`)}</>
+          )}
+        </p>
+      )}
       {!history ? (
         <p role="status">{t("agents.mcp.history.unavailable")}</p>
       ) : history.entries.length === 0 ? (
@@ -30,7 +38,7 @@ export function AgentMcpHistory({ history }: { history: History | null }) {
                 </div>
                 <span>{t(`agents.mcp.history.action.${entry.action}`)}</span>
                 <span className="mono agents-field-hint">
-                  {entry.sessionId ?? t("agents.mcp.history.noSession")}
+                  {entry.sessionId ?? entry.targetId ?? t("agents.mcp.history.noSession")}
                 </span>
               </li>
             ))}
