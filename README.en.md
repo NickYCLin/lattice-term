@@ -36,7 +36,7 @@ Windows · macOS · Linux | Open-source desktop core, licensed under MPL-2.0
     </td>
     <td width="50%" valign="top">
       <h3>Schedule recurring work</h3>
-      <p>Set a schedule and return to the results. Agent sessions can stay in the local background service after you close the window, ready to reconnect when you open LatticeTerm again, and can be shared with any MCP-capable AI tool to watch, prompt or launch.</p>
+      <p>Set a schedule and return to the results. Agent sessions can stay in the local background service after you close the window, ready to reconnect when you open LatticeTerm again. Separately authorize MCP-capable AI tools to observe sessions, send prompts once the CLI confirms it is ready, or start saved plans. Revoking control removes pending MCP prompts.</p>
     </td>
   </tr>
 </table>

@@ -63,8 +63,8 @@ pub fn owns(session_id: &str) -> bool {
 
 /// Who is on the other end of a connection. The desktop owns everything;
 /// an observer (the MCP adapter) only ever sees the sessions the user chose
-/// to share, never receives terminal bytes as events, and cannot launch,
-/// send, or stop anything. The daemon enforces this per request; the role
+/// to share and never receives terminal bytes as events. Prompting, stopping
+/// and starting saved plans need separate grants checked by the daemon. The role
 /// is a claim the client makes, but a wrong claim only ever narrows access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -379,7 +379,8 @@ pub enum Request {
     },
     /// Observer: the plans it may launch.
     Plans,
-    /// Observer: start one saved plan in the background.
+    /// Observer: start one saved plan in the background. All MCP writes
+    /// require a non-empty request id, retained for deduplication.
     LaunchPlan {
         plan_id: String,
         #[serde(default)]
@@ -411,8 +412,8 @@ pub enum PromptMode {
     /// report it free, exactly like the interface's prompt queue.
     #[default]
     Queue,
-    /// Typed straight in, refused while the session is working or
-    /// waiting for a person.
+    /// Submit only when an integration reports idle/done, no human edit
+    /// is pending, and control is still granted at the input boundary.
     Now,
 }
 
@@ -420,7 +421,8 @@ pub enum PromptMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CancelScope {
-    /// Prompts still waiting; the running turn is untouched.
+    /// MCP prompts still waiting; desktop prompts and the running turn
+    /// are untouched.
     Queue,
     /// The whole PTY: the CLI process ends, nothing is recoverable.
     Session,

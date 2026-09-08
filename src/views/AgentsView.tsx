@@ -113,12 +113,7 @@ export function AgentsView({
   const [launchNote, setLaunchNote] = useState("");
   const [sandbox, setSandbox] = useState(false);
   const [detached, setDetached] = useState(false);
-  const daemon = useAgentDaemon(
-    agents.sessions.length,
-    `${agents.mcpLaunch ? "on" : "off"}:${agents.plans
-      .map((plan) => `${plan.id}${plan.detached ? "+" : ""}`)
-      .join(",")}:${agents.startupInstructions.length}`,
-  );
+  const daemon = useAgentDaemon(agents.sessions.length);
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);
   const sharedWithMcp = useMemo(

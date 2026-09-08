@@ -34,6 +34,6 @@
 ## Important boundaries
 
 - AI CLI credentials remain owned by each CLI and are not stored by LatticeTerm.
-- The MCP server sees only background sessions the user explicitly shared; prompting, ending and launching each need a separate grant the user turns on in the interface, and launching is limited to saved plans.
+- The MCP server sees only background sessions the user explicitly shared; prompting, ending and launching each need a separate grant, and launching is limited to saved plans. Prompts require official CLI readiness and never append to a user's unfinished input. Revoking control drops pending MCP prompts; writes require a requestId, deduplicated across concurrent retries for 15 minutes. Read-only SSH/SFTP and remote screen tools remain planned.
 - Remote connections use real backends; planned capabilities are labelled rather than simulated.
 - Lattice Remote supports direct endpoint pairing and a self-hosted lattice-relay: permanent nine-digit device IDs reachable across networks, end-to-end encrypted with the relay forwarding ciphertext only. NAT hole-punching is planned, not implemented.

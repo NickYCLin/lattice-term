@@ -44,11 +44,7 @@ export const EMPTY_DAEMON_STATUS: AgentDaemonStatus = {
   mcp: null,
 };
 
-export function useAgentDaemon(
-  sessionsHint: number,
-  /** Changes whenever the saved plans or the launch permission change. */
-  plansHint = "",
-): {
+export function useAgentDaemon(sessionsHint: number): {
   status: AgentDaemonStatus;
   refresh: () => Promise<void>;
   stop: () => Promise<boolean>;
@@ -86,20 +82,6 @@ export function useAgentDaemon(
     await refresh();
     return stopped;
   }, [refresh]);
-
-  // The plans an MCP client may launch live in the background service too;
-  // hand it the current list whenever they change.
-  useEffect(() => {
-    if (!hasDesktopBackend()) return;
-    void (async () => {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke<boolean>("agent_mcp_plans_sync");
-      } catch {
-        // The service is not running and nothing is allowed: nothing to hand over.
-      }
-    })();
-  }, [plansHint]);
 
   // Sharing and control live in the background service, so the answer is
   // its list.

@@ -523,7 +523,6 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() {
-    use base64::Engine as _;
     let dir = tempfile::tempdir().unwrap();
     let paths = DaemonPaths::new(dir.path());
     let token = read_or_create_token(&paths).unwrap();
@@ -607,42 +606,65 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     let listed = observer.request(Request::Sessions).await.unwrap();
     assert_eq!(listed[0]["mcpControl"], true);
 
-    // `now` types straight in; the PTY echoes it back.
-    let sent = observer
+    // A shell's guessed idle state is not authorization to type into an
+    // unknown terminal mode. It can queue, but only a real reporter can
+    // release the prompt.
+    assert!(observer
         .request(Request::Prompt {
             session_id: session.clone(),
             text: "ping from mcp\n".to_string(),
             mode: super::PromptMode::Now,
+            request_id: "unready-now".to_string(),
+        })
+        .await
+        .is_err());
+    assert!(observer
+        .request(Request::Prompt {
+            session_id: session.clone(),
+            text: "missing request id".to_string(),
+            mode: super::PromptMode::Queue,
+            request_id: String::new(),
+        })
+        .await
+        .unwrap_err()
+        .contains("requestId"));
+    let queued = observer
+        .request(Request::Prompt {
+            session_id: session.clone(),
+            text: "ping from mcp\n".to_string(),
+            mode: super::PromptMode::Queue,
             request_id: "req-1".to_string(),
         })
         .await
         .unwrap();
-    assert_eq!(sent["sentImmediately"], true);
-    let echoed = desktop
-        .wait_for_event("data", |payload| {
-            payload["sessionId"] == session.as_str()
-                && base64::engine::general_purpose::STANDARD
-                    .decode(payload["base64"].as_str().unwrap_or(""))
-                    .map(|bytes| String::from_utf8_lossy(&bytes).contains("ping from mcp"))
-                    .unwrap_or(false)
-        })
-        .await;
-    assert!(echoed["offset"].is_u64());
+    assert_eq!(queued["sentImmediately"], false);
+    assert_eq!(queued["queued"], 1);
     // The same request id again is the same outcome, not a second prompt.
     let again = observer
         .request(Request::Prompt {
             session_id: session.clone(),
             text: "ping from mcp\n".to_string(),
-            mode: super::PromptMode::Now,
+            mode: super::PromptMode::Queue,
             request_id: "req-1".to_string(),
         })
         .await
         .unwrap();
     assert_eq!(again["duplicate"], true);
+    let mismatched = observer
+        .request(Request::Prompt {
+            session_id: session.clone(),
+            text: "changed prompt".to_string(),
+            mode: super::PromptMode::Queue,
+            request_id: "req-1".to_string(),
+        })
+        .await
+        .unwrap_err();
+    assert!(mismatched.contains("different operation"));
+    assert_eq!(registry.list()[0].queued_prompts, 1);
     // The user sees who did what.
     let shared = desktop.request(Request::Shared).await.unwrap();
     assert_eq!(shared[0]["activity"]["client"], "test-client 1.0");
-    assert_eq!(shared[0]["activity"]["action"], "prompt");
+    assert_eq!(shared[0]["activity"]["action"], "queue");
 
     // `queue` on a session whose state is only guessed waits for a real
     // report; dropping the queue is the observer's to do.
@@ -651,20 +673,20 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
             session_id: session.clone(),
             text: "later".to_string(),
             mode: super::PromptMode::Queue,
-            request_id: String::new(),
+            request_id: "queue-later".to_string(),
         })
         .await
         .unwrap();
-    assert_eq!(queued["queued"], 1);
+    assert_eq!(queued["queued"], 2);
     let cleared = observer
         .request(Request::Cancel {
             session_id: session.clone(),
             scope: super::CancelScope::Queue,
-            request_id: String::new(),
+            request_id: "clear-queue".to_string(),
         })
         .await
         .unwrap();
-    assert_eq!(cleared["dropped"], 1);
+    assert_eq!(cleared["dropped"], 2);
 
     // Plans: nothing until allowed, then exactly the allowed ones.
     assert_eq!(
@@ -689,14 +711,35 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     let plans = observer.request(Request::Plans).await.unwrap();
     assert_eq!(plans["plans"][0]["planId"], "agent-plan-1");
     assert!(plans["plans"][0].get("request").is_none());
-    let launched = observer
-        .request(Request::LaunchPlan {
-            plan_id: "agent-plan-1".to_string(),
-            request_id: "launch-1".to_string(),
+    let mut retrying_observer = RawClient::connect(&paths).await;
+    retrying_observer
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: PROTOCOL_VERSION,
+            role: ClientRole::Observer,
+            client: Some("test-client 1.0".to_string()),
         })
         .await
         .unwrap();
+    // Concurrent connections must reserve the id before spawning the CLI.
+    let (launched, concurrent_retry) = tokio::join!(
+        observer.request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "launch-1".to_string(),
+        }),
+        retrying_observer.request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "launch-1".to_string(),
+        }),
+    );
+    let launched = launched.unwrap();
+    let concurrent_retry = concurrent_retry.unwrap();
     let planned = launched["sessionId"].as_str().unwrap().to_string();
+    assert_eq!(concurrent_retry["sessionId"], planned.as_str());
+    assert_ne!(
+        launched["duplicate"].as_bool().unwrap_or(false),
+        concurrent_retry["duplicate"].as_bool().unwrap_or(false),
+    );
     assert_eq!(launched["detached"], true);
     // The desktop hears about it and sees it shared with control.
     let announced = desktop
@@ -727,7 +770,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
         .request(Request::Cancel {
             session_id: planned.clone(),
             scope: super::CancelScope::Session,
-            request_id: String::new(),
+            request_id: "end-session".to_string(),
         })
         .await
         .unwrap();
@@ -737,8 +780,44 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
         .await;
     assert_eq!(registry.list().len(), 1);
     assert!(!sink.is_shared(&planned));
+    let ended_again = observer
+        .request(Request::Cancel {
+            session_id: planned.clone(),
+            scope: super::CancelScope::Session,
+            request_id: "end-session".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(ended_again["ended"], true);
+    assert_eq!(ended_again["duplicate"], true);
+    // A cached launch must not disclose a session after its sharing ends.
+    assert!(observer
+        .request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "launch-1".to_string(),
+        })
+        .await
+        .is_err());
 
     // Taking control back leaves sharing in place.
+    use base64::Engine as _;
+    desktop
+        .request(Request::Enqueue {
+            session_id: session.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"user's queued task\r"),
+        })
+        .await
+        .unwrap();
+    observer
+        .request(Request::Prompt {
+            session_id: session.clone(),
+            text: "MCP task before revocation".to_string(),
+            mode: super::PromptMode::Queue,
+            request_id: "before-revoke".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(registry.list()[0].queued_prompts, 2);
     desktop
         .request(Request::ControlSet {
             session_id: session.clone(),
@@ -746,12 +825,26 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
         })
         .await
         .unwrap();
+    assert_eq!(
+        registry.list()[0].queued_prompts,
+        1,
+        "keep only the user's prompt"
+    );
+    assert!(observer
+        .request(Request::Prompt {
+            session_id: session.clone(),
+            text: "ping from mcp\n".to_string(),
+            mode: super::PromptMode::Queue,
+            request_id: "req-1".to_string(),
+        })
+        .await
+        .is_err());
     assert!(observer
         .request(Request::Prompt {
             session_id: session.clone(),
             text: "nope".to_string(),
             mode: super::PromptMode::Now,
-            request_id: String::new(),
+            request_id: "revoked-prompt".to_string(),
         })
         .await
         .is_err());
