@@ -187,7 +187,7 @@ impl Bridge {
         let Ok(mut pending) = self.pending.lock() else {
             return;
         };
-        if !pending.get(&id).is_some_and(|p| p.owner == owner) {
+        if pending.get(&id).is_none_or(|p| p.owner != owner) {
             return;
         }
         let Some(p) = pending.remove(&id) else {
