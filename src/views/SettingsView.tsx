@@ -29,6 +29,7 @@ import type { EncryptedBackupRestore } from "../app/encryptedBackup";
 import { EncryptedBackupPanel } from "../components/settings/EncryptedBackupPanel";
 import { ChangelogPanel } from "../components/settings/ChangelogPanel";
 import { PrivacyNotice } from "../components/settings/PrivacyNotice";
+import { RemoteMcpPanel } from "../components/settings/RemoteMcpPanel";
 import {
   clearSensitiveClipboard,
   type SensitiveClipboardClearOutcome,
@@ -735,6 +736,7 @@ export function SettingsView({
       </section>
 
       {usesAppleUpdates && <PrivacyNotice />}
+      {!usesAppleUpdates && <RemoteMcpPanel available={desktopBackendAvailable} />}
 
       {!usesAppleUpdates && (
       <section className="panel glass glass--sheen">

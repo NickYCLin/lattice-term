@@ -21,6 +21,7 @@
 pub mod audit;
 pub mod automations;
 pub mod client;
+mod desktop_bridge;
 pub mod mcp;
 pub mod server;
 #[cfg(test)]
@@ -392,6 +393,18 @@ pub enum Request {
     Shared,
     /// Desktop-only bounded metadata history, including stopped sessions.
     McpHistory,
+    /// Desktop connection-owned grants. Never accepts credentials or commands.
+    DesktopGrants {
+        targets: Vec<crate::mcp_desktop::TargetView>,
+    },
+    DesktopCall {
+        operation: crate::mcp_desktop::DesktopOperation,
+    },
+    /// Reverse RPC only; inbound clients cannot invoke this variant.
+    DesktopInvoke {
+        client: String,
+        operation: crate::mcp_desktop::DesktopOperation,
+    },
     /// A bounded slice of one shared session's output from `cursor` on.
     Observe {
         session_id: String,
@@ -503,6 +516,8 @@ pub struct HelloReply {
     /// request variant: they may close the connection on an unknown frame.
     #[serde(default)]
     pub mcp_history: bool,
+    #[serde(default)]
+    pub desktop_bridge_protocol: u32,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,
     pub snapshots: Vec<crate::agent::AgentOutputSnapshot>,
     /// Sessions the user shared with observers; empty for observers who

@@ -139,6 +139,14 @@ impl SftpRegistry {
             .ok_or_else(|| format!("no SFTP session called '{session_id}'"))
     }
 
+    /// A retained registry entry is not proof that its SSH transport is alive.
+    /// MCP grants use this snapshot without reconnecting or loading a profile.
+    pub(crate) fn connected_session(&self, session_id: &str) -> Option<Arc<SftpSession>> {
+        let sessions = self.sessions.lock().ok()?;
+        let entry = sessions.get(session_id)?;
+        (!entry._transport.is_closed()).then(|| Arc::clone(&entry.sftp))
+    }
+
     fn insert(&self, entry: SftpSessionEntry) -> Result<(), String> {
         self.sessions
             .lock()

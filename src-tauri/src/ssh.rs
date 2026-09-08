@@ -33,6 +33,32 @@ pub trait SessionSink: Send + Sync + 'static {
     fn closed(&self, session_id: &str, reason: &str);
 }
 
+/// A dedicated exec channel must close even when its caller drops a future.
+/// russh's channel halves do not close the peer channel on Drop themselves.
+/// This guard never closes the underlying shared SSH connection or its PTY.
+pub(crate) struct ChannelCloseGuard(Arc<russh::ChannelWriteHalf<client::Msg>>);
+
+impl ChannelCloseGuard {
+    pub(crate) fn new(writer: russh::ChannelWriteHalf<client::Msg>) -> Self {
+        Self(Arc::new(writer))
+    }
+
+    pub(crate) fn writer(&self) -> &russh::ChannelWriteHalf<client::Msg> {
+        &self.0
+    }
+}
+
+impl Drop for ChannelCloseGuard {
+    fn drop(&mut self) {
+        let writer = Arc::clone(&self.0);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(1), writer.close()).await;
+            });
+        }
+    }
+}
+
 /// The sink used by the application: one Tauri event per chunk.
 pub struct EventSink(pub AppHandle);
 

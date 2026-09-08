@@ -358,7 +358,19 @@ try {
   await share(plain);
   await check("A tools and sharing", async () => {
     const tools = await adapter.request("tools/list", {});
-    assert.equal(tools.tools.length, 8);
+    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
+      "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
+      "list_authorized_connections", "get_host_metrics", "sftp_list_directory",
+      "ssh_exec_job", "sftp_transfer", "get_remote_operation", "cancel_remote_operation",
+    ].sort());
+    const capabilities = ok(await adapter.call("get_capabilities"));
+    const remote = capabilities.backends.find((backend) => backend.id === "desktopSshSftp");
+    assert.equal(remote.supported, true);
+    assert.equal(remote.available, false);
+    assert.equal(remote.authorizedConnections, 0);
+    assert.deepEqual(ok(await adapter.call("list_authorized_connections")).connections, []);
+    assert.equal((await adapter.call("get_host_metrics", { targetId: "not-granted" })).isError, true);
     const list = ok(await adapter.call("list_agent_sessions"));
     assert.deepEqual(
       list.sessions.map((s) => s.sessionId),

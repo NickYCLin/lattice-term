@@ -1,8 +1,8 @@
-# LatticeTerm MCP Server（A 唯讀觀測 + B 受控協作）
+# LatticeTerm MCP Server（Agent 協作與受控遠端操作）
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出狀態、讀取終端輸出、等待狀態改變；對你另外勾選「可控」的工作階段送指示、清佇列或結束它；以及在你打開啟動開關後，啟動你保存過的背景啟動項目。
 
-這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A 與 B 階段。C（SSH／SFTP）、D（遠端畫面）尚未實作，見文末。
+這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 遠端畫面尚未實作。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
 
@@ -13,14 +13,18 @@ LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprot
 lattice-term mcp --data-dir <資料目錄>          ← 同一個 LatticeTerm 執行檔的子命令
         │ observer 角色連上使用者專屬本機 socket
         ▼
-lattice-term agent-daemon（背景服務）           ← 只回應「已分享」的工作階段
+lattice-term agent-daemon（背景服務）
+        ├─ AgentRegistry                     ← 只提供已分享、另行允許的操作
+        └─ connection-owned reverse RPC      ← 已授權的目標、逾時不自動重送
+                ▼
+           桌面 SSH／SFTP registry            ← 原有登入與主機信任不交給模型
 ```
 
-- **只有背景工作階段可分享。** 啟動 CLI 時勾「留在背景」的工作階段由背景服務持有；桌面程序自己的工作階段、對話頁、SSH／SFTP、遠端畫面都沒有對外路徑。
+- **只有背景 Agent 工作階段可分享。** 啟動 CLI 時勾「留在背景」的工作階段由背景服務持有；桌面自己的 Agent 工作階段、對話頁及遠端畫面沒有對外路徑。SSH／SFTP 走下方獨立的桌面授權流程。
 - **預設不分享，可隨時撤銷。** 在 Agent Fleet 頁「執行中」清單裡，每個背景工作階段旁有「分享給 MCP」勾選框；分享狀態存在背景服務的記憶體裡，工作階段結束或背景服務結束就自動取消。
 - **讀跟寫是兩個授權。** 分享只給看；要讓 MCP client 對某個工作階段送指示、清除 MCP 指示佇列或結束它，得再勾「允許 MCP 送指示與停止」。取消可控或分享時，尚未送出的 MCP 指示一併移除；你自己排隊的工作保留。取消可控不影響分享。
 - **啟動是第三個授權。** MCP 區塊裡的「允許 MCP 啟動已保存的背景啟動項目」打開後，client 才能用 `launch_agent` 啟動「跨重啟還原」清單裡勾了「留在背景」的項目，內容完全照你保存的（CLI、參數、工作目錄、沙箱、共用啟動指示），不能自訂指令；它啟動的工作階段自動分享並可控。這個開關存在啟動項目檔裡，開著時背景服務會保持常駐。
-- **你看得到誰做了什麼。** 每個分享的工作階段旁會顯示最近一次 MCP 操作；MCP 區塊另列最近 256 筆寫入請求，包含啟動、提示、清佇列、停止，以及已接受、重送、失敗或結果未確認。取消分享或工作階段結束不會移除這份紀錄，關閉再開視窗仍可取得；背景服務結束後清除，不寫入磁碟。超過上限會顯示已移除的筆數。client 名稱來自 `initialize.clientInfo`，是對方自報，不是已驗證身分。
+- **你看得到誰做了什麼。** MCP 區塊列最近 256 筆 Agent 寫入、遠端操作與遠端授權變更，包含已接受、重送、失敗或結果未確認。撤權或工作階段結束不移除紀錄；安全寫入此裝置後可跨背景服務重啟還原。介面區分已儲存、尚在儲存、只在記憶體與無法儲存。client 名稱由對方自報，不是已驗證身分，請勿包含敏感資訊。
 - **adapter 不會啟動背景服務。** 背景服務沒在跑時，`list_agent_sessions` 回 `daemonRunning: false` 與空清單，讀取與等待回 `isError` 說明原因；不會為了讓模型有東西看而拉起程序。
 - **權限由背景服務端強制。** adapter 以 `observer` 角色打招呼，背景服務只接受已分享工作階段的觀測、另外授權的操作，以及允許的啟動項目查詢；其他管理請求一律拒絕。`readOnlyHint` 等 MCP annotation 只是描述。
 - **權杖留在 adapter 程序。** 連線用的 `agent-daemon.token`（0600）由 adapter 讀取，不會出現在任何工具結果裡。
@@ -123,9 +127,41 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 紀錄只供桌面使用，observer 不能讀取，也不新增對外 MCP 工具。每 10 秒重新取得一次；舊背景服務或連線失敗會顯示「無法取得」，不假裝成空清單。只記 client 名稱、動作、時間、結果類別與已知工作階段 ID，不保存指示內容、request ID、原始錯誤、啟動參數或憑證。失敗目標若不在 registry 裡，不把呼叫者傳入的任意字串存為工作階段 ID。
 
-同一 request ID 的每次回覆各占一筆；成功的去重回覆標「重送」，不表示執行了第二次。已接受只代表伺服器接受該操作，不代表模型完成工作或測試通過；「失敗或未完成」也不保證完全沒有副作用。未回覆的在途呼叫、adapter 端就被拒絕的參數、唯讀查詢與人工授權變更不在這份寫入紀錄內；這不是跨重啟、不可竄改的完整稽核帳本。
+同一 request ID 的每次回覆各占一筆；成功的去重回覆標「重送」，不表示執行第二次。已接受只代表伺服器接受操作，不代表模型完成工作或測試通過；失敗也不保證沒有副作用。遠端操作另記已知的 opaque target ID，不記原始主機、指令或路徑。遠端授權／撤權會記錄；exec／傳檔完成結果由 `get_remote_operation` 查詢，不另追加背景完成事件。未回覆的在途呼叫、adapter 端拒絕的參數、Agent 唯讀查詢與 Agent 授權變更不在這份紀錄內。
+
+`agent-mcp-audit/history.json` 是最多 256 筆／256 KiB 的版本化快照。背景 worker 最多留一份待寫快照，正常關閉最多等待 250ms；突然斷電或強制終止仍可能遺失尚未寫入的紀錄，並留下暫存檔。這不是 append-only、防竄改或完整稽核帳本，request ID 去重仍不跨重啟。
+
+新目錄與檔案限制為目前使用者存取（Unix 0700／0600、Windows protected DACL）。拒絕偵測到的連結、junction、hardlink、不安全權限或外部修改；格式損壞、未知版本與寫入失敗不自動清空原檔，CLI 仍可使用，介面顯示無法儲存。這些檢查不構成對同一 OS 帳號惡意程序或管理員的隔離。
+
+## C：SSH／SFTP 與主機資訊
+
+1. 先在桌面正常連線，確認主機金鑰與帳號；MCP 不代為確認、不使用其他已存帳號登入。
+2. 設定頁「MCP 遠端操作授權」選擇既有連線，填入可分享的名稱，逐項勾選操作。
+3. SSH 可開放 Linux 主機資訊與固定指令。指令由使用者事先填妥，AI 只選 `planId`，不能插入參數。SFTP 可開放目錄清單、上傳與下載，兩個方向分別授權。
+4. 檔案操作需核准遠端根目錄；傳檔還需核准本機根目錄。AI 只提交 `rootId` 與相對路徑，單檔最多 8 MiB，不覆寫既有檔案。
+5. 檢查設定後明確開放，隨時可撤權。桌面關閉、與 daemon 失聯或原連線失效後不得沿用舊授權；重新授權產生新的 target ID。
+
+| 工具 | 用途 |
+| --- | --- |
+| `list_authorized_connections` | 只列已授權名稱、opaque ID、能力及連線狀態，不含主機、帳號、憑證、指令與實際根目錄 |
+| `get_host_metrics` | 既有 SSH 連線上的固定 Linux probe，只回傳數值，不含掛載路徑與裝置名稱 |
+| `sftp_list_directory` | 已核准根目錄下的有界清單 |
+| `ssh_exec_job` | 獨立、非互動 SSH channel 的命名指令工作 |
+| `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
+| `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
+| `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
+
+指令／傳檔先回 `operationId` 與 running，client 必須再查結果。指令分別保存 stdout、stderr、exit status／signal、截斷與逾時，輸出合計最多 32 KiB，UI 固定指令上限 30 秒（後端上限 60 秒）。結束通道不代表全部遠端衍生程序已停止，也不會回復先前寫入；不可把 `accepted` 或 EOF 當成 exit 0。相同 client／request ID 的重送不重跑，最多保存 256 筆／15 分鐘；失聯或超時可能結果未確認，不得改用新 ID 盲目重送。
+
+桌面 Rust service 持有 registry 與原始授權，daemon 僅定向轉送到擁有它的桌面連線，兩端檢查權限。握手確認 `desktopBridgeProtocol` 後才送新請求，舊服務不會收到不認得的管理指令。MCP 不能註冊桌面 bridge、核准自己的權限或提交任意 Tauri command。
+
+`get_capabilities.backends` 分別列出 `agentFleetBackground` 與 `desktopSshSftp`。後者的 `supported` 表示服務支援橋接協定，`available` 還需要至少一個已授權且連線中的目標；不能把服務版本支援當成目前已獲得主機權限。
+
+SFTP 逐層檢查相對路徑與連結，但遠端 `realpath`／`open` 不是同一個原子操作。這依賴可信任的伺服器與根目錄管理，不是抵抗其他遠端程序換目錄的強沙箱；需要強隔離時應使用伺服器端 chroot。固定 SSH 指令的權限等同該 SSH 帳號，不受 SFTP 根目錄限制。
 
 [窄視窗元件驗收畫面](assets/mcp-history-narrow.png) 使用合成測試資料，展示長名稱換行、可捲動紀錄、無法取得與空紀錄；不是安裝版或真實帳號驗收。
+
+[遠端授權窄視窗畫面](assets/mcp-remote-sftp-narrow.png) 使用合成連線、真實 React 元件與 mock Tauri 回應；已操作授權與撤權，核對 SSH／SFTP 權限分流及確認勾選。它不代表安裝版已連線到外部主機。
 
 ## 已驗證的範圍
 
@@ -155,10 +191,12 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 2026-09-08 的 Windows CI 與下載產物各通過 9 項檢查，結果、來源 commit、雜湊及驗證範圍見 [Windows MCP 驗收紀錄](MCP-WINDOWS-ACCEPTANCE.zh-TW.md)。
 
+後續候選版的持久紀錄、C 遠端操作、Windows 啟動修正及不使用外部 reporter 的驗收，另見 [MCP 遠端操作與紀錄驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md)。舊版檢查結果不代替新功能驗收。
+
 ## 後續階段（未實作）
 
-- **B 的缺口**：沒有「中止本輪」；操作紀錄只保留本次背景服務最近 256 筆寫入請求，不是跨重啟的完整稽核歷史；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派（把這個 MCP 再傳給它啟動的 CLI）未支援，也沒有深度限制。
-- **C SSH／SFTP 與主機診斷**：要接到桌面持有的連線 registry；`ssh_exec_job` 需要專屬非互動 exec channel，不能拿互動終端貼指令充數。
+- **B 的邊界**：PTY 模式不支援安全的「中止本輪」，不模擬 Esc／Ctrl+C，以免完成競態結束整個 CLI；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI。
+- **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
 - **D 遠端畫面**：frame ID／尺寸／時間戳與有界快照，先擷取再考慮鍵鼠。
 
 歡迎在 #180 繼續討論優先順序。

@@ -258,19 +258,22 @@ pub(crate) async fn collect(
     session: Arc<client::Handle<TrustingHandler>>,
 ) -> Result<HostMetricsPayload, String> {
     let probe = async {
-        let mut channel = session
+        let channel = session
             .channel_open_session()
             .await
             .map_err(|error| format!("could not open a channel: {error}"))?;
 
-        channel
+        let (mut reader, writer) = channel.split();
+        let closing = crate::ssh::ChannelCloseGuard::new(writer);
+        closing
+            .writer()
             .exec(true, PROBE)
             .await
             .map_err(|error| format!("could not run the probe: {error}"))?;
 
         let mut output = Vec::new();
         loop {
-            match channel.wait().await {
+            match reader.wait().await {
                 Some(ChannelMsg::Data { ref data }) => {
                     if output.len() + data.len() > MAX_PROBE_OUTPUT {
                         return Err("the host sent more output than a metrics probe can produce"

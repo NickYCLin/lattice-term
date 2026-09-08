@@ -315,6 +315,7 @@ where
             protocol: role.protocol_version(),
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: true,
+            desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: detached_list(&context.registry),
             snapshots: context.registry.output_snapshots(),
             shared: context.sink.shared(),
@@ -324,12 +325,16 @@ where
             protocol: role.protocol_version(),
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: false,
+            desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: shared_list(&context),
             snapshots: Vec::new(),
             shared: Vec::new(),
         },
     };
     let (client_id, tx, mut rx) = context.sink.subscribe(role, client_name.clone());
+    if role == ClientRole::Desktop {
+        context.sink.desktop_bridge.attach(client_id);
+    }
     let _ = tx.send(response_line(
         hello_id,
         serde_json::to_value(reply).map_err(|error| error.to_string()),
@@ -372,6 +377,44 @@ where
         while tasks.try_join_next().is_some() {}
         match frame {
             Ok(Some(Frame::Request { id, body })) => {
+                // Grant changes preserve wire order relative to reverse-RPC
+                // replies. Spawning them could release a stale result first.
+                let body = match body {
+                    Request::DesktopGrants { targets } => {
+                        let result = context.sink.desktop_bridge.replace(
+                            client_id,
+                            role,
+                            tx.clone(),
+                            targets,
+                        );
+                        if let Ok(value) = &result {
+                            if let Ok(mut history) = context.sink.history.lock() {
+                                for (key, action) in [
+                                    ("granted", audit::Action::Grant),
+                                    ("revoked", audit::Action::Revoke),
+                                ] {
+                                    for target in value[key]
+                                        .as_array()
+                                        .into_iter()
+                                        .flatten()
+                                        .filter_map(Value::as_str)
+                                    {
+                                        history.record_target(
+                                            "LatticeTerm desktop",
+                                            action,
+                                            audit::Outcome::Accepted,
+                                            Some(target.into()),
+                                            now_millis(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        let _ = tx.send(response_line(id, result));
+                        continue;
+                    }
+                    body => body,
+                };
                 // Reserve before spawning, never put an unlimited number
                 // of observer jobs on Tokio's blocking work queue. Keep a
                 // daemon-wide reservation until even a disconnected
@@ -392,6 +435,53 @@ where
                 let context = Arc::clone(&context);
                 let tx = tx.clone();
                 let client_name = client_name.clone();
+                if matches!(
+                    &body,
+                    Request::DesktopCall { .. } | Request::DesktopInvoke { .. }
+                ) {
+                    tasks.spawn(async move {
+                        let _permits = permits;
+                        let result = match body {
+                            Request::DesktopCall { operation } if role == ClientRole::Observer => {
+                                let target = context.sink.desktop_bridge.known_target(&operation);
+                                let action = remote_audit_action(&operation);
+                                let result = context
+                                    .sink
+                                    .desktop_bridge
+                                    .call(&client_name, operation)
+                                    .await;
+                                if let Some(action) = action {
+                                    let outcome = match &result {
+                                        Ok(value) if value["duplicate"] == true => {
+                                            audit::Outcome::Replayed
+                                        }
+                                        Ok(_) => audit::Outcome::Accepted,
+                                        Err(error) if error.contains("unknown") => {
+                                            audit::Outcome::Unknown
+                                        }
+                                        Err(_) => audit::Outcome::Failed,
+                                    };
+                                    if let Ok(mut history) = context.sink.history.lock() {
+                                        history.record_target(
+                                            &client_name,
+                                            action,
+                                            outcome,
+                                            target,
+                                            now_millis(),
+                                        );
+                                    }
+                                }
+                                result
+                            }
+                            _ => {
+                                Err("This remote bridge request is not allowed for this client"
+                                    .into())
+                            }
+                        };
+                        let _ = tx.send(response_line(id, result));
+                    });
+                    continue;
+                }
                 tasks.spawn_blocking(move || {
                     let _permits = permits;
                     if role == ClientRole::Observer && tx.is_disconnected() {
@@ -401,6 +491,23 @@ where
                     let _ = tx.send(response_line(id, result));
                 });
             }
+            Ok(Some(Frame::Response {
+                id,
+                ok,
+                result,
+                error,
+            })) => {
+                context.sink.desktop_bridge.resolve(
+                    client_id,
+                    role,
+                    id,
+                    if ok {
+                        Ok(result)
+                    } else {
+                        Err(error.unwrap_or_else(|| "Remote operation failed".into()))
+                    },
+                );
+            }
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => break,
         }
@@ -409,6 +516,7 @@ where
         tx.disconnect();
     }
     context.sink.unsubscribe(client_id);
+    context.sink.desktop_bridge.remove(client_id);
     drop(tx);
     // Blocking work that has already started is not abortable, but its
     // permits remain held by the closure. Cancel queued jobs and release
@@ -878,6 +986,11 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
     let sink: &dyn AgentSink = context.sink.as_ref();
     match body {
         Request::Hello { .. } => Err("Already greeted.".to_string()),
+        Request::DesktopGrants { .. }
+        | Request::DesktopCall { .. }
+        | Request::DesktopInvoke { .. } => {
+            Err("Remote operations require the connection-owned bridge".into())
+        }
         Request::Launch {
             request,
             restored_output,
@@ -1020,6 +1133,26 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
+fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Option<audit::Action> {
+    use crate::mcp_desktop::{DesktopOperation as Op, TransferDirection};
+    Some(match operation {
+        Op::ListConnections => return None,
+        Op::GetMetrics { .. } => audit::Action::RemoteMetrics,
+        Op::ListDirectory { .. } => audit::Action::RemoteList,
+        Op::Exec { .. } => audit::Action::RemoteExec,
+        Op::Transfer {
+            direction: TransferDirection::Upload,
+            ..
+        } => audit::Action::RemoteUpload,
+        Op::Transfer {
+            direction: TransferDirection::Download,
+            ..
+        } => audit::Action::RemoteDownload,
+        Op::Cancel { .. } => audit::Action::RemoteCancel,
+        Op::OperationStatus { .. } => audit::Action::RemoteStatus,
+    })
+}
+
 /// The registry sink: every event goes to every attached client, and to
 /// nobody at all when the window is closed — the registry keeps working
 /// regardless, which is the whole point.
@@ -1030,6 +1163,7 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
 /// pile up terminal bytes in a channel.
 #[derive(Default)]
 pub struct DaemonSink {
+    desktop_bridge: super::desktop_bridge::Bridge,
     /// Independent from shares: revocation and session exit keep metadata.
     history: Mutex<audit::History>,
     clients: Mutex<Vec<Client>>,
@@ -1083,7 +1217,7 @@ pub enum ClientReceiver {
 }
 
 impl ClientSender {
-    fn send(&self, line: String) -> Result<(), ()> {
+    pub(super) fn send(&self, line: String) -> Result<(), ()> {
         if self.is_disconnected() {
             return Err(());
         }
@@ -1098,7 +1232,7 @@ impl ClientSender {
         sent
     }
 
-    fn is_disconnected(&self) -> bool {
+    pub(super) fn is_disconnected(&self) -> bool {
         *self.disconnected.borrow()
     }
 

@@ -1,0 +1,12 @@
+.mcp-remote { min-width: 0; }
+.mcp-remote__body, .mcp-remote__form { display: grid; min-width: 0; gap: var(--space-4); }
+.mcp-remote__body p { margin: 0; overflow-wrap: anywhere; }
+.mcp-remote .field { min-width: 0; margin: 0; }
+.mcp-remote .input { width: 100%; min-width: 0; }
+.mcp-remote__scopes { display: grid; gap: var(--space-3); min-width: 0; margin: 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.mcp-remote__scopes legend { padding-inline: var(--space-2); font-weight: 600; }
+.mcp-remote__scopes label, .mcp-remote__form > label:not(.field) { display: flex; align-items: flex-start; gap: var(--space-2); line-height: 1.6; }
+.mcp-remote input[type="checkbox"] { flex: 0 0 auto; margin-block-start: .3em; accent-color: var(--accent); }
+.mcp-remote__scopes label:has(input:disabled) { opacity: .55; }
+.mcp-remote textarea { resize: vertical; }
+.mcp-remote .setting { flex-wrap: wrap; gap: var(--space-3); }

@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
@@ -37,6 +37,11 @@ pub struct DaemonClient {
 pub struct Connection {
     mcp_protocol: AtomicU32,
     mcp_history: AtomicBool,
+    desktop_bridge_protocol: AtomicU32,
+    bridge_allowance: Arc<tokio::sync::Semaphore>,
+    /// Only grants published through this connection; a late disconnect must
+    /// not revoke a new connection's freshly approved targets.
+    remote_grants: Mutex<HashSet<String>>,
     tx: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
     next_id: AtomicU64,
@@ -123,6 +128,9 @@ impl DaemonClient {
         let connection = Arc::new(Connection {
             mcp_protocol: AtomicU32::new(0),
             mcp_history: AtomicBool::new(false),
+            desktop_bridge_protocol: AtomicU32::new(0),
+            bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
+            remote_grants: Mutex::new(HashSet::new()),
             tx,
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -167,8 +175,45 @@ impl DaemonClient {
         connection
             .mcp_history
             .store(reply.mcp_history, Ordering::Relaxed);
+        connection
+            .desktop_bridge_protocol
+            .store(reply.desktop_bridge_protocol, Ordering::Relaxed);
         if let Ok(mut sessions) = connection.sessions.lock() {
             sessions.extend(reply.sessions.into_iter().map(|summary| summary.session_id));
+        }
+        if reply.desktop_bridge_protocol == super::desktop_bridge::PROTOCOL {
+            let weak = Arc::downgrade(&connection);
+            let app = self.app.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    let Some(connection) =
+                        weak.upgrade().filter(|c| c.alive.load(Ordering::Relaxed))
+                    else {
+                        break;
+                    };
+                    let Some(service) = app.try_state::<Arc<crate::mcp_desktop::DesktopService>>()
+                    else {
+                        break;
+                    };
+                    let sync = app.state::<crate::McpRemoteSync>();
+                    let _guard = sync.0.lock().await;
+                    if !connection.alive.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // Refresh connection health; this never restores grants
+                    // revoked on disconnect or registers saved credentials.
+                    if connection
+                        .request(Request::DesktopGrants {
+                            targets: service.targets(),
+                        })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
         }
         Ok(connection)
     }
@@ -222,6 +267,12 @@ impl DaemonClient {
 
 impl Connection {
     pub async fn request(&self, request: Request) -> Result<Value, String> {
+        if matches!(&request, Request::DesktopGrants { .. })
+            && self.desktop_bridge_protocol.load(Ordering::Relaxed)
+                != super::desktop_bridge::PROTOCOL
+        {
+            return Err("Remote MCP requires an updated background service; finish its sessions before restarting it.".into());
+        }
         if matches!(
             &request,
             Request::Shared
@@ -238,6 +289,9 @@ impl Connection {
         }
         if !self.alive.load(Ordering::Relaxed) {
             return Err(DAEMON_GONE.to_string());
+        }
+        if let Request::DesktopGrants { targets } = &request {
+            self.note_remote_grants(targets.iter().map(|target| target.id.clone()))?;
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel();
@@ -267,6 +321,23 @@ impl Connection {
         }
     }
 
+    fn note_remote_grants(&self, targets: impl Iterator<Item = String>) -> Result<(), String> {
+        let mut grants = self.remote_grants.lock().map_err(|_| DAEMON_GONE)?;
+        if !self.alive.load(Ordering::Relaxed) {
+            return Err(DAEMON_GONE.into());
+        }
+        *grants = targets.collect();
+        Ok(())
+    }
+
+    fn take_lost_grants(&self) -> Vec<String> {
+        // Serialize loss with grant publication so a late publisher cannot
+        // survive disconnect and be restored by the next connection's ticker.
+        let mut grants = self.remote_grants.lock().unwrap_or_else(|e| e.into_inner());
+        self.alive.store(false, Ordering::Relaxed);
+        grants.drain().collect()
+    }
+
     fn resolve(&self, id: u64, result: Result<Value, String>) {
         let sender = self
             .pending
@@ -294,7 +365,12 @@ impl Connection {
     /// The daemon went away: fail what is waiting and close its sessions in
     /// the interface.
     fn lost(&self, app: &AppHandle) {
-        self.alive.store(false, Ordering::Relaxed);
+        let revoked = self.take_lost_grants();
+        if let Some(service) = app.try_state::<Arc<crate::mcp_desktop::DesktopService>>() {
+            for target in revoked {
+                let _ = service.revoke(&target);
+            }
+        }
         if let Ok(mut pending) = self.pending.lock() {
             for (_, sender) in pending.drain() {
                 let _ = sender.send(Err(DAEMON_GONE.to_string()));
@@ -349,6 +425,53 @@ async fn reader_loop<R: AsyncBufReadExt + Unpin>(
                 if let Some(channel) = event_channel(&name) {
                     let _ = app.emit(channel, payload);
                 }
+            }
+            Frame::Request {
+                id,
+                body: Request::DesktopInvoke { client, operation },
+            } => {
+                if connection.desktop_bridge_protocol.load(Ordering::Relaxed)
+                    != super::desktop_bridge::PROTOCOL
+                {
+                    continue;
+                }
+                let Ok(permit) = Arc::clone(&connection.bridge_allowance).try_acquire_owned()
+                else {
+                    let _ = connection.tx.send(serde_json::json!({"kind":"response","id":id,"ok":false,"error":"Too many remote operations"}).to_string());
+                    continue;
+                };
+                let service = app
+                    .state::<Arc<crate::mcp_desktop::DesktopService>>()
+                    .inner()
+                    .clone();
+                let connection = Arc::clone(&connection);
+                tauri::async_runtime::spawn(async move {
+                    let _permit = permit;
+                    if !connection.alive.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let result = service.execute(&client, operation).await;
+                    let frame = match result {
+                        Ok(result) => Frame::Response {
+                            id,
+                            ok: true,
+                            result,
+                            error: None,
+                        },
+                        Err(error) => Frame::Response {
+                            id,
+                            ok: false,
+                            result: Value::Null,
+                            error: Some(
+                                serde_json::to_string(&error)
+                                    .unwrap_or_else(|_| "Remote operation failed".into()),
+                            ),
+                        },
+                    };
+                    if let Ok(line) = serde_json::to_string(&frame) {
+                        let _ = connection.tx.send(line);
+                    }
+                });
             }
             Frame::Request { .. } => {}
         }
@@ -421,6 +544,35 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
 mod history_tests {
     use super::*;
 
+    #[test]
+    fn late_disconnect_only_revokes_its_own_grants_and_rejects_late_publication() {
+        let make = || Connection {
+            mcp_protocol: AtomicU32::new(OBSERVER_PROTOCOL_VERSION),
+            mcp_history: AtomicBool::new(true),
+            desktop_bridge_protocol: AtomicU32::new(super::super::desktop_bridge::PROTOCOL),
+            bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
+            remote_grants: Mutex::new(HashSet::new()),
+            tx: mpsc::unbounded_channel().0,
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+            alive: AtomicBool::new(true),
+            sessions: Mutex::new(HashSet::new()),
+        };
+        let old = make();
+        let new = make();
+        old.note_remote_grants(["old-target".into()].into_iter())
+            .unwrap();
+        new.note_remote_grants(["new-target".into()].into_iter())
+            .unwrap();
+        assert_eq!(old.take_lost_grants(), ["old-target"]);
+        assert!(old.take_lost_grants().is_empty());
+        assert!(old
+            .note_remote_grants(["late-target".into()].into_iter())
+            .is_err());
+        assert!(new.alive.load(Ordering::Relaxed));
+        assert_eq!(new.take_lost_grants(), ["new-target"]);
+    }
+
     #[tokio::test]
     async fn an_old_daemon_rejects_mcp_locally_but_desktop_requests_still_work() {
         let old: HelloReply = serde_json::from_value(json!({
@@ -434,6 +586,9 @@ mod history_tests {
             tx,
             mcp_protocol: AtomicU32::new(old.mcp_protocol),
             mcp_history: AtomicBool::new(old.mcp_history),
+            desktop_bridge_protocol: AtomicU32::new(0),
+            bridge_allowance: Arc::new(tokio::sync::Semaphore::new(16)),
+            remote_grants: Mutex::new(HashSet::new()),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
             alive: AtomicBool::new(true),
@@ -454,6 +609,7 @@ mod history_tests {
                 plans: vec![],
             },
             Request::McpHistory,
+            Request::DesktopGrants { targets: vec![] },
         ] {
             assert!(connection
                 .request(request)
