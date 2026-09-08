@@ -22,6 +22,56 @@ impl Drop for AgentGuard {
     }
 }
 
+fn terminal_diagnostic(line: &str) -> Option<String> {
+    let event: serde_json::Value = serde_json::from_str(line).ok()?;
+    // Readiness includes a pairing code. Never print the raw JSON or events
+    // other than the explicitly selected terminal error fields.
+    match event.get("kind")?.as_str()? {
+        "stopped" => Some(format!("stopped: {}", event.get("reason")?.as_str()?)),
+        "failed" => Some(format!(
+            "failed at {}: {}",
+            event.get("stage")?.as_str()?,
+            event.get("detail")?.as_str()?
+        )),
+        _ => None,
+    }
+}
+
+#[test]
+fn diagnostic_output_omits_readiness_and_unrelated_credentials() {
+    assert!(terminal_diagnostic(
+        r#"{"kind":"ready","pairingCode":"do-not-log","fileTransfer":true}"#
+    )
+    .is_none());
+    assert_eq!(
+        terminal_diagnostic(
+            r#"{"kind":"stopped","reason":"unsafe path","pairingCode":"do-not-log"}"#
+        ),
+        Some("stopped: unsafe path".into())
+    );
+    assert_eq!(
+        terminal_diagnostic(r#"{"kind":"failed","stage":"startup","detail":"missing folder"}"#),
+        Some("failed at startup: missing folder".into())
+    );
+    assert!(terminal_diagnostic("not json").is_none());
+}
+
+#[test]
+fn canonical_fixture_parent_avoids_pairing_symlink_rejection() {
+    let temporary = tempfile::tempdir().unwrap();
+    let actual = temporary.path().canonicalize().unwrap();
+    let alias = actual.join("alias");
+    std::os::unix::fs::symlink(&actual, &alias).unwrap();
+    assert!(lattice_remote::pairing_limit::PairingPermit::reserve(
+        &alias.join("pairing-attempts.json")
+    )
+    .is_err());
+    assert!(lattice_remote::pairing_limit::PairingPermit::reserve(
+        &alias.canonicalize().unwrap().join("pairing-attempts.json")
+    )
+    .is_ok());
+}
+
 async fn next_response(connection: &mut SecureConnection<Transport>) -> RemoteFileResponse {
     timeout(Duration::from_secs(10), async {
         loop {
@@ -78,7 +128,11 @@ async fn read_text(
 #[ignore = "spawns a real headless agent and shell; run explicitly"]
 async fn encrypted_editor_saves_multichunk_utf8_and_rejects_external_conflicts() {
     let temporary = tempfile::tempdir().unwrap();
-    let root = temporary.path().join("shared");
+    // macOS temporary paths can start with the /var -> /private/var alias.
+    // Pairing state intentionally rejects symlink ancestors, so fixture paths
+    // must use the canonical parent without weakening the host's path checks.
+    let temporary_path = temporary.path().canonicalize().unwrap();
+    let root = temporary_path.join("shared");
     std::fs::create_dir(&root).unwrap();
     let original = "initial\r\n".repeat(9000).into_bytes();
     std::fs::write(root.join("note.txt"), &original).unwrap();
@@ -98,7 +152,7 @@ async fn encrypted_editor_saves_multichunk_utf8_and_rejects_external_conflicts()
                 "text-editor-fixture",
                 "--identity",
             ])
-            .arg(temporary.path().join("identity.json"))
+            .arg(temporary_path.join("identity.json"))
             .arg("--file-root")
             .arg(&root)
             .env("SHELL", "/bin/sh")
@@ -111,27 +165,43 @@ async fn encrypted_editor_saves_multichunk_utf8_and_rejects_external_conflicts()
     );
     let stdout = agent.0.stdout.take().unwrap();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (terminal_tx, terminal_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        let _ = reader.read_line(&mut line);
-        let _ = ready_tx.send(line);
         // Keep the pipe open until the host exits; normal JSON status events
         // should not get a broken pipe merely because readiness was read.
-        for _ in reader.lines() {}
+        for (index, line) in BufReader::new(stdout).lines().enumerate() {
+            let Ok(line) = line else { break };
+            if index == 0 {
+                let _ = ready_tx.send(line.clone());
+            }
+            if let Some(diagnostic) = terminal_diagnostic(&line) {
+                eprintln!("headless agent: {diagnostic}");
+                let _ = terminal_tx.send(diagnostic);
+            }
+        }
     });
     let ready = ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let ready: serde_json::Value = serde_json::from_str(&ready).expect("valid readiness JSON");
     assert!(
-        ready.contains("\"fileTransfer\":true"),
-        "unexpected readiness: {ready}"
+        ready.get("kind").and_then(serde_json::Value::as_str) == Some("ready")
+            && ready
+                .get("fileTransfer")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true),
+        "expected headless agent readiness with file transfer"
     );
     let mut connection = timeout(
         Duration::from_secs(10),
         SecureConnection::connect("127.0.0.1", port, "text-editor-fixture"),
     )
     .await
-    .unwrap()
-    .unwrap();
+    .expect("headless agent handshake timed out")
+    .unwrap_or_else(|error| {
+        let diagnostic = terminal_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or_else(|_| "no terminal status received".into());
+        panic!("headless agent handshake failed: {error}; {diagnostic}");
+    });
     match timeout(Duration::from_secs(10), connection.receive())
         .await
         .unwrap()
