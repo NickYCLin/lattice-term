@@ -2444,15 +2444,6 @@ fn terminate_agent_entry(entry: &AgentSessionEntry) -> Result<(), String> {
         .lock()
         .map_err(|error| error.to_string())?
         .kill();
-    #[cfg(windows)]
-    if result
-        .as_ref()
-        .is_err_and(|error| error.raw_os_error() == Some(0))
-    {
-        // ConPTY can report a false failure after TerminateProcess succeeded:
-        // GetLastError is ERROR_SUCCESS, so there is no actionable failure.
-        return Ok(());
-    }
     result.map_err(|error| format!("Cannot stop the agent process: {error}"))
 }
 
@@ -5928,7 +5919,10 @@ pub fn launch_with_replay(
     drop(pair.slave);
 
     let process_id = child.process_id();
-    let killer = child.clone_killer();
+    let killer = crate::agent_process::clone_killer(child.as_ref()).map_err(|error| {
+        let _ = child.kill();
+        format!("Cannot retain the agent process handle: {error}")
+    })?;
     let mut reader = pair
         .master
         .try_clone_reader()

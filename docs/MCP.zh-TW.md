@@ -117,7 +117,15 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 shadowjohn 在 #180 用 Windows CI 產物補做 A 階段驗收，回報四個邊界問題（撤銷不喚醒等待、分頁切開 ANSI、小分頁遇多位元組字元卡住、Windows 路徑寫法不同找不到 daemon），已修正並補回歸測試（`mcp.rs` 的分頁測試對每種序列、每個分頁大小、每個切點跑過；`tests.rs` 有撤銷即時結束等待的 adapter 級測試；`mod.rs` 有 Windows 路徑正規化測試）。
 
-尚未在本機驗證：Windows 具名管道實機（由 CI 產物與外部回報覆蓋）、macOS。
+Windows x64 已用 #182 的 CI 執行檔重跑 F1～F4，四項通過，包含 8 種等價路徑寫法連到同一個具名管道。後續驗收可在 Windows 執行：
+
+```powershell
+node scripts/verify-mcp-windows.mjs "C:\path\to\lattice-term.exe" report.json
+```
+
+腳本建立獨立的暫存資料目錄，以 Windows 內建 shell 建立 ConPTY 工作階段，驗證分享、授權、分頁、排隊、取消、並行重送與背景服務失聯，結束後清理自己建立的程序與檔案。就緒狀態由測試程序呼叫真正的 reporter CLI 回報，並非實際 AI 供應商的 hook 驗收。它不安裝程式，也不使用日常的工作階段或帳號。
+
+Windows 測試安裝包工作流程也會執行這份驗收，報告放在 `LatticeTerm-Windows-MCP-acceptance` artifact。這份驗收涵蓋命令列、具名管道與 ConPTY；未操作桌面勾選框或執行真實 AI 回合。macOS 尚未實機驗證。
 
 ## 後續階段（未實作）
 

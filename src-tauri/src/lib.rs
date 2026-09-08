@@ -3,6 +3,7 @@ pub mod agent_chat;
 pub mod agent_daemon;
 pub mod agent_history;
 pub mod agent_plans;
+mod agent_process;
 pub mod backup;
 mod chat_attachments;
 pub mod clipboard;

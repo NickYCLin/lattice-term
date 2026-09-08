@@ -8,6 +8,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - "scripts/build-*.mjs"
+      - "scripts/verify-mcp-windows.mjs"
       - "src/**"
       - "src-tauri/**"
       - "crates/lattice-remote/**"
@@ -67,6 +68,18 @@ jobs:
           '{"bundle":{"createUpdaterArtifacts":false}}' | Out-File $config -Encoding ascii
           npx tauri build --bundles nsis --no-sign --ci --config $config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify MCP through Windows named pipes and ConPTY
+        run: node scripts/verify-mcp-windows.mjs src-tauri/target/release/lattice-term.exe mcp-windows-report.json
+
+      - name: Upload Windows MCP acceptance report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LatticeTerm-Windows-MCP-acceptance
+          path: mcp-windows-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify installer output
         shell: pwsh
