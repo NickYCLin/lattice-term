@@ -26,6 +26,8 @@ struct StoreFile {
     workspace_name: String,
     #[serde(default, rename = "startupInstructions")]
     startup_instructions: String,
+    #[serde(default, rename = "mcpLaunch")]
+    mcp_launch: bool,
     plans: Vec<AgentLaunchPlan>,
 }
 
@@ -41,6 +43,10 @@ pub struct AgentPlanRecovery {
 pub struct AgentPlanSnapshot {
     pub workspace_name: String,
     pub startup_instructions: String,
+    /// Whether MCP clients may start the saved plans marked "keep in the
+    /// background".
+    #[serde(default)]
+    pub mcp_launch: bool,
     pub plans: Vec<AgentLaunchPlan>,
     pub recovery: Option<AgentPlanRecovery>,
 }
@@ -50,6 +56,7 @@ pub struct FileAgentPlanStore {
     path: PathBuf,
     workspace_name: String,
     startup_instructions: String,
+    mcp_launch: bool,
     plans: Vec<AgentLaunchPlan>,
     recovery: Option<AgentPlanRecovery>,
 }
@@ -62,6 +69,7 @@ impl FileAgentPlanStore {
             path,
             workspace_name: String::new(),
             startup_instructions: String::new(),
+            mcp_launch: false,
             plans: Vec::new(),
             recovery: None,
         };
@@ -82,6 +90,7 @@ impl FileAgentPlanStore {
                     (Ok(name), Ok(instructions)) => {
                         store.workspace_name = name;
                         store.startup_instructions = instructions;
+                        store.mcp_launch = file.mcp_launch;
                         store.plans = file.plans;
                     }
                     (Err(error), _) => {
@@ -147,6 +156,7 @@ impl FileAgentPlanStore {
             version: STORE_VERSION,
             workspace_name: self.workspace_name.clone(),
             startup_instructions: self.startup_instructions.clone(),
+            mcp_launch: self.mcp_launch,
             plans: self.plans.clone(),
         })
         .map_err(|error| error.to_string())?;
@@ -169,6 +179,7 @@ impl FileAgentPlanStore {
         AgentPlanSnapshot {
             workspace_name: self.workspace_name.clone(),
             startup_instructions: self.startup_instructions.clone(),
+            mcp_launch: self.mcp_launch,
             plans: self.plans.clone(),
             recovery: self.recovery.clone(),
         }
@@ -198,6 +209,18 @@ impl FileAgentPlanStore {
             return Err(error);
         }
         Ok(instructions)
+    }
+
+    pub fn update_mcp_launch(&mut self, enabled: bool) -> Result<bool, String> {
+        if enabled == self.mcp_launch {
+            return Ok(enabled);
+        }
+        self.mcp_launch = enabled;
+        if let Err(error) = self.persist() {
+            self.mcp_launch = !enabled;
+            return Err(error);
+        }
+        Ok(enabled)
     }
 
     pub fn reorder(&mut self, ordered_ids: &[String]) -> Result<Vec<AgentLaunchPlan>, String> {

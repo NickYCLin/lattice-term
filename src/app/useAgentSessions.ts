@@ -173,6 +173,8 @@ export interface AgentPlanRecovery {
 interface AgentPlanSnapshot {
   workspaceName: string;
   startupInstructions: string;
+  /** MCP clients may start the saved plans marked "keep in the background". */
+  mcpLaunch?: boolean;
   plans: AgentLaunchPlan[];
   recovery: AgentPlanRecovery | null;
 }
@@ -618,6 +620,8 @@ export interface AgentApi {
   lastClosed: SessionClosedNotice | null;
   workspaceName: string;
   startupInstructions: string;
+  /** Whether MCP clients may start saved background plans. */
+  mcpLaunch: boolean;
   plans: AgentLaunchPlan[];
   planRecovery: AgentPlanRecovery | null;
   refreshCatalog: () => Promise<void>;
@@ -627,6 +631,7 @@ export interface AgentApi {
   savePlan: (draft: AgentLaunchPlanDraft) => Promise<AgentLaunchPlan>;
   renameWorkspace: (name: string) => Promise<string>;
   updateStartupInstructions: (instructions: string) => Promise<string>;
+  updateMcpLaunch: (enabled: boolean) => Promise<boolean>;
   reorderPlans: (orderedIds: string[]) => Promise<AgentLaunchPlan[]>;
   deletePlan: (id: string) => Promise<boolean>;
   restorePlans: (planIds: string[]) => Promise<AgentRestoreOutcome[]>;
@@ -673,6 +678,7 @@ export function useAgentSessions(): AgentApi {
   const [workspaceName, setWorkspaceName] = useState("");
   const [startupInstructions, setStartupInstructions] = useState("");
   const [plans, setPlans] = useState<AgentLaunchPlan[]>([]);
+  const [mcpLaunch, setMcpLaunch] = useState(false);
   const [planRecovery, setPlanRecovery] = useState<AgentPlanRecovery | null>(
     null,
   );
@@ -708,6 +714,7 @@ export function useAgentSessions(): AgentApi {
       setDefaultWorkingDirectory(directory);
       setWorkspaceName(planSnapshot.workspaceName);
       setStartupInstructions(planSnapshot.startupInstructions);
+      setMcpLaunch(planSnapshot.mcpLaunch === true);
       setPlans(planSnapshot.plans);
       setPlanRecovery(planSnapshot.recovery);
       setError(null);
@@ -959,6 +966,26 @@ export function useAgentSessions(): AgentApi {
         );
         if (!keep(stopQueue)) return;
 
+        // A session somebody else started through the background service
+        // (an MCP client): show it like one of ours. During hydration the
+        // snapshot that follows already includes it.
+        const stopLaunched = await listen<AgentSessionSummary>(
+          "agent://launched",
+          (event) => {
+            if (hydrating) return;
+            const launched = { ...event.payload, detached: true };
+            setSessions((current) => {
+              if (current.some((session) => session.sessionId === launched.sessionId)) {
+                return current;
+              }
+              const next = [...current, launched];
+              sessionsRef.current = next;
+              return next;
+            });
+          },
+        );
+        if (!keep(stopLaunched)) return;
+
         const [
           definitions,
           directory,
@@ -1168,6 +1195,13 @@ export function useAgentSessions(): AgentApi {
       instructions,
     });
     setStartupInstructions(saved);
+    return saved;
+  }, []);
+
+  const updateMcpLaunch = useCallback(async (enabled: boolean) => {
+    const { invoke } = await core();
+    const saved = await invoke<boolean>("agent_workspace_mcp_launch_update", { enabled });
+    setMcpLaunch(saved);
     return saved;
   }, []);
 
@@ -1383,6 +1417,7 @@ export function useAgentSessions(): AgentApi {
     lastClosed,
     workspaceName,
     startupInstructions,
+    mcpLaunch,
     plans,
     planRecovery,
     refreshCatalog,
@@ -1391,6 +1426,7 @@ export function useAgentSessions(): AgentApi {
     savePlan,
     renameWorkspace,
     updateStartupInstructions,
+    updateMcpLaunch,
     reorderPlans,
     deletePlan,
     restorePlans,

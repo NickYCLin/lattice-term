@@ -11,12 +11,27 @@ export interface AgentMcpLaunch {
   args: string[];
 }
 
+export interface AgentMcpActivity {
+  client: string;
+  action: string;
+  /** Unix milliseconds. */
+  at: number;
+}
+
+export interface AgentSharedSession {
+  sessionId: string;
+  /** MCP clients may prompt and end it, not only read it. */
+  control: boolean;
+  /** The last thing an MCP client did to it. */
+  activity?: AgentMcpActivity | null;
+}
+
 export interface AgentDaemonStatus {
   running: boolean;
   sessions: number;
-  /** Background session ids the user shared with MCP observers. */
-  shared: string[];
-  /** How an MCP client starts the read-only adapter for this installation. */
+  /** Background sessions the user shared with MCP observers, with grants. */
+  shared: AgentSharedSession[];
+  /** How an MCP client starts the adapter for this installation. */
   mcp: AgentMcpLaunch | null;
 }
 
@@ -29,11 +44,16 @@ export const EMPTY_DAEMON_STATUS: AgentDaemonStatus = {
   mcp: null,
 };
 
-export function useAgentDaemon(sessionsHint: number): {
+export function useAgentDaemon(
+  sessionsHint: number,
+  /** Changes whenever the saved plans or the launch permission change. */
+  plansHint = "",
+): {
   status: AgentDaemonStatus;
   refresh: () => Promise<void>;
   stop: () => Promise<boolean>;
   share: (sessionId: string, shared: boolean) => Promise<void>;
+  control: (sessionId: string, control: boolean) => Promise<void>;
 } {
   const [status, setStatus] = useState<AgentDaemonStatus>(EMPTY_DAEMON_STATUS);
 
@@ -67,13 +87,38 @@ export function useAgentDaemon(sessionsHint: number): {
     return stopped;
   }, [refresh]);
 
-  // Sharing lives in the background service, so the answer is its list.
+  // The plans an MCP client may launch live in the background service too;
+  // hand it the current list whenever they change.
+  useEffect(() => {
+    if (!hasDesktopBackend()) return;
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke<boolean>("agent_mcp_plans_sync");
+      } catch {
+        // The service is not running and nothing is allowed: nothing to hand over.
+      }
+    })();
+  }, [plansHint]);
+
+  // Sharing and control live in the background service, so the answer is
+  // its list.
   const share = useCallback(async (sessionId: string, shared: boolean) => {
     if (!hasDesktopBackend()) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const next = await invoke<string[]>("agent_mcp_share", { sessionId, shared });
+    const next = await invoke<AgentSharedSession[]>("agent_mcp_share", { sessionId, shared });
     setStatus((current) => ({ ...current, shared: next }));
   }, []);
 
-  return { status, refresh, stop, share };
+  const control = useCallback(async (sessionId: string, control: boolean) => {
+    if (!hasDesktopBackend()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const next = await invoke<AgentSharedSession[]>("agent_mcp_control", {
+      sessionId,
+      control,
+    });
+    setStatus((current) => ({ ...current, shared: next }));
+  }, []);
+
+  return { status, refresh, stop, share, control };
 }

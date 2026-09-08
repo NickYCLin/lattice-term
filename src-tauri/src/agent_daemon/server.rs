@@ -8,8 +8,9 @@
 
 use super::automations::{self, Scheduler};
 use super::{
-    read_or_create_token, transport, ClientRole, DaemonPaths, Frame, HelloReply, Request, LOG_FILE,
-    MAX_FRAME_BYTES, MAX_OBSERVE_BYTES, PROTOCOL_VERSION, SESSION_ID_PREFIX,
+    read_or_create_token, transport, CancelScope, ClientRole, DaemonPaths, Frame, HelloReply,
+    McpActivity, McpPlan, PromptMode, Request, SharedSession, LOG_FILE, MAX_FRAME_BYTES,
+    MAX_MCP_PROMPT_CHARS, MAX_OBSERVE_BYTES, PROTOCOL_VERSION, SESSION_ID_PREFIX,
 };
 use crate::agent::{
     self, AgentLifecycle, AgentRegistry, AgentSessionSummary, AgentSink, AgentStateSource,
@@ -18,7 +19,7 @@ use crate::agent::{
 use crate::agent_chat::AgentChatRegistry;
 use base64::Engine;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -33,6 +34,11 @@ const IDLE_CHECK: Duration = Duration::from_secs(5);
 /// A pasted image after PNG encoding; the desktop already bounds pixels.
 const MAX_STAGED_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOG_BYTES: u64 = 1024 * 1024;
+/// How long an observer's request id is remembered, so a retried call
+/// after a lost reply gets the first outcome instead of a second launch or
+/// a second prompt.
+const RECENT_OUTCOME_TTL: Duration = Duration::from_secs(15 * 60);
+const MAX_RECENT_OUTCOMES: usize = 256;
 
 /// Handles `agent-daemon`; `None` when the arguments are for something else.
 pub fn run_cli<I, S>(args: I) -> Option<i32>
@@ -189,7 +195,8 @@ pub async fn serve(
                 let idle = context.registry.list().is_empty()
                     && context.sink.client_count() == 0
                     && !context.scheduler.has_enabled()
-                    && context.scheduler.running_count() == 0;
+                    && context.scheduler.running_count() == 0
+                    && !context.sink.plans_enabled();
                 match (idle, idle_since) {
                     (true, None) => idle_since = Some(Instant::now()),
                     (true, Some(since)) if since.elapsed() >= idle_exit => {
@@ -251,11 +258,13 @@ where
             token,
             protocol,
             role,
+            client,
         },
     ) = hello
     else {
         return;
     };
+    let client_name = client_label(client.as_deref());
     if token != context.token || protocol != PROTOCOL_VERSION {
         let _ = write_half
             .write_all(
@@ -283,14 +292,14 @@ where
             shared: Vec::new(),
         },
     };
-    let (client_id, tx, mut rx) = context.sink.subscribe(role);
+    let (client_id, tx, mut rx) = context.sink.subscribe(role, client_name.clone());
     let _ = tx.send(response_line(
         hello_id,
         serde_json::to_value(reply).map_err(|error| error.to_string()),
     ));
-    context
-        .log
-        .line(&format!("client {client_id} attached as {role:?}"));
+    context.log.line(&format!(
+        "client {client_id} attached as {role:?} ({client_name})"
+    ));
 
     let writer = tokio::spawn(async move {
         while let Some(line) = rx.recv().await {
@@ -307,8 +316,9 @@ where
             Ok(Some(Frame::Request { id, body })) => {
                 let context = Arc::clone(&context);
                 let tx = tx.clone();
+                let client_name = client_name.clone();
                 tokio::task::spawn_blocking(move || {
-                    let result = dispatch_as(&context, role, body);
+                    let result = dispatch_as(&context, role, &client_name, body);
                     let _ = tx.send(response_line(id, result));
                 });
             }
@@ -373,18 +383,60 @@ fn shared_list(context: &Context) -> Vec<AgentSessionSummary> {
     let shared = context.sink.shared();
     detached_list(&context.registry)
         .into_iter()
-        .filter(|summary| shared.contains(&summary.session_id))
+        .filter(|summary| {
+            shared
+                .iter()
+                .any(|entry| entry.session_id == summary.session_id)
+        })
         .collect()
 }
 
+/// The same, with each session's grant attached (`mcpControl`).
+fn observed_list(context: &Context) -> Vec<Value> {
+    let shared = context.sink.shared();
+    detached_list(&context.registry)
+        .into_iter()
+        .filter_map(|summary| {
+            let entry = shared
+                .iter()
+                .find(|entry| entry.session_id == summary.session_id)?;
+            let mut value = serde_json::to_value(&summary).ok()?;
+            value["mcpControl"] = json!(entry.control);
+            Some(value)
+        })
+        .collect()
+}
+
+/// A display name for an observer, from what it claimed: bounded, printable.
+fn client_label(claimed: Option<&str>) -> String {
+    let label: String = claimed
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(80)
+        .collect();
+    let label = label.trim().to_string();
+    if label.is_empty() {
+        "MCP client".to_string()
+    } else {
+        label
+    }
+}
+
 /// Everything an observer can do, and nothing else: read the shared
-/// sessions and their output. Every other request is refused before it
-/// reaches the registry.
-pub fn dispatch_as(context: &Context, role: ClientRole, body: Request) -> Result<Value, String> {
+/// sessions and their output, and — only where the user granted control —
+/// prompt or end them, or start a plan the user allowed. Every other
+/// request is refused before it reaches the registry.
+pub fn dispatch_as(
+    context: &Context,
+    role: ClientRole,
+    client: &str,
+    body: Request,
+) -> Result<Value, String> {
     match role {
         ClientRole::Desktop => dispatch(context, body),
         ClientRole::Observer => match body {
-            Request::Sessions => to_value(&shared_list(context)),
+            Request::Sessions => Ok(Value::Array(observed_list(context))),
             Request::Observe {
                 session_id,
                 cursor,
@@ -402,8 +454,192 @@ pub fn dispatch_as(context: &Context, role: ClientRole, body: Request) -> Result
                     },
                 )
             }
+            Request::Plans => Ok(context.sink.plans_view()),
+            Request::LaunchPlan {
+                plan_id,
+                request_id,
+            } => once(context, client, &request_id, || {
+                launch_plan(context, client, &plan_id)
+            }),
+            Request::Prompt {
+                session_id,
+                text,
+                mode,
+                request_id,
+            } => once(context, client, &request_id, || {
+                prompt(context, client, &session_id, &text, mode)
+            }),
+            Request::Cancel {
+                session_id,
+                scope,
+                request_id,
+            } => once(context, client, &request_id, || {
+                cancel(context, client, &session_id, scope)
+            }),
             _ => Err("Observers may only read shared sessions.".to_string()),
         },
+    }
+}
+
+/// Runs an observer's action at most once per request id: a retry after a
+/// lost reply gets the first outcome back, marked `duplicate`.
+fn once(
+    context: &Context,
+    client: &str,
+    request_id: &str,
+    action: impl FnOnce() -> Result<Value, String>,
+) -> Result<Value, String> {
+    if request_id.is_empty() {
+        return action();
+    }
+    if request_id.len() > 128 {
+        return Err("requestId is too long.".to_string());
+    }
+    let key = format!("{client}\u{1f}{request_id}");
+    if let Some(previous) = context.sink.recall(&key) {
+        return previous.map(|mut value| {
+            if let Some(object) = value.as_object_mut() {
+                object.insert("duplicate".to_string(), json!(true));
+            }
+            value
+        });
+    }
+    let outcome = action();
+    context.sink.remember(key, outcome.clone());
+    outcome
+}
+
+fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, String> {
+    let Some(plan) = context.sink.plan(plan_id) else {
+        return Err(if context.sink.plans_enabled() {
+            "No saved plan with that id is available to MCP clients.".to_string()
+        } else {
+            "The user has not allowed MCP clients to launch saved plans.".to_string()
+        });
+    };
+    let mut request = plan.request;
+    request.detached = true;
+    let summary = agent::launch_with_replay(
+        Arc::clone(&context.sink) as Arc<dyn AgentSink>,
+        Arc::clone(&context.registry),
+        request,
+        None,
+    )?;
+    let summary = detached(summary);
+    // What a client started, it may watch and drive; the user allowed the
+    // plan for exactly that.
+    context.sink.set_shared(&summary.session_id, true);
+    let _ = context.sink.set_control(&summary.session_id, true);
+    context
+        .sink
+        .note_activity(&summary.session_id, client, "launch");
+    context.log.line(&format!(
+        "mcp {client}: launched plan {plan_id} as {}",
+        summary.session_id
+    ));
+    let value = to_value(&summary)?;
+    context.sink.broadcast("launched", value.clone());
+    Ok(value)
+}
+
+fn prompt(
+    context: &Context,
+    client: &str,
+    session_id: &str,
+    text: &str,
+    mode: PromptMode,
+) -> Result<Value, String> {
+    if !context.sink.has_control(session_id) {
+        return Err("This session is not under MCP control.".to_string());
+    }
+    let text = text.trim_end_matches(['\r', '\n']);
+    if text.trim().is_empty() {
+        return Err("A prompt is required.".to_string());
+    }
+    if text.chars().count() > MAX_MCP_PROMPT_CHARS {
+        return Err(format!(
+            "A prompt may have at most {MAX_MCP_PROMPT_CHARS} characters."
+        ));
+    }
+    // Exactly what the interface types: newlines become carriage returns
+    // so multi-line text stays one submission, then Enter.
+    let mut typed = text.replace("\r\n", "\n").replace('\n', "\r");
+    typed.push('\r');
+    let encoded = base64::engine::general_purpose::STANDARD.encode(typed.as_bytes());
+    let registry = &context.registry;
+    let sink: &dyn AgentSink = context.sink.as_ref();
+    let before = registry
+        .session_summary(session_id)
+        .ok_or_else(|| "Agent session no longer exists.".to_string())?;
+    let (queued, sent_now) = match mode {
+        PromptMode::Queue => {
+            let depth = agent::enqueue(sink, registry, session_id, &encoded)?;
+            (depth, depth == 0)
+        }
+        PromptMode::Now => {
+            if matches!(
+                before.state,
+                AgentLifecycle::Working | AgentLifecycle::NeedsAttention
+            ) {
+                return Err(format!(
+                    "The session is {} right now; queue the prompt or wait for it to finish.",
+                    match before.state {
+                        AgentLifecycle::Working => "working",
+                        _ => "waiting for a person",
+                    }
+                ));
+            }
+            agent::send(sink, registry, session_id, &encoded)?;
+            (0, true)
+        }
+    };
+    context.sink.note_activity(
+        session_id,
+        client,
+        if sent_now { "prompt" } else { "queue" },
+    );
+    context.log.line(&format!(
+        "mcp {client}: prompt to {session_id} ({} chars, {})",
+        text.chars().count(),
+        if sent_now { "sent" } else { "queued" }
+    ));
+    let after = registry.session_summary(session_id).unwrap_or(before);
+    Ok(json!({
+        "sessionId": session_id,
+        "sentImmediately": sent_now,
+        "queued": queued,
+        "state": after.state,
+        "stateSource": after.state_source,
+    }))
+}
+
+fn cancel(
+    context: &Context,
+    client: &str,
+    session_id: &str,
+    scope: CancelScope,
+) -> Result<Value, String> {
+    if !context.sink.has_control(session_id) {
+        return Err("This session is not under MCP control.".to_string());
+    }
+    let registry = &context.registry;
+    let sink: &dyn AgentSink = context.sink.as_ref();
+    match scope {
+        CancelScope::Queue => {
+            let dropped = agent::clear_queue(sink, registry, session_id)?;
+            context.sink.note_activity(session_id, client, "clearQueue");
+            context.log.line(&format!(
+                "mcp {client}: cleared {dropped} queued prompt(s) on {session_id}"
+            ));
+            Ok(json!({ "sessionId": session_id, "scope": "queue", "dropped": dropped }))
+        }
+        CancelScope::Session => {
+            agent::disconnect(sink, registry, session_id)?;
+            context
+                .log
+                .line(&format!("mcp {client}: ended {session_id}"));
+            Ok(json!({ "sessionId": session_id, "scope": "session", "ended": true }))
+        }
     }
 }
 
@@ -494,9 +730,36 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
                 return Err("Agent session no longer exists.".to_string());
             }
             context.sink.set_shared(&session_id, shared);
+            context.log.line(&format!(
+                "desktop: {} {session_id} with observers",
+                if shared { "shared" } else { "unshared" }
+            ));
+            to_value(&context.sink.shared())
+        }
+        Request::ControlSet {
+            session_id,
+            control,
+        } => {
+            context.sink.set_control(&session_id, control)?;
+            context.log.line(&format!(
+                "desktop: {} control of {session_id}",
+                if control { "granted" } else { "revoked" }
+            ));
             to_value(&context.sink.shared())
         }
         Request::Shared => to_value(&context.sink.shared()),
+        Request::McpPlansReplace { enabled, plans } => {
+            context.log.line(&format!(
+                "desktop: observers may launch {} saved plan(s)",
+                if enabled { plans.len() } else { 0 }
+            ));
+            context.sink.plans_replace(enabled, plans);
+            Ok(Value::Null)
+        }
+        Request::Plans
+        | Request::LaunchPlan { .. }
+        | Request::Prompt { .. }
+        | Request::Cancel { .. } => Err("These requests are for observers.".to_string()),
         Request::Observe {
             session_id,
             cursor,
@@ -527,10 +790,15 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
 #[derive(Default)]
 pub struct DaemonSink {
     clients: Mutex<Vec<Client>>,
-    /// Session ids the user shared with observers. Lives with the daemon:
-    /// a session that ends is unshared with it, and sharing never outlives
-    /// the process that holds the session.
-    shared: Mutex<HashSet<String>>,
+    /// Sessions the user shared with observers, with what each observer may
+    /// do to them. Lives with the daemon: a session that ends is unshared
+    /// with it, and sharing never outlives the process that holds the
+    /// session.
+    shared: Mutex<HashMap<String, ShareEntry>>,
+    /// Saved plans the user allowed observers to launch.
+    plans: Mutex<(bool, Vec<McpPlan>)>,
+    /// Outcomes of recent observer actions, by client and request id.
+    recent: Mutex<VecDeque<RecentOutcome>>,
     next: AtomicU64,
 }
 
@@ -540,10 +808,30 @@ struct Client {
     tx: mpsc::UnboundedSender<String>,
 }
 
+#[derive(Default, Clone)]
+struct ShareEntry {
+    control: bool,
+    activity: Option<McpActivity>,
+}
+
+struct RecentOutcome {
+    key: String,
+    at: Instant,
+    outcome: Result<Value, String>,
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 impl DaemonSink {
     pub fn subscribe(
         &self,
         role: ClientRole,
+        _client: String,
     ) -> (
         u64,
         mpsc::UnboundedSender<String>,
@@ -581,30 +869,141 @@ impl DaemonSink {
             .unwrap_or(0)
     }
 
-    pub fn shared(&self) -> Vec<String> {
-        let mut shared: Vec<String> = self
+    pub fn shared(&self) -> Vec<SharedSession> {
+        let mut shared: Vec<SharedSession> = self
             .shared
             .lock()
-            .map(|shared| shared.iter().cloned().collect())
+            .map(|shared| {
+                shared
+                    .iter()
+                    .map(|(session_id, entry)| SharedSession {
+                        session_id: session_id.clone(),
+                        control: entry.control,
+                        activity: entry.activity.clone(),
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        shared.sort();
+        shared.sort_by(|a, b| a.session_id.cmp(&b.session_id));
         shared
     }
 
     pub fn is_shared(&self, session_id: &str) -> bool {
         self.shared
             .lock()
-            .map(|shared| shared.contains(session_id))
+            .map(|shared| shared.contains_key(session_id))
             .unwrap_or(false)
     }
 
+    pub fn has_control(&self, session_id: &str) -> bool {
+        self.shared
+            .lock()
+            .map(|shared| shared.get(session_id).is_some_and(|entry| entry.control))
+            .unwrap_or(false)
+    }
+
+    /// Sharing on keeps an existing grant; sharing off drops everything and
+    /// tells observers, so a wait on that session ends now rather than at
+    /// its timeout.
     pub fn set_shared(&self, session_id: &str, shared: bool) {
-        if let Ok(mut set) = self.shared.lock() {
-            if shared {
-                set.insert(session_id.to_string());
-            } else {
-                set.remove(session_id);
+        let revoked = match self.shared.lock() {
+            Ok(mut set) => {
+                if shared {
+                    set.entry(session_id.to_string()).or_default();
+                    false
+                } else {
+                    set.remove(session_id).is_some()
+                }
             }
+            Err(_) => false,
+        };
+        if revoked {
+            self.broadcast("unshared", json!({ "sessionId": session_id }));
+        }
+    }
+
+    /// Control is a grant on top of sharing, never instead of it.
+    pub fn set_control(&self, session_id: &str, control: bool) -> Result<(), String> {
+        let mut set = self.shared.lock().map_err(|error| error.to_string())?;
+        match set.get_mut(session_id) {
+            Some(entry) => {
+                entry.control = control;
+                Ok(())
+            }
+            None => Err("Share the session with observers first.".to_string()),
+        }
+    }
+
+    pub fn note_activity(&self, session_id: &str, client: &str, action: &str) {
+        if let Ok(mut set) = self.shared.lock() {
+            if let Some(entry) = set.get_mut(session_id) {
+                entry.activity = Some(McpActivity {
+                    client: client.to_string(),
+                    action: action.to_string(),
+                    at: now_millis(),
+                });
+            }
+        }
+    }
+
+    pub fn plans_replace(&self, enabled: bool, plans: Vec<McpPlan>) {
+        if let Ok(mut current) = self.plans.lock() {
+            *current = (enabled, if enabled { plans } else { Vec::new() });
+        }
+    }
+
+    pub fn plans_enabled(&self) -> bool {
+        self.plans.lock().map(|plans| plans.0).unwrap_or(false)
+    }
+
+    fn plan(&self, plan_id: &str) -> Option<McpPlan> {
+        self.plans.lock().ok().and_then(|plans| {
+            plans
+                .0
+                .then(|| plans.1.iter().find(|plan| plan.plan_id == plan_id).cloned())
+                .flatten()
+        })
+    }
+
+    /// What an observer learns about launchable plans: never the request.
+    fn plans_view(&self) -> Value {
+        let (enabled, plans) = self
+            .plans
+            .lock()
+            .map(|plans| (plans.0, plans.1.clone()))
+            .unwrap_or_default();
+        json!({
+            "enabled": enabled,
+            "plans": plans.iter().map(|plan| json!({
+                "planId": plan.plan_id,
+                "label": plan.label,
+                "note": plan.note,
+                "definitionId": plan.definition_id,
+                "workingDirectory": plan.working_directory,
+                "sandbox": plan.sandbox,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    fn recall(&self, key: &str) -> Option<Result<Value, String>> {
+        let mut recent = self.recent.lock().ok()?;
+        recent.retain(|entry| entry.at.elapsed() < RECENT_OUTCOME_TTL);
+        recent
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.outcome.clone())
+    }
+
+    fn remember(&self, key: String, outcome: Result<Value, String>) {
+        if let Ok(mut recent) = self.recent.lock() {
+            while recent.len() >= MAX_RECENT_OUTCOMES {
+                recent.pop_front();
+            }
+            recent.push_back(RecentOutcome {
+                key,
+                at: Instant::now(),
+                outcome,
+            });
         }
     }
 
@@ -613,7 +1012,12 @@ impl DaemonSink {
             .get("sessionId")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let observable = name != "data" && name != "captured" && self.is_shared(session_id);
+        // Observers hear only lifecycle news about shared sessions (and
+        // that a session stopped being shared); never terminal bytes,
+        // native ids, or launches.
+        let observable = name == "unshared"
+            || (matches!(name, "state" | "closed" | "model" | "usage" | "queue")
+                && self.is_shared(session_id));
         let frame = Frame::Event {
             name: name.to_string(),
             payload,
@@ -654,7 +1058,10 @@ impl AgentSink for DaemonSink {
             "closed",
             json!({ "sessionId": session_id, "reason": reason }),
         );
-        self.set_shared(session_id, false);
+        // Observers already heard `closed`; drop the grant quietly.
+        if let Ok(mut set) = self.shared.lock() {
+            set.remove(session_id);
+        }
     }
 
     fn captured(&self, session_id: &str, native_session_id: &str) {

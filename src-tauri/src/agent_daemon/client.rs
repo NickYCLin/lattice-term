@@ -145,6 +145,7 @@ impl DaemonClient {
                 token,
                 protocol: PROTOCOL_VERSION,
                 role: super::ClientRole::Desktop,
+                client: None,
             })
             .await?;
         let reply: HelloReply = serde_json::from_value(reply)
