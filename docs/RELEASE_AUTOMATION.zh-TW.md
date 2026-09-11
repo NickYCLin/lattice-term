@@ -55,7 +55,8 @@ GitHub API 失敗、發布時間格式錯誤、主分支或 PR 快照不一致�
 1. 一般 push 與功能 PR 在 Linux amd64 執行前端檢查、Rust 格式、測試與 lint，並於 macOS 驗證遠端文字編輯的原生權限、加密連線及桌面結束選單；PR 另外檢查 Conventional Commits。符合路徑條件的功能 PR 亦會建立 Windows 測試安裝包、驗證 Windows 分享端拒絕文字編輯的邊界，以及執行既有 iOS 未簽章建置驗證；這些測試產物不是正式發布。
 2. `Release` workflow 讀取最近公開正式版與目前版本的未完成發布狀態；舊草稿或預發行標記不重設週期。
 3. 若有可發布變更，自動建立或更新一個 draft Release PR，內容包含新版本、`CHANGELOG.md` 與所有版本檔差異；workflow 會自動合併同一版本內由 merge commit 與原提交造成的重複 changelog 項目，並檢查版本檔是否同步。
-4. 只有到期時，才透過可重用的 `ci.yml` 額外驗證 Release PR 的確切 SHA；一般 push 不會重複執行這份發布驗證。CI 失敗不合併 PR，也不建立新 tag。
+4. 只有到期時，才透過可重用的 `ci.yml` 額外驗證 Release PR 的確切 SHA。Release Please 只在版本說明改變時才重寫 PR，所以若最後幾筆是 docs／test／chore，PR 會停在較舊的 main；此時 workflow 先用 GitHub 的 update branch（帶著剛讀到的 head SHA 防競爭）把目前的 main 快照合進 bot 的 PR 分支，再驗證新的 head，衝突或 PR 被改動就停下不發。
+   一般 push 不會重複執行這份發布驗證。CI 失敗不合併 PR，也不建立新 tag。
 5. 完整 CI 成功後，自動以預期 PR head SHA 合併，複查合併的父提交與檔案樹，再於同一 run 建立 `vX.Y.Z` 與草稿 GitHub Release。使用 `GITHUB_TOKEN` 合併不會啟動另一份 workflow，因此不能依賴下一個 push 事件。發布提交可跳過一般 push CI，因為候選內容已完整驗證。
 6. Linux amd64、Linux arm64、Windows amd64、macOS arm64、macOS Intel 原生 runner 建置安裝檔，上傳更新簽章與 `latest.json`；Android 只在簽章金鑰齊全時建置並附加 APK。Intel 使用明確的 `macos-15-intel` runner；`macos-latest` 是 Apple Silicon，無法取代 Intel 建置。
 7. 發布 job 先以 `scripts/validate-updater-manifest.mjs` 檢查必要平台鍵、版本、架構、已上傳的更新包與簽章檔，再將同一份繁中版本說明同步到 GitHub Release 與 `latest.json`，全部通過才公開 Release。
