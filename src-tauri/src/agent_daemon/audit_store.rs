@@ -1136,6 +1136,15 @@ mod tests {
         store.save(&disk(1)).unwrap();
         let file = path.join(DIRECTORY).join(FILE_NAME);
         let original = fs::read(&file).unwrap();
+        // Keep the removed file's inode alive. ext4 hands a freed inode
+        // straight to the next file, and on kernels with coarse timestamps
+        // an identical copy written in the same tick would then look like
+        // the original itself (same dev, inode, mtime and bytes), which is
+        // not the replacement this test is about. (Windows cannot reuse a
+        // name whose file is still open, and does not recycle file ids so
+        // eagerly, so this is Unix only.)
+        #[cfg(unix)]
+        let _removed = File::open(&file).unwrap();
         fs::remove_file(&file).unwrap();
         assert_eq!(store.save(&disk(2)), Err(Reason::ExternalChange));
         assert!(!file.exists());
