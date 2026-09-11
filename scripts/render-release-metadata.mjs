@@ -72,11 +72,18 @@ function deriveSubtitle(body) {
   if (!items.length) return "版本更新";
 
   if (items.length > 1) {
-    const subjects = [
-      ...new Set(
-        items.map((item) => item[1].replace(/[：:]$/, "").trim()),
-      ),
-    ].slice(0, 3);
+    // Scopes differ only in case across commits ("MCP" / "mcp"); count
+    // them once, keeping the first spelling the changelog shows.
+    const seen = new Set();
+    const subjects = items
+      .map((item) => item[1].replace(/[：:]$/, "").trim())
+      .filter((subject) => {
+        const key = subject.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 3);
     if (subjects.length === 1) return subjects[0];
 
     const last = subjects.pop();
