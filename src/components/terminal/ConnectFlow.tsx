@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   connectionTarget,
   type ConnectionProfile,
@@ -25,7 +26,14 @@ import { Callout } from "../common/Callout";
 import { HostFingerprintDialog } from "../overlays/HostFingerprintDialog";
 import { HostKeyChangedDialog } from "../overlays/HostKeyChangedDialog";
 import { useModalFocus } from "../overlays/modalFocus";
-import { CheckIcon, CloseIcon, ShieldIcon, TerminalIcon, TrashIcon } from "../icons";
+import {
+  CheckIcon,
+  CloseIcon,
+  FileIcon,
+  ShieldIcon,
+  TerminalIcon,
+  TrashIcon,
+} from "../icons";
 import type { HostFingerprint } from "../../domain/security";
 import { useSavedCredential } from "../../app/useSavedCredential";
 import {
@@ -36,6 +44,17 @@ import {
 import { moveRadioGroupFocus } from "../overlays/radioNavigation";
 
 const authMethodChoices = ["password", "privateKey"] as const;
+
+export async function choosePrivateKeyPath(
+  title: string,
+): Promise<string | null> {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title,
+  });
+  return typeof selected === "string" ? selected : null;
+}
 
 /**
  * The dialogs describe a stored vault entry, while a live connection only has
@@ -105,6 +124,7 @@ export function ConnectFlow({
     initialPref?.method ?? "password",
   );
   const [keyPath, setKeyPath] = useState(initialPref?.keyPath ?? "");
+  const [choosingKey, setChoosingKey] = useState(false);
   const [passphrase, setPassphrase] = useState("");
   const [detectedKeys, setDetectedKeys] = useState<string[]>([]);
   const [problem, setProblem] = useState<{ title: string; body: string } | null>(
@@ -233,6 +253,24 @@ export function ConnectFlow({
       });
     } finally {
       setRemovingCredential(false);
+    }
+  }
+
+  async function chooseKey() {
+    setChoosingKey(true);
+    setProblem(null);
+    try {
+      const selected = await choosePrivateKeyPath(t("connect.keyPath.choose"));
+      if (selected) setKeyPath(selected);
+    } catch (reason) {
+      setProblem({
+        title: t("connect.keyPath.chooseFailed.title"),
+        body: t("connect.keyPath.chooseFailed", {
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      });
+    } finally {
+      setChoosingKey(false);
     }
   }
 
@@ -458,18 +496,29 @@ export function ConnectFlow({
                 <label className="field__label" htmlFor="connect-key-path">
                   {t("connect.keyPath")}
                 </label>
-                <input
-                  id="connect-key-path"
-                  className="input mono"
-                  type="text"
-                  list="connect-key-suggestions"
-                  value={keyPath}
-                  onChange={(event) => setKeyPath(event.currentTarget.value)}
-                  placeholder={t("connect.keyPath.placeholder")}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={busy}
-                />
+                <div className="field__input-action">
+                  <input
+                    id="connect-key-path"
+                    className="input mono"
+                    type="text"
+                    list="connect-key-suggestions"
+                    value={keyPath}
+                    onChange={(event) => setKeyPath(event.currentTarget.value)}
+                    placeholder={t("connect.keyPath.placeholder")}
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={busy || choosingKey}
+                  />
+                  <button
+                    type="button"
+                    className="button button--secondary field__input-action-button"
+                    onClick={() => void chooseKey()}
+                    disabled={busy || choosingKey}
+                  >
+                    <FileIcon size={14} />
+                    {t("connect.keyPath.choose")}
+                  </button>
+                </div>
                 {detectedKeys.length > 0 && (
                   <datalist id="connect-key-suggestions">
                     {detectedKeys.map((key) => (
