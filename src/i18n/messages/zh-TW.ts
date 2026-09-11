@@ -569,7 +569,7 @@ export const zhTW = {
   "settings.mobileHint": "用手機掃描 QR，查看對應平台的安裝方式與最新發布狀態。",
   "settings.mobile.qrAlt": "行動版安裝說明的 QR Code",
   "settings.mobile.scan": "拿手機相機掃這個 QR：",
-  "settings.mobile.android": "Android：自動下載最新安裝檔（安裝時需允許「未知來源」）",
+  "settings.mobile.android": "Android：正式版有附安裝檔時會自動下載（安裝時需允許「未知來源」）；還沒有時頁面會顯示準備中。",
   "settings.mobile.ios": "iPhone／iPad：查看 iOS 正式版的發布進度與安裝方式。",
   "update.prompt.title": "有新版本可以更新",
   "update.prompt.versions": "目前版本 {current}，最新版本 {version}",

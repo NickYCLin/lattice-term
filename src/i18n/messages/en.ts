@@ -586,7 +586,7 @@ export const en: Messages = {
   "settings.mobileHint": "Scan the QR with your phone to see installation instructions and the latest release status for your platform.",
   "settings.mobile.qrAlt": "QR code for mobile installation instructions",
   "settings.mobile.scan": "Scan this QR with your phone camera:",
-  "settings.mobile.android": "Android: downloads the latest installer automatically (allow “unknown sources” to install).",
+  "settings.mobile.android": "Android: downloads the latest installer when a release includes one (allow “unknown sources” to install); otherwise the page says it is still being prepared.",
   "settings.mobile.ios": "iPhone / iPad: see the iOS release status and installation instructions.",
   "update.prompt.title": "A new version is available",
   "update.prompt.versions": "Current version {current}, latest version {version}",
