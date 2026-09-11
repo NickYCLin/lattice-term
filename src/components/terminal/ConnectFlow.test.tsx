@@ -52,6 +52,10 @@ describe("ConnectFlow private key picker", () => {
     expect(markup).toContain('id="connect-key-path"');
     expect(markup).toContain('type="button"');
     expect(markup).toContain("選擇檔案");
+    // The example path keeps its separators; a bare "\\U" in the locale
+    // source used to render as "C:Usersyou.sshid_ed25519".
+    expect(markup).toContain("/home/you/.ssh/id_ed25519");
+    expect(markup).toContain("C:\\Users\\you\\.ssh\\id_ed25519");
   });
 
   it("accepts one file of any extension and returns its native path", async () => {

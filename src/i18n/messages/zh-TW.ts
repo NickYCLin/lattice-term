@@ -658,7 +658,7 @@ export const zhTW = {
   "connect.keyPath.choose": "選擇檔案",
   "connect.keyPath.chooseFailed.title": "無法選擇私鑰",
   "connect.keyPath.chooseFailed": "無法開啟檔案選擇視窗：{detail}",
-  "connect.keyPath.placeholder": "例如 C:\Users\you\.ssh\id_ed25519",
+  "connect.keyPath.placeholder": "例如 /home/you/.ssh/id_ed25519 或 C:\\Users\\you\\.ssh\\id_ed25519",
   "connect.keyPath.hint": "金鑰只在這台電腦上讀取與簽名，內容不會傳出去。",
   "connect.passphrase": "金鑰密語（沒有就留空）",
   "connect.passphrase.hint": "只用於這次解鎖金鑰，不會儲存。",

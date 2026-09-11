@@ -676,7 +676,7 @@ export const en: Messages = {
   "connect.keyPath.choose": "Choose file",
   "connect.keyPath.chooseFailed.title": "Could not choose a private key",
   "connect.keyPath.chooseFailed": "Could not open the file picker: {detail}",
-  "connect.keyPath.placeholder": "e.g. C:\Users\you\.ssh\id_ed25519",
+  "connect.keyPath.placeholder": "e.g. /home/you/.ssh/id_ed25519 or C:\\Users\\you\\.ssh\\id_ed25519",
   "connect.keyPath.hint": "The key is read and used for signing on this machine only; its contents never leave it.",
   "connect.passphrase": "Key passphrase (leave empty if none)",
   "connect.passphrase.hint": "Used once to unlock the key; never stored.",
