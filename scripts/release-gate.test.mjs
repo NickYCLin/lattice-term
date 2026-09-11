@@ -30,14 +30,14 @@ function fixture() {
       getContent: vi.fn().mockResolvedValue({ data: { content: Buffer.from('{".":"2.0.1"}').toString("base64") } }),
     },
     issues: { listForRepo: vi.fn() },
-    pulls: { get: vi.fn().mockResolvedValue({ data: pr() }), merge: vi.fn().mockResolvedValue({ data: { merged: true, sha: merged } }) },
+    pulls: { get: vi.fn().mockResolvedValue({ data: pr() }), merge: vi.fn().mockResolvedValue({ data: { merged: true, sha: merged } }), updateBranch: vi.fn() },
     git: { getRef: vi.fn(async ({ ref }) => ({ data: { object: { sha: ref === "heads/main" ? source : head } } })), deleteRef: vi.fn() },
   };
   const github = {
     rest, graphql: vi.fn(),
     paginate: vi.fn(async (method) => method === rest.repos.listReleases ? [release("v2.0.0")] : [{ number: 10, pull_request: {} }]),
   };
-  return { github, core, outputs, context, metadata, commits: [{ subject: "fix(ui): 修正提示" }], now };
+  return { github, core, outputs, context, metadata, commits: [{ subject: "fix(ui): 修正提示" }], now, wait: vi.fn(async () => {}) };
 }
 
 describe("published release metadata", () => {
@@ -92,9 +92,37 @@ describe("release candidate selection", () => {
     const f = fixture(); f.github.rest.git.getRef.mockResolvedValue({ data: { object: { sha: changed } } });
     await prepareRelease(f); expect(f.outputs.ready).toBe("false");
   });
-  it.each(["behind", "diverged"])("rejects a %s candidate", async (status) => {
+  it.each(["behind", "diverged"])("rejects a %s candidate that cannot be brought up to date", async (status) => {
     const f = fixture(); f.github.rest.repos.compareCommitsWithBasehead.mockResolvedValue({ data: { status } });
-    await expect(prepareRelease(f)).rejects.toThrow(/snapshot/);
+    f.github.rest.pulls.updateBranch.mockRejectedValue(new Error("merge conflict"));
+    await expect(prepareRelease(f)).rejects.toThrow(/conflict/);
+    expect(f.outputs.ready).toBe("false");
+  });
+  it("brings a Release PR left behind by a docs/test commit up to main, then selects the new head", async () => {
+    const f = fixture();
+    f.github.rest.repos.compareCommitsWithBasehead
+      .mockResolvedValueOnce({ data: { status: "diverged" } })
+      .mockResolvedValue({ data: { status: "ahead" } });
+    f.github.rest.pulls.get
+      .mockResolvedValueOnce({ data: pr() }) // listing the open release PR
+      .mockResolvedValueOnce({ data: pr() }) // update still in progress
+      .mockResolvedValue({ data: pr({ head: { ...pr().head, sha: changed } }) });
+    await prepareRelease(f);
+    expect(f.github.rest.pulls.updateBranch).toHaveBeenCalledWith({ owner: "example", repo: "app", pull_number: 10, expected_head_sha: head });
+    expect(f.outputs).toMatchObject({ ready: "true", candidate_sha: changed, source_sha: source });
+  });
+  it("does not select a PR that a person took over while it was being updated", async () => {
+    const f = fixture();
+    f.github.rest.repos.compareCommitsWithBasehead.mockResolvedValueOnce({ data: { status: "behind" } });
+    f.github.rest.pulls.get
+      .mockResolvedValueOnce({ data: pr() })
+      .mockResolvedValue({ data: pr({ user: { type: "User" }, head: { ...pr().head, sha: changed } }) });
+    await expect(prepareRelease(f)).rejects.toThrow(/changed while/);
+    expect(f.outputs.ready).toBe("false");
+  });
+  it("does not touch an up-to-date Release PR", async () => {
+    const f = fixture(); await prepareRelease(f);
+    expect(f.github.rest.pulls.updateBranch).not.toHaveBeenCalled();
   });
   it("does not promote arbitrary human-created or fork PRs", async () => {
     for (const unsafe of [pr({ user: { type: "User" } }), pr({ head: { ...pr().head, repo: { full_name: "other/fork" } } })]) {

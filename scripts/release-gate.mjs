@@ -78,7 +78,32 @@ export async function inspectRelease({ github, context, version, sourceSha }) {
   return metadata;
 }
 
-export async function prepareRelease({ github, context, core, metadata, commits, forced = false, now = Date.now() }) {
+/**
+ * Release Please only rewrites its PR when the release notes change, so a
+ * later docs/test/chore commit on main leaves the PR based on an older main.
+ * That PR can never pass the snapshot check below, and the scheduled release
+ * would stall until some unrelated fix landed. Merge the exact main snapshot
+ * into the bot's PR branch (GitHub's "update branch", guarded by the head we
+ * read) and return the new head; conflicts or races fail instead of guessing.
+ */
+async function catchUpReleasePr(github, context, core, pr, sourceSha, wait) {
+  const { data } = await github.rest.repos.compareCommitsWithBasehead({
+    ...context.repo, basehead: `${sourceSha}...${pr.head.sha}`,
+  });
+  if (["ahead", "identical"].includes(data.status)) return pr.head.sha;
+  core.info(`Release PR #${pr.number} predates main ${sourceSha}; bringing it up to date.`);
+  await github.rest.pulls.updateBranch({ ...context.repo, pull_number: pr.number, expected_head_sha: pr.head.sha });
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await wait(2000);
+    const { data: fresh } = await github.rest.pulls.get({ ...context.repo, pull_number: pr.number });
+    if (fresh.head.sha === pr.head.sha) continue;
+    if (!isReleasePr(fresh, context) || fresh.state !== "open") throw new Error("Release PR changed while it was being updated.");
+    return fresh.head.sha;
+  }
+  throw new Error("Release PR did not pick up the main snapshot in time.");
+}
+
+export async function prepareRelease({ github, context, core, metadata, commits, forced = false, now = Date.now(), wait = (ms) => new Promise((done) => setTimeout(done, ms)) }) {
   core.setOutput("ready", "false");
   if (!canPublishFrom(context.eventName)) {
     core.info("Push: update the draft PR only; no release approval is needed at the scheduled check.");
@@ -103,9 +128,10 @@ export async function prepareRelease({ github, context, core, metadata, commits,
   const pr = pulls[0];
   const { data: main } = await github.rest.git.getRef({ ...context.repo, ref: "heads/main" });
   if (main.object.sha !== metadata.sourceSha) { core.info("Main advanced; retry at the next scheduled check."); return; }
-  await assertAncestor(github, context, metadata.sourceSha, pr.head.sha);
+  const candidateSha = await catchUpReleasePr(github, context, core, pr, metadata.sourceSha, wait);
+  await assertAncestor(github, context, metadata.sourceSha, candidateSha);
   for (const [key, value] of Object.entries({
-    mode: "new", candidate_sha: pr.head.sha, source_sha: metadata.sourceSha, pr_number: pr.number,
+    mode: "new", candidate_sha: candidateSha, source_sha: metadata.sourceSha, pr_number: pr.number,
   })) core.setOutput(key, value);
   core.setOutput("ready", "true");
 }
