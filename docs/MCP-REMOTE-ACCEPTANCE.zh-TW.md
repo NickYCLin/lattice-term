@@ -155,3 +155,24 @@ Issue 不限定兩種供應商，因此另以 `4be3aca` 主程式和 Codex 0.153
 通過的是協作、來源檢閱、獨立編譯器檢查與取消／撤權邊界，不是「兩個模型都成功執行編譯器」。新的 MCP 讀回證據另外保存 checker 失敗回報：前端為空，Rust 為 `[1]`，不因後續畫面更新而清除；來源明示為未受信任的 CLI 文字，原因仍不明。驗收由 Node MCP client 派工給真實 AI worker，不是模型自主呼叫 MCP；輸出驗證使用 raw MCP 分頁及終端 renderer，也不是預設去除控制碼模式的驗收。
 
 最終 head 的 CI 與 Windows 下載產物仍須核對後才能合併並關閉 issue。macOS 桌面、外部主機與 D 遠端畫面不在已驗證範圍；D 並非原提案 A／B 的前置要求。
+
+## 2026-09-11 Linux 發版前驗收（`47231d0`）
+
+合併 #201、#202（Tauri 外掛、vitest 5、russh 0.63.2 升級）後，在 Linux x86_64（Ubuntu，核心 7.0）用 debug 主程式重跑 #180 的 A／B／C。全部使用新建的暫存資料目錄、自有 daemon 與 fixture，沒有碰使用者平常的資料目錄、工作階段或正式主機；驗收腳本放在被 git 忽略的 `src-tauri/target/`，沒有提交。
+
+自動測試：`npm run check`（115 檔 772 測試、production build、版本一致）、`cargo fmt --check`、`cargo clippy --all-targets -D warnings`、`cargo test`（主程式 572 通過、29 ignored），以及 CI 用的 `openssh_ -- --ignored`（21 通過，含 3 項 MCP 桌面 registry 經真實 OpenSSH `sftp-server` 的傳檔）。
+
+| 階段 | 方式 | 結果 |
+| --- | --- | --- |
+| A | Node JSON-RPC client 經 stdio 連 `lattice-term mcp`；daemon 裡三個 `/bin/sh` PTY | 20／20：協定 2 與內容授權能力、15 個工具、分享前看不到、第一次分享只有 metadata 且不能讀內容、摘要不含執行檔／參數／帳號目錄／PID／原生 ID、未分享的工作階段與輸出不外露、預設分頁停在 `ESC[` 之前（F2）、`maxBytes: 1` 讀「中」與 🙂 各前進 3／4 bytes（F3）、超過 256 KiB 保留範圍回 `truncated`、分頁讀到結尾、等待中的其他呼叫 2 ms 回應、撤銷分享 0.3 秒內以 `revoked` 結束等待（F1）、程序結束回 `closed`、daemon 停止後回報未執行且 adapter 不會自己拉起 daemon |
+| B | 兩個真實 Codex 0.153.4 背景工作階段（同一登入帳號、各自的 fixture 目錄），只經 MCP 派工 | 21／21：兩邊 bootstrap 回合都以官方 notify 回 `done/integration`；`now` 各派一次、同 requestId 重送回 `duplicate`、同 id 換內容被拒；忙碌時 `queue` 排隊、`cancel scope=queue` 丟掉且那段文字從未送進 PTY；兩邊都讀回正確 nonce 與計算值（TypeScript 95、Rust 27）；獨立 tsc／rustc 前後檢查一致、fixture 未變；使用者打了草稿沒按 Enter 時 `now` 被拒、`queue` 等待；`cancel scope=session` 只結束前端那個 CLI（PID 確認退出）、Rust 仍在跑且保持分享；撤權後看不到也不能派工；桌面操作紀錄有這個 client 的寫入 |
+| C | Xvfb 裡的桌面程式用拋棄式金鑰連本機臨時 `sshd`（127.0.0.1:2223，OpenSSH），在設定頁授權 SSH（主機資訊＋固定指令）與 SFTP（列目錄、上傳、下載，限定遠端／本機根目錄） | 21／21 加撤權與關桌面：能力回報 `desktopSshSftp` 可用且 2 個授權；清單只有這兩個、不含主機／埠／帳號／指令／實際路徑；主機資訊回數值；`ssh_exec_job` 先回 operation、重送不重跑、stdout／stderr／exit 3 分開保存；未核准的 plan 與錯用後端被拒；`..`、連結、絕對路徑、`sub/../..` 全被拒；下載與上傳落在核准目錄、既有檔不覆寫（`file_conflict`）、失敗傳輸不留殘檔、本機根目錄外的路徑被拒；在介面撤回 SSH 授權後主機資訊與指令立即被拒而 SFTP 仍可用；只關桌面程式、daemon 仍在時，授權數歸零且 SFTP 被拒 |
+
+限制與觀察：
+
+- B 的 Codex 用 `--sandbox danger-full-access`。這台主機不允許 Codex 的 bwrap 建 user namespace，`read-only` 沙箱下 checker 與 `cat` 都回「Operation not permitted」；第一次跑兩個 worker 都如實回報失敗，LatticeTerm 的派工、官方完成與讀回本身正常。fixture 完整性由驗收程式事後核對。
+- 撤權後 PTY 裡已經打進去的字收不回，這次沒有測「已接受但結果未知」的情境，只靠既有單元測試。
+- C 是本機 loopback，不是外部或正式主機；桌面在 Xvfb 用 debug 主程式與 Vite dev server 執行，不是安裝版。
+- 在 dev 模式連上 SSH 時，右側檔案面板出現一次「A directory listing is already running for this session」。dev 版 React StrictMode 會把 effect 跑兩次，production build 是否也會出現沒有驗證。
+- 金鑰路徑欄位的範例顯示成 `C:Usersyou.sshid_ed25519`，是語系檔反斜線沒有跳脫，修在 #203。
+- macOS 桌面、Windows 安裝版、D 遠端畫面仍不在這次範圍。
