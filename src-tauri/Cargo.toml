@@ -26,7 +26,7 @@ serde_json = "1"
 toml = "1.1"
 # `ring` instead of the default aws-lc-rs backend: aws-lc-sys needs NASM and a
 # C toolchain on Windows, and complicates Android/iOS cross-compilation.
-russh = { version = "0.63.1", default-features = false, features = ["ring", "flate2", "rsa"] }
+russh = { version = "0.63.2", default-features = false, features = ["ring", "flate2", "rsa"] }
 # `reqwest` is pulled in by Tauri without selecting a process-wide provider.
 # Install the same `ring` backend before any Tauri HTTP client is constructed.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
