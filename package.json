@@ -1,7 +1,7 @@
 {
   "name": "lattice-term",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "description": "A secure, cross-platform workspace for local AI CLIs, SSH, SFTP, RDP, and remote desktop access.",
   "license": "MPL-2.0",
