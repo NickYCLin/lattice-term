@@ -886,6 +886,26 @@ mod tests {
         DiskHistory::new((1..=next).map(entry).collect(), next, 0)
     }
 
+    /// Reopen a store this test just released. Another test may be forking
+    /// a child at that moment: until the child execs it still holds the
+    /// previous writer's lock descriptor, so the lock can look taken for a
+    /// short while after the writer is gone. Production reports that as
+    /// Busy on purpose (a second writer never waits); a test that means
+    /// "open it again after closing" retries only that transient case.
+    fn reopen(path: &Path) -> History {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let history = History::open(path);
+            if history.snapshot().persistence_reason != Some(Reason::Busy)
+                || std::time::Instant::now() >= deadline
+            {
+                return history;
+            }
+            drop(history);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn wait(history: &History) -> Status {
         history
             .persistence
@@ -904,7 +924,7 @@ mod tests {
         }
         assert_eq!(wait(&history), (State::Ready, Some(259), None));
         drop(history);
-        let mut reopened = History::open(&path);
+        let mut reopened = reopen(&path);
         let snapshot = reopened.snapshot();
         assert_eq!(snapshot.persistence, State::Ready);
         assert_eq!(snapshot.entries.len(), HISTORY_LIMIT);
@@ -943,7 +963,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("the audit worker must complete before reopening its store");
         relay.join().unwrap();
-        let reopened = History::open(&path);
+        let reopened = reopen(&path);
         assert_eq!(reopened.snapshot().persistence, State::Ready);
         assert_eq!(reopened.snapshot().entries.len(), 1);
         assert_eq!(reopened.snapshot().entries[0].outcome, Outcome::Failed);
@@ -1034,7 +1054,7 @@ mod tests {
             vec![b' '; MAX_BYTES as usize + 1],
         ] {
             fs::write(&file, &bytes).unwrap();
-            let mut history = History::open(&path);
+            let mut history = reopen(&path);
             assert_eq!(
                 history.snapshot().persistence_reason,
                 Some(Reason::InvalidData)
@@ -1092,7 +1112,7 @@ mod tests {
         );
         assert_eq!(wait(&history).0, State::Ready);
         drop(history);
-        let reopened = History::open(&path);
+        let reopened = reopen(&path);
         let entry = &reopened.snapshot().entries[0];
         assert_eq!(entry.target_id.as_deref(), Some("target-a123"));
         assert!(entry.session_id.is_none());
@@ -1187,7 +1207,7 @@ mod tests {
         assert_eq!(fs::read(&outside).unwrap(), original);
         drop(store);
         assert_eq!(
-            History::open(&path).snapshot().persistence_reason,
+            reopen(&path).snapshot().persistence_reason,
             Some(Reason::UnsafePath)
         );
     }
