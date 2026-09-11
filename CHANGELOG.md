@@ -4,6 +4,38 @@
 
 ---
 
+## [2.1.0](https://github.com/NickYCLin/lattice-term/compare/v2.0.0...v2.1.0) (2026-09-11)
+
+
+### 🚀 新增功能
+
+* **files:** 支援遠端純文字線上編輯 ([#187](https://github.com/NickYCLin/lattice-term/issues/187)) ([4b7f7e8](https://github.com/NickYCLin/lattice-term/commit/4b7f7e829523bcc1b9bb53e6db158a8b368a18ce)), closes [#186](https://github.com/NickYCLin/lattice-term/issues/186)
+* **MCP:** 加入唯讀 MCP Server，外部 AI 看得到分享的背景工作階段 ([#181](https://github.com/NickYCLin/lattice-term/issues/181)) ([d06f718](https://github.com/NickYCLin/lattice-term/commit/d06f718c1faea19d269509bb6a56276ffb6ec8ea)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 加入操作紀錄並修正升級連線 ([e241587](https://github.com/NickYCLin/lattice-term/commit/e241587d587fbc4ed101f595177e0b0397e7c9cf)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **MCP:** 外部 AI 可對授權的背景工作階段送指示、取消與啟動 ([#182](https://github.com/NickYCLin/lattice-term/issues/182)) ([46c39d1](https://github.com/NickYCLin/lattice-term/commit/46c39d10c2ef868e6e202ede3ff5af3c00677cf1)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 安全保存並還原操作紀錄 ([aeb58d3](https://github.com/NickYCLin/lattice-term/commit/aeb58d3c9b2fe058a7b58536bffa83790c42a4d1)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 補齊工作階段與遠端操作授權 ([#185](https://github.com/NickYCLin/lattice-term/issues/185)) ([14d263f](https://github.com/NickYCLin/lattice-term/commit/14d263fe05c73f40672702b893ea785bcd290ddf)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 開放明確授權的 SSH 與 SFTP 操作 ([00f07ca](https://github.com/NickYCLin/lattice-term/commit/00f07cabdcf617da20b243195fc85b650e41d1f3)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+
+
+### 🛠️ 問題修正
+
+* **agents:** 避免窄視窗的狀態蓋住權限選項 ([41ed0bf](https://github.com/NickYCLin/lattice-term/commit/41ed0bffc468dc463539c974112db4b8a26e8f84)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **agent:** 不把終端模式回報當成人工輸入 ([58c14fb](https://github.com/NickYCLin/lattice-term/commit/58c14fbca1f636483dd08df1f94cd571da2e73ec)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **agent:** 保留終端啟動時的程序環境 ([096a606](https://github.com/NickYCLin/lattice-term/commit/096a6067b3e9bd1b2a21f16bfcb257eb2fc24640)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **agent:** 續接 Codex 時沿用選定的專案目錄 ([0bbd8dd](https://github.com/NickYCLin/lattice-term/commit/0bbd8dd5f6bc841da18881e009377a66de304664))
+* **agent:** 讓 Windows Codex 正確送出 MCP 指示 ([4be3aca](https://github.com/NickYCLin/lattice-term/commit/4be3aca508d03498945dabcc2fd41ab7fb8b6dd6)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **daemon:** 避免取消等待時切斷新管道連線 ([7d10c9d](https://github.com/NickYCLin/lattice-term/commit/7d10c9d1eef13fbeb2024782bbc8590b262e1d05)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **ios:** 改善手機終端機與主要頁面操作 ([b24dce1](https://github.com/NickYCLin/lattice-term/commit/b24dce1de2eeba864a358b919d4c218a649c8251))
+* **mcp:** 修正 Windows 取消誤報並加入實機驗收 ([6d957a4](https://github.com/NickYCLin/lattice-term/commit/6d957a4ad950c7c4ac2868ada98427c6d18fb0ca)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 分開工作階段狀態與內容的授權 ([b89c44a](https://github.com/NickYCLin/lattice-term/commit/b89c44a6020ea9377de0629b0be43b02e6a5297f)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 核對 Codex 設定並修正積壓輸入 ([41f0cc8](https://github.com/NickYCLin/lattice-term/commit/41f0cc87ba6fabaf0f27678328b9911c044ded3d)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **MCP:** 補齊撤權與並行派送保護 ([#183](https://github.com/NickYCLin/lattice-term/issues/183)) ([d7dc826](https://github.com/NickYCLin/lattice-term/commit/d7dc8268bd39a8ba098ba9d56af895661332d2c7)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 限定 Windows Job 的提早釋放 ([2b0660e](https://github.com/NickYCLin/lattice-term/commit/2b0660ea59aedc4320891ac92531300c5e53c5ab)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **ui:** 避免側欄蓋住導覽提示 ([557ccae](https://github.com/NickYCLin/lattice-term/commit/557ccae026b73ccc58fd4338d7a4d20a4413476a))
+* **連線:** 修正 SSH 金鑰路徑提示的反斜線被吃掉 ([7766ddf](https://github.com/NickYCLin/lattice-term/commit/7766ddf8596f71ed351f50123b467205bbadf1f9))
+* **連線:** 支援選取 SSH 私鑰檔案 ([#199](https://github.com/NickYCLin/lattice-term/issues/199)) ([51029b5](https://github.com/NickYCLin/lattice-term/commit/51029b5a398e410ee9ef9481399174f89abb997e)), closes [#198](https://github.com/NickYCLin/lattice-term/issues/198)
+
 ## [2.0.0](https://github.com/NickYCLin/lattice-term/compare/v1.3.0...v2.0.0) (2026-09-07)
 
 
