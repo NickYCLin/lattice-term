@@ -110,7 +110,7 @@ export function pairPrompt(kind) {
   if (!["frontend", "rust"].includes(kind)) fail("unknown-compiler-worker");
   const file = kind === "frontend" ? "review.ts" : "review.rs";
   const expression = kind === "frontend" ? "score(sample)" : "score(&SAMPLE)";
-  return `In this new read-only fixture, run node checker.mjs once as the only compiler command. Read-only file inspection of this fixture is allowed; do not execute the source. The checker captures bounded output and does not execute compiled code or write files. Do not install packages, use network tools, read other directories, modify files, or start background work. Then inspect ${file} and calculate ${expression}. Return one plain line LATTICE_RESULT <nonce> <integer>, replacing both placeholders using the source. Do not repeat this request. If the checker is denied or fails, state that honestly; do not request broader permissions.`;
+  return `In this new read-only fixture, run node checker.mjs once as the only compiler command. Read-only file inspection of this fixture is allowed; do not execute the source. The checker captures bounded output and does not execute compiled code or write files. Do not install packages, use network tools, read other directories, modify files, or start background work. Then inspect ${file} and calculate ${expression}. Return one plain line LATTICE_RESULT <nonce> <integer>, replacing both placeholders using the source. Do not repeat this request. If the checker is denied or fails, mention that briefly, but continue the permitted source inspection and still include the LATTICE_RESULT line. Do not request broader permissions.`;
 }
 
 export function pairCodexArguments(directory, mcpArguments) {
@@ -162,7 +162,7 @@ export function verifiedResult(text, nonce, expected) {
 }
 
 export function reportedCheckerFailures(text) {
-  const codes = [...text.matchAll(/checker\s+failed\s+with\s+exit\s+code\s+(-?\d{1,10})(?=\s|$|[;.,:](?=\s|$))/gi)]
+  const codes = [...text.matchAll(/checker\s+failed(?:\s+with)?\s*[:;,-]?\s*exit\s+code\s+(-?\d{1,10})(?=\s|$|[;.,:](?=\s|$))/gi)]
     .map((match) => Number(match[1])).filter((code) => code >= -1 && code <= 255);
   return [...new Set(codes)].slice(0, 8);
 }
