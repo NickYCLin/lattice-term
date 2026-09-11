@@ -36,7 +36,8 @@ test("correct source review does not erase a reported compiler failure", async (
 });
 
 test("reported compiler failure metadata is bounded and excludes arbitrary error text", () => {
-  assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1. private-secret\nChecker failed with exit code 1; private-path"), [1]);
+  assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1. private-secret\nChecker failed: exit code 1; private-path"), [1]);
+  assert.deepEqual(reportedCheckerFailures("checker failed, exit code 2\nchecker failed; exit code 3"), [2, 3]);
   assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1.5\nchecker failed with exit code 1wrong"), []);
   assert.deepEqual(reportedCheckerFailures("checker failed with exit code 1234567890.\nchecker failed with exit code -999."), []);
   assert.equal(reportedCheckerFailures(Array.from({ length: 20 }, (_, i) => `checker failed with exit code ${i}.`).join("\n")).length, 8);
@@ -159,6 +160,7 @@ test("pair compiler plans never install, execute artifacts, or write compiler ou
     assert.match(prompt, /run node checker\.mjs once as the only compiler command/);
     assert.match(prompt, /Read-only file inspection of this fixture is allowed; do not execute the source/);
     assert.match(prompt, /does not execute compiled code or write files/);
+    assert.match(prompt, /checker is denied or fails.*continue the permitted source inspection.*still include the LATTICE_RESULT line/);
     assert.equal(verifiedResult(prompt, "88888888-2222-4333-8444-555555555555", 51), false);
   }
 });
