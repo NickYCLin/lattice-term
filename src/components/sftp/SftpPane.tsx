@@ -12,6 +12,7 @@ import type {
 } from "../../app/useSftpSessions";
 import { useI18n } from "../../i18n/context";
 import { formatBytes } from "../../domain/metrics";
+import { createSerialQueue } from "../../app/serialQueue";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
 import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
@@ -65,22 +66,31 @@ export function SftpPane({
   const [dragging, setDragging] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const refreshedPathUploads = useRef(new Set<string>());
+  // The backend runs one listing per session and refuses a second, so every
+  // listing from this pane waits its turn; only the newest open() may update
+  // the view, so a slow earlier folder never replaces the one asked for last.
+  const listQueue = useRef(createSerialQueue());
+  const latestOpen = useRef(0);
   const list = sftp.list;
   const sessionTransfers = Object.values(sftp.transfers)
     .filter((transfer) => transfer.sessionId === session.sessionId)
     .sort((a, b) => a.transferId.localeCompare(b.transferId, undefined, { numeric: true }));
 
   async function open(path: string) {
+    const ticket = ++latestOpen.current;
+    const current = () => mounted.current && ticket === latestOpen.current;
     setLoading(true);
     setProblem(null);
     try {
-      const next = await list(session.sessionId, path);
+      const next = await listQueue.current(() => list(session.sessionId, path));
+      if (!current()) return;
       setDirectory(next);
       setPathInput(next.path);
     } catch (reason) {
+      if (!current()) return;
       setProblem(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }
 
@@ -106,7 +116,7 @@ export function SftpPane({
     for (const transfer of arrivals) {
       refreshedPathUploads.current.add(transfer.transferId);
     }
-    void list(session.sessionId, currentPath)
+    void listQueue.current(() => list(session.sessionId, currentPath))
       .then((next) => {
         setDirectory((current) =>
           current?.path === currentPath ? next : current,
