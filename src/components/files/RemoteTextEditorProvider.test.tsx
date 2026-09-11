@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
@@ -170,6 +170,30 @@ describe("remote editor integration", () => {
     ));
   }
   const editButtons = () => nodes(host).filter((node) => node.attributes["aria-label"] === "Edit text");
+
+  it("never asks the SFTP backend for two listings at once, even when effects run twice", async () => {
+    // The backend allows one listing per session and rejects a second.
+    let running = 0;
+    let peak = 0;
+    sftp.list = vi.fn(async () => {
+      if (running > 0) throw new Error("A directory listing is already running for this session.");
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((done) => setTimeout(done, 5));
+      running -= 1;
+      return { path: "/", entries };
+    }) as SftpApi["list"];
+    await act(async () => root.render(
+      <StrictMode><I18nProvider locale="en"><RemoteTextEditorProvider>
+        <SftpPane session={sftpSession} sftp={sftp} active={false} />
+      </RemoteTextEditorProvider></I18nProvider></StrictMode>,
+    ));
+    await act(async () => { await new Promise((done) => setTimeout(done, 30)); });
+    expect(vi.mocked(sftp.list).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(peak).toBe(1);
+    expect(host.textContent).not.toContain("already running");
+    expect(host.textContent).toContain("file.txt");
+  });
 
   it("keeps a single editor and its in-memory draft when the owning pane disconnects", async () => {
     await render("remote");
