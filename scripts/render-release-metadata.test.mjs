@@ -116,6 +116,24 @@ describe("buildReleaseMetadata", () => {
     );
   });
 
+  it("大小寫不同的同一分類只算一次", () => {
+    const changelog = `## [2.1.0] (2026-09-11)
+
+### 🚀 新增功能
+* **files:** 支援遠端純文字線上編輯
+* **MCP:** 加入唯讀 MCP Server
+* **mcp:** 加入操作紀錄
+* **MCP:** 外部 AI 可送指示
+
+### 🛠️ 問題修正
+* **agents:** 避免窄視窗的狀態蓋住權限選項
+`;
+
+    expect(buildReleaseMetadata(changelog, "v2.1.0").name).toBe(
+      "LatticeTerm v2.1.0 - files、MCP與 agents",
+    );
+  });
+
   it("多個項目只有同一分類時標題只保留分類名稱", () => {
     const changelog = `## [2.0.2] (2026-08-22)
 
