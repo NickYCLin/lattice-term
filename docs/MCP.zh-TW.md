@@ -236,6 +236,8 @@ SFTP 逐層檢查相對路徑與連結，但遠端 `realpath`／`open` 不是同
 前兩版 PR 曾用 Claude Code 對自訂 `cat` 送出 `now`；目前已收緊為需要官方就緒回報，因此那份紀錄不能當作新版 B 派送規則的真實 CLI 驗收。後續 Windows 已用兩個真實 Codex 工作階段通過派工、各自答案及官方完成、重送去重與取消隔離；詳細來源及限制見 [真實 CLI 驗收歷程](MCP-REMOTE-ACCEPTANCE.zh-TW.md#真實-cli-驗收歷程)。macOS 桌面與安裝版仍未驗證。
 
 2026-09-12（Linux debug 執行檔，main `9bf9a7e`）新增功能的實測：
+- 遠端畫面擷取（同日，實機）：用專案自己的 `lattice-agent` 在另一個 X display（藍底桌面＋時鐘）開畫面分享，LatticeTerm 直連配對後在設定頁只勾「擷取目前畫面」（其他五項在畫面工作階段一律停用），再用 `lattice-term mcp` 呼叫 `capture_remote_screen`：拿回 1152×720、27 KB 的 JPEG，內容就是那台桌面，metadata 含 frameId 與擷取時間；連續呼叫第一次被兩秒節流擋下（`limit_reached`）；撤回授權後連線立刻從清單消失、擷取拿不到目標；操作紀錄留下 `remoteScreen` 的成功與被拒各一筆與 `grant` 一筆。RDP 與 VNC 走同一條保留路徑，但沒有可連的 RDP／VNC 伺服器可實測。
+
 
 - 中斷本輪：桌面端送出一個長問題後，Codex 的輸出從 24664 位元組長到 60811，此時以 MCP 下 `scope: "turn"`，之後 12 秒都停在 60811；工作階段仍在清單裡也還能回答下一個問題。Codex 的 `notify` hook 在回合中途就回報 `done`，因此中斷條件不看 `working` 狀態。
 - 合併後回歸（真實 Claude Code 當 client）：`get_capabilities` 回 `access: control`、`turnInterrupt` 列出 codex／claude、`errorCodes` 九種；`list_agent_sessions` 的 `access`／`readOutput` 正確；`read_agent_output` 分頁正常；`scope: "turn"` 成功後立刻再下一次回 `not_ready`（五秒冷卻）；操作紀錄有折疊過的 `read`（3 次）與 `interrupt` 的成功與被拒各一筆，`persistence: ready`。
