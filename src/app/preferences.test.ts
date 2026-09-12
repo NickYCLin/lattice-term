@@ -52,4 +52,16 @@ describe("sanitizePreferences", () => {
       defaultPreferences.agentCompletionSound,
     );
   });
+  it.each([["clear", "glass"], ["gentle", "bloom"], ["double", "pulse"], ["wood", "marimba"], ["off", "off"]])("migrates legacy sound %s without unmuting it", (old, current) => {
+    const result = sanitizePreferences({ agentCompletionSound: old as never });
+    expect(result.agentCompletionSound).toBe(current);
+    expect(result.chatCompletionSound).toBe(current);
+  });
+  it("preserves separate event choices and bounds volume", () => {
+    expect(sanitizePreferences({ agentCompletionSound: "off", chatCompletionSound: "arcade", notificationVolume: 0 })).toMatchObject({ agentCompletionSound: "off", chatCompletionSound: "arcade", notificationVolume: 0 });
+    for (const [input, expected] of [[NaN, 60], [Infinity, 60], [-1, 0], [101, 100], [25.6, 26]]) {
+      expect(sanitizePreferences({ notificationVolume: input }).notificationVolume).toBe(expected);
+    }
+  });
+
 });

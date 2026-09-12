@@ -35,11 +35,7 @@ import {
   clearSensitiveClipboard,
   type SensitiveClipboardClearOutcome,
 } from "../app/sensitiveClipboard";
-import {
-  notificationSoundChoices,
-  playNotificationSound,
-  type NotificationSoundChoice,
-} from "../app/notificationSounds";
+import { NotificationSoundPanel } from "../components/settings/NotificationSoundPanel";
 import { moveRadioGroupFocus } from "../components/overlays/radioNavigation";
 
 interface Choice<T> {
@@ -57,14 +53,6 @@ const motionChoices: Choice<MotionChoice>[] = [
   { value: "system", labelKey: "settings.motion.system" },
   { value: "reduced", labelKey: "settings.motion.reduced" },
 ];
-
-const notificationSoundKeys: Record<NotificationSoundChoice, MessageKey> = {
-  off: "settings.notifications.sound.off",
-  clear: "settings.notifications.sound.clear",
-  gentle: "settings.notifications.sound.gentle",
-  double: "settings.notifications.sound.double",
-  wood: "settings.notifications.sound.wood",
-};
 
 const vaultAutoLockChoices: Choice<VaultAutoLockChoice>[] = [
   { value: "off", labelKey: "settings.security.autoLock.off" },
@@ -176,9 +164,6 @@ export function SettingsView({
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const [clipboardNotice, setClipboardNotice] =
     useState<MessageKey | null>(null);
-  const [notificationPreview, setNotificationPreview] = useState<
-    "idle" | "playing" | "unavailable"
-  >("idle");
   const [systemPrefersReducedMotion, setSystemPrefersReducedMotion] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -323,62 +308,7 @@ export function SettingsView({
             <p className="panel__hint">{t("settings.notificationsHint")}</p>
           </div>
         </header>
-        <div className="setting-list">
-          <SegmentedSetting
-            title={t("settings.notifications.agentSound")}
-            description={t("settings.notifications.agentSoundHint")}
-            choices={notificationSoundChoices.map((sound) => ({
-              value: sound,
-              label: t(notificationSoundKeys[sound]),
-            }))}
-            value={preferences.agentCompletionSound}
-            onChange={(agentCompletionSound) => {
-              onChange({ agentCompletionSound });
-              if (agentCompletionSound === "off") {
-                setNotificationPreview("idle");
-                return;
-              }
-              setNotificationPreview("playing");
-              void playNotificationSound(agentCompletionSound).then((result) => {
-                setNotificationPreview(
-                  result === "unavailable" ? "unavailable" : "idle",
-                );
-              });
-            }}
-          />
-          <div className="setting-notification-preview">
-            <button
-              type="button"
-              className="button button--ghost button--sm"
-              disabled={
-                preferences.agentCompletionSound === "off" ||
-                notificationPreview === "playing"
-              }
-              onClick={() => {
-                setNotificationPreview("playing");
-                void playNotificationSound(
-                  preferences.agentCompletionSound,
-                ).then((result) => {
-                  setNotificationPreview(
-                    result === "unavailable" ? "unavailable" : "idle",
-                  );
-                });
-              }}
-            >
-              <PlayIcon size={13} />
-              {t(
-                notificationPreview === "playing"
-                  ? "settings.notifications.previewing"
-                  : "settings.notifications.preview",
-              )}
-            </button>
-            {notificationPreview === "unavailable" && (
-              <small className="is-danger" role="status">
-                {t("settings.notifications.previewUnavailable")}
-              </small>
-            )}
-          </div>
-        </div>
+        <NotificationSoundPanel preferences={preferences} onChange={onChange} />
       </section>
 
       <section className="panel glass glass--sheen">

@@ -1,21 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** Short, original cues for Agent completion notifications. */
+import catalog from "./notificationSoundCatalog.json";
 
-export type NotificationSoundChoice =
-  | "off"
-  | "clear"
-  | "gentle"
-  | "double"
-  | "wood";
-
+/** Original cue compositions shared with the native Windows PCM renderer. */
+export type NotificationSoundChoice = "off" | keyof typeof catalog;
 export const notificationSoundChoices: readonly NotificationSoundChoice[] = [
-  "off",
-  "clear",
-  "gentle",
-  "double",
-  "wood",
+  "off", ...Object.keys(catalog) as (keyof typeof catalog)[],
 ];
+export const notificationSoundGroups = [
+  { id: "soft", sounds: ["bloom", "drift", "moon"] },
+  { id: "bright", sounds: ["droplet", "glass", "spark"] },
+  { id: "natural", sounds: ["marimba", "pluck", "bamboo"] },
+  { id: "digital", sounds: ["orbit", "pulse", "arcade"] },
+] as const;
 
 interface NotificationTone {
   frequency: number;
@@ -24,40 +21,22 @@ interface NotificationTone {
   gain: number;
   type: OscillatorType;
 }
+export type NotificationPlaybackResult = "disabled" | "native" | "webAudio" | "unavailable";
 
-export type NotificationPlaybackResult =
-  | "disabled"
-  | "native"
-  | "webAudio"
-  | "unavailable";
-
-export function notificationToneSequence(
-  sound: NotificationSoundChoice,
-): readonly NotificationTone[] {
-  switch (sound) {
-    case "clear":
-      return [
-        { frequency: 880, delay: 0, duration: 0.18, gain: 0.1, type: "sine" },
-        { frequency: 1320, delay: 0.13, duration: 0.28, gain: 0.08, type: "sine" },
-      ];
-    case "gentle":
-      return [
-        { frequency: 659.25, delay: 0, duration: 0.34, gain: 0.075, type: "sine" },
-        { frequency: 783.99, delay: 0.08, duration: 0.42, gain: 0.05, type: "sine" },
-      ];
-    case "double":
-      return [
-        { frequency: 740, delay: 0, duration: 0.14, gain: 0.09, type: "triangle" },
-        { frequency: 988, delay: 0.2, duration: 0.18, gain: 0.09, type: "triangle" },
-      ];
-    case "wood":
-      return [
-        { frequency: 420, delay: 0, duration: 0.09, gain: 0.11, type: "square" },
-        { frequency: 315, delay: 0.1, duration: 0.11, gain: 0.065, type: "triangle" },
-      ];
-    default:
-      return [];
-  }
+export function normalizeNotificationSound(value: unknown): NotificationSoundChoice {
+  const legacy: Record<string, NotificationSoundChoice> = {
+    clear: "glass", gentle: "bloom", double: "pulse", wood: "marimba",
+  };
+  if (typeof value !== "string") return "bloom";
+  if (notificationSoundChoices.includes(value as NotificationSoundChoice)) return value as NotificationSoundChoice;
+  return Object.prototype.hasOwnProperty.call(legacy, value) ? legacy[value] : "bloom";
+}
+export function normalizeNotificationVolume(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.round(Math.min(100, Math.max(0, value))) : 60;
+}
+export function notificationToneSequence(sound: NotificationSoundChoice): readonly NotificationTone[] {
+  return sound === "off" ? [] : catalog[sound] as NotificationTone[];
 }
 
 let sharedContext: AudioContext | null = null;
@@ -74,8 +53,12 @@ function audioContext(): AudioContext | null {
     (window as typeof window & { webkitAudioContext?: typeof AudioContext })
       .webkitAudioContext;
   if (!AudioContextConstructor) return null;
-  sharedContext ??= new AudioContextConstructor();
-  return sharedContext;
+  try {
+    sharedContext ??= new AudioContextConstructor();
+    return sharedContext;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -97,6 +80,7 @@ export async function prepareNotificationAudio(): Promise<boolean> {
 /** Plays one short cue. Browser autoplay rejection is intentionally silent. */
 async function playWebAudioSound(
   tones: readonly NotificationTone[],
+  volume: number,
 ): Promise<boolean> {
   const context = audioContext();
   if (!context) return false;
@@ -112,13 +96,14 @@ async function playWebAudioSound(
       oscillator.type = tone.type;
       oscillator.frequency.setValueAtTime(tone.frequency, toneStart);
       gain.gain.setValueAtTime(0.0001, toneStart);
-      gain.gain.exponentialRampToValueAtTime(tone.gain, toneStart + 0.012);
+      gain.gain.exponentialRampToValueAtTime(tone.gain * volume / 100, toneStart + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, toneEnd);
       oscillator.connect(gain);
       gain.connect(context.destination);
       oscillator.start(toneStart);
       oscillator.stop(toneEnd + 0.01);
     }
+    await new Promise((resolve) => setTimeout(resolve, 1000 * (0.03 + Math.max(...tones.map((tone) => tone.delay + tone.duration)))));
     return true;
   } catch {
     return false;
@@ -127,6 +112,7 @@ async function playWebAudioSound(
 
 async function playNotificationSoundNow(
   sound: NotificationSoundChoice,
+  volume = 60,
 ): Promise<NotificationPlaybackResult> {
   const tones = notificationToneSequence(sound);
   if (tones.length === 0) return "disabled";
@@ -136,7 +122,7 @@ async function playNotificationSoundNow(
     "__TAURI_INTERNALS__" in window
   ) {
     try {
-      if (await invoke<boolean>("play_notification_sound", { sound })) {
+      if (await invoke<boolean>("play_notification_sound", { sound, volume })) {
         return "native";
       }
     } catch {
@@ -144,19 +130,21 @@ async function playNotificationSoundNow(
     }
   }
 
-  return (await playWebAudioSound(tones)) ? "webAudio" : "unavailable";
+  return (await playWebAudioSound(tones, volume)) ? "webAudio" : "unavailable";
 }
 
 export function playNotificationSound(
   sound: NotificationSoundChoice,
+  volume = 60,
 ): Promise<NotificationPlaybackResult> {
-  if (notificationToneSequence(sound).length === 0) {
+  volume = normalizeNotificationVolume(volume);
+  if (volume === 0 || notificationToneSequence(sound).length === 0) {
     return Promise.resolve("disabled");
   }
 
   const playback = notificationPlaybackQueue.then(
-    () => playNotificationSoundNow(sound),
-    () => playNotificationSoundNow(sound),
+    () => playNotificationSoundNow(sound, volume),
+    () => playNotificationSoundNow(sound, volume),
   );
   notificationPlaybackQueue = playback.then(
     () => undefined,

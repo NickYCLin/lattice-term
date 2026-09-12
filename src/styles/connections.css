@@ -757,22 +757,29 @@
   max-width: 32rem;
 }
 
-.setting-notification-preview {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: 0 0 var(--space-4);
-  flex-wrap: wrap;
-}
-
-.setting-notification-preview small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
-.setting-notification-preview small.is-danger {
-  color: var(--danger);
+/* A compact sound library remains usable on phones and desktop. */
+.notification-sounds { padding: var(--space-4); }
+.sound-events { display: grid; gap: var(--space-3); }
+.sound-event { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 1fr) auto; align-items: center; gap: var(--space-3); }
+.sound-event label, .sound-volume label { font-size: var(--text-sm); font-weight: 600; }
+.sound-event select { width: 100%; min-width: 0; padding: var(--space-2); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.sound-volume { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-5) 0 var(--space-2); }
+.sound-volume input { flex: 1; min-width: 3rem; accent-color: var(--accent); }
+.sound-volume output { min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: right; }
+.sound-library { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+.sound-group h3 { margin: 0 0 var(--space-2); color: var(--text-muted); font-size: var(--text-xs); }
+.sound-cue { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-3); text-align: start; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.sound-cue span { display: grid; gap: var(--space-1); }
+.sound-cue strong { font-size: var(--text-sm); }
+.sound-cue small { font-size: var(--text-xs); color: var(--text-muted); }
+.sound-cue:hover:not(:disabled), .sound-cue.is-playing { border-color: var(--accent); }
+.sound-cue:disabled { cursor: default; opacity: .6; }
+.sound-cue.is-playing { opacity: 1; }
+.sound-status { min-height: 1.5em; margin-top: var(--space-3); font-size: var(--text-xs); color: var(--text-muted); }
+.sound-status.is-danger { color: var(--danger); }
+@media (max-width: 520px) {
+  .sound-event { grid-template-columns: minmax(0, 1fr) auto; }
+  .sound-event label { grid-column: 1 / -1; }
 }
 
 .theme-grid {

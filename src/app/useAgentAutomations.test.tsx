@@ -204,7 +204,8 @@ describe("useAgentAutomations", () => {
       reactRoot.render(
         React.createElement(ChatRuntime, {
           locale: "en",
-          completionSound: "gentle",
+          completionSound: "bloom",
+          completionVolume: 35,
           onChange: (next: Api) => {
             api = next;
           },
@@ -253,7 +254,7 @@ describe("useAgentAutomations", () => {
       chatListener!({ payload: envelope });
     });
     expect(playSound).toHaveBeenCalledTimes(1);
-    expect(playSound).toHaveBeenLastCalledWith("gentle");
+    expect(playSound).toHaveBeenLastCalledWith("bloom", 35);
 
     await act(async () => {
       const general = runtime.chat.createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "", browserEnabled: true });

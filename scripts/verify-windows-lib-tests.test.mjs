@@ -33,7 +33,7 @@ describe("Windows account-free native regression CI", () => {
   });
 
   test("requires nonzero matching inventories and does not run ignored provider tests", () => {
-    for (const filter of ["codex_input_profile", "codex_mcp_submit", "startup_seed", "windows_pty_environment", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::", "remote_host::", "remote_commands::", "remote_chat_host::"]) {
+    for (const filter of ["codex_input_profile", "codex_mcp_submit", "startup_seed", "windows_pty_environment", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::", "remote_host::", "remote_commands::", "remote_chat_host::", "notification_sound::"]) {
       expect(script).toContain(`"${filter}"`);
     }
     expect(script).toContain('"--list", "--ignored"');

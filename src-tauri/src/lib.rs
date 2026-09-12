@@ -257,10 +257,12 @@ fn now_seconds() -> u64 {
 }
 
 #[tauri::command]
-async fn play_notification_sound(sound: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || notification_sound::play(&sound))
-        .await
-        .map_err(|error| format!("Notification sound did not complete: {error}"))?
+async fn play_notification_sound(sound: String, volume: Option<u8>) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        notification_sound::play(&sound, volume.unwrap_or(60))
+    })
+    .await
+    .map_err(|error| format!("Notification sound did not complete: {error}"))?
 }
 
 async fn credential_call<T, F>(operation: F) -> Result<T, String>
