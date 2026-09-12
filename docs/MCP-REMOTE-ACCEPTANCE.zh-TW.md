@@ -176,3 +176,34 @@ Issue 不限定兩種供應商，因此另以 `4be3aca` 主程式和 Codex 0.153
 - 在 dev 模式連上 SSH 時，右側檔案面板出現一次「A directory listing is already running for this session」。dev 版 React StrictMode 會把 effect 跑兩次，production build 是否也會出現沒有驗證。
 - 金鑰路徑欄位的範例顯示成 `C:Usersyou.sshid_ed25519`，是語系檔反斜線沒有跳脫，修在 #203。
 - macOS 桌面、Windows 安裝版、D 遠端畫面仍不在這次範圍。
+
+
+## 2026-09-12 Linux VNC 鍵鼠與人工接手驗收
+
+接續 #218 畫面擷取與 #219 鍵鼠實作，在獨立 Xvfb、loopback
+x11vnc、GTK 3 測試視窗及獨立 app data 下，以 production frontend
+嵌入 debug 主程式執行；不使用使用者帳號或正式主機。
+MCP client 為 Node.js 22.22.1 的 JSON-RPC stdio client，呼叫實際
+`lattice-term mcp`，經 daemon、desktop bridge 及 VNC sidecar 操作 GTK。
+
+- 操作驗收 **10／10 通過**：擷取的尺寸與 client 憑據、點擊接受、相同
+  request ID 去重、GTK 僅收到一次點擊、已消耗憑據拒絕、輸入框取得
+  焦點、可列印文字、GTK 完整文字、Control+a、替換結果。
+- 人工接手 **3／3 通過**：使用者在檢視器移動滑鼠後，500 ms 再查
+  MCP 清單已無控制目標；舊憑據被拒；被拒的點擊未到達 GTK。
+  清單已同步撤權時回 `needs_user_action`，要求重新連線／明確授權。
+- 最後重新擷取並檢視實際 MCP JPEG：文字為 `DONE`、按鈕為
+  `Clicks: 1`。接受訊息不代替這項畫面及 GTK 狀態驗證。
+
+測試等待 GTK 狀態變化最多五秒，不將 `submitted` 當作完成訊號。
+初次靜止畫面尚未產生授權後影格時會回 `not_ready`；暖機後才執行
+操作驗收，這不是首幀延遲的效能保證。較早共用顯示器遭其他程序
+介入的重跑結果不列入本次通過數；最後一輪的顯示器、資料目錄、
+執行檔及 GTK 視窗均獨立。
+
+本次另修正使用者接手後的授權清單同步：桌面先撤權，再非同步通知
+daemon，人工輸入不等待 IPC；不必等候原本十秒一次的同步週期。
+相關 Rust MCP 測試 88 項通過、4 項略過，debug build 與格式檢查通過。
+
+這是 Linux loopback 的 VNC 實機程序驗收，尚未驗證外部 VNC 主機、
+RDP／Lattice Remote 的實際鍵鼠、Windows／macOS 安裝版或跨主機 Fleet。

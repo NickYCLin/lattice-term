@@ -238,7 +238,7 @@ SFTP 逐層檢查相對路徑與連結，但遠端 `realpath`／`open` 不是同
 2026-09-12（Linux debug 執行檔）的實測；畫面擷取來自 `feat/mcp-screen-capture`，鍵鼠來自 `feat/mcp-screen-input`，單輪中斷與回歸來自 main `9bf9a7e`：
 - 遠端畫面擷取（實機）：用專案自己的 `lattice-agent` 在另一個 X display（藍底桌面＋時鐘）開畫面分享，LatticeTerm 直連配對後在設定頁只勾「擷取目前畫面」（其他五項在畫面工作階段一律停用），再用 `lattice-term mcp` 呼叫 `capture_remote_screen`：拿回 1152×720、27 KB 的 JPEG，內容就是那台桌面，metadata 含 frameId 與擷取時間；連續呼叫第一次被兩秒節流擋下（`limit_reached`）；撤回授權後連線立刻從清單消失、擷取拿不到目標；操作紀錄留下 `remoteScreen` 的成功與被拒各一筆與 `grant` 一筆。RDP 與 VNC 走同一條保留路徑，但沒有可連的 RDP／VNC 伺服器可實測。
 - 遠端鍵鼠（實機 VNC）：在另一個 X display 跑 x11vnc 與一個 GTK 視窗（有一個按鈕與一個輸入框，把收到的點擊數與文字寫成 JSON），LatticeTerm 連上去後只勾「擷取目前畫面」與「操作鍵盤與滑鼠」，再用 `lattice-term mcp` 走完 10 項：擷取拿到 800×600 與 `snapshotId`；`click` 被接受且 GTK 只收到一次；相同 request ID 重送回 `duplicate` 而沒有按第二次；憑據用掉後換新 request ID 回 `not_ready`；`text` 打進輸入框的內容一字不差；`keys` 的全選加取代也如實反映。接手：直接在檢視器畫面上移動滑鼠後，授權立刻從清單消失，拿舊憑據再送點擊被擋（回 `needs_user_action`，因為該授權已經不存在），GTK 的點擊數沒有增加。
-  這台是無頭 Xvfb，視窗沒有損毀事件就不重繪，WebKit 會把 `requestAnimationFrame` 停住，檢視器節流過的滑鼠移動因此卡在佇列裡；測試時要用一次一像素的縮放把它逼出來，真實桌面上不會有這個問題。RDP 仍然沒有可連的伺服器可實測。
+  這台是無頭 Xvfb，視窗沒有損毀事件就不重繪，WebKit 會把 `requestAnimationFrame` 停住，檢視器節流過的滑鼠移動因此卡在佇列裡；測試時要用一次一像素的縮放把它逼出來，這是本次無頭環境的觀察，一般實體桌面的對應行為未另驗證。RDP 仍然沒有可連的伺服器可實測。
 
 
 - 中斷本輪：桌面端送出一個長問題後，Codex 的輸出從 24664 位元組長到 60811，此時以 MCP 下 `scope: "turn"`，之後 12 秒都停在 60811；工作階段仍在清單裡也還能回答下一個問題。Codex 的 `notify` hook 在回合中途就回報 `done`，因此中斷條件不看 `working` 狀態。
@@ -291,6 +291,8 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 使用者直接在遠端視窗移動、點擊或輸入時，會撤銷該連線含 `input` 的授權；獨立的唯讀授權保留。已送入通道的動作無法回復。RDP／VNC 批次寫入若中斷或結果不明，會停止該引擎連線，避免留下無法確認是否放開的按鍵；回報 `unknown_outcome` 時先人工核對，不要換 ID 重送。操作紀錄使用 `remoteInput`，不記錄文字、按鍵或座標。
 
 桌面橋接協定升為 2，舊背景服務仍可維持既有 Agent 工作；遠端授權需等使用者方便時重啟背景服務，程式不自動中斷既有 CLI。
+
+Linux VNC 的鍵鼠及人工接手實機紀錄見 [MCP 遠端操作驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md#2026-09-12-linux-vnc-鍵鼠與人工接手驗收)。
 
 目前仍沒有連續串流或跨主機 Fleet 編排。
 
