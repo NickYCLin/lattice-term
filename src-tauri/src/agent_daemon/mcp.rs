@@ -108,7 +108,7 @@ where
     Some(runtime.block_on(serve_stdio(server)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) async fn serve_workspace_test_io<R, W>(
     data: &Path,
     directory: &Path,
