@@ -11425,7 +11425,8 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     /// Interrupting a turn is a keystroke into a live PTY, so the rules
     /// around it are what this pins: which CLIs it is offered for, and the
-    /// states in which LatticeTerm refuses to press the key.
+    /// states in which LatticeTerm refuses to press the key. The session is
+    /// a plain `cat`, relabelled, so the test needs no CLI installed.
     #[cfg(unix)]
     #[test]
     fn a_turn_interrupt_is_offered_only_where_it_is_known_and_only_mid_turn() {
@@ -11438,83 +11439,12 @@ notify = ["notify.exe", "turn-ended"]"#,
         let collector = Arc::new(TestSink::default());
         let sink: Arc<dyn AgentSink> = collector.clone();
         let registry = Arc::new(AgentRegistry::new());
-        let request = AgentLaunchRequest {
-            definition_id: "claude".to_string(),
-            label: "interrupt fixture".to_string(),
-            executable: "cat".to_string(),
-            arguments: Vec::new(),
-            resume_session_id: None,
-            group_id: None,
-            seed_input: None,
-            restore_existing_session: false,
-            profile_config_path: None,
-            sandbox: false,
-            detached: false,
-            working_directory: std::env::temp_dir().display().to_string(),
-            cols: 80,
-            rows: 24,
-        };
-        let session = launch(sink.clone(), registry.clone(), request).unwrap();
-        let id = session.session_id.clone();
-
-        // Without a control grant nothing is pressed, whatever the state.
-        assert_eq!(
-            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
-            MCP_NOT_CONTROLLED
-        );
-        set_mcp_control(sink.as_ref(), &registry, &id, true).unwrap();
-
-        // A session waiting for a person is never answered with a keystroke.
-        registry.update_state(
-            &id,
-            AgentLifecycle::NeedsAttention,
-            AgentStateSource::Integration,
-        );
-        assert_eq!(
-            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
-            MCP_NO_TURN_TO_INTERRUPT
-        );
-
-        // Nor is one whose human has unfinished input.
-        registry.update_state(&id, AgentLifecycle::Working, AgentStateSource::Integration);
-        let entry = registry.get(&id).unwrap();
-        assert_eq!(
-            registry.session_summary(&id).unwrap().state,
-            AgentLifecycle::Working
-        );
-        entry.input.lock().unwrap().desktop_editing = true;
-        assert_eq!(
-            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
-            MCP_NO_TURN_TO_INTERRUPT
-        );
-        entry.input.lock().unwrap().desktop_editing = false;
-
-        // Otherwise the CLI's own interrupt key goes in, once.
-        mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap();
-        assert_eq!(
-            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
-            MCP_INTERRUPT_TOO_SOON,
-            "two presses in a row mean something else in some CLIs"
-        );
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline && !collector.data.lock().unwrap().contains(&0x1b) {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(
-            collector.data.lock().unwrap().contains(&0x1b),
-            "the interrupt key reached the terminal"
-        );
-        // Ending a turn never ends the session.
-        assert!(registry.session_summary(&id).is_some());
-        assert!(collector.closed.lock().unwrap().is_empty());
-
-        // A CLI with no documented interrupt key is refused, not guessed at.
-        let custom = launch(
+        let session = launch(
             sink.clone(),
             registry.clone(),
             AgentLaunchRequest {
                 definition_id: "custom".to_string(),
-                label: "no interrupt".to_string(),
+                label: "interrupt fixture".to_string(),
                 executable: "cat".to_string(),
                 arguments: Vec::new(),
                 resume_session_id: None,
@@ -11530,15 +11460,73 @@ notify = ["notify.exe", "turn-ended"]"#,
             },
         )
         .unwrap();
-        set_mcp_control(sink.as_ref(), &registry, &custom.session_id, true).unwrap();
+        let id = session.session_id.clone();
+        let entry = registry.get(&id).unwrap();
+        set_mcp_control(sink.as_ref(), &registry, &id, true).unwrap();
+        registry.update_state(&id, AgentLifecycle::Working, AgentStateSource::Integration);
+
+        // A CLI with no documented interrupt key is refused, not guessed at.
+        assert_eq!(
+            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
+            MCP_INTERRUPT_UNSUPPORTED
+        );
+        entry.summary.lock().unwrap().definition_id = "claude".to_string();
+
+        // A session waiting for a person is never answered with a keystroke.
         registry.update_state(
-            &custom.session_id,
-            AgentLifecycle::Working,
+            &id,
+            AgentLifecycle::NeedsAttention,
             AgentStateSource::Integration,
         );
         assert_eq!(
-            mcp_interrupt_turn(sink.as_ref(), &registry, &custom.session_id).unwrap_err(),
-            MCP_INTERRUPT_UNSUPPORTED
+            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
+            MCP_NO_TURN_TO_INTERRUPT
+        );
+
+        // Nor is one whose human has unfinished input.
+        registry.update_state(&id, AgentLifecycle::Working, AgentStateSource::Integration);
+        entry.input.lock().unwrap().desktop_editing = true;
+        assert_eq!(
+            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
+            MCP_NO_TURN_TO_INTERRUPT
+        );
+        entry.input.lock().unwrap().desktop_editing = false;
+
+        // Otherwise the CLI's own interrupt key goes in, once. Watch the
+        // writer itself: a PTY echoes a control byte as "^[", so the
+        // terminal's own output cannot show what was written.
+        struct Recorder(Arc<Mutex<Vec<u8>>>);
+        impl Write for Recorder {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let original = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(Recorder(written.clone())),
+        );
+        mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap();
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b");
+        assert_eq!(
+            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
+            MCP_INTERRUPT_TOO_SOON,
+            "two presses in a row mean something else in some CLIs"
+        );
+        *entry.writer.lock().unwrap() = original;
+        // Ending a turn never ends the session.
+        assert!(registry.session_summary(&id).is_some());
+        assert!(collector.closed.lock().unwrap().is_empty());
+
+        // Without a control grant nothing is pressed, whatever the state.
+        set_mcp_control(sink.as_ref(), &registry, &id, false).unwrap();
+        assert_eq!(
+            mcp_interrupt_turn(sink.as_ref(), &registry, &id).unwrap_err(),
+            MCP_NOT_CONTROLLED
         );
         registry.stop_all();
     }
