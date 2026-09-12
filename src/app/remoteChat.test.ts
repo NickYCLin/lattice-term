@@ -22,6 +22,12 @@ describe("Remote conversation projection", () => {
     expect(page.items[0]).toMatchObject({ id: "control-output", truncated: true });
     expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThan(40 * 1024);
   });
+  it("keeps the full stored thread list inside the encrypted response budget", async () => {
+    const threads = Array.from({ length: 50 }, (_, index) => ({ ...thread(), id: `thread-${index}`, title: "\u0001".repeat(2000), workingDirectory: "\u0002".repeat(6000) }));
+    const result = await performRemoteChat(fakeChatApi({ threads }), [], { kind: "list" });
+    expect(result).toHaveLength(50);
+    expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThan(55 * 1024);
+  });
   it("uses current host state, rejects stale turns and never selects a missing account", async () => {
     let value: ChatThread = { ...thread(), runningTurnId: "new-turn" };
     const chat = fakeChatApi({ threads: [value], getThread: () => value });

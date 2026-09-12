@@ -19,8 +19,17 @@ function clip(text: string, bytes: number) {
   if (encoder.encode(text).length <= bytes) return text;
   return new TextDecoder().decode(encoder.encode(text).slice(0, bytes)) + "…";
 }
+function clipForJson(text: string, bytes: number): string {
+  let budget = bytes;
+  let result = clip(text, budget);
+  while (encoder.encode(JSON.stringify(result)).length > bytes) {
+    budget = Math.floor(budget / 2);
+    result = clip(text, budget);
+  }
+  return result;
+}
 export function remoteThread(thread: ChatThread): RemoteChatThread {
-  return { id: thread.id, title: clip(thread.title, 200), agent: thread.definitionId, directory: clip(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt };
+  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt };
 }
 function remoteItem(item: ChatItem): RemoteChatItem {
   let text: string;
