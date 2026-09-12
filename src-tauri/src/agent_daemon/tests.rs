@@ -1086,3 +1086,160 @@ async fn a_wait_ends_when_sharing_is_revoked() {
         .unwrap()
         .unwrap();
 }
+
+/// A client that can start an agent can be told to start another by
+/// whatever it reads, so the ceiling is the daemon's. It counts only what
+/// MCP started, and a slot comes back when that session ends.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_client_cannot_launch_past_its_ceiling() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let token = read_or_create_token(&paths).unwrap();
+    let sink = Arc::new(DaemonSink::default());
+    let registry = AgentRegistry::with_local_reporter_prefixed(
+        Arc::clone(&sink) as Arc<dyn AgentSink>,
+        super::SESSION_ID_PREFIX,
+    )
+    .unwrap();
+    let server = tokio::spawn(serve(
+        paths.clone(),
+        token.clone(),
+        Arc::clone(&registry),
+        Arc::clone(&sink),
+        Arc::new(super::automations::Scheduler::open(dir.path())),
+        Arc::new(crate::agent_chat::AgentChatRegistry::new()),
+        Duration::from_secs(600),
+        Arc::new(Logger::silent()),
+    ));
+    for _ in 0..50 {
+        if paths.socket.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let mut desktop = RawClient::connect(&paths).await;
+    desktop
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
+            client: None,
+        })
+        .await
+        .unwrap();
+    let mut observer = RawClient::connect(&paths).await;
+    observer
+        .request(Request::Hello {
+            token: token.clone(),
+            protocol: ClientRole::Observer.protocol_version(),
+            role: ClientRole::Observer,
+            client: Some("test-client 1.0".to_string()),
+        })
+        .await
+        .unwrap();
+    desktop
+        .request(Request::McpPlansReplace {
+            enabled: true,
+            plans: vec![super::McpPlan {
+                plan_id: "agent-plan-1".to_string(),
+                label: "shell".to_string(),
+                note: String::new(),
+                definition_id: "custom".to_string(),
+                working_directory: std::env::temp_dir().display().to_string(),
+                sandbox: false,
+                request: launch_request("sleep 30"),
+            }],
+        })
+        .await
+        .unwrap();
+
+    // The desktop's own session is the user's, and is never counted.
+    let user_session = desktop
+        .request(Request::Launch {
+            request: Box::new(launch_request("sleep 30")),
+            restored_output: None,
+        })
+        .await
+        .unwrap()["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut started = Vec::new();
+    for attempt in 0..super::server::MAX_LAUNCHED_PER_CLIENT {
+        let launched = observer
+            .request(Request::LaunchPlan {
+                plan_id: "agent-plan-1".to_string(),
+                request_id: format!("launch-{attempt}"),
+            })
+            .await
+            .unwrap();
+        started.push(launched["sessionId"].as_str().unwrap().to_string());
+    }
+    let plans = observer.request(Request::Plans).await.unwrap();
+    assert_eq!(
+        plans["launchedByYou"],
+        super::server::MAX_LAUNCHED_PER_CLIENT
+    );
+    assert_eq!(
+        plans["launchedTotal"],
+        super::server::MAX_LAUNCHED_PER_CLIENT
+    );
+    assert_eq!(
+        plans["maxLaunchedPerClient"],
+        super::server::MAX_LAUNCHED_PER_CLIENT
+    );
+
+    let refused = observer
+        .request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "one-too-many".to_string(),
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.contains("limit"), "{refused}");
+    assert_eq!(
+        registry.list().len(),
+        super::server::MAX_LAUNCHED_PER_CLIENT + 1,
+        "the refusal started nothing"
+    );
+
+    // Ending one of its own sessions frees exactly one slot.
+    observer
+        .request(Request::Cancel {
+            session_id: started[0].clone(),
+            scope: super::CancelScope::Session,
+            request_id: "end-one".to_string(),
+        })
+        .await
+        .unwrap();
+    observer
+        .wait_for_event("closed", |payload| {
+            payload["sessionId"] == started[0].as_str()
+        })
+        .await;
+    let replacement = observer
+        .request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "after-one-ended".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(replacement["sessionId"].is_string());
+    assert!(observer
+        .request(Request::LaunchPlan {
+            plan_id: "agent-plan-1".to_string(),
+            request_id: "still-too-many".to_string(),
+        })
+        .await
+        .is_err());
+    assert!(registry.session_summary(&user_session).is_some());
+
+    desktop.request(Request::Shutdown).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .expect("the daemon stops when told")
+        .unwrap()
+        .unwrap();
+}

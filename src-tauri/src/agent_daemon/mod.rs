@@ -61,6 +61,105 @@ pub const MAX_OBSERVE_BYTES: usize = 68 * 1024;
 /// One prompt an MCP client may hand a session, in characters.
 pub const MAX_MCP_PROMPT_CHARS: usize = 16_000;
 
+/// Machine-readable reasons a tool call did not go through, so a client can
+/// tell "ask the person to flip a switch" from "try again in a moment" from
+/// "this will never work here". The message stays the explanation; the code
+/// is what a program should branch on.
+pub mod error_code {
+    /// The user has not granted this, or took the grant back.
+    pub const NOT_AUTHORIZED: &str = "not_authorized";
+    /// Someone must act in LatticeTerm before this can work.
+    pub const NEEDS_USER_ACTION: &str = "needs_user_action";
+    /// Nothing to do now, but the same call may work shortly.
+    pub const NOT_READY: &str = "not_ready";
+    /// The session, plan or target is gone.
+    pub const NOT_FOUND: &str = "not_found";
+    /// A ceiling was reached; stop something before asking again.
+    pub const LIMIT_REACHED: &str = "limit_reached";
+    /// This combination is not supported here; retrying will not help.
+    pub const UNSUPPORTED: &str = "unsupported";
+    /// The operation may or may not have happened; never blindly retry.
+    pub const UNKNOWN_OUTCOME: &str = "unknown_outcome";
+    /// The background service is not running or not reachable.
+    pub const DAEMON_UNAVAILABLE: &str = "daemon_unavailable";
+    /// Anything else.
+    pub const FAILED: &str = "failed";
+
+    /// Every code a client may see, for `get_capabilities`.
+    pub const ALL: [&str; 9] = [
+        NOT_AUTHORIZED,
+        NEEDS_USER_ACTION,
+        NOT_READY,
+        NOT_FOUND,
+        LIMIT_REACHED,
+        UNSUPPORTED,
+        UNKNOWN_OUTCOME,
+        DAEMON_UNAVAILABLE,
+        FAILED,
+    ];
+}
+
+/// A refusal as a client should see it: the sentence, and the code to
+/// branch on. A remote failure arrives as the desktop's serialized
+/// `ServiceError`; unwrap it rather than handing a model a JSON blob
+/// inside a string field.
+pub fn failure_payload(message: &str) -> (String, &'static str) {
+    if let Ok(remote) = serde_json::from_str::<crate::mcp_desktop::ServiceError>(message) {
+        return (remote.message, remote_code(&remote.code));
+    }
+    (message.to_string(), failure_code(message))
+}
+
+/// The desktop's codes, mapped onto the set this server documents.
+fn remote_code(code: &str) -> &'static str {
+    use error_code as mapped;
+    if let Some(known) = error_code::ALL.iter().find(|candidate| **candidate == code) {
+        return known;
+    }
+    match code {
+        "busy" => mapped::LIMIT_REACHED,
+        "path_not_allowed" | "denied" => mapped::NOT_AUTHORIZED,
+        _ => mapped::FAILED,
+    }
+}
+
+/// Classifies a refusal by the message the daemon or the adapter produced.
+/// Both sides build those messages from the same constants matched here, so
+/// the pairing stays honest; an unrecognised message is plain `failed`
+/// rather than a guess.
+pub fn failure_code(message: &str) -> &'static str {
+    use crate::agent;
+    use error_code as code;
+    if message.starts_with(server::LAUNCH_LIMIT_REACHED) {
+        return code::LIMIT_REACHED;
+    }
+    // The desktop bridge already classifies its own refusals and sends them
+    // as `code: message`; keep its answer instead of guessing a new one.
+    if let Some((prefix, _)) = message.split_once(": ") {
+        if let Some(known) = error_code::ALL.iter().find(|code| **code == prefix) {
+            return known;
+        }
+        if prefix == "invalid_request" || prefix == "busy" {
+            return code::FAILED;
+        }
+    }
+    match message {
+        agent::MCP_NOT_CONTROLLED
+        | agent::MCP_GRANT_CHANGED
+        | server::SESSION_NOT_SHARED
+        | server::OBSERVER_NOT_ALLOWED
+        | server::OUTPUT_NOT_SHARED
+        | mcp::OUTPUT_REVOKED => code::NOT_AUTHORIZED,
+        agent::MCP_NOT_READY | agent::MCP_QUEUE_IN_ORDER => code::NOT_READY,
+        server::LAUNCH_NOT_ALLOWED => code::NEEDS_USER_ACTION,
+        agent::MCP_INPUT_PROFILE_UNSUPPORTED => code::UNSUPPORTED,
+        agent::MCP_SESSION_GONE | server::PLAN_NOT_AVAILABLE => code::NOT_FOUND,
+        agent::MCP_DRAFT_RECOVERY_ERROR | server::UNKNOWN_OUTCOME => code::UNKNOWN_OUTCOME,
+        mcp::DAEMON_NOT_RUNNING => code::DAEMON_UNAVAILABLE,
+        _ => code::FAILED,
+    }
+}
+
 /// Whether a session id belongs to the daemon rather than the desktop.
 pub fn owns(session_id: &str) -> bool {
     session_id.starts_with(SESSION_ID_PREFIX)
@@ -562,6 +661,63 @@ pub(crate) fn event_channel(name: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod wire_tests {
     use super::*;
+
+    #[test]
+    fn every_refusal_a_client_sees_carries_a_code_to_branch_on() {
+        use crate::agent;
+        use error_code as code;
+        for (message, expected) in [
+            (agent::MCP_NOT_CONTROLLED, code::NOT_AUTHORIZED),
+            (agent::MCP_GRANT_CHANGED, code::NOT_AUTHORIZED),
+            (server::SESSION_NOT_SHARED, code::NOT_AUTHORIZED),
+            (server::OUTPUT_NOT_SHARED, code::NOT_AUTHORIZED),
+            (mcp::OUTPUT_REVOKED, code::NOT_AUTHORIZED),
+            (agent::MCP_NOT_READY, code::NOT_READY),
+            (agent::MCP_QUEUE_IN_ORDER, code::NOT_READY),
+            (server::LAUNCH_NOT_ALLOWED, code::NEEDS_USER_ACTION),
+            (agent::MCP_INPUT_PROFILE_UNSUPPORTED, code::UNSUPPORTED),
+            (agent::MCP_SESSION_GONE, code::NOT_FOUND),
+            (server::PLAN_NOT_AVAILABLE, code::NOT_FOUND),
+            (agent::MCP_DRAFT_RECOVERY_ERROR, code::UNKNOWN_OUTCOME),
+            (server::UNKNOWN_OUTCOME, code::UNKNOWN_OUTCOME),
+            (mcp::DAEMON_NOT_RUNNING, code::DAEMON_UNAVAILABLE),
+            ("Something else entirely", code::FAILED),
+        ] {
+            assert_eq!(failure_code(message), expected, "{message}");
+            assert!(error_code::ALL.contains(&expected));
+        }
+        // The launch ceiling explains itself in the sentence and the code.
+        let refusal = format!("{} Stop one first.", server::LAUNCH_LIMIT_REACHED);
+        assert_eq!(failure_code(&refusal), code::LIMIT_REACHED);
+    }
+
+    #[test]
+    fn a_remote_failure_is_unwrapped_instead_of_handed_over_as_json() {
+        let remote = serde_json::to_string(&crate::mcp_desktop::ServiceError {
+            code: "needs_user_action".into(),
+            message: "Connect and verify this session in LatticeTerm first.".into(),
+        })
+        .unwrap();
+        let (message, code) = failure_payload(&remote);
+        assert_eq!(
+            message,
+            "Connect and verify this session in LatticeTerm first."
+        );
+        assert_eq!(code, error_code::NEEDS_USER_ACTION);
+
+        // Codes this server does not publish are mapped onto ones it does.
+        let busy = serde_json::to_string(&crate::mcp_desktop::ServiceError {
+            code: "busy".into(),
+            message: "The desktop operation limit has been reached.".into(),
+        })
+        .unwrap();
+        assert_eq!(failure_payload(&busy).1, error_code::LIMIT_REACHED);
+
+        // A plain sentence stays exactly as written.
+        let (message, code) = failure_payload(server::OBSERVER_NOT_ALLOWED);
+        assert_eq!(message, server::OBSERVER_NOT_ALLOWED);
+        assert_eq!(code, error_code::NOT_AUTHORIZED);
+    }
 
     #[test]
     fn frames_round_trip_with_camel_case_tags() {
