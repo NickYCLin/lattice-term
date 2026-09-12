@@ -76,6 +76,7 @@ struct Options {
     fps: u32,
     json: bool,
     allow_input: bool,
+    allow_commands: bool,
     file_root: Option<PathBuf>,
     relay: Option<String>,
     identity_file: Option<PathBuf>,
@@ -83,6 +84,7 @@ struct Options {
     /// Shared by every relay session so blocked filesystem calls cannot
     /// accumulate across reconnects.
     file_job_permits: Arc<Semaphore>,
+    command_permits: Arc<Semaphore>,
 }
 
 #[derive(Serialize)]
@@ -99,6 +101,7 @@ enum AgentEvent<'a> {
         expires_in_seconds: u64,
         view_only: bool,
         file_transfer: bool,
+        commands: bool,
         file_root: Option<String>,
         /// Present in relay mode: the permanent nine-digit device ID.
         device_id: Option<String>,
@@ -147,7 +150,7 @@ fn help() -> &'static str {
 Usage: lattice-agent [--bind ADDRESS:PORT] [--relay HOST[:PORT]|WSS_URL] [--identity FILE]\n\
                      [--pair-code CODE|--pair-code-file FILE|--pair-code-stdin]\n\
                      [--fps 1-10] [--allow-input]\n\
-                     [--file-root PATH] [--terminal] [--json]\n\n\
+                     [--file-root PATH] [--allow-commands] [--terminal] [--json]\n\n\
 Direct mode (default): the safe default listens on 127.0.0.1 only. To receive\n\
 a LAN connection, pass the machine's LAN address explicitly, for example\n\
 --bind 192.168.1.20:44900. The agent accepts one successfully paired\n\
@@ -163,6 +166,8 @@ By default the session is view-only. Pass --allow-input to let the paired\n\
 viewer control this machine's mouse and keyboard; without it, input messages\n\
 are ignored. File access stays disabled unless --file-root explicitly shares\n\
 one folder; every remote path is then confined to that folder.\n\n\
+Windows commands: --allow-commands independently permits cmd / PowerShell\n\
+execution as this account, beyond the file-sharing root. Off by default.\n\n\
 Terminal mode: --terminal shares an encrypted shell session instead of the\n\
 display, so a headless host (no desktop) works too. --allow-input lets the\n\
 viewer type; without it the terminal is watch-only. --fps is ignored.\n\n\
@@ -223,6 +228,7 @@ fn parse_options() -> Result<Options, String> {
     let mut fps = DEFAULT_FPS;
     let mut json = false;
     let mut allow_input = false;
+    let mut allow_commands = false;
     let mut file_root = None;
     let mut relay = None;
     let mut identity_file = None;
@@ -284,6 +290,12 @@ fn parse_options() -> Result<Options, String> {
             }
             "--json" => json = true,
             "--allow-input" => allow_input = true,
+            "--allow-commands" => {
+                if !cfg!(windows) {
+                    return Err("Command execution requires a Windows sharing host.".into());
+                }
+                allow_commands = true;
+            }
             "--terminal" => terminal = true,
             "--file-root" => {
                 let path = PathBuf::from(
@@ -310,11 +322,13 @@ fn parse_options() -> Result<Options, String> {
         fps,
         json,
         allow_input,
+        allow_commands,
         file_root,
         relay,
         identity_file,
         terminal,
         file_job_permits: Arc::new(Semaphore::new(FILE_JOB_LIMIT)),
+        command_permits: Arc::new(Semaphore::new(2)),
     })
 }
 
@@ -2064,8 +2078,10 @@ async fn serve<S>(
     connection: SecureConnection<S>,
     fps: u32,
     allow_input: bool,
+    allow_commands: bool,
     file_root: Option<PathBuf>,
     file_job_permits: Arc<Semaphore>,
+    command_permits: Arc<Semaphore>,
 ) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -2092,6 +2108,7 @@ where
             view_only: !allow_input,
             file_transfer: shared_files.is_some(),
             file_edit: shared_files.is_some() && host_text::editing_supported(),
+            command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2131,9 +2148,15 @@ where
         (None, None)
     };
 
+    let mut command_handler = lattice_remote::host_commands::Commands::new(
+        allow_commands,
+        outgoing.clone(),
+        command_permits,
+    );
     let mut file_handler =
         FileRequestHandler::new(shared_files.clone(), outgoing.clone(), file_job_permits);
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
+    let mut command_failed_rx = command_handler.subscribe_failures();
     let (receiver_stop_tx, mut receiver_stop_rx) = watch::channel(false);
     let receiver = tokio::spawn(async move {
         loop {
@@ -2141,6 +2164,7 @@ where
                 biased;
                 _ = receiver_stop_rx.changed() => break,
                 _ = file_failed_rx.changed() => break,
+                _ = command_failed_rx.changed() => break,
                 message = reader.receive() => message,
             };
             match message {
@@ -2160,6 +2184,11 @@ where
                         }
                     }
                 }
+                Ok(RemoteMessage::CommandRequest(request)) => {
+                    if !command_handler.handle(request).await {
+                        break;
+                    }
+                }
                 Ok(RemoteMessage::FileRequest(request)) => {
                     let handled = tokio::select! {
                         biased;
@@ -2177,6 +2206,7 @@ where
         }
         // Dropping the sender ends the input thread and releases held keys.
         drop(input_tx);
+        command_handler.shutdown().await;
         file_handler.shutdown().await;
     });
 
@@ -2324,8 +2354,10 @@ fn default_shell() -> String {
 async fn serve_terminal<S>(
     connection: SecureConnection<S>,
     allow_input: bool,
+    allow_commands: bool,
     file_root: Option<PathBuf>,
     file_job_permits: Arc<Semaphore>,
+    command_permits: Arc<Semaphore>,
 ) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -2376,6 +2408,7 @@ where
             view_only: !allow_input,
             file_transfer: shared_files.is_some(),
             file_edit: shared_files.is_some() && host_text::editing_supported(),
+            command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2485,14 +2518,21 @@ where
     });
     drop(pump_ended_tx);
 
+    let mut command_handler = lattice_remote::host_commands::Commands::new(
+        allow_commands,
+        outgoing.clone(),
+        command_permits,
+    );
     let mut file_handler =
         FileRequestHandler::new(shared_files, outgoing.clone(), file_job_permits);
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
+    let mut command_failed_rx = command_handler.subscribe_failures();
     loop {
         let message = tokio::select! {
             biased;
             _ = pump_ended_rx.changed() => break,
             _ = file_failed_rx.changed() => break,
+                _ = command_failed_rx.changed() => break,
             message = reader.receive() => message,
         };
         match message {
@@ -2522,6 +2562,11 @@ where
                     });
                 }
             }
+            Ok(RemoteMessage::CommandRequest(request)) => {
+                if !command_handler.handle(request).await {
+                    break;
+                }
+            }
             Ok(RemoteMessage::FileRequest(request)) => {
                 let handled = tokio::select! {
                     biased;
@@ -2538,6 +2583,7 @@ where
         }
     }
 
+    command_handler.shutdown().await;
     file_handler.shutdown().await;
     drop(file_handler);
     drop(keystroke_tx);
@@ -2654,8 +2700,10 @@ async fn run_relay_session(
         serve_terminal(
             secure,
             options.allow_input,
+            options.allow_commands,
             options.file_root,
             Arc::clone(&options.file_job_permits),
+            Arc::clone(&options.command_permits),
         )
         .await
     } else {
@@ -2663,8 +2711,10 @@ async fn run_relay_session(
             secure,
             options.fps,
             options.allow_input,
+            options.allow_commands,
             options.file_root,
             Arc::clone(&options.file_job_permits),
+            Arc::clone(&options.command_permits),
         )
         .await
     };
@@ -2796,6 +2846,7 @@ async fn run_relay(options: &Options) -> String {
                     expires_in_seconds: 0,
                     view_only: !options.allow_input,
                     file_transfer: options.file_root.is_some(),
+                    commands: options.allow_commands,
                     file_root: options
                         .file_root
                         .as_ref()
@@ -2957,6 +3008,7 @@ async fn main() {
             expires_in_seconds: PAIRING_LIFETIME.as_secs(),
             view_only: !options.allow_input,
             file_transfer: options.file_root.is_some(),
+            commands: options.allow_commands,
             file_root: options
                 .file_root
                 .as_ref()
@@ -3057,8 +3109,10 @@ async fn main() {
             serve_terminal(
                 secure,
                 options.allow_input,
+                options.allow_commands,
                 options.file_root.clone(),
                 Arc::clone(&options.file_job_permits),
+                Arc::clone(&options.command_permits),
             )
             .await
         } else {
@@ -3066,8 +3120,10 @@ async fn main() {
                 secure,
                 options.fps,
                 options.allow_input,
+                options.allow_commands,
                 options.file_root.clone(),
                 Arc::clone(&options.file_job_permits),
+                Arc::clone(&options.command_permits),
             )
             .await
         };
@@ -4245,6 +4301,7 @@ mod tests {
             expires_in_seconds: 300,
             view_only: true,
             file_transfer: false,
+            commands: false,
             file_root: None,
             device_id: Some("123456789".to_string()),
             relay: Some("relay.example.com".to_string()),

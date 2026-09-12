@@ -93,6 +93,8 @@ const MESSAGE_FILE_RESPONSE: u8 = 8;
 const MESSAGE_TERMINAL_DATA: u8 = 9;
 const MESSAGE_TERMINAL_INPUT: u8 = 10;
 const MESSAGE_TERMINAL_RESIZE: u8 = 11;
+const MESSAGE_COMMAND_REQUEST: u8 = 12;
+const MESSAGE_COMMAND_EVENT: u8 = 13;
 
 /// One terminal payload may carry at most this many raw PTY bytes.
 pub const TERMINAL_CHUNK_SIZE: usize = 48 * 1024;
@@ -148,6 +150,8 @@ pub struct RemoteHello {
     /// Optional trailing capability. Never send text requests to a peer that
     /// did not advertise it; older hosts continue to support ordinary files.
     pub file_edit: bool,
+    /// Optional command-shell bitset: cmd=1, PowerShell=2.
+    pub command_shells: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -374,6 +378,8 @@ pub enum RemoteMessage {
     Input(RemoteInput),
     FileRequest(RemoteFileRequest),
     FileResponse(RemoteFileResponse),
+    CommandRequest(crate::command_protocol::CommandRequest),
+    CommandEvent(crate::command_protocol::CommandEvent),
     /// Raw PTY output from a terminal-mode agent.
     TerminalData {
         bytes: Vec<u8>,
@@ -492,6 +498,23 @@ fn validate_input(input: &RemoteInput) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn encode_command(
+    kind: u8,
+    value: &impl serde::Serialize,
+    valid: bool,
+) -> Result<Vec<u8>, ProtocolError> {
+    if !valid {
+        return Err(ProtocolError::InvalidMessage("invalid command payload"));
+    }
+    let mut output = vec![kind];
+    serde_json::to_writer(&mut output, value)
+        .map_err(|_| ProtocolError::InvalidMessage("invalid command payload"))?;
+    if output.len() > 60 * 1024 {
+        return Err(ProtocolError::InvalidMessage("command payload too large"));
+    }
+    Ok(output)
+}
+
 impl RemoteMessage {
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         match self {
@@ -513,11 +536,14 @@ impl RemoteMessage {
                 // Hosts without optional capabilities stay byte-identical to
                 // the original protocol v2 hello. Editing appends a terminal
                 // placeholder and its own capability for tolerant v2 peers.
-                if hello.terminal || hello.file_edit {
+                if hello.terminal || hello.file_edit || hello.command_shells != 0 {
                     output.push(u8::from(hello.terminal));
                 }
-                if hello.file_edit {
-                    output.push(1);
+                if hello.file_edit || hello.command_shells != 0 {
+                    output.push(u8::from(hello.file_edit));
+                }
+                if hello.command_shells != 0 {
+                    output.push(hello.command_shells);
                 }
                 Ok(output)
             }
@@ -580,6 +606,12 @@ impl RemoteMessage {
             }
             Self::FileRequest(request) => encode_file_request(request),
             Self::FileResponse(response) => encode_file_response(response),
+            Self::CommandRequest(request) => {
+                encode_command(MESSAGE_COMMAND_REQUEST, request, request.valid())
+            }
+            Self::CommandEvent(event) => {
+                encode_command(MESSAGE_COMMAND_EVENT, event, event.valid())
+            }
             Self::TerminalData { bytes } => {
                 validate_terminal_bytes(bytes)?;
                 let mut output = Vec::with_capacity(1 + bytes.len());
@@ -676,6 +708,7 @@ impl RemoteMessage {
                     file_root_label,
                     terminal,
                     file_edit,
+                    command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 3,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -740,6 +773,22 @@ impl RemoteMessage {
             }
             MESSAGE_FILE_REQUEST => decode_file_request(body).map(Self::FileRequest),
             MESSAGE_FILE_RESPONSE => decode_file_response(body).map(Self::FileResponse),
+            MESSAGE_COMMAND_REQUEST if body.len() <= 60 * 1024 => {
+                let request: crate::command_protocol::CommandRequest = serde_json::from_slice(body)
+                    .map_err(|_| ProtocolError::InvalidMessage("invalid command request"))?;
+                if !request.valid() {
+                    return Err(ProtocolError::InvalidMessage("invalid command request"));
+                }
+                Ok(Self::CommandRequest(request))
+            }
+            MESSAGE_COMMAND_EVENT if body.len() <= 60 * 1024 => {
+                let event: crate::command_protocol::CommandEvent = serde_json::from_slice(body)
+                    .map_err(|_| ProtocolError::InvalidMessage("invalid command event"))?;
+                if !event.valid() {
+                    return Err(ProtocolError::InvalidMessage("invalid command event"));
+                }
+                Ok(Self::CommandEvent(event))
+            }
             MESSAGE_TERMINAL_DATA => {
                 validate_terminal_bytes(body)?;
                 Ok(Self::TerminalData {
@@ -1403,12 +1452,41 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: false,
         });
         assert_eq!(
             RemoteMessage::decode(&message.encode().unwrap()).unwrap(),
             message
         );
+    }
+
+    #[test]
+    fn command_capability_is_optional_and_independent_of_screen_and_file_grants() {
+        let mut hello = RemoteHello {
+            protocol_version: PROTOCOL_VERSION,
+            agent_name: "test".into(),
+            width: 800,
+            height: 600,
+            view_only: true,
+            file_transfer: false,
+            file_root_label: String::new(),
+            terminal: false,
+            file_edit: false,
+            command_shells: 0,
+        };
+        let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
+        hello.command_shells = 3;
+        let message = RemoteMessage::Hello(hello);
+        let mut encoded = message.encode().unwrap();
+        assert_eq!(encoded.len(), old.len() + 3);
+        assert_eq!(RemoteMessage::decode(&encoded).unwrap(), message);
+        encoded.extend_from_slice(&[128, 129]);
+        assert_eq!(RemoteMessage::decode(&encoded).unwrap(), message);
+        let RemoteMessage::Hello(old_hello) = RemoteMessage::decode(&old).unwrap() else {
+            panic!("missing hello")
+        };
+        assert_eq!(old_hello.command_shells, 0);
     }
 
     #[test]
@@ -1423,6 +1501,7 @@ mod tests {
                 file_transfer: false,
                 file_root_label: String::new(),
                 file_edit: false,
+                command_shells: 0,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1495,6 +1574,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: true,
         })
         .encode()
@@ -1523,6 +1603,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: false,
         })
         .encode()
@@ -1538,6 +1619,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: true,
         })
         .encode()
@@ -1557,6 +1639,7 @@ mod tests {
             file_root_label: "Shared".into(),
             terminal: false,
             file_edit: false,
+            command_shells: 0,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1642,6 +1725,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: true,
         })
         .encode()
@@ -1750,6 +1834,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1763,6 +1848,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1776,6 +1862,7 @@ mod tests {
             file_transfer: false,
             file_root_label: String::new(),
             file_edit: false,
+            command_shells: 0,
             terminal: false,
         })
         .encode()

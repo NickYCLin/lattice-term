@@ -28,6 +28,8 @@ pub struct RemoteHostStartRequest {
     /// keyboard. Defaults to false so an unset field stays view-only.
     #[serde(default)]
     pub allow_input: bool,
+    #[serde(default)]
+    pub allow_commands: bool,
     /// File access is independently authorised from keyboard/mouse control.
     #[serde(default)]
     pub allow_files: bool,
@@ -55,6 +57,7 @@ pub struct RemoteHostStatus {
     pub expires_at: u64,
     pub view_only: bool,
     pub file_transfer: bool,
+    pub commands: bool,
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
@@ -79,6 +82,8 @@ enum AgentEvent {
         expires_in_seconds: u64,
         view_only: bool,
         file_transfer: bool,
+        #[serde(default)]
+        commands: bool,
         file_root: Option<String>,
         #[serde(default)]
         device_id: Option<String>,
@@ -270,6 +275,7 @@ async fn spawn_agent(
     target: AgentTarget<'_>,
     fps: u32,
     allow_input: bool,
+    allow_commands: bool,
     file_root: Option<&Path>,
 ) -> Result<(Child, tokio::process::ChildStdout), String> {
     let mut command = Command::new(agent_path()?);
@@ -295,6 +301,9 @@ async fn spawn_agent(
     command.arg("--fps").arg(fps.to_string());
     if allow_input {
         command.arg("--allow-input");
+    }
+    if allow_commands {
+        command.arg("--allow-commands");
     }
     if let Some(file_root) = file_root {
         command.arg("--file-root").arg(file_root);
@@ -376,6 +385,9 @@ pub async fn start(
         return Err("This device is already sharing its display.".to_string());
     }
 
+    if request.allow_commands && !cfg!(windows) {
+        return Err("Command execution requires a Windows sharing host.".into());
+    }
     let relay_mode = request.mode.trim() == "relay";
     let direct_target = if relay_mode {
         if !(1..=10).contains(&request.fps) {
@@ -433,6 +445,7 @@ pub async fn start(
         target,
         request.fps,
         request.allow_input,
+        request.allow_commands,
         file_root.as_deref(),
     )
     .await?;
@@ -465,6 +478,7 @@ pub async fn start(
         expires_in_seconds,
         view_only,
         file_transfer,
+        commands,
         file_root,
         device_id,
         relay,
@@ -486,6 +500,7 @@ pub async fn start(
         },
         view_only,
         file_transfer,
+        commands,
         file_root,
         state: "waiting",
         peer: None,
@@ -633,6 +648,7 @@ mod tests {
             port: 44_900,
             fps: 5,
             allow_input: false,
+            allow_commands: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -647,6 +663,7 @@ mod tests {
             port: 44_900,
             fps: 10,
             allow_input: true,
+            allow_commands: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -665,6 +682,7 @@ mod tests {
                 port: 44_900,
                 fps: 5,
                 allow_input: false,
+                allow_commands: false,
                 allow_files: false,
                 file_root: String::new(),
                 mode: String::new(),

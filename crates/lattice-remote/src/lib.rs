@@ -6,8 +6,11 @@
 //! opt-in per share. The optional relay only matches a viewer to a device ID
 //! and forwards ciphertext; it never sees pairing codes or frame contents.
 
+pub mod command_protocol;
 pub mod credentials;
 pub mod device_pins;
+#[cfg(feature = "agent")]
+pub mod host_commands;
 #[cfg(feature = "agent")]
 pub mod host_files;
 #[cfg(feature = "agent")]

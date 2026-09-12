@@ -485,6 +485,7 @@ mod tests {
                     file_transfer: false,
                     file_root_label: String::new(),
                     file_edit: false,
+                    command_shells: 0,
                     terminal: true,
                 }))
                 .await
@@ -789,6 +790,7 @@ mod tests {
                     file_transfer: false,
                     file_root_label: String::new(),
                     file_edit: false,
+                    command_shells: 0,
                     terminal: false,
                 }))
                 .await

@@ -121,3 +121,5 @@ GitHub Copilot CLI、Hermes Agent、Cursor Agent、Aider、Qwen Code、Kimi Code
 安全漏洞請依 [安全性政策](SECURITY.md) 私下通報。
 
 [MPL-2.0 授權](LICENSE) · [商標與名稱規範](TRADEMARKS.md)
+
+Lattice Remote also offers an independently authorised cmd / PowerShell command panel for Windows sharing hosts. See [command controls and limits](docs/REMOTE_COMMANDS.zh-TW.md).

@@ -20,10 +20,12 @@ import { useModalFocus } from "../overlays/modalFocus";
 
 export function RemoteHostDialog({
   host,
+  platform,
   sensitiveClipboardClear,
   onClose,
 }: {
   host: RemoteHostApi;
+  platform?: string;
   sensitiveClipboardClear: SensitiveClipboardClearChoice;
   onClose: () => void;
 }) {
@@ -38,6 +40,7 @@ export function RemoteHostDialog({
   const [port, setPort] = useState(44_900);
   const [fps, setFps] = useState(5);
   const [allowInput, setAllowInput] = useState(false);
+  const [allowCommands, setAllowCommands] = useState(false);
   const [allowFiles, setAllowFiles] = useState(false);
   const [fileRoot, setFileRoot] = useState("");
   const [busy, setBusy] = useState(false);
@@ -120,6 +123,7 @@ export function RemoteHostDialog({
         port,
         fps,
         allowInput,
+        allowCommands: platform === "windows" && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
         mode,
@@ -262,6 +266,7 @@ export function RemoteHostDialog({
                     ? t("remote.host.modeViewOnly")
                     : t("remote.host.modeInteractive")}
                 </span>
+                {host.status.commands && <span className="badge tone-warn">{t("remote.commands.title")}</span>}
                 {host.status.fileTransfer && (
                   <span className="badge tone-security">
                     {t("remote.host.modeFiles")}
@@ -526,6 +531,10 @@ export function RemoteHostDialog({
                 </span>
               </label>
 
+              {platform === "windows" && <label className="remote-host-toggle">
+                <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />
+                <span><strong>{t("remote.commands.allow")}</strong><small>{t("remote.commands.allowHint")}</small></span>
+              </label>}
               {allowInput && (
                 <Callout tone="warn" title={t("remote.host.allowInputWarnTitle")}>
                   {t("remote.host.allowInputWarnBody")}

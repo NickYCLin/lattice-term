@@ -1,0 +1,11 @@
+.remote-command-pane { padding: 14px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.remote-command-pane[hidden] { display: none; }
+.remote-command-pane p { margin: 0; font-size: 12px; line-height: 1.5; }
+.remote-command-pane form { display: grid; gap: 10px; }
+.remote-command-pane .field { display: grid; gap: 5px; font-size: 12px; }
+.remote-command-input { resize: vertical; min-height: 100px; }
+.remote-command-actions { display: flex; gap: 8px; }
+.remote-command-result { display: grid; gap: 8px; min-width: 0; font-size: 12px; }
+.remote-command-result pre { margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 320px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: 6px; }
+.remote-command-result .remote-command-submitted { opacity: .7; max-height: 100px; }
+.remote-command-result .remote-command-stderr { color: var(--danger); }

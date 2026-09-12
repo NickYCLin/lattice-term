@@ -1212,6 +1212,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {remoteHostOpen && runtime.host === "tauri" && (
         <RemoteHostDialog
           host={remoteHost}
+          platform={platform}
           sensitiveClipboardClear={preferences.sensitiveClipboardClear}
           onClose={() => setRemoteHostOpen(false)}
         />

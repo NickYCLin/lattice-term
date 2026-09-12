@@ -21,6 +21,7 @@ pub mod metrics;
 pub mod notification_sound;
 pub mod rdp;
 pub mod remote;
+pub mod remote_commands;
 pub mod remote_files;
 pub mod remote_host;
 pub mod remote_pins;
@@ -2771,6 +2772,30 @@ async fn remote_terminal_resize(
 }
 
 #[tauri::command]
+async fn remote_command_start(
+    registry: State<'_, Arc<RemoteRegistry>>,
+    session_id: String,
+    request: crate::remote_commands::CommandInput,
+) -> Result<crate::remote_commands::CommandView, String> {
+    crate::remote::command_start(registry.inner(), &session_id, request).await
+}
+#[tauri::command]
+async fn remote_command_cancel(
+    registry: State<'_, Arc<RemoteRegistry>>,
+    session_id: String,
+    id: u32,
+) -> Result<(), String> {
+    crate::remote::command_cancel(registry.inner(), &session_id, id).await
+}
+#[tauri::command]
+fn remote_command_state(
+    registry: State<'_, Arc<RemoteRegistry>>,
+    session_id: String,
+) -> Result<Option<crate::remote_commands::CommandView>, String> {
+    registry.command_state(&session_id)
+}
+
+#[tauri::command]
 async fn remote_file_list(
     session_id: String,
     path: String,
@@ -3479,6 +3504,9 @@ pub fn run() {
             remote_input,
             remote_terminal_input,
             remote_terminal_resize,
+            remote_command_start,
+            remote_command_cancel,
+            remote_command_state,
             remote_file_list,
             remote_file_read_text,
             remote_file_save_text,

@@ -45,6 +45,8 @@
 
   以 ID 連線成功的裝置會存成一般設定檔，留在「我的連線」。可手動輸入配對碼，或選擇在成功配對後保存到系統認證儲存區；配對碼不會寫入連線設定檔，儲存項目同時綁定設定檔與永久裝置 ID。中繼沒有回應時，連線視窗會提供位址欄位；只有連線成功才保存新位址。鍵鼠、終端輸入與檔案分享分開授權，依主機公告的能力提供功能。檔案模式只暴露指定的單一根目錄，拒絕路徑跳脫和越界符號連結，上傳完整收完並安全關檔後才替換目標。斷線或停止分享會釋放輸入並清除未完成的檔案暫存。
 - **Web RDP Canvas**：IronRDP 原生 engine 以 TLS/NLA 連到 Windows，畫面繪入內嵌 Canvas，並支援滑鼠、滾輪與鍵盤。密碼只經本機 stdin 傳給隔離 engine，也可在成功驗證後安全保存。
+- **Lattice Remote 命令介面**：Windows 分享端可獨立授權 cmd／PowerShell 指令；觀看端在畫面旁查看 stdout、stderr 與結束代碼，並可停止執行。指令受時間、輸出與併發限制，停止或斷線會清理所屬子程序。詳見 [命令操作與權限](REMOTE_COMMANDS.zh-TW.md)。
+
 - **使用者控制的截圖與錄影**：Lattice Remote、Web RDP 與 VNC 都可手動擷取 PNG，或開始、停止並下載遠端 Canvas 錄影；不會自動錄製或上傳。
 - **跨平台支援**：桌面版支援 Windows、Linux 與 macOS；Android 與 iOS 版已可建置共用的純 Rust 核心功能，iOS 已有 Simulator 驗證與 In-House 企業 IPA；需本機程序的 RDP／VNC／CLI Fleet 維持桌面限定。
 
