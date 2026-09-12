@@ -21,6 +21,8 @@ use tauri::{AppHandle, Emitter};
 #[cfg_attr(not(windows), allow(dead_code))]
 mod codex_input_profile;
 mod codex_resume;
+#[cfg(any(windows, test))]
+mod conpty_startup;
 
 pub const EVENT_DATA: &str = "agent://data";
 pub const EVENT_CLOSED: &str = "agent://closed";
@@ -1937,7 +1939,7 @@ impl AgentRegistry {
         Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()))
     }
 
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn with_test_reporter_executable(
         sink: Arc<dyn AgentSink>,
         executable: PathBuf,
@@ -6262,6 +6264,8 @@ pub fn launch_with_replay(
     let reader_sink = Arc::clone(&sink);
     let reader_registry = Arc::clone(&registry);
     let reader_entry = Arc::clone(&entry);
+    #[cfg(windows)]
+    let mut startup_cursor = conpty_startup::Cursor::new(request.detached);
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
         loop {
@@ -6269,6 +6273,28 @@ pub fn launch_with_replay(
                 Ok(0) => break,
                 Ok(count) => {
                     let bytes = &buffer[..count];
+                    #[cfg(windows)]
+                    let filtered = {
+                        let (reply, output) = startup_cursor.feed(bytes);
+                        if reply {
+                            let Ok(mut writer) = reader_entry.writer.lock() else {
+                                break;
+                            };
+                            if writer
+                                .write_all(b"\x1b[1;1R")
+                                .and_then(|()| writer.flush())
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        output
+                    };
+                    #[cfg(windows)]
+                    let bytes = filtered.as_slice();
+                    if bytes.is_empty() {
+                        continue;
+                    }
                     if let Ok(mut last_output_at) = reader_entry.last_output_at.lock() {
                         *last_output_at = Instant::now();
                     }

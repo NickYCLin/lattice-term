@@ -13,6 +13,10 @@ pub(super) struct Workspace {
 }
 impl Workspace {
     pub fn new(directory: &str) -> Result<Self, String> {
+        #[cfg(windows)]
+        if !crate::mcp_desktop::valid_windows_workspace_path(directory) {
+            return Err(DENIED.into());
+        }
         let path = Path::new(directory);
         if directory.len() > 4096 || directory.chars().any(char::is_control) || !path.is_absolute()
         {
@@ -43,6 +47,12 @@ impl Workspace {
         )
     }
     pub fn contains(&self, directory: &str) -> bool {
+        #[cfg(windows)]
+        if !crate::mcp_desktop::valid_windows_workspace_path(
+            directory.strip_prefix(r"\\?\").unwrap_or(directory),
+        ) {
+            return false;
+        }
         // Replacing the approved root with a symlink cannot broaden a live grant.
         self.root.canonicalize().ok().as_ref() == Some(&self.root)
             && Path::new(directory)
@@ -166,6 +176,34 @@ mod tests {
         assert!(scope.allows_frame(event));
         assert!(Workspace::new("relative").is_err());
     }
+    #[cfg(windows)]
+    #[test]
+    fn windows_workspace_rejects_network_roots_and_junction_escapes() {
+        assert!(Workspace::new(r"\\host\share\work").is_err());
+        assert!(Workspace::new(r"C:\").is_err());
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("approved");
+        let outside = temp.path().join("private");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let scope = Workspace::new(root.to_str().unwrap()).unwrap();
+        assert!(scope.contains(root.to_str().unwrap()));
+        let upper = root.to_string_lossy().to_uppercase();
+        if Path::new(&upper).exists() {
+            assert!(scope.contains(&upper));
+        }
+        let link = root.join("junction");
+        let output = std::process::Command::new(std::env::var_os("ComSpec").unwrap())
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "owned junction fixture failed");
+        assert!(!scope.contains(link.to_str().unwrap()));
+        assert!(!scope.contains(outside.to_str().unwrap()));
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlink_escape_and_replaced_root_cannot_broaden_scope() {

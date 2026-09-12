@@ -1,6 +1,7 @@
 //! Workspace-scoped MCP over a dedicated channel on an already trusted SSH
 //! transport. Never sends keystrokes to the user's SSH terminal or forwards
 //! arbitrary tool names, executable arguments, credentials, or desktop RPCs.
+mod windows;
 use super::*;
 use crate::ssh::{ChannelCloseGuard, TrustingHandler};
 use russh::{client, ChannelMsg, ChannelReadHalf};
@@ -8,9 +9,19 @@ use russh::{client, ChannelMsg, ChannelReadHalf};
 const MAX_REPLY: usize = 384 * 1024;
 const MAX_MESSAGES: usize = 64;
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FleetPlatform {
+    #[default]
+    Unix,
+    Windows,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FleetWorkspace {
+    #[serde(default)]
+    pub platform: FleetPlatform,
     pub executable: String,
     pub data_directory: String,
     pub directory: String,
@@ -210,6 +221,12 @@ pub(super) fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError>
         &config.data_directory,
         &config.directory,
     ] {
+        if config.platform == FleetPlatform::Windows {
+            if !windows::valid_path(path) {
+                return Err(ServiceError::invalid());
+            }
+            continue;
+        }
         if !path.starts_with('/')
             || path.len() > 4096
             || path.chars().any(char::is_control)
@@ -219,12 +236,27 @@ pub(super) fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError>
             return Err(ServiceError::invalid());
         }
     }
+    // cmd.exe is one supported OpenSSH default shell. Keep its full command
+    // below the 8191-character command limit, including server wrapping.
+    if config.platform == FleetPlatform::Windows && windows::command(config).len() > 7800 {
+        return Err(ServiceError::new(
+            "invalid_request",
+            "The approved Windows paths make the SSH bootstrap too long.",
+        ));
+    }
     Ok(())
+}
+#[cfg(windows)]
+pub(crate) fn valid_windows_workspace_path(path: &str) -> bool {
+    windows::valid_path(path)
 }
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 pub(super) fn command(config: &FleetWorkspace) -> String {
+    if config.platform == FleetPlatform::Windows {
+        return windows::command(config);
+    }
     format!(
         "exec {} mcp --data-dir {} --workspace-directory {}",
         quote(&config.executable),
@@ -402,6 +434,18 @@ pub(super) async fn execute(
         {
             return Err(ServiceError::new("needs_user_action", "Start and authorize the remote workspace in an updated LatticeTerm background service."));
         }
+        let platform_matches = match config.platform {
+            FleetPlatform::Windows => capabilities["platform"] == "windows",
+            FleetPlatform::Unix => {
+                matches!(capabilities["platform"].as_str(), Some("linux" | "macos"))
+            }
+        };
+        if !platform_matches {
+            return Err(ServiceError::new(
+                "unsupported",
+                "The remote platform differs from the user-approved workspace platform.",
+            ));
+        }
         let (tool, arguments) = action.tool();
         send(writer, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":tool,"arguments":arguments}})).await?;
         // Once dispatched, a broken or malformed reply cannot prove that a
@@ -435,6 +479,7 @@ mod tests {
     #[test]
     fn command_quotes_every_user_approved_path_without_shell_expansion() {
         let c = FleetWorkspace {
+            platform: FleetPlatform::Unix,
             executable: "/opt/a'$(whoami)/lattice-term".into(),
             data_directory: "/tmp/data space".into(),
             directory: "/workspace/demo".into(),

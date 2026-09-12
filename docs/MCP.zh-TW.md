@@ -306,11 +306,12 @@ Linux VNC 的鍵鼠及人工接手實機紀錄見 [MCP 遠端操作驗收](MCP-R
 
 ### 設定與權限
 
-1. 遠端 Linux／macOS 安裝支援工作區授權的 LatticeTerm，先從遠端桌面
+1. 遠端 Windows／Linux／macOS 安裝支援工作區授權的 LatticeTerm，先從遠端桌面
    啟動背景工作階段，明確分享狀態、內容或控制；需要新增 Agent 時，
    另核准已保存的啟動項目。MCP 不自動啟動 daemon、不新增遠端授權。
 2. 本機桌面正常建立 SSH 連線並確認 host key。在設定頁選該連線，勾選
-   「查看遠端 Fleet 工作區」，填入遠端執行檔、app data 與核准工作目錄
+   「查看遠端 Fleet 工作區」，選擇遠端作業系統，再填入執行檔、
+   app data 與核准工作目錄
    的絕對路徑；這些路徑由使用者指定，工具呼叫不能更換或添加參數。
 3. `fleetObserve` 只准列出狀態／啟動項目及等待狀態；`fleetRead` 另外
    允許讀輸出，`fleetControl` 另外允許送提示／取消，`fleetLaunch` 另外
@@ -322,6 +323,30 @@ Linux VNC 的鍵鼠及人工接手實機紀錄見 [MCP 遠端操作驗收](MCP-R
 5. 目錄限制不是 OS 沙箱。Agent 仍依遠端帳號與 CLI 的權限執行，可能
    使用該帳號已有的網路或目錄外能力；需要檔案隔離時，另外在遠端
    啟用受支援的 CLI／作業系統沙箱。此功能不提供託管協作服務。
+
+### Windows 遠端主機
+
+在本機授權表單選擇 **Windows**，三個路徑都填磁碟機完整路徑，
+例如 `C:\Users\you\projects\fleet-test`。直接使用遠端 Fleet 頁顯示的
+執行檔與資料目錄，不把 `%APPDATA%` 等環境變數交給工具展開。
+不接受 UNC 網路分享、裝置／具名管道路徑、磁碟機根目錄、`..`、
+替代資料流與不明確的 Windows 檔名。工作區仍在遠端 canonicalize，
+目錄外的 junction／符號連結無法取得該工作區的 MCP 權限。
+
+遠端需啟用 [Windows OpenSSH Server](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)，
+SSH 帳號與已開啟 LatticeTerm 背景服務的 Windows 帳號必須一致。
+支援 OpenSSH 預設 `cmd.exe` 或 PowerShell shell，不需要改系統
+預設 shell；Windows PowerShell 必須可執行。自訂 shell 尚未驗證。
+
+Windows 通道以固定的 PowerShell 啟動器執行核准主程式。路徑以
+編碼資料傳入，程式參數固定為 MCP 子命令、資料目錄與工作區；
+不插入 model 提供的 shell 程式碼，不變更 execution policy。
+主程式繼承原始 stdin／stdout，stderr 以 byte stream 複製，不透過
+PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同，
+在任何 Agent 操作送出前即拒絕。啟動指令上限 7800 個 ASCII 字元，
+路徑過長會在開啟 SSH channel 前被拒絕。
+
+自動驗收及待實機確認項目見 [Windows Fleet 驗收](MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md)。
 
 ### 工具動作
 
