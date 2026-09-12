@@ -5,7 +5,7 @@
 - `chat-workspace.zh-TW.png`：繁體中文，1200 × 780。
 - `chat-workspace.en.png`：英文，1200 × 780。
 - 擷取日期：2026-09-07。
-- 來源：`a91134a` 之後、尚未發布的工作樹；使用白瓷主題。
+- 來源：`a91134a` 之後、尚未發布的工作樹；使用淺色主題（目前名稱為霧藍）。
 
 圖片由 Chrome 擷取現有的 [ChatView](../../src/views/ChatView.tsx)、
 [NavRail](../../src/components/shell/NavRail.tsx) 與 [ViewHeader](../../src/components/shell/ViewHeader.tsx)，
