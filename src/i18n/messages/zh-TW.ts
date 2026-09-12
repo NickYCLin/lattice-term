@@ -923,6 +923,7 @@ export const zhTW = {
   "settings.mcpRemote.acknowledge": "我已檢查權限、指令與目錄，允許連到此 MCP 的工具使用它們",
   "settings.mcpRemote.grant": "開放所選操作",
   "agents.mcp.history.title": "MCP 操作紀錄",
+  "agents.mcp.history.action.remoteScreen": "擷取遠端畫面",
   "agents.mcp.history.action.remoteMetrics": "讀取主機資訊",
   "agents.mcp.history.action.remoteList": "列出遠端目錄",
   "agents.mcp.history.action.remoteExec": "提交遠端指令",

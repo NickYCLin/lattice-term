@@ -33,7 +33,7 @@ export interface AgentMcpHistory {
     id: number;
     at: number;
     client: string;
-    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "grant" | "revoke" | "read" | "interrupt";
+    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "remoteScreen" | "grant" | "revoke" | "read" | "interrupt";
     outcome: "accepted" | "replayed" | "failed" | "unknown";
     sessionId: string | null;
     targetId?: string | null;

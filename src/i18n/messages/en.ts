@@ -953,6 +953,7 @@ export const en: Messages = {
   "settings.mcpRemote.acknowledge": "I reviewed these permissions, commands and directories and allow tools connected to this MCP to use them",
   "settings.mcpRemote.grant": "Allow selected operations",
   "agents.mcp.history.title": "MCP operation history",
+  "agents.mcp.history.action.remoteScreen": "Capture remote screen",
   "agents.mcp.history.action.remoteMetrics": "Read host metrics",
   "agents.mcp.history.action.remoteList": "List remote directory",
   "agents.mcp.history.action.remoteExec": "Submit remote command",
