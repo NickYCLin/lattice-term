@@ -201,6 +201,7 @@ async fn exercise(live: bool, shell: FleetShell) {
     let plans = call(grant.id.clone(), FleetAction::ListPlans {})
         .await
         .unwrap();
+    eprintln!("Fleet fixture: workspace handshake and plan listing passed");
     assert_eq!(plans["result"]["plans"].as_array().unwrap().len(), 2);
     assert!(!plans.to_string().contains("private"));
     let action = |id: &str| FleetAction::Launch {
@@ -236,6 +237,7 @@ async fn exercise(live: bool, shell: FleetShell) {
         .unwrap()
         .to_owned();
     assert_ne!(first_id, second_id);
+    eprintln!("Fleet fixture: two independent PTYs launched");
     assert_eq!(first["result"]["session"]["label"], "first 中文🦀");
     assert_eq!(
         call(grant.id.clone(), action("first")).await.unwrap()["duplicate"],
@@ -316,6 +318,7 @@ async fn exercise(live: bool, shell: FleetShell) {
         }
     }
     if !live {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             let output = call(grant.id.clone(), read(first_id.clone()))
                 .await
@@ -326,9 +329,14 @@ async fn exercise(live: bool, shell: FleetShell) {
                 assert!(text.contains("中文"));
                 break;
             }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "owned PTY fixture produced no ready marker: {text:?}"
+            );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
+    eprintln!("Fleet fixture: PTY output verified");
     sink.set_shared_output(&second_id, true, Some(false));
     assert_eq!(
         call(grant.id.clone(), read(second_id.clone()))
