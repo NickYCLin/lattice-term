@@ -137,6 +137,47 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def test_capture_timeout_retries_without_recognizing_partial_image(self):
+        now = [0.0]
+        attempts = []
+
+        def capture(*args, **kwargs):
+            attempts.append(kwargs["timeout"])
+            if len(attempts) == 1:
+                now[0] += kwargs["timeout"]
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            now[0] += 2
+
+        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                patch.object(smoke.os, "kill"), \
+                patch.object(smoke, "simctl", side_effect=capture), \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout='["No connections yet", "Add connection"]')) as recognize:
+            result = smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"))
+        self.assertTrue(result["renderedStartup"])
+        self.assertEqual(attempts, [60, 30])
+        self.assertEqual(recognize.call_count, 1)
+        self.assertEqual(recognize.call_args.kwargs["timeout"], 28)
+
+    def test_persistent_capture_timeout_fails_without_extending_deadline(self):
+        now = [0.0]
+        attempts = []
+
+        def capture(*args, **kwargs):
+            attempts.append(kwargs["timeout"])
+            now[0] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                patch.object(smoke.os, "kill"), \
+                patch.object(smoke, "simctl", side_effect=capture), \
+                patch.object(smoke.subprocess, "run") as recognize:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"))
+        self.assertEqual(now[0], 90)
+        self.assertEqual(attempts, [60, 30])
+        recognize.assert_not_called()
+
     def test_ocr_timeout_retries_a_fresh_capture_without_extending_deadline(self):
         now = [0.0]
         attempts = []

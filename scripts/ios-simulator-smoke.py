@@ -106,7 +106,16 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         # Large iPad captures can finish writing before simctl exits on a
         # loaded runner. Keep the shared readiness deadline, but do not impose
         # a shorter 20-second cutoff on a capture that is still completing.
-        simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
+        try:
+            simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
+        except subprocess.TimeoutExpired:
+            # CoreSimulator's screenshot IPC can stall even after launch.
+            # Reap the timed-out helper and request a new capture, without
+            # accepting a partial image or extending the readiness deadline.
+            if time.monotonic() >= deadline:
+                raise
+            print(f"{device_id}: 截圖指令逾時，在原啟動畫面期限內重新擷取", flush=True)
+            continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
