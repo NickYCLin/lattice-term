@@ -290,6 +290,8 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 桌面橋接協定升為 2，舊背景服務仍可維持既有 Agent 工作；遠端授權需等使用者方便時重啟背景服務，程式不自動中斷既有 CLI。
 
+Linux VNC 的鍵鼠及人工接手實機紀錄見 [MCP 遠端操作驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md#2026-09-12-linux-vnc-鍵鼠與人工接手驗收)。
+
 目前仍沒有連續串流或跨主機 Fleet 編排。
 
 ## 後續階段（未實作）
