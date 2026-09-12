@@ -13,9 +13,9 @@ import {
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
-type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen";
+type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen" | "input";
 type Scopes = Record<Scope, boolean>;
-const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false };
+const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false, input: false };
 type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
 const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
 interface Session { sessionId: string; host: string; backend: Backend }
@@ -103,7 +103,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     setAcknowledged(false);
   };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
-    && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
+    && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
@@ -131,13 +131,14 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           <fieldset disabled={busy || !selected} className="mcp-remote__scopes"><legend>{t("settings.mcpRemote.scopes")}</legend>
             {(Object.keys(scopesOff) as Scope[]).map((scope) => <label key={scope}>
               <input type="checkbox" checked={scopes[scope]} disabled={
-                isScreen ? scope !== "screen"
-                : scope === "screen" ? true
+                isScreen ? scope !== "screen" && scope !== "input"
+                : scope === "screen" || scope === "input" ? true
                 : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec"
                 : scope === "list" || scope === "upload" || scope === "download"}
-                onChange={(e) => { setScopes((current) => ({ ...current, [scope]: e.target.checked })); setAcknowledged(false); }} /> {t(`settings.mcpRemote.scope.${scope}`)}
+                onChange={(e) => { setScopes((current) => ({ ...current, [scope]: e.target.checked, ...(scope === "input" && e.target.checked ? { screen: true } : {}), ...(scope === "screen" && !e.target.checked ? { input: false } : {}) })); setAcknowledged(false); }} /> {t(`settings.mcpRemote.scope.${scope}`)}
             </label>)}
           </fieldset>
+          {scopes.input && <p className="setting__description">{t("settings.mcpRemote.inputHint")}</p>}
           {scopes.screen && <p className="setting__description">{t("settings.mcpRemote.screenHint")}</p>}
           {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">
             <legend>{t("settings.mcpRemote.command")}</legend>

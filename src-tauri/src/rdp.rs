@@ -353,6 +353,38 @@ impl RdpRegistry {
 
     /// Which run of this session is live: the identity an MCP screen grant
     /// binds to, so a reconnection under the same id is not the same screen.
+    pub(crate) fn screen_controllable(&self, session_id: &str) -> bool {
+        self.get(session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|record| record.summary.interactive)
+    }
+
+    pub(crate) async fn mcp_input<F>(
+        &self,
+        session_id: &str,
+        generation: u64,
+        commands: &[RdpInputRequest],
+        validate: F,
+    ) -> Result<(), crate::mcp_desktop::ServiceError>
+    where
+        F: FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+    {
+        use crate::mcp_desktop::ServiceError;
+        let record = self
+            .get(session_id)
+            .map_err(|_| ServiceError::unavailable())?
+            .filter(|record| record.generation == generation && record.summary.interactive)
+            .ok_or_else(ServiceError::unavailable)?;
+        crate::sidecar::write_mcp_input_batch(&record.stdin, commands, record.stop.clone(), || {
+            if self.screen_generation(session_id) != Some(generation) {
+                return Err(ServiceError::unavailable());
+            }
+            validate()
+        })
+        .await
+    }
+
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
         let state = self.state.lock().ok()?;
         state

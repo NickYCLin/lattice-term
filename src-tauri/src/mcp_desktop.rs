@@ -9,7 +9,9 @@
 #[cfg(test)]
 mod loopback_tests;
 mod paths;
+mod screen_input;
 mod ssh_jobs;
+pub use screen_input::ScreenAction;
 
 use crate::mcp_screen::{ScreenBackend, ScreenKey};
 use crate::sftp::SftpRegistry;
@@ -57,6 +59,7 @@ pub enum Scope {
     /// One still picture of the shared screen, on request. Never a stream,
     /// and never keyboard or pointer input.
     Screen,
+    Input,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -74,6 +77,8 @@ pub struct Scopes {
     pub download: bool,
     #[serde(default)]
     pub screen: bool,
+    #[serde(default)]
+    pub input: bool,
 }
 
 impl Scopes {
@@ -85,6 +90,7 @@ impl Scopes {
             Scope::Upload => self.upload,
             Scope::Download => self.download,
             Scope::Screen => self.screen,
+            Scope::Input => self.input,
         }
     }
 }
@@ -162,6 +168,13 @@ pub enum DesktopOperation {
     CaptureScreen {
         target_id: String,
     },
+    ScreenInput {
+        target_id: String,
+        snapshot_id: String,
+        frame_id: u64,
+        action: ScreenAction,
+        request_id: String,
+    },
     ListDirectory {
         target_id: String,
         root_id: String,
@@ -197,6 +210,7 @@ impl DesktopOperation {
             Self::ListConnections => None,
             Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
+            | Self::ScreenInput { target_id, .. }
             | Self::ListDirectory { target_id, .. }
             | Self::Exec { target_id, .. }
             | Self::Transfer { target_id, .. }
@@ -209,6 +223,7 @@ impl DesktopOperation {
         match self {
             Self::GetMetrics { .. } => Some(Scope::Metrics),
             Self::CaptureScreen { .. } => Some(Scope::Screen),
+            Self::ScreenInput { .. } => Some(Scope::Input),
             Self::ListDirectory { .. } => Some(Scope::List),
             Self::Exec { .. } => Some(Scope::Exec),
             Self::Transfer {
@@ -226,7 +241,8 @@ impl DesktopOperation {
 
     fn request_id(&self) -> Option<&str> {
         match self {
-            Self::Exec { request_id, .. }
+            Self::ScreenInput { request_id, .. }
+            | Self::Exec { request_id, .. }
             | Self::Transfer { request_id, .. }
             | Self::Cancel { request_id, .. } => Some(request_id),
             _ => None,
@@ -241,28 +257,28 @@ pub struct ServiceError {
 }
 
 impl ServiceError {
-    fn new(code: &str, message: &str) -> Self {
+    pub(crate) fn new(code: &str, message: &str) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
         }
     }
 
-    fn invalid() -> Self {
+    pub(crate) fn invalid() -> Self {
         Self::new(
             "invalid_request",
             "The operation or approved configuration is invalid.",
         )
     }
 
-    fn denied() -> Self {
+    pub(crate) fn denied() -> Self {
         Self::new(
             "not_authorized",
             "This connection or operation is not shared, or its grant was revoked.",
         )
     }
 
-    fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self::new(
             "needs_user_action",
             "Connect and verify this session in LatticeTerm before sharing it.",
@@ -305,12 +321,24 @@ struct OperationRecord {
     cancel: watch::Sender<bool>,
 }
 
+#[derive(Clone)]
+struct ScreenReceipt {
+    id: String,
+    frame_id: u64,
+    width: u32,
+    height: u32,
+    digest: String,
+    issued: Instant,
+    source: ScreenKey,
+}
+
 #[derive(Default)]
 struct State {
     grants: HashMap<String, Arc<Grant>>,
     operations: HashMap<String, OperationRecord>,
     /// When each target last handed over a picture.
     captures: HashMap<String, Instant>,
+    screen_receipts: HashMap<(String, String), ScreenReceipt>,
 }
 
 pub struct DesktopService {
@@ -402,6 +430,18 @@ impl DesktopService {
 
     pub async fn grant(&self, request: GrantRequest) -> Result<TargetView, ServiceError> {
         validate_grant(&request)?;
+        let controllable = match request.backend {
+            Backend::Rdp => self.rdp.screen_controllable(&request.session_id),
+            Backend::Vnc => self.vnc.screen_controllable(&request.session_id),
+            Backend::Remote => self.remote.screen_controllable(&request.session_id),
+            _ => false,
+        };
+        if request.scopes.input && !controllable {
+            return Err(ServiceError::new(
+                "needs_user_action",
+                "The sharing host must allow control before MCP input can be granted.",
+            ));
+        }
         let identity = self
             .identity(request.backend, &request.session_id)
             .ok_or_else(ServiceError::unavailable)?;
@@ -474,6 +514,9 @@ impl DesktopService {
             self.stop_retaining(&state, &grant);
         }
         state.captures.remove(target_id);
+        state
+            .screen_receipts
+            .retain(|(target, _), _| target != target_id);
         for operation in state
             .operations
             .values()
@@ -512,6 +555,30 @@ impl DesktopService {
         }
     }
 
+    /// A real user input is an explicit takeover. Read-only grants survive;
+    /// any grant that included input needs a fresh user authorization.
+    pub fn take_over_screen(&self, backend: Backend, session_id: &str) {
+        let ids: Vec<_> = self
+            .state
+            .lock()
+            .map(|state| {
+                state
+                    .grants
+                    .values()
+                    .filter(|grant| {
+                        grant.view.backend == backend
+                            && grant.session_id == session_id
+                            && grant.view.scopes.input
+                    })
+                    .map(|grant| grant.view.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in ids {
+            let _ = self.revoke(&id);
+        }
+    }
+
     pub fn revoke_all(&self) {
         if let Ok(mut state) = self.state.lock() {
             for (_, grant) in state.grants.drain() {
@@ -521,6 +588,7 @@ impl DesktopService {
                 }
             }
             state.captures.clear();
+            state.screen_receipts.clear();
             for operation in state.operations.values() {
                 operation.cancel.send_replace(true);
             }
@@ -603,10 +671,11 @@ impl DesktopService {
             let response =
                 json!({ "operationId": lease.id, "state": "running", "duplicate": false });
             let service = Arc::clone(self);
+            let client = client.to_string();
             tokio::spawn(async move {
                 let _permit = permit;
                 let result = match service.authorized(&operation) {
-                    Ok(_) => service.run(&grant, &operation, Some(&lease)).await,
+                    Ok(_) => service.run(&client, &grant, &operation, Some(&lease)).await,
                     Err(error) => Err(error),
                 };
                 let result = service.authorized(&operation).and(result);
@@ -618,7 +687,7 @@ impl DesktopService {
             self.cancel(client, &grant.view.id, operation_id)
         } else {
             match self.calls.try_acquire() {
-                Ok(_permit) => self.run(&grant, &operation, lease.as_ref()).await,
+                Ok(_permit) => self.run(client, &grant, &operation, lease.as_ref()).await,
                 Err(_) => Err(ServiceError::new(
                     "busy",
                     "The desktop operation limit has been reached.",
@@ -645,6 +714,14 @@ impl DesktopService {
             // Nothing to check beyond the scope and the live stream: a
             // capture names no plan, path or file.
             DesktopOperation::CaptureScreen { .. } => {}
+            DesktopOperation::ScreenInput {
+                snapshot_id,
+                action,
+                ..
+            } => {
+                valid_id(snapshot_id)?;
+                action.events(u32::from(u16::MAX) + 1, u32::from(u16::MAX) + 1)?;
+            }
             DesktopOperation::Exec { plan_id, .. } => {
                 if !grant.plans.iter().any(|plan| plan.id == *plan_id) {
                     return Err(ServiceError::denied());
@@ -686,10 +763,22 @@ impl DesktopService {
 
     async fn run(
         &self,
+        client: &str,
         grant: &Grant,
         operation: &DesktopOperation,
         lease: Option<&OperationLease>,
     ) -> Result<Value, ServiceError> {
+        if let DesktopOperation::ScreenInput {
+            snapshot_id,
+            frame_id,
+            action,
+            ..
+        } = operation
+        {
+            return self
+                .screen_input(client, grant, snapshot_id, *frame_id, action)
+                .await;
+        }
         let mut revoked = grant.revoked.subscribe();
         let mut cancel = lease
             .map(|lease| lease.cancel.subscribe())
@@ -702,7 +791,10 @@ impl DesktopService {
                         .map_err(metrics_error)?;
                     Ok(json!({ "metrics": metrics_view(metrics), "platform": "linux" }))
                 }
-                DesktopOperation::CaptureScreen { .. } => self.capture_screen(grant),
+                DesktopOperation::CaptureScreen { .. } => self.capture_screen(client, grant),
+                DesktopOperation::ScreenInput { .. } => {
+                    unreachable!("handled before cancellable reads")
+                }
                 DesktopOperation::ListDirectory { root_id, path, .. } => {
                     let root = grant
                         .roots
@@ -981,7 +1073,7 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
     {
         return Err(ServiceError::invalid());
     }
-    if !request.backend.is_screen() && request.scopes.screen {
+    if !request.backend.is_screen() && (request.scopes.screen || request.scopes.input) {
         return Err(ServiceError::invalid());
     }
     if (request.backend == Backend::Ssh
@@ -1045,7 +1137,120 @@ fn sha256(bytes: &[u8]) -> String {
 const SCREEN_CAPTURE_INTERVAL: Duration = Duration::from_secs(2);
 
 impl DesktopService {
-    fn capture_screen(&self, grant: &Grant) -> Result<Value, ServiceError> {
+    async fn screen_input(
+        &self,
+        client: &str,
+        grant: &Grant,
+        snapshot_id: &str,
+        frame_id: u64,
+        action: &ScreenAction,
+    ) -> Result<Value, ServiceError> {
+        let receipt = {
+            let state = self.state.lock().map_err(|_| ServiceError::failed())?;
+            state
+                .screen_receipts
+                .get(&(grant.view.id.clone(), client.to_string()))
+                .cloned()
+                .filter(|receipt| receipt.id == snapshot_id && receipt.frame_id == frame_id)
+                .ok_or_else(|| {
+                    ServiceError::new("not_ready", "Capture this screen before sending input.")
+                })?
+        };
+        let events = action.events(receipt.width, receipt.height)?;
+        let validate = || self.consume_screen_receipt(client, grant, &receipt);
+        match grant.view.backend {
+            Backend::Rdp => {
+                self.rdp
+                    .mcp_input(
+                        &grant.session_id,
+                        grant.identity as u64,
+                        &events
+                            .iter()
+                            .map(screen_input::InputEvent::rdp)
+                            .collect::<Vec<_>>(),
+                        validate,
+                    )
+                    .await?
+            }
+            Backend::Vnc => {
+                self.vnc
+                    .mcp_input(
+                        &grant.session_id,
+                        grant.identity as u64,
+                        &events
+                            .iter()
+                            .map(screen_input::InputEvent::vnc)
+                            .collect::<Vec<_>>(),
+                        validate,
+                    )
+                    .await?
+            }
+            Backend::Remote => {
+                self.remote
+                    .mcp_input(
+                        &grant.session_id,
+                        grant.identity as u64,
+                        events
+                            .iter()
+                            .map(screen_input::InputEvent::remote)
+                            .collect(),
+                        validate,
+                    )
+                    .await?
+            }
+            _ => return Err(ServiceError::denied()),
+        }
+        Ok(json!({"submitted": true, "frameId": frame_id, "verificationRequired": true}))
+    }
+
+    fn consume_screen_receipt(
+        &self,
+        client: &str,
+        grant: &Grant,
+        receipt: &ScreenReceipt,
+    ) -> Result<(), ServiceError> {
+        let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
+        if *grant.revoked.borrow()
+            || !grant.view.scopes.input
+            || !state.grants.contains_key(&grant.view.id)
+        {
+            return Err(ServiceError::denied());
+        }
+        if !self.connected(grant) {
+            return Err(ServiceError::unavailable());
+        }
+        let current = state
+            .screen_receipts
+            .get(&(grant.view.id.clone(), client.to_string()));
+        if current.is_none_or(|current| current.id != receipt.id)
+            || receipt.issued.elapsed() >= Duration::from_secs(10)
+        {
+            return Err(ServiceError::new(
+                "not_ready",
+                "The screen observation expired or was already used; capture again.",
+            ));
+        }
+        let frame = self.screens.latest(&receipt.source).map_err(|_| {
+            ServiceError::new("not_ready", "The screen is unavailable; capture again.")
+        })?;
+        if frame.width != receipt.width
+            || frame.height != receipt.height
+            || sha256(&frame.bytes) != receipt.digest
+        {
+            return Err(ServiceError::new(
+                "not_ready",
+                "The screen changed since capture; inspect a new capture before sending input.",
+            ));
+        }
+        // One accepted action invalidates all clients' observations of this
+        // connection, including other grants, before any next input can pass.
+        state
+            .screen_receipts
+            .retain(|_, other| other.source != receipt.source);
+        Ok(())
+    }
+
+    fn capture_screen(&self, client: &str, grant: &Grant) -> Result<Value, ServiceError> {
         {
             let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
             let last = state.captures.get(&grant.view.id).copied();
@@ -1070,7 +1275,38 @@ impl DesktopService {
                     "This screen's frames are too large to hand over whole; lower the remote resolution or colour depth.",
                 ),
             })?;
+        let snapshot_id = if grant.view.scopes.input {
+            let receipt = ScreenReceipt {
+                id: opaque_id()?,
+                frame_id: frame.frame_id,
+                width: frame.width,
+                height: frame.height,
+                digest: sha256(&frame.bytes),
+                issued: Instant::now(),
+                source: self.screen_key(grant).ok_or_else(ServiceError::invalid)?,
+            };
+            let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
+            state
+                .screen_receipts
+                .retain(|_, receipt| receipt.issued.elapsed() < Duration::from_secs(10));
+            let key = (grant.view.id.clone(), client.to_string());
+            if state.screen_receipts.len() >= 256 && !state.screen_receipts.contains_key(&key) {
+                return Err(ServiceError::new(
+                    "capacity",
+                    "Too many pending screen observations.",
+                ));
+            }
+            let id = receipt.id.clone();
+            state.screen_receipts.insert(key, receipt);
+            Some(id)
+        } else {
+            None
+        };
         Ok(json!({
+            "snapshotId": snapshot_id,
+            "inputExpiresInMs": if snapshot_id.is_some() { 10_000 } else { 0 },
+            "coordinateSpace": "framePixels",
+            "scale": 1,
             "frameId": frame.frame_id,
             "capturedAt": frame.at,
             "width": frame.width,
