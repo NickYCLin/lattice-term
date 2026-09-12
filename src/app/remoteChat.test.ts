@@ -15,6 +15,13 @@ describe("Remote conversation projection", () => {
     expect(JSON.stringify(remoteThread(value))).not.toContain("private-");
     expect(() => remotePage(value, "deleted-item")).toThrow("changed");
   });
+  it("does not lose a page when tool output consists of JSON-escaped control bytes", () => {
+    const value = { ...thread(), items: [{ type: "text" as const, id: "control-output", text: "\u0001".repeat(12000) }] };
+    const page = remotePage(value, null);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ id: "control-output", truncated: true });
+    expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThan(40 * 1024);
+  });
   it("uses current host state, rejects stale turns and never selects a missing account", async () => {
     let value: ChatThread = { ...thread(), runningTurnId: "new-turn" };
     const chat = fakeChatApi({ threads: [value], getThread: () => value });

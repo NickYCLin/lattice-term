@@ -28,7 +28,10 @@ function remoteItem(item: ChatItem): RemoteChatItem {
   else if (item.type === "approval") text = `${item.name}\n${item.summary}\n${item.input}`;
   else if (item.type === "turnEnd") text = item.error ?? "";
   else text = item.text;
-  const bounded = clip(text, 8000);
+  let bounded = clip(text, 8000);
+  // JSON escapes control bytes as six characters. Keep even those messages
+  // small enough that a single item can always advance the page cursor.
+  if (encoder.encode(JSON.stringify(bounded)).length > 32 * 1024) bounded = clip(text, 4000);
   return { id: item.id, type: item.type, text: bounded, truncated: bounded !== text, ...(item.type === "approval" ? { requestId: item.requestId, pending: item.decision === "pending" } : {}) };
 }
 export function remotePage(thread: ChatThread, before: string | null): RemoteChatPage {

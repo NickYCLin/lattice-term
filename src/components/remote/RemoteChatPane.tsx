@@ -46,7 +46,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
     try {
       const result = await request(operation);
       if (!alive.current) return;
-      if (operation.kind === "send") setDrafts(value => ({ ...value, [operation.threadId]: "" }));
+      if (operation.kind === "send") setDrafts(value => value[operation.threadId] === operation.text ? { ...value, [operation.threadId]: "" } : value);
       if (operation.kind === "create") { setSelected((result as RemoteChatThread).id); setPage(null); }
       setBefore(null); setRefresh(value => value + 1);
     } catch (error) { if (alive.current) setProblem(String(error)); }
