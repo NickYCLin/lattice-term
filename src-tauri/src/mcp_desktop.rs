@@ -585,7 +585,7 @@ impl DesktopService {
                 DesktopOperation::GetMetrics { .. } => {
                     let metrics = crate::metrics::collect_for_session(&self.ssh, &grant.session_id)
                         .await
-                        .map_err(|_| ServiceError::failed())?;
+                        .map_err(metrics_error)?;
                     Ok(json!({ "metrics": metrics_view(metrics), "platform": "linux" }))
                 }
                 DesktopOperation::ListDirectory { root_id, path, .. } => {
@@ -909,6 +909,21 @@ fn sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// A host that is not Linux will never answer this probe, so say that
+/// instead of "the operation failed": one is worth retrying, the other is
+/// not. The probe's own words are not passed through; they can mention the
+/// commands it ran.
+fn metrics_error(reason: String) -> ServiceError {
+    if reason.contains("Linux") {
+        ServiceError::new(
+            "unsupported",
+            "Resource readings need a Linux host; this connection did not report Linux /proc data.",
+        )
+    } else {
+        ServiceError::failed()
+    }
+}
+
 /// Deliberately separate from the desktop metrics DTO. No server-supplied
 /// text (CPU model, mountpoint, filesystem, host or account) crosses MCP.
 /// Disk labels are snapshot-local ordinals, not stable device identifiers;
@@ -944,6 +959,21 @@ fn metrics_view(metrics: crate::metrics::HostMetricsPayload) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_host_without_linux_metrics_is_unsupported_rather_than_a_failure() {
+        use super::metrics_error;
+        let unsupported = metrics_error(
+            "The host did not report Linux /proc data — resource readings need a Linux host."
+                .to_string(),
+        );
+        assert_eq!(unsupported.code, "unsupported");
+        // The probe's own words never reach the client: they name commands.
+        assert!(!unsupported.message.contains("/proc data —"));
+
+        let broken = metrics_error("could not open a channel: closed".to_string());
+        assert_eq!(broken.code, "operation_failed");
+    }
+
     use super::*;
 
     fn service() -> Arc<DesktopService> {
