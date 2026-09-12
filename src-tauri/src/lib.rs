@@ -3623,6 +3623,9 @@ pub fn run() {
             handle.state::<Arc<TunnelRegistry>>().stop_all();
             handle.state::<Arc<RdpRegistry>>().stop_all();
             handle.state::<Arc<VncRegistry>>().stop_all();
+            handle
+                .state::<Arc<crate::remote_host::RemoteHostRegistry>>()
+                .shutdown();
         }
     });
 }

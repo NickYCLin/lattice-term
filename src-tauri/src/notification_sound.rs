@@ -182,7 +182,9 @@ mod tests {
     fn volume_scales_pcm_without_clipping_and_zero_is_silent() {
         fn samples(wave: &[u8]) -> Vec<i16> {
             wave[44..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|b| i16::from_le_bytes([b[0], b[1]]))
                 .collect()
         }
