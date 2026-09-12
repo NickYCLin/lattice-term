@@ -32,6 +32,7 @@ pub enum Action {
     RemoteStatus,
     /// One still picture of a shared screen.
     RemoteScreen,
+    RemoteInput,
     Grant,
     Revoke,
     /// Terminal output handed to a client. The content is never recorded.

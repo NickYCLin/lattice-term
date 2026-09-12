@@ -112,6 +112,48 @@ where
     .map_err(|_| format!("{channel_name} did not accept a command before the deadline."))?
 }
 
+/// Submit a bounded input batch under the existing UI writer lock. Once the
+/// first byte is written, cancellation or a partial write closes the engine
+/// rather than leaving an unmatched key/button press connected indefinitely.
+pub(crate) async fn write_mcp_input_batch<T: Serialize, F>(
+    writer: &Mutex<BoxedSidecarStdin>,
+    commands: &[T],
+    stop: watch::Sender<bool>,
+    validate: F,
+) -> Result<(), crate::mcp_desktop::ServiceError>
+where
+    F: FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+{
+    use crate::mcp_desktop::ServiceError;
+    let mut bytes = Vec::new();
+    if commands.is_empty() || commands.len() > 100 {
+        return Err(ServiceError::invalid());
+    }
+    for command in commands {
+        serde_json::to_writer(&mut bytes, command).map_err(|_| ServiceError::invalid())?;
+        bytes.push(b'\n');
+    }
+    let mut writer = timeout(Duration::from_secs(1), writer.lock())
+        .await
+        .map_err(|_| ServiceError::new("busy", "The screen input channel is busy."))?;
+    validate()?;
+    let guard = SidecarCloseCancellationGuard::new(stop);
+    let result = timeout(Duration::from_secs(1), async {
+        writer.write_all(&bytes).await?;
+        writer.flush().await
+    })
+    .await;
+    if matches!(result, Ok(Ok(()))) {
+        guard.disarm();
+        Ok(())
+    } else {
+        Err(ServiceError::new(
+            "unknown_outcome",
+            "Screen input may be partial; inspect the remote screen before retrying.",
+        ))
+    }
+}
+
 /// Waits briefly for a sidecar which has already announced closure, then asks
 /// the OS to kill it without releasing admission while the process remains.
 pub(crate) async fn wait_for_sidecar_exit(child: &mut Child) {
@@ -139,6 +181,65 @@ mod tests {
     #[derive(Serialize)]
     struct TestCommand {
         payload: String,
+    }
+
+    #[tokio::test]
+    async fn mcp_batch_rechecks_authorization_after_waiting_for_the_ui_writer() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (stream, mut reader) = tokio::io::duplex(1024);
+        let writer = Arc::new(Mutex::new(Box::new(stream) as BoxedSidecarStdin));
+        let held = writer.lock().await;
+        let authorized = Arc::new(AtomicBool::new(true));
+        let (stop, stopped) = watch::channel(false);
+        let task_writer = Arc::clone(&writer);
+        let task_authorized = Arc::clone(&authorized);
+        let task = tokio::spawn(async move {
+            write_mcp_input_batch(
+                &task_writer,
+                &[TestCommand {
+                    payload: "must not arrive".into(),
+                }],
+                stop,
+                || {
+                    if task_authorized.load(Ordering::SeqCst) {
+                        Ok(())
+                    } else {
+                        Err(crate::mcp_desktop::ServiceError::denied())
+                    }
+                },
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        authorized.store(false, Ordering::SeqCst);
+        drop(held);
+        assert_eq!(task.await.unwrap().unwrap_err().code, "not_authorized");
+        assert!(!*stopped.borrow());
+        use tokio::io::AsyncReadExt;
+        assert!(timeout(Duration::from_millis(20), reader.read_u8())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_partial_mcp_batch_stops_the_engine() {
+        let (stream, _reader) = tokio::io::duplex(1);
+        let writer = Mutex::new(Box::new(stream) as BoxedSidecarStdin);
+        let (stop, stopped) = watch::channel(false);
+        let result = timeout(
+            Duration::from_millis(20),
+            write_mcp_input_batch(
+                &writer,
+                &[TestCommand {
+                    payload: "partial".into(),
+                }],
+                stop,
+                || Ok(()),
+            ),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(*stopped.borrow());
     }
 
     #[tokio::test]

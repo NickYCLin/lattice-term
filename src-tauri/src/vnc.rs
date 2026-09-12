@@ -88,6 +88,15 @@ pub enum VncInputRequest {
     ReleaseAll,
 }
 
+impl VncInputRequest {
+    /// Whether this action is a person taking the screen back. The viewer
+    /// also sends `ReleaseAll` when it unmounts or re-renders, which says
+    /// nothing about who is at the keyboard, so it must not count.
+    pub fn takes_over_screen(&self) -> bool {
+        !matches!(self, Self::ReleaseAll)
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum EngineCommand {
@@ -359,6 +368,66 @@ impl VncRegistry {
 
     /// Which run of this session is live: the identity an MCP screen grant
     /// binds to, so a reconnection under the same id is not the same screen.
+    #[cfg(test)]
+    pub(crate) fn insert_mcp_test_session(
+        &self,
+        session_id: &str,
+        generation: u64,
+    ) -> tokio::io::DuplexStream {
+        let (writer, reader) = tokio::io::duplex(16_384);
+        let (stop, _) = watch::channel(false);
+        self.state.lock().unwrap().sessions.insert(
+            session_id.into(),
+            Arc::new(VncSessionRecord {
+                summary: VncSessionSummary {
+                    session_id: session_id.into(),
+                    profile_id: "mcp-test".into(),
+                    host: "vnc.test".into(),
+                    port: 5900,
+                    width: 100,
+                    height: 100,
+                    interactive: true,
+                },
+                generation,
+                stdin: AsyncMutex::new(Box::new(writer)),
+                stop,
+            }),
+        );
+        reader
+    }
+
+    pub(crate) fn screen_controllable(&self, session_id: &str) -> bool {
+        self.get(session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|record| record.summary.interactive)
+    }
+
+    pub(crate) async fn mcp_input<F>(
+        &self,
+        session_id: &str,
+        generation: u64,
+        commands: &[VncInputRequest],
+        validate: F,
+    ) -> Result<(), crate::mcp_desktop::ServiceError>
+    where
+        F: FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+    {
+        use crate::mcp_desktop::ServiceError;
+        let record = self
+            .get(session_id)
+            .map_err(|_| ServiceError::unavailable())?
+            .filter(|record| record.generation == generation && record.summary.interactive)
+            .ok_or_else(ServiceError::unavailable)?;
+        crate::sidecar::write_mcp_input_batch(&record.stdin, commands, record.stop.clone(), || {
+            if self.screen_generation(session_id) != Some(generation) {
+                return Err(ServiceError::unavailable());
+            }
+            validate()
+        })
+        .await
+    }
+
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
         let state = self.state.lock().ok()?;
         state
@@ -812,6 +881,12 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releasing_held_keys_is_not_a_person_taking_over() {
+        assert!(VncInputRequest::MouseMove { x: 4, y: 9 }.takes_over_screen());
+        assert!(!VncInputRequest::ReleaseAll.takes_over_screen());
+    }
 
     fn test_record(
         session_id: &str,

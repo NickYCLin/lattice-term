@@ -12,7 +12,9 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::{oneshot, Semaphore};
 
-pub const PROTOCOL: u32 = 1;
+// Version 2 adds independently granted screen input and capture receipts.
+// Older peers must refuse remote sharing instead of guessing new scopes.
+pub const PROTOCOL: u32 = 2;
 const MAX_TARGETS: usize = 64;
 const MAX_CALLS: usize = 16;
 const MAX_REPLY: usize = 512 * 1024;

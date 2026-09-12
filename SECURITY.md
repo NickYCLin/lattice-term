@@ -64,3 +64,14 @@ Remote MCP tools require a live desktop bridge and separate, initially disabled 
 MCP observers use daemon protocol 2, distinct from desktop protocol 1. Legacy daemons ignore unknown role fields, so the adapter must use a version those daemons reject before returning private session data. The desktop negotiates MCP support before sending administration frames; unsupported commands fail locally without dropping existing desktop sessions. An outdated daemon must be restarted after existing work finishes; the application never forcibly restarts it for MCP. This protects protocol compatibility, not against a malicious process already running as the same OS user with access to the desktop token.
 
 These statements describe the current source tree, not a security audit or certification.
+
+### MCP screen input
+
+Screen capture does not authorize keyboard or pointer input. Input requires a
+separate live-connection grant and, for Lattice Remote, host-approved control.
+Each discrete input batch consumes a client-bound capture receipt within ten
+seconds; changed pixels, dimensions, connection generation, revocation or local
+viewer takeover invalidate it. Coordinates use captured frame pixels. A tool
+submission is not confirmation of a remote application outcome. Once accepted,
+input cannot be rolled back; partial RDP/VNC writes close the engine to avoid
+stranded pressed keys. Input metadata is audited without text, keys or coordinates.

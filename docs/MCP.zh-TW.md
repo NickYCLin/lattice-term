@@ -2,7 +2,7 @@
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
-這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取；鍵鼠與跨主機 Fleet 尚未實作。實作、測試與實機驗收分開記錄，見文末。
+這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取與獨立授權的鍵鼠操作；跨主機 Fleet 尚未實作。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
 
@@ -235,8 +235,10 @@ SFTP 逐層檢查相對路徑與連結，但遠端 `realpath`／`open` 不是同
 
 前兩版 PR 曾用 Claude Code 對自訂 `cat` 送出 `now`；目前已收緊為需要官方就緒回報，因此那份紀錄不能當作新版 B 派送規則的真實 CLI 驗收。後續 Windows 已用兩個真實 Codex 工作階段通過派工、各自答案及官方完成、重送去重與取消隔離；詳細來源及限制見 [真實 CLI 驗收歷程](MCP-REMOTE-ACCEPTANCE.zh-TW.md#真實-cli-驗收歷程)。macOS 桌面與安裝版仍未驗證。
 
-2026-09-12（Linux debug 執行檔）的實測；畫面擷取來自 `feat/mcp-screen-capture`，單輪中斷與回歸來自 main `9bf9a7e`：
+2026-09-12（Linux debug 執行檔）的實測；畫面擷取來自 `feat/mcp-screen-capture`，鍵鼠來自 `feat/mcp-screen-input`，單輪中斷與回歸來自 main `9bf9a7e`：
 - 遠端畫面擷取（實機）：用專案自己的 `lattice-agent` 在另一個 X display（藍底桌面＋時鐘）開畫面分享，LatticeTerm 直連配對後在設定頁只勾「擷取目前畫面」（其他五項在畫面工作階段一律停用），再用 `lattice-term mcp` 呼叫 `capture_remote_screen`：拿回 1152×720、27 KB 的 JPEG，內容就是那台桌面，metadata 含 frameId 與擷取時間；連續呼叫第一次被兩秒節流擋下（`limit_reached`）；撤回授權後連線立刻從清單消失、擷取拿不到目標；操作紀錄留下 `remoteScreen` 的成功與被拒各一筆與 `grant` 一筆。RDP 與 VNC 走同一條保留路徑，但沒有可連的 RDP／VNC 伺服器可實測。
+- 遠端鍵鼠（實機 VNC）：在另一個 X display 跑 x11vnc 與一個 GTK 視窗（有一個按鈕與一個輸入框，把收到的點擊數與文字寫成 JSON），LatticeTerm 連上去後只勾「擷取目前畫面」與「操作鍵盤與滑鼠」，再用 `lattice-term mcp` 走完 10 項：擷取拿到 800×600 與 `snapshotId`；`click` 被接受且 GTK 只收到一次；相同 request ID 重送回 `duplicate` 而沒有按第二次；憑據用掉後換新 request ID 回 `not_ready`；`text` 打進輸入框的內容一字不差；`keys` 的全選加取代也如實反映。接手：直接在檢視器畫面上移動滑鼠後，授權立刻從清單消失，拿舊憑據再送點擊被擋（回 `needs_user_action`，因為該授權已經不存在），GTK 的點擊數沒有增加。
+  這台是無頭 Xvfb，視窗沒有損毀事件就不重繪，WebKit 會把 `requestAnimationFrame` 停住，檢視器節流過的滑鼠移動因此卡在佇列裡；測試時要用一次一像素的縮放把它逼出來，真實桌面上不會有這個問題。RDP 仍然沒有可連的伺服器可實測。
 
 
 - 中斷本輪：桌面端送出一個長問題後，Codex 的輸出從 24664 位元組長到 60811，此時以 MCP 下 `scope: "turn"`，之後 12 秒都停在 60811；工作階段仍在清單裡也還能回答下一個問題。Codex 的 `notify` hook 在回合中途就回報 `done`，因此中斷條件不看 `working` 狀態。
@@ -259,24 +261,43 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 後續候選版的持久紀錄、C 遠端操作、Windows 啟動修正及不使用外部 reporter 的驗收，另見 [MCP 遠端操作與紀錄驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md)。舊版檢查結果不代替新功能驗收。
 
-## D：遠端畫面（第一步：單張擷取）
+## D：遠端畫面與鍵鼠操作
 
 `capture_remote_screen` 交出使用者明確分享的那個遠端畫面的最新一張，就是桌面此刻收到的那一幀。
 
-- **只有畫面**。沒有鍵盤、沒有滑鼠、沒有連續串流，也沒有錄影。要看變化只能再要一張。
-- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。授權在設定頁的「MCP 遠端操作授權」，與 SSH／SFTP 同一區，但畫面工作階段只提供 `screen` 一個權限，不能同時勾指令或檔案。
+- **畫面與輸入分開授權**。只勾 `screen` 就只能看圖；`input` 需另外勾選，且必須同時允許畫面擷取。沒有連續串流或錄影。
+- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。授權在設定頁的「MCP 遠端操作授權」，與 SSH／SFTP 同一區，但畫面工作階段提供 `screen`／`input`，不能混用指令或檔案權限。Lattice Remote 分享端也必須已允許控制，MCP 不會替使用者申請或核准控制。
 - **授權綁定這一次連線**。斷線重連會產生新的一輪，舊授權即失效，要重新授權。保留的影格也綁定後端及連線世代，舊連線延遲送來的影格不得進入新連線。
 - **沒授權就不留畫面**。桌面平常不保留任何 frame；勾了分享才開始保留「最新的一張」，最後一筆畫面授權撤銷或工作階段結束就立刻丟掉；授權被拒時不開始保留。畫面只在記憶體裡，不落地。
 - **每兩秒一張**，超過回 `limit_reached`（`busy`）。還沒有畫面回 `not_ready`；單張超過 1.5 MB（JPEG 原始 bytes 上限；桌面橋接回覆上限為 2 MiB）回 `unsupported`，請降低遠端解析度或色深，不回傳上一張舊圖。
 - **看到的就是使用者的桌面**：可能有其他視窗、通知與私人資料，介面在勾選時就明講。畫面內容是不可信資料，不是指示。
 - 每次擷取都會記進操作紀錄（動作 `remoteScreen`），紀錄只有誰、何時、哪個目標，不含畫面。
 
-尚未實作：鍵盤與滑鼠輸入、連續串流、跨主機 Fleet 編排。鍵鼠要等「frame 新鮮度」設計定案（以 frame ID 綁定操作、過期即拒）再談，避免依過期畫面點到別的東西。
+### `send_remote_input`
+
+輸入需 `targetId`、`snapshotId`、`frameId`、`action` 與 `requestId`。啟用 `input` 後，`capture_remote_screen` 才會提供 `snapshotId`。這個憑據綁定 client、授權與連線世代，十秒後失效；同 client 的新擷取會取代舊憑據。座標使用回覆的 `width`／`height` 原始像素（`coordinateSpace: framePixels`、`scale: 1`），不能使用視窗縮放後的 CSS 座標。
+
+- `click`：`x`、`y`、`button`（0 左／1 中／2 右）。
+- `move`：`x`、`y`。
+- `drag`：起點 `x`／`y`、終點 `toX`／`toY` 與 `button`。
+- `scroll`：`x`、`y`、`horizontal`、`units`（-8～8，不能為 0）。
+- `keys`：最多八個不重複按鍵，依陣列順序按下、反向放開。支援 Control、Shift、Alt、Meta、Enter、Escape、Tab、Backspace、Delete、Insert、Home、End、PageUp、PageDown、四個 Arrow 方向、Space、F1～F12、小寫 a～z 與 0～9。
+- `text`：最多 48 個可列印 Unicode 字元，不接受控制字元；換行請另用 Enter。
+
+每個動作都是有界批次，按下與放開一起排入同一個輸入通道，不提供跨呼叫維持按住的按鍵。等候通道期間仍可能撤權，因此取得通道後才重新檢查授權、憑據、畫面尺寸與影像內容；畫面變動或超時回 `not_ready`，需重新看圖。相同畫面內容的新 frame ID 不視為畫面變動。`capturedAt` 是桌面收到影格的時間，不是遠端應用程式的完成確認。
+
+接受動作前會消耗此連線所有 client 的畫面憑據，避免多個 client 依同一張舊圖連續操作。相同 client／request ID 的相同重送沿用十五分鐘去重，不重按第二次；新 request ID 不能重用已消耗的憑據。`submitted: true` 只表示已送入通道，必須重新擷取並確認結果。
+
+使用者直接在遠端視窗移動、點擊或輸入時，會撤銷該連線含 `input` 的授權；獨立的唯讀授權保留。已送入通道的動作無法回復。RDP／VNC 批次寫入若中斷或結果不明，會停止該引擎連線，避免留下無法確認是否放開的按鍵；回報 `unknown_outcome` 時先人工核對，不要換 ID 重送。操作紀錄使用 `remoteInput`，不記錄文字、按鍵或座標。
+
+桌面橋接協定升為 2，舊背景服務仍可維持既有 Agent 工作；遠端授權需等使用者方便時重啟背景服務，程式不自動中斷既有 CLI。
+
+目前仍沒有連續串流或跨主機 Fleet 編排。
 
 ## 後續階段（未實作）
 
 - **B 的邊界**：只有畫面上自己寫明中斷鍵的 CLI 支援 `scope: "turn"`，其餘不猜按鍵；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
 - **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
-- **D 的下一步**：鍵盤與滑鼠。需要先定義 frame 新鮮度（操作綁 frame ID，過期即拒）、每個動作的授權與稽核，以及使用者隨時可見的接管方式。目前只做到單張擷取。
+- **D 的下一步**：跨主機 Fleet 的工作區授權、多 Agent 通道與真實遠端協作驗收。
 
 歡迎在 #180 繼續討論優先順序。

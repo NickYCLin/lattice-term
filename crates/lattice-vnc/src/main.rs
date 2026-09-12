@@ -444,7 +444,10 @@ async fn run_session(
                     }
                     // Bell, clipboard text, cursor shapes: nothing to composite.
                     Some(_) => {}
-                    None => {}
+                    // vnc-rs poll_event uses try_recv and returns immediately
+                    // on an empty queue. Yield instead of spinning a core and
+                    // starving stdin/network work while the screen is idle.
+                    None => tokio::time::sleep(Duration::from_millis(2)).await,
                 }
             }
             _ = ticker.tick() => {

@@ -2711,7 +2711,11 @@ async fn remote_input(
     session_id: String,
     request: RemoteInputRequest,
     registry: State<'_, Arc<RemoteRegistry>>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
+    if request.takes_over_screen() {
+        service.take_over_screen(mcp_desktop::Backend::Remote, &session_id);
+    }
     crate::remote::input(registry.inner(), &session_id, request).await
 }
 
@@ -2946,7 +2950,11 @@ async fn rdp_input(
     session_id: String,
     request: RdpInputRequest,
     registry: State<'_, Arc<RdpRegistry>>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
+    if request.takes_over_screen() {
+        service.take_over_screen(mcp_desktop::Backend::Rdp, &session_id);
+    }
     crate::rdp::input(&app, registry.inner(), &session_id, request).await
 }
 
@@ -3086,7 +3094,11 @@ async fn vnc_input(
     session_id: String,
     request: VncInputRequest,
     registry: State<'_, Arc<VncRegistry>>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
+    if request.takes_over_screen() {
+        service.take_over_screen(mcp_desktop::Backend::Vnc, &session_id);
+    }
     crate::vnc::input(&app, registry.inner(), &session_id, request).await
 }
 

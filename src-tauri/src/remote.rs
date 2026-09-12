@@ -139,6 +139,15 @@ pub enum RemoteInputRequest {
     ReleaseAll,
 }
 
+impl RemoteInputRequest {
+    /// Whether this action is a person taking the screen back. The viewer
+    /// also sends `ReleaseAll` when it unmounts or re-renders, which says
+    /// nothing about who is at the keyboard, so it must not count.
+    pub fn takes_over_screen(&self) -> bool {
+        !matches!(self, Self::ReleaseAll)
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteFrameEvent {
@@ -471,6 +480,59 @@ impl RemoteRegistry {
     /// Which run of this session is live: the identity an MCP screen grant
     /// binds to, so a reconnection under the same id is not the same screen.
     /// A terminal-only share has no screen to hand over.
+    pub(crate) fn screen_controllable(&self, session_id: &str) -> bool {
+        self.access(session_id)
+            .is_ok_and(|access| !access.summary.view_only && !access.summary.terminal)
+    }
+
+    pub(crate) async fn mcp_input<F>(
+        &self,
+        session_id: &str,
+        generation: u64,
+        commands: Vec<RemoteInputRequest>,
+        validate: F,
+    ) -> Result<(), crate::mcp_desktop::ServiceError>
+    where
+        F: FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+    {
+        use crate::mcp_desktop::ServiceError;
+        let access = self
+            .access(session_id)
+            .map_err(|_| ServiceError::unavailable())?;
+        if access.summary.view_only
+            || access.summary.terminal
+            || commands.is_empty()
+            || commands.len() > 100
+        {
+            return Err(ServiceError::denied());
+        }
+        let messages: Vec<_> = commands
+            .into_iter()
+            .map(|command| {
+                resolve_input(command)
+                    .map(RemoteMessage::Input)
+                    .ok_or_else(ServiceError::invalid)
+            })
+            .collect::<Result<_, _>>()?;
+        // Reserve the whole batch before validation. Sending the permits has
+        // no await, so local input cannot interleave inside a chord or drag.
+        let permits = tokio::time::timeout(
+            Duration::from_secs(1),
+            access.outbound.reserve_many(messages.len()),
+        )
+        .await
+        .map_err(|_| ServiceError::new("busy", "The screen input channel is busy."))?
+        .map_err(|_| ServiceError::unavailable())?;
+        if self.screen_generation(session_id) != Some(generation) {
+            return Err(ServiceError::unavailable());
+        }
+        validate()?;
+        for (permit, message) in permits.zip(messages) {
+            permit.send(message);
+        }
+        Ok(())
+    }
+
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
         let state = self.state.lock().ok()?;
         state
@@ -1326,6 +1388,12 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Barrier;
+
+    #[test]
+    fn releasing_held_keys_is_not_a_person_taking_over() {
+        assert!(RemoteInputRequest::MouseMove { x: 4, y: 9 }.takes_over_screen());
+        assert!(!RemoteInputRequest::ReleaseAll.takes_over_screen());
+    }
 
     #[test]
     fn only_an_unreachable_relay_blames_the_address() {

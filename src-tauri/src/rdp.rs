@@ -89,6 +89,15 @@ pub enum RdpInputRequest {
     ReleaseAll,
 }
 
+impl RdpInputRequest {
+    /// Whether this action is a person taking the screen back. The viewer
+    /// also sends `ReleaseAll` when it unmounts or re-renders, which says
+    /// nothing about who is at the keyboard, so it must not count.
+    pub fn takes_over_screen(&self) -> bool {
+        !matches!(self, Self::ReleaseAll)
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum EngineCommand {
@@ -353,6 +362,38 @@ impl RdpRegistry {
 
     /// Which run of this session is live: the identity an MCP screen grant
     /// binds to, so a reconnection under the same id is not the same screen.
+    pub(crate) fn screen_controllable(&self, session_id: &str) -> bool {
+        self.get(session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|record| record.summary.interactive)
+    }
+
+    pub(crate) async fn mcp_input<F>(
+        &self,
+        session_id: &str,
+        generation: u64,
+        commands: &[RdpInputRequest],
+        validate: F,
+    ) -> Result<(), crate::mcp_desktop::ServiceError>
+    where
+        F: FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+    {
+        use crate::mcp_desktop::ServiceError;
+        let record = self
+            .get(session_id)
+            .map_err(|_| ServiceError::unavailable())?
+            .filter(|record| record.generation == generation && record.summary.interactive)
+            .ok_or_else(ServiceError::unavailable)?;
+        crate::sidecar::write_mcp_input_batch(&record.stdin, commands, record.stop.clone(), || {
+            if self.screen_generation(session_id) != Some(generation) {
+                return Err(ServiceError::unavailable());
+            }
+            validate()
+        })
+        .await
+    }
+
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
         let state = self.state.lock().ok()?;
         state
@@ -1064,6 +1105,12 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releasing_held_keys_is_not_a_person_taking_over() {
+        assert!(RdpInputRequest::MouseMove { x: 4, y: 9 }.takes_over_screen());
+        assert!(!RdpInputRequest::ReleaseAll.takes_over_screen());
+    }
 
     fn test_record(
         session_id: &str,
