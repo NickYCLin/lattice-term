@@ -589,9 +589,14 @@ export function RemoteHostDialog({
             {t("common.close")}
           </button>
           {host.status && !editing ? (
-            <button type="button" className="button button--primary" disabled={busy} onClick={() => setEditing(true)}>{t("remote.host.editSettings")}</button>
+            <button key="edit" type="button" className="button button--primary" disabled={busy} onClick={(event) => {
+              // React can replace this action with a submit button before the
+              // browser finishes activation. Opening settings must not save.
+              event.preventDefault();
+              setEditing(true);
+            }}>{t("remote.host.editSettings")}</button>
           ) : (
-            <button type="submit" form={formId} className="button button--primary" disabled={busy}>{busy ? t("remote.host.applying") : t("remote.host.saveSettings")}</button>
+            <button key="save" type="submit" form={formId} className="button button--primary" disabled={busy}>{busy ? t("remote.host.applying") : t("remote.host.saveSettings")}</button>
           )}
         </footer>
       </div>
