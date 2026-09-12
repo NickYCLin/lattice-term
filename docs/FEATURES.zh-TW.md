@@ -13,8 +13,8 @@
 | Lattice Remote | **基礎功能可用** | 已完成使用者主動啟動、Noise 端對端加密、主螢幕／純終端分享，以及由分享端分別授權的鍵盤／滑鼠或終端輸入與單一根目錄檔案瀏覽、上下載；另支援自架 lattice-relay 中繼、永久九位數裝置 ID、跨網路連線、裝置金鑰釘選與固定配對碼（無人值守）；以 ID 連線過的裝置會留在「我的連線」，中繼位址失效時可在連線對話框就地更正。目前仍是自架、小規模服務，NAT 直連穿透與多人租戶管理尚未加入。 |
 | 發行與更新 | **可用** | Windows x64、Linux x64／arm64、macOS Intel／Apple Silicon 安裝檔、更新簽章、Release PR 與應用程式內更新已自動化。 |
 | Android | **預覽** | 共用的純 Rust SSH／SFTP／Tunnel／Vault 核心與行動介面可建置；需要桌面 sidecar 的 RDP、VNC 與 Agent Fleet 不提供。 |
-| iOS | **預覽／上架準備中** | 已有 Simulator 驗證；提供 App Store 匯出、獨立建置號、區網權限說明、隱私清單與發布檢查。簽章實機安裝、TestFlight 與 App Store 審核仍待完成，詳見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。 |
-| 進階 Agent 與行動能力 | **部分完成** | 排程任務、接續執行與同時執行上限、提示佇列，Linux 的 bubblewrap 檔案範圍沙箱，跨程序背景服務（勾選「留在背景」的工作階段在關閉 LatticeTerm 後繼續執行、下次開啟自動接回），以及讓外部 AI 透過 MCP 查看、提示與啟動分享的背景工作階段已完成；SSH MCP 遠端 Fleet 已支援 Windows／Linux／macOS 工作區授權與多 PTY；遠端 panes、macOS／Windows 的沙箱與 iOS 上架仍待完成。 |
+| iOS | **已上架** | iPhone／iPad 可從 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 下載；目前商店版本為 2.0.0（2026-09-12 查核）。商店版與主分支的新功能可能不同，開發與驗證紀錄見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。 |
+| 進階 Agent 與行動能力 | **部分完成** | 排程任務、接續執行與同時執行上限、提示佇列，Linux 的 bubblewrap 檔案範圍沙箱，跨程序背景服務（勾選「留在背景」的工作階段在關閉 LatticeTerm 後繼續執行、下次開啟自動接回），以及讓外部 AI 透過 MCP 查看、提示與啟動分享的背景工作階段已完成；SSH MCP 遠端 Fleet 已支援 Windows／Linux／macOS 工作區授權與多 PTY；遠端 panes、macOS／Windows 的沙箱仍待完成。 |
 
 ## 主要特色
 
@@ -66,7 +66,7 @@
 1. **Lattice Remote 連線範圍**：鍵盤／滑鼠遠端控制已可用（由分享端明確授權）；免帳戶數字裝置 ID、自架 Relay（`docs/RELAY_SERVER.zh-TW.md`）、裝置金鑰釘選（TOFU）與固定配對碼無人值守已可用；接著加入 NAT 直連穿透。連線清單先保存在本機，帳戶只作為日後跨裝置同步與團隊權限的選配層。
 2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH transport 已提供 MCP 工作區與遠端多 PTY 操作；桌面遠端 panes 與 Relay Fleet transport 尚未提供。
 3. **Agent 編排與隔離**：補齊其他工具的 hook 與 token／cost 可觀測事件；排程、佇列、接續執行與同時執行上限已完成，Linux 檔案範圍沙箱已完成，接著是 macOS／Windows 的對應隔離與網路／資源限制。
-4. **平台完整度**：設計安全的 Windows npm shim adapter、持續強化 Android 發行流程，並完成 iOS 實機安裝、TestFlight 與上架驗證。
+4. **平台完整度**：設計安全的 Windows npm shim adapter、持續強化 Android 發行流程，並持續驗證 iOS 商店更新與實機操作。
 5. **正式發行信任**：自動更新包已有 Tauri 簽章；Windows Authenticode 與 Apple Developer ID／notarization 仍需發行者憑證。
 
 ## 鍵盤快捷鍵

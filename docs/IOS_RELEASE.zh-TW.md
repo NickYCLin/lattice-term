@@ -2,7 +2,13 @@
 
 本文件取代早期 Simulator 計畫中的企業 In-House 匯出步驟。Simulator 可啟動、已簽章的實機 App、TestFlight 可安裝與 App Store 已上架是不同狀態，須各自取得證據。
 
-## 最新審核狀態（2026-09-07）
+## 目前商店狀態（2026-09-12）
+
+LatticeTerm 已在 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 公開上架。Apple 公開查詢資料確認 App ID `6808952335`、Bundle ID `io.github.nickyclin.latticeterm`、版本 `2.0.0`，首發日期為 2026-09-11。使用者可直接下載，無須 TestFlight 邀請；地區供應、相容性與後續更新以商店頁面為準。
+
+以下保留送審與建置的歷史紀錄，不代表目前仍待上架。商店 2.0.0 的上架也不代表主分支後續功能已發布到 iOS。
+
+## 歷史審核狀態（2026-09-07）
 
 Apple 於 08:16（台灣時間）將 `1.0.0（2）` 退件，提交頁為「問題未解決／已拒絕」。原因為 **Guideline 2.1 — Information Needed — New App Submission**：開發者帳號審核歷史有限，需補充實體裝置操作錄影及五類產品說明。通知沒有指出具體閃退或程式錯誤。
 

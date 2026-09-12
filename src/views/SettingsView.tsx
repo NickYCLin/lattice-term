@@ -759,7 +759,7 @@ export function SettingsView({
             <p className="mobile-download__lead">{t("settings.mobile.scan")}</p>
             <ul className="mobile-download__list">
               <li>{t("settings.mobile.android")}</li>
-              <li>{t("settings.mobile.ios")}</li>
+              <li><a href="https://apps.apple.com/app/latticeterm/id6808952335" target="_blank" rel="noreferrer">{t("settings.mobile.ios")}</a></li>
             </ul>
             <a
               className="mobile-download__link mono"

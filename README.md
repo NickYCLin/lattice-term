@@ -62,7 +62,7 @@ GitHub Copilot CLI、Hermes Agent、Cursor Agent、Aider、Qwen Code、Kimi Code
 | Linux x64 | `amd64.deb`、`x86_64.rpm` 或 `amd64.AppImage` |
 | Linux ARM64 | `arm64.deb`、`aarch64.rpm` 或 `aarch64.AppImage` |
 
-目前為公開測試階段，以桌面版為主。行動版進度與限制見 [功能現況](docs/FEATURES.zh-TW.md#完成度總覽)。
+iPhone／iPad 已可從 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 下載；Android 安裝入口見 [行動版下載頁](https://nickyclin.github.io/lattice-term/)。各平台功能與限制見 [功能現況](docs/FEATURES.zh-TW.md#完成度總覽)。
 主分支可能包含未發布功能；請對照 [Release 更新說明](https://github.com/NickYCLin/lattice-term/releases)。
 
 ## 開始使用
