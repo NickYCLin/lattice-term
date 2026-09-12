@@ -176,7 +176,9 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 同一 request ID 的每次回覆各占一筆；成功的去重回覆標「重送」，不表示執行第二次。已接受只代表伺服器接受操作，不代表模型完成工作或測試通過；失敗也不保證沒有副作用。遠端操作另記已知的 opaque target ID，不記原始主機、指令或路徑。遠端授權／撤權會記錄；exec／傳檔完成結果由 `get_remote_operation` 查詢，不另追加背景完成事件。未回覆的在途呼叫、adapter 端拒絕的參數、Agent 唯讀查詢與 Agent 授權變更不在這份紀錄內。
 
-`agent-mcp-audit/history.json` 是最多 256 筆／256 KiB 的版本化快照。背景 worker 最多留一份待寫快照，正常關閉最多等待 250ms；突然斷電或強制終止仍可能遺失尚未寫入的紀錄，並留下暫存檔。這不是 append-only、防竄改或完整稽核帳本，request ID 去重仍不跨重啟。
+讀取終端輸出（`read_agent_output`）也會入紀錄，動作是 `read`，只記「誰在什麼時候讀了哪個工作階段」，不記 cursor 範圍與任何輸出內容；被拒絕的讀取一樣記一筆（`failed`），方便看出有人試過。同一個 client 對同一個工作階段的連續讀取會併成一筆，帶 `repeated` 次數與 `firstAt`，5 分鐘沒再讀就另起一筆——否則輪詢式讀取會把其他紀錄擠掉。`list_agent_sessions` 與 `wait_agent_state` 不入紀錄：它們只回狀態，不含對話內容。
+
+`agent-mcp-audit/history.json` 是最多 256 筆／256 KiB 的版本化快照。格式版本為 2（1 寫的檔可直接載入，缺少的折疊欄位視為單次操作）。背景 worker 最多留一份待寫快照，正常關閉最多等待 250ms；突然斷電或強制終止仍可能遺失尚未寫入的紀錄，並留下暫存檔。這不是 append-only、防竄改或完整稽核帳本，request ID 去重仍不跨重啟。
 
 新目錄與檔案限制為目前使用者存取（Unix 0700／0600、Windows protected DACL）。拒絕偵測到的連結、junction、hardlink、不安全權限或外部修改；格式損壞、未知版本與寫入失敗不自動清空原檔，CLI 仍可使用，介面顯示無法儲存。這些檢查不構成對同一 OS 帳號惡意程序或管理員的隔離。
 

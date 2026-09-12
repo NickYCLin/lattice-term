@@ -15,7 +15,9 @@ use std::time::{Duration, SystemTime};
 const DIRECTORY: &str = "agent-mcp-audit";
 const FILE_NAME: &str = "history.json";
 const LOCK_NAME: &str = "writer.lock";
-const VERSION: u32 = 1;
+/// 2 added the folded-read fields. A file from 1 still loads: the fields
+/// are optional and absent means "one operation".
+const VERSION: u32 = 2;
 const MAX_BYTES: u64 = 256 * 1024;
 const DROP_FLUSH: Duration = Duration::from_millis(250);
 
@@ -39,7 +41,11 @@ impl DiskHistory {
     }
 
     fn validate(&self) -> Result<(), Reason> {
-        if self.version != VERSION || self.entries.len() > HISTORY_LIMIT || self.next == u64::MAX {
+        if self.version == 0
+            || self.version > VERSION
+            || self.entries.len() > HISTORY_LIMIT
+            || self.next == u64::MAX
+        {
             return Err(Reason::InvalidData);
         }
         for (index, entry) in self.entries.iter().enumerate() {
@@ -65,6 +71,9 @@ impl DiskHistory {
                         || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
                 })
                 || (entry.session_id.is_some() && entry.target_id.is_some())
+                || entry.repeated.is_some_and(|repeated| repeated < 2)
+                || entry.first_at.is_some_and(|first| first > entry.at)
+                || (entry.first_at.is_some() != entry.repeated.is_some())
             {
                 return Err(Reason::InvalidData);
             }
@@ -879,11 +888,48 @@ mod tests {
             outcome: Outcome::Accepted,
             session_id: Some("agent-bg-session-test".into()),
             target_id: None,
+            repeated: None,
+            first_at: None,
         }
     }
 
     fn disk(next: u64) -> DiskHistory {
         DiskHistory::new((1..=next).map(entry).collect(), next, 0)
+    }
+
+    #[test]
+    fn a_file_from_the_previous_format_loads_and_folded_fields_are_checked() {
+        // Version 1 wrote no repeated/firstAt: absent means one operation.
+        let older = serde_json::json!({
+            "version": 1,
+            "entries": [{
+                "id": 1, "at": 5, "client": "test client", "action": "prompt",
+                "outcome": "accepted", "sessionId": "agent-bg-session-test",
+            }],
+            "next": 1,
+            "discarded": 0,
+        });
+        let loaded: DiskHistory = serde_json::from_value(older).unwrap();
+        assert_eq!(loaded.validate(), Ok(()));
+        assert_eq!(loaded.entries[0].repeated, None);
+
+        let mut folded = disk(1);
+        folded.entries[0].repeated = Some(3);
+        folded.entries[0].first_at = Some(1);
+        assert_eq!(folded.validate(), Ok(()));
+        // A count of one, a first-seen after the last, or one field without
+        // the other are all shapes this daemon never writes.
+        for (repeated, first_at) in [
+            (Some(1), Some(1)),
+            (Some(3), Some(u64::MAX)),
+            (Some(3), None),
+            (None, Some(1)),
+        ] {
+            let mut bad = disk(1);
+            bad.entries[0].repeated = repeated;
+            bad.entries[0].first_at = first_at;
+            assert_eq!(bad.validate(), Err(Reason::InvalidData), "{repeated:?}");
+        }
     }
 
     /// Reopen a store this test just released. Another test may be forking

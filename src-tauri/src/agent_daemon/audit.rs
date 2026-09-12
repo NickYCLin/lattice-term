@@ -10,6 +10,10 @@ mod store;
 pub use store::FlushHandle;
 
 pub const HISTORY_LIMIT: usize = 256;
+/// Repeated reads of the same session by the same client fold into one
+/// entry for this long. Polling a session's output is one activity, not
+/// two hundred, and the history must not lose the rest of the record to it.
+const READ_FOLD_WINDOW: u64 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +32,8 @@ pub enum Action {
     RemoteStatus,
     Grant,
     Revoke,
+    /// Terminal output handed to a client. The content is never recorded.
+    Read,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,6 +58,12 @@ pub struct Entry {
     /// Only a bridge-known opaque target ID, never a host or path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_id: Option<String>,
+    /// How many folded operations this entry stands for, when more than
+    /// one; `at` is then the latest and `first_at` the earliest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeated: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +149,34 @@ impl History {
         self.record_inner(client, action, outcome, session_id, None, at);
     }
 
+    /// Reading a session's output, folded per client and session so a
+    /// polling client cannot push everything else out of a bounded history.
+    pub fn record_read(&mut self, client: &str, session_id: &str, outcome: Outcome, at: u64) {
+        let client = sanitize_client(client);
+        let folded = self.entries.iter_mut().rev().find(|entry| {
+            entry.action == Action::Read
+                && entry.outcome == outcome
+                && entry.client == client
+                && entry.session_id.as_deref() == Some(session_id)
+        });
+        if let Some(entry) = folded.filter(|entry| at.saturating_sub(entry.at) <= READ_FOLD_WINDOW)
+        {
+            entry.first_at.get_or_insert(entry.at);
+            entry.at = at.max(entry.at);
+            entry.repeated = Some(entry.repeated.unwrap_or(1).saturating_add(1));
+            self.persist();
+            return;
+        }
+        self.record_inner(
+            &client,
+            Action::Read,
+            outcome,
+            Some(session_id.to_string()),
+            None,
+            at,
+        );
+    }
+
     pub fn record_target(
         &mut self,
         client: &str,
@@ -165,16 +205,18 @@ impl History {
         self.entries.push_back(Entry {
             id: self.next,
             at,
-            client: client
-                .chars()
-                .filter(|c| !c.is_control())
-                .take(128)
-                .collect(),
+            client: sanitize_client(client),
             action,
             outcome,
             session_id,
             target_id,
+            repeated: None,
+            first_at: None,
         });
+        self.persist();
+    }
+
+    fn persist(&self) {
         if let Some(worker) = &self.persistence {
             worker.submit(store::DiskHistory::new(
                 self.entries.iter().cloned().collect(),
@@ -204,6 +246,16 @@ impl History {
     }
 }
 
+/// Client names are self-reported: bound them and keep control characters
+/// out of anything the interface will show.
+fn sanitize_client(client: &str) -> String {
+    client
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(128)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +272,67 @@ mod tests {
         assert_eq!(snapshot.discarded, 3);
         assert_eq!(snapshot.entries[0].id, (HISTORY_LIMIT + 3) as u64);
         assert_eq!(snapshot.entries.last().unwrap().id, 4);
+    }
+
+    #[test]
+    fn repeated_reads_of_one_session_fold_into_a_single_counted_entry() {
+        let mut history = History::default();
+        history.record_read(
+            "claude-code 2.1",
+            "agent-bg-session-a",
+            Outcome::Accepted,
+            1_000,
+        );
+        for at in 1..50 {
+            history.record_read(
+                "claude-code 2.1",
+                "agent-bg-session-a",
+                Outcome::Accepted,
+                1_000 + at * 1_000,
+            );
+        }
+        // A different client, session or outcome is its own entry.
+        history.record_read("codex 1.0", "agent-bg-session-a", Outcome::Accepted, 60_000);
+        history.record_read(
+            "claude-code 2.1",
+            "agent-bg-session-b",
+            Outcome::Accepted,
+            60_000,
+        );
+        history.record_read(
+            "claude-code 2.1",
+            "agent-bg-session-a",
+            Outcome::Failed,
+            60_000,
+        );
+
+        let snapshot = history.snapshot();
+        assert_eq!(snapshot.entries.len(), 4, "{:?}", snapshot.entries);
+        let folded = snapshot
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.client == "claude-code 2.1"
+                    && entry.session_id.as_deref() == Some("agent-bg-session-a")
+                    && entry.outcome == Outcome::Accepted
+            })
+            .unwrap();
+        assert_eq!(folded.repeated, Some(50));
+        assert_eq!(folded.first_at, Some(1_000));
+        assert_eq!(folded.at, 50_000);
+        assert_eq!(folded.action, Action::Read);
+
+        // Once the window has passed, the next read starts a fresh entry.
+        history.record_read(
+            "claude-code 2.1",
+            "agent-bg-session-a",
+            Outcome::Accepted,
+            50_000 + READ_FOLD_WINDOW + 1,
+        );
+        assert_eq!(history.snapshot().entries.len(), 5);
+        // Folding never mints an id, so the stored sequence stays contiguous.
+        let ids: Vec<u64> = history.entries.iter().map(|entry| entry.id).collect();
+        assert_eq!(ids, (1..=5).collect::<Vec<_>>());
     }
 
     #[test]
