@@ -280,6 +280,9 @@ async fn spawn_agent(
 ) -> Result<(Child, tokio::process::ChildStdout), String> {
     let mut command = Command::new(agent_path()?);
     command.arg("--json");
+    // The desktop owns the sharing UI; the bundled console engine stays hidden.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW; keep redirected pipes.
     let mut pairing_code_input = None;
     match target {
         AgentTarget::Direct(address) => {
