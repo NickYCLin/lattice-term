@@ -207,3 +207,50 @@ daemon，人工輸入不等待 IPC；不必等候原本十秒一次的同步週�
 
 這是 Linux loopback 的 VNC 實機程序驗收，尚未驗證外部 VNC 主機、
 RDP／Lattice Remote 的實際鍵鼠、Windows／macOS 安裝版或跨主機 Fleet。
+
+
+## 2026-09-12 SSH Fleet 工作區與真實 CLI 驗收
+
+在 Linux x86_64 以獨立暫存工作區、daemon socket、loopback SSH
+連線及 debug MCP 執行檔驗證 `remote_fleet`。SSH server 是測試用
+russh exec peer，只接受完整比對的核准指令，再啟動實際
+`lattice-term mcp --workspace-directory` 子程序；daemon 與 PTY
+使用產品服務實作。這不是外部主機或 OpenSSH sshd 的驗收。
+
+預設整合測試使用兩個 `/bin/sh`／`cat` PTY，涵蓋：
+
+- 核准工作區內的兩個啟動項目可見，目錄外項目不可見且不能啟動。
+- 本機 metadata 授權不能啟動或讀輸出；遠端撤回內容權限仍會拒絕。
+- 同時啟動兩個不同 session、獨立輸出、相同 request ID 去重。
+- 結束一個 session 後重送不重做，另一個 session 仍存活。
+- 撤回本機授權後不能操作，已存在的遠端 PTY 與 SSH 連線仍存活。
+- 全程只認證一次 SSH；每次獨立開 exec channel，原互動終端沒有
+  收到指令或 MCP JSON。舊 daemon 未宣告工作區限制時不予接入。
+
+另以兩個真實 Codex CLI 0.154.0 執行忽略型驗收，從核准 plan 啟動，沒有
+桌面 renderer 或測試程式回覆終端查詢。兩者 bootstrap 均得到
+`integration` 來源的完成狀態；再各送一輪禁止工具與檔案操作的
+算術提示，從該輪 cursor 讀到獨立計算的答案 24682／27160，且再次
+收到官方完成狀態。相同 launch ID、獨立取消與雙邊撤權檢查亦通過。
+這是實際 CLI 與模型服務的派工驗收，不是模型自主選擇呼叫 MCP，
+也不是模型執行編譯器或完成一般程式開發任務的證明。
+
+測試只在明確提供執行檔與已登入的測試環境時執行：
+
+```sh
+LATTICETERM_FLEET_TEST_BINARY=/absolute/path/to/lattice-term \
+LATTICETERM_FLEET_TEST_CODEX=/absolute/path/to/codex \
+cargo test --manifest-path src-tauri/Cargo.toml --lib \
+  ssh_fleet_two_live_codex_ptys_without_a_desktop_renderer -- --ignored
+```
+
+CLI 使用 `read-only`、`--ask-for-approval never`，不改寫使用者設定；
+只以本次程序參數信任測試目錄並停用既有 node_repl MCP。初次測試
+誤用 Rust test runner 作為 Reporter 執行檔，雖讀到 READY，狀態
+仍只有 heuristic，因此未判通過；改成真正主程式作為 Reporter
+後重新啟動兩個 CLI，完整測試於 17.03 秒通過。測試結束會停止
+自有 PTY、daemon 與 SSH peer，並移除暫存目錄。
+
+外部 SSH 主機、macOS 遠端程序、安裝版 GUI、RDP／Lattice Remote
+鍵鼠及 Relay Fleet 不屬於本次驗證範圍。工作區限制是 MCP 路由
+與啟動目錄的範圍檢查，不是遠端帳號的 OS 沙箱。

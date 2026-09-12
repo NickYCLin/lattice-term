@@ -33,6 +33,7 @@ pub enum Action {
     /// One still picture of a shared screen.
     RemoteScreen,
     RemoteInput,
+    RemoteFleet,
     Grant,
     Revoke,
     /// Terminal output handed to a client. The content is never recorded.

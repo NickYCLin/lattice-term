@@ -362,7 +362,7 @@ try {
       "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
       "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
       "list_authorized_connections", "get_host_metrics", "sftp_list_directory",
-      "ssh_exec_job", "sftp_transfer", "capture_remote_screen", "send_remote_input", "get_remote_operation",
+      "ssh_exec_job", "sftp_transfer", "capture_remote_screen", "send_remote_input", "remote_fleet", "get_remote_operation",
       "cancel_remote_operation",
     ].sort());
     const capabilities = ok(await adapter.call("get_capabilities"));

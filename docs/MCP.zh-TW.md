@@ -2,7 +2,7 @@
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
-這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取與獨立授權的鍵鼠操作；跨主機 Fleet 尚未實作。實作、測試與實機驗收分開記錄，見文末。
+這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取與獨立授權的鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
 
@@ -288,16 +288,82 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 使用者直接在遠端視窗移動、點擊或輸入時，會撤銷該連線含 `input` 的授權；獨立的唯讀授權保留。已送入通道的動作無法回復。RDP／VNC 批次寫入若中斷或結果不明，會停止該引擎連線，避免留下無法確認是否放開的按鍵；回報 `unknown_outcome` 時先人工核對，不要換 ID 重送。操作紀錄使用 `remoteInput`，不記錄文字、按鍵或座標。
 
-桌面橋接協定升為 2，舊背景服務仍可維持既有 Agent 工作；遠端授權需等使用者方便時重啟背景服務，程式不自動中斷既有 CLI。
+桌面橋接協定升為 3，舊背景服務仍可維持既有 Agent 工作；遠端授權需等使用者方便時重啟背景服務，程式不自動中斷既有 CLI。
 
 Linux VNC 的鍵鼠及人工接手實機紀錄見 [MCP 遠端操作驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md#2026-09-12-linux-vnc-鍵鼠與人工接手驗收)。
 
-目前仍沒有連續串流或跨主機 Fleet 編排。
+目前沒有連續畫面串流；跨主機 Fleet 使用下列獨立 SSH 工作區授權。
+
+## D：SSH 跨主機 Fleet 工作區
+
+`remote_fleet` 沿用一條已信任、已登入的 SSH 連線，以專用 exec channel
+啟動遠端 `lattice-term mcp --data-dir … --workspace-directory …` adapter。
+既有互動 SSH 終端不接收 MCP JSON 或貼上的指令；每個 Agent 都由遠端
+背景 daemon 持有獨立 PTY，工具以 session ID 分別讀取、等待或控制。
+一次 MCP 呼叫結束，只關閉 adapter channel，不結束這些背景 Agent。
+
+### 設定與權限
+
+1. 遠端 Linux／macOS 安裝支援工作區授權的 LatticeTerm，先從遠端桌面
+   啟動背景工作階段，明確分享狀態、內容或控制；需要新增 Agent 時，
+   另核准已保存的啟動項目。MCP 不自動啟動 daemon、不新增遠端授權。
+2. 本機桌面正常建立 SSH 連線並確認 host key。在設定頁選該連線，勾選
+   「查看遠端 Fleet 工作區」，填入遠端執行檔、app data 與核准工作目錄
+   的絕對路徑；這些路徑由使用者指定，工具呼叫不能更換或添加參數。
+3. `fleetObserve` 只准列出狀態／啟動項目及等待狀態；`fleetRead` 另外
+   允許讀輸出，`fleetControl` 另外允許送提示／取消，`fleetLaunch` 另外
+   允許啟動。遠端原有的分享／控制／內容／啟動權限仍須同時成立。
+   一筆 Fleet 授權不能混用固定 shell 指令、檔案或畫面權限。
+4. 工作目錄在遠端握手時 canonicalize；只有核准目錄及子目錄內的
+   session 與 launch plan 可用，符號連結到目錄外會被拒絕。真正啟動前
+   再檢查保存項目的實際工作目錄，不只篩選提供給 AI 的清單。
+5. 目錄限制不是 OS 沙箱。Agent 仍依遠端帳號與 CLI 的權限執行，可能
+   使用該帳號已有的網路或目錄外能力；需要檔案隔離時，另外在遠端
+   啟用受支援的 CLI／作業系統沙箱。此功能不提供託管協作服務。
+
+### 工具動作
+
+每次提交 `targetId` 及 `action`（含 `kind`）。先用
+`list_authorized_connections` 找到具有 Fleet scopes 的工作區。
+
+| `action.kind` | 其他欄位 | 權限 |
+| --- | --- | --- |
+| `listSessions` | 無 | `fleetObserve` |
+| `listPlans` | 無 | `fleetObserve`；清單不代表有啟動權 |
+| `readOutput` | `sessionId`、`cursor`（預設 0）、`maxBytes`（1–32768，預設 8192） | `fleetRead` |
+| `waitState` | `sessionId`、`timeoutMs`（0–5000，預設 5000） | `fleetObserve` |
+| `launch` | `planId`、`requestId` | `fleetLaunch` |
+| `send` | `sessionId`、`text`、`mode`（`queue`／`now`，預設 `queue`）、`requestId` | `fleetControl` |
+| `cancel` | `sessionId`、`scope`（`turn`／`queue`／`session`）、`requestId` | `fleetControl` |
+
+回覆含 `workspaceId`、`source: remoteFleet`、`untrusted: true` 與 `result`。
+輸出 cursor、就緒檢查、忙碌佇列、官方狀態來源及取消語意沿用 A／B。
+提示最多 8192 個字元／32768 bytes，不能是空白。
+讀取、控制與啟動的回覆權限會和本機授權取交集；AI 不會因遠端單方面
+允許控制，就得到本機使用者未核准的能力。內容／完成狀態仍需核對
+實際測試結果，不能把 Agent 的回合結束當作工作成功。
+
+每個 channel 的總回覆限 384 KiB、64 則訊息、12 秒；等待最多五秒，
+同時沿用桌面八個呼叫上限。遠端 adapter 及 daemon 以能力握手確認
+工作區限制；忽略新欄位的舊服務會被拒絕，不退回無限制模式。
+遠端 scoped adapter 不能再轉送其他桌面、主機或 Fleet 工具。
+
+寫入在本機及遠端均沿用 request ID 去重；遠端 client 身分綁定本機
+授權、client 及 canonical 工作區，重新開 SSH channel 不重置身分。
+紀錄最多保留十五分鐘，不能承諾跨 daemon crash 的 exactly-once。
+`unknown_outcome` 時先讀取工作階段與原 request ID 的結果，不換 ID
+盲目重送。撤權、桌面失聯或 SSH 重連都需要新的明確授權；已接受的
+工作不會回復，背景 PTY 也不因撤權自動結束。稽核只記 `remoteFleet`
+操作 metadata，不記提示、終端內容、金鑰或實際路徑。
+
+整合測試包含真實 loopback SSH 通道、遠端 MCP framing、daemon socket
+與兩個實際 PTY，核對目錄外拒絕、分權、獨立輸出、重複啟動、取消與
+撤權；SSH peer 在測試程序內啟動 adapter，尚不是外部 SSH 主機驗收。
 
 ## 後續階段（未實作）
 
 - **B 的邊界**：只有畫面上自己寫明中斷鍵的 CLI 支援 `scope: "turn"`，其餘不猜按鍵；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
 - **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
-- **D 的下一步**：跨主機 Fleet 的工作區授權、多 Agent 通道與真實遠端協作驗收。
+- **D 的延伸**：SSH 工作區與多 PTY 已接入 MCP；Lattice Remote／Relay 的 Fleet transport、桌面遠端 Fleet panes 與巢狀派工未提供。外部主機與真實 CLI 的驗收另列，不以 loopback fixture 代替。
 
 歡迎在 #180 繼續討論優先順序。

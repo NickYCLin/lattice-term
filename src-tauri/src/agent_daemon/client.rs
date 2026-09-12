@@ -156,6 +156,7 @@ impl DaemonClient {
 
         let reply = connection
             .request(Request::Hello {
+                workspace_directory: None,
                 token,
                 protocol: PROTOCOL_VERSION,
                 role: super::ClientRole::Desktop,

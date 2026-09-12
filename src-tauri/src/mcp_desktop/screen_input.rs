@@ -376,6 +376,7 @@ mod service_tests {
         let reader = service.vnc.insert_mcp_test_session("screen-test", 1);
         let target = service
             .grant(GrantRequest {
+                fleet: None,
                 session_id: "screen-test".into(),
                 backend: Backend::Vnc,
                 label: "test".into(),
@@ -522,6 +523,7 @@ mod service_tests {
         let (service, target, key, _) = setup().await;
         service.revoke(&target.id).unwrap();
         let request = GrantRequest {
+            fleet: None,
             session_id: "screen-test".into(),
             backend: Backend::Vnc,
             label: "view".into(),

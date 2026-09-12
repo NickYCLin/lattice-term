@@ -596,6 +596,7 @@ impl WireClient {
             .send(&[Frame::Request {
                 id: 1,
                 body: Request::Hello {
+                    workspace_directory: None,
                     token: token.into(),
                     protocol: role.protocol_version(),
                     role,

@@ -10,11 +10,18 @@ use russh::{server, Channel, ChannelId, Pty};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(unix)]
+mod fleet;
+#[cfg(unix)]
 mod openssh;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum SftpMode {
     Disabled,
+    #[cfg(unix)]
+    Fleet {
+        data: Arc<std::path::PathBuf>,
+        directory: Arc<std::path::PathBuf>,
+    },
     #[cfg(unix)]
     OpenSsh {
         denied_requests: Option<&'static str>,
@@ -115,8 +122,10 @@ impl server::Handler for Handler {
             session.channel_failure(channel_id)?;
             return Ok(());
         }
-        match self.sftp_mode {
+        match &self.sftp_mode {
             SftpMode::Disabled => session.channel_failure(channel_id)?,
+            #[cfg(unix)]
+            SftpMode::Fleet { .. } => session.channel_failure(channel_id)?,
             #[cfg(unix)]
             SftpMode::OpenSsh { denied_requests } => {
                 let Some(index) = self
@@ -129,7 +138,7 @@ impl server::Handler for Handler {
                 };
                 let channel = self.channels.swap_remove(index);
                 let (peer, mut peer_stream) =
-                    crate::sftp_test_server::OpenSshServer::start(denied_requests);
+                    crate::sftp_test_server::OpenSshServer::start(*denied_requests);
                 self.sftp_channels.insert(channel_id);
                 session.channel_success(channel_id)?;
                 tokio::spawn(async move {
@@ -155,6 +164,68 @@ impl server::Handler for Handler {
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
         self.execs.fetch_add(1, Ordering::Relaxed);
+        #[cfg(unix)]
+        if let SftpMode::Fleet {
+            data: directory_data,
+            directory,
+        } = &self.sftp_mode
+        {
+            let config = FleetWorkspace {
+                executable: "/test/lattice-term".into(),
+                data_directory: directory_data.to_string_lossy().into_owned(),
+                directory: directory.to_string_lossy().into_owned(),
+            };
+            if data != super::fleet::command(&config).as_bytes() {
+                session.channel_failure(channel)?;
+                return Ok(());
+            }
+            let index = self
+                .channels
+                .iter()
+                .position(|c| c.id() == channel)
+                .unwrap();
+            let stream = self.channels.swap_remove(index).into_stream();
+            self.sftp_channels.insert(channel);
+            session.channel_success(channel)?;
+            let directory_data = Arc::clone(directory_data);
+            let directory = Arc::clone(directory);
+            tokio::spawn(async move {
+                let (read, write) = tokio::io::split(stream);
+                if let Some(binary) = std::env::var_os("LATTICETERM_FLEET_TEST_BINARY") {
+                    // Opt-in acceptance against the compiled stdio executable.
+                    // The peer still accepts only the exact approved command.
+                    let mut child = tokio::process::Command::new(binary)
+                        .arg("mcp")
+                        .arg("--data-dir")
+                        .arg(&*directory_data)
+                        .arg("--workspace-directory")
+                        .arg(&*directory)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::null())
+                        .kill_on_drop(true)
+                        .spawn()
+                        .unwrap();
+                    let mut input = child.stdin.take().unwrap();
+                    let mut output = child.stdout.take().unwrap();
+                    let (mut read, mut write) = (read, write);
+                    tokio::select! {
+                        _ = tokio::io::copy(&mut read, &mut input) => {},
+                        _ = tokio::io::copy(&mut output, &mut write) => {},
+                        _ = child.wait() => {},
+                    }
+                } else {
+                    let _ = crate::agent_daemon::mcp::serve_workspace_test_io(
+                        &directory_data,
+                        &directory,
+                        read,
+                        write,
+                    )
+                    .await;
+                }
+            });
+            return Ok(());
+        }
         session.channel_success(channel)?;
         match data {
             b"result" => {
@@ -235,7 +306,7 @@ impl Peer {
                     stream = listener.accept() => {
                         let (stream, _) = stream.unwrap();
                         let config = Arc::clone(&config);
-                        let handler = Handler { password: task_password.clone(), channels: vec![], execs: Arc::clone(&task_execs), authentications: Arc::clone(&task_authentications), closed_channels: Arc::clone(&task_closed_channels), sftp_mode, sftp_channels: Default::default() };
+                        let handler = Handler { password: task_password.clone(), channels: vec![], execs: Arc::clone(&task_execs), authentications: Arc::clone(&task_authentications), closed_channels: Arc::clone(&task_closed_channels), sftp_mode: sftp_mode.clone(), sftp_channels: Default::default() };
                         let mut connection_closed = closed.clone();
                         peers.spawn(async move {
                             let Ok(session) = server::run_stream(config, stream, handler).await else { return; };
@@ -363,6 +434,7 @@ async fn actual_ssh_exec_is_bounded_deduplicated_and_does_not_close_the_users_te
         ));
         let grant = service
             .grant(GrantRequest {
+                fleet: None,
                 session_id: session_id.clone(),
                 backend: Backend::Ssh,
                 label: "Isolated SSH".into(),
@@ -545,6 +617,7 @@ async fn an_observed_offline_grant_stays_revoked_when_the_same_live_handle_retur
             Arc::new(SftpRegistry::new()),
         ));
         let request = GrantRequest {
+            fleet: None,
             session_id: session_id.clone(),
             backend: Backend::Ssh,
             label: "Ephemeral SSH".into(),
