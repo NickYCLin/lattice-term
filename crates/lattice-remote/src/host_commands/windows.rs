@@ -44,7 +44,7 @@ impl Job {
 // This fixed bootstrap cannot execute user code until its stdin is supplied.
 // The parent assigns the process to a kill-on-close Job before sending JSON.
 // No user text or paths become PowerShell source or outer command arguments.
-const BOOTSTRAP: &str = r#"$ErrorActionPreference='Stop';$utf8=New-Object System.Text.UTF8Encoding($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;$OutputEncoding=$utf8;try{$text=[Console]::In.ReadToEnd();if(!$text){exit 125};$r=ConvertFrom-Json $text;if($r.file){$p=New-Object System.Diagnostics.ProcessStartInfo;$p.FileName=[Environment]::SystemDirectory+'\cmd.exe';$p.Arguments='/d /s /c ""'+$r.file+'""';$p.UseShellExecute=$false;$p.CreateNoWindow=$true;$p.RedirectStandardInput=$true;$p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true;$c=[Diagnostics.Process]::Start($p);$c.StandardInput.Close();$a=$c.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput());$b=$c.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError());$c.WaitForExit();$a.GetAwaiter().GetResult();$b.GetAwaiter().GetResult();$code=$c.ExitCode;$c.Dispose();exit $code};$global:LASTEXITCODE=0;& ([ScriptBlock]::Create($r.command));$ok=$?;$code=$LASTEXITCODE;if($code){exit $code};if(!$ok){exit 1};exit 0}catch{[Console]::Error.WriteLine($_.ToString());exit 1}"#;
+const BOOTSTRAP: &str = r#"$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';$utf8=New-Object System.Text.UTF8Encoding($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;$OutputEncoding=$utf8;try{$text=[Console]::In.ReadToEnd();if(!$text){exit 125};$r=ConvertFrom-Json $text;if($r.file){$p=New-Object System.Diagnostics.ProcessStartInfo;$p.FileName=[Environment]::SystemDirectory+'\cmd.exe';$p.Arguments='/d /s /c ""'+$r.file+'""';$p.UseShellExecute=$false;$p.CreateNoWindow=$true;$p.RedirectStandardInput=$true;$p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true;$c=[Diagnostics.Process]::Start($p);$c.StandardInput.Close();$a=$c.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput());$b=$c.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError());$c.WaitForExit();$a.GetAwaiter().GetResult();$b.GetAwaiter().GetResult();$code=$c.ExitCode;$c.Dispose();exit $code};$global:LASTEXITCODE=0;& ([ScriptBlock]::Create($r.command));$ok=$?;$code=$LASTEXITCODE;if($code){exit $code};if(!$ok){exit 1};exit 0}catch{[Console]::Error.WriteLine($_.ToString());exit 1}"#;
 
 async fn execute(
     request: CommandRequest,
@@ -118,6 +118,8 @@ async fn execute(
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
+            "-OutputFormat",
+            "Text",
             "-EncodedCommand",
             &encoded,
         ])
@@ -321,6 +323,8 @@ mod tests {
             assert_eq!((end, code), (CommandEnd::Exited, Some(7)));
             assert!(out.contains("中文🦀"), "{out:?}");
             assert!(err.contains("stderr-test"), "{err:?}");
+            assert!(!err.contains("#< CLIXML"), "{err:?}");
+            assert!(!err.contains("<Objs"), "{err:?}");
             assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), 1);
             assert!(commands.handle(request).await);
             assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err());
