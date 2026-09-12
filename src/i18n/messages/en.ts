@@ -916,6 +916,7 @@ export const en: Messages = {
   "agents.mcp.history.action.queue": "Queue prompt",
   "agents.mcp.history.action.clearQueue": "Clear MCP queue",
   "agents.mcp.history.action.stop": "End session",
+  "agents.mcp.history.action.interrupt": "Interrupt the running turn",
   "settings.mcpRemote.title": "MCP remote operation grants",
   "settings.mcpRemote.hint": "Allow external AI tools to use only the live SSH/SFTP connections you explicitly authorize here.",
   "settings.mcpRemote.boundary": "Off by default and valid only for this desktop connection. Closing the desktop or losing its daemon connection revokes access. Never logs in or accepts host keys automatically. Revocation does not undo completed commands or file writes.",
