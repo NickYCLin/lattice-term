@@ -2706,15 +2706,47 @@ fn remote_terminal_snapshots(
     registry.terminal_snapshots()
 }
 
+/// Publish a local takeover promptly without making human input wait for
+/// daemon I/O. Service-side revocation is already effective before spawning.
+fn notify_mcp_screen_takeover(
+    app: &AppHandle,
+    service: &Arc<mcp_desktop::DesktopService>,
+    backend: mcp_desktop::Backend,
+    session_id: &str,
+) {
+    if !service.take_over_screen(backend, session_id) {
+        return;
+    }
+    let app = app.clone();
+    let service = Arc::clone(service);
+    tauri::async_runtime::spawn(async move {
+        let sync = app.state::<McpRemoteSync>();
+        let _guard = sync.0.lock().await;
+        if let Some(connection) = app.state::<AppDaemon>().attached().await {
+            let _ = connection
+                .request(agent_daemon::Request::DesktopGrants {
+                    targets: service.targets(),
+                })
+                .await;
+        }
+    });
+}
+
 #[tauri::command]
 async fn remote_input(
+    app: AppHandle,
     session_id: String,
     request: RemoteInputRequest,
     registry: State<'_, Arc<RemoteRegistry>>,
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
     if request.takes_over_screen() {
-        service.take_over_screen(mcp_desktop::Backend::Remote, &session_id);
+        notify_mcp_screen_takeover(
+            &app,
+            service.inner(),
+            mcp_desktop::Backend::Remote,
+            &session_id,
+        );
     }
     crate::remote::input(registry.inner(), &session_id, request).await
 }
@@ -2953,7 +2985,12 @@ async fn rdp_input(
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
     if request.takes_over_screen() {
-        service.take_over_screen(mcp_desktop::Backend::Rdp, &session_id);
+        notify_mcp_screen_takeover(
+            &app,
+            service.inner(),
+            mcp_desktop::Backend::Rdp,
+            &session_id,
+        );
     }
     crate::rdp::input(&app, registry.inner(), &session_id, request).await
 }
@@ -3097,7 +3134,12 @@ async fn vnc_input(
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Result<(), String> {
     if request.takes_over_screen() {
-        service.take_over_screen(mcp_desktop::Backend::Vnc, &session_id);
+        notify_mcp_screen_takeover(
+            &app,
+            service.inner(),
+            mcp_desktop::Backend::Vnc,
+            &session_id,
+        );
     }
     crate::vnc::input(&app, registry.inner(), &session_id, request).await
 }

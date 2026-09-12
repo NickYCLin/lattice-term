@@ -557,7 +557,7 @@ impl DesktopService {
 
     /// A real user input is an explicit takeover. Read-only grants survive;
     /// any grant that included input needs a fresh user authorization.
-    pub fn take_over_screen(&self, backend: Backend, session_id: &str) {
+    pub fn take_over_screen(&self, backend: Backend, session_id: &str) -> bool {
         let ids: Vec<_> = self
             .state
             .lock()
@@ -574,9 +574,11 @@ impl DesktopService {
                     .collect()
             })
             .unwrap_or_default();
+        let changed = !ids.is_empty();
         for id in ids {
             let _ = self.revoke(&id);
         }
+        changed
     }
 
     pub fn revoke_all(&self) {
