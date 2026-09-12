@@ -468,6 +468,18 @@ impl RemoteRegistry {
         }
     }
 
+    /// Which run of this session is live: the identity an MCP screen grant
+    /// binds to, so a reconnection under the same id is not the same screen.
+    /// A terminal-only share has no screen to hand over.
+    pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
+        let state = self.state.lock().ok()?;
+        state
+            .sessions
+            .get(session_id)
+            .filter(|record| !record.summary.terminal)
+            .map(|record| record.generation)
+    }
+
     pub fn list(&self) -> Vec<RemoteSessionSummary> {
         let Ok(state) = self.state.lock() else {
             return Vec::new();
@@ -915,6 +927,18 @@ pub async fn connect(
                 Ok(message @ RemoteMessage::FrameStart(_))
                 | Ok(message @ RemoteMessage::FrameChunk { .. }) => match assembler.push(message) {
                     Ok(Some(frame)) => {
+                        if let Some(frames) =
+                            task_app.try_state::<Arc<crate::mcp_screen::ScreenFrames>>()
+                        {
+                            frames.offer(
+                                &task_session_id,
+                                frame.frame_id,
+                                frame.width,
+                                frame.height,
+                                frame.format.mime_type(),
+                                &frame.bytes,
+                            );
+                        }
                         let payload = RemoteFrameEvent {
                             session_id: task_session_id.clone(),
                             frame_id: frame.frame_id,

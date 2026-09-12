@@ -906,6 +906,8 @@ export const zhTW = {
   "settings.mcpRemote.scope.exec": "執行下方指定指令",
   "settings.mcpRemote.scope.upload": "上傳新檔案",
   "settings.mcpRemote.scope.download": "下載檔案",
+  "settings.mcpRemote.scope.screen": "擷取目前畫面（單張）",
+  "settings.mcpRemote.screenHint": "外部 AI 每兩秒最多取一張這個連線的畫面，看到的就是你螢幕上的內容（可能包含其他視窗、通知與私人資料）。只有畫面，沒有鍵盤滑鼠；斷線重連後授權即失效，要重新授權。",
   "settings.mcpRemote.command": "核准的固定指令（不接受 AI 插入參數）",
   "settings.mcpRemote.commandHint": "AI 只能整段執行你加在這裡的指令，權限與 SSH 帳號相同，不是目錄沙箱。每段指令走獨立通道，各自有逾時，結果區分標準輸出、錯誤輸出與結束碼。請勿貼入密碼或 token。",
   "settings.mcpRemote.commandLabel": "這段指令的名稱（會提供給 AI）",

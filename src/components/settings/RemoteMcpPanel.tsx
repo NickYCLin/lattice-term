@@ -13,10 +13,12 @@ import {
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
-type Scope = "metrics" | "list" | "exec" | "upload" | "download";
+type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen";
 type Scopes = Record<Scope, boolean>;
-const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false };
-interface Session { sessionId: string; host: string; backend: "ssh" | "sftp" }
+const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false };
+type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
+const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
+interface Session { sessionId: string; host: string; backend: Backend }
 
 interface Target { id: string; label: string; backend: string; scopes: Scopes; connected: boolean }
 
@@ -37,18 +39,24 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selected = sessions.find((session) => session.sessionId === sessionId);
+  const isScreen = !!selected && screenBackends.includes(selected.backend);
   const fileScope = scopes.list || scopes.upload || scopes.download;
   const transferScope = scopes.upload || scopes.download;
 
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [ssh, sftp, next] = await Promise.all([
+    const [ssh, sftp, screens, next] = await Promise.all([
       invoke<Omit<Session, "backend">[]>("ssh_sessions"),
       invoke<Omit<Session, "backend">[]>("sftp_sessions"),
+      invoke<Session[]>("mcp_screen_sessions"),
       invoke<Target[]>("mcp_remote_targets"),
     ]);
-    setSessions([...ssh.map((s) => ({ ...s, backend: "ssh" as const })), ...sftp.map((s) => ({ ...s, backend: "sftp" as const }))]);
+    setSessions([
+      ...ssh.map((s) => ({ ...s, backend: "ssh" as const })),
+      ...sftp.map((s) => ({ ...s, backend: "sftp" as const })),
+      ...screens,
+    ]);
     setTargets(next);
   }, [available]);
 
@@ -122,10 +130,15 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
             <input className="input" value={label} maxLength={128} disabled={busy} onChange={(e) => setLabel(e.target.value)} autoComplete="off" /></label>
           <fieldset disabled={busy || !selected} className="mcp-remote__scopes"><legend>{t("settings.mcpRemote.scopes")}</legend>
             {(Object.keys(scopesOff) as Scope[]).map((scope) => <label key={scope}>
-              <input type="checkbox" checked={scopes[scope]} disabled={selected?.backend === "sftp" ? scope === "metrics" || scope === "exec" : scope === "list" || scope === "upload" || scope === "download"}
+              <input type="checkbox" checked={scopes[scope]} disabled={
+                isScreen ? scope !== "screen"
+                : scope === "screen" ? true
+                : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec"
+                : scope === "list" || scope === "upload" || scope === "download"}
                 onChange={(e) => { setScopes((current) => ({ ...current, [scope]: e.target.checked })); setAcknowledged(false); }} /> {t(`settings.mcpRemote.scope.${scope}`)}
             </label>)}
           </fieldset>
+          {scopes.screen && <p className="setting__description">{t("settings.mcpRemote.screenHint")}</p>}
           {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">
             <legend>{t("settings.mcpRemote.command")}</legend>
             <span className="setting__description">{t("settings.mcpRemote.commandHint")}</span>

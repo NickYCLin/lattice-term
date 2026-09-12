@@ -357,6 +357,16 @@ impl VncRegistry {
         Ok(record)
     }
 
+    /// Which run of this session is live: the identity an MCP screen grant
+    /// binds to, so a reconnection under the same id is not the same screen.
+    pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
+        let state = self.state.lock().ok()?;
+        state
+            .sessions
+            .get(session_id)
+            .map(|record| record.generation)
+    }
+
     pub fn list(&self) -> Vec<VncSessionSummary> {
         let Ok(state) = self.state.lock() else {
             return Vec::new();
@@ -643,6 +653,15 @@ pub async fn connect(
                     mime_type,
                     base64,
                 })) => {
+                    crate::mcp_screen::retain_shared_frame(
+                        &task_app,
+                        &task_summary.session_id,
+                        frame_id,
+                        u32::from(width),
+                        u32::from(height),
+                        &mime_type,
+                        &base64,
+                    );
                     let _ = task_app.emit(
                         "vnc://frame",
                         VncFrameEvent {

@@ -30,6 +30,8 @@ pub enum Action {
     RemoteDownload,
     RemoteCancel,
     RemoteStatus,
+    /// One still picture of a shared screen.
+    RemoteScreen,
     Grant,
     Revoke,
     /// Terminal output handed to a client. The content is never recorded.

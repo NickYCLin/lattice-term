@@ -89,6 +89,59 @@ async fn completed(task: tokio::task::JoinHandle<Result<Value, String>>) -> Resu
         .unwrap()
 }
 
+/// A picture is larger than any other reply, so the bridge gives captures
+/// their own ceiling — and still has one.
+#[tokio::test]
+async fn a_screen_capture_may_be_larger_than_other_replies_but_is_still_bounded() {
+    let bridge = Arc::new(Bridge::default());
+    let sink = DaemonSink::default();
+    let (owner, sender, mut receiver) = desktop(&sink, &bridge);
+    let mut screen = target("target-screen");
+    screen.backend = Backend::Rdp;
+    screen.scopes = Scopes {
+        screen: true,
+        ..Scopes::default()
+    };
+    bridge
+        .replace(owner, ClientRole::Desktop, sender, vec![screen])
+        .unwrap();
+
+    // A picture well past the ordinary reply ceiling still arrives.
+    let picture = "A".repeat(900 * 1024);
+    let task = call(
+        &bridge,
+        DesktopOperation::CaptureScreen {
+            target_id: "target-screen".into(),
+        },
+    );
+    let id = invoke_id(receive(&mut receiver).await, "target-screen");
+    bridge.resolve(
+        owner,
+        ClientRole::Desktop,
+        id,
+        Ok(json!({ "frameId": 1, "base64": picture })),
+    );
+    let reply = completed(task).await.unwrap();
+    assert_eq!(reply["base64"].as_str().unwrap().len(), 900 * 1024);
+
+    // Beyond the screen ceiling it is refused like any oversized reply.
+    let task = call(
+        &bridge,
+        DesktopOperation::CaptureScreen {
+            target_id: "target-screen".into(),
+        },
+    );
+    let id = invoke_id(receive(&mut receiver).await, "target-screen");
+    bridge.resolve(
+        owner,
+        ClientRole::Desktop,
+        id,
+        Ok(json!({ "frameId": 2, "base64": "B".repeat(3 * 1024 * 1024) })),
+    );
+    let refused = completed(task).await.unwrap_err();
+    assert!(refused.contains("exceeded its limit"), "{refused}");
+}
+
 #[tokio::test]
 async fn observers_cannot_register_grants_or_resolve_desktop_results() {
     let bridge = Arc::new(Bridge::default());

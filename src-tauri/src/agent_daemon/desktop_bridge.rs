@@ -16,6 +16,10 @@ pub const PROTOCOL: u32 = 1;
 const MAX_TARGETS: usize = 64;
 const MAX_CALLS: usize = 16;
 const MAX_REPLY: usize = 512 * 1024;
+/// A screen capture is a picture, and pictures do not fit a metadata-sized
+/// reply. It is still bounded, and the desktop refuses to retain a frame
+/// larger than [`crate::mcp_screen::MAX_FRAME_BYTES`] in the first place.
+const MAX_SCREEN_REPLY: usize = 2 * 1024 * 1024;
 const UNKNOWN: &str = "desktop_operation_unknown: the desktop did not confirm the outcome; do not retry with a new request ID";
 
 struct Owner {
@@ -23,10 +27,19 @@ struct Owner {
     targets: Vec<TargetView>,
     revision: u64,
 }
+/// How large this operation's answer may be. Only a picture needs room.
+fn reply_limit(operation: &DesktopOperation) -> usize {
+    match operation {
+        DesktopOperation::CaptureScreen { .. } => MAX_SCREEN_REPLY,
+        _ => MAX_REPLY,
+    }
+}
+
 struct Pending {
     owner: u64,
     revision: u64,
     target: String,
+    max_reply: usize,
     reply: oneshot::Sender<Result<Value, String>>,
 }
 pub struct Bridge {
@@ -202,8 +215,8 @@ impl Bridge {
         let outcome = if !authorized {
             Err("Remote grant was revoked; operation outcome may be unknown".into())
         } else if match &outcome {
-            Ok(value) => value.to_string().len() > MAX_REPLY,
-            Err(error) => error.len() > MAX_REPLY,
+            Ok(value) => value.to_string().len() > p.max_reply,
+            Err(error) => error.len() > p.max_reply,
         } {
             Err("Remote result exceeded its limit; operation outcome may be unknown".into())
         } else {
@@ -269,6 +282,7 @@ impl Bridge {
                     owner: route.0,
                     revision: route.3,
                     target: route.2,
+                    max_reply: reply_limit(&operation),
                     reply: tx,
                 },
             );

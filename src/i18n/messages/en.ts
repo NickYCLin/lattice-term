@@ -936,6 +936,8 @@ export const en: Messages = {
   "settings.mcpRemote.scope.exec": "Run the command below",
   "settings.mcpRemote.scope.upload": "Upload new files",
   "settings.mcpRemote.scope.download": "Download files",
+  "settings.mcpRemote.scope.screen": "Capture the current screen (one still)",
+  "settings.mcpRemote.screenHint": "An external AI may take one picture of this connection every two seconds, and it sees exactly what is on that screen, including other windows, notifications and private data. Pictures only: no keyboard or pointer. Reconnecting ends the grant and it must be given again.",
   "settings.mcpRemote.command": "Approved fixed commands (the AI cannot add arguments)",
   "settings.mcpRemote.commandHint": "The AI can only run the commands you add here, exactly as written, with the same rights as your SSH account; this is not a directory sandbox. Each runs on its own channel with its own timeout, and reports stdout, stderr and the exit code separately. Never paste passwords or tokens.",
   "settings.mcpRemote.commandLabel": "Name for this command (shown to the AI)",

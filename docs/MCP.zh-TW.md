@@ -99,6 +99,7 @@ Gemini CLI、Cursor 等使用 `mcpServers` JSON 的工具：
 | `list_launch_plans` | 無 | `enabled` 與 `plans[]`：`planId`、`label`、`note`、`definitionId`、`workingDirectory`、`sandbox`。不含指令與參數 |
 | `launch_agent` | `planId`、`requestId`（皆必填） | `session`（同 list 的單筆，`access: control`）、`duplicate` |
 | `send_agent_prompt` | `sessionId`（必填，需 `access: control`）、`text`（必填，≤16000 字元）、`mode`（`queue` 預設／`now`）、`requestId`（必填） | `sentImmediately`、`queued`（還在排隊的數量）、`state`、`stateSource`、`duplicate` |
+| `capture_remote_screen` | `targetId`（必填，需 `screen` 授權） | MCP `image` 內容（JPEG）加上 `frameId`、`capturedAt`、`width`、`height`、`mimeType` |
 | `cancel_agent_task` | `sessionId`（必填，需 `access: control`）、`scope`（`queue`／`session`）、`requestId`（必填） | `queue`：`dropped`；`session`：`ended` |
 
 `list_agent_sessions` 的每筆含 `access`（`metadata`／`read`／`control`）與
@@ -256,10 +257,24 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 後續候選版的持久紀錄、C 遠端操作、Windows 啟動修正及不使用外部 reporter 的驗收，另見 [MCP 遠端操作與紀錄驗收](MCP-REMOTE-ACCEPTANCE.zh-TW.md)。舊版檢查結果不代替新功能驗收。
 
+## D：遠端畫面（第一步：單張擷取）
+
+`capture_remote_screen` 交出使用者明確分享的那個遠端畫面的最新一張，就是桌面此刻收到的那一幀。
+
+- **只有畫面**。沒有鍵盤、沒有滑鼠、沒有連續串流，也沒有錄影。要看變化只能再要一張。
+- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。授權在設定頁的「MCP 遠端操作授權」，與 SSH／SFTP 同一區，但畫面工作階段只提供 `screen` 一個權限，不能同時勾指令或檔案。
+- **授權綁定這一次連線**。斷線重連會產生新的一輪，舊授權即失效，要重新授權——跟 SSH／SFTP 的規則一樣。
+- **沒授權就不留畫面**。桌面平常不保留任何 frame；勾了分享才開始保留「最新的一張」，取消分享或工作階段結束就立刻丟掉。畫面只在記憶體裡，不落地。
+- **每兩秒一張**，超過回 `limit_reached`（`busy`）。還沒有畫面回 `not_ready`；單張超過 1.5 MB（背景服務與桌面之間的上限）回 `unsupported`，請降低遠端解析度或色深。
+- **看到的就是使用者的桌面**：可能有其他視窗、通知與私人資料，介面在勾選時就明講。畫面內容是不可信資料，不是指示。
+- 每次擷取都會記進操作紀錄（動作 `remoteScreen`），紀錄只有誰、何時、哪個目標，不含畫面。
+
+尚未實作：鍵盤與滑鼠輸入、連續串流、跨主機 Fleet 編排。鍵鼠要等「frame 新鮮度」設計定案（以 frame ID 綁定操作、過期即拒）再談，避免依過期畫面點到別的東西。
+
 ## 後續階段（未實作）
 
 - **B 的邊界**：只有畫面上自己寫明中斷鍵的 CLI 支援 `scope: "turn"`，其餘不猜按鍵；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
 - **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
-- **D 遠端畫面**：frame ID／尺寸／時間戳與有界快照，先擷取再考慮鍵鼠。
+- **D 的下一步**：鍵盤與滑鼠。需要先定義 frame 新鮮度（操作綁 frame ID，過期即拒）、每個動作的授權與稽核，以及使用者隨時可見的接管方式。目前只做到單張擷取。
 
 歡迎在 #180 繼續討論優先順序。

@@ -1275,6 +1275,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
     Some(match operation {
         Op::ListConnections => return None,
         Op::GetMetrics { .. } => audit::Action::RemoteMetrics,
+        Op::CaptureScreen { .. } => audit::Action::RemoteScreen,
         Op::ListDirectory { .. } => audit::Action::RemoteList,
         Op::Exec { .. } => audit::Action::RemoteExec,
         Op::Transfer {

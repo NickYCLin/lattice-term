@@ -13,6 +13,7 @@ mod ssh_jobs;
 
 use crate::sftp::SftpRegistry;
 use crate::ssh::SshRegistry;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -31,6 +32,17 @@ const MAX_CALLS: usize = 8;
 pub enum Backend {
     Ssh,
     Sftp,
+    /// Screen sessions. They share one capability — the picture the user is
+    /// already looking at — and nothing else: no shell, no files.
+    Rdp,
+    Vnc,
+    Remote,
+}
+
+impl Backend {
+    pub fn is_screen(self) -> bool {
+        matches!(self, Self::Rdp | Self::Vnc | Self::Remote)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +53,9 @@ pub enum Scope {
     Exec,
     Upload,
     Download,
+    /// One still picture of the shared screen, on request. Never a stream,
+    /// and never keyboard or pointer input.
+    Screen,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -56,6 +71,8 @@ pub struct Scopes {
     pub upload: bool,
     #[serde(default)]
     pub download: bool,
+    #[serde(default)]
+    pub screen: bool,
 }
 
 impl Scopes {
@@ -66,6 +83,7 @@ impl Scopes {
             Scope::Exec => self.exec,
             Scope::Upload => self.upload,
             Scope::Download => self.download,
+            Scope::Screen => self.screen,
         }
     }
 }
@@ -140,6 +158,9 @@ pub enum DesktopOperation {
     GetMetrics {
         target_id: String,
     },
+    CaptureScreen {
+        target_id: String,
+    },
     ListDirectory {
         target_id: String,
         root_id: String,
@@ -174,6 +195,7 @@ impl DesktopOperation {
         match self {
             Self::ListConnections => None,
             Self::GetMetrics { target_id }
+            | Self::CaptureScreen { target_id }
             | Self::ListDirectory { target_id, .. }
             | Self::Exec { target_id, .. }
             | Self::Transfer { target_id, .. }
@@ -185,6 +207,7 @@ impl DesktopOperation {
     pub fn required_scope(&self) -> Option<Scope> {
         match self {
             Self::GetMetrics { .. } => Some(Scope::Metrics),
+            Self::CaptureScreen { .. } => Some(Scope::Screen),
             Self::ListDirectory { .. } => Some(Scope::List),
             Self::Exec { .. } => Some(Scope::Exec),
             Self::Transfer {
@@ -285,23 +308,49 @@ struct OperationRecord {
 struct State {
     grants: HashMap<String, Arc<Grant>>,
     operations: HashMap<String, OperationRecord>,
+    /// When each target last handed over a picture.
+    captures: HashMap<String, Instant>,
 }
 
 pub struct DesktopService {
     ssh: Arc<SshRegistry>,
     sftp: Arc<SftpRegistry>,
+    rdp: Arc<crate::rdp::RdpRegistry>,
+    vnc: Arc<crate::vnc::VncRegistry>,
+    remote: Arc<crate::remote::RemoteRegistry>,
+    screens: Arc<crate::mcp_screen::ScreenFrames>,
     state: Arc<Mutex<State>>,
     calls: Arc<Semaphore>,
 }
 
 impl DesktopService {
+    /// Shell and file access only. Screens stay unavailable until
+    /// [`Self::with_screens`] names the registries that own them.
     pub fn new(ssh: Arc<SshRegistry>, sftp: Arc<SftpRegistry>) -> Self {
         Self {
             ssh,
             sftp,
+            rdp: Arc::new(crate::rdp::RdpRegistry::new()),
+            vnc: Arc::new(crate::vnc::VncRegistry::new()),
+            remote: Arc::new(crate::remote::RemoteRegistry::new()),
+            screens: Arc::new(crate::mcp_screen::ScreenFrames::default()),
             state: Arc::new(Mutex::new(State::default())),
             calls: Arc::new(Semaphore::new(MAX_CALLS)),
         }
+    }
+
+    pub fn with_screens(
+        mut self,
+        rdp: Arc<crate::rdp::RdpRegistry>,
+        vnc: Arc<crate::vnc::VncRegistry>,
+        remote: Arc<crate::remote::RemoteRegistry>,
+        screens: Arc<crate::mcp_screen::ScreenFrames>,
+    ) -> Self {
+        self.rdp = rdp;
+        self.vnc = vnc;
+        self.remote = remote;
+        self.screens = screens;
+        self
     }
 
     fn identity(&self, backend: Backend, session_id: &str) -> Option<usize> {
@@ -315,6 +364,21 @@ impl DesktopService {
                 .sftp
                 .connected_session(session_id)
                 .map(|handle| Arc::as_ptr(&handle) as usize),
+            // One run of one screen session, as its own registry sees it.
+            // A reconnection under the same id is a different run, so the
+            // grant goes offline rather than following the new screen.
+            Backend::Rdp => self
+                .rdp
+                .screen_generation(session_id)
+                .map(|generation| generation as usize),
+            Backend::Vnc => self
+                .vnc
+                .screen_generation(session_id)
+                .map(|generation| generation as usize),
+            Backend::Remote => self
+                .remote
+                .screen_generation(session_id)
+                .map(|generation| generation as usize),
         }
     }
 
@@ -334,6 +398,13 @@ impl DesktopService {
 
     pub async fn grant(&self, request: GrantRequest) -> Result<TargetView, ServiceError> {
         validate_grant(&request)?;
+        // Retention starts with the grant, so a screen nobody shared is
+        // never copied, and the stream it binds to is the one now running.
+        if request.backend.is_screen() {
+            self.identity(request.backend, &request.session_id)
+                .ok_or_else(ServiceError::unavailable)?;
+            self.screens.arm(&request.session_id);
+        }
         let identity = self
             .identity(request.backend, &request.session_id)
             .ok_or_else(ServiceError::unavailable)?;
@@ -394,7 +465,9 @@ impl DesktopService {
         let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
         if let Some(grant) = state.grants.remove(target_id) {
             grant.revoked.send_replace(true);
+            self.stop_retaining(&state, &grant);
         }
+        state.captures.remove(target_id);
         for operation in state
             .operations
             .values()
@@ -405,11 +478,29 @@ impl DesktopService {
         Ok(())
     }
 
+    /// A screen keeps being copied only while some grant still shares it.
+    fn stop_retaining(&self, state: &State, grant: &Grant) {
+        if !grant.view.backend.is_screen() {
+            return;
+        }
+        let shared_elsewhere = state
+            .grants
+            .values()
+            .any(|other| other.view.backend.is_screen() && other.session_id == grant.session_id);
+        if !shared_elsewhere {
+            self.screens.disarm(&grant.session_id);
+        }
+    }
+
     pub fn revoke_all(&self) {
         if let Ok(mut state) = self.state.lock() {
             for (_, grant) in state.grants.drain() {
                 grant.revoked.send_replace(true);
+                if grant.view.backend.is_screen() {
+                    self.screens.disarm(&grant.session_id);
+                }
             }
+            state.captures.clear();
             for operation in state.operations.values() {
                 operation.cancel.send_replace(true);
             }
@@ -531,6 +622,9 @@ impl DesktopService {
         operation: &DesktopOperation,
     ) -> Result<(), ServiceError> {
         match operation {
+            // Nothing to check beyond the scope and the live stream: a
+            // capture names no plan, path or file.
+            DesktopOperation::CaptureScreen { .. } => {}
             DesktopOperation::Exec { plan_id, .. } => {
                 if !grant.plans.iter().any(|plan| plan.id == *plan_id) {
                     return Err(ServiceError::denied());
@@ -588,6 +682,7 @@ impl DesktopService {
                         .map_err(metrics_error)?;
                     Ok(json!({ "metrics": metrics_view(metrics), "platform": "linux" }))
                 }
+                DesktopOperation::CaptureScreen { .. } => self.capture_screen(grant),
                 DesktopOperation::ListDirectory { root_id, path, .. } => {
                     let root = grant
                         .roots
@@ -854,6 +949,21 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
     {
         return Err(ServiceError::invalid());
     }
+    if request.backend.is_screen()
+        && (!request.scopes.screen
+            || request.scopes.metrics
+            || request.scopes.list
+            || request.scopes.exec
+            || request.scopes.upload
+            || request.scopes.download
+            || !request.exec_plans.is_empty()
+            || !request.roots.is_empty())
+    {
+        return Err(ServiceError::invalid());
+    }
+    if !request.backend.is_screen() && request.scopes.screen {
+        return Err(ServiceError::invalid());
+    }
     if (request.backend == Backend::Ssh
         && (request.scopes.list
             || request.scopes.upload
@@ -909,6 +1019,48 @@ fn sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// One still picture per this often, per target. A screen is the user's
+/// desktop: a client that wants to watch must ask again, visibly, rather
+/// than stream.
+const SCREEN_CAPTURE_INTERVAL: Duration = Duration::from_secs(2);
+
+impl DesktopService {
+    fn capture_screen(&self, grant: &Grant) -> Result<Value, ServiceError> {
+        {
+            let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
+            let last = state.captures.get(&grant.view.id).copied();
+            if last.is_some_and(|at| at.elapsed() < SCREEN_CAPTURE_INTERVAL) {
+                return Err(ServiceError::new(
+                    "busy",
+                    "One screen capture every two seconds; ask again in a moment.",
+                ));
+            }
+            state.captures.insert(grant.view.id.clone(), Instant::now());
+        }
+        let frame = self
+            .screens
+            .latest(&grant.session_id)
+            .map_err(|missing| match missing {
+                crate::mcp_screen::Missing::NotYet => ServiceError::new(
+                    "not_ready",
+                    "This screen has not produced a frame yet; ask again shortly.",
+                ),
+                crate::mcp_screen::Missing::Oversized => ServiceError::new(
+                    "unsupported",
+                    "This screen's frames are too large to hand over whole; lower the remote resolution or colour depth.",
+                ),
+            })?;
+        Ok(json!({
+            "frameId": frame.frame_id,
+            "capturedAt": frame.at,
+            "width": frame.width,
+            "height": frame.height,
+            "mimeType": frame.mime_type,
+            "base64": base64::engine::general_purpose::STANDARD.encode(&frame.bytes),
+        }))
+    }
+}
+
 /// A host that is not Linux will never answer this probe, so say that
 /// instead of "the operation failed": one is worth retrying, the other is
 /// not. The probe's own words are not passed through; they can mention the
@@ -959,6 +1111,65 @@ fn metrics_view(metrics: crate::metrics::HostMetricsPayload) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_screen_grant_needs_a_live_screen_and_shares_nothing_else() {
+        use super::{Backend, GrantRequest, Scopes};
+        let screens = std::sync::Arc::new(crate::mcp_screen::ScreenFrames::default());
+        let service = std::sync::Arc::new(
+            super::DesktopService::new(
+                std::sync::Arc::new(crate::ssh::SshRegistry::new()),
+                std::sync::Arc::new(crate::sftp::SftpRegistry::new()),
+            )
+            .with_screens(
+                std::sync::Arc::new(crate::rdp::RdpRegistry::new()),
+                std::sync::Arc::new(crate::vnc::VncRegistry::new()),
+                std::sync::Arc::new(crate::remote::RemoteRegistry::new()),
+                std::sync::Arc::clone(&screens),
+            ),
+        );
+        let request = |scopes: Scopes| GrantRequest {
+            session_id: "rdp-session".into(),
+            backend: Backend::Rdp,
+            label: "desk".into(),
+            scopes,
+            exec_plans: Vec::new(),
+            roots: Vec::new(),
+        };
+
+        // A screen grant carries the screen scope and nothing else.
+        let mixed = Scopes {
+            screen: true,
+            metrics: true,
+            ..Scopes::default()
+        };
+        assert_eq!(
+            service.grant(request(mixed)).await.unwrap_err().code,
+            "invalid_request"
+        );
+        // Shell and file connections cannot claim the screen scope either.
+        let mut shell = request(Scopes {
+            screen: true,
+            ..Scopes::default()
+        });
+        shell.backend = Backend::Ssh;
+        assert_eq!(
+            service.grant(shell).await.unwrap_err().code,
+            "invalid_request"
+        );
+
+        // With no live screen session there is nothing to share, and
+        // nothing starts being retained.
+        let only_screen = Scopes {
+            screen: true,
+            ..Scopes::default()
+        };
+        assert_eq!(
+            service.grant(request(only_screen)).await.unwrap_err().code,
+            "needs_user_action"
+        );
+        assert!(!screens.is_armed("rdp-session"));
+    }
+
     #[test]
     fn a_host_without_linux_metrics_is_unsupported_rather_than_a_failure() {
         use super::metrics_error;
