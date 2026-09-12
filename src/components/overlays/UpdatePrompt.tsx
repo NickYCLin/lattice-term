@@ -9,6 +9,7 @@
 import { useEffect, useRef } from "react";
 import { useI18n } from "../../i18n/context";
 import type { AppUpdater } from "../../app/useAppUpdater";
+import { ReleaseNotes } from "../common/ReleaseNotes";
 import { RefreshIcon } from "../icons";
 import { useModalFocus } from "./modalFocus";
 
@@ -76,9 +77,9 @@ export function UpdatePrompt({
         {updater.status === "available" && updater.releaseNotes && (
           <div className="update-prompt__notes">
             <strong>{t("settings.updater.releaseNotes")}</strong>
-            <pre className="update-prompt__notes-body">
-              {updater.releaseNotes}
-            </pre>
+            <div className="update-prompt__notes-body">
+              <ReleaseNotes body={updater.releaseNotes} />
+            </div>
           </div>
         )}
 
