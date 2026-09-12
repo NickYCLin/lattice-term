@@ -192,7 +192,7 @@ Reporter 傳輸與狀態模型已完成，Codex、Claude Code、Gemini CLI、Ope
 
 MCP 另有桌面專用 `mcpHistory` 查詢，保留最近 256 筆 Agent 寫入、遠端操作與遠端授權變更。私有快照由有界 worker 原子寫入，跨重啟還原；不主動收集提示、request ID、錯誤原文或憑證。observer 不能查詢，桌面每 10 秒更新，區分 pending／ready／memoryOnly／unavailable，失聯不當成空紀錄。詳細限制見 [MCP 操作紀錄](MCP.zh-TW.md#操作紀錄的邊界)。
 
-遠端工具以 `desktopBridgeProtocol` 協商，daemon 只保存 redacted grants，定向轉送到註冊它的 desktop connection。實際操作由 `mcp_desktop::DesktopService` 使用既有 SSH／SFTP registry，兩端檢查 scope；pending reply 綁定 owner 與 grant revision，撤權和失聯不得釋放舊結果。SSH 使用專用 exec channel，不碰使用者 PTY；SFTP 使用核准根目錄與既有 staging transfer。這不等同遠端多 PTY Fleet，也沒有畫面或鍵鼠能力。
+遠端工具以 `desktopBridgeProtocol` 協商，daemon 只保存 redacted grants，定向轉送到註冊它的 desktop connection。實際操作由 `mcp_desktop::DesktopService` 使用既有 SSH／SFTP registry，兩端檢查 scope；pending reply 綁定 owner 與 grant revision，撤權和失聯不得釋放舊結果。SSH 使用專用 exec channel，不碰使用者 PTY；SFTP 使用核准根目錄與既有 staging transfer。RDP／VNC／Lattice Remote 可另外授權單張畫面擷取，影格只在記憶體保留並綁定後端及連線世代。這不等同遠端多 PTY Fleet；鍵鼠操作尚未提供。
 
 ### 3. 自建遠端 Fleet
 

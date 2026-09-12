@@ -931,7 +931,11 @@ pub async fn connect(
                             task_app.try_state::<Arc<crate::mcp_screen::ScreenFrames>>()
                         {
                             frames.offer(
-                                &task_session_id,
+                                &crate::mcp_screen::ScreenKey::new(
+                                    crate::mcp_screen::ScreenBackend::Remote,
+                                    &task_session_id,
+                                    generation,
+                                ),
                                 frame.frame_id,
                                 frame.width,
                                 frame.height,
@@ -1001,6 +1005,14 @@ pub async fn connect(
             return;
         };
 
+        crate::mcp_screen::end_shared_screen(
+            &supervisor_app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Remote,
+                &supervisor_session_id,
+                generation,
+            ),
+        );
         // A local disconnect removes first and owns its event. Generation
         // matching prevents an old task from mutating/removing a newer record
         // if a session identifier is ever reused.
@@ -1284,6 +1296,14 @@ pub async fn disconnect(
     session_id: &str,
 ) -> Result<(), String> {
     if let Some(record) = registry.remove(session_id)? {
+        crate::mcp_screen::end_shared_screen(
+            app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Remote,
+                session_id,
+                record.generation,
+            ),
+        );
         let reason = "Disconnected by the local user.";
         stop_remote_session(record, reason, REMOTE_CLOSE_SEND_TIMEOUT).await;
         let _ = app.emit(

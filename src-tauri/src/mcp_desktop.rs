@@ -11,6 +11,7 @@ mod loopback_tests;
 mod paths;
 mod ssh_jobs;
 
+use crate::mcp_screen::{ScreenBackend, ScreenKey};
 use crate::sftp::SftpRegistry;
 use crate::ssh::SshRegistry;
 use base64::Engine as _;
@@ -391,6 +392,9 @@ impl DesktopService {
             // presents the same ID/handle again. Wake pending jobs immediately;
             // only a new explicit desktop grant can restore access.
             grant.revoked.send_replace(true);
+            if let Some(key) = self.screen_key(grant) {
+                self.screens.disarm(&key);
+            }
             return false;
         }
         true
@@ -398,13 +402,6 @@ impl DesktopService {
 
     pub async fn grant(&self, request: GrantRequest) -> Result<TargetView, ServiceError> {
         validate_grant(&request)?;
-        // Retention starts with the grant, so a screen nobody shared is
-        // never copied, and the stream it binds to is the one now running.
-        if request.backend.is_screen() {
-            self.identity(request.backend, &request.session_id)
-                .ok_or_else(ServiceError::unavailable)?;
-            self.screens.arm(&request.session_id);
-        }
         let identity = self
             .identity(request.backend, &request.session_id)
             .ok_or_else(ServiceError::unavailable)?;
@@ -457,6 +454,15 @@ impl DesktopService {
                 "Too many shared connections; revoke one before adding another.",
             ));
         }
+        if let Some(key) = self.screen_key(&grant) {
+            self.screens.arm(&key);
+            // A disconnect may have run its cleanup before arm acquired the
+            // frame lock. Recheck after arming so it cannot leave retention on.
+            if !self.connected(&grant) {
+                self.screens.disarm(&key);
+                return Err(ServiceError::unavailable());
+            }
+        }
         state.grants.insert(view.id.clone(), grant);
         Ok(view)
     }
@@ -478,17 +484,31 @@ impl DesktopService {
         Ok(())
     }
 
+    fn screen_key(&self, grant: &Grant) -> Option<ScreenKey> {
+        let backend = match grant.view.backend {
+            Backend::Rdp => ScreenBackend::Rdp,
+            Backend::Vnc => ScreenBackend::Vnc,
+            Backend::Remote => ScreenBackend::Remote,
+            _ => return None,
+        };
+        Some(ScreenKey::new(
+            backend,
+            &grant.session_id,
+            grant.identity as u64,
+        ))
+    }
+
     /// A screen keeps being copied only while some grant still shares it.
     fn stop_retaining(&self, state: &State, grant: &Grant) {
-        if !grant.view.backend.is_screen() {
+        let Some(key) = self.screen_key(grant) else {
             return;
-        }
+        };
         let shared_elsewhere = state
             .grants
             .values()
-            .any(|other| other.view.backend.is_screen() && other.session_id == grant.session_id);
+            .any(|other| !*other.revoked.borrow() && self.screen_key(other).as_ref() == Some(&key));
         if !shared_elsewhere {
-            self.screens.disarm(&grant.session_id);
+            self.screens.disarm(&key);
         }
     }
 
@@ -496,8 +516,8 @@ impl DesktopService {
         if let Ok(mut state) = self.state.lock() {
             for (_, grant) in state.grants.drain() {
                 grant.revoked.send_replace(true);
-                if grant.view.backend.is_screen() {
-                    self.screens.disarm(&grant.session_id);
+                if let Some(key) = self.screen_key(&grant) {
+                    self.screens.disarm(&key);
                 }
             }
             state.captures.clear();
@@ -1039,7 +1059,7 @@ impl DesktopService {
         }
         let frame = self
             .screens
-            .latest(&grant.session_id)
+            .latest(&self.screen_key(grant).ok_or_else(ServiceError::invalid)?)
             .map_err(|missing| match missing {
                 crate::mcp_screen::Missing::NotYet => ServiceError::new(
                     "not_ready",
@@ -1111,6 +1131,52 @@ fn metrics_view(metrics: crate::metrics::HostMetricsPayload) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn revoking_one_of_two_grants_keeps_only_the_still_shared_screen() {
+        use super::*;
+        let service =
+            DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()));
+        let grant = |id: &str| {
+            Arc::new(Grant {
+                view: TargetView {
+                    id: id.into(),
+                    label: "test screen".into(),
+                    backend: Backend::Rdp,
+                    scopes: Scopes {
+                        screen: true,
+                        ..Scopes::default()
+                    },
+                    plans: vec![],
+                    roots: vec![],
+                    connected: true,
+                },
+                session_id: "same-screen".into(),
+                identity: 1,
+                plans: vec![],
+                roots: vec![],
+                revoked: watch::channel(false).0,
+            })
+        };
+        let first = grant("one");
+        let second = grant("two");
+        let key = service.screen_key(&first).unwrap();
+        service.screens.arm(&key);
+        service.screens.offer(&key, 1, 1, 1, "image/jpeg", &[7]);
+        {
+            let mut state = service.state.lock().unwrap();
+            state.grants.insert("one".into(), first);
+            state.grants.insert("two".into(), second);
+        }
+        service.revoke("one").unwrap();
+        assert_eq!(service.screens.latest(&key).unwrap().bytes, vec![7]);
+        service.revoke("two").unwrap();
+        assert!(!service.screens.is_armed(&key));
+        assert_eq!(
+            service.screens.latest(&key),
+            Err(crate::mcp_screen::Missing::NotYet)
+        );
+    }
+
     #[tokio::test]
     async fn a_screen_grant_needs_a_live_screen_and_shares_nothing_else() {
         use super::{Backend, GrantRequest, Scopes};
@@ -1167,7 +1233,11 @@ mod tests {
             service.grant(request(only_screen)).await.unwrap_err().code,
             "needs_user_action"
         );
-        assert!(!screens.is_armed("rdp-session"));
+        assert!(!screens.is_armed(&crate::mcp_screen::ScreenKey::new(
+            crate::mcp_screen::ScreenBackend::Rdp,
+            "rdp-session",
+            1
+        )));
     }
 
     #[test]

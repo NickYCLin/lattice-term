@@ -655,7 +655,11 @@ pub async fn connect(
                 })) => {
                     crate::mcp_screen::retain_shared_frame(
                         &task_app,
-                        &task_summary.session_id,
+                        &crate::mcp_screen::ScreenKey::new(
+                            crate::mcp_screen::ScreenBackend::Vnc,
+                            &task_summary.session_id,
+                            generation,
+                        ),
                         frame_id,
                         u32::from(width),
                         u32::from(height),
@@ -686,6 +690,14 @@ pub async fn connect(
                 Err(error) => break error,
             }
         };
+        crate::mcp_screen::end_shared_screen(
+            &task_app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Vnc,
+                &task_summary.session_id,
+                generation,
+            ),
+        );
         if !reaped {
             wait_for_sidecar_exit(&mut child).await;
         }
@@ -726,6 +738,14 @@ pub async fn input(
         let _ = record.stop.send(true);
         match removed {
             Ok(Some(_)) => {
+                crate::mcp_screen::end_shared_screen(
+                    app,
+                    &crate::mcp_screen::ScreenKey::new(
+                        crate::mcp_screen::ScreenBackend::Vnc,
+                        session_id,
+                        record.generation,
+                    ),
+                );
                 let _ = app.emit(
                     "vnc://closed",
                     VncClosedEvent {
@@ -752,6 +772,14 @@ pub async fn disconnect(
     session_id: &str,
 ) -> Result<(), String> {
     if let Some(record) = registry.begin_close(session_id)? {
+        crate::mcp_screen::end_shared_screen(
+            app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Vnc,
+                session_id,
+                record.generation,
+            ),
+        );
         let cancellation_guard = SidecarCloseCancellationGuard::new(record.stop.clone());
         let close_result = write_locked_json_line_timeboxed(
             &record.stdin,
