@@ -52,6 +52,7 @@ jobs:
           cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --bin lattice-agent text_editor
           cargo build --manifest-path crates/lattice-remote/Cargo.toml --features agent --bin lattice-agent
           cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --test text_files_e2e -- --ignored
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --test chat_e2e
           cargo clippy --manifest-path crates/lattice-remote/Cargo.toml --features agent --all-targets -- -D warnings
       - name: Verify the macOS desktop quit route
         run: |

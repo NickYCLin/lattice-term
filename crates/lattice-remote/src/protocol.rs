@@ -152,6 +152,7 @@ pub struct RemoteHello {
     pub file_edit: bool,
     /// Optional command-shell bitset: cmd=1, PowerShell=2.
     pub command_shells: u8,
+    pub chat: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,6 +379,8 @@ pub enum RemoteMessage {
     Input(RemoteInput),
     FileRequest(RemoteFileRequest),
     FileResponse(RemoteFileResponse),
+    ChatRequest(crate::chat_protocol::ChatRequest),
+    ChatResponse(crate::chat_protocol::ChatResponse),
     CommandRequest(crate::command_protocol::CommandRequest),
     CommandEvent(crate::command_protocol::CommandEvent),
     /// Raw PTY output from a terminal-mode agent.
@@ -536,14 +539,17 @@ impl RemoteMessage {
                 // Hosts without optional capabilities stay byte-identical to
                 // the original protocol v2 hello. Editing appends a terminal
                 // placeholder and its own capability for tolerant v2 peers.
-                if hello.terminal || hello.file_edit || hello.command_shells != 0 {
+                if hello.terminal || hello.file_edit || hello.command_shells != 0 || hello.chat {
                     output.push(u8::from(hello.terminal));
                 }
-                if hello.file_edit || hello.command_shells != 0 {
+                if hello.file_edit || hello.command_shells != 0 || hello.chat {
                     output.push(u8::from(hello.file_edit));
                 }
-                if hello.command_shells != 0 {
+                if hello.command_shells != 0 || hello.chat {
                     output.push(hello.command_shells);
+                }
+                if hello.chat {
+                    output.push(1);
                 }
                 Ok(output)
             }
@@ -606,6 +612,8 @@ impl RemoteMessage {
             }
             Self::FileRequest(request) => encode_file_request(request),
             Self::FileResponse(response) => encode_file_response(response),
+            Self::ChatRequest(request) => encode_command(14, request, request.valid()),
+            Self::ChatResponse(response) => encode_command(15, response, response.valid()),
             Self::CommandRequest(request) => {
                 encode_command(MESSAGE_COMMAND_REQUEST, request, request.valid())
             }
@@ -709,6 +717,7 @@ impl RemoteMessage {
                     terminal,
                     file_edit,
                     command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 3,
+                    chat: body.get(base_len + 3).copied().unwrap_or(0) == 1,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -773,6 +782,22 @@ impl RemoteMessage {
             }
             MESSAGE_FILE_REQUEST => decode_file_request(body).map(Self::FileRequest),
             MESSAGE_FILE_RESPONSE => decode_file_response(body).map(Self::FileResponse),
+            14 if body.len() <= 60 * 1024 => {
+                let request: crate::chat_protocol::ChatRequest = serde_json::from_slice(body)
+                    .map_err(|_| ProtocolError::InvalidMessage("invalid chat request"))?;
+                if !request.valid() {
+                    return Err(ProtocolError::InvalidMessage("invalid chat request"));
+                }
+                Ok(Self::ChatRequest(request))
+            }
+            15 if body.len() <= 60 * 1024 => {
+                let response: crate::chat_protocol::ChatResponse = serde_json::from_slice(body)
+                    .map_err(|_| ProtocolError::InvalidMessage("invalid chat response"))?;
+                if !response.valid() {
+                    return Err(ProtocolError::InvalidMessage("invalid chat response"));
+                }
+                Ok(Self::ChatResponse(response))
+            }
             MESSAGE_COMMAND_REQUEST if body.len() <= 60 * 1024 => {
                 let request: crate::command_protocol::CommandRequest = serde_json::from_slice(body)
                     .map_err(|_| ProtocolError::InvalidMessage("invalid command request"))?;
@@ -1453,6 +1478,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: false,
         });
         assert_eq!(
@@ -1474,6 +1500,7 @@ mod tests {
             terminal: false,
             file_edit: false,
             command_shells: 0,
+            chat: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.command_shells = 3;
@@ -1502,6 +1529,7 @@ mod tests {
                 file_root_label: String::new(),
                 file_edit: false,
                 command_shells: 0,
+                chat: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1575,6 +1603,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: true,
         })
         .encode()
@@ -1604,6 +1633,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: false,
         })
         .encode()
@@ -1620,6 +1650,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: true,
         })
         .encode()
@@ -1640,6 +1671,7 @@ mod tests {
             terminal: false,
             file_edit: false,
             command_shells: 0,
+            chat: false,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1726,6 +1758,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: true,
         })
         .encode()
@@ -1835,6 +1868,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1849,6 +1883,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1863,6 +1898,7 @@ mod tests {
             file_root_label: String::new(),
             file_edit: false,
             command_shells: 0,
+            chat: false,
             terminal: false,
         })
         .encode()

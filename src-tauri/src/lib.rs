@@ -21,6 +21,7 @@ pub mod metrics;
 pub mod notification_sound;
 pub mod rdp;
 pub mod remote;
+pub mod remote_chat_host;
 pub mod remote_commands;
 pub mod remote_files;
 pub mod remote_host;
@@ -800,9 +801,10 @@ async fn agent_chat_steer(
 #[tauri::command]
 fn agent_chat_stop(
     thread_id: String,
+    expected_turn_id: Option<String>,
     registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
 ) -> Result<bool, String> {
-    registry.stop(&thread_id)
+    registry.stop_expected(&thread_id, expected_turn_id.as_deref())
 }
 
 /// Ends everything serving a thread: its running turn and, for Codex, the
@@ -822,10 +824,19 @@ async fn agent_chat_respond(
     request_id: String,
     allow: bool,
     message: Option<String>,
+    expected_turn_id: Option<String>,
     registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
 ) -> Result<(), String> {
     let registry = Arc::clone(registry.inner());
-    crate::agent_chat::respond(registry, &thread_id, &request_id, allow, message.as_deref()).await
+    crate::agent_chat::respond_expected(
+        registry,
+        &thread_id,
+        &request_id,
+        allow,
+        message.as_deref(),
+        expected_turn_id.as_deref(),
+    )
+    .await
 }
 
 /// The models a chat CLI offers right now; empty when it cannot say.
@@ -2772,6 +2783,32 @@ async fn remote_terminal_resize(
 }
 
 #[tauri::command]
+async fn remote_host_configure(
+    app: AppHandle,
+    registry: State<'_, Arc<remote_host::RemoteHostRegistry>>,
+    request: remote_host::RemoteHostStartRequest,
+) -> Result<remote_host::RemoteHostStatus, String> {
+    remote_host::configure(app, Arc::clone(registry.inner()), request).await
+}
+
+#[tauri::command]
+async fn remote_chat_request(
+    registry: State<'_, Arc<RemoteRegistry>>,
+    session_id: String,
+    request: lattice_remote::chat_protocol::ChatRequest,
+) -> Result<lattice_remote::chat_protocol::ChatResponse, String> {
+    crate::remote::chat_request(registry.inner(), &session_id, request).await
+}
+#[tauri::command]
+fn remote_chat_reply(
+    registry: State<'_, Arc<remote_host::RemoteHostRegistry>>,
+    host_id: String,
+    response: lattice_remote::chat_protocol::ChatResponse,
+) -> Result<(), String> {
+    crate::remote_host::chat_reply(registry.inner(), &host_id, response)
+}
+
+#[tauri::command]
 async fn remote_command_start(
     registry: State<'_, Arc<RemoteRegistry>>,
     session_id: String,
@@ -3504,6 +3541,9 @@ pub fn run() {
             remote_input,
             remote_terminal_input,
             remote_terminal_resize,
+            remote_host_configure,
+            remote_chat_request,
+            remote_chat_reply,
             remote_command_start,
             remote_command_cancel,
             remote_command_state,

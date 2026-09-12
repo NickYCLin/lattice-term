@@ -84,6 +84,7 @@ pub struct RemoteSessionSummary {
     pub file_transfer: bool,
     pub file_edit: bool,
     pub command_shells: u8,
+    pub chat: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -251,6 +252,10 @@ struct RemoteSessionRecord {
     terminal_output: Option<RemoteTerminalOutput>,
     command: Option<crate::remote_commands::CommandState>,
     command_next: u32,
+    chat_pending: std::collections::HashMap<
+        String,
+        oneshot::Sender<lattice_remote::chat_protocol::ChatResponse>,
+    >,
     admission: OwnedSemaphorePermit,
 }
 
@@ -416,6 +421,7 @@ impl RemoteRegistry {
                 terminal_output,
                 command: None,
                 command_next: 0,
+                chat_pending: std::collections::HashMap::new(),
                 admission: permit,
             },
         );
@@ -1069,6 +1075,7 @@ pub async fn connect(
         file_transfer: hello.file_transfer,
         file_edit: hello.file_edit,
         command_shells: hello.command_shells,
+        chat: hello.chat,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1168,7 +1175,20 @@ pub async fn connect(
                         Err(error) => break error,
                     }
                 }
-                Ok(RemoteMessage::CommandRequest(_)) => {
+                Ok(RemoteMessage::ChatResponse(response)) => {
+                    if let Ok(mut records) = task_registry.state.lock() {
+                        if let Some(record) = records
+                            .sessions
+                            .get_mut(&task_session_id)
+                            .filter(|record| record.generation == generation && record.summary.chat)
+                        {
+                            if let Some(tx) = record.chat_pending.remove(&response.id) {
+                                let _ = tx.send(response);
+                            }
+                        }
+                    }
+                }
+                Ok(RemoteMessage::ChatRequest(_)) | Ok(RemoteMessage::CommandRequest(_)) => {
                     break "The Agent sent a viewer-only command request.".into()
                 }
                 Ok(RemoteMessage::Input(_))
@@ -1515,6 +1535,53 @@ pub async fn disconnect(
     Ok(())
 }
 
+pub async fn chat_request(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    request: lattice_remote::chat_protocol::ChatRequest,
+) -> Result<lattice_remote::chat_protocol::ChatResponse, String> {
+    RemoteMessage::ChatRequest(request.clone())
+        .encode()
+        .map_err(|e| e.to_string())?;
+    let id = request.id.clone();
+    let (outbound, generation, rx) = {
+        let mut records = registry.state.lock().map_err(|e| e.to_string())?;
+        let record = records
+            .sessions
+            .get_mut(session_id)
+            .ok_or("The Remote connection ended.")?;
+        if !record.summary.chat {
+            return Err("The host has not shared conversations.".into());
+        }
+        if record.chat_pending.len() >= 4 || record.chat_pending.contains_key(&id) {
+            return Err("Another conversation request is pending.".into());
+        }
+        let (tx, rx) = oneshot::channel();
+        record.chat_pending.insert(id.clone(), tx);
+        (record.outbound.clone(), record.generation, rx)
+    };
+    let result = tokio::time::timeout(Duration::from_secs(15), async {
+        outbound
+            .send(RemoteMessage::ChatRequest(request))
+            .await
+            .map_err(|_| "The Remote connection ended.")?;
+        rx.await.map_err(|_| "The Remote connection ended.")
+    })
+    .await
+    .map_err(|_| "No acknowledgement. Refresh the conversation before sending again.".to_string())
+    .and_then(|result| result.map_err(str::to_owned));
+    if let Ok(mut records) = registry.state.lock() {
+        if let Some(record) = records
+            .sessions
+            .get_mut(session_id)
+            .filter(|record| record.generation == generation)
+        {
+            record.chat_pending.remove(&id);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1566,6 +1633,7 @@ mod tests {
             file_transfer: false,
             file_edit: false,
             command_shells: 0,
+            chat: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1593,6 +1661,7 @@ mod tests {
             file_transfer: false,
             file_edit: false,
             command_shells: 0,
+            chat: false,
             file_root_label: String::new(),
             terminal,
         }

@@ -38,6 +38,7 @@ export interface RemoteSessionSummary {
   fileEdit?: boolean;
   /** Host-authorised command shells: cmd=1, PowerShell=2. */
   commandShells?: number;
+  chat?: boolean;
   fileRootLabel: string;
   /** True when the agent shares a shell (headless host) instead of a display. */
   terminal: boolean;

@@ -85,6 +85,7 @@ jobs:
           cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --bin lattice-agent windows_text_requests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --test commands_e2e
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --test chat_e2e
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify native regression runner contracts

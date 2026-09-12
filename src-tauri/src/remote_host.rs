@@ -30,6 +30,8 @@ pub struct RemoteHostStartRequest {
     pub allow_input: bool,
     #[serde(default)]
     pub allow_commands: bool,
+    #[serde(default)]
+    pub allow_chat: bool,
     /// File access is independently authorised from keyboard/mouse control.
     #[serde(default)]
     pub allow_files: bool,
@@ -58,6 +60,7 @@ pub struct RemoteHostStatus {
     pub view_only: bool,
     pub file_transfer: bool,
     pub commands: bool,
+    pub chat: bool,
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
@@ -126,6 +129,7 @@ struct RemoteHostClosedEvent {
 struct RemoteHostRecord {
     status: Mutex<RemoteHostStatus>,
     child: AsyncMutex<Child>,
+    chat: Option<crate::remote_chat_host::Bridge>,
 }
 
 #[derive(Default)]
@@ -242,12 +246,50 @@ fn agent_path() -> Result<PathBuf, String> {
         })
 }
 
+/// Prefer a LAN IPv4 address. Link-local IPv6 needs a scope ID and cannot be
+/// advertised as a plain IP. Offline hosts remain available on loopback.
+fn automatic_bind_address(addresses: impl Iterator<Item = IpAddr>) -> IpAddr {
+    addresses
+        .filter(|address| match address {
+            IpAddr::V4(ip) => {
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_multicast()
+                    && !ip.is_link_local()
+                    && !ip.is_broadcast()
+            }
+            IpAddr::V6(ip) => {
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_multicast()
+                    && !ip.is_unicast_link_local()
+            }
+        })
+        .min_by_key(|address| match address {
+            IpAddr::V4(ip) if ip.is_private() => 0,
+            IpAddr::V4(_) => 1,
+            IpAddr::V6(_) => 2,
+        })
+        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+}
+
 fn bind_target(request: &RemoteHostStartRequest) -> Result<SocketAddr, String> {
-    let address: IpAddr = request
-        .bind_address
-        .trim()
-        .parse()
-        .map_err(|_| "The bind address must be an IP address.".to_string())?;
+    let address: IpAddr = if request.bind_address.trim().is_empty() {
+        let interfaces = if_addrs::get_if_addrs()
+            .map_err(|error| format!("Cannot read network interfaces: {error}"))?;
+        automatic_bind_address(
+            interfaces
+                .into_iter()
+                .filter(|interface| interface.is_oper_up())
+                .map(|interface| interface.ip()),
+        )
+    } else {
+        request
+            .bind_address
+            .trim()
+            .parse()
+            .map_err(|_| "The bind address must be an IP address.".to_string())?
+    };
     if address.is_unspecified() || address.is_multicast() {
         return Err("Choose a specific loopback or network interface address.".to_string());
     }
@@ -277,15 +319,29 @@ async fn spawn_agent(
     allow_input: bool,
     allow_commands: bool,
     file_root: Option<&Path>,
+    chat: Option<&crate::remote_chat_host::Bridge>,
+    direct_pairing_code: Option<&str>,
 ) -> Result<(Child, tokio::process::ChildStdout), String> {
     let mut command = Command::new(agent_path()?);
     command.arg("--json");
     // The desktop owns the sharing UI; the bundled console engine stays hidden.
     #[cfg(windows)]
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW; keep redirected pipes.
+    command
+        .env_remove("LATTICE_CHAT_BRIDGE")
+        .env_remove("LATTICE_CHAT_TOKEN");
+    if let Some(chat) = chat {
+        command
+            .env("LATTICE_CHAT_BRIDGE", &chat.address)
+            .env("LATTICE_CHAT_TOKEN", &chat.token);
+    }
     let mut pairing_code_input = None;
     match target {
         AgentTarget::Direct(address) => {
+            if let Some(code) = direct_pairing_code {
+                command.arg("--pair-code-stdin");
+                pairing_code_input = Some(code);
+            }
             command.arg("--bind").arg(address.to_string());
         }
         AgentTarget::Relay {
@@ -383,8 +439,23 @@ pub async fn start(
     registry: Arc<RemoteHostRegistry>,
     request: RemoteHostStartRequest,
 ) -> Result<RemoteHostStatus, String> {
+    start_inner(app, registry, request, false).await
+}
+pub async fn configure(
+    app: AppHandle,
+    registry: Arc<RemoteHostRegistry>,
+    request: RemoteHostStartRequest,
+) -> Result<RemoteHostStatus, String> {
+    start_inner(app, registry, request, true).await
+}
+async fn start_inner(
+    app: AppHandle,
+    registry: Arc<RemoteHostRegistry>,
+    request: RemoteHostStartRequest,
+    replace: bool,
+) -> Result<RemoteHostStatus, String> {
     let _start_guard = registry.start_lock.lock().await;
-    if registry.current()?.is_some() {
+    if !replace && registry.current()?.is_some() {
         return Err("This device is already sharing its display.".to_string());
     }
 
@@ -402,7 +473,7 @@ pub async fn start(
     } else {
         Some(bind_target(&request)?)
     };
-    let fixed_code = if relay_mode && !request.pairing_code.is_empty() {
+    let fixed_code = if !request.pairing_code.is_empty() {
         Some(
             lattice_remote::normalize_pairing_code(&request.pairing_code)
                 .map_err(|error| error.to_string())?,
@@ -444,12 +515,23 @@ pub async fn start(
         },
         (None, None) => return Err("The sharing mode is incomplete.".to_string()),
     };
+    if replace {
+        stop(&app, &registry).await?;
+    }
+    let sharing_id = host_id();
+    let chat = if request.allow_chat {
+        Some(crate::remote_chat_host::Bridge::start(app.clone(), sharing_id.clone()).await?)
+    } else {
+        None
+    };
     let (mut child, stdout) = spawn_agent(
         target,
         request.fps,
         request.allow_input,
         request.allow_commands,
         file_root.as_deref(),
+        chat.as_ref(),
+        fixed_code.as_deref(),
     )
     .await?;
     let mut lines = BufReader::new(stdout).lines();
@@ -492,7 +574,7 @@ pub async fn start(
     };
 
     let status = RemoteHostStatus {
-        host_id: host_id(),
+        host_id: sharing_id,
         address,
         pairing_code,
         // Zero from the agent means the code never expires while sharing.
@@ -504,6 +586,7 @@ pub async fn start(
         view_only,
         file_transfer,
         commands,
+        chat: request.allow_chat,
         file_root,
         state: "waiting",
         peer: None,
@@ -515,6 +598,7 @@ pub async fn start(
     let record = Arc::new(RemoteHostRecord {
         status: Mutex::new(status.clone()),
         child: AsyncMutex::new(child),
+        chat,
     });
     registry.insert(Arc::clone(&record))?;
 
@@ -622,6 +706,9 @@ pub async fn start(
 
 pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), String> {
     if let Some(record) = registry.take()? {
+        if let Some(chat) = &record.chat {
+            chat.stop();
+        }
         let host_id = record
             .status
             .lock()
@@ -640,9 +727,46 @@ pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), 
     Ok(())
 }
 
+pub fn chat_reply(
+    registry: &RemoteHostRegistry,
+    host_id: &str,
+    response: lattice_remote::chat_protocol::ChatResponse,
+) -> Result<(), String> {
+    let record = registry.current()?.ok_or("Sharing stopped.")?;
+    if record.status.lock().map_err(|e| e.to_string())?.host_id != host_id {
+        return Err("Sharing changed.".into());
+    }
+    record
+        .chat
+        .as_ref()
+        .ok_or("Conversation sharing is disabled.")?
+        .reply(response)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_standby_selects_a_connectable_interface() {
+        let addresses = [
+            "127.0.0.1",
+            "fe80::1",
+            "0.0.0.0",
+            "::",
+            "203.0.113.2",
+            "192.168.1.2",
+        ];
+        assert_eq!(
+            automatic_bind_address(addresses.into_iter().map(|value| value.parse().unwrap()))
+                .to_string(),
+            "192.168.1.2"
+        );
+        assert_eq!(
+            automatic_bind_address(std::iter::empty()).to_string(),
+            "127.0.0.1"
+        );
+    }
 
     #[test]
     fn accepts_specific_ipv4_and_ipv6_bind_addresses() {
@@ -652,6 +776,7 @@ mod tests {
             fps: 5,
             allow_input: false,
             allow_commands: false,
+            allow_chat: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -667,6 +792,7 @@ mod tests {
             fps: 10,
             allow_input: true,
             allow_commands: false,
+            allow_chat: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -686,6 +812,7 @@ mod tests {
                 fps: 5,
                 allow_input: false,
                 allow_commands: false,
+                allow_chat: false,
                 allow_files: false,
                 file_root: String::new(),
                 mode: String::new(),

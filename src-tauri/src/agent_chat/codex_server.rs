@@ -1073,12 +1073,23 @@ fn decline_line(rpc_id: &Value) -> String {
 }
 
 /// Answers one approval card on the thread's server.
+#[cfg(test)]
 pub(super) async fn respond(
     servers: &CodexServers,
     thread_id: &str,
     request_id: &str,
     allow: bool,
     message: Option<&str>,
+) -> Result<(), String> {
+    respond_expected(servers, thread_id, request_id, allow, message, None).await
+}
+pub(super) async fn respond_expected(
+    servers: &CodexServers,
+    thread_id: &str,
+    request_id: &str,
+    allow: bool,
+    message: Option<&str>,
+    expected_turn_id: Option<&str>,
 ) -> Result<(), String> {
     let server = servers
         .get(thread_id)
@@ -1089,6 +1100,9 @@ pub(super) async fn respond(
             .active
             .as_mut()
             .ok_or_else(|| "This conversation is not waiting for an answer.".to_string())?;
+        if expected_turn_id.is_some_and(|id| id != turn.turn_id) {
+            return Err("The active turn changed.".into());
+        }
         let pending = turn
             .pending
             .get(request_id)
@@ -1166,7 +1180,11 @@ fn is_mcp_tool_approval(params: &Value) -> bool {
 /// Interrupts the turn in flight, keeping the server for the next one. A
 /// server that does not acknowledge within the grace period is killed; its
 /// reader then reports the turn as stopped.
-pub(super) fn stop(servers: &CodexServers, thread_id: &str) -> Result<bool, String> {
+pub(super) fn stop_expected(
+    servers: &CodexServers,
+    thread_id: &str,
+    expected_turn_id: Option<&str>,
+) -> Result<bool, String> {
     let Some(server) = servers.get(thread_id) else {
         return Ok(false);
     };
@@ -1175,6 +1193,9 @@ pub(super) fn stop(servers: &CodexServers, thread_id: &str) -> Result<bool, Stri
         let Some(turn) = state.active.as_ref() else {
             return Ok(false);
         };
+        if expected_turn_id.is_some_and(|id| id != turn.turn_id) {
+            return Err("The active turn changed.".into());
+        }
         (
             state.codex_thread_id.clone(),
             turn.codex_turn_id.clone(),
