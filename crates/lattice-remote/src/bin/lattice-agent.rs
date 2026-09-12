@@ -2770,7 +2770,6 @@ async fn run_relay(options: &Options) -> String {
         }
     };
 
-    let listening_address = listener.local_addr().unwrap_or(options.bind);
     let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
     let mut failed_pairings = 0u32;
     let mut announced = false;
