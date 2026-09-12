@@ -351,6 +351,16 @@ impl RdpRegistry {
         Ok(record)
     }
 
+    /// Which run of this session is live: the identity an MCP screen grant
+    /// binds to, so a reconnection under the same id is not the same screen.
+    pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
+        let state = self.state.lock().ok()?;
+        state
+            .sessions
+            .get(session_id)
+            .map(|record| record.generation)
+    }
+
     pub fn list(&self) -> Vec<RdpSessionSummary> {
         let Ok(state) = self.state.lock() else {
             return Vec::new();
@@ -897,6 +907,19 @@ pub async fn connect(
                     mime_type,
                     base64,
                 })) => {
+                    crate::mcp_screen::retain_shared_frame(
+                        &task_app,
+                        &crate::mcp_screen::ScreenKey::new(
+                            crate::mcp_screen::ScreenBackend::Rdp,
+                            &task_summary.session_id,
+                            generation,
+                        ),
+                        frame_id,
+                        u32::from(width),
+                        u32::from(height),
+                        &mime_type,
+                        &base64,
+                    );
                     let _ = task_app.emit(
                         "rdp://frame",
                         RdpFrameEvent {
@@ -919,6 +942,14 @@ pub async fn connect(
                 Err(error) => break error,
             }
         };
+        crate::mcp_screen::end_shared_screen(
+            &task_app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Rdp,
+                &task_summary.session_id,
+                generation,
+            ),
+        );
         if !reaped {
             wait_for_sidecar_exit(&mut child).await;
         }
@@ -959,6 +990,14 @@ pub async fn input(
         let _ = record.stop.send(true);
         match removed {
             Ok(Some(_)) => {
+                crate::mcp_screen::end_shared_screen(
+                    app,
+                    &crate::mcp_screen::ScreenKey::new(
+                        crate::mcp_screen::ScreenBackend::Rdp,
+                        session_id,
+                        record.generation,
+                    ),
+                );
                 let _ = app.emit(
                     "rdp://closed",
                     RdpClosedEvent {
@@ -985,6 +1024,14 @@ pub async fn disconnect(
     session_id: &str,
 ) -> Result<(), String> {
     if let Some(record) = registry.begin_close(session_id)? {
+        crate::mcp_screen::end_shared_screen(
+            app,
+            &crate::mcp_screen::ScreenKey::new(
+                crate::mcp_screen::ScreenBackend::Rdp,
+                session_id,
+                record.generation,
+            ),
+        );
         let cancellation_guard = SidecarCloseCancellationGuard::new(record.stop.clone());
         let close_result = write_locked_json_line_timeboxed(
             &record.stdin,

@@ -16,6 +16,7 @@ pub mod hostkeys;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
 pub mod mcp_desktop;
+pub mod mcp_screen;
 pub mod metrics;
 pub mod notification_sound;
 pub mod rdp;
@@ -89,6 +90,52 @@ struct McpPlanSync(tokio::sync::Mutex<()>);
 
 #[derive(Default)]
 struct McpRemoteSync(tokio::sync::Mutex<()>);
+
+/// The live screens the user could share with MCP: RDP, VNC and Lattice
+/// Remote display sessions. A terminal-only Remote share has no screen and
+/// is left out rather than offered and then refused.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpScreenSession {
+    session_id: String,
+    host: String,
+    backend: mcp_desktop::Backend,
+}
+
+#[tauri::command]
+fn mcp_screen_sessions(
+    rdp: State<'_, Arc<RdpRegistry>>,
+    vnc: State<'_, Arc<VncRegistry>>,
+    remote: State<'_, Arc<RemoteRegistry>>,
+) -> Vec<McpScreenSession> {
+    let mut sessions: Vec<McpScreenSession> = rdp
+        .list()
+        .into_iter()
+        .map(|session| McpScreenSession {
+            session_id: session.session_id,
+            host: session.host,
+            backend: mcp_desktop::Backend::Rdp,
+        })
+        .chain(vnc.list().into_iter().map(|session| McpScreenSession {
+            session_id: session.session_id,
+            host: session.host,
+            backend: mcp_desktop::Backend::Vnc,
+        }))
+        .chain(
+            remote
+                .list()
+                .into_iter()
+                .filter(|session| !session.terminal)
+                .map(|session| McpScreenSession {
+                    session_id: session.session_id,
+                    host: session.host,
+                    backend: mcp_desktop::Backend::Remote,
+                }),
+        )
+        .collect();
+    sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+    sessions
+}
 
 #[tauri::command]
 fn mcp_remote_targets(
@@ -3225,10 +3272,7 @@ pub fn run() {
             app.manage(trust);
             app.manage(Arc::new(SshRegistry::new()));
             app.manage(Arc::new(SftpRegistry::new()));
-            app.manage(Arc::new(mcp_desktop::DesktopService::new(
-                app.state::<Arc<SshRegistry>>().inner().clone(),
-                app.state::<Arc<SftpRegistry>>().inner().clone(),
-            )));
+            app.manage(Arc::new(mcp_screen::ScreenFrames::default()));
             app.manage(McpRemoteSync::default());
             app.manage(Arc::new(TransferRegistry::new()));
             app.manage(Arc::new(RemoteRegistry::new()));
@@ -3240,6 +3284,20 @@ pub fn run() {
             app.manage(Arc::new(VncRegistry::with_admission(
                 desktop_sidecar_admission,
             )));
+            // Built last: it binds an MCP grant to the live session in each
+            // of the registries it can share.
+            app.manage(Arc::new(
+                mcp_desktop::DesktopService::new(
+                    app.state::<Arc<SshRegistry>>().inner().clone(),
+                    app.state::<Arc<SftpRegistry>>().inner().clone(),
+                )
+                .with_screens(
+                    app.state::<Arc<RdpRegistry>>().inner().clone(),
+                    app.state::<Arc<VncRegistry>>().inner().clone(),
+                    app.state::<Arc<RemoteRegistry>>().inner().clone(),
+                    app.state::<Arc<mcp_screen::ScreenFrames>>().inner().clone(),
+                ),
+            ));
             app.manage(Arc::new(TunnelRegistry::new()));
             app.manage(Arc::new(SensitiveClipboard::default()));
             let agent_registry = AgentRegistry::with_local_reporter(Arc::new(
@@ -3260,6 +3318,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_summary,
             mcp_remote_targets,
+            mcp_screen_sessions,
             mcp_remote_grant,
             mcp_remote_revoke,
             play_notification_sound,
