@@ -21,6 +21,7 @@ import { localeCatalog, type Locale } from "../i18n/catalog";
 import type { MessageKey } from "../i18n/context";
 import { Chip } from "../components/common/Badge";
 import { Callout } from "../components/common/Callout";
+import { ReleaseNotes } from "../components/common/ReleaseNotes";
 import { CheckIcon, PlayIcon } from "../components/icons";
 import { useAppUpdater, type AppUpdater } from "../app/useAppUpdater";
 import { canUseInAppUpdater } from "../app/platformCapabilities";
@@ -666,9 +667,7 @@ export function SettingsView({
               {updater.releaseNotes ? (
                 <div>
                   <strong>{t("settings.updater.releaseNotes")}：</strong>
-                  <p style={{ marginTop: "var(--space-2)", whiteSpace: "pre-wrap" }}>
-                    {updater.releaseNotes}
-                  </p>
+                  <ReleaseNotes body={updater.releaseNotes} />
                 </div>
               ) : null}
             </Callout>

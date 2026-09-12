@@ -444,7 +444,6 @@
   font-family: inherit;
   font-size: var(--text-xs);
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
@@ -629,4 +628,38 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Release notes: headed lists of changes, in the update prompt and in
+   Settings. Sized to read as prose, not as terminal output. */
+.release-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: left;
+}
+
+.release-notes__title {
+  margin: 0 0 var(--space-1);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.release-notes__list {
+  margin: 0;
+  padding-left: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.release-notes__list li {
+  color: var(--text-muted);
+}
+
+.release-notes__paragraph {
+  margin: 0;
+  color: var(--text-muted);
+  white-space: pre-wrap;
 }
