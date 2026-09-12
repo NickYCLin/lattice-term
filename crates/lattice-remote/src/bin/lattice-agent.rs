@@ -2770,6 +2770,7 @@ async fn run_relay(options: &Options) -> String {
         }
     };
 
+    let listening_address = listener.local_addr().unwrap_or(options.bind);
     let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
     let mut failed_pairings = 0u32;
     let mut announced = false;
@@ -2999,11 +3000,12 @@ async fn main() {
         }
     };
 
+    let listening_address = listener.local_addr().unwrap_or(options.bind);
     let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
     emit_event(
         options.json,
         &AgentEvent::Ready {
-            address: options.bind.to_string(),
+            address: listening_address.to_string(),
             pairing_code: formatted_code.clone(),
             expires_in_seconds: PAIRING_LIFETIME.as_secs(),
             view_only: !options.allow_input,
@@ -3025,7 +3027,7 @@ async fn main() {
             "view-only"
         };
         println!("Lattice Remote is ready ({mode})");
-        println!("Address: {}", options.bind);
+        println!("Address: {listening_address}");
         println!("Pairing code: {formatted_code}");
         println!("The code is valid for one successful connection and is not saved.");
     }
