@@ -83,6 +83,7 @@ pub struct RemoteSessionSummary {
     pub view_only: bool,
     pub file_transfer: bool,
     pub file_edit: bool,
+    pub command_shells: u8,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -248,6 +249,8 @@ struct RemoteSessionRecord {
     outbound: mpsc::Sender<RemoteMessage>,
     files: Option<Arc<RemoteFilesClient>>,
     terminal_output: Option<RemoteTerminalOutput>,
+    command: Option<crate::remote_commands::CommandState>,
+    command_next: u32,
     admission: OwnedSemaphorePermit,
 }
 
@@ -411,6 +414,8 @@ impl RemoteRegistry {
                 outbound: pending_record.outbound,
                 files: pending_record.files,
                 terminal_output,
+                command: None,
+                command_next: 0,
                 admission: permit,
             },
         );
@@ -772,6 +777,125 @@ async fn stop_remote_session(
     drop(admission);
 }
 
+impl RemoteRegistry {
+    pub fn command_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::remote_commands::CommandView>, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let record = state
+            .sessions
+            .get(session_id)
+            .ok_or("The remote session is not connected.")?;
+        Ok(record.command.as_ref().map(|c| c.view.clone()))
+    }
+    fn command_event(
+        &self,
+        session_id: &str,
+        generation: u64,
+        event: lattice_remote::command_protocol::CommandEvent,
+    ) -> Result<crate::remote_commands::CommandView, String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        let record = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or("The remote session is not connected.")?;
+        if record.generation != generation || record.summary.command_shells == 0 {
+            return Err("Unexpected remote command capability.".into());
+        }
+        record
+            .command
+            .as_mut()
+            .ok_or("The host sent an unsolicited command event.")?
+            .update(event)
+    }
+}
+
+pub async fn command_start(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    input: crate::remote_commands::CommandInput,
+) -> Result<crate::remote_commands::CommandView, String> {
+    use lattice_remote::command_protocol::{CommandEnd, CommandEvent};
+    let (outbound, generation, request, view) = {
+        let mut state = registry.state.lock().map_err(|e| e.to_string())?;
+        let record = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or("The remote session is not connected.")?;
+        if record.summary.command_shells & input.shell.flag() == 0 {
+            return Err("The host has not allowed this command shell.".into());
+        }
+        if record.command.as_ref().is_some_and(|c| c.view.active()) {
+            return Err("A command is still running.".into());
+        }
+        if record.command_next >= 256 {
+            return Err("Reconnect before starting more commands.".into());
+        }
+        let request = input.request(record.command_next + 1);
+        RemoteMessage::CommandRequest(request.clone())
+            .encode()
+            .map_err(|e| e.to_string())?;
+        record.command_next += 1;
+        let command = crate::remote_commands::CommandState::new(session_id, &request);
+        let view = command.view.clone();
+        record.command = Some(command);
+        (record.outbound.clone(), record.generation, request, view)
+    };
+    if !matches!(
+        timeout(
+            Duration::from_secs(2),
+            outbound.send(RemoteMessage::CommandRequest(request))
+        )
+        .await,
+        Ok(Ok(()))
+    ) {
+        let detail = "The command could not be queued on this connection.";
+        let _ = registry.command_event(
+            session_id,
+            generation,
+            CommandEvent::Finished {
+                id: view.id,
+                reason: CommandEnd::Failed,
+                exit_code: None,
+                detail: detail.into(),
+            },
+        );
+        return Err(detail.into());
+    }
+    Ok(view)
+}
+
+pub async fn command_cancel(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    id: u32,
+) -> Result<(), String> {
+    let outbound = {
+        let mut state = registry.state.lock().map_err(|e| e.to_string())?;
+        let record = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or("The remote session is not connected.")?;
+        let command = record.command.as_mut().ok_or("No command is running.")?;
+        if command.view.id != id || !command.view.active() {
+            return Err("This command is no longer running.".into());
+        }
+        command.view.state = "cancelling".into();
+        command.view.revision += 1;
+        record.outbound.clone()
+    };
+    timeout(
+        Duration::from_secs(2),
+        outbound.send(RemoteMessage::CommandRequest(
+            lattice_remote::command_protocol::CommandRequest::Cancel { id },
+        )),
+    )
+    .await
+    .map_err(|_| "The stop request timed out.")?
+    .map_err(|_| "The remote connection closed.".to_string())
+}
+
 pub async fn connect(
     app: AppHandle,
     registry: Arc<RemoteRegistry>,
@@ -944,6 +1068,7 @@ pub async fn connect(
         view_only: hello.view_only,
         file_transfer: hello.file_transfer,
         file_edit: hello.file_edit,
+        command_shells: hello.command_shells,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1034,6 +1159,17 @@ pub async fn connect(
                     if task_app.emit("remote://terminal-data", payload).is_err() {
                         break "The application window is no longer available.".to_string();
                     }
+                }
+                Ok(RemoteMessage::CommandEvent(event)) => {
+                    match task_registry.command_event(&task_session_id, generation, event) {
+                        Ok(view) => {
+                            let _ = task_app.emit("remote://command", view);
+                        }
+                        Err(error) => break error,
+                    }
+                }
+                Ok(RemoteMessage::CommandRequest(_)) => {
+                    break "The Agent sent a viewer-only command request.".into()
                 }
                 Ok(RemoteMessage::Input(_))
                 | Ok(RemoteMessage::TerminalInput { .. })
@@ -1429,6 +1565,7 @@ mod tests {
             view_only: true,
             file_transfer: false,
             file_edit: false,
+            command_shells: 0,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1455,6 +1592,7 @@ mod tests {
             view_only: false,
             file_transfer: false,
             file_edit: false,
+            command_shells: 0,
             file_root_label: String::new(),
             terminal,
         }
@@ -1500,6 +1638,48 @@ mod tests {
         let mut pending = Some(record);
         registry.commit(&mut reservation, &mut pending).unwrap();
         assert!(pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn command_grants_are_independent_of_mouse_access_and_only_one_job_runs() {
+        let registry = Arc::new(RemoteRegistry::new());
+        let mut summary = remote_summary("command-test", false);
+        summary.view_only = true;
+        register_test_record(&registry, idle_test_record(summary, 7));
+        let input = || crate::remote_commands::CommandInput {
+            shell: lattice_remote::command_protocol::CommandShell::Cmd,
+            command: "echo test".into(),
+            directory: String::new(),
+            timeout_seconds: 5,
+        };
+        assert!(command_start(&registry, "command-test", input())
+            .await
+            .is_err());
+        {
+            let mut state = registry.state.lock().unwrap();
+            let record = state.sessions.get_mut("command-test").unwrap();
+            assert_eq!(record.command_next, 0);
+            record.summary.command_shells = 1;
+        }
+        let view = command_start(&registry, "command-test", input())
+            .await
+            .unwrap();
+        assert_eq!(view.id, 1);
+        assert!(command_start(&registry, "command-test", input())
+            .await
+            .is_err());
+        assert!(registry
+            .command_event(
+                "command-test",
+                8,
+                lattice_remote::command_protocol::CommandEvent::Started {
+                    id: 1,
+                    directory: String::new()
+                }
+            )
+            .is_err());
+        let record = registry.remove("command-test").unwrap().unwrap();
+        stop_remote_session(record, "owned test completed", Duration::from_millis(10)).await;
     }
 
     struct Dropped(Arc<AtomicBool>);

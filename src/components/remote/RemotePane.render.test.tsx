@@ -40,6 +40,12 @@ function renderRemote(viewOnly: boolean, fileTransfer = false): string {
 }
 
 describe("Lattice Remote canvas interaction", () => {
+  it("offers commands only when the host advertises a grant, including view-only screens", () => {
+    expect(renderRemote(true)).not.toContain('aria-label="命令"');
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><RemotePane session={{ ...session, viewOnly: true, commandShells: 3 }} remote={remote} theme="dark" /></I18nProvider>);
+    expect(markup).toContain('aria-label="命令"');
+    expect(markup).toContain('remote-command-pane" hidden=""');
+  });
   it("exposes an interactive, focusable pointer target when control is allowed", () => {
     const markup = renderRemote(false);
 

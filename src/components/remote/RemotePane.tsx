@@ -12,6 +12,7 @@ import {
 } from "./CanvasSoftKeyboard";
 import { CanvasCaptureControls } from "./CanvasCaptureControls";
 import { keysymFor } from "./keysym";
+import { RemoteCommandPane } from "./RemoteCommandPane";
 import { RemoteFilesPane } from "./RemoteFilesPane";
 import {
   RemotePointerInputState,
@@ -36,6 +37,7 @@ export function RemotePane({
   const pointerInput = useRef(new RemotePointerInputState());
   const keyboardInputSequence = useRef(new CanvasInputSequence());
   const [filesOpen, setFilesOpen] = useState(false);
+  const [commandsOpen, setCommandsOpen] = useState(false);
   const interactive = !session.viewOnly;
   // The Remote API container changes whenever a frame updates, while the
   // memoised input method remains stable. Depending on the whole object would
@@ -262,7 +264,7 @@ export function RemotePane({
             />
           </>
         )}
-        {interactive && !session.terminal && !filesOpen && (
+        {interactive && !session.terminal && !filesOpen && !commandsOpen && (
           <CanvasSoftKeyboard
             buttonLabel={t("remote.keyboard.open")}
             closeButtonLabel={t("remote.keyboard.close")}
@@ -272,11 +274,14 @@ export function RemotePane({
             onReleaseAll={() => sendKeyboard({ kind: "releaseAll" })}
           />
         )}
+        {!!session.commandShells && <button type="button" className={`capture-button${commandsOpen ? " is-active" : ""}`} aria-expanded={commandsOpen} aria-pressed={commandsOpen} aria-label={t("remote.commands.title")} onClick={() => { setCommandsOpen(value => !value); setFilesOpen(false); }}>
+          <TerminalIcon size={13} /><span className="capture-button__label">{t("remote.commands.title")}</span>
+        </button>}
         {session.fileTransfer && (
           <button
             type="button"
             className={`capture-button${filesOpen ? " is-active" : ""}`}
-            onClick={() => setFilesOpen((current) => !current)}
+            onClick={() => { setFilesOpen((current) => !current); setCommandsOpen(false); }}
             aria-pressed={filesOpen}
             aria-expanded={filesOpen}
             aria-label={t("remote.files.toggle")}
@@ -293,7 +298,8 @@ export function RemotePane({
         </span>
       </div>
 
-      <div className={`remote-workspace${filesOpen ? " remote-workspace--files" : ""}`}>
+      <div className={`remote-workspace${filesOpen || commandsOpen ? " remote-workspace--files" : ""}`}>
+        {!!session.commandShells && <RemoteCommandPane key={session.sessionId} session={session} hidden={!commandsOpen} />}
         {filesOpen && session.fileTransfer && (
           <aside
             className="remote-workspace__files"

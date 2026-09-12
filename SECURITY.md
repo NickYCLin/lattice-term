@@ -100,3 +100,7 @@ must be inspected before any new request ID is used. Audits retain operation
 metadata, not prompts, terminal text, credentials or workspace paths.
 
 Windows Fleet uses an explicitly selected platform and a fixed encoded PowerShell bootstrap with literal native arguments. Local drive paths are required; UNC/device paths, drive roots, ambiguous components and alternate data streams are refused. The same remote workspace and per-session grants still apply. Windows OpenSSH host and installed-app acceptance are recorded separately in `docs/MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md`.
+
+### Lattice Remote command execution
+
+Windows hosts may explicitly enable cmd / PowerShell commands independently of screen input and file sharing. This grants execution as the sharing account, including access outside the shared file root; it is not a filesystem sandbox or privilege elevation. Commands run in owned kill-on-close Job Objects, with bounded concurrency, execution time and output. Cancellation cannot undo changes already made by a command. Command content and output are not recorded in application history.

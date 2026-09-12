@@ -12,6 +12,7 @@ client-cli = ["dep:clap", "dep:crossterm", "dep:dirs", "dep:rpassword", "tokio/i
 relay-server = []
 
 [dependencies]
+base64 = "0.22"
 sha2 = "0.11.0"
 snow = "0.10.0"
 opaque-ke = { version = "4.0.1", default-features = false, features = ["ristretto255", "argon2"] }
@@ -21,7 +22,7 @@ hkdf = "0.12"
 sha2-opaque = { package = "sha2", version = "0.10" }
 getrandom = "0.4.3"
 thiserror = "2"
-tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time", "process"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 # tokio-tungstenite pulls rustls without choosing a crypto provider. Pick ring
@@ -47,7 +48,7 @@ portable-pty = { version = "0.9", optional = true }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [[bin]]
 name = "lattice-agent"

@@ -3002,6 +3002,7 @@ dependencies = [
 name = "lattice-remote"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "fs2",
  "futures-util",
  "getrandom 0.4.3",
