@@ -1,5 +1,7 @@
 # iPhone 介面修正與驗證
 
+> 2026-09-12 更新：iOS 已在 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 上架。本文保留當時的開發／送審紀錄；目前下載與版本狀態見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。
+
 2026-09-07 使用者在 TestFlight `1.0.0（2）` 回報終端機太窄，無法正常輸入 `ls -la`。此問題獨立於 Apple 的 Guideline 2.1 補件要求，須先提供修正版，再錄製實機操作影片。
 
 ## 原因與修正
