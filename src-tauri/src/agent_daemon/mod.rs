@@ -152,7 +152,10 @@ pub fn failure_code(message: &str) -> &'static str {
         | mcp::OUTPUT_REVOKED => code::NOT_AUTHORIZED,
         agent::MCP_NOT_READY | agent::MCP_QUEUE_IN_ORDER => code::NOT_READY,
         server::LAUNCH_NOT_ALLOWED => code::NEEDS_USER_ACTION,
-        agent::MCP_INPUT_PROFILE_UNSUPPORTED => code::UNSUPPORTED,
+        agent::MCP_INPUT_PROFILE_UNSUPPORTED | agent::MCP_INTERRUPT_UNSUPPORTED => {
+            code::UNSUPPORTED
+        }
+        agent::MCP_NO_TURN_TO_INTERRUPT | agent::MCP_INTERRUPT_TOO_SOON => code::NOT_READY,
         agent::MCP_SESSION_GONE | server::PLAN_NOT_AVAILABLE => code::NOT_FOUND,
         agent::MCP_DRAFT_RECOVERY_ERROR | server::UNKNOWN_OUTCOME => code::UNKNOWN_OUTCOME,
         mcp::DAEMON_NOT_RUNNING => code::DAEMON_UNAVAILABLE,
@@ -566,6 +569,9 @@ pub enum PromptMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CancelScope {
+    /// The running turn only, for CLIs with a documented interrupt key.
+    /// The session, its queue and the user's own work keep going.
+    Turn,
     /// MCP prompts still waiting; desktop prompts and the running turn
     /// are untouched.
     Queue,
