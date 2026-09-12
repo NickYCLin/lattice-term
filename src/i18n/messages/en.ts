@@ -952,6 +952,8 @@ export const en: Messages = {
   "agents.mcp.history.action.remoteStatus": "Read remote operation result",
   "agents.mcp.history.action.grant": "Grant remote access",
   "agents.mcp.history.action.revoke": "Revoke remote access",
+  "agents.mcp.history.action.read": "Read terminal output",
+  "agents.mcp.history.repeated": "({count} times since {since})",
   "agents.mcp.history.hint": "Keeps the latest 256 Agent writes, remote operations and remote grant changes, refreshed every 10 seconds. Does not collect prompts, credentials or raw errors. Client names are self-reported: keep sensitive data out of them. Accepted does not mean the task completed.",
   "agents.mcp.history.persistence.memoryOnly": "In memory only; not restored after the background service ends.",
   "agents.mcp.history.persistence.pending": "Saving; entries not yet written may be lost after an unexpected shutdown.",

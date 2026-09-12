@@ -511,6 +511,7 @@ where
                             match context.sink.output_access(session_id) {
                                 Ok(access) => Some(access),
                                 Err(error) => {
+                                    record_read(&context, &client_name, session_id, false);
                                     let _ = tx.send(response_line(id, Err(error)));
                                     return;
                                 }
@@ -701,6 +702,13 @@ pub fn dispatch_as(
     client: &str,
     body: Request,
 ) -> Result<Value, String> {
+    // Reading a session's terminal is the most sensitive thing an observer
+    // does, so it belongs in the same history as the writes. Entries fold
+    // per client and session; the content is never recorded.
+    let read_session = match (&body, role) {
+        (Request::Observe { session_id, .. }, ClientRole::Observer) => Some(session_id.clone()),
+        _ => None,
+    };
     let descriptor = if role == ClientRole::Observer {
         match &body {
             Request::LaunchPlan { .. } => Some((audit::Action::Launch, None)),
@@ -736,6 +744,9 @@ pub fn dispatch_as(
         None
     };
     let result = dispatch_as_inner(context, role, client, body);
+    if let Some(session_id) = read_session {
+        record_read(context, client, &session_id, result.is_ok());
+    }
     if let Some((action, mut session_id)) = descriptor {
         let outcome = match &result {
             Ok(value) => {
@@ -760,6 +771,26 @@ pub fn dispatch_as(
         }
     }
     result
+}
+
+/// One history entry per client and session, however many reads it takes.
+fn record_read(context: &Context, client: &str, session_id: &str, accepted: bool) {
+    // Only a session the registry knows; a caller's string never becomes an id.
+    let Some(session) = context.registry.session_summary(session_id) else {
+        return;
+    };
+    if let Ok(mut history) = context.sink.history.lock() {
+        history.record_read(
+            client,
+            &session.session_id,
+            if accepted {
+                audit::Outcome::Accepted
+            } else {
+                audit::Outcome::Failed
+            },
+            now_millis(),
+        );
+    }
 }
 
 fn dispatch_as_inner(

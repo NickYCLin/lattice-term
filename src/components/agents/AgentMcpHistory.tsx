@@ -36,7 +36,15 @@ export function AgentMcpHistory({ history }: { history: History | null }) {
                     {new Date(entry.at).toLocaleString(locale)}
                   </time>
                 </div>
-                <span>{t(`agents.mcp.history.action.${entry.action}`)}</span>
+                <span>
+                  {t(`agents.mcp.history.action.${entry.action}`)}
+                  {entry.repeated && entry.repeated > 1 ? (
+                    <> {t("agents.mcp.history.repeated", {
+                      count: entry.repeated,
+                      since: new Date(entry.firstAt ?? entry.at).toLocaleString(locale),
+                    })}</>
+                  ) : null}
+                </span>
                 <span className="mono agents-field-hint">
                   {entry.sessionId ?? entry.targetId ?? t("agents.mcp.history.noSession")}
                 </span>

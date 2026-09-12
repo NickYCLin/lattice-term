@@ -486,6 +486,37 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
         .unwrap_err();
     assert!(refused.contains("not shared"), "{refused}");
 
+    // Reading a session's terminal is in the history like the writes are,
+    // folded per client and session, and an attempt on a session that is
+    // not shared is recorded too.
+    let history = desktop.request(Request::McpHistory).await.unwrap();
+    let reads: Vec<&Value> = history["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["action"] == "read")
+        .collect();
+    // One folded accepted read, plus the two refusals: before sharing, and
+    // on a session that was never shared.
+    assert_eq!(reads.len(), 3, "{reads:?}");
+    let accepted = reads
+        .iter()
+        .find(|entry| entry["outcome"] == "accepted")
+        .unwrap();
+    assert_eq!(accepted["sessionId"], public.as_str());
+    assert_eq!(accepted["client"], "test-client 1.0");
+    assert!(accepted["repeated"].as_u64().unwrap() >= 2, "{accepted}");
+    assert!(accepted["firstAt"].as_u64().unwrap() <= accepted["at"].as_u64().unwrap());
+    let denied: Vec<&str> = reads
+        .iter()
+        .filter(|entry| entry["outcome"] == "failed")
+        .map(|entry| entry["sessionId"].as_str().unwrap())
+        .collect();
+    assert!(denied.contains(&secret.as_str()), "{denied:?}");
+    assert!(denied.contains(&public.as_str()), "{denied:?}");
+    // The history never carries what was read.
+    assert!(!history.to_string().contains("top-secret"));
+
     // Nothing that changes state is allowed, whatever the request.
     for request in [
         Request::Send {

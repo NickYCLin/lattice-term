@@ -33,10 +33,13 @@ export interface AgentMcpHistory {
     id: number;
     at: number;
     client: string;
-    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "grant" | "revoke";
+    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "grant" | "revoke" | "read";
     outcome: "accepted" | "replayed" | "failed" | "unknown";
     sessionId: string | null;
     targetId?: string | null;
+    /** Repeated reads fold into one entry; `at` is then the latest. */
+    repeated?: number | null;
+    firstAt?: number | null;
   }[];
   discarded: number;
   limit: number;
