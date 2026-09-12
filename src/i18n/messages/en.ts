@@ -1562,7 +1562,7 @@ export const en: Messages = {
   "remote.host.attempts": "Attempts remaining: {count}",
   "remote.host.bindAddress": "Interface IP to share",
   "remote.host.bindHint":
-    "Use 127.0.0.1 for local testing. For LAN sharing, enter this device's specific LAN IP; 0.0.0.0 is refused.",
+    "Leave blank to choose a LAN IP automatically, or specify an interface. Without a network, only this computer can connect.",
   "remote.host.port": "Port",
   "remote.host.frameRate": "Display rate: {fps} FPS",
   "remote.host.start": "Start sharing",

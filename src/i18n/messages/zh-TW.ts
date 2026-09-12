@@ -1485,7 +1485,7 @@ export const zhTW = {
   "remote.host.expires": "配對碼將於 {time} 後失效",
   "remote.host.attempts": "剩餘嘗試次數：{count}",
   "remote.host.bindAddress": "分享介面 IP",
-  "remote.host.bindHint": "本機測試用 127.0.0.1；區網分享請填這台電腦的特定 LAN IP，不接受 0.0.0.0。",
+  "remote.host.bindHint": "留白自動選擇區網 IP；多張網卡可指定要分享的 IP。未連上網路時僅本機可連線。",
   "remote.host.port": "連接埠",
   "remote.host.frameRate": "畫面更新率：{fps} FPS",
   "remote.host.start": "開始分享",

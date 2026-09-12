@@ -34,6 +34,7 @@ describe("automatic Remote standby", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(backend.invoke.mock.calls.filter(call => call[0] === "remote_host_configure")).toHaveLength(1);
     expect(api?.status?.hostId).toBe("host");
+    expect(backend.invoke.mock.calls.find(call => call[0] === "remote_host_configure")?.[1].request.bindAddress).toBe("");
     await act(async () => { backend.listeners.get("remote-host://closed")?.({ payload: { hostId: "host", reason: "peer left" } }); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(backend.invoke.mock.calls.filter(call => call[0] === "remote_host_configure")).toHaveLength(2);

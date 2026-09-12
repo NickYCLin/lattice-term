@@ -3,7 +3,7 @@ import type { RemoteHostStartRequest } from "./useRemoteHost";
 const KEY = "latticeterm.remote.hostSettings.v1";
 export function loadRemoteHostSettings(storage: Storage): RemoteHostStartRequest {
   const relay = loadRelayAddress(storage);
-  const defaults: RemoteHostStartRequest = { bindAddress: "0.0.0.0", port: 44900, fps: 5, allowInput: false, allowFiles: false, allowCommands: false, allowChat: false, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "" };
+  const defaults: RemoteHostStartRequest = { bindAddress: "", port: 44900, fps: 5, allowInput: false, allowFiles: false, allowCommands: false, allowChat: false, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "" };
   try {
     const value = JSON.parse(storage.getItem(KEY) ?? "null") as Partial<RemoteHostStartRequest> | null;
     if (!value || typeof value !== "object") return defaults;

@@ -246,12 +246,50 @@ fn agent_path() -> Result<PathBuf, String> {
         })
 }
 
+/// Prefer a LAN IPv4 address. Link-local IPv6 needs a scope ID and cannot be
+/// advertised as a plain IP. Offline hosts remain available on loopback.
+fn automatic_bind_address(addresses: impl Iterator<Item = IpAddr>) -> IpAddr {
+    addresses
+        .filter(|address| match address {
+            IpAddr::V4(ip) => {
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_multicast()
+                    && !ip.is_link_local()
+                    && !ip.is_broadcast()
+            }
+            IpAddr::V6(ip) => {
+                !ip.is_loopback()
+                    && !ip.is_unspecified()
+                    && !ip.is_multicast()
+                    && !ip.is_unicast_link_local()
+            }
+        })
+        .min_by_key(|address| match address {
+            IpAddr::V4(ip) if ip.is_private() => 0,
+            IpAddr::V4(_) => 1,
+            IpAddr::V6(_) => 2,
+        })
+        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+}
+
 fn bind_target(request: &RemoteHostStartRequest) -> Result<SocketAddr, String> {
-    let address: IpAddr = request
-        .bind_address
-        .trim()
-        .parse()
-        .map_err(|_| "The bind address must be an IP address.".to_string())?;
+    let address: IpAddr = if request.bind_address.trim().is_empty() {
+        let interfaces = if_addrs::get_if_addrs()
+            .map_err(|error| format!("Cannot read network interfaces: {error}"))?;
+        automatic_bind_address(
+            interfaces
+                .into_iter()
+                .filter(|interface| interface.is_oper_up())
+                .map(|interface| interface.ip()),
+        )
+    } else {
+        request
+            .bind_address
+            .trim()
+            .parse()
+            .map_err(|_| "The bind address must be an IP address.".to_string())?
+    };
     if address.is_unspecified() || address.is_multicast() {
         return Err("Choose a specific loopback or network interface address.".to_string());
     }
@@ -708,6 +746,27 @@ pub fn chat_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_standby_selects_a_connectable_interface() {
+        let addresses = [
+            "127.0.0.1",
+            "fe80::1",
+            "0.0.0.0",
+            "::",
+            "203.0.113.2",
+            "192.168.1.2",
+        ];
+        assert_eq!(
+            automatic_bind_address(addresses.into_iter().map(|value| value.parse().unwrap()))
+                .to_string(),
+            "192.168.1.2"
+        );
+        assert_eq!(
+            automatic_bind_address(std::iter::empty()).to_string(),
+            "127.0.0.1"
+        );
+    }
 
     #[test]
     fn accepts_specific_ipv4_and_ipv6_bind_addresses() {
