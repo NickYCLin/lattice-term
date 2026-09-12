@@ -6,6 +6,8 @@
 //! it exits by itself once it has had nothing to own and nobody attached for
 //! [`super::IDLE_EXIT`].
 
+mod workspace;
+
 use super::audit;
 use super::automations::{self, Scheduler};
 use super::mcp::{read_bounded_line, LineRead};
@@ -155,7 +157,9 @@ fn run(data_dir: &Path) -> i32 {
 }
 
 /// Everything a connection handler needs.
+#[derive(Clone)]
 pub struct Context {
+    workspace: Option<Arc<workspace::Workspace>>,
     pub registry: Arc<AgentRegistry>,
     pub sink: Arc<DaemonSink>,
     pub scheduler: Arc<Scheduler>,
@@ -188,6 +192,7 @@ pub async fn serve(
         *history = audit::History::open(&paths.data_dir);
     }
     let context = Arc::new(Context {
+        workspace: None,
         registry,
         sink,
         scheduler,
@@ -306,12 +311,13 @@ where
             protocol,
             role,
             client,
+            workspace_directory,
         },
     ) = hello
     else {
         return;
     };
-    let client_name = client_label(client.as_deref());
+    let mut client_name = client_label(client.as_deref());
     if token != context.token || protocol != role.protocol_version() {
         let _ = tokio::time::timeout(
             HELLO_TIMEOUT,
@@ -326,12 +332,35 @@ where
         .await;
         return;
     }
+    let context = if let Some(directory) = workspace_directory {
+        if role != ClientRole::Observer {
+            return;
+        }
+        let workspace = match workspace::Workspace::new(&directory) {
+            Ok(scope) => Arc::new(scope),
+            Err(error) => {
+                let line = response_line(hello_id, Err(error)) + "\n";
+                let _ = tokio::time::timeout(HELLO_TIMEOUT, write_half.write_all(line.as_bytes()))
+                    .await;
+                return;
+            }
+        };
+        let mut scoped = (*context).clone();
+        scoped.workspace = Some(workspace);
+        Arc::new(scoped)
+    } else {
+        context
+    };
+    if let Some(scope) = &context.workspace {
+        client_name = scope.client_identity(&client_name);
+    }
     let reply = match role {
         ClientRole::Desktop => HelloReply {
             protocol: role.protocol_version(),
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: true,
             mcp_output_scopes: true,
+            mcp_workspace_scope: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: detached_list(&context.registry),
             snapshots: context.registry.output_snapshots(),
@@ -343,6 +372,7 @@ where
             mcp_protocol: OBSERVER_PROTOCOL_VERSION,
             mcp_history: false,
             mcp_output_scopes: true,
+            mcp_workspace_scope: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
             sessions: shared_list(&context),
             snapshots: Vec::new(),
@@ -361,8 +391,15 @@ where
         "client {client_id} attached as {role:?} ({client_name})"
     ));
 
+    let writer_workspace = context.workspace.clone();
     let mut writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
+            if writer_workspace
+                .as_ref()
+                .is_some_and(|scope| !scope.allows_frame(&frame.line))
+            {
+                continue;
+            }
             if frame.write_to(&mut write_half).await.is_err() {
                 break;
             }
@@ -458,7 +495,9 @@ where
                     tasks.spawn(async move {
                         let _permits = permits;
                         let result = match body {
-                            Request::DesktopCall { operation } if role == ClientRole::Observer => {
+                            Request::DesktopCall { operation }
+                                if role == ClientRole::Observer && context.workspace.is_none() =>
+                            {
                                 let target = context.sink.desktop_bridge.known_target(&operation);
                                 let action = remote_audit_action(&operation);
                                 let result = context
@@ -655,6 +694,7 @@ fn shared_list(context: &Context) -> Vec<AgentSessionSummary> {
                 .iter()
                 .any(|entry| entry.session_id == summary.session_id)
         })
+        .filter(|summary| workspace::allows_session(context, summary))
         .map(observer_summary)
         .collect()
 }
@@ -743,7 +783,8 @@ pub fn dispatch_as(
     } else {
         None
     };
-    let result = dispatch_as_inner(context, role, client, body);
+    let result = workspace::authorize(context, &body)
+        .and_then(|()| dispatch_as_inner(context, role, client, body));
     if let Some(session_id) = read_session {
         record_read(context, client, &session_id, result.is_ok());
     }
@@ -820,7 +861,7 @@ fn dispatch_as_inner(
                 access.check()?;
                 result
             }
-            Request::Plans => Ok(context.sink.plans_view(&context.registry, client)),
+            Request::Plans => Ok(workspace::plans_view(context, client)),
             Request::LaunchPlan {
                 plan_id,
                 request_id,
@@ -975,6 +1016,7 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
             LAUNCH_NOT_ALLOWED.to_string()
         });
     };
+    workspace::authorize_plan(context, &plan)?;
     let mut request = plan.request;
     request.detached = true;
     let summary = agent::launch_with_replay(
@@ -984,6 +1026,14 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
         None,
     )?;
     let summary = detached(summary);
+    if !workspace::allows_session(context, &summary) {
+        let _ = agent::disconnect(
+            context.sink.as_ref(),
+            &context.registry,
+            &summary.session_id,
+        );
+        return Err(workspace::DENIED.into());
+    }
     // What a client started, it may watch and drive; the user allowed the
     // plan for exactly that.
     finish_plan_launch(context, &summary.session_id, generation)?;
@@ -1277,6 +1327,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::GetMetrics { .. } => audit::Action::RemoteMetrics,
         Op::CaptureScreen { .. } => audit::Action::RemoteScreen,
         Op::ScreenInput { .. } => audit::Action::RemoteInput,
+        Op::Fleet { .. } => audit::Action::RemoteFleet,
         Op::ListDirectory { .. } => audit::Action::RemoteList,
         Op::Exec { .. } => audit::Action::RemoteExec,
         Op::Transfer {
@@ -2314,6 +2365,7 @@ mod observer_transport_tests {
 
     fn test_context(dir: &Path) -> Arc<Context> {
         Arc::new(Context {
+            workspace: None,
             registry: Arc::new(AgentRegistry::new()),
             sink: Arc::new(DaemonSink::default()),
             scheduler: Arc::new(Scheduler::open(dir)),
@@ -2335,6 +2387,7 @@ mod observer_transport_tests {
             client.get_mut(),
             1,
             Request::Hello {
+                workspace_directory: None,
                 token: "test-token".into(),
                 protocol: role.protocol_version(),
                 role,
@@ -2373,6 +2426,7 @@ mod observer_transport_tests {
                 client.get_mut(),
                 1,
                 Request::Hello {
+                    workspace_directory: None,
                     token: "test-token".into(),
                     protocol,
                     role,
@@ -2665,6 +2719,7 @@ mod operation_tests {
         )
         .unwrap();
         let context = Context {
+            workspace: None,
             registry: Arc::clone(&registry),
             sink: Arc::clone(&sink),
             scheduler: Arc::new(Scheduler::open(dir.path())),
@@ -2726,6 +2781,7 @@ mod operation_tests {
         let sink = Arc::new(DaemonSink::default());
         let registry = Arc::new(AgentRegistry::new());
         let context = Context {
+            workspace: None,
             registry: Arc::clone(&registry),
             sink: Arc::clone(&sink),
             scheduler: Arc::new(Scheduler::open(dir.path())),

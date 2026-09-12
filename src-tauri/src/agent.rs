@@ -1937,6 +1937,15 @@ impl AgentRegistry {
         Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()))
     }
 
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_test_reporter_executable(
+        sink: Arc<dyn AgentSink>,
+        executable: PathBuf,
+        prefix: &str,
+    ) -> Result<Arc<Self>, String> {
+        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_owned()))
+    }
+
     fn with_local_reporter_executable(
         sink: Arc<dyn AgentSink>,
         executable: PathBuf,

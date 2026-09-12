@@ -49,6 +49,7 @@ impl Fixture {
         ));
         let target = service
             .grant(GrantRequest {
+                fleet: None,
                 session_id: session.session_id.clone(),
                 backend: Backend::Sftp,
                 label: "Isolated transfer workspace".into(),

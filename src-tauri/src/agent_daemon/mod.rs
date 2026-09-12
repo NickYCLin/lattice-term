@@ -428,6 +428,9 @@ pub enum Request {
         /// version), shown to the user next to what it did.
         #[serde(default)]
         client: Option<String>,
+        /// Optional observer workspace boundary; never grants access by itself.
+        #[serde(default)]
+        workspace_directory: Option<String>,
     },
     Launch {
         request: Box<AgentLaunchRequest>,
@@ -635,6 +638,8 @@ pub struct HelloReply {
     /// output access before this capability has been confirmed.
     #[serde(default)]
     pub mcp_output_scopes: bool,
+    #[serde(default)]
+    pub mcp_workspace_scope: bool,
     #[serde(default)]
     pub desktop_bridge_protocol: u32,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,

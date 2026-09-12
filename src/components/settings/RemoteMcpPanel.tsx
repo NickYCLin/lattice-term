@@ -13,9 +13,9 @@ import {
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
-type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen" | "input";
+type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen" | "input" | "fleetObserve" | "fleetRead" | "fleetControl" | "fleetLaunch";
 type Scopes = Record<Scope, boolean>;
-const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false, input: false };
+const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false, input: false, fleetObserve: false, fleetRead: false, fleetControl: false, fleetLaunch: false };
 type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
 const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
 interface Session { sessionId: string; host: string; backend: Backend }
@@ -33,6 +33,9 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [command, setCommand] = useState("");
   const [commandLabel, setCommandLabel] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_EXEC_TIMEOUT_SECONDS);
+  const [fleetExecutable, setFleetExecutable] = useState("");
+  const [fleetDataDirectory, setFleetDataDirectory] = useState("");
+  const [fleetDirectory, setFleetDirectory] = useState("");
   const [remoteRoot, setRemoteRoot] = useState("");
   const [localRoot, setLocalRoot] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -75,6 +78,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       const { invoke } = await import("@tauri-apps/api/core");
       setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
         sessionId, backend: selected.backend, label: label.trim(), scopes,
+        fleet: scopes.fleetObserve ? { executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory } : null,
         execPlans: scopes.exec ? execPlanRequests(plans) : [],
         roots: fileScope ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot, localPath: transferScope ? localRoot : null }] : [],
       } }));
@@ -103,6 +107,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     setAcknowledged(false);
   };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
+    && (!scopes.fleetObserve || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => path.startsWith("/") && path.length > 1))
     && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
@@ -133,11 +138,35 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
               <input type="checkbox" checked={scopes[scope]} disabled={
                 isScreen ? scope !== "screen" && scope !== "input"
                 : scope === "screen" || scope === "input" ? true
+                : scope.startsWith("fleet") ? selected?.backend !== "ssh"
+                : scopes.fleetObserve ? true
                 : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec"
                 : scope === "list" || scope === "upload" || scope === "download"}
-                onChange={(e) => { setScopes((current) => ({ ...current, [scope]: e.target.checked, ...(scope === "input" && e.target.checked ? { screen: true } : {}), ...(scope === "screen" && !e.target.checked ? { input: false } : {}) })); setAcknowledged(false); }} /> {t(`settings.mcpRemote.scope.${scope}`)}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setScopes((current) => {
+                    if (scope.startsWith("fleet")) {
+                      if (scope === "fleetObserve" && !enabled) return { ...scopesOff };
+                      return { ...scopesOff, fleetObserve: true, fleetRead: current.fleetRead, fleetControl: current.fleetControl, fleetLaunch: current.fleetLaunch, [scope]: enabled };
+                    }
+                    return { ...current, [scope]: enabled, ...(scope === "input" && enabled ? { screen: true } : {}), ...(scope === "screen" && !enabled ? { input: false } : {}) };
+                  });
+                  setAcknowledged(false);
+                }} /> {t(`settings.mcpRemote.scope.${scope}`)}
             </label>)}
           </fieldset>
+          {scopes.fleetObserve && <fieldset disabled={busy} className="mcp-remote__plans">
+            <legend>{t("settings.mcpRemote.fleetTitle")}</legend>
+            <p className="setting__description">{t("settings.mcpRemote.fleetHint")}</p>
+            {([
+              ["fleetExecutable", fleetExecutable, setFleetExecutable],
+              ["fleetDataDirectory", fleetDataDirectory, setFleetDataDirectory],
+              ["fleetDirectory", fleetDirectory, setFleetDirectory],
+            ] as const).map(([key, value, update]) => <label className="field" key={key}>
+              <span className="field__label">{t(`settings.mcpRemote.${key}`)}</span>
+              <input className="input" value={value} maxLength={4096} autoComplete="off" onChange={(e) => { update(e.target.value); setAcknowledged(false); }} />
+            </label>)}
+          </fieldset>}
           {scopes.input && <p className="setting__description">{t("settings.mcpRemote.inputHint")}</p>}
           {scopes.screen && <p className="setting__description">{t("settings.mcpRemote.screenHint")}</p>}
           {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">

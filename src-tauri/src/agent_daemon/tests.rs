@@ -144,6 +144,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
     let mut stranger = RawClient::connect(&paths).await;
     let refused = stranger
         .request(Request::Hello {
+            workspace_directory: None,
             token: "nope".to_string(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -155,6 +156,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
     let mut desktop = RawClient::connect(&paths).await;
     let hello = desktop
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -198,6 +200,7 @@ async fn a_desktop_attaches_launches_and_reattaches_over_the_socket() {
     let mut next_window = RawClient::connect(&paths).await;
     let hello = next_window
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -310,6 +313,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
     let mut desktop = RawClient::connect(&paths).await;
     desktop
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -345,6 +349,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
     let mut observer = RawClient::connect(&paths).await;
     let hello = observer
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
@@ -395,6 +400,7 @@ async fn an_observer_reads_only_shared_sessions_and_nothing_else() {
     let mut additional_observer = RawClient::connect(&paths).await;
     let hello = additional_observer
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
@@ -646,6 +652,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     let mut desktop = RawClient::connect(&paths).await;
     desktop
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -656,6 +663,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     let mut observer = RawClient::connect(&paths).await;
     observer
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
@@ -810,6 +818,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     let mut retrying_observer = RawClient::connect(&paths).await;
     retrying_observer
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,
@@ -1012,6 +1021,7 @@ async fn a_wait_ends_when_sharing_is_revoked() {
     let mut desktop = RawClient::connect(&paths).await;
     desktop
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -1152,6 +1162,7 @@ async fn one_client_cannot_launch_past_its_ceiling() {
     let mut desktop = RawClient::connect(&paths).await;
     desktop
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: PROTOCOL_VERSION,
             role: ClientRole::Desktop,
@@ -1162,6 +1173,7 @@ async fn one_client_cannot_launch_past_its_ceiling() {
     let mut observer = RawClient::connect(&paths).await;
     observer
         .request(Request::Hello {
+            workspace_directory: None,
             token: token.clone(),
             protocol: ClientRole::Observer.protocol_version(),
             role: ClientRole::Observer,

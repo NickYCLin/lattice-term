@@ -6,11 +6,13 @@
 //! SFTP path checks assume a cooperative trusted server. They are not a chroot
 //! and cannot defeat another remote process changing directories between calls.
 
+mod fleet;
 #[cfg(test)]
 mod loopback_tests;
 mod paths;
 mod screen_input;
 mod ssh_jobs;
+pub use fleet::{FleetAction, FleetWorkspace};
 pub use screen_input::ScreenAction;
 
 use crate::mcp_screen::{ScreenBackend, ScreenKey};
@@ -60,6 +62,10 @@ pub enum Scope {
     /// and never keyboard or pointer input.
     Screen,
     Input,
+    FleetObserve,
+    FleetRead,
+    FleetControl,
+    FleetLaunch,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -79,6 +85,14 @@ pub struct Scopes {
     pub screen: bool,
     #[serde(default)]
     pub input: bool,
+    #[serde(default)]
+    pub fleet_observe: bool,
+    #[serde(default)]
+    pub fleet_read: bool,
+    #[serde(default)]
+    pub fleet_control: bool,
+    #[serde(default)]
+    pub fleet_launch: bool,
 }
 
 impl Scopes {
@@ -91,6 +105,10 @@ impl Scopes {
             Scope::Download => self.download,
             Scope::Screen => self.screen,
             Scope::Input => self.input,
+            Scope::FleetObserve => self.fleet_observe,
+            Scope::FleetRead => self.fleet_read,
+            Scope::FleetControl => self.fleet_control,
+            Scope::FleetLaunch => self.fleet_launch,
         }
     }
 }
@@ -125,6 +143,8 @@ pub struct GrantRequest {
     pub exec_plans: Vec<ExecPlan>,
     #[serde(default)]
     pub roots: Vec<RootRequest>,
+    #[serde(default)]
+    pub fleet: Option<FleetWorkspace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +182,10 @@ pub enum TransferDirection {
 )]
 pub enum DesktopOperation {
     ListConnections,
+    Fleet {
+        target_id: String,
+        action: FleetAction,
+    },
     GetMetrics {
         target_id: String,
     },
@@ -208,7 +232,8 @@ impl DesktopOperation {
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::ListConnections => None,
-            Self::GetMetrics { target_id }
+            Self::Fleet { target_id, .. }
+            | Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
             | Self::ScreenInput { target_id, .. }
             | Self::ListDirectory { target_id, .. }
@@ -221,6 +246,7 @@ impl DesktopOperation {
 
     pub fn required_scope(&self) -> Option<Scope> {
         match self {
+            Self::Fleet { action, .. } => Some(action.scope()),
             Self::GetMetrics { .. } => Some(Scope::Metrics),
             Self::CaptureScreen { .. } => Some(Scope::Screen),
             Self::ScreenInput { .. } => Some(Scope::Input),
@@ -241,6 +267,7 @@ impl DesktopOperation {
 
     fn request_id(&self) -> Option<&str> {
         match self {
+            Self::Fleet { action, .. } => action.request_id(),
             Self::ScreenInput { request_id, .. }
             | Self::Exec { request_id, .. }
             | Self::Transfer { request_id, .. }
@@ -302,6 +329,7 @@ impl std::fmt::Display for ServiceError {
 impl std::error::Error for ServiceError {}
 
 struct Grant {
+    fleet: Option<FleetWorkspace>,
     view: TargetView,
     session_id: String,
     identity: usize,
@@ -480,6 +508,7 @@ impl DesktopService {
             return Err(ServiceError::unavailable());
         }
         let grant = Arc::new(Grant {
+            fleet: request.fleet,
             view: view.clone(),
             session_id: request.session_id,
             identity,
@@ -715,6 +744,12 @@ impl DesktopService {
         match operation {
             // Nothing to check beyond the scope and the live stream: a
             // capture names no plan, path or file.
+            DesktopOperation::Fleet { action, .. } => {
+                if grant.fleet.is_none() {
+                    return Err(ServiceError::denied());
+                }
+                action.validate()?;
+            }
             DesktopOperation::CaptureScreen { .. } => {}
             DesktopOperation::ScreenInput {
                 snapshot_id,
@@ -787,6 +822,22 @@ impl DesktopService {
             .unwrap_or_else(|| watch::channel(false).1);
         let work = async {
             match operation {
+                DesktopOperation::Fleet { action, .. } => {
+                    let handle = self
+                        .ssh
+                        .session_handle(&grant.session_id)
+                        .ok_or_else(ServiceError::unavailable)?;
+                    let workspace = grant.fleet.as_ref().ok_or_else(ServiceError::denied)?;
+                    fleet::execute(
+                        handle,
+                        workspace,
+                        client,
+                        &grant.view.id,
+                        action,
+                        &grant.view.scopes,
+                    )
+                    .await
+                }
                 DesktopOperation::GetMetrics { .. } => {
                     let metrics = crate::metrics::collect_for_session(&self.ssh, &grant.session_id)
                         .await
@@ -1055,6 +1106,7 @@ fn label(label: &str) -> bool {
 }
 
 fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
+    fleet::validate_grant(request)?;
     if !label(&request.label)
         || request.session_id.is_empty()
         || request.session_id.len() > 128
@@ -1376,6 +1428,7 @@ mod tests {
             DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()));
         let grant = |id: &str| {
             Arc::new(Grant {
+                fleet: None,
                 view: TargetView {
                     id: id.into(),
                     label: "test screen".into(),
@@ -1432,6 +1485,7 @@ mod tests {
             ),
         );
         let request = |scopes: Scopes| GrantRequest {
+            fleet: None,
             session_id: "rdp-session".into(),
             backend: Backend::Rdp,
             label: "desk".into(),
@@ -1504,6 +1558,7 @@ mod tests {
 
     fn request() -> GrantRequest {
         GrantRequest {
+            fleet: None,
             session_id: "not-connected".into(),
             backend: Backend::Ssh,
             label: "測試主機".into(),
