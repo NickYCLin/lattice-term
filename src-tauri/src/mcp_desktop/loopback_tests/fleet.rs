@@ -1,5 +1,5 @@
 //! Real SSH channels, remote MCP stdio framing, daemon socket and multiple PTYs.
-//! The SSH exec peer starts the actual in-process adapter instead of a shell.
+//! Defaults to an in-process adapter; opt-in native tests use the real shell.
 use super::*;
 use crate::agent::{AgentRegistry, AgentSink};
 use crate::agent_chat::AgentChatRegistry;
@@ -27,29 +27,62 @@ fn plan(id: &str, directory: &Path, live: bool) -> McpPlan {
     if live {
         let executable =
             std::env::var("LATTICETERM_FLEET_TEST_CODEX").expect("explicit test Codex executable");
-        return serde_json::from_value(json!({"planId":id,"label":id,"note":"","definitionId":"codex","workingDirectory":directory,"sandbox":false,
-            "request":{"definitionId":"codex","label":id,"executable":executable,"arguments":["--sandbox","read-only","--ask-for-approval","never","--no-alt-screen","-c","web_search=\"disabled\"","-c","allow_login_shell=false","-c","mcp_servers.node_repl={enabled=false,command=\"latticeterm-live-acceptance-disabled\"}","-c",format!("projects={{{}={{trust_level=\"trusted\"}}}}",serde_json::to_string(directory).unwrap()),"Do not use tools, read files, change files, or start background work. Reply with just READY."],"workingDirectory":directory,"cols":180,"rows":40}})).unwrap();
+        return serde_json::from_value(json!({"planId":id,"label":format!("{id} 中文🦀"),"note":"","definitionId":"codex","workingDirectory":directory,"sandbox":false,
+            "request":{"definitionId":"codex","label":format!("{id} 中文🦀"),"executable":executable,"arguments":["--sandbox","read-only","--ask-for-approval","never","--no-alt-screen","-c","web_search=\"disabled\"","-c","allow_login_shell=false","-c","mcp_servers.node_repl={enabled=false,command=\"latticeterm-live-acceptance-disabled\"}","-c",format!("projects={{{}={{trust_level=\"trusted\"}}}}",serde_json::to_string(directory).unwrap()),"Do not use tools, read files, change files, or start background work. Reply with just READY."],"workingDirectory":directory,"cols":180,"rows":40}})).unwrap();
     }
-    serde_json::from_value(json!({"planId":id,"label":id,"note":"","definitionId":"custom","workingDirectory":directory,"sandbox":false,
-        "request":{"definitionId":"custom","label":id,"executable":"/bin/sh","arguments":["-c",format!("printf '{id} output\\n'; exec cat")],"workingDirectory":directory,"cols":80,"rows":24}})).unwrap()
+    #[cfg(unix)]
+    let (executable, arguments) = (
+        "/bin/sh".to_owned(),
+        vec![
+            "-c".to_owned(),
+            format!("printf '{id} output 中文\\n'; exec cat"),
+        ],
+    );
+    #[cfg(windows)]
+    let (executable, arguments) = (
+        std::env::var("ComSpec").unwrap(),
+        vec![
+            "/d".into(),
+            "/q".into(),
+            "/k".into(),
+            format!("echo {id} output 中文"),
+        ],
+    );
+    serde_json::from_value(json!({"planId":id,"label":format!("{id} 中文🦀"),"note":"","definitionId":"custom","workingDirectory":directory,"sandbox":false,
+        "request":{"definitionId":"custom","label":format!("{id} 中文🦀"),"executable":executable,"arguments":arguments,"workingDirectory":directory,"cols":80,"rows":24}})).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn ssh_fleet_multiplexes_real_ptys_with_scopes_and_revocation() {
-    bounded(exercise(false)).await;
+    bounded(exercise(false, FleetShell::Native)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "Requires explicit local Codex executable, login and compiled MCP binary; uses model service"]
 async fn ssh_fleet_two_live_codex_ptys_without_a_desktop_renderer() {
     assert!(std::env::var_os("LATTICETERM_FLEET_TEST_BINARY").is_some());
-    tokio::time::timeout(Duration::from_secs(240), exercise(true))
+    tokio::time::timeout(Duration::from_secs(240), exercise(true, FleetShell::Native))
         .await
         .unwrap();
 }
 
-async fn exercise(live: bool) {
-    let temp = tempfile::tempdir().unwrap();
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "Requires the compiled Windows MCP binary; CI runs this without provider accounts"]
+async fn windows_fleet_native_bootstrap_supports_both_ssh_shells() {
+    assert!(std::env::var_os("LATTICETERM_FLEET_TEST_BINARY").is_some());
+    for shell in [FleetShell::Native, FleetShell::PowerShell] {
+        tokio::time::timeout(Duration::from_secs(120), exercise(false, shell))
+            .await
+            .unwrap();
+    }
+}
+
+async fn exercise(live: bool, shell: FleetShell) {
+    let temp = tempfile::Builder::new()
+        .prefix("fleet 空白%&'’")
+        .tempdir()
+        .unwrap();
     let data = Arc::new(temp.path().join("data"));
     let root = Arc::new(temp.path().join("approved"));
     let private = temp.path().join("private");
@@ -97,15 +130,16 @@ async fn exercise(live: bool) {
         )),
     };
     for _ in 0..100 {
-        if paths.socket.exists() {
+        if crate::agent_daemon::mcp::workspace_test_daemon_ready(&paths).await {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert!(paths.socket.exists());
+    assert!(crate::agent_daemon::mcp::workspace_test_daemon_ready(&paths).await);
     let peer = Peer::start_with_sftp(SftpMode::Fleet {
         data: Arc::clone(&data),
         directory: Arc::clone(&root),
+        shell,
     })
     .await;
     let ssh = Arc::new(SshRegistry::new());
@@ -131,11 +165,7 @@ async fn exercise(live: bool) {
         scopes,
         exec_plans: vec![],
         roots: vec![],
-        fleet: Some(FleetWorkspace {
-            executable: "/test/lattice-term".into(),
-            data_directory: data.to_string_lossy().into_owned(),
-            directory: root.to_string_lossy().into_owned(),
-        }),
+        fleet: Some(fleet_config(&data, &root)),
     };
     let metadata = service
         .grant(request(Scopes {
@@ -206,6 +236,7 @@ async fn exercise(live: bool) {
         .unwrap()
         .to_owned();
     assert_ne!(first_id, second_id);
+    assert_eq!(first["result"]["session"]["label"], "first 中文🦀");
     assert_eq!(
         call(grant.id.clone(), action("first")).await.unwrap()["duplicate"],
         true
@@ -284,18 +315,19 @@ async fn exercise(live: bool) {
             }
         }
     }
-    let output = call(grant.id.clone(), read(first_id.clone()))
-        .await
-        .unwrap();
     if !live {
-        assert!(output["result"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("first output"));
-        assert!(!output["result"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("second output"));
+        loop {
+            let output = call(grant.id.clone(), read(first_id.clone()))
+                .await
+                .unwrap();
+            let text = output["result"]["text"].as_str().unwrap();
+            assert!(!text.contains("second output"));
+            if text.contains("first output") {
+                assert!(text.contains("中文"));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
     sink.set_shared_output(&second_id, true, Some(false));
     assert_eq!(

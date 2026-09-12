@@ -223,3 +223,5 @@ MCP Fleet 已先支援 SSH transport，沿用主機信任與認證；已完成�
 - 各平台必須通過原生 PTY 啟動、輸入輸出、resize、停止與應用程式退出清理。
 - 未安裝、立即退出、無權限、錯誤工作目錄與異常大量輸入都要回傳明確錯誤。
 - 通用 Lattice Remote 已有固定配對碼無人值守；遠端 Agent Fleet 若要沿用，仍必須另行完成工作區／能力授權、撤銷、重放防護、稽核與 Relay 威脅模型，不得直接把固定碼視為完整團隊權限系統。
+
+Windows 遠端 Fleet 沿用相同工作區與多 PTY 契約，以固定 PowerShell 啟動器跨接 Windows OpenSSH 的 cmd／PowerShell shell；平台由使用者授權，並以遠端能力握手核對。具名管道與 ConPTY 的 CI 不代替外部 Windows 主機驗收，見 [驗收紀錄](MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md)。

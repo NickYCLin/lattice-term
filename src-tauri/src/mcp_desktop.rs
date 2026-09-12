@@ -12,7 +12,9 @@ mod loopback_tests;
 mod paths;
 mod screen_input;
 mod ssh_jobs;
-pub use fleet::{FleetAction, FleetWorkspace};
+#[cfg(windows)]
+pub(crate) use fleet::valid_windows_workspace_path;
+pub use fleet::{FleetAction, FleetPlatform, FleetWorkspace};
 pub use screen_input::ScreenAction;
 
 use crate::mcp_screen::{ScreenBackend, ScreenKey};

@@ -98,3 +98,5 @@ Deduplication binds the local grant/client and canonical remote workspace and
 retains the existing fifteen-minute, process-lifetime boundary. Unknown outcomes
 must be inspected before any new request ID is used. Audits retain operation
 metadata, not prompts, terminal text, credentials or workspace paths.
+
+Windows Fleet uses an explicitly selected platform and a fixed encoded PowerShell bootstrap with literal native arguments. Local drive paths are required; UNC/device paths, drive roots, ambiguous components and alternate data streams are refused. The same remote workspace and per-session grants still apply. Windows OpenSSH host and installed-app acceptance are recorded separately in `docs/MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md`.

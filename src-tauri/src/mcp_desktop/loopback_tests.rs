@@ -9,7 +9,6 @@ use russh::keys::ssh_key::{private::Ed25519Keypair, HashAlg, PrivateKey};
 use russh::{server, Channel, ChannelId, Pty};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
 mod openssh;
@@ -17,15 +16,41 @@ mod openssh;
 #[derive(Clone)]
 enum SftpMode {
     Disabled,
-    #[cfg(unix)]
     Fleet {
         data: Arc<std::path::PathBuf>,
         directory: Arc<std::path::PathBuf>,
+        shell: FleetShell,
     },
     #[cfg(unix)]
     OpenSsh {
         denied_requests: Option<&'static str>,
     },
+}
+
+#[derive(Clone, Copy)]
+enum FleetShell {
+    Native,
+    #[cfg(windows)]
+    PowerShell,
+}
+
+fn fleet_config(data: &std::path::Path, directory: &std::path::Path) -> FleetWorkspace {
+    FleetWorkspace {
+        platform: if cfg!(windows) {
+            FleetPlatform::Windows
+        } else {
+            FleetPlatform::Unix
+        },
+        executable: std::env::var("LATTICETERM_FLEET_TEST_BINARY").unwrap_or_else(|_| {
+            if cfg!(windows) {
+                r"C:\test\lattice-term.exe".into()
+            } else {
+                "/test/lattice-term".into()
+            }
+        }),
+        data_directory: data.to_string_lossy().into_owned(),
+        directory: directory.to_string_lossy().into_owned(),
+    }
 }
 
 struct Handler {
@@ -124,7 +149,6 @@ impl server::Handler for Handler {
         }
         match &self.sftp_mode {
             SftpMode::Disabled => session.channel_failure(channel_id)?,
-            #[cfg(unix)]
             SftpMode::Fleet { .. } => session.channel_failure(channel_id)?,
             #[cfg(unix)]
             SftpMode::OpenSsh { denied_requests } => {
@@ -164,17 +188,13 @@ impl server::Handler for Handler {
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
         self.execs.fetch_add(1, Ordering::Relaxed);
-        #[cfg(unix)]
         if let SftpMode::Fleet {
             data: directory_data,
             directory,
+            shell,
         } = &self.sftp_mode
         {
-            let config = FleetWorkspace {
-                executable: "/test/lattice-term".into(),
-                data_directory: directory_data.to_string_lossy().into_owned(),
-                directory: directory.to_string_lossy().into_owned(),
-            };
+            let config = fleet_config(directory_data, directory);
             if data != super::fleet::command(&config).as_bytes() {
                 session.channel_failure(channel)?;
                 return Ok(());
@@ -189,17 +209,36 @@ impl server::Handler for Handler {
             session.channel_success(channel)?;
             let directory_data = Arc::clone(directory_data);
             let directory = Arc::clone(directory);
+            let shell = *shell;
+            let command_text = std::str::from_utf8(data).unwrap().to_owned();
             tokio::spawn(async move {
                 let (read, write) = tokio::io::split(stream);
-                if let Some(binary) = std::env::var_os("LATTICETERM_FLEET_TEST_BINARY") {
-                    // Opt-in acceptance against the compiled stdio executable.
-                    // The peer still accepts only the exact approved command.
-                    let mut child = tokio::process::Command::new(binary)
-                        .arg("mcp")
-                        .arg("--data-dir")
-                        .arg(&*directory_data)
-                        .arg("--workspace-directory")
-                        .arg(&*directory)
+                if std::env::var_os("LATTICETERM_FLEET_TEST_BINARY").is_some() {
+                    // Exercise the actual shell and bootstrap, including raw
+                    // UTF-8 stdio and special characters in approved paths.
+                    #[cfg(unix)]
+                    let mut process = {
+                        let _ = shell;
+                        let mut c = tokio::process::Command::new("/bin/sh");
+                        c.arg("-c").arg(&command_text);
+                        c
+                    };
+                    #[cfg(windows)]
+                    let mut process = match shell {
+                        FleetShell::Native => {
+                            let mut c =
+                                tokio::process::Command::new(std::env::var_os("ComSpec").unwrap());
+                            c.arg("/d").arg("/s").arg("/c").arg(&command_text);
+                            c
+                        }
+                        FleetShell::PowerShell => {
+                            let mut c = tokio::process::Command::new("powershell.exe");
+                            c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+                                .arg(&command_text);
+                            c
+                        }
+                    };
+                    let mut child = process
                         .stdin(std::process::Stdio::piped())
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::null())

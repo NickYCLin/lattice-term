@@ -108,7 +108,12 @@ where
     Some(runtime.block_on(serve_stdio(server)))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+pub(crate) async fn workspace_test_daemon_ready(paths: &DaemonPaths) -> bool {
+    transport::connect(paths).await.is_ok()
+}
+
+#[cfg(test)]
 pub(crate) async fn serve_workspace_test_io<R, W>(
     data: &Path,
     directory: &Path,

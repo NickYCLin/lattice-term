@@ -262,6 +262,19 @@ try {
         $check.passed = $true
         $check.counts = $result
     }
+    # This account-free opt-in runs the real MCP executable behind both
+    # Windows OpenSSH default shell shapes, then verifies two ConPTY sessions.
+    $fleetFilter = "mcp_desktop::loopback_tests::fleet::windows_fleet_native_bootstrap_supports_both_ssh_shells"
+    $fleetCheck = [ordered]@{ filter = $fleetFilter; passed = $false }
+    $report.tests += $fleetCheck
+    $fleetNames = @(Get-TestNames (Invoke-NativeChecked $testCopy @($fleetFilter, "--exact", "--list", "--ignored", "--format", "terse")))
+    if ($fleetNames.Count -ne 1) { throw "The Windows Fleet bootstrap test is missing." }
+    $oldFleetBinary = $env:LATTICETERM_FLEET_TEST_BINARY
+    try {
+        $env:LATTICETERM_FLEET_TEST_BINARY = Join-Path $targetDirectory "release/lattice-term.exe"
+        $fleetCheck.counts = Get-TestResult (Invoke-NativeChecked $testCopy @($fleetFilter, "--exact", "--ignored", "--test-threads=1", "--color", "never")) 1 0
+        $fleetCheck.passed = $true
+    } finally { $env:LATTICETERM_FLEET_TEST_BINARY = $oldFleetBinary }
     $report.passed = $true
 } catch {
     $failure = $_

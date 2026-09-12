@@ -33,6 +33,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [command, setCommand] = useState("");
   const [commandLabel, setCommandLabel] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_EXEC_TIMEOUT_SECONDS);
+  const [fleetPlatform, setFleetPlatform] = useState<"unix" | "windows">("unix");
   const [fleetExecutable, setFleetExecutable] = useState("");
   const [fleetDataDirectory, setFleetDataDirectory] = useState("");
   const [fleetDirectory, setFleetDirectory] = useState("");
@@ -78,7 +79,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       const { invoke } = await import("@tauri-apps/api/core");
       setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
         sessionId, backend: selected.backend, label: label.trim(), scopes,
-        fleet: scopes.fleetObserve ? { executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory } : null,
+        fleet: scopes.fleetObserve ? { platform: fleetPlatform, executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory } : null,
         execPlans: scopes.exec ? execPlanRequests(plans) : [],
         roots: fileScope ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot, localPath: transferScope ? localRoot : null }] : [],
       } }));
@@ -107,7 +108,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     setAcknowledged(false);
   };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
-    && (!scopes.fleetObserve || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => path.startsWith("/") && path.length > 1))
+    && (!scopes.fleetObserve || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => fleetPlatform === "windows" ? /^[A-Za-z]:[\\/].+/.test(path) : path.startsWith("/") && path.length > 1))
     && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
@@ -158,6 +159,12 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           {scopes.fleetObserve && <fieldset disabled={busy} className="mcp-remote__plans">
             <legend>{t("settings.mcpRemote.fleetTitle")}</legend>
             <p className="setting__description">{t("settings.mcpRemote.fleetHint")}</p>
+            <label className="field"><span className="field__label">{t("settings.mcpRemote.fleetPlatform")}</span>
+              <select className="input" value={fleetPlatform} onChange={(e) => { setFleetPlatform(e.target.value as "unix" | "windows"); setAcknowledged(false); }}>
+                <option value="unix">Linux / macOS</option><option value="windows">Windows</option>
+              </select>
+            </label>
+            {fleetPlatform === "windows" && <p className="setting__description">{t("settings.mcpRemote.fleetWindowsHint")}</p>}
             {([
               ["fleetExecutable", fleetExecutable, setFleetExecutable],
               ["fleetDataDirectory", fleetDataDirectory, setFleetDataDirectory],
