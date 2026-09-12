@@ -22,7 +22,7 @@ use crate::agent_chat::AgentChatRegistry;
 use base64::Engine;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -47,8 +47,24 @@ const MAX_OBSERVER_REQUEST_BYTES: usize = 1024 * 1024;
 /// a second prompt.
 const RECENT_OUTCOME_TTL: Duration = Duration::from_secs(15 * 60);
 const MAX_RECENT_OUTCOMES: usize = 256;
+/// How many live sessions one MCP client may have started, and how many
+/// all of them together may have started. A client that can start an
+/// agent can be told to start another by whatever it is reading, so the
+/// ceiling is the daemon's, not the model's. The user's own launches and
+/// the sessions they shared by hand are not counted here.
+pub(crate) const MAX_LAUNCHED_PER_CLIENT: usize = 4;
+/// Every refusal from the launch ceiling starts with this, so a client can
+/// tell "too many running" from "not allowed at all".
+pub(crate) const LAUNCH_LIMIT_REACHED: &str = "Launch limit reached.";
+pub(crate) const SESSION_NOT_SHARED: &str = "This session is not shared with observers.";
+pub(crate) const OBSERVER_NOT_ALLOWED: &str = "Observers may only read shared sessions.";
+pub(crate) const PLAN_NOT_AVAILABLE: &str =
+    "No saved plan with that id is available to MCP clients.";
+pub(crate) const LAUNCH_NOT_ALLOWED: &str =
+    "The user has not allowed MCP clients to launch saved plans.";
+pub(crate) const MAX_LAUNCHED_TOTAL: usize = 8;
 const DUPLICATE_WAIT: Duration = Duration::from_secs(10);
-const UNKNOWN_OUTCOME: &str = "Operation outcome is unknown; retry only with the same requestId while this daemon is running. Do not submit a new requestId.";
+pub(crate) const UNKNOWN_OUTCOME: &str = "Operation outcome is unknown; retry only with the same requestId while this daemon is running. Do not submit a new requestId.";
 
 /// Handles `agent-daemon`; `None` when the arguments are for something else.
 pub fn run_cli<I, S>(args: I) -> Option<i32>
@@ -773,7 +789,7 @@ fn dispatch_as_inner(
                 access.check()?;
                 result
             }
-            Request::Plans => Ok(context.sink.plans_view()),
+            Request::Plans => Ok(context.sink.plans_view(&context.registry, client)),
             Request::LaunchPlan {
                 plan_id,
                 request_id,
@@ -850,7 +866,7 @@ fn dispatch_as_inner(
                     }
                 },
             ),
-            _ => Err("Observers may only read shared sessions.".to_string()),
+            _ => Err(OBSERVER_NOT_ALLOWED.to_string()),
         },
     }
 }
@@ -910,11 +926,22 @@ fn require_control(context: &Context, session_id: &str) -> Result<(), String> {
 }
 
 fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, String> {
+    let (mine, total) = context.sink.launched_counts(&context.registry, client);
+    if mine >= MAX_LAUNCHED_PER_CLIENT {
+        return Err(format!(
+            "{LAUNCH_LIMIT_REACHED} This client already started {mine} of at most {MAX_LAUNCHED_PER_CLIENT} live sessions. Stop one before starting another."
+        ));
+    }
+    if total >= MAX_LAUNCHED_TOTAL {
+        return Err(format!(
+            "{LAUNCH_LIMIT_REACHED} MCP clients together already started {total} of at most {MAX_LAUNCHED_TOTAL} live sessions. Stop one before starting another."
+        ));
+    }
     let Some((plan, generation)) = context.sink.plan_with_generation(plan_id) else {
         return Err(if context.sink.plans_enabled() {
-            "No saved plan with that id is available to MCP clients.".to_string()
+            PLAN_NOT_AVAILABLE.to_string()
         } else {
-            "The user has not allowed MCP clients to launch saved plans.".to_string()
+            LAUNCH_NOT_ALLOWED.to_string()
         });
     };
     let mut request = plan.request;
@@ -929,6 +956,7 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
     // What a client started, it may watch and drive; the user allowed the
     // plan for exactly that.
     finish_plan_launch(context, &summary.session_id, generation)?;
+    context.sink.note_launch(client, &summary.session_id);
     context
         .sink
         .note_activity(&summary.session_id, client, "launch");
@@ -1007,7 +1035,7 @@ fn cancel(
     scope: CancelScope,
 ) -> Result<Value, String> {
     if !context.sink.has_control(session_id) {
-        return Err("This session is not under MCP control.".to_string());
+        return Err(agent::MCP_NOT_CONTROLLED.to_string());
     }
     let registry = &context.registry;
     let sink: &dyn AgentSink = context.sink.as_ref();
@@ -1241,6 +1269,9 @@ pub struct DaemonSink {
     shared: Mutex<HashMap<String, ShareEntry>>,
     /// Saved plans the user allowed observers to launch.
     plans: Mutex<LaunchPlans>,
+    /// Sessions each observer started, so a client cannot fan out beyond
+    /// its ceiling. Entries go when the session ends.
+    launched: Mutex<HashMap<String, HashSet<String>>>,
     /// Outcomes of recent observer actions, by client and request id.
     recent: Mutex<VecDeque<Arc<RecentOutcome>>>,
     next: AtomicU64,
@@ -1374,7 +1405,7 @@ impl Default for ShareEntry {
     }
 }
 
-const OUTPUT_NOT_SHARED: &str = "This session's output is not shared with observers.";
+pub(crate) const OUTPUT_NOT_SHARED: &str = "This session's output is not shared with observers.";
 
 #[derive(Clone)]
 struct OutputAccess(watch::Receiver<bool>);
@@ -1676,6 +1707,43 @@ impl DaemonSink {
         self.plan_with_generation(plan_id).map(|(plan, _)| plan)
     }
 
+    /// Live sessions this client started, and the total across clients.
+    /// Sessions the registry no longer holds are dropped on the way.
+    fn launched_counts(&self, registry: &AgentRegistry, client: &str) -> (usize, usize) {
+        let Ok(mut launched) = self.launched.lock() else {
+            return (MAX_LAUNCHED_PER_CLIENT, MAX_LAUNCHED_TOTAL);
+        };
+        let mut total = 0;
+        let mut mine = 0;
+        launched.retain(|owner, sessions| {
+            sessions.retain(|session| registry.session_summary(session).is_some());
+            total += sessions.len();
+            if owner == client {
+                mine = sessions.len();
+            }
+            !sessions.is_empty()
+        });
+        (mine, total)
+    }
+
+    fn note_launch(&self, client: &str, session_id: &str) {
+        if let Ok(mut launched) = self.launched.lock() {
+            launched
+                .entry(client.to_string())
+                .or_default()
+                .insert(session_id.to_string());
+        }
+    }
+
+    fn forget_launch(&self, session_id: &str) {
+        if let Ok(mut launched) = self.launched.lock() {
+            launched.retain(|_, sessions| {
+                sessions.remove(session_id);
+                !sessions.is_empty()
+            });
+        }
+    }
+
     fn plan_with_generation(&self, plan_id: &str) -> Option<(McpPlan, u64)> {
         self.plans.lock().ok().and_then(|plans| {
             plans
@@ -1693,14 +1761,19 @@ impl DaemonSink {
     }
 
     /// What an observer learns about launchable plans: never the request.
-    fn plans_view(&self) -> Value {
+    fn plans_view(&self, registry: &AgentRegistry, client: &str) -> Value {
         let (enabled, plans) = self
             .plans
             .lock()
             .map(|plans| (plans.enabled, plans.plans.clone()))
             .unwrap_or_default();
+        let (mine, total) = self.launched_counts(registry, client);
         json!({
             "enabled": enabled,
+            "launchedByYou": mine,
+            "launchedTotal": total,
+            "maxLaunchedPerClient": MAX_LAUNCHED_PER_CLIENT,
+            "maxLaunchedTotal": MAX_LAUNCHED_TOTAL,
             "plans": plans.iter().map(|plan| json!({
                 "planId": plan.plan_id,
                 "label": plan.label,
@@ -1852,6 +1925,7 @@ impl AgentSink for DaemonSink {
             "closed",
             json!({ "sessionId": session_id, "reason": reason }),
         );
+        self.forget_launch(session_id);
         // Observers already heard `closed`; drop the grant quietly.
         if let Ok(mut set) = self.shared.lock() {
             if let Some(entry) = set.remove(session_id) {

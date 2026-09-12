@@ -302,7 +302,7 @@ fn rpc_result(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-const OUTPUT_REVOKED: &str = "Permission to read this session's output was revoked.";
+pub(crate) const OUTPUT_REVOKED: &str = "Permission to read this session's output was revoked.";
 
 struct McpReply {
     value: Value,
@@ -477,12 +477,16 @@ impl McpServer {
             Err(ToolError::Invalid(message)) => {
                 return Err(RpcFailure::invalid_params(&message));
             }
-            Err(ToolError::Failed(message)) => tool_result(json!({ "error": message }), true),
+            Err(ToolError::Failed(message)) => {
+                let (message, code) = super::failure_payload(&message);
+                tool_result(json!({ "error": message, "code": code }), true)
+            }
         })
     }
 
     async fn get_capabilities(&self) -> Result<Value, ToolError> {
         let connection = self.attached().await;
+        let mut launched = Value::Null;
         let (shared, readable, controlled, launch_enabled, plans) = match &connection {
             Some(connection) => {
                 let sessions = connection.sessions().await?;
@@ -491,6 +495,7 @@ impl McpServer {
                 let plans = connection.plans().await?;
                 let enabled = plans["enabled"].as_bool().unwrap_or(false);
                 let count = plans["plans"].as_array().map(Vec::len).unwrap_or(0);
+                launched = plans.clone();
                 (sessions.len(), readable, controlled, enabled, count)
             }
             None => (0, 0, 0, false, 0),
@@ -547,6 +552,7 @@ impl McpServer {
                 "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
                 "list_authorized_connections", "get_host_metrics", "sftp_list_directory", "ssh_exec_job", "sftp_transfer", "get_remote_operation", "cancel_remote_operation",
             ],
+            "errorCodes": super::error_code::ALL,
             "limits": {
                 "maxReadBytes": MAX_READ_BYTES,
                 "readOverrunBytes": OVERRUN_SLACK,
@@ -557,10 +563,16 @@ impl McpServer {
                 "maxInFlightWaits": MAX_IN_FLIGHT_WAITS,
                 "maxQueuedReplies": MAX_QUEUED_REPLIES,
                 "maxRequestBytes": MAX_LINE_BYTES,
+                "maxLaunchedSessionsPerClient": launched["maxLaunchedPerClient"].clone(),
+                "maxLaunchedSessionsTotal": launched["maxLaunchedTotal"].clone(),
+            },
+            "launchedSessions": {
+                "byThisClient": launched["launchedByYou"].clone(),
+                "byAllClients": launched["launchedTotal"].clone(),
             },
             "limitations": [
                 "Only Agent Fleet sessions the user marked \"keep in the background\" and then shared in LatticeTerm are visible; only those the user also marked controllable accept prompts or cancels.",
-                "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client.",
+                "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
                 "Desktop Fleet sessions, chat threads and remote screens are not exposed. SSH/SFTP require a live desktop and separate explicit grants; saved credentials alone never grant access.",
                 "There is no way to interrupt a running turn: cancel_agent_task drops queued prompts or ends the whole session.",
                 "Output is the retained terminal tail; a cursor older than it is reported as truncated.",
@@ -960,7 +972,7 @@ impl McpServer {
     }
 }
 
-const DAEMON_NOT_RUNNING: &str =
+pub(crate) const DAEMON_NOT_RUNNING: &str =
     "The LatticeTerm background service is not running, so there is nothing to observe. Start a session with \"keep in the background\" in LatticeTerm and share it.";
 
 const INSTRUCTIONS: &str = "LatticeTerm Agent Fleet sessions the user shared. \
@@ -1357,7 +1369,7 @@ fn tool_definitions() -> Value {
         {
             "name": "list_launch_plans",
             "title": "List launchable saved plans",
-            "description": "Lists the saved launch plans the user allowed MCP clients to start (planId, label, note, CLI, working directory, sandbox). Empty with enabled=false when the user has not allowed launching.",
+            "description": "Lists the saved launch plans the user allowed MCP clients to start (planId, label, note, CLI, working directory, sandbox), plus how many sessions this client and all clients have started and the ceilings for both. Empty with enabled=false when the user has not allowed launching.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
             "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
         },

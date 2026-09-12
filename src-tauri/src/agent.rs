@@ -2013,7 +2013,7 @@ impl AgentRegistry {
             .map_err(|error| error.to_string())?
             .get(session_id)
             .cloned()
-            .ok_or_else(|| "Agent session no longer exists.".to_string())
+            .ok_or_else(|| MCP_SESSION_GONE.to_string())
     }
 
     fn remove(&self, session_id: &str) -> Option<Arc<AgentSessionEntry>> {
@@ -6605,8 +6605,17 @@ fn record_sent_input(
     }
 }
 
-pub(crate) const MCP_DRAFT_RECOVERY_ERROR: &str = "MCP submission could not be confirmed. Inspect the visible draft before typing or retrying; pending input was rejected and nothing was automatically retried.";
-const MCP_INPUT_PROFILE_UNSUPPORTED: &str = "Windows Codex automatic MCP input is unsupported for this session: the launch-time default keymap and Vim-off profile was not verified, changed, or has been taken over by human input. No input was sent or queued. Reading output and session cancellation remain available; do not automatically restart or retry.";
+/// A session the caller was never granted, or whose grant changed under it.
+pub const MCP_NOT_CONTROLLED: &str = "This session is not under MCP control.";
+pub const MCP_GRANT_CHANGED: &str = "This session is not under the original MCP control grant.";
+/// The CLI has not reported itself free, or a person is mid-prompt.
+pub const MCP_NOT_READY: &str = "The CLI has not confirmed it is ready, or the user is editing its prompt. Queue the prompt or wait for an official idle/done report.";
+pub const MCP_QUEUE_IN_ORDER: &str =
+    "This session already has queued prompts. Use queue mode to preserve their order.";
+pub const MCP_SESSION_GONE: &str = "Agent session no longer exists.";
+
+pub const MCP_DRAFT_RECOVERY_ERROR: &str = "MCP submission could not be confirmed. Inspect the visible draft before typing or retrying; pending input was rejected and nothing was automatically retried.";
+pub const MCP_INPUT_PROFILE_UNSUPPORTED: &str = "Windows Codex automatic MCP input is unsupported for this session: the launch-time default keymap and Vim-off profile was not verified, changed, or has been taken over by human input. No input was sent or queued. Reading output and session cancellation remain available; do not automatically restart or retry.";
 
 fn rejects_interrupted_desktop_input(input: &AgentInputControl, ticket: u64, bytes: &[u8]) -> bool {
     // Only complete, recognized reports bypass this recovery cutoff. Unknown
@@ -6860,7 +6869,7 @@ fn enqueue_locked(
         && releases_queued_prompt(state, source)
     {
         if !prompt_grant_matches(&entry, mcp_grant_epoch) {
-            return Err("This session is not under MCP control.".to_string());
+            return Err(MCP_NOT_CONTROLLED.to_string());
         }
         send_prompt_bytes_locked(sink, registry, session_id, &bytes, mcp_grant_epoch, input)?;
         return Ok(0);
@@ -6872,7 +6881,7 @@ fn enqueue_locked(
             .lock()
             .map_err(|error| error.to_string())?;
         if !prompt_grant_matches(&entry, mcp_grant_epoch) {
-            return Err("This session is not under MCP control.".to_string());
+            return Err(MCP_NOT_CONTROLLED.to_string());
         }
         if queue.len() >= MAX_QUEUED_PROMPTS {
             return Err(format!(
@@ -7066,8 +7075,7 @@ fn mcp_prompt_with_grant_observer(
     let entry = registry.get(session_id)?;
     // Remember the grant when this call enters, not after it waits behind a
     // split write. Re-granting cannot revive an already-waiting MCP request.
-    let grant_epoch = current_mcp_grant(&entry)
-        .ok_or_else(|| "This session is not under MCP control.".to_string())?;
+    let grant_epoch = current_mcp_grant(&entry).ok_or_else(|| MCP_NOT_CONTROLLED.to_string())?;
     validate_mcp_prompt_transport(
         cfg!(windows),
         &entry
@@ -7088,7 +7096,7 @@ fn mcp_prompt_with_grant_observer(
     after_grant_snapshot();
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if !prompt_grant_matches(&entry, Some(grant_epoch)) {
-        return Err("This session is not under the original MCP control grant.".to_string());
+        return Err(MCP_GRANT_CHANGED.to_string());
     }
     revalidate_mcp_input_profile(
         &entry,
@@ -7104,7 +7112,7 @@ fn mcp_prompt_with_grant_observer(
             || input.startup_seed_pending
             || !releases_queued_prompt(summary.state, summary.state_source)
         {
-            return Err("The CLI has not confirmed it is ready, or the user is editing its prompt. Queue the prompt or wait for an official idle/done report.".to_string());
+            return Err(MCP_NOT_READY.to_string());
         }
         if !entry
             .queued_prompts
@@ -7112,14 +7120,11 @@ fn mcp_prompt_with_grant_observer(
             .map_err(|error| error.to_string())?
             .is_empty()
         {
-            return Err(
-                "This session already has queued prompts. Use queue mode to preserve their order."
-                    .to_string(),
-            );
+            return Err(MCP_QUEUE_IN_ORDER.to_string());
         }
         drop(summary);
         if !prompt_grant_matches(&entry, Some(grant_epoch)) {
-            return Err("This session is not under MCP control.".to_string());
+            return Err(MCP_NOT_CONTROLLED.to_string());
         }
         send_prompt_bytes_locked(
             sink,
@@ -7198,7 +7203,7 @@ pub fn mcp_cancel_queue(
 ) -> Result<usize, String> {
     let entry = registry.get(session_id)?;
     if current_mcp_grant(&entry).is_none() {
-        return Err("This session is not under MCP control.".to_string());
+        return Err(MCP_NOT_CONTROLLED.to_string());
     }
     clear_queue_locked(sink, registry, session_id, true)
 }
@@ -7210,7 +7215,7 @@ pub fn mcp_disconnect(
 ) -> Result<(), String> {
     let entry = registry.get(session_id)?;
     if current_mcp_grant(&entry).is_none() {
-        return Err("This session is not under MCP control.".to_string());
+        return Err(MCP_NOT_CONTROLLED.to_string());
     }
     disconnect_locked(sink, registry, session_id, &entry)
 }
