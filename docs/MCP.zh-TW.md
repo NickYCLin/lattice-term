@@ -184,6 +184,8 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 ## C：SSH／SFTP 與主機資訊
 
+每個授權可以核准多段具名指令（最多 8 段），每段各自設定逾時（1–60 秒）。`ssh_exec_job` 只能用 `planId` 指名其中一段，插不進參數；`list_authorized_connections` 只會回名稱與 id，不含指令內容。
+
 `get_host_metrics` 用的是固定的 Linux `/proc` 探針。主機沒有回報 Linux 資料時回 `unsupported`，重試也不會變，請改用其他方式；不會回一堆零假裝讀到了。
 
 1. 先在桌面正常連線，確認主機金鑰與帳號；MCP 不代為確認、不使用其他已存帳號登入。
