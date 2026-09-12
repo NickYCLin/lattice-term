@@ -886,6 +886,7 @@ export const zhTW = {
   "agents.mcp.history.action.queue": "排隊送出指示",
   "agents.mcp.history.action.clearQueue": "清除 MCP 佇列",
   "agents.mcp.history.action.stop": "結束工作階段",
+  "agents.mcp.history.action.interrupt": "中斷目前回合",
   "settings.mcpRemote.title": "MCP 遠端操作授權",
   "settings.mcpRemote.hint": "讓外部 AI 工具使用你已連線、並在此明確授權的 SSH／SFTP 連線。",
   "settings.mcpRemote.boundary": "預設全部關閉，僅本次桌面連線有效。關閉桌面或背景服務失聯即撤權；不會自動登入或接受主機金鑰。已執行的指令或檔案寫入不會因撤權而復原。",

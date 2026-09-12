@@ -728,10 +728,10 @@ pub fn dispatch_as(
             Request::Cancel {
                 session_id, scope, ..
             } => Some((
-                if *scope == CancelScope::Queue {
-                    audit::Action::ClearQueue
-                } else {
-                    audit::Action::Stop
+                match scope {
+                    CancelScope::Queue => audit::Action::ClearQueue,
+                    CancelScope::Turn => audit::Action::Interrupt,
+                    CancelScope::Session => audit::Action::Stop,
                 },
                 context
                     .registry
@@ -1071,6 +1071,21 @@ fn cancel(
     let registry = &context.registry;
     let sink: &dyn AgentSink = context.sink.as_ref();
     match scope {
+        CancelScope::Turn => {
+            agent::mcp_interrupt_turn(sink, registry, session_id)?;
+            context.sink.note_activity(session_id, client, "interrupt");
+            context.log.line(&format!(
+                "mcp {client}: interrupted the turn on {session_id}"
+            ));
+            let after = registry.session_summary(session_id);
+            Ok(json!({
+                "sessionId": session_id,
+                "scope": "turn",
+                "interrupted": true,
+                "state": after.as_ref().map(|summary| summary.state),
+                "stateSource": after.as_ref().map(|summary| summary.state_source),
+            }))
+        }
         CancelScope::Queue => {
             let dropped = agent::mcp_cancel_queue(sink, registry, session_id)?;
             context.sink.note_activity(session_id, client, "clearQueue");

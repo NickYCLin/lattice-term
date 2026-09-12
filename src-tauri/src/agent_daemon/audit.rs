@@ -34,6 +34,8 @@ pub enum Action {
     Revoke,
     /// Terminal output handed to a client. The content is never recorded.
     Read,
+    /// The running turn was interrupted; the session kept running.
+    Interrupt,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -537,6 +537,16 @@ impl McpServer {
             "launchEnabled": launch_enabled,
             "launchablePlans": plans,
             "desktopBridgeAvailable": desktop_bridge,
+            "turnInterrupt": {
+                "supportedDefinitionIds": crate::agent::catalog()
+                    .iter()
+                    .map(|definition| definition.id.as_str())
+                    .filter(|id| crate::agent::supports_turn_interrupt(id))
+                    .collect::<Vec<_>>(),
+                "refusedWhileWaitingForAPerson": true,
+                "refusedWhileHumanInputUnfinished": true,
+                "cooldownMs": 5000,
+            },
             "promptTextRestrictions": [{
                 "platform": "windows",
                 "definitionId": "codex",
@@ -574,7 +584,7 @@ impl McpServer {
                 "Only Agent Fleet sessions the user marked \"keep in the background\" and then shared in LatticeTerm are visible; only those the user also marked controllable accept prompts or cancels.",
                 "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
                 "Desktop Fleet sessions, chat threads and remote screens are not exposed. SSH/SFTP require a live desktop and separate explicit grants; saved credentials alone never grant access.",
-                "There is no way to interrupt a running turn: cancel_agent_task drops queued prompts or ends the whole session.",
+                "cancel_agent_task with scope \"turn\" interrupts the running turn only for the CLIs listed under turnInterrupt, and only while the session is working with no unfinished human input; every other CLI must be interrupted by the user in the terminal, or ended entirely with scope \"session\".",
                 "Output is the retained terminal tail; a cursor older than it is reported as truncated.",
                 "Lifecycle states are the CLI's own hook reports when stateSource is integration, and a guess when it is heuristic; both immediate and queued prompts require an integration report that the CLI is free and no unfinished human input.",
                 "Windows Codex MCP prompts require a launch-verified default keymap with Vim off. Human input, unrecognized or split terminal replies, and changed input configuration permanently disable automatic prompting for that session; regranting control does not restore it. Reading output and cancelling a session remain separately authorized. Do not automatically restart or retry an unsupported session.",
@@ -696,9 +706,14 @@ impl McpServer {
     async fn cancel_agent_task(&self, arguments: &Value) -> Result<Value, ToolError> {
         let session_id = required_session_id(arguments)?;
         let scope = match arguments.get("scope").and_then(Value::as_str) {
+            Some("turn") => CancelScope::Turn,
             Some("queue") => CancelScope::Queue,
             Some("session") => CancelScope::Session,
-            _ => return Err(ToolError::Invalid("scope must be queue or session".into())),
+            _ => {
+                return Err(ToolError::Invalid(
+                    "scope must be turn, queue or session".into(),
+                ))
+            }
         };
         let request_id = request_id(arguments)?;
         let Some(connection) = self.attached().await else {
@@ -1408,12 +1423,12 @@ fn tool_definitions() -> Value {
         {
             "name": "cancel_agent_task",
             "title": "Drop queued prompts or end a session",
-            "description": "scope \"queue\" discards the prompts still waiting on a controlled session and leaves the running turn alone; scope \"session\" ends the whole CLI process, which cannot be undone. There is no way to interrupt a running turn.",
+            "description": "scope \"turn\" presses the interrupt key the CLI's own interface documents, ending the running turn while the session, its queue and the user's work continue; only for the CLIs get_capabilities lists under turnInterrupt, refused while the session waits for a person, while somebody has unfinished input in it, and for a few seconds after a previous interrupt. scope \"queue\" discards the MCP prompts still waiting and leaves the running turn alone. scope \"session\" ends the whole CLI process, which cannot be undone. An interrupt reports that the key was delivered, not what the CLI did with it: confirm with wait_agent_state and read_agent_output.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "sessionId": { "type": "string", "description": "A sessionId with access control." },
-                    "scope": { "type": "string", "enum": ["queue", "session"] },
+                    "scope": { "type": "string", "enum": ["turn", "queue", "session"] },
                     "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required idempotency key, at most 128 UTF-8 bytes. Reuse only for an identical retry." }
                 },
                 "required": ["sessionId", "scope", "requestId"],

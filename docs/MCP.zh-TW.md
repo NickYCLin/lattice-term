@@ -116,7 +116,11 @@ B 階段工具的語意：
 
 - `send_agent_prompt` 以 bracketed paste 傳送文字，最後只補一次 Enter；拒絕 ESC、Ctrl+C 等控制字元。Windows Codex 的 MCP 提示另限單行、不可含 CR、LF、Tab、`@` 或 `$`，也不可用 `/` 或 `!` 起頭；`now` 與 `queue` 都在寫入或入隊前拒絕，不會默默改字。前幾種字元可能被轉成按鍵，後幾種會啟動 CLI 指令或補完選單，不能當一般文字送入。其他平台、CLI 與桌面手動輸入維持原行為。`queue` 與 `now` 都只有在 CLI 官方 hook 回報 `idle`／`done`、且使用者沒有編輯中的提示時才可派送。`queue` 會等待；`now` 在尚未就緒、等待人工操作或已有排隊指示時拒絕。沒有整合的 CLI（例如自訂 shell）不能用 `now` 略過檢查，需由使用者在終端操作。回傳的 `sentImmediately`／`queued` 只代表 PTY 寫入與排隊狀態，不代表 CLI 已開始新回合或任務成功；請用 `wait_agent_state` 與 `read_agent_output` 核對。
 - Windows Codex 的自動輸入只對通過啟動設定檢查的工作階段開放。貼上後先送 End，讓已驗證的預設按鍵處理清掉貼上判定，再送唯一一次 Enter；不依賴固定等待。每個階段仍重查原授權、程序及人工接管狀態。若途中撤權、停止整個工作階段或寫入失敗，可能留下未提交的草稿，結果會標成不確定，不補送 Enter 或自動重試。此時拒絕當時等待輸入鎖的人工請求，終端顯示接管提示；請先檢查可見草稿，再決定如何繼續。仍須核對官方狀態與實際結果。
-- `cancel_agent_task` 只有兩種範圍：`queue` 丟掉還沒送出的 MCP 指示，保留使用者排隊的工作與正在跑的回合；`session` 結束整個 CLI 程序，不可復原，結束後自動取消分享。**沒有「中止本輪」**：各 CLI 的中斷鍵不一致，目前不假裝支援。
+- `cancel_agent_task` 有三種範圍：
+  - `turn` 送出該 CLI 自己介面上寫的中斷鍵，結束正在跑的回合，工作階段、佇列與使用者的工作都留著。只對 `get_capabilities.turnInterrupt.supportedDefinitionIds` 列出的 CLI 開放（目前 Codex 與 Claude Code，兩者的畫面都寫著「esc to interrupt」）；工作階段在等人回應（`needsAttention`）、有人有未送出的輸入、或五秒內已經中斷過一次時拒絕，代碼 `not_ready`。五秒冷卻是因為有些 CLI 把連按兩次 Esc 當成別的意思（Codex 是「編輯上一則訊息」）。回傳只代表按鍵送進去了，不代表 CLI 停了：請用 `wait_agent_state` 與 `read_agent_output` 核對。
+  - `queue` 丟掉還沒送出的 MCP 指示，保留使用者排隊的工作與正在跑的回合。
+  - `session` 結束整個 CLI 程序，不可復原，結束後自動取消分享。
+  沒有列在 `turnInterrupt` 的 CLI 不會用猜的按鍵去試，一律回 `unsupported`；要中斷請使用者自己在終端機操作，或用 `session` 整個結束。
 - `launch_agent` 只能啟動 `list_launch_plans` 給的項目，永遠是背景工作階段；請求本身由桌面依保存的項目準備好交給背景服務，client 給不了任何指令或參數。
 - **啟動有數量上限。** 同一個 client 最多同時持有 4 個由它啟動且仍存活的工作階段，所有 client 合計最多 8 個；超過就拒絕，回 `limit_reached`，要先停掉一個再啟動。使用者自己開的工作階段、以及手動分享給 MCP 的工作階段都不計入。能讀輸出的 CLI 可能在輸出裡看到「再開一個 agent」這種指示，上限由背景服務把關，不看模型自制。目前用量與上限在 `list_launch_plans` 與 `get_capabilities`（`launchedSessions`、`limits`）。
 - **request ID 去重**：三個寫入工具都必須帶非空、最多 128 bytes 的 `requestId`。同一個 client（以 `initialize.clientInfo` 名稱與版本區分）同時重送完全相同的請求，只執行一次；完成後 15 分鐘內回傳原結果並標 `duplicate: true`。同 id 換工具、目標或內容會拒絕。背景服務最多保留 256 筆；額滿時拒絕新的寫入，不提早淘汰尚在保留期的結果。重送仍需通過目前授權檢查；已結束工作階段的取消結果可重取。
@@ -248,7 +252,7 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 
 ## 後續階段（未實作）
 
-- **B 的邊界**：PTY 模式不支援安全的「中止本輪」，不模擬 Esc／Ctrl+C，以免完成競態結束整個 CLI；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
+- **B 的邊界**：只有畫面上自己寫明中斷鍵的 CLI 支援 `scope: "turn"`，其餘不猜按鍵；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
 - **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
 - **D 遠端畫面**：frame ID／尺寸／時間戳與有界快照，先擷取再考慮鍵鼠。
 
