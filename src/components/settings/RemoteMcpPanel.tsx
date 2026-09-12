@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  addExecPlan,
+  clampExecTimeout,
+  execPlanRequests,
+  DEFAULT_EXEC_TIMEOUT_SECONDS,
+  MAX_EXEC_PLANS,
+  MAX_EXEC_TIMEOUT_SECONDS,
+  MIN_EXEC_TIMEOUT_SECONDS,
+  removeExecPlan,
+  type RemoteExecPlan,
+} from "../../app/remoteExecPlans";
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
@@ -6,6 +17,7 @@ type Scope = "metrics" | "list" | "exec" | "upload" | "download";
 type Scopes = Record<Scope, boolean>;
 const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false };
 interface Session { sessionId: string; host: string; backend: "ssh" | "sftp" }
+
 interface Target { id: string; label: string; backend: string; scopes: Scopes; connected: boolean }
 
 export function RemoteMcpPanel({ available }: { available: boolean }) {
@@ -15,7 +27,10 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [sessionId, setSessionId] = useState("");
   const [label, setLabel] = useState("");
   const [scopes, setScopes] = useState<Scopes>({ ...scopesOff });
+  const [plans, setPlans] = useState<RemoteExecPlan[]>([]);
   const [command, setCommand] = useState("");
+  const [commandLabel, setCommandLabel] = useState("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_EXEC_TIMEOUT_SECONDS);
   const [remoteRoot, setRemoteRoot] = useState("");
   const [localRoot, setLocalRoot] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
@@ -52,10 +67,11 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       const { invoke } = await import("@tauri-apps/api/core");
       setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
         sessionId, backend: selected.backend, label: label.trim(), scopes,
-        execPlans: scopes.exec ? [{ id: "command", label: t("settings.mcpRemote.plan"), command, timeoutMs: 30_000 }] : [],
+        execPlans: scopes.exec ? execPlanRequests(plans) : [],
         roots: fileScope ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot, localPath: transferScope ? localRoot : null }] : [],
       } }));
-      setScopes({ ...scopesOff }); setAcknowledged(false); setCommand("");
+      setScopes({ ...scopesOff }); setAcknowledged(false); setPlans([]);
+      setCommand(""); setCommandLabel(""); setTimeoutSeconds(DEFAULT_EXEC_TIMEOUT_SECONDS);
     } catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };
@@ -67,8 +83,19 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     } catch (reason) { setError(String(reason)); await refresh().catch(() => {}); }
     finally { setBusy(false); }
   };
+  const addPlan = () => {
+    const next = addExecPlan(plans, { label: commandLabel, command, timeoutSeconds });
+    if (next === plans) return;
+    setPlans(next);
+    setCommand(""); setCommandLabel(""); setTimeoutSeconds(DEFAULT_EXEC_TIMEOUT_SECONDS);
+    setAcknowledged(false);
+  };
+  const removePlan = (id: string) => {
+    setPlans((current) => removeExecPlan(current, id));
+    setAcknowledged(false);
+  };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
-    && (!scopes.exec || !!command.trim()) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
+    && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
@@ -99,9 +126,30 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
                 onChange={(e) => { setScopes((current) => ({ ...current, [scope]: e.target.checked })); setAcknowledged(false); }} /> {t(`settings.mcpRemote.scope.${scope}`)}
             </label>)}
           </fieldset>
-          {scopes.exec && <label className="field"><span className="field__label">{t("settings.mcpRemote.command")}</span>
-            <textarea className="input mono" value={command} maxLength={8192} rows={3} disabled={busy} onChange={(e) => { setCommand(e.target.value); setAcknowledged(false); }} />
-            <span className="setting__description">{t("settings.mcpRemote.commandHint")}</span></label>}
+          {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">
+            <legend>{t("settings.mcpRemote.command")}</legend>
+            <span className="setting__description">{t("settings.mcpRemote.commandHint")}</span>
+            {plans.length > 0 && <ul className="mcp-remote__plan-list">
+              {plans.map((plan) => <li key={plan.id}>
+                <div><strong>{plan.label}</strong> <span className="mono">{plan.id}</span>
+                  <span> · {t("settings.mcpRemote.timeoutValue", { seconds: plan.timeoutSeconds })}</span>
+                  <p className="mono">{plan.command}</p></div>
+                <button type="button" className="button button--ghost" onClick={() => removePlan(plan.id)}>
+                  {t("settings.mcpRemote.removeCommand")}</button>
+              </li>)}
+            </ul>}
+            {plans.length >= MAX_EXEC_PLANS ? <p>{t("settings.mcpRemote.commandLimit", { count: MAX_EXEC_PLANS })}</p> : <>
+              <label className="field"><span className="field__label">{t("settings.mcpRemote.commandLabel")}</span>
+                <input className="input" value={commandLabel} maxLength={128} onChange={(e) => setCommandLabel(e.target.value)} autoComplete="off" /></label>
+              <label className="field"><span className="field__label">{t("settings.mcpRemote.commandText")}</span>
+                <textarea className="input mono" value={command} maxLength={8192} rows={3} onChange={(e) => setCommand(e.target.value)} /></label>
+              <label className="field"><span className="field__label">{t("settings.mcpRemote.timeout")}</span>
+                <input className="input" type="number" min={MIN_EXEC_TIMEOUT_SECONDS} max={MAX_EXEC_TIMEOUT_SECONDS}
+                  value={timeoutSeconds} onChange={(e) => setTimeoutSeconds(clampExecTimeout(Number(e.target.value)))} /></label>
+              <div><button type="button" className="button" disabled={!command.trim() || !commandLabel.trim()} onClick={addPlan}>
+                {t("settings.mcpRemote.addCommand")}</button></div>
+            </>}
+          </fieldset>}
           {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.remoteRoot")}</span>
             <input className="input mono" value={remoteRoot} disabled={busy} onChange={(e) => { setRemoteRoot(e.target.value); setAcknowledged(false); }} />
             <span className="setting__description">{t("settings.mcpRemote.pathHint")}</span></label>}
