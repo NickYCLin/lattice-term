@@ -85,6 +85,7 @@ export interface ChatThreadCreation extends ChatThreadSettings {
 
 export interface AgentChatApi {
   threads: ChatThread[];
+  getThread: (id: string) => ChatThread | undefined;
   activeThreadId: string | null;
   setActiveThreadId: (id: string | null) => void;
   /** CLIs the backend can drive in chat mode. */
@@ -115,13 +116,13 @@ export interface AgentChatApi {
     attachments?: readonly ChatAttachment[],
     profileConfigPath?: string | null,
   ) => Promise<void>;
-  stop: (id: string) => Promise<void>;
+  stop: (id: string, expectedTurnId?: string) => Promise<void>;
   steer: (id: string, prompt: string, attachments: readonly ChatAttachment[]) => Promise<void>;
   enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
   removeQueued: (id: string, inputId: string) => void;
   resumeQueue: (id: string) => void;
   /** Answers an approval card; rejects with the reason when it cannot. */
-  respond: (id: string, requestId: string, allow: boolean, message?: string) => Promise<void>;
+  respond: (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => Promise<void>;
   /** The models a CLI offers, fetched once per session on first request. */
   models: Record<ChatDefinitionId, ChatModelList>;
   loadModels: (definitionId: ChatDefinitionId) => void;
@@ -450,9 +451,9 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
     }
   }, []);
 
-  const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string) => {
+  const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => {
     const { invoke } = await core();
-    await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null });
+    await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: expectedTurnId ?? null });
     changeThreads((current) =>
       current.map((entry) =>
         entry.id === id
@@ -494,11 +495,11 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       });
   }, []);
 
-  const stopTurn = useCallback(async (id: string) => {
+  const stopTurn = useCallback(async (id: string, expectedTurnId?: string) => {
     completionTracker.current.cancel(id);
     changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: true } : thread));
     const { invoke } = await core();
-    await invoke<boolean>("agent_chat_stop", { threadId: id });
+    await invoke<boolean>("agent_chat_stop", { threadId: id, expectedTurnId: expectedTurnId ?? null });
   }, []);
 
   const enqueue = useCallback((id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath: string | null = null) => {
@@ -532,6 +533,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
   return useMemo(
     () => ({
       threads,
+      getThread: (id: string) => threadsRef.current.find(thread => thread.id === id),
       activeThreadId,
       setActiveThreadId: activate,
       supported,

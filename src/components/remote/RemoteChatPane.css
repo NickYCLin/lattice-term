@@ -1,0 +1,17 @@
+.remote-chat-pane { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 12px; gap: 12px; overflow: auto; background: var(--surface); }
+.remote-chat-pane[hidden] { display: none; }
+.remote-chat-pane header, .remote-chat-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.remote-chat-pane header strong, .remote-chat-actions span { flex: 1; }
+.remote-chat-list { display: grid; gap: 8px; }
+.remote-chat-thread { display: grid; text-align: start; gap: 6px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--surface-sunken); color: inherit; min-height: 48px; cursor: pointer; overflow-wrap: anywhere; }
+.remote-chat-heading { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.remote-chat-messages { flex: 1; overflow: auto; min-height: 120px; display: flex; flex-direction: column; gap: 12px; }
+.remote-chat-message { padding: 12px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: 10px; }
+.remote-chat-message pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+.remote-chat-message--user { margin-inline-start: 24px; }
+.remote-chat-message--tool pre { font-family: monospace; }
+.remote-chat-composer { display: grid; gap: 8px; position: sticky; bottom: 0; background: var(--surface); padding-bottom: env(safe-area-inset-bottom); }
+.remote-chat-composer textarea { resize: vertical; font-size: 16px; }
+.remote-workspace--chat { display: block; }
+.remote-workspace--chat > :not(.remote-chat-pane) { display: none; }
+@media (max-width: 600px) { .remote-chat-pane { padding: 8px; } .remote-chat-pane .button { min-height: 44px; } }

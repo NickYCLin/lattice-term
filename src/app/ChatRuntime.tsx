@@ -9,6 +9,8 @@
  * code out of the first paint; it renders nothing and hands its API up.
  */
 
+import { useRemoteChatHost } from "./useRemoteChatHost";
+import type { RemoteHostStatus } from "./useRemoteHost";
 import { useEffect } from "react";
 import type { NotificationSoundChoice } from "./notificationSounds";
 import { useAgentAutomations, type AgentAutomationsApi } from "./useAgentAutomations";
@@ -23,12 +25,15 @@ export function ChatRuntime({
   locale,
   completionSound = "off",
   onChange,
+  remoteHost,
 }: {
   locale: string;
+  remoteHost?: RemoteHostStatus | null;
   completionSound?: NotificationSoundChoice;
   onChange: (api: ChatRuntimeApi) => void;
 }) {
   const chat = useAgentChat(completionSound);
+  useRemoteChatHost(chat, remoteHost ?? null);
   const automations = useAgentAutomations(chat, locale);
   useEffect(() => {
     onChange({ chat, automations });

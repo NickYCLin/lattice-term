@@ -62,7 +62,7 @@ describe("remote host dialog", () => {
     expect(windows).toContain("允許 cmd／PowerShell 指令");
     expect(windows).toContain("不受分享資料夾範圍限制");
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
-    expect(checkboxes).toHaveLength(3);
+    expect(checkboxes).toHaveLength(4);
     expect(checkboxes.every(input => !input.includes("checked"))).toBe(true);
     expect(render(null, null, "linux").markup).not.toContain("允許 cmd／PowerShell 指令");
   });
@@ -97,11 +97,12 @@ describe("remote host dialog", () => {
     // and submission, rather than turning Start into an unrelated button.
     expect(markup.indexOf("</form>")).toBeLessThan(markup.indexOf("<footer"));
     expect(footer).toContain(`type="submit" form="${formId}"`);
-    expect(footer).toContain("開始分享");
-    expect(footer).toContain("取消");
+    expect(footer).toContain("儲存設定");
+    expect(footer).not.toContain("開始分享");
+    expect(footer).toContain("關閉");
   });
 
-  it("keeps stop and keep-running actions in the active sharing footer", () => {
+  it("offers configuration without an on/off button while standing by", () => {
     const { markup } = render(null, {
       hostId: "test-host",
       address: "127.0.0.1:44900",
@@ -115,8 +116,9 @@ describe("remote host dialog", () => {
     });
     const footer = markup.slice(markup.indexOf("<footer"));
 
-    expect(footer).toContain("停止分享");
-    expect(footer).toContain("在背景繼續分享");
+    expect(footer).not.toContain("停止分享");
+    expect(footer).toContain("連線與權限設定");
+    expect(markup).toContain("開啟 LatticeTerm 即自動待命");
     expect(footer).not.toContain('type="submit"');
     expect(markup).not.toContain("<form");
   });

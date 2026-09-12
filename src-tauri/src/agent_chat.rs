@@ -311,13 +311,24 @@ impl AgentChatRegistry {
     /// Asks the running turn on `thread_id` to stop. Returns whether there
     /// was one; the `Finished` event still arrives once the process exits.
     pub fn stop(&self, thread_id: &str) -> Result<bool, String> {
+        self.stop_expected(thread_id, None)
+    }
+
+    pub fn stop_expected(
+        &self,
+        thread_id: &str,
+        expected_turn_id: Option<&str>,
+    ) -> Result<bool, String> {
         validate_id(thread_id, "thread id")?;
-        if codex_server::stop(&self.codex, thread_id)? {
+        if codex_server::stop_expected(&self.codex, thread_id, expected_turn_id)? {
             return Ok(true);
         }
         let mut running = self.lock();
         match running.get_mut(thread_id) {
             Some(turn) => {
+                if expected_turn_id.is_some_and(|id| id != turn.turn_id) {
+                    return Err("The active turn changed.".into());
+                }
                 turn.stdin = None;
                 turn.pending_inputs.clear();
                 kill_turn(&mut turn.child)
@@ -1592,6 +1603,17 @@ pub async fn respond(
     allow: bool,
     message: Option<&str>,
 ) -> Result<(), String> {
+    respond_expected(registry, thread_id, request_id, allow, message, None).await
+}
+
+pub async fn respond_expected(
+    registry: Arc<AgentChatRegistry>,
+    thread_id: &str,
+    request_id: &str,
+    allow: bool,
+    message: Option<&str>,
+    expected_turn_id: Option<&str>,
+) -> Result<(), String> {
     validate_id(thread_id, "thread id")?;
     // The request id is the CLI's own token, used here only as a map key,
     // so its alphabet is the CLI's business; only the size is bounded.
@@ -1599,7 +1621,15 @@ pub async fn respond(
         return Err("Invalid request id.".to_string());
     }
     if registry.codex.get(thread_id).is_some() {
-        return codex_server::respond(&registry.codex, thread_id, request_id, allow, message).await;
+        return codex_server::respond_expected(
+            &registry.codex,
+            thread_id,
+            request_id,
+            allow,
+            message,
+            expected_turn_id,
+        )
+        .await;
     }
     let message = message.map(|text| truncate(text.trim(), 1024));
     let (stdin, input) = {
@@ -1607,6 +1637,9 @@ pub async fn respond(
         let turn = running
             .get_mut(thread_id)
             .ok_or_else(|| "This conversation is not waiting for an answer.".to_string())?;
+        if expected_turn_id.is_some_and(|id| id != turn.turn_id) {
+            return Err("The active turn changed.".into());
+        }
         let input = turn
             .pending_inputs
             .remove(request_id)

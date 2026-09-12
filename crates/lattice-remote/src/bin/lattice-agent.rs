@@ -2109,6 +2109,7 @@ where
             file_transfer: shared_files.is_some(),
             file_edit: shared_files.is_some() && host_text::editing_supported(),
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
+            chat: lattice_remote::chat_protocol::available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2158,6 +2159,7 @@ where
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
     let mut command_failed_rx = command_handler.subscribe_failures();
     let (receiver_stop_tx, mut receiver_stop_rx) = watch::channel(false);
+    let chat_outgoing = outgoing.clone();
     let receiver = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
@@ -2182,6 +2184,23 @@ where
                         if !queued {
                             break;
                         }
+                    }
+                }
+                Ok(RemoteMessage::ChatRequest(request)) => {
+                    let response = if lattice_remote::chat_protocol::available() {
+                        lattice_remote::chat_protocol::forward(request).await
+                    } else {
+                        lattice_remote::chat_protocol::ChatResponse::failed(
+                            request.id,
+                            "Conversation sharing is disabled.",
+                        )
+                    };
+                    if chat_outgoing
+                        .send(RemoteMessage::ChatResponse(response))
+                        .await
+                        .is_err()
+                    {
+                        break;
                     }
                 }
                 Ok(RemoteMessage::CommandRequest(request)) => {
@@ -2409,6 +2428,7 @@ where
             file_transfer: shared_files.is_some(),
             file_edit: shared_files.is_some() && host_text::editing_supported(),
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
+            chat: lattice_remote::chat_protocol::available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2560,6 +2580,23 @@ where
                         pixel_width: 0,
                         pixel_height: 0,
                     });
+                }
+            }
+            Ok(RemoteMessage::ChatRequest(request)) => {
+                let response = if lattice_remote::chat_protocol::available() {
+                    lattice_remote::chat_protocol::forward(request).await
+                } else {
+                    lattice_remote::chat_protocol::ChatResponse::failed(
+                        request.id,
+                        "Conversation sharing is disabled.",
+                    )
+                };
+                if outgoing
+                    .send(RemoteMessage::ChatResponse(response))
+                    .await
+                    .is_err()
+                {
+                    break;
                 }
             }
             Ok(RemoteMessage::CommandRequest(request)) => {
@@ -2999,11 +3036,12 @@ async fn main() {
         }
     };
 
+    let listening_address = listener.local_addr().unwrap_or(options.bind);
     let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
     emit_event(
         options.json,
         &AgentEvent::Ready {
-            address: options.bind.to_string(),
+            address: listening_address.to_string(),
             pairing_code: formatted_code.clone(),
             expires_in_seconds: PAIRING_LIFETIME.as_secs(),
             view_only: !options.allow_input,
@@ -3025,7 +3063,7 @@ async fn main() {
             "view-only"
         };
         println!("Lattice Remote is ready ({mode})");
-        println!("Address: {}", options.bind);
+        println!("Address: {listening_address}");
         println!("Pairing code: {formatted_code}");
         println!("The code is valid for one successful connection and is not saved.");
     }

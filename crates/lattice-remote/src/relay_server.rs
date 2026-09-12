@@ -967,6 +967,7 @@ mod tests {
                     file_root_label: String::new(),
                     file_edit: false,
                     command_shells: 0,
+                    chat: false,
                     terminal: false,
                 }))
                 .await

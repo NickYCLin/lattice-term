@@ -6,6 +6,7 @@
 //! opt-in per share. The optional relay only matches a viewer to a device ID
 //! and forwards ciphertext; it never sees pairing codes or frame contents.
 
+pub mod chat_protocol;
 pub mod command_protocol;
 pub mod credentials;
 pub mod device_pins;

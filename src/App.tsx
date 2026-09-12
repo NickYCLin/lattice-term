@@ -224,7 +224,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const ssh = useSshSessions();
   const sftp = useSftpSessions();
   const remote = useRemoteSessions();
-  const remoteHost = useRemoteHost();
+  const remoteHost = useRemoteHost(runtime.host === "tauri" && !!platform && !onMobile);
   const rdp = useRdpSessions();
   const vnc = useVncSessions();
   const vault = useVault();
@@ -1039,7 +1039,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               />
             )}
             <Suspense fallback={null}>
-              <ChatRuntime locale={preferences.locale} completionSound={preferences.agentCompletionSound} onChange={setChatRuntime} />
+              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.agentCompletionSound} onChange={setChatRuntime} />
             </Suspense>
             {view === "chat" && chatRuntime && (
               <ChatView

@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { loadRemoteHostSettings } from "../../app/remoteHostSettings";
 import { normalizePairingPassword } from "../../app/pairingToken";
 import type { SensitiveClipboardClearChoice } from "../../app/preferences";
 import { copyTextToClipboard } from "../../app/clipboardText";
@@ -30,20 +31,24 @@ export function RemoteHostDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const [settings] = useState(() => host.configuration ?? loadRemoteHostSettings(window.localStorage));
+  const [editing, setEditing] = useState(false);
   const [savedRelay] = useState(() => loadRelayAddress(window.localStorage));
   const [mode, setMode] = useState<"relay" | "direct">(
-    savedRelay ? "relay" : "direct",
+    settings.mode,
   );
-  const [relayAddress, setRelayAddress] = useState(savedRelay);
+  const [relayAddress, setRelayAddress] = useState(settings.relayAddress || savedRelay);
   const [fixedCode, setFixedCode] = useState("");
-  const [bindAddress, setBindAddress] = useState("127.0.0.1");
-  const [port, setPort] = useState(44_900);
-  const [fps, setFps] = useState(5);
-  const [allowInput, setAllowInput] = useState(false);
-  const [allowCommands, setAllowCommands] = useState(false);
-  const [allowFiles, setAllowFiles] = useState(false);
-  const [fileRoot, setFileRoot] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [bindAddress, setBindAddress] = useState(settings.bindAddress);
+  const [port, setPort] = useState(settings.port);
+  const [fps, setFps] = useState(settings.fps);
+  const [allowInput, setAllowInput] = useState(settings.allowInput === true);
+  const [allowChat, setAllowChat] = useState(settings.allowChat === true);
+  const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
+  const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
+  const [fileRoot, setFileRoot] = useState(settings.fileRoot);
+  const [submitting, setBusy] = useState(false);
+  const busy = submitting || host.configuring === true;
   const [problem, setProblem] = useState<string | null>(null);
   const [copyProblem, setCopyProblem] = useState<string | null>(null);
   const [copied, setCopied] = useState<"address" | "code" | "deviceId" | null>(
@@ -123,6 +128,7 @@ export function RemoteHostDialog({
         port,
         fps,
         allowInput,
+        allowChat,
         allowCommands: platform === "windows" && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
@@ -134,19 +140,8 @@ export function RemoteHostDialog({
         saveRelayAddress(window.localStorage, relayAddress);
       }
       setFixedCode("");
+      setEditing(false);
       setNow(Math.floor(Date.now() / 1_000));
-    } catch (error) {
-      setProblem(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function stop() {
-    setBusy(true);
-    setProblem(null);
-    try {
-      await host.stop();
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
     } finally {
@@ -243,7 +238,8 @@ export function RemoteHostDialog({
             </Callout>
           )}
 
-          {host.status ? (
+          <p className="panel__hint" role="status">{t("remote.host.autoStandby")}</p>
+          {host.status && !editing ? (
             <div className="remote-host-active">
               <div className="remote-host-state">
                 <span
@@ -531,6 +527,8 @@ export function RemoteHostDialog({
                 </span>
               </label>
 
+              <label className="checkbox-field"><input type="checkbox" checked={allowChat} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
+              <p className="muted">{t("remote.chat.shareHint")}</p>
               {platform === "windows" && <label className="remote-host-toggle">
                 <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />
                 <span><strong>{t("remote.commands.allow")}</strong><small>{t("remote.commands.allowHint")}</small></span>
@@ -588,30 +586,12 @@ export function RemoteHostDialog({
             onClick={onClose}
             disabled={busy}
           >
-            {host.status ? t("remote.host.keepRunning") : t("common.cancel")}
+            {t("common.close")}
           </button>
-          {/* Keep distinct buttons so stopping cannot submit a newly shown form. */}
-          {host.status ? (
-            <button
-              key="stop"
-              type="button"
-              className="button button--danger"
-              onClick={() => void stop()}
-              disabled={busy}
-            >
-              {busy ? t("remote.host.stopping") : t("remote.host.stop")}
-            </button>
+          {host.status && !editing ? (
+            <button type="button" className="button button--primary" disabled={busy} onClick={() => setEditing(true)}>{t("remote.host.editSettings")}</button>
           ) : (
-            <button
-              key="start"
-              type="submit"
-              form={formId}
-              className="button button--primary"
-              disabled={busy}
-            >
-              <ScreenShareIcon size={14} />
-              {busy ? t("remote.host.starting") : t("remote.host.start")}
-            </button>
+            <button type="submit" form={formId} className="button button--primary" disabled={busy}>{busy ? t("remote.host.applying") : t("remote.host.saveSettings")}</button>
           )}
         </footer>
       </div>

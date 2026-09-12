@@ -1,13 +1,12 @@
 //! Real compiled Windows Agent, TCP pairing and encrypted command channel.
 #![cfg(all(feature = "agent", windows))]
 use lattice_remote::command_protocol::{CommandEnd, CommandEvent, CommandRequest, CommandShell};
-use lattice_remote::{RemoteMessage, SecureConnection};
+use lattice_remote::{RemoteMessage, SecureConnection, Transport};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 
-async fn agent() -> (Child, SecureConnection<TcpStream>) {
+async fn agent() -> (Child, SecureConnection<Transport>) {
     let code = lattice_remote::generate_pairing_code().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_lattice-agent"))
         .args([
@@ -56,7 +55,7 @@ async fn agent() -> (Child, SecureConnection<TcpStream>) {
     tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     (child, connection)
 }
-async fn event(connection: &mut SecureConnection<TcpStream>) -> CommandEvent {
+async fn event(connection: &mut SecureConnection<Transport>) -> CommandEvent {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             match connection.receive().await.unwrap() {
