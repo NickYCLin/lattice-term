@@ -87,20 +87,10 @@
 
       <p class="hint" id="hint"></p>
       <section class="ios-guide" aria-labelledby="ios-heading">
-        <h2 id="ios-heading">iOS 正式版準備上架</h2>
-        <p id="ios-availability">我們正在準備 App Store 公開版本。完成 Apple 審核並上架後，大家都能從這裡前往下載，不需要測試邀請。</p>
-        <p class="hint">正式下載連結開放後會更新在這一頁，設定頁的 QR Code 可以繼續使用。</p>
-        <details>
-        <summary>已收到 TestFlight 測試邀請？</summary>
-        <ol>
-          <li>在要使用的 iPhone 或 iPad 安裝 Apple 的 TestFlight。</li>
-          <li>收到 LatticeTerm 測試邀請後，用手機開啟信件，點「View in TestFlight」。</li>
-          <li>在 TestFlight 接受邀請，選擇 LatticeTerm 並點「安裝」。</li>
-        </ol>
-        <a class="btn" href="https://apps.apple.com/us/app/testflight/id899247664">安裝 Apple TestFlight</a>
-        <p class="hint">需要 iOS／iPadOS 16 以上，不需要 USB 線。掃描這個 QR Code 只會開啟安裝說明，不會自動取得測試資格；目前沒有公開加入連結。</p>
-        <p class="hint">若 TestFlight 尚未顯示 LatticeTerm，請確認已接受邀請，且測試版本已提供給你的帳號。版本可用天數與更新狀態以 TestFlight 顯示為準。<a href="https://testflight.apple.com/">Apple 操作說明</a></p>
-        </details>
+        <h2 id="ios-heading">iPhone／iPad 已在 App Store 上架</h2>
+        <p id="ios-availability">LatticeTerm iOS 正式版已開放下載，不需要 TestFlight 邀請。</p>
+        <a class="btn" href="https://apps.apple.com/app/latticeterm/id6808952335">從 App Store 下載</a>
+        <p class="hint">使用 iPhone 或 iPad 開啟 App Store 即可安裝；相容性、地區供應與最新版本以商店頁面為準。</p>
       </section>
       <p class="hint"><a href="support.html" style="color: var(--accent)">使用支援</a> · <a href="privacy.html" style="color: var(--accent)">隱私權政策</a></p>
     </main>
@@ -163,13 +153,13 @@
           });
       } else if (isIOS) {
         stopSpinner();
-        statusEl.textContent = "iPhone／iPad 正式版準備中";
+        statusEl.textContent = "iPhone／iPad 已可下載";
         hintEl.textContent =
-          "App Store 公開上架後，這裡會提供免邀請的下載入口。";
+          "請從 App Store 安裝 LatticeTerm，不需要測試邀請。";
       } else {
         stopSpinner();
         statusEl.textContent = "行動版安裝說明與桌面版下載";
-        hintEl.textContent = "iPhone／iPad 請查看下方上架進度；Android 請用手機開啟此頁取得安裝檔。";
+        hintEl.textContent = "iPhone／iPad 可從下方 App Store 連結下載；Android 請用手機開啟此頁取得安裝檔。";
         actionsEl.appendChild(button("桌面版下載", RELEASES));
       }
     </script>

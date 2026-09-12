@@ -1,5 +1,7 @@
 # iOS App Store 資料草稿
 
+> 2026-09-12 更新：iOS 已在 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 上架。本文保留當時的開發／送審紀錄；目前下載與版本狀態見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。
+
 本文件保留商店文案與審核備註來源。`1.0.0（2）` 首次送審後，Apple 於 2026-09-07 08:16 以 Guideline 2.1 要求實體裝置錄影及補充資料，目前「問題未解決／已拒絕」，尚未重新送審、核准或上架。五項文字說明已儲存於 Apple 私密備註，錄影待補；見[審核補件](IOS_REVIEW_RESPONSE.zh-TW.md)與[發布狀態紀錄](IOS_RELEASE.zh-TW.md)。首版以繁體中文商店內容為主，審核備註另提供英文。
 
 ## 可直接使用的文案

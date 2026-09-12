@@ -1,5 +1,7 @@
 # iOS 首次送審補件
 
+> 2026-09-12 更新：iOS 已在 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 上架。本文保留當時的開發／送審紀錄；目前下載與版本狀態見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。
+
 2026-09-07 查核 Apple 正式通知：`1.0.0（2）` 於當日 08:16（台灣時間）遭到拒絕，原因是 Guideline 2.1 — Information Needed — New App Submission。Apple 要求了解新開發者帳號提交的產品，未提供特定崩潰紀錄或可重現的程式缺陷。提交 ID 為 `ed1bc1cf-b2e1-410a-9033-9160591d5a81`。
 
 ## 實際完成與缺項
