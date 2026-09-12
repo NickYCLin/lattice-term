@@ -1,0 +1,285 @@
+{
+  "bloom": [
+    {
+      "frequency": 523.25,
+      "delay": 0,
+      "duration": 0.44,
+      "gain": 0.13,
+      "type": "sine"
+    },
+    {
+      "frequency": 659.25,
+      "delay": 0.11,
+      "duration": 0.48,
+      "gain": 0.1,
+      "type": "sine"
+    },
+    {
+      "frequency": 1046.5,
+      "delay": 0.22,
+      "duration": 0.46,
+      "gain": 0.06,
+      "type": "sine"
+    }
+  ],
+  "drift": [
+    {
+      "frequency": 392,
+      "delay": 0,
+      "duration": 0.52,
+      "gain": 0.1,
+      "type": "sine"
+    },
+    {
+      "frequency": 587.33,
+      "delay": 0.16,
+      "duration": 0.52,
+      "gain": 0.07,
+      "type": "sine"
+    },
+    {
+      "frequency": 783.99,
+      "delay": 0.27,
+      "duration": 0.4,
+      "gain": 0.045,
+      "type": "sine"
+    }
+  ],
+  "moon": [
+    {
+      "frequency": 349.23,
+      "delay": 0,
+      "duration": 0.58,
+      "gain": 0.11,
+      "type": "sine"
+    },
+    {
+      "frequency": 523.25,
+      "delay": 0.02,
+      "duration": 0.55,
+      "gain": 0.055,
+      "type": "sine"
+    },
+    {
+      "frequency": 698.46,
+      "delay": 0.22,
+      "duration": 0.46,
+      "gain": 0.05,
+      "type": "sine"
+    }
+  ],
+  "droplet": [
+    {
+      "frequency": 1174.66,
+      "delay": 0,
+      "duration": 0.11,
+      "gain": 0.14,
+      "type": "sine"
+    },
+    {
+      "frequency": 1761.99,
+      "delay": 0,
+      "duration": 0.065,
+      "gain": 0.04,
+      "type": "sine"
+    },
+    {
+      "frequency": 1567.98,
+      "delay": 0.18,
+      "duration": 0.24,
+      "gain": 0.1,
+      "type": "sine"
+    }
+  ],
+  "glass": [
+    {
+      "frequency": 1046.5,
+      "delay": 0,
+      "duration": 0.46,
+      "gain": 0.115,
+      "type": "sine"
+    },
+    {
+      "frequency": 2637.02,
+      "delay": 0,
+      "duration": 0.17,
+      "gain": 0.025,
+      "type": "sine"
+    },
+    {
+      "frequency": 1318.51,
+      "delay": 0.16,
+      "duration": 0.4,
+      "gain": 0.09,
+      "type": "sine"
+    }
+  ],
+  "spark": [
+    {
+      "frequency": 1318.51,
+      "delay": 0,
+      "duration": 0.12,
+      "gain": 0.1,
+      "type": "sine"
+    },
+    {
+      "frequency": 1567.98,
+      "delay": 0.1,
+      "duration": 0.13,
+      "gain": 0.085,
+      "type": "sine"
+    },
+    {
+      "frequency": 2093,
+      "delay": 0.21,
+      "duration": 0.28,
+      "gain": 0.065,
+      "type": "sine"
+    }
+  ],
+  "marimba": [
+    {
+      "frequency": 523.25,
+      "delay": 0,
+      "duration": 0.2,
+      "gain": 0.14,
+      "type": "triangle"
+    },
+    {
+      "frequency": 1569.75,
+      "delay": 0,
+      "duration": 0.05,
+      "gain": 0.025,
+      "type": "sine"
+    },
+    {
+      "frequency": 783.99,
+      "delay": 0.19,
+      "duration": 0.26,
+      "gain": 0.115,
+      "type": "triangle"
+    }
+  ],
+  "pluck": [
+    {
+      "frequency": 440,
+      "delay": 0,
+      "duration": 0.25,
+      "gain": 0.12,
+      "type": "triangle"
+    },
+    {
+      "frequency": 880,
+      "delay": 0,
+      "duration": 0.08,
+      "gain": 0.04,
+      "type": "sine"
+    },
+    {
+      "frequency": 659.25,
+      "delay": 0.17,
+      "duration": 0.3,
+      "gain": 0.09,
+      "type": "triangle"
+    }
+  ],
+  "bamboo": [
+    {
+      "frequency": 587.33,
+      "delay": 0,
+      "duration": 0.09,
+      "gain": 0.11,
+      "type": "triangle"
+    },
+    {
+      "frequency": 880,
+      "delay": 0.12,
+      "duration": 0.1,
+      "gain": 0.09,
+      "type": "triangle"
+    },
+    {
+      "frequency": 1174.66,
+      "delay": 0.26,
+      "duration": 0.17,
+      "gain": 0.075,
+      "type": "triangle"
+    }
+  ],
+  "orbit": [
+    {
+      "frequency": 329.63,
+      "delay": 0,
+      "duration": 0.3,
+      "gain": 0.105,
+      "type": "triangle"
+    },
+    {
+      "frequency": 493.88,
+      "delay": 0.1,
+      "duration": 0.3,
+      "gain": 0.075,
+      "type": "sine"
+    },
+    {
+      "frequency": 659.25,
+      "delay": 0.23,
+      "duration": 0.3,
+      "gain": 0.09,
+      "type": "triangle"
+    }
+  ],
+  "pulse": [
+    {
+      "frequency": 493.88,
+      "delay": 0,
+      "duration": 0.09,
+      "gain": 0.11,
+      "type": "triangle"
+    },
+    {
+      "frequency": 493.88,
+      "delay": 0.16,
+      "duration": 0.09,
+      "gain": 0.09,
+      "type": "triangle"
+    },
+    {
+      "frequency": 739.99,
+      "delay": 0.32,
+      "duration": 0.2,
+      "gain": 0.08,
+      "type": "triangle"
+    }
+  ],
+  "arcade": [
+    {
+      "frequency": 523.25,
+      "delay": 0,
+      "duration": 0.085,
+      "gain": 0.055,
+      "type": "square"
+    },
+    {
+      "frequency": 659.25,
+      "delay": 0.09,
+      "duration": 0.085,
+      "gain": 0.05,
+      "type": "square"
+    },
+    {
+      "frequency": 783.99,
+      "delay": 0.18,
+      "duration": 0.085,
+      "gain": 0.045,
+      "type": "square"
+    },
+    {
+      "frequency": 1046.5,
+      "delay": 0.27,
+      "duration": 0.19,
+      "gain": 0.04,
+      "type": "square"
+    }
+  ]
+}

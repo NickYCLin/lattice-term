@@ -24,15 +24,17 @@ export interface ChatRuntimeApi {
 export function ChatRuntime({
   locale,
   completionSound = "off",
+  completionVolume = 60,
   onChange,
   remoteHost,
 }: {
   locale: string;
   remoteHost?: RemoteHostStatus | null;
   completionSound?: NotificationSoundChoice;
+  completionVolume?: number;
   onChange: (api: ChatRuntimeApi) => void;
 }) {
-  const chat = useAgentChat(completionSound);
+  const chat = useAgentChat(completionSound, completionVolume);
   useRemoteChatHost(chat, remoteHost ?? null);
   const automations = useAgentAutomations(chat, locale);
   useEffect(() => {

@@ -249,10 +249,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     );
     const previous = previousCompletionStatesRef.current;
     if (anyAgentSessionJustCompleted(previous, agents.sessions)) {
-      void playNotificationSound(preferences.agentCompletionSound);
+      void playNotificationSound(preferences.agentCompletionSound, preferences.notificationVolume);
     }
     previousCompletionStatesRef.current = current;
-  }, [agents.mode, completionStates, preferences.agentCompletionSound]);
+  }, [agents.mode, completionStates, preferences.agentCompletionSound, preferences.notificationVolume]);
 
   useEffect(() => {
     let unlocked = false;
@@ -1039,7 +1039,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               />
             )}
             <Suspense fallback={null}>
-              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.agentCompletionSound} onChange={setChatRuntime} />
+              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} onChange={setChatRuntime} />
             </Suspense>
             {view === "chat" && chatRuntime && (
               <ChatView

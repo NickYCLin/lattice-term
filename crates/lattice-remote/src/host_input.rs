@@ -26,10 +26,22 @@ impl InputInjector {
     pub fn new(
         stream_width: u32,
         stream_height: u32,
-        display_width: u32,
-        display_height: u32,
+        _display_width: u32,
+        _display_height: u32,
     ) -> Result<Self, String> {
         let enigo = Enigo::new(&Settings::default()).map_err(|error| error.to_string())?;
+        // Windows normalizes absolute pointer input using GetSystemMetrics.
+        // Those dimensions may be DPI-virtualized; captured pixels are physical.
+        #[cfg(windows)]
+        let (display_width, display_height) = {
+            let (width, height) = enigo.main_display().map_err(|error| error.to_string())?;
+            if width <= 0 || height <= 0 {
+                return Err("The input display dimensions are unavailable.".into());
+            }
+            (width as u32, height as u32)
+        };
+        #[cfg(not(windows))]
+        let (display_width, display_height) = (_display_width, _display_height);
         Ok(Self {
             enigo,
             scale_x: ratio(display_width, stream_width),
@@ -73,6 +85,17 @@ impl InputInjector {
                     // Unmappable keys are ignored rather than failing the stream.
                     return Ok(());
                 };
+                #[cfg(windows)]
+                match windows_unicode_input(key, pressed, &self.pressed_keys) {
+                    UnicodeInput::Text(character) => {
+                        return self
+                            .enigo
+                            .text(&character.to_string())
+                            .map_err(|error| error.to_string());
+                    }
+                    UnicodeInput::IgnoreRelease => return Ok(()),
+                    UnicodeInput::Physical => {}
+                }
                 if pressed {
                     self.track_key(key);
                     self.enigo.key(key, Direction::Press)
@@ -147,6 +170,40 @@ fn map_button(button: PointerButton) -> Button {
         PointerButton::Left => Button::Left,
         PointerButton::Middle => Button::Middle,
         PointerButton::Right => Button::Right,
+    }
+}
+
+// enigo's Windows Unicode fallback emits a complete character for both Press
+// and Release. Send printable text once, while keeping physical ASCII keys for
+// shortcuts. A release follows the route chosen by its corresponding press,
+// even if a modifier was released first.
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum UnicodeInput {
+    Text(char),
+    IgnoreRelease,
+    Physical,
+}
+#[cfg(any(windows, test))]
+fn windows_unicode_input(key: Key, pressed: bool, held: &[Key]) -> UnicodeInput {
+    let Key::Unicode(character) = key else {
+        return UnicodeInput::Physical;
+    };
+    if !pressed {
+        return if held.contains(&key) {
+            UnicodeInput::Physical
+        } else {
+            UnicodeInput::IgnoreRelease
+        };
+    }
+    if character.is_ascii()
+        && held
+            .iter()
+            .any(|key| matches!(key, Key::Control | Key::Alt | Key::Meta))
+    {
+        UnicodeInput::Physical
+    } else {
+        UnicodeInput::Text(character)
     }
 }
 
@@ -245,6 +302,40 @@ mod tests {
     fn drops_unmappable_and_control_keysyms() {
         assert!(map_keysym(0x0000).is_none());
         assert!(map_keysym(0x0009).is_none()); // raw tab control char, not the Tab keysym
+    }
+
+    #[test]
+    fn windows_unicode_is_emitted_once_and_shortcut_releases_stay_physical() {
+        for character in ['R', '中', '🦀'] {
+            assert_eq!(
+                windows_unicode_input(Key::Unicode(character), true, &[]),
+                UnicodeInput::Text(character)
+            );
+            assert_eq!(
+                windows_unicode_input(Key::Unicode(character), false, &[]),
+                UnicodeInput::IgnoreRelease
+            );
+        }
+        assert_eq!(
+            windows_unicode_input(Key::Unicode('A'), true, &[Key::Shift]),
+            UnicodeInput::Text('A')
+        );
+        assert_eq!(
+            windows_unicode_input(Key::Unicode('a'), true, &[Key::Control]),
+            UnicodeInput::Physical
+        );
+        assert_eq!(
+            windows_unicode_input(Key::Unicode('a'), false, &[Key::Unicode('a')]),
+            UnicodeInput::Physical
+        );
+        assert_eq!(
+            windows_unicode_input(Key::Unicode('a'), false, &[Key::Control]),
+            UnicodeInput::IgnoreRelease
+        );
+        assert_eq!(
+            windows_unicode_input(Key::Return, false, &[Key::Return]),
+            UnicodeInput::Physical
+        );
     }
 
     #[test]

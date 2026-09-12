@@ -1,8 +1,10 @@
 //! Lifecycle bridge for the bundled Lattice Remote Agent.
 //!
-//! Hosting is always user-initiated. The generated pairing code lives only in
+//! Hosting follows the desktop standby settings. The generated pairing code lives only in
 //! this process and the WebView state; it is never written to disk or logs.
 
+mod lifetime;
+use lifetime::AgentLifetime;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -129,6 +131,7 @@ struct RemoteHostClosedEvent {
 struct RemoteHostRecord {
     status: Mutex<RemoteHostStatus>,
     child: AsyncMutex<Child>,
+    lifetime: AgentLifetime,
     chat: Option<crate::remote_chat_host::Bridge>,
 }
 
@@ -175,6 +178,19 @@ impl RemoteHostRegistry {
             current.take();
         }
         Ok(matches)
+    }
+
+    /// Called synchronously before Tauri exits; async tasks may not run again.
+    pub fn shutdown(&self) {
+        if let Ok(Some(record)) = self.take() {
+            if let Some(chat) = &record.chat {
+                chat.stop();
+            }
+            record.lifetime.stop();
+            if let Ok(mut child) = record.child.try_lock() {
+                let _ = child.start_kill();
+            }
+        }
     }
 
     pub fn status(&self) -> Result<Option<RemoteHostStatus>, String> {
@@ -321,7 +337,7 @@ async fn spawn_agent(
     file_root: Option<&Path>,
     chat: Option<&crate::remote_chat_host::Bridge>,
     direct_pairing_code: Option<&str>,
-) -> Result<(Child, tokio::process::ChildStdout), String> {
+) -> Result<(Child, tokio::process::ChildStdout, AgentLifetime), String> {
     let mut command = Command::new(agent_path()?);
     command.arg("--json");
     // The desktop owns the sharing UI; the bundled console engine stays hidden.
@@ -378,6 +394,7 @@ async fn spawn_agent(
         .kill_on_drop(true)
         .spawn()
         .map_err(|error| error.to_string())?;
+    let lifetime = AgentLifetime::attach(&child)?;
     if let Some(code) = pairing_code_input {
         let mut stdin = child
             .stdin
@@ -400,7 +417,7 @@ async fn spawn_agent(
         .stdout
         .take()
         .ok_or_else(|| "The Lattice Agent event stream is unavailable.".to_string())?;
-    Ok((child, stdout))
+    Ok((child, stdout, lifetime))
 }
 
 fn parse_event(line: &str) -> Result<AgentEvent, String> {
@@ -524,7 +541,7 @@ async fn start_inner(
     } else {
         None
     };
-    let (mut child, stdout) = spawn_agent(
+    let (mut child, stdout, lifetime) = spawn_agent(
         target,
         request.fps,
         request.allow_input,
@@ -598,6 +615,7 @@ async fn start_inner(
     let record = Arc::new(RemoteHostRecord {
         status: Mutex::new(status.clone()),
         child: AsyncMutex::new(child),
+        lifetime,
         chat,
     });
     registry.insert(Arc::clone(&record))?;
@@ -706,6 +724,7 @@ async fn start_inner(
 
 pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), String> {
     if let Some(record) = registry.take()? {
+        record.lifetime.stop();
         if let Some(chat) = &record.chat {
             chat.stop();
         }
@@ -746,6 +765,63 @@ pub fn chat_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn desktop_shutdown_ends_agent_even_while_a_watcher_holds_the_record() {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new(std::env::var("ComSpec").unwrap());
+            command.args(["/d", "/q", "/c", "set /p owned_fixture_wait="]);
+            command.creation_flags(0x08000000);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "read owned_fixture_wait"]);
+            command
+        };
+        let child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let lifetime = AgentLifetime::attach(&child).unwrap();
+        let record = Arc::new(RemoteHostRecord {
+            status: Mutex::new(RemoteHostStatus {
+                host_id: "owned-fixture".into(),
+                address: String::new(),
+                pairing_code: String::new(),
+                expires_at: 0,
+                view_only: true,
+                file_transfer: false,
+                commands: false,
+                chat: false,
+                file_root: None,
+                state: "waiting",
+                peer: None,
+                attempts_remaining: 5,
+                device_id: None,
+                relay: None,
+                persistent: false,
+            }),
+            child: AsyncMutex::new(child),
+            lifetime,
+            chat: None,
+        });
+        let registry = RemoteHostRegistry::new();
+        registry.insert(Arc::clone(&record)).unwrap();
+        registry.shutdown();
+        assert!(registry.status().unwrap().is_none());
+        let mut child = record.child.lock().await;
+        timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        registry.shutdown(); // Repeated exit requests remain harmless.
+    }
 
     #[test]
     fn automatic_standby_selects_a_connectable_interface() {

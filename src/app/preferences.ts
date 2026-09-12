@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultLocale, localeCatalog, type Locale } from "../i18n/catalog";
 import {
-  notificationSoundChoices,
+  normalizeNotificationSound,
+  normalizeNotificationVolume,
   type NotificationSoundChoice,
 } from "./notificationSounds";
 import { normalizeTheme, resolveTheme, type ThemeChoice, type ThemeId } from "./themes";
@@ -36,6 +37,8 @@ export interface Preferences {
   inspectorOpen: boolean;
   checkUpdatesOnLaunch: boolean;
   agentCompletionSound: NotificationSoundChoice;
+  chatCompletionSound: NotificationSoundChoice;
+  notificationVolume: number;
 }
 
 export const defaultPreferences: Preferences = {
@@ -49,7 +52,9 @@ export const defaultPreferences: Preferences = {
   sidebarCollapsed: false,
   inspectorOpen: true,
   checkUpdatesOnLaunch: true,
-  agentCompletionSound: "clear",
+  agentCompletionSound: "bloom",
+  chatCompletionSound: "bloom",
+  notificationVolume: 60,
 };
 
 const STORAGE_KEY = "latticeterm.preferences.v2";
@@ -69,7 +74,6 @@ const knownSensitiveClipboardClearChoices = new Set<string>([
   "60",
   "120",
 ]);
-const knownNotificationSounds = new Set<string>(notificationSoundChoices);
 
 /**
  * Ignores anything unrecognised, so an older file or a hand-edited one cannot
@@ -98,11 +102,9 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     sidebarCollapsed: Boolean(stored.sidebarCollapsed),
     inspectorOpen: stored.inspectorOpen !== false,
     checkUpdatesOnLaunch: stored.checkUpdatesOnLaunch !== false,
-    agentCompletionSound: knownNotificationSounds.has(
-      String(stored.agentCompletionSound),
-    )
-      ? (stored.agentCompletionSound as NotificationSoundChoice)
-      : defaultPreferences.agentCompletionSound,
+    agentCompletionSound: normalizeNotificationSound(stored.agentCompletionSound),
+    chatCompletionSound: normalizeNotificationSound(stored.chatCompletionSound ?? stored.agentCompletionSound),
+    notificationVolume: normalizeNotificationVolume(stored.notificationVolume),
   };
 }
 

@@ -2,96 +2,37 @@ const SAMPLE_RATE: u32 = 44_100;
 const CHANNELS: u16 = 1;
 const BITS_PER_SAMPLE: u16 = 16;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum Waveform {
     Sine,
     Triangle,
     Square,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Deserialize)]
 struct Tone {
     frequency: f32,
-    delay_ms: u32,
-    duration_ms: u32,
+    delay: f32,
+    duration: f32,
     gain: f32,
+    #[serde(rename = "type")]
     waveform: Waveform,
 }
-
 fn tones(sound: &str) -> Result<&'static [Tone], String> {
-    const CLEAR: [Tone; 2] = [
-        Tone {
-            frequency: 880.0,
-            delay_ms: 0,
-            duration_ms: 180,
-            gain: 0.24,
-            waveform: Waveform::Sine,
-        },
-        Tone {
-            frequency: 1320.0,
-            delay_ms: 130,
-            duration_ms: 280,
-            gain: 0.19,
-            waveform: Waveform::Sine,
-        },
-    ];
-    const GENTLE: [Tone; 2] = [
-        Tone {
-            frequency: 659.25,
-            delay_ms: 0,
-            duration_ms: 340,
-            gain: 0.2,
-            waveform: Waveform::Sine,
-        },
-        Tone {
-            frequency: 783.99,
-            delay_ms: 80,
-            duration_ms: 420,
-            gain: 0.14,
-            waveform: Waveform::Sine,
-        },
-    ];
-    const DOUBLE: [Tone; 2] = [
-        Tone {
-            frequency: 740.0,
-            delay_ms: 0,
-            duration_ms: 140,
-            gain: 0.2,
-            waveform: Waveform::Triangle,
-        },
-        Tone {
-            frequency: 988.0,
-            delay_ms: 200,
-            duration_ms: 180,
-            gain: 0.2,
-            waveform: Waveform::Triangle,
-        },
-    ];
-    const WOOD: [Tone; 2] = [
-        Tone {
-            frequency: 420.0,
-            delay_ms: 0,
-            duration_ms: 90,
-            gain: 0.2,
-            waveform: Waveform::Square,
-        },
-        Tone {
-            frequency: 315.0,
-            delay_ms: 100,
-            duration_ms: 110,
-            gain: 0.15,
-            waveform: Waveform::Triangle,
-        },
-    ];
-
-    match sound {
-        "off" => Ok(&[]),
-        "clear" => Ok(&CLEAR),
-        "gentle" => Ok(&GENTLE),
-        "double" => Ok(&DOUBLE),
-        "wood" => Ok(&WOOD),
-        _ => Err("Unknown notification sound.".to_string()),
+    use std::{collections::BTreeMap, sync::OnceLock};
+    static CATALOG: OnceLock<BTreeMap<String, Vec<Tone>>> = OnceLock::new();
+    let catalog = CATALOG.get_or_init(|| {
+        serde_json::from_str(include_str!("../../src/app/notificationSoundCatalog.json"))
+            .expect("embedded sound catalog")
+    });
+    if sound == "off" {
+        return Ok(&[]);
     }
+    catalog
+        .get(sound)
+        .map(Vec::as_slice)
+        .ok_or_else(|| "Unknown notification sound.".to_owned())
 }
 
 fn waveform_sample(waveform: Waveform, phase: f32) -> f32 {
@@ -108,33 +49,35 @@ fn waveform_sample(waveform: Waveform, phase: f32) -> f32 {
     }
 }
 
-fn render_wave(sound: &str) -> Result<Vec<u8>, String> {
+fn render_wave(sound: &str, volume: u8) -> Result<Vec<u8>, String> {
+    if volume > 100 {
+        return Err("Notification volume must be between 0 and 100.".into());
+    }
     let tones = tones(sound)?;
-    if tones.is_empty() {
+    if tones.is_empty() || volume == 0 {
         return Ok(Vec::new());
     }
 
-    let duration_ms = tones
+    let duration = tones
         .iter()
-        .map(|tone| tone.delay_ms + tone.duration_ms)
-        .max()
-        .unwrap_or(0)
-        + 35;
-    let sample_count = ((duration_ms as u64 * SAMPLE_RATE as u64) / 1000) as usize;
+        .map(|tone| tone.delay + tone.duration)
+        .fold(0.0_f32, f32::max)
+        + 0.035;
+    let sample_count = (duration * SAMPLE_RATE as f32) as usize;
     let mut mixed = vec![0.0_f32; sample_count];
-
     for tone in tones {
-        let start = ((tone.delay_ms as u64 * SAMPLE_RATE as u64) / 1000) as usize;
-        let length = ((tone.duration_ms as u64 * SAMPLE_RATE as u64) / 1000) as usize;
-        let attack = (SAMPLE_RATE as usize * 8 / 1000).max(1);
-        let release = (SAMPLE_RATE as usize * 28 / 1000).max(1);
+        let start = (tone.delay * SAMPLE_RATE as f32) as usize;
+        let length = (tone.duration * SAMPLE_RATE as f32) as usize;
+        let attack = (SAMPLE_RATE as f32 * 0.012) as usize;
+        let peak = tone.gain * f32::from(volume) / 100.0;
         for offset in 0..length.min(sample_count.saturating_sub(start)) {
-            let attack_envelope = (offset as f32 / attack as f32).min(1.0);
-            let remaining = length.saturating_sub(offset + 1);
-            let release_envelope = (remaining as f32 / release as f32).min(1.0);
-            let envelope = attack_envelope.min(release_envelope);
+            let gain = if offset < attack {
+                0.0001 * (peak / 0.0001).powf(offset as f32 / attack as f32)
+            } else {
+                peak * (0.0001 / peak).powf((offset - attack) as f32 / (length - attack) as f32)
+            };
             let phase = std::f32::consts::TAU * tone.frequency * offset as f32 / SAMPLE_RATE as f32;
-            mixed[start + offset] += waveform_sample(tone.waveform, phase) * tone.gain * envelope;
+            mixed[start + offset] += waveform_sample(tone.waveform, phase) * gain;
         }
     }
 
@@ -205,8 +148,8 @@ fn play_wave(_wave: &[u8]) -> Result<bool, String> {
     Ok(false)
 }
 
-pub fn play(sound: &str) -> Result<bool, String> {
-    play_wave(&render_wave(sound)?)
+pub fn play(sound: &str, volume: u8) -> Result<bool, String> {
+    play_wave(&render_wave(sound, volume)?)
 }
 
 #[cfg(test)]
@@ -215,8 +158,11 @@ mod tests {
 
     #[test]
     fn every_named_sound_renders_a_short_pcm_wave() {
-        for sound in ["clear", "gentle", "double", "wood"] {
-            let wave = render_wave(sound).unwrap();
+        for sound in [
+            "bloom", "drift", "moon", "droplet", "glass", "spark", "marimba", "pluck", "bamboo",
+            "orbit", "pulse", "arcade",
+        ] {
+            let wave = render_wave(sound, 60).unwrap();
             assert_eq!(&wave[0..4], b"RIFF");
             assert_eq!(&wave[8..12], b"WAVE");
             assert_eq!(&wave[36..40], b"data");
@@ -228,14 +174,34 @@ mod tests {
 
     #[test]
     fn off_is_silent_and_unknown_names_are_rejected() {
-        assert!(render_wave("off").unwrap().is_empty());
-        assert!(render_wave("surprise").is_err());
+        assert!(render_wave("off", 60).unwrap().is_empty());
+        assert!(render_wave("surprise", 60).is_err());
+    }
+
+    #[test]
+    fn volume_scales_pcm_without_clipping_and_zero_is_silent() {
+        fn samples(wave: &[u8]) -> Vec<i16> {
+            wave[44..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes([b[0], b[1]]))
+                .collect()
+        }
+        assert!(render_wave("bloom", 0).unwrap().is_empty());
+        assert!(render_wave("bloom", 101).is_err());
+        let full = samples(&render_wave("bloom", 100).unwrap());
+        let low = samples(&render_wave("bloom", 25).unwrap());
+        let energy = |s: &[i16]| s.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>();
+        assert!(energy(&low) < energy(&full) * 0.15);
+        assert!(energy(&low) > 0.0);
+        assert!(full.iter().all(|v| v.unsigned_abs() < i16::MAX as u16));
     }
 
     #[cfg(target_os = "windows")]
     #[test]
     #[ignore = "plays a short cue through the real Windows output device"]
-    fn windows_backend_plays_the_clear_cue() {
-        assert_eq!(play("clear"), Ok(true));
+    fn windows_backend_plays_the_bloom_cue() {
+        assert_eq!(play("bloom", 60), Ok(true));
     }
 }

@@ -135,10 +135,12 @@ export interface AgentChatApi {
   toggleFolder: (folderId: string) => void;
 }
 
-export function useAgentChat(completionSound: NotificationSoundChoice = "off"): AgentChatApi {
+export function useAgentChat(completionSound: NotificationSoundChoice = "off", completionVolume = 60): AgentChatApi {
   const completionTracker = useRef(new ChatCompletionTracker());
   const soundRef = useRef(completionSound);
   soundRef.current = completionSound;
+  const volumeRef = useRef(completionVolume);
+  volumeRef.current = completionVolume;
   const [threads, setThreads] = useState<ChatThread[]>(() =>
     typeof localStorage === "undefined" ? [] : loadStoredThreads(localStorage),
   );
@@ -218,7 +220,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off"): 
       const unlisten = await listen<ChatEventEnvelope>(EVENT_CHAT, (event) => {
         const envelope = event.payload;
         if (completionTracker.current.accept(envelope)) {
-          void playNotificationSound(soundRef.current);
+          void playNotificationSound(soundRef.current, volumeRef.current);
         }
         changeThreads((current) =>
           current.map((thread) =>
