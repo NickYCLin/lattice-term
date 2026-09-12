@@ -139,6 +139,15 @@ pub enum RemoteInputRequest {
     ReleaseAll,
 }
 
+impl RemoteInputRequest {
+    /// Whether this action is a person taking the screen back. The viewer
+    /// also sends `ReleaseAll` when it unmounts or re-renders, which says
+    /// nothing about who is at the keyboard, so it must not count.
+    pub fn takes_over_screen(&self) -> bool {
+        !matches!(self, Self::ReleaseAll)
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteFrameEvent {
@@ -1379,6 +1388,12 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Barrier;
+
+    #[test]
+    fn releasing_held_keys_is_not_a_person_taking_over() {
+        assert!(RemoteInputRequest::MouseMove { x: 4, y: 9 }.takes_over_screen());
+        assert!(!RemoteInputRequest::ReleaseAll.takes_over_screen());
+    }
 
     #[test]
     fn only_an_unreachable_relay_blames_the_address() {

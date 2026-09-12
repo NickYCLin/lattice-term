@@ -89,6 +89,15 @@ pub enum RdpInputRequest {
     ReleaseAll,
 }
 
+impl RdpInputRequest {
+    /// Whether this action is a person taking the screen back. The viewer
+    /// also sends `ReleaseAll` when it unmounts or re-renders, which says
+    /// nothing about who is at the keyboard, so it must not count.
+    pub fn takes_over_screen(&self) -> bool {
+        !matches!(self, Self::ReleaseAll)
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum EngineCommand {
@@ -1096,6 +1105,12 @@ pub async fn disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn releasing_held_keys_is_not_a_person_taking_over() {
+        assert!(RdpInputRequest::MouseMove { x: 4, y: 9 }.takes_over_screen());
+        assert!(!RdpInputRequest::ReleaseAll.takes_over_screen());
+    }
 
     fn test_record(
         session_id: &str,
