@@ -4,6 +4,35 @@
 
 ---
 
+## [2.2.0](https://github.com/NickYCLin/lattice-term/compare/v2.1.0...v2.2.0) (2026-09-13)
+
+
+### 🚀 新增功能
+
+* **mcp:** 依授權畫面送出遠端鍵鼠操作 ([#219](https://github.com/NickYCLin/lattice-term/issues/219)) ([f6dd64a](https://github.com/NickYCLin/lattice-term/commit/f6dd64a723c1c716fe5922ad8080e5b20affb7e1)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 把讀取終端輸出也記進操作紀錄 ([#212](https://github.com/NickYCLin/lattice-term/issues/212)) ([388407a](https://github.com/NickYCLin/lattice-term/commit/388407adf70c6d369e94011734874671edbe5336)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 提供已授權遠端畫面的單張擷取 ([#218](https://github.com/NickYCLin/lattice-term/issues/218)) ([b74c520](https://github.com/NickYCLin/lattice-term/commit/b74c520f8fb56bbd6349d7fafb298e8f9259431a)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 支援 Windows 遠端 Fleet 工作區 ([18bfe43](https://github.com/NickYCLin/lattice-term/commit/18bfe436dc6f602b86a5fb265e00b1f5bbc70666)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 支援中斷目前回合而不結束工作階段 ([#215](https://github.com/NickYCLin/lattice-term/issues/215)) ([9bf9a7e](https://github.com/NickYCLin/lattice-term/commit/9bf9a7e58936fc7fbd2d3386d2467b722bf81957)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 透過 SSH 編排核准工作區的 Agent ([#221](https://github.com/NickYCLin/lattice-term/issues/221)) ([c65a1cb](https://github.com/NickYCLin/lattice-term/commit/c65a1cbd1e12bbfc7a7ffa47935df8ad94f4887a)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 遠端授權可核准多段具名指令 ([#216](https://github.com/NickYCLin/lattice-term/issues/216)) ([cac8405](https://github.com/NickYCLin/lattice-term/commit/cac840575ab4c5e74f8973902946e0295bf650d2)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 限制 MCP 啟動數量並回傳錯誤代碼 ([#211](https://github.com/NickYCLin/lattice-term/issues/211)) ([5bef01e](https://github.com/NickYCLin/lattice-term/commit/5bef01eb6ffe9e53cf7123aacc539fc1dac0465c)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **remote:** 支援跨裝置對話與自動待命 ([#225](https://github.com/NickYCLin/lattice-term/issues/225)) ([2583581](https://github.com/NickYCLin/lattice-term/commit/258358199da41f16e65c0087fbd9cacec3106a91))
+* **remote:** 新增 Windows 遠端命令面板 ([#223](https://github.com/NickYCLin/lattice-term/issues/223)) ([f949da7](https://github.com/NickYCLin/lattice-term/commit/f949da726fa580fca2258a8221f08232db0e8a99))
+* **settings:** 重設音效並完善 Windows 遠端操作 ([#228](https://github.com/NickYCLin/lattice-term/issues/228)) ([183ee3e](https://github.com/NickYCLin/lattice-term/commit/183ee3e83b13c667bab58672e88d541f33dd049d))
+
+
+### 🛠️ 問題修正
+
+* **ios:** 更新 App Store 下載入口 ([#224](https://github.com/NickYCLin/lattice-term/issues/224)) ([f5e4614](https://github.com/NickYCLin/lattice-term/commit/f5e4614b1bd978941d2b40ef2367ddce96be098e))
+* **mcp:** 使用者接手時立即同步撤權 ([#220](https://github.com/NickYCLin/lattice-term/issues/220)) ([1e6093e](https://github.com/NickYCLin/lattice-term/commit/1e6093e8f9018a578684f24e9d1eda94f2d0bd2b)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **mcp:** 非 Linux 主機的資源讀取回報為不支援 ([#214](https://github.com/NickYCLin/lattice-term/issues/214)) ([a104216](https://github.com/NickYCLin/lattice-term/commit/a104216874cf1e3067b90b03d2e156cc765ad5ff)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **remote:** 避免命令輸出混入進度 XML ([#226](https://github.com/NickYCLin/lattice-term/issues/226)) ([0ee633d](https://github.com/NickYCLin/lattice-term/commit/0ee633dd40d1a3f065aa38d910f43cdb2208d0ac))
+* **remote:** 避免開啟權限設定時立即送出 ([#230](https://github.com/NickYCLin/lattice-term/issues/230)) ([64b61da](https://github.com/NickYCLin/lattice-term/commit/64b61da432a274747e775ed31881496bc9c7eb59))
+* **sftp:** 避免檔案面板同時送出兩次目錄讀取 ([#206](https://github.com/NickYCLin/lattice-term/issues/206)) ([5c3042e](https://github.com/NickYCLin/lattice-term/commit/5c3042e757082533ebc0c27c7154ccdb2bbc6cc6))
+* **更新:** 版本說明改成可讀的條列 ([#210](https://github.com/NickYCLin/lattice-term/issues/210)) ([54ff51e](https://github.com/NickYCLin/lattice-term/commit/54ff51ed7da6930af5b432cef08c20ea748d7395))
+* **設定:** Android 安裝說明不再暗示已有安裝檔 ([#208](https://github.com/NickYCLin/lattice-term/issues/208)) ([dcaa14d](https://github.com/NickYCLin/lattice-term/commit/dcaa14dbf7c8ecb1fdba94c845afa34a645874fd))
+
 ## [2.1.0](https://github.com/NickYCLin/lattice-term/compare/v2.0.0...v2.1.0) (2026-09-11)
 
 

@@ -1,6 +1,6 @@
 [package]
 name = "lattice-term"
-version = "2.1.0"
+version = "2.2.0"
 description = "A secure, cross-platform workspace for local AI CLIs, SSH, SFTP, RDP, and remote desktop access."
 authors = ["NickYCLin"]
 edition = "2021"

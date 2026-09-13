@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "lattice-term"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "apple-native-keyring-store",
  "arboard",
