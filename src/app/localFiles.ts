@@ -22,7 +22,8 @@ export function localFileError(reason: unknown, t: (key: MessageKey) => string):
 
 export async function readSelectedText(file: UploadFile, maxBytes: number): Promise<string> {
   if (file.size > maxBytes) throw new Error("localFile.tooLarge");
-  if ("nativePath" in file) return droppedText(file.nativePath, maxBytes);
+  // Match TextDecoder/File.text semantics for UTF-8 JSON exported by Windows.
+  if ("nativePath" in file) return (await droppedText(file.nativePath, maxBytes)).replace(/^\uFEFF/, "");
   const bytes = await file.arrayBuffer();
   if (bytes.byteLength > maxBytes) throw new Error("localFile.tooLarge");
   try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }

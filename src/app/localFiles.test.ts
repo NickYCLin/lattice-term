@@ -25,3 +25,10 @@ it("passes a caller-specific bounded import limit to native reads", async () => 
   expect(await readSelectedText({ name: "data.json", size: 17, nativePath: "/tmp/data.json" }, 1024)).toContain("中文");
   expect(invoke).toHaveBeenCalledExactlyOnceWith("local_file_read_text", { path: "/tmp/data.json", maxBytes: 1024 });
 });
+it("treats a UTF-8 BOM identically in native and browser imports", async () => {
+  invoke.mockResolvedValue('\uFEFF{"name":"中文"}');
+  const native = await readSelectedText({ name: "data.json", size: 20, nativePath: "/tmp/data.json" }, 1024);
+  const browser = await readSelectedText(new File(['\uFEFF{"name":"中文"}'], "data.json"), 1024);
+  expect(native).toBe(browser);
+  expect(JSON.parse(native)).toEqual({ name: "中文" });
+});
