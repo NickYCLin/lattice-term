@@ -18,6 +18,9 @@ describe.each(localeCatalog)("$label catalogue", ({ id, tag }) => {
       expect(placeholders(value), `${id}:${key}`).toEqual(placeholders(original));
       expect(value, `${id}:${key}`).not.toMatch(/▁|990000\d{3}|<unk>/);
       expect(value, `${id}:${key}`).not.toMatch(/&(?:amp|quot|lt|gt);|&#\d+;/);
+      for (const token of ["XChaCha20-Poly1305", "Argon2id", "bubblewrap", "bwrap", "launch_agent", "ssh-keygen -lf"]) {
+        if (original.includes(token)) expect(value, `${id}:${key}`).toContain(token);
+      }
     }
   });
   it("persists the selection and renders translated text and dates", () => {

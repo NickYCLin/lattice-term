@@ -1528,7 +1528,7 @@ export const messages: Messages = {
   "vault.tabs.label": "密钥保管库分页",
   "vault.tabs.encrypted": "加密保管库",
   "vault.encrypted.title": "加密保管库",
-  "vault.encrypted.body": "用一组主密码保护的加密文件（Argon2id 密钥派生 + XChaCha20-Poly1305 加密），存在本机的应用程序文件夹，可自行备份。系统认证保存区不可用时（例如某些 Linux 环境或未来的行动版）就靠它。忘记主密码没有任何救援方式，里面的密码会全部拿不回来。",
+  "vault.encrypted.body": "由一个主密码保护的加密文件，使用 Argon2id 密钥派生与 XChaCha20-Poly1305，保存在应用数据文件夹中，可进行备份。系统凭据存储不可用时也能使用。没有恢复途径：遗失主密码就无法取回保存的内容。",
   "vault.encrypted.failedTitle": "操作失败",
   "vault.encrypted.noticeTitle": "完成",
   "vault.encrypted.created": "保管库已创建并解锁。",

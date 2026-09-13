@@ -1716,7 +1716,7 @@ export const en: Messages = {
   "vault.tabs.label": "Key Vault sections",
   "vault.tabs.encrypted": "Encrypted vault",
   "vault.encrypted.title": "Encrypted vault",
-  "vault.encrypted.body": "An encrypted file protected by one master password (Argon2id key derivation + XChaCha20-Poly1305), stored in the app data folder and easy to back up. It covers what the OS credential store cannot — some Linux setups, future mobile builds. There is no recovery: lose the master password and the entries are gone.",
+  "vault.encrypted.body": "An encrypted file protected by one master password, using Argon2id key derivation and XChaCha20-Poly1305. It is stored in the app data folder and can be backed up. It also works where the OS credential store is unavailable. There is no recovery: losing the master password makes the entries inaccessible.",
   "vault.encrypted.failedTitle": "That did not work",
   "vault.encrypted.noticeTitle": "Done",
   "vault.encrypted.created": "The vault is created and unlocked.",

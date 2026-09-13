@@ -1633,7 +1633,7 @@ export const zhTW = {
   "vault.tabs.label": "金鑰保管庫分頁",
   "vault.tabs.encrypted": "加密保管庫",
   "vault.encrypted.title": "加密保管庫",
-  "vault.encrypted.body": "用一組主密碼保護的加密檔案（Argon2id 金鑰派生 + XChaCha20-Poly1305 加密），存在本機的應用程式資料夾，可自行備份。系統認證儲存區不可用時（例如某些 Linux 環境或未來的行動版）就靠它。忘記主密碼沒有任何救援方式，裡面的密碼會全部拿不回來。",
+  "vault.encrypted.body": "由單一主密碼保護的加密檔案，使用 Argon2id 金鑰推導與 XChaCha20-Poly1305，存放在應用程式資料夾中，可進行備份。作業系統憑證儲存區無法使用時也能使用。沒有復原途徑：遺失主密碼就無法取回保存的內容。",
   "vault.encrypted.failedTitle": "操作失敗",
   "vault.encrypted.noticeTitle": "完成",
   "vault.encrypted.created": "保管庫已建立並解鎖。",
