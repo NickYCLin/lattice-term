@@ -9,6 +9,7 @@ interface DropTarget {
 const targets = new Set<DropTarget>();
 let stopNative: (() => void) | undefined;
 let binding: Promise<void> | undefined;
+let nativeGeneration = 0;
 
 /** One native listener, one visible hit target, including nested dialogs. */
 export function pickDropTarget<T extends { element: () => HTMLElement | null; enabled: () => boolean }>(
@@ -26,10 +27,14 @@ export function pickDropTarget<T extends { element: () => HTMLElement | null; en
 function clearHighlights() { for (const target of targets) target.highlight(false); }
 function bindNative() {
   if (binding || stopNative) return;
+  const generation = nativeGeneration;
   binding = (async () => {
     try {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const stop = await getCurrentWebviewWindow().onDragDropEvent(({ payload }) => {
+        // Native unlisten is asynchronous. Never route its late events into
+        // a new pane mounted after the last target was disposed.
+        if (generation !== nativeGeneration) return;
         clearHighlights();
         if (payload.type === "leave") return;
         const scale = window.devicePixelRatio || 1;
@@ -39,10 +44,13 @@ function bindNative() {
         if (payload.type === "drop") target.paths(payload.paths);
         else target.highlight(true);
       });
-      if (targets.size) stopNative = stop;
+      if (targets.size && generation === nativeGeneration) stopNative = stop;
       else stop();
     } catch { /* Browser preview uses DOM file drops below. */ }
-    finally { binding = undefined; }
+    finally {
+      binding = undefined;
+      if (targets.size && generation !== nativeGeneration) bindNative();
+    }
   })();
 }
 
@@ -75,7 +83,7 @@ export function useFileDrop<T extends HTMLElement>({
     targets.add(target); bindNative();
     return () => {
       targets.delete(target);
-      if (!targets.size) { stopNative?.(); stopNative = undefined; }
+      if (!targets.size) { nativeGeneration++; stopNative?.(); stopNative = undefined; }
     };
   }, [ref]);
   useEffect(() => { if (disabled) setDragging(false); }, [disabled]);
