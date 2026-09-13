@@ -17,6 +17,7 @@ describe.each(localeCatalog)("$label catalogue", ({ id, tag }) => {
       expect(value.trim(), `${id}:${key}`).not.toBe("");
       expect(placeholders(value), `${id}:${key}`).toEqual(placeholders(original));
       expect(value, `${id}:${key}`).not.toMatch(/▁|990000\d{3}|<unk>/);
+      expect(value, `${id}:${key}`).not.toMatch(/&(?:amp|quot|lt|gt);|&#\d+;/);
     }
   });
   it("persists the selection and renders translated text and dates", () => {
