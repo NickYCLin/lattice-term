@@ -153,6 +153,7 @@ pub struct RemoteHello {
     /// Optional command-shell bitset: cmd=1, PowerShell=2.
     pub command_shells: u8,
     pub chat: bool,
+    pub cli: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -539,16 +540,24 @@ impl RemoteMessage {
                 // Hosts without optional capabilities stay byte-identical to
                 // the original protocol v2 hello. Editing appends a terminal
                 // placeholder and its own capability for tolerant v2 peers.
-                if hello.terminal || hello.file_edit || hello.command_shells != 0 || hello.chat {
+                if hello.terminal
+                    || hello.file_edit
+                    || hello.command_shells != 0
+                    || hello.chat
+                    || hello.cli
+                {
                     output.push(u8::from(hello.terminal));
                 }
-                if hello.file_edit || hello.command_shells != 0 || hello.chat {
+                if hello.file_edit || hello.command_shells != 0 || hello.chat || hello.cli {
                     output.push(u8::from(hello.file_edit));
                 }
-                if hello.command_shells != 0 || hello.chat {
+                if hello.command_shells != 0 || hello.chat || hello.cli {
                     output.push(hello.command_shells);
                 }
-                if hello.chat {
+                if hello.chat || hello.cli {
+                    output.push(u8::from(hello.chat));
+                }
+                if hello.cli {
                     output.push(1);
                 }
                 Ok(output)
@@ -718,6 +727,7 @@ impl RemoteMessage {
                     file_edit,
                     command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 3,
                     chat: body.get(base_len + 3).copied().unwrap_or(0) == 1,
+                    cli: body.get(base_len + 4).copied().unwrap_or(0) == 1,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -1479,6 +1489,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: false,
         });
         assert_eq!(
@@ -1501,6 +1512,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.command_shells = 3;
@@ -1530,6 +1542,7 @@ mod tests {
                 file_edit: false,
                 command_shells: 0,
                 chat: false,
+                cli: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1604,6 +1617,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: true,
         })
         .encode()
@@ -1634,6 +1648,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: false,
         })
         .encode()
@@ -1651,6 +1666,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: true,
         })
         .encode()
@@ -1672,6 +1688,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1759,6 +1776,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: true,
         })
         .encode()
@@ -1869,6 +1887,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1884,6 +1903,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1899,6 +1919,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             terminal: false,
         })
         .encode()

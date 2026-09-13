@@ -16,6 +16,20 @@ pub struct ChatRequest {
 )]
 pub enum ChatOperation {
     List,
+    CliList,
+    CliRead {
+        session_id: String,
+        cursor: u64,
+    },
+    CliInput {
+        session_id: String,
+        data: String,
+    },
+    CliResize {
+        session_id: String,
+        cols: u32,
+        rows: u32,
+    },
     Read {
         thread_id: String,
         before: Option<String>,
@@ -38,6 +52,14 @@ pub enum ChatOperation {
         template_id: String,
     },
 }
+impl ChatOperation {
+    pub fn is_cli(&self) -> bool {
+        matches!(
+            self,
+            Self::CliList | Self::CliRead { .. } | Self::CliInput { .. } | Self::CliResize { .. }
+        )
+    }
+}
 fn identifier(value: &str) -> bool {
     !value.is_empty() && value.len() <= 160 && !value.chars().any(char::is_control)
 }
@@ -47,7 +69,16 @@ impl ChatRequest {
             return false;
         }
         match &self.operation {
-            ChatOperation::List => true,
+            ChatOperation::List | ChatOperation::CliList => true,
+            ChatOperation::CliRead { session_id, .. } => identifier(session_id),
+            ChatOperation::CliInput { session_id, data } => {
+                identifier(session_id) && !data.is_empty() && data.len() <= 16 * 1024
+            }
+            ChatOperation::CliResize {
+                session_id,
+                cols,
+                rows,
+            } => identifier(session_id) && (2..=500).contains(cols) && (2..=300).contains(rows),
             ChatOperation::Read { thread_id, before } => {
                 identifier(thread_id) && before.as_deref().is_none_or(identifier)
             }
@@ -72,7 +103,10 @@ impl ChatRequest {
     pub fn mutates(&self) -> bool {
         !matches!(
             self.operation,
-            ChatOperation::List | ChatOperation::Read { .. }
+            ChatOperation::List
+                | ChatOperation::Read { .. }
+                | ChatOperation::CliList
+                | ChatOperation::CliRead { .. }
         )
     }
 }
@@ -139,16 +173,102 @@ pub async fn forward(request: ChatRequest) -> ChatResponse {
     }
 }
 #[cfg(feature = "agent")]
-pub fn available() -> bool {
+pub fn bridge_available() -> bool {
     std::env::var("LATTICE_CHAT_BRIDGE")
         .ok()
         .and_then(|value| value.parse::<std::net::SocketAddr>().ok())
         .is_some_and(|address| address.ip().is_loopback())
         && std::env::var("LATTICE_CHAT_TOKEN").is_ok_and(|value| value.len() == 64)
 }
+#[cfg(feature = "agent")]
+pub fn available() -> bool {
+    bridge_available() && std::env::var("LATTICE_CHAT_ALLOWED").as_deref() != Ok("0")
+}
+#[cfg(feature = "agent")]
+pub fn cli_available() -> bool {
+    bridge_available() && std::env::var("LATTICE_CLI_ALLOWED").as_deref() == Ok("1")
+}
+#[cfg(feature = "agent")]
+pub fn permits(operation: &ChatOperation) -> bool {
+    if operation.is_cli() {
+        cli_available()
+    } else {
+        available()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cli_messages_validate_bounds_and_classify_mutations() {
+        for operation in [
+            ChatOperation::CliList,
+            ChatOperation::CliRead {
+                session_id: "opaque".into(),
+                cursor: 123,
+            },
+            ChatOperation::CliInput {
+                session_id: "opaque".into(),
+                data: "中文\r\u{1b}[A\u{3}".into(),
+            },
+            ChatOperation::CliResize {
+                session_id: "opaque".into(),
+                cols: 80,
+                rows: 24,
+            },
+        ] {
+            let request = ChatRequest {
+                id: "r".into(),
+                operation,
+            };
+            assert!(request.valid());
+            assert!(request.operation.is_cli());
+            let encoded = crate::RemoteMessage::ChatRequest(request.clone())
+                .encode()
+                .unwrap();
+            assert_eq!(
+                crate::RemoteMessage::decode(&encoded).unwrap(),
+                crate::RemoteMessage::ChatRequest(request)
+            );
+        }
+        for operation in [
+            ChatOperation::CliInput {
+                session_id: "x".into(),
+                data: "x".repeat(16385),
+            },
+            ChatOperation::CliResize {
+                session_id: "x".into(),
+                cols: 501,
+                rows: 24,
+            },
+            ChatOperation::CliRead {
+                session_id: "".into(),
+                cursor: 0,
+            },
+        ] {
+            assert!(!ChatRequest {
+                id: "r".into(),
+                operation
+            }
+            .valid());
+        }
+        assert!(!ChatRequest {
+            id: "r".into(),
+            operation: ChatOperation::CliRead {
+                session_id: "x".into(),
+                cursor: 0
+            }
+        }
+        .mutates());
+        assert!(ChatRequest {
+            id: "r".into(),
+            operation: ChatOperation::CliInput {
+                session_id: "x".into(),
+                data: "a".into()
+            }
+        }
+        .mutates());
+    }
     #[test]
     fn requests_cannot_select_local_paths_or_permissions() {
         assert!(serde_json::from_value::<ChatRequest>(serde_json::json!({"id":"x", "operation":{"kind":"send","threadId":"a","text":"hello","profileConfigPath":"private"}})).is_err());

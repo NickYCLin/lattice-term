@@ -34,6 +34,8 @@ pub struct RemoteHostStartRequest {
     pub allow_commands: bool,
     #[serde(default)]
     pub allow_chat: bool,
+    #[serde(default)]
+    pub allow_cli: bool,
     /// File access is independently authorised from keyboard/mouse control.
     #[serde(default)]
     pub allow_files: bool,
@@ -63,6 +65,7 @@ pub struct RemoteHostStatus {
     pub file_transfer: bool,
     pub commands: bool,
     pub chat: bool,
+    pub cli: bool,
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
@@ -345,11 +348,21 @@ async fn spawn_agent(
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW; keep redirected pipes.
     command
         .env_remove("LATTICE_CHAT_BRIDGE")
-        .env_remove("LATTICE_CHAT_TOKEN");
+        .env_remove("LATTICE_CHAT_TOKEN")
+        .env_remove("LATTICE_CHAT_ALLOWED")
+        .env_remove("LATTICE_CLI_ALLOWED");
     if let Some(chat) = chat {
         command
             .env("LATTICE_CHAT_BRIDGE", &chat.address)
-            .env("LATTICE_CHAT_TOKEN", &chat.token);
+            .env("LATTICE_CHAT_TOKEN", &chat.token)
+            .env(
+                "LATTICE_CHAT_ALLOWED",
+                if chat.allow_chat { "1" } else { "0" },
+            )
+            .env(
+                "LATTICE_CLI_ALLOWED",
+                if chat.cli.allowed() { "1" } else { "0" },
+            );
     }
     let mut pairing_code_input = None;
     match target {
@@ -536,8 +549,16 @@ async fn start_inner(
         stop(&app, &registry).await?;
     }
     let sharing_id = host_id();
-    let chat = if request.allow_chat {
-        Some(crate::remote_chat_host::Bridge::start(app.clone(), sharing_id.clone()).await?)
+    let chat = if request.allow_chat || request.allow_cli {
+        Some(
+            crate::remote_chat_host::Bridge::start(
+                app.clone(),
+                sharing_id.clone(),
+                request.allow_chat,
+                request.allow_cli,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -604,6 +625,7 @@ async fn start_inner(
         file_transfer,
         commands,
         chat: request.allow_chat,
+        cli: request.allow_cli,
         file_root,
         state: "waiting",
         peer: None,
@@ -799,6 +821,7 @@ mod tests {
                 file_transfer: false,
                 commands: false,
                 chat: false,
+                cli: false,
                 file_root: None,
                 state: "waiting",
                 peer: None,
@@ -853,6 +876,7 @@ mod tests {
             allow_input: false,
             allow_commands: false,
             allow_chat: false,
+            allow_cli: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -869,6 +893,7 @@ mod tests {
             allow_input: true,
             allow_commands: false,
             allow_chat: false,
+            allow_cli: false,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -889,6 +914,7 @@ mod tests {
                 allow_input: false,
                 allow_commands: false,
                 allow_chat: false,
+                allow_cli: false,
                 allow_files: false,
                 file_root: String::new(),
                 mode: String::new(),

@@ -17,6 +17,7 @@ export interface RemoteHostStatus {
   fileTransfer: boolean;
   commands?: boolean;
   chat?: boolean;
+  cli?: boolean;
   fileRoot?: string;
   state: "waiting" | "pairing" | "streaming" | "reconnecting";
   peer?: string;
@@ -36,6 +37,7 @@ export interface RemoteHostStartRequest {
   allowInput: boolean;
   allowCommands?: boolean;
   allowChat?: boolean;
+  allowCli?: boolean;
   /** Independently authorises access to one shared folder. */
   allowFiles: boolean;
   /** Empty selects the current user's home folder in the native backend. */

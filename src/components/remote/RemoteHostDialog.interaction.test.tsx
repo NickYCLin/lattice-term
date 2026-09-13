@@ -88,10 +88,13 @@ it("opens permissions without immediately submitting the newly rendered save act
     expect(grant).toBeDefined();
     const input = allNodes(grant).find(node => node.tagName === "INPUT")!;
     await act(async () => { props(input).onChange!({ currentTarget: { checked: true } }); });
+    const cliGrant = find("LABEL", "分享 CLI 並允許操作")!;
+    const cliInput = allNodes(cliGrant).find(node => node.tagName === "INPUT")!;
+    await act(async () => { props(cliInput).onChange!({ currentTarget: { checked: true } }); });
     expect(host.start).not.toHaveBeenCalled();
     expect(props(find("BUTTON", "儲存設定")!).type).toBe("submit");
     await act(async () => { await props(find("FORM")!).onSubmit!({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }); });
-    expect(host.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ allowChat: true, allowInput: false, allowCommands: false }));
+    expect(host.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ allowChat: true, allowCli: true, allowInput: false, allowCommands: false }));
     expect(find("FORM")).toBeUndefined();
   } finally { await act(async () => { root.unmount(); }); }
 });
