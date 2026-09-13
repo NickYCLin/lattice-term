@@ -10,6 +10,18 @@ import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
   // Common ----------------------------------------------------------------
+  "localFile.invalidPath": "Drop an absolute local path.",
+  "localFile.unreadable": "Cannot read this file.",
+  "localFile.unsupported": "Shortcuts, symbolic links and special files are not supported.",
+  "localFile.tooLarge": "The file exceeds the allowed size.",
+  "localFile.invalidText": "The file must contain UTF-8 text.",
+  "localFile.changed": "The file changed. Select it again.",
+  "localFile.expectedFile": "Drop a regular file.",
+  "localFile.expectedDirectory": "Drop a folder.",
+  "localFile.single": "Select one item at a time here.",
+  "localFile.dropFile": "Drop a file here to select it.",
+  "localFile.dropDirectory": "Drop a folder here to select it.",
+  "language.loadFailed": "The selected language could not be loaded. The previous language is still displayed; please try again.",
   "common.appName": "LatticeTerm",
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -1417,7 +1429,7 @@ export const en: Messages = {
   "automation.unit.hours": "hours",
   "automation.permission.hint":
     "Nobody is there to answer a prompt in an unattended run, so \"ask each time\" is not offered. Read only by default; widen it only when you want changes made.",
-  "automation.storage.note": "Automations and their instructions live only in LatticeTerm on this computer and travel with the encrypted backup.",
+  "automation.storage.note": "Schedules and instructions are stored locally in LatticeTerm. They are currently excluded from encrypted backups. Keep a separate copy of important instructions.",
   "automation.weekday.0": "Sun",
   "automation.weekday.1": "Mon",
   "automation.weekday.2": "Tue",

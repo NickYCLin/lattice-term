@@ -7,6 +7,18 @@
 
 export const zhTW = {
   // 共用 ------------------------------------------------------------------
+  "localFile.invalidPath": "請拖入完整的本機路徑。",
+  "localFile.unreadable": "無法讀取這個檔案。",
+  "localFile.unsupported": "不支援捷徑、符號連結或特殊檔案。",
+  "localFile.tooLarge": "檔案超過允許的大小。",
+  "localFile.invalidText": "檔案必須是 UTF-8 文字。",
+  "localFile.changed": "檔案已變更，請重新選擇。",
+  "localFile.expectedFile": "請拖入一般檔案。",
+  "localFile.expectedDirectory": "請拖入資料夾。",
+  "localFile.single": "此處一次只能選擇一個項目。",
+  "localFile.dropFile": "也可以將檔案拖曳到這裡選取。",
+  "localFile.dropDirectory": "也可以將資料夾拖曳到這裡選取。",
+  "language.loadFailed": "無法載入所選語言，目前保留原本的介面語言，請再試一次。",
   "common.appName": "LatticeTerm",
   "common.save": "儲存",
   "common.cancel": "取消",
@@ -1350,7 +1362,7 @@ export const zhTW = {
   "automation.unit.hours": "小時",
   "automation.permission.hint":
     "無人值守沒有人能回答詢問，所以這裡沒有「每次詢問」；預設唯讀，只有你確定要它改東西時才放寬。",
-  "automation.storage.note": "排程與指示只保存在這台電腦的 LatticeTerm 裡，會隨加密備份一起匯出。",
+  "automation.storage.note": "排程與指示只保存在這台電腦的 LatticeTerm 裡，目前不包含在加密備份中。請另行保存重要的排程指示。",
   "automation.weekday.0": "日",
   "automation.weekday.1": "一",
   "automation.weekday.2": "二",

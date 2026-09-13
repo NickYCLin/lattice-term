@@ -6,9 +6,9 @@
  * translation is a build error instead of a blank label.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { catalogues, defaultLocale, localeCatalog, type Locale } from "./catalog";
+import { catalogues, loadCatalogue, localeCatalog, type Locale } from "./catalog";
 import { I18nContext, type I18nValue, type TranslateValues } from "./context";
 import { zhTW, type MessageKey } from "./messages/zh-TW";
 
@@ -27,12 +27,22 @@ export function I18nProvider({
   locale: Locale;
   children: ReactNode;
 }) {
+  const [loaded, setLoaded] = useState(() => ({ locale, catalogue: catalogues[locale] ?? zhTW }));
+  const [loadFailed, setLoadFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setLoadFailed(false);
+    void loadCatalogue(locale).then(catalogue => {
+      if (!cancelled) setLoaded({ locale, catalogue });
+    }).catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [locale]);
+  const catalogue = catalogues[locale] ?? loaded.catalogue;
   const t = useCallback(
     (key: MessageKey, values?: TranslateValues) => {
-      const catalogue = catalogues[locale] ?? catalogues[defaultLocale];
       return interpolate(catalogue[key] ?? zhTW[key] ?? key, values);
     },
-    [locale],
+    [catalogue],
   );
 
   const value = useMemo<I18nValue>(
@@ -44,5 +54,8 @@ export function I18nProvider({
     [locale, t],
   );
 
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  return <I18nContext.Provider value={value}>
+    {loadFailed && <p role="alert">{t("language.loadFailed")}</p>}
+    {children}
+  </I18nContext.Provider>;
 }
