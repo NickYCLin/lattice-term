@@ -6,7 +6,7 @@
  * without manual reinstall.
  */
 
-import { useCallback, useContext, useState } from "react";
+import { useCallback, useContext, useRef, useState } from "react";
 import { I18nContext } from "../i18n/context";
 import { zhTW, type MessageKey } from "../i18n/messages/zh-TW";
 import { appLifecycleGuard } from "./appLifecycleGuard";
@@ -122,7 +122,11 @@ export function useAppUpdater(currentVersion = APP_VERSION) {
   const [pendingUpdate, setPendingUpdate] =
     useState<InstallableUpdate | null>(null);
 
+  const checking = useRef(false);
   const checkForUpdates = useCallback(async () => {
+    // A check must never replace an installation state or race another check.
+    if (checking.current || appLifecycleGuard.owner === "update") return;
+    checking.current = true;
     setInfo((prev) => ({
       ...prev,
       status: "checking",
@@ -167,11 +171,13 @@ export function useAppUpdater(currentVersion = APP_VERSION) {
         lastChecked: new Date(),
         error: err instanceof Error ? err.message : String(err),
       }));
+    } finally {
+      checking.current = false;
     }
   }, []);
 
   const downloadAndInstall = useCallback(async () => {
-    if (!pendingUpdate) return;
+    if (!pendingUpdate || checking.current || appLifecycleGuard.owner === "update") return;
     // Acquire before the first await and before invoking the plugin: Windows
     // may quit inside downloadAndInstall, before our explicit restart callback.
     const lease = appLifecycleGuard.acquire("update");
