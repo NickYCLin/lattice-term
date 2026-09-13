@@ -12,7 +12,6 @@ use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -40,6 +39,17 @@ pub const APP_FILES: [&str; 5] = [
     "agent-workspaces.json",
     "credential_backend.json",
     "vault.json",
+];
+
+// Forward restore disables host authority before replacing a vault. Rollback
+// reverses that dependency: restore the old vault first and its authority
+// marker last, so interruption at any boundary remains fail-closed.
+const ROLLBACK_APP_FILES: [&str; 5] = [
+    "connections.json",
+    "known_hosts.json",
+    "agent-workspaces.json",
+    "vault.json",
+    "credential_backend.json",
 ];
 
 pub const LOCAL_STORAGE_KEYS: [&str; 3] = [
@@ -197,11 +207,12 @@ fn validate_maps(
 pub fn create_encrypted_backup(
     app_version: &str,
     created_at: u64,
-    files: BTreeMap<String, String>,
+    mut files: BTreeMap<String, String>,
     local_storage: BTreeMap<String, String>,
     password: &str,
 ) -> Result<String, String> {
     validate_password(password)?;
+    sanitize_host_credential_for_export(&mut files)?;
     validate_maps(&files, &local_storage)?;
     if app_version.is_empty() || app_version.len() > 64 {
         return Err("The application version is invalid.".to_string());
@@ -294,7 +305,7 @@ pub fn open_encrypted_backup(contents: &str, password: &str) -> Result<Decrypted
     let decoded = serde_json::from_slice::<BackupPayload>(&plaintext)
         .map_err(|error| format!("The decrypted backup payload is invalid: {error}"));
     plaintext.zeroize();
-    let decoded = decoded?;
+    let mut decoded = decoded?;
     if decoded.version != PAYLOAD_VERSION {
         return Err("The decrypted backup payload version is not supported.".to_string());
     }
@@ -302,12 +313,35 @@ pub fn open_encrypted_backup(contents: &str, password: &str) -> Result<Decrypted
         return Err("The backup application version is invalid.".to_string());
     }
     validate_maps(&decoded.files, &decoded.local_storage)?;
+    sanitize_host_credential_for_restore(&mut decoded.files)?;
+    validate_maps(&decoded.files, &decoded.local_storage)?;
     Ok(DecryptedBackup {
         created_at: decoded.created_at,
         app_version: decoded.app_version,
         files: decoded.files,
         local_storage: decoded.local_storage,
     })
+}
+
+fn sanitize_host_credential_for_export(files: &mut BTreeMap<String, String>) -> Result<(), String> {
+    let Some(raw) = files.get("credential_backend.json") else {
+        return Ok(());
+    };
+    let sanitized = crate::credentials::backend_file_for_backup(raw)
+        .map_err(|error| format!("The credential backend file is invalid: {error}"))?;
+    files.insert("credential_backend.json".to_string(), sanitized);
+    Ok(())
+}
+
+fn sanitize_host_credential_for_restore(
+    files: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    let sanitized = crate::credentials::backend_file_for_restore(
+        files.get("credential_backend.json").map(String::as_str),
+    )
+    .map_err(|error| format!("The credential backend file is invalid: {error}"))?;
+    files.insert("credential_backend.json".to_string(), sanitized);
+    Ok(())
 }
 
 fn ensure_regular_file(path: &Path) -> Result<bool, String> {
@@ -347,52 +381,46 @@ pub fn read_app_files(directory: &Path) -> Result<BTreeMap<String, String>, Stri
 }
 
 fn atomic_write(path: &Path, value: &str) -> Result<(), String> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| "The application data path has no parent directory.".to_string())?;
-    let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
-    temporary
-        .write_all(value.as_bytes())
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|error| error.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        temporary
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
-    }
-    temporary
-        .persist(path)
-        .map(|_| ())
-        .map_err(|error| error.error.to_string())
+    crate::durable_file::atomic_write_private(path, value.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
-fn write_exact_files(directory: &Path, files: &BTreeMap<String, String>) -> Result<(), String> {
+fn write_exact_files_in_order(
+    directory: &Path,
+    files: &BTreeMap<String, String>,
+    order: &[&str],
+) -> Result<(), String> {
     fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-    for name in APP_FILES {
+    for &name in order {
         let path = directory.join(name);
         let exists = ensure_regular_file(&path)?;
         if let Some(value) = files.get(name) {
-            // NamedTempFile::persist replaces an existing destination in one
-            // filesystem operation on every supported desktop platform.
             atomic_write(&path, value)?;
         } else if exists {
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
+            crate::durable_file::durable_remove_private(&path)?;
         }
     }
     Ok(())
+}
+
+fn write_exact_files(directory: &Path, files: &BTreeMap<String, String>) -> Result<(), String> {
+    write_exact_files_in_order(directory, files, &APP_FILES)
+}
+
+fn write_rollback_files(directory: &Path, files: &BTreeMap<String, String>) -> Result<(), String> {
+    write_exact_files_in_order(directory, files, &ROLLBACK_APP_FILES)
 }
 
 pub fn replace_app_files(
     directory: &Path,
     files: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, String> {
-    validate_maps(files, &BTreeMap::new())?;
+    let mut files = files.clone();
+    sanitize_host_credential_for_restore(&mut files)?;
+    validate_maps(&files, &BTreeMap::new())?;
     let previous = read_app_files(directory)?;
-    if let Err(error) = write_exact_files(directory, files) {
-        let rollback = write_exact_files(directory, &previous);
+    if let Err(error) = write_exact_files(directory, &files) {
+        let rollback = write_rollback_files(directory, &previous);
         return Err(match rollback {
             Ok(()) => format!("The backup could not be restored: {error}"),
             Err(rollback_error) => format!(
@@ -407,7 +435,7 @@ pub fn rollback_app_files(
     directory: &Path,
     previous: &BTreeMap<String, String>,
 ) -> Result<(), String> {
-    write_exact_files(directory, previous)
+    write_rollback_files(directory, previous)
 }
 
 fn validate_vault_file(raw: &str) -> Result<(), String> {
@@ -462,15 +490,43 @@ fn validate_credential_backend(raw: &str, vault_included: bool) -> Result<(), St
     if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
         return Err("The credential backend version is not supported.".to_string());
     }
-    match value.get("backend").and_then(serde_json::Value::as_str) {
-        Some("osKeyring") => Ok(()),
+    // Selecting the Vault is valid before the user creates or unlocks one
+    // (and is the mobile default). It carries no credential authority by
+    // itself; remoteHostBackend below remains strict.
+    if !matches!(
+        value.get("backend").and_then(serde_json::Value::as_str),
+        Some("osKeyring" | "vault")
+    ) {
+        return Err("The credential backend value is not supported.".to_string());
+    }
+    match value
+        .get("remoteHostBackend")
+        .and_then(serde_json::Value::as_str)
+    {
+        None | Some("osKeyring") => Ok(()),
         Some("vault") if vault_included => Ok(()),
         Some("vault") => Err(
-            "The backup selects the encrypted vault backend but contains no vault file."
+            "The backup selects the encrypted vault for the Remote host password but contains no vault file."
                 .to_string(),
         ),
-        _ => Err("The credential backend value is not supported.".to_string()),
+        Some(_) => Err("The Remote host credential backend is not supported.".to_string()),
+    }?;
+    if let Some(pending) = value.get("remoteHostCleanupPending") {
+        let pending = pending
+            .as_array()
+            .ok_or_else(|| "The Remote host credential cleanup journal is invalid.".to_string())?;
+        let mut seen = Vec::new();
+        for backend in pending {
+            let backend = backend.as_str().ok_or_else(|| {
+                "The Remote host credential cleanup journal is invalid.".to_string()
+            })?;
+            if !matches!(backend, "osKeyring" | "vault") || seen.contains(&backend) {
+                return Err("The Remote host credential cleanup journal is invalid.".to_string());
+            }
+            seen.push(backend);
+        }
     }
+    Ok(())
 }
 
 pub fn validate_app_files(files: &BTreeMap<String, String>) -> Result<ValidatedAppData, String> {
@@ -542,8 +598,45 @@ mod tests {
         let opened = open_encrypted_backup(&encrypted, PASSWORD).unwrap();
         assert_eq!(opened.created_at, 123);
         assert_eq!(opened.app_version, "9.9.9");
-        assert_eq!(opened.files, files);
+        assert_eq!(
+            opened.files.get("connections.json"),
+            files.get("connections.json")
+        );
+        let backend: serde_json::Value =
+            serde_json::from_str(opened.files.get("credential_backend.json").unwrap()).unwrap();
+        assert!(backend.get("remoteHostBackend").is_none());
+        assert_eq!(
+            backend["remoteHostCleanupPending"],
+            serde_json::json!(["osKeyring", "vault"])
+        );
         assert_eq!(opened.local_storage, local);
+    }
+
+    #[test]
+    fn backup_round_trip_cannot_restore_host_password_authority() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "credential_backend.json".to_string(),
+            r#"{
+              "version": 1,
+              "backend": "osKeyring",
+              "remoteHostBackend": "osKeyring",
+              "remoteHostCleanupPending": ["vault"]
+            }"#
+            .to_string(),
+        );
+
+        let encrypted =
+            create_encrypted_backup("9.9.9", 123, files, BTreeMap::new(), PASSWORD).unwrap();
+        let opened = open_encrypted_backup(&encrypted, PASSWORD).unwrap();
+        let backend: serde_json::Value =
+            serde_json::from_str(opened.files.get("credential_backend.json").unwrap()).unwrap();
+        assert_eq!(backend["backend"], "osKeyring");
+        assert!(backend.get("remoteHostBackend").is_none());
+        assert_eq!(
+            backend["remoteHostCleanupPending"],
+            serde_json::json!(["osKeyring", "vault"])
+        );
     }
 
     #[test]
@@ -577,17 +670,89 @@ mod tests {
     }
 
     #[test]
+    fn validates_an_uncreated_preferred_vault_without_host_authority() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "credential_backend.json".to_string(),
+            r#"{
+              "version": 1,
+              "backend": "vault",
+              "remoteHostCleanupPending": ["osKeyring", "vault"]
+            }"#
+            .to_string(),
+        );
+
+        assert_eq!(
+            validate_app_files(&files).unwrap(),
+            ValidatedAppData {
+                profile_count: 0,
+                trusted_host_count: 0,
+                agent_plan_count: 0,
+                vault_included: false,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_missing_vault_when_it_is_still_host_authority() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "credential_backend.json".to_string(),
+            r#"{
+              "version": 1,
+              "backend": "vault",
+              "remoteHostBackend": "vault"
+            }"#
+            .to_string(),
+        );
+
+        assert!(validate_app_files(&files)
+            .unwrap_err()
+            .contains("Remote host password"));
+    }
+
+    #[test]
+    fn restore_and_rollback_orders_keep_host_authority_fail_closed() {
+        let forward_marker = APP_FILES
+            .iter()
+            .position(|name| *name == "credential_backend.json")
+            .unwrap();
+        let forward_vault = APP_FILES
+            .iter()
+            .position(|name| *name == "vault.json")
+            .unwrap();
+        assert!(forward_marker < forward_vault);
+
+        let rollback_marker = ROLLBACK_APP_FILES
+            .iter()
+            .position(|name| *name == "credential_backend.json")
+            .unwrap();
+        let rollback_vault = ROLLBACK_APP_FILES
+            .iter()
+            .position(|name| *name == "vault.json")
+            .unwrap();
+        assert!(rollback_vault < rollback_marker);
+    }
+
+    #[test]
     fn replacement_returns_a_snapshot_and_rollback_restores_it() {
         let directory = tempfile::tempdir().unwrap();
         let connections = directory.path().join("connections.json");
         let vault = directory.path().join("vault.json");
+        let credential_backend = directory.path().join("credential_backend.json");
         fs::write(&connections, "old connections").unwrap();
         fs::write(&vault, "old vault").unwrap();
+        let old_backend = r#"{"version":1,"backend":"osKeyring","remoteHostBackend":"osKeyring"}"#;
+        fs::write(&credential_backend, old_backend).unwrap();
 
         let mut next = BTreeMap::new();
         next.insert(
             "connections.json".to_string(),
             "new connections".to_string(),
+        );
+        next.insert(
+            "credential_backend.json".to_string(),
+            r#"{"version":1,"backend":"osKeyring","remoteHostBackend":"vault"}"#.to_string(),
         );
         let previous = replace_app_files(directory.path(), &next).unwrap();
 
@@ -595,9 +760,24 @@ mod tests {
         assert!(!vault.exists());
         assert_eq!(previous.get("connections.json").unwrap(), "old connections");
         assert_eq!(previous.get("vault.json").unwrap(), "old vault");
+        assert_eq!(
+            previous.get("credential_backend.json").unwrap(),
+            old_backend
+        );
+        let restored_backend: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&credential_backend).unwrap()).unwrap();
+        assert!(restored_backend.get("remoteHostBackend").is_none());
+        assert_eq!(
+            restored_backend["remoteHostCleanupPending"],
+            serde_json::json!(["osKeyring", "vault"])
+        );
 
         rollback_app_files(directory.path(), &previous).unwrap();
         assert_eq!(fs::read_to_string(&connections).unwrap(), "old connections");
         assert_eq!(fs::read_to_string(&vault).unwrap(), "old vault");
+        assert_eq!(
+            fs::read_to_string(&credential_backend).unwrap(),
+            old_backend
+        );
     }
 }

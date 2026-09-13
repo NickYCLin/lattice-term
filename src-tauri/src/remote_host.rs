@@ -1,7 +1,9 @@
 //! Lifecycle bridge for the bundled Lattice Remote Agent.
 //!
-//! Hosting follows the desktop standby settings. The generated pairing code lives only in
-//! this process and the WebView state; it is never written to disk or logs.
+//! Hosting follows the desktop standby settings. Pairing passwords are either
+//! kept only for this process or stored in the selected secure credential
+//! backend; plaintext is never written to settings, command-line arguments,
+//! or logs.
 
 mod lifetime;
 use lifetime::AgentLifetime;
@@ -17,6 +19,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::timeout;
+use zeroize::{Zeroize, Zeroizing};
 
 static NEXT_HOST: AtomicU64 = AtomicU64::new(1);
 
@@ -51,6 +54,18 @@ pub struct RemoteHostStartRequest {
     /// Optional fixed pairing code for relay mode; empty generates one.
     #[serde(default)]
     pub pairing_code: String,
+    /// Load the fixed relay password from the native secure credential store.
+    #[serde(default)]
+    pub use_saved_pairing_code: bool,
+    /// Save the supplied fixed relay password after the Agent is ready.
+    #[serde(default)]
+    pub remember_pairing_code: bool,
+}
+
+impl Drop for RemoteHostStartRequest {
+    fn drop(&mut self) {
+        self.pairing_code.zeroize();
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -75,6 +90,24 @@ pub struct RemoteHostStatus {
     pub relay: Option<String>,
     /// True when the agent keeps serving sessions until stopped.
     pub persistent: bool,
+    /// True when the active relay password is backed by secure storage. Its
+    /// plaintext pairing_code is deliberately omitted from native IPC.
+    pub saved_pairing_code: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteHostForgetResult {
+    /// Physical cleanup can be retried later; the native location marker has
+    /// already been disabled, so no leftover copy remains usable.
+    pub cleanup_warning: Option<String>,
+    pub cleanup_pending: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteHostCredentialResetEvent {
+    host_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +182,10 @@ impl RemoteHostRegistry {
         Self::default()
     }
 
+    pub(crate) async fn lock_configuration(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.start_lock.lock().await
+    }
+
     fn current(&self) -> Result<Option<Arc<RemoteHostRecord>>, String> {
         Ok(self
             .current
@@ -160,6 +197,30 @@ impl RemoteHostRegistry {
     fn insert(&self, record: Arc<RemoteHostRecord>) -> Result<(), String> {
         *self.current.lock().map_err(|error| error.to_string())? = Some(record);
         Ok(())
+    }
+
+    /// Mutates and publishes a watcher status only while that exact Agent is
+    /// still the registry owner. Keeping the current-record lock through the
+    /// publish prevents a replaced Agent from queueing a late status after its
+    /// successor has become current.
+    fn publish_status_if_current(
+        &self,
+        record: &Arc<RemoteHostRecord>,
+        update: impl FnOnce(&mut RemoteHostStatus) -> bool,
+        publish: impl FnOnce(&RemoteHostStatus),
+    ) -> Result<bool, String> {
+        let current = self.current.lock().map_err(|error| error.to_string())?;
+        let Some(active) = current.as_ref() else {
+            return Ok(false);
+        };
+        if !Arc::ptr_eq(active, record) {
+            return Ok(false);
+        }
+        let mut status = active.status.lock().map_err(|error| error.to_string())?;
+        if update(&mut status) {
+            publish(&status);
+        }
+        Ok(true)
     }
 
     fn take(&self) -> Result<Option<Arc<RemoteHostRecord>>, String> {
@@ -441,6 +502,15 @@ fn emit_status(app: &AppHandle, status: &RemoteHostStatus) {
     let _ = app.emit("remote-host://status", status.clone());
 }
 
+fn update_and_emit_current_status(
+    app: &AppHandle,
+    registry: &RemoteHostRegistry,
+    record: &Arc<RemoteHostRecord>,
+    update: impl FnOnce(&mut RemoteHostStatus) -> bool,
+) {
+    let _ = registry.publish_status_if_current(record, update, |status| emit_status(app, status));
+}
+
 fn identity_path(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
@@ -481,7 +551,7 @@ pub async fn configure(
 async fn start_inner(
     app: AppHandle,
     registry: Arc<RemoteHostRegistry>,
-    request: RemoteHostStartRequest,
+    mut request: RemoteHostStartRequest,
     replace: bool,
 ) -> Result<RemoteHostStatus, String> {
     let _start_guard = registry.start_lock.lock().await;
@@ -493,6 +563,8 @@ async fn start_inner(
         return Err("Command execution requires a Windows sharing host.".into());
     }
     let relay_mode = request.mode.trim() == "relay";
+    validate_saved_pairing_choice(&request, relay_mode)?;
+    let supplied_code = Zeroizing::new(std::mem::take(&mut request.pairing_code));
     let direct_target = if relay_mode {
         if !(1..=10).contains(&request.fps) {
             return Err("Frame rate must be between 1 and 10 FPS.".to_string());
@@ -503,21 +575,48 @@ async fn start_inner(
     } else {
         Some(bind_target(&request)?)
     };
-    let fixed_code = if !request.pairing_code.is_empty() {
-        Some(
-            lattice_remote::normalize_pairing_code(&request.pairing_code)
-                .map_err(|error| error.to_string())?,
-        )
-    } else {
-        None
-    };
-    let identity_path = if relay_mode {
+    let (identity_path, permanent_device_id) = if relay_mode {
         let path = identity_path(&app)?;
-        permanent_device_id_at(&path)?;
-        Some(path)
+        let device_id = permanent_device_id_at(&path)?;
+        (Some(path), Some(device_id))
+    } else {
+        (None, None)
+    };
+    let fixed_code = if request.use_saved_pairing_code {
+        let device_id = permanent_device_id
+            .as_ref()
+            .expect("relay validation guarantees a permanent device ID")
+            .clone();
+        let loaded = crate::credential_call(move || {
+            crate::credentials::load_remote_host_pairing_code(&device_id)
+        })
+        .await
+        .map_err(|error| format!("Cannot load the unattended pairing password: {error}"))?;
+        Some(Zeroizing::new(
+            lattice_remote::normalize_pairing_code(&loaded).map_err(|error| error.to_string())?,
+        ))
+    } else if !supplied_code.is_empty() {
+        Some(Zeroizing::new(
+            lattice_remote::normalize_pairing_code(&supplied_code)
+                .map_err(|error| error.to_string())?,
+        ))
     } else {
         None
     };
+    if request.remember_pairing_code {
+        crate::credential_call(|| {
+            let status = crate::credentials::status();
+            if status.ready {
+                Ok(())
+            } else {
+                Err(status
+                    .detail
+                    .unwrap_or_else(|| format!("{} is unavailable", status.provider)))
+            }
+        })
+        .await
+        .map_err(|error| format!("Cannot save the unattended pairing password: {error}"))?;
+    }
     let file_root = if request.allow_files {
         let requested = request.file_root.trim();
         let path = if requested.is_empty() {
@@ -541,12 +640,12 @@ async fn start_inner(
         (None, Some(identity)) => AgentTarget::Relay {
             address: request.relay_address.trim(),
             identity,
-            pairing_code: fixed_code.as_deref(),
+            pairing_code: fixed_code.as_ref().map(|code| code.as_str()),
         },
         (None, None) => return Err("The sharing mode is incomplete.".to_string()),
     };
     if replace {
-        stop(&app, &registry).await?;
+        stop_inner(&app, &registry).await?;
     }
     let sharing_id = host_id();
     let chat = if request.allow_chat || request.allow_cli {
@@ -569,12 +668,15 @@ async fn start_inner(
         request.allow_commands,
         file_root.as_deref(),
         chat.as_ref(),
-        fixed_code.as_deref(),
+        fixed_code.as_ref().map(|code| code.as_str()),
     )
     .await?;
     let mut lines = BufReader::new(stdout).lines();
     let first = match timeout(Duration::from_secs(12), lines.next_line()).await {
-        Ok(Ok(Some(line))) => parse_event(&line),
+        Ok(Ok(Some(line))) => {
+            let line = Zeroizing::new(line);
+            parse_event(&line)
+        }
         Ok(Ok(None)) => Err("The Lattice Agent exited before it was ready.".to_string()),
         Ok(Err(error)) => Err(error.to_string()),
         Err(_) => Err("The Lattice Agent did not become ready within 12 seconds.".to_string()),
@@ -610,11 +712,61 @@ async fn start_inner(
     else {
         unreachable!("checked above");
     };
+    let mut pairing_code = Zeroizing::new(pairing_code);
+
+    if let Err(error) = validate_ready_identity(
+        relay_mode,
+        permanent_device_id.as_deref(),
+        device_id.as_deref(),
+        persistent,
+    ) {
+        abort_pending_agent(&mut child, &lifetime, chat.as_ref()).await;
+        return Err(error);
+    }
+
+    if let Some(expected) = fixed_code.as_ref() {
+        let confirmed = match lattice_remote::normalize_pairing_code(&pairing_code) {
+            Ok(confirmed) => Zeroizing::new(confirmed),
+            Err(error) => {
+                abort_pending_agent(&mut child, &lifetime, chat.as_ref()).await;
+                return Err(error.to_string());
+            }
+        };
+        if confirmed.as_str() != expected.as_str() {
+            abort_pending_agent(&mut child, &lifetime, chat.as_ref()).await;
+            return Err("The Lattice Agent did not confirm the requested pairing password.".into());
+        }
+    }
+    let saved_pairing_code = request.use_saved_pairing_code || request.remember_pairing_code;
+    if request.remember_pairing_code {
+        let device_id = permanent_device_id
+            .as_ref()
+            .expect("relay validation guarantees a permanent device ID")
+            .clone();
+        let secret = Zeroizing::new(
+            fixed_code
+                .as_ref()
+                .expect("remember validation guarantees a fixed password")
+                .as_str()
+                .to_string(),
+        );
+        if let Err(error) = crate::credential_call(move || {
+            crate::credentials::store_remote_host_pairing_code(&device_id, &secret)
+        })
+        .await
+        {
+            abort_pending_agent(&mut child, &lifetime, chat.as_ref()).await;
+            return Err(format!(
+                "Cannot save the unattended pairing password: {error}"
+            ));
+        }
+    }
+    let status_pairing_code = pairing_code_for_status(&mut pairing_code, saved_pairing_code);
 
     let status = RemoteHostStatus {
         host_id: sharing_id,
         address,
-        pairing_code,
+        pairing_code: status_pairing_code,
         // Zero from the agent means the code never expires while sharing.
         expires_at: if expires_in_seconds == 0 {
             0
@@ -633,6 +785,7 @@ async fn start_inner(
         device_id,
         relay,
         persistent,
+        saved_pairing_code,
     };
     let record = Arc::new(RemoteHostRecord {
         status: Mutex::new(status.clone()),
@@ -649,7 +802,7 @@ async fn start_inner(
         let mut reason = "The Lattice Agent exited.".to_string();
         loop {
             let line = match lines.next_line().await {
-                Ok(Some(line)) => line,
+                Ok(Some(line)) => Zeroizing::new(line),
                 Ok(None) => break,
                 Err(error) => {
                     reason = error.to_string();
@@ -658,49 +811,76 @@ async fn start_inner(
             };
             match parse_event(&line) {
                 Ok(AgentEvent::PairingRequest { peer }) => {
-                    if let Ok(mut status) = record.status.lock() {
-                        status.state = "pairing";
-                        status.peer = Some(peer);
-                        emit_status(&watcher_app, &status);
-                    }
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        move |status| {
+                            status.state = "pairing";
+                            status.peer = Some(peer);
+                            true
+                        },
+                    );
                 }
                 Ok(AgentEvent::PairingRejected { attempts_remaining }) => {
-                    if let Ok(mut status) = record.status.lock() {
-                        status.state = "waiting";
-                        status.peer = None;
-                        status.attempts_remaining = attempts_remaining;
-                        emit_status(&watcher_app, &status);
-                    }
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        |status| {
+                            status.state = "waiting";
+                            status.peer = None;
+                            status.attempts_remaining = attempts_remaining;
+                            true
+                        },
+                    );
                 }
                 Ok(AgentEvent::Paired { peer }) => {
-                    if let Ok(mut status) = record.status.lock() {
-                        status.state = "streaming";
-                        status.peer = Some(peer);
-                        // A one-shot code is spent now; a persistent share
-                        // keeps its code for the sessions that follow.
-                        if !status.persistent {
-                            status.pairing_code.clear();
-                        }
-                        emit_status(&watcher_app, &status);
-                    }
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        move |status| {
+                            status.state = "streaming";
+                            status.peer = Some(peer);
+                            // A one-shot code is spent now; a persistent share
+                            // keeps its code for the sessions that follow.
+                            if !status.persistent {
+                                status.pairing_code.clear();
+                            }
+                            true
+                        },
+                    );
                 }
                 Ok(AgentEvent::SessionEnded { reason }) => {
                     // The viewer side already surfaced the reason through
                     // remote://closed; the host only returns to waiting.
                     drop(reason);
-                    if let Ok(mut status) = record.status.lock() {
-                        status.state = "waiting";
-                        status.peer = None;
-                        emit_status(&watcher_app, &status);
-                    }
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        |status| {
+                            status.state = "waiting";
+                            status.peer = None;
+                            true
+                        },
+                    );
                 }
                 Ok(AgentEvent::RelayState { connected }) => {
-                    if let Ok(mut status) = record.status.lock() {
-                        if status.state != "streaming" {
-                            status.state = if connected { "waiting" } else { "reconnecting" };
-                            emit_status(&watcher_app, &status);
-                        }
-                    }
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        |status| {
+                            if status.state != "streaming" {
+                                status.state = if connected { "waiting" } else { "reconnecting" };
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                    );
                 }
                 Ok(AgentEvent::Failed { stage, detail }) => {
                     reason = format!("{stage}: {detail}");
@@ -712,7 +892,10 @@ async fn start_inner(
                     reason = stopped_reason;
                     break;
                 }
-                Ok(AgentEvent::Ready { .. }) => {
+                Ok(AgentEvent::Ready {
+                    mut pairing_code, ..
+                }) => {
+                    pairing_code.zeroize();
                     reason = "The Lattice Agent sent a second ready event.".to_string();
                     break;
                 }
@@ -744,7 +927,22 @@ async fn start_inner(
     Ok(status)
 }
 
-pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), String> {
+async fn abort_pending_agent(
+    child: &mut Child,
+    lifetime: &AgentLifetime,
+    chat: Option<&crate::remote_chat_host::Bridge>,
+) {
+    lifetime.stop();
+    if let Some(chat) = chat {
+        chat.stop();
+    }
+    let _ = child.kill().await;
+}
+
+pub(crate) async fn stop_inner(
+    app: &AppHandle,
+    registry: &RemoteHostRegistry,
+) -> Result<(), String> {
     if let Some(record) = registry.take()? {
         record.lifetime.stop();
         if let Some(chat) = &record.chat {
@@ -766,6 +964,112 @@ pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), 
         );
     }
     Ok(())
+}
+
+pub async fn stop(app: &AppHandle, registry: &RemoteHostRegistry) -> Result<(), String> {
+    let _start_guard = registry.start_lock.lock().await;
+    stop_inner(app, registry).await
+}
+
+pub async fn forget_pairing_code(
+    app: &AppHandle,
+    registry: &RemoteHostRegistry,
+) -> Result<RemoteHostForgetResult, String> {
+    let _start_guard = registry.start_lock.lock().await;
+    let cleanup =
+        crate::credential_call(crate::credentials::delete_remote_host_pairing_code).await?;
+
+    mark_pairing_code_unsaved(app, registry)?;
+    Ok(RemoteHostForgetResult {
+        cleanup_warning: cleanup.warning,
+        cleanup_pending: cleanup.cleanup_pending,
+    })
+}
+
+/// Keeps the active Agent running with its already supplied in-memory
+/// password, while making status explicit that no future run may reload it.
+/// Callers must hold the configuration lock so watcher removal cannot reorder
+/// a stale status event after the corresponding closed event.
+pub(crate) fn mark_pairing_code_unsaved(
+    app: &AppHandle,
+    registry: &RemoteHostRegistry,
+) -> Result<(), String> {
+    let current = registry.current.lock().map_err(|error| error.to_string())?;
+    let host_id = if let Some(record) = current.as_ref() {
+        let status = {
+            let mut status = record.status.lock().map_err(|error| error.to_string())?;
+            status.saved_pairing_code = false;
+            status.clone()
+        };
+        emit_status(app, &status);
+        Some(status.host_id)
+    } else {
+        None
+    };
+    // Unlike a status event, this also reaches the frontend when no Agent is
+    // active, so automatic standby cannot retain a stale use-saved setting
+    // after deletion or backup restore.
+    let _ = app.emit(
+        "remote-host://credential-reset",
+        RemoteHostCredentialResetEvent { host_id },
+    );
+    Ok(())
+}
+
+pub async fn retry_pairing_code_cleanup(
+    registry: &RemoteHostRegistry,
+) -> Result<RemoteHostForgetResult, String> {
+    let _start_guard = registry.start_lock.lock().await;
+    let cleanup =
+        crate::credential_call(crate::credentials::retry_remote_host_pairing_code_cleanup).await?;
+    Ok(RemoteHostForgetResult {
+        cleanup_warning: cleanup.warning,
+        cleanup_pending: cleanup.cleanup_pending,
+    })
+}
+
+fn validate_saved_pairing_choice(
+    request: &RemoteHostStartRequest,
+    relay_mode: bool,
+) -> Result<(), String> {
+    if !relay_mode && (request.use_saved_pairing_code || request.remember_pairing_code) {
+        return Err("Saved pairing passwords are available only in relay mode.".to_string());
+    }
+    if request.use_saved_pairing_code && request.remember_pairing_code {
+        return Err("Choose either the saved password or a new password to save.".to_string());
+    }
+    if request.use_saved_pairing_code && !request.pairing_code.is_empty() {
+        return Err("A saved pairing password cannot be combined with a new password.".to_string());
+    }
+    if request.remember_pairing_code && request.pairing_code.is_empty() {
+        return Err("Enter a fixed pairing password before saving it.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_ready_identity(
+    relay_mode: bool,
+    expected_device_id: Option<&str>,
+    ready_device_id: Option<&str>,
+    persistent: bool,
+) -> Result<(), String> {
+    if !relay_mode {
+        return Ok(());
+    }
+    if !persistent || ready_device_id != expected_device_id {
+        return Err(
+            "The Lattice Agent confirmed a different or non-persistent relay identity.".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn pairing_code_for_status(pairing_code: &mut Zeroizing<String>, saved: bool) -> String {
+    if saved {
+        String::new()
+    } else {
+        std::mem::take(&mut **pairing_code)
+    }
 }
 
 pub fn chat_reply(
@@ -829,6 +1133,7 @@ mod tests {
                 device_id: None,
                 relay: None,
                 persistent: false,
+                saved_pairing_code: false,
             }),
             child: AsyncMutex::new(child),
             lifetime,
@@ -836,8 +1141,25 @@ mod tests {
         });
         let registry = RemoteHostRegistry::new();
         registry.insert(Arc::clone(&record)).unwrap();
+        let mut current_published = false;
+        assert!(registry
+            .publish_status_if_current(
+                &record,
+                |status| {
+                    status.state = "pairing";
+                    true
+                },
+                |_| current_published = true,
+            )
+            .unwrap());
+        assert!(current_published);
         registry.shutdown();
         assert!(registry.status().unwrap().is_none());
+        let mut retired_published = false;
+        assert!(!registry
+            .publish_status_if_current(&record, |_| true, |_| retired_published = true)
+            .unwrap());
+        assert!(!retired_published);
         let mut child = record.child.lock().await;
         timeout(Duration::from_secs(5), child.wait())
             .await
@@ -882,6 +1204,8 @@ mod tests {
             mode: String::new(),
             relay_address: String::new(),
             pairing_code: String::new(),
+            use_saved_pairing_code: false,
+            remember_pairing_code: false,
         })
         .unwrap();
         assert_eq!(ipv4.to_string(), "192.168.1.20:44900");
@@ -899,6 +1223,8 @@ mod tests {
             mode: String::new(),
             relay_address: String::new(),
             pairing_code: String::new(),
+            use_saved_pairing_code: false,
+            remember_pairing_code: false,
         })
         .unwrap();
         assert_eq!(ipv6.to_string(), "[::1]:44900");
@@ -920,6 +1246,8 @@ mod tests {
                 mode: String::new(),
                 relay_address: String::new(),
                 pairing_code: String::new(),
+                use_saved_pairing_code: false,
+                remember_pairing_code: false,
             })
             .is_err());
         }
@@ -941,5 +1269,86 @@ mod tests {
         assert!(first.bytes().all(|byte| byte.is_ascii_digit()));
 
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn saved_host_password_choices_fail_closed() {
+        let mut request = RemoteHostStartRequest {
+            bind_address: String::new(),
+            port: 44_900,
+            fps: 5,
+            allow_input: false,
+            allow_commands: false,
+            allow_chat: false,
+            allow_cli: false,
+            allow_files: false,
+            file_root: String::new(),
+            mode: "relay".to_string(),
+            relay_address: "wss://relay.example.test".to_string(),
+            pairing_code: String::new(),
+            use_saved_pairing_code: true,
+            remember_pairing_code: false,
+        };
+        assert!(validate_saved_pairing_choice(&request, true).is_ok());
+
+        request.remember_pairing_code = true;
+        assert!(validate_saved_pairing_choice(&request, true).is_err());
+        request.use_saved_pairing_code = false;
+        assert!(validate_saved_pairing_choice(&request, true).is_err());
+        request.pairing_code = "safe-password".to_string();
+        assert!(validate_saved_pairing_choice(&request, true).is_ok());
+        assert!(validate_saved_pairing_choice(&request, false).is_err());
+    }
+
+    #[test]
+    fn saved_host_password_is_redacted_before_status_serialization() {
+        let mut pairing_code = Zeroizing::new("sentinel-host-password".to_string());
+        let pairing_code = pairing_code_for_status(&mut pairing_code, true);
+        let status = RemoteHostStatus {
+            host_id: "host".to_string(),
+            address: "wss://relay.example.test".to_string(),
+            pairing_code,
+            expires_at: 0,
+            view_only: true,
+            file_transfer: false,
+            commands: false,
+            chat: false,
+            cli: false,
+            file_root: None,
+            state: "waiting",
+            peer: None,
+            attempts_remaining: 5,
+            device_id: Some("123456789".to_string()),
+            relay: Some("wss://relay.example.test".to_string()),
+            persistent: true,
+            saved_pairing_code: true,
+        };
+        let encoded = serde_json::to_string(&status).unwrap();
+        assert!(!encoded.contains("sentinel-host-password"));
+        assert!(encoded.contains("\"pairingCode\":\"\""));
+        assert!(encoded.contains("\"savedPairingCode\":true"));
+    }
+
+    #[test]
+    fn legacy_start_requests_default_saved_password_flags_to_false() {
+        let request: RemoteHostStartRequest = serde_json::from_value(serde_json::json!({
+            "bindAddress": "127.0.0.1",
+            "port": 44900,
+            "fps": 5
+        }))
+        .unwrap();
+
+        assert!(!request.use_saved_pairing_code);
+        assert!(!request.remember_pairing_code);
+    }
+
+    #[test]
+    fn relay_ready_identity_must_match_the_loaded_credential_identity() {
+        assert!(validate_ready_identity(true, Some("123456789"), Some("123456789"), true).is_ok());
+        assert!(validate_ready_identity(true, Some("123456789"), Some("987654321"), true).is_err());
+        assert!(
+            validate_ready_identity(true, Some("123456789"), Some("123456789"), false).is_err()
+        );
+        assert!(validate_ready_identity(false, None, None, false).is_ok());
     }
 }

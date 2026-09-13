@@ -22,7 +22,6 @@ use std::sync::{Mutex, OnceLock};
 use zeroize::{Zeroize, Zeroizing};
 
 const VAULT_FILE: &str = "vault.json";
-const TEMP_FILE: &str = "vault.json.tmp";
 const VAULT_VERSION: u32 = 1;
 const SALT_BYTES: usize = 16;
 const NONCE_BYTES: usize = 24;
@@ -67,6 +66,14 @@ struct KdfParameters {
 #[derive(Serialize, Deserialize, Default)]
 struct VaultEntries {
     entries: HashMap<String, String>,
+}
+
+impl Drop for VaultEntries {
+    fn drop(&mut self) {
+        for secret in self.entries.values_mut() {
+            secret.zeroize();
+        }
+    }
 }
 
 struct UnlockedVault {
@@ -160,7 +167,8 @@ fn seal(
             .map(|(name, secret)| (name.clone(), secret.as_str().to_string()))
             .collect(),
     };
-    let mut plaintext = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    let plaintext =
+        Zeroizing::new(serde_json::to_vec(&payload).map_err(|error| error.to_string())?);
 
     let mut nonce_bytes = [0u8; NONCE_BYTES];
     getrandom::fill(&mut nonce_bytes).map_err(|error| error.to_string())?;
@@ -168,8 +176,6 @@ fn seal(
     let ciphertext = cipher
         .encrypt(&XNonce::from(nonce_bytes), plaintext.as_slice())
         .map_err(|_| "the vault could not be sealed".to_string())?;
-    plaintext.zeroize();
-
     Ok(VaultFile {
         version: VAULT_VERSION,
         kdf: KdfParameters {
@@ -211,15 +217,13 @@ fn unseal(
         return Err("the vault nonce has the wrong size".to_string());
     };
     let ciphertext = from_b64(&file.ciphertext)?;
-    let mut plaintext = cipher.decrypt(nonce, ciphertext.as_slice()).map_err(|_| {
+    let plaintext = Zeroizing::new(cipher.decrypt(nonce, ciphertext.as_slice()).map_err(|_| {
         // AEAD cannot tell a wrong key from a tampered file; say both.
         "the master password is wrong, or the vault file was modified".to_string()
-    })?;
-    let payload: VaultEntries =
+    })?);
+    let mut payload: VaultEntries =
         serde_json::from_slice(&plaintext).map_err(|error| error.to_string())?;
-    plaintext.zeroize();
-    Ok(payload
-        .entries
+    Ok(std::mem::take(&mut payload.entries)
         .into_iter()
         .map(|(name, secret)| (name, Zeroizing::new(secret)))
         .collect())
@@ -275,21 +279,13 @@ impl VaultManager {
         }
     }
 
-    /// Writes the current entries to disk: temporary file first, fsync, then
-    /// rename, so an interrupted write can never leave a half-vault behind.
+    /// Writes the current entries through the platform's durable atomic-file
+    /// path, so a successful credential update cannot revert after a crash.
     fn persist(&self, vault: &UnlockedVault) -> Result<(), String> {
         let sealed = seal(&vault.key, &vault.kdf, &vault.entries)?;
         let encoded = serde_json::to_vec_pretty(&sealed).map_err(|error| error.to_string())?;
-        std::fs::create_dir_all(&self.directory).map_err(|error| error.to_string())?;
-        let temp = self.directory.join(TEMP_FILE);
-        {
-            use std::io::Write;
-            let mut file = std::fs::File::create(&temp).map_err(|error| error.to_string())?;
-            file.write_all(&encoded)
-                .map_err(|error| error.to_string())?;
-            file.sync_all().map_err(|error| error.to_string())?;
-        }
-        std::fs::rename(&temp, self.path()).map_err(|error| error.to_string())
+        crate::durable_file::atomic_write_private(&self.path(), &encoded)
+            .map_err(|error| error.to_string())
     }
 
     pub fn create(&self, master_password: &str) -> Result<VaultStatus, String> {
@@ -383,10 +379,21 @@ impl VaultManager {
             return Err("An empty password cannot be saved.".to_string());
         }
         self.with_unlocked(|vault| {
-            vault
+            let previous = vault
                 .entries
                 .insert(account.to_string(), Zeroizing::new(secret.to_string()));
-            self.persist(vault)
+            if let Err(error) = self.persist(vault) {
+                match previous {
+                    Some(previous) => {
+                        vault.entries.insert(account.to_string(), previous);
+                    }
+                    None => {
+                        vault.entries.remove(account);
+                    }
+                }
+                return Err(error);
+            }
+            Ok(())
         })
     }
 
@@ -406,11 +413,14 @@ impl VaultManager {
 
     pub fn delete(&self, account: &str) -> Result<bool, String> {
         self.with_unlocked(|vault| {
-            let removed = vault.entries.remove(account).is_some();
-            if removed {
-                self.persist(vault)?;
+            let Some(removed) = vault.entries.remove(account) else {
+                return Ok(false);
+            };
+            if let Err(error) = self.persist(vault) {
+                vault.entries.insert(account.to_string(), removed);
+                return Err(error);
             }
-            Ok(removed)
+            Ok(true)
         })
     }
 }
@@ -530,6 +540,26 @@ mod tests {
         vault.lock();
         vault.unlock("correct horse battery").unwrap();
         assert!(!vault.exists_entry("profile:p1:ssh-password").unwrap());
+    }
+
+    #[test]
+    fn failed_persistence_rolls_back_store_and_delete_in_memory() {
+        let vault = test_manager();
+        let account = "profile:p1:ssh-password";
+        vault.create("correct horse battery").unwrap();
+        vault.store(account, "old password").unwrap();
+
+        let moved_directory = vault.directory.with_extension("moved");
+        std::fs::rename(&vault.directory, &moved_directory).unwrap();
+        std::fs::write(&vault.directory, "blocks directory creation").unwrap();
+
+        assert!(vault.store(account, "new password").is_err());
+        assert_eq!(vault.load(account).unwrap(), "old password");
+        assert!(vault.delete(account).is_err());
+        assert_eq!(vault.load(account).unwrap(), "old password");
+
+        std::fs::remove_file(&vault.directory).unwrap();
+        std::fs::rename(moved_directory, &vault.directory).unwrap();
     }
 
     #[test]

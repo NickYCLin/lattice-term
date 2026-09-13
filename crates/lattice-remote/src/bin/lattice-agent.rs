@@ -1,5 +1,5 @@
 use image::{imageops::FilterType, DynamicImage};
-use lattice_remote::credentials::read_pairing_code_file;
+use lattice_remote::credentials::read_pairing_code_file_zeroizing;
 use lattice_remote::relay::{
     format_device_id, normalize_relay_endpoint, read_server_message, write_client_message,
     DeviceIdentity, RelayClientMessage, RelayServerMessage,
@@ -28,6 +28,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{sleep, timeout};
 use xcap::Monitor;
+use zeroize::Zeroizing;
 
 const DEFAULT_FPS: u32 = 5;
 const MAX_FPS: u32 = 10;
@@ -72,7 +73,9 @@ const TERMINAL_SESSION_KILL_INTERVAL: Duration = Duration::from_millis(25);
 #[derive(Clone)]
 struct Options {
     bind: SocketAddr,
-    pairing_code: String,
+    /// Shared instead of cloned for each relay session, then erased when the
+    /// final Options owner is dropped.
+    pairing_code: Arc<Zeroizing<String>>,
     fps: u32,
     json: bool,
     allow_input: bool,
@@ -96,7 +99,7 @@ struct Options {
 enum AgentEvent<'a> {
     Ready {
         address: String,
-        pairing_code: String,
+        pairing_code: &'a str,
         /// Zero means the code does not expire while sharing stays on.
         expires_in_seconds: u64,
         view_only: bool,
@@ -139,9 +142,11 @@ fn emit_event(json: bool, event: &AgentEvent<'_>) {
     if !json {
         return;
     }
-    if let Ok(line) = serde_json::to_string(event) {
-        println!("{line}");
-        let _ = std::io::stdout().flush();
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    if serde_json::to_writer(&mut output, event).is_ok() {
+        let _ = output.write_all(b"\n");
+        let _ = output.flush();
     }
 }
 
@@ -185,16 +190,18 @@ Typical headless setup:\n\
                 --pair-code-file /secure/path/pair-code\n"
 }
 
-fn set_pairing_code(slot: &mut Option<String>, input: &str) -> Result<(), String> {
+fn set_pairing_code(slot: &mut Option<Zeroizing<String>>, input: &str) -> Result<(), String> {
     if slot.is_some() {
         return Err("choose only one pairing-code source".to_string());
     }
-    *slot = Some(normalize_pairing_code(input).map_err(|error| error.to_string())?);
+    *slot = Some(Zeroizing::new(
+        normalize_pairing_code(input).map_err(|error| error.to_string())?,
+    ));
     Ok(())
 }
 
-fn read_pairing_code_stdin() -> Result<String, String> {
-    let mut input = String::new();
+fn read_pairing_code_stdin() -> Result<Zeroizing<String>, String> {
+    let mut input = Zeroizing::new(String::new());
     std::io::stdin()
         .take(67)
         .read_to_string(&mut input)
@@ -204,7 +211,9 @@ fn read_pairing_code_stdin() -> Result<String, String> {
             "--pair-code-stdin must be at most 64 characters plus a line ending".to_string(),
         );
     }
-    Ok(input.trim_end_matches(['\r', '\n']).to_string())
+    Ok(Zeroizing::new(
+        input.trim_end_matches(['\r', '\n']).to_string(),
+    ))
 }
 
 fn reserve_pairing(
@@ -271,7 +280,7 @@ fn parse_options() -> Result<Options, String> {
                         .next()
                         .ok_or_else(|| "--pair-code-file needs a path".to_string())?,
                 );
-                let input = read_pairing_code_file(&path)?;
+                let input = read_pairing_code_file_zeroizing(&path)?;
                 set_pairing_code(&mut pairing_code, &input)?;
             }
             "--pair-code-stdin" => {
@@ -315,10 +324,12 @@ fn parse_options() -> Result<Options, String> {
 
     Ok(Options {
         bind,
-        pairing_code: pairing_code
-            .map(Ok)
-            .unwrap_or_else(generate_pairing_code)
-            .map_err(|error| error.to_string())?,
+        pairing_code: Arc::new(
+            pairing_code
+                .map(Ok)
+                .unwrap_or_else(|| generate_pairing_code().map(Zeroizing::new))
+                .map_err(|error| error.to_string())?,
+        ),
         fps,
         json,
         allow_input,
@@ -2709,7 +2720,7 @@ async fn run_relay_session(
         Duration::from_secs(10),
         SecureConnection::accept_for_device(
             stream,
-            &options.pairing_code,
+            options.pairing_code.as_str(),
             &static_key,
             Some(&identity.device_id),
         ),
@@ -2809,7 +2820,9 @@ async fn run_relay(options: &Options) -> String {
         }
     };
 
-    let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
+    let formatted_code = Zeroizing::new(lattice_remote::format_pairing_code(
+        options.pairing_code.as_str(),
+    ));
     let mut failed_pairings = 0u32;
     let mut announced = false;
     let mut link_up = false;
@@ -2881,7 +2894,7 @@ async fn run_relay(options: &Options) -> String {
                 options.json,
                 &AgentEvent::Ready {
                     address: relay_raw.clone(),
-                    pairing_code: formatted_code.clone(),
+                    pairing_code: formatted_code.as_str(),
                     expires_in_seconds: 0,
                     view_only: !options.allow_input,
                     file_transfer: options.file_root.is_some(),
@@ -2898,7 +2911,7 @@ async fn run_relay(options: &Options) -> String {
             if !options.json {
                 println!("Lattice Remote is ready over the relay {relay_raw}.");
                 println!("Device ID: {}", format_device_id(&identity.device_id));
-                println!("Pairing code: {formatted_code}");
+                println!("Pairing code: {}", formatted_code.as_str());
                 println!("The code stays valid until sharing stops.");
             }
         }
@@ -3039,12 +3052,14 @@ async fn main() {
     };
 
     let listening_address = listener.local_addr().unwrap_or(options.bind);
-    let formatted_code = lattice_remote::format_pairing_code(&options.pairing_code);
+    let formatted_code = Zeroizing::new(lattice_remote::format_pairing_code(
+        options.pairing_code.as_str(),
+    ));
     emit_event(
         options.json,
         &AgentEvent::Ready {
             address: listening_address.to_string(),
-            pairing_code: formatted_code.clone(),
+            pairing_code: formatted_code.as_str(),
             expires_in_seconds: PAIRING_LIFETIME.as_secs(),
             view_only: !options.allow_input,
             file_transfer: options.file_root.is_some(),
@@ -3066,7 +3081,7 @@ async fn main() {
         };
         println!("Lattice Remote is ready ({mode})");
         println!("Address: {listening_address}");
-        println!("Pairing code: {formatted_code}");
+        println!("Pairing code: {}", formatted_code.as_str());
         println!("The code is valid for one successful connection and is not saved.");
     }
 
@@ -3105,7 +3120,7 @@ async fn main() {
         };
         let secure = match timeout(
             Duration::from_secs(10),
-            SecureConnection::accept(stream, &options.pairing_code),
+            SecureConnection::accept(stream, options.pairing_code.as_str()),
         )
         .await
         {
@@ -4337,7 +4352,7 @@ mod tests {
     fn ready_event_is_machine_readable() {
         let event = AgentEvent::Ready {
             address: "127.0.0.1:44900".to_string(),
-            pairing_code: "0123-4567-89AB-CDEF-0123-4567-89AB-CDEF".to_string(),
+            pairing_code: "0123-4567-89AB-CDEF-0123-4567-89AB-CDEF",
             expires_in_seconds: 300,
             view_only: true,
             file_transfer: false,
@@ -4361,7 +4376,10 @@ mod tests {
     fn pairing_code_sources_cannot_override_each_other() {
         let mut code = None;
         set_pairing_code(&mut code, "0123-4567-89AB-CDEF-0123-4567-89AB-CDEF").unwrap();
-        assert_eq!(code.as_deref(), Some("0123456789ABCDEF0123456789ABCDEF"));
+        assert_eq!(
+            code.as_ref().map(|value| value.as_str()),
+            Some("0123456789ABCDEF0123456789ABCDEF")
+        );
         assert!(set_pairing_code(&mut code, "87654321FEDCBA0987654321FEDCBA09").is_err());
     }
 
@@ -4375,12 +4393,12 @@ mod tests {
         std::fs::write(&path, "0123456789ABCDEF0123456789ABCDEF\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(
-            read_pairing_code_file(&path).unwrap(),
+            read_pairing_code_file_zeroizing(&path).unwrap().as_str(),
             "0123456789ABCDEF0123456789ABCDEF"
         );
 
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(read_pairing_code_file(&path).is_err());
+        assert!(read_pairing_code_file_zeroizing(&path).is_err());
         let _ = std::fs::remove_file(path);
     }
 }
