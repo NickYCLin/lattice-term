@@ -22,6 +22,7 @@ pub mod notification_sound;
 pub mod rdp;
 pub mod remote;
 pub mod remote_chat_host;
+mod remote_cli;
 pub mod remote_commands;
 pub mod remote_files;
 pub mod remote_host;

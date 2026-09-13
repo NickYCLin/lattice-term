@@ -40,6 +40,13 @@ function renderRemote(viewOnly: boolean, fileTransfer = false): string {
 }
 
 describe("Lattice Remote canvas interaction", () => {
+  it("opens the CLI list for an explicit grant without enabling desktop input", () => {
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><RemotePane session={{ ...session, cli: true, viewOnly: true }} remote={remote} theme="dark" /></I18nProvider>);
+    expect(markup).toContain("remote-workspace--cli");
+    expect(markup).toContain('aria-label="CLI 工作階段"');
+    expect(markup).not.toContain('aria-label="開啟軟體鍵盤"');
+    expect(renderRemote(true)).not.toContain("remote-workspace--cli");
+  });
   it("offers commands only when the host advertises a grant, including view-only screens", () => {
     expect(renderRemote(true)).not.toContain('aria-label="命令"');
     const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><RemotePane session={{ ...session, viewOnly: true, commandShells: 3 }} remote={remote} theme="dark" /></I18nProvider>);

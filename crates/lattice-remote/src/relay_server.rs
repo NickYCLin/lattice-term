@@ -968,6 +968,7 @@ mod tests {
                     file_edit: false,
                     command_shells: 0,
                     chat: false,
+                    cli: false,
                     terminal: false,
                 }))
                 .await

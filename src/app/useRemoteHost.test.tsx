@@ -16,10 +16,10 @@ afterEach(() => { vi.useRealTimers(); backend.invoke.mockReset(); backend.listen
 describe("automatic Remote standby", () => {
   it("persists explicit grants but never a pairing password", () => {
     const store = storage();
-    const request = { ...loadRemoteHostSettings(store), allowChat: true, allowInput: true, pairingCode: "secret-not-to-store" };
+    const request = { ...loadRemoteHostSettings(store), allowChat: true, allowCli: true, allowInput: true, pairingCode: "secret-not-to-store" };
     saveRemoteHostSettings(store, request);
     expect(store.getItem(store.key(0)!)).not.toContain("secret-not-to-store");
-    expect(loadRemoteHostSettings(store)).toMatchObject({ allowChat: true, allowInput: true, allowFiles: false, pairingCode: "" });
+    expect(loadRemoteHostSettings(store)).toMatchObject({ allowChat: true, allowCli: true, allowInput: true, allowFiles: false, pairingCode: "" });
   });
   it("starts once after hydration and resumes standby after the engine ends", async () => {
     vi.useFakeTimers();

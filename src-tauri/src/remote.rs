@@ -85,6 +85,7 @@ pub struct RemoteSessionSummary {
     pub file_edit: bool,
     pub command_shells: u8,
     pub chat: bool,
+    pub cli: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -1076,6 +1077,7 @@ pub async fn connect(
         file_edit: hello.file_edit,
         command_shells: hello.command_shells,
         chat: hello.chat,
+        cli: hello.cli,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1550,7 +1552,11 @@ pub async fn chat_request(
             .sessions
             .get_mut(session_id)
             .ok_or("The Remote connection ended.")?;
-        if !record.summary.chat {
+        if !(if request.operation.is_cli() {
+            record.summary.cli
+        } else {
+            record.summary.chat
+        }) {
             return Err("The host has not shared conversations.".into());
         }
         if record.chat_pending.len() >= 4 || record.chat_pending.contains_key(&id) {
@@ -1634,6 +1640,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1662,6 +1669,7 @@ mod tests {
             file_edit: false,
             command_shells: 0,
             chat: false,
+            cli: false,
             file_root_label: String::new(),
             terminal,
         }

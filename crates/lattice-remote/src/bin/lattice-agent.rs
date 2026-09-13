@@ -2110,6 +2110,7 @@ where
             file_edit: shared_files.is_some() && host_text::editing_supported(),
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             chat: lattice_remote::chat_protocol::available(),
+            cli: lattice_remote::chat_protocol::cli_available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2187,7 +2188,7 @@ where
                     }
                 }
                 Ok(RemoteMessage::ChatRequest(request)) => {
-                    let response = if lattice_remote::chat_protocol::available() {
+                    let response = if lattice_remote::chat_protocol::permits(&request.operation) {
                         lattice_remote::chat_protocol::forward(request).await
                     } else {
                         lattice_remote::chat_protocol::ChatResponse::failed(
@@ -2429,6 +2430,7 @@ where
             file_edit: shared_files.is_some() && host_text::editing_supported(),
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             chat: lattice_remote::chat_protocol::available(),
+            cli: lattice_remote::chat_protocol::cli_available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2583,7 +2585,7 @@ where
                 }
             }
             Ok(RemoteMessage::ChatRequest(request)) => {
-                let response = if lattice_remote::chat_protocol::available() {
+                let response = if lattice_remote::chat_protocol::permits(&request.operation) {
                     lattice_remote::chat_protocol::forward(request).await
                 } else {
                     lattice_remote::chat_protocol::ChatResponse::failed(

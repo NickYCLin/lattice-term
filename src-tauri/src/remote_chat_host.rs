@@ -9,7 +9,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -34,6 +34,18 @@ struct Shared {
     pending: Mutex<HashMap<String, oneshot::Sender<ChatResponse>>>,
     completed: Mutex<HashMap<String, ChatResponse>>,
 }
+// CLI typing needs more identities than chat turns. Keep the cache bounded
+// even when a conversation mutation returns a large projection.
+fn cached_response(response: &ChatResponse) -> ChatResponse {
+    if serde_json::to_vec(response).is_ok_and(|bytes| bytes.len() <= 1024) {
+        response.clone()
+    } else {
+        ChatResponse::failed(
+            response.id.clone(),
+            "This operation was already submitted. Refresh its state before continuing.",
+        )
+    }
+}
 struct PendingGuard {
     state: Arc<Shared>,
     id: String,
@@ -48,21 +60,39 @@ impl Drop for PendingGuard {
 pub struct Bridge {
     pub address: String,
     pub token: String,
+    pub allow_chat: bool,
+    pub cli: Arc<crate::remote_cli::Access>,
     shared: Arc<Shared>,
     task: JoinHandle<()>,
 }
 impl Bridge {
-    pub async fn start(app: AppHandle, host_id: String) -> Result<Self, String> {
-        Self::start_dispatch(Arc::new(move |request| {
-            let _ = app.emit(
-                "remote-host://chat",
-                Invocation {
-                    host_id: host_id.clone(),
-                    request,
-                },
-            );
-        }))
-        .await
+    pub async fn start(
+        app: AppHandle,
+        host_id: String,
+        allow_chat: bool,
+        allow_cli: bool,
+    ) -> Result<Self, String> {
+        let cli = Arc::new(crate::remote_cli::Access::new(allow_cli));
+        let access = cli.clone();
+        let mut bridge = Self::start_dispatch(Arc::new(move |request| {
+            if request.operation.is_cli() || !allow_chat {
+                let (app, host_id, access) = (app.clone(), host_id.clone(), access.clone());
+                tokio::spawn(async move {
+                    let result = if request.operation.is_cli() { access.perform(&app, request.operation).await } else { Err("Conversation sharing is disabled.".into()) };
+                    let response = match result {
+                        Ok(value) => ChatResponse { id: request.id, value, error: None },
+                        Err(_) => ChatResponse::failed(request.id, "CLI unavailable or operation failed. Check sharing permissions and refresh before sending again."),
+                    };
+                    let registry = app.state::<Arc<crate::remote_host::RemoteHostRegistry>>();
+                    let _ = crate::remote_host::chat_reply(&registry, &host_id, response);
+                });
+            } else {
+                let _ = app.emit("remote-host://chat", Invocation { host_id: host_id.clone(), request });
+            }
+        })).await?;
+        bridge.allow_chat = allow_chat;
+        bridge.cli = cli;
+        Ok(bridge)
     }
     async fn start_dispatch(
         dispatch: Arc<dyn Fn(ChatRequest) + Send + Sync>,
@@ -114,7 +144,7 @@ impl Bridge {
                         let id = request.id.clone();
                         let cached = state.completed.lock().ok()?.get(&id).cloned();
                         let response = if let Some(cached) = cached { cached } else {
-                            if request.mutates() && state.completed.lock().ok()?.len() >= 1024 {
+                            if request.mutates() && state.completed.lock().ok()?.len() >= 65536 {
                                 ChatResponse::failed(id.clone(), "Restart sharing before issuing more operations.")
                             } else {
                                 let (tx, rx) = oneshot::channel();
@@ -130,7 +160,7 @@ impl Bridge {
                                     _ => ChatResponse::failed(id.clone(), "The desktop did not acknowledge the operation. Refresh before sending again."),
                                 };
                                 state.pending.lock().ok()?.remove(&id);
-                                if request.mutates() { state.completed.lock().ok()?.insert(id, response.clone()); }
+                                if request.mutates() { state.completed.lock().ok()?.insert(id, cached_response(&response)); }
                                 response
                             }
                         };
@@ -147,6 +177,8 @@ impl Bridge {
         Ok(Self {
             address,
             token,
+            allow_chat: false,
+            cli: Arc::new(crate::remote_cli::Access::new(false)),
             shared,
             task,
         })
@@ -173,6 +205,7 @@ impl Bridge {
         Ok(())
     }
     pub fn stop(&self) {
+        self.cli.revoke();
         self.shared.active.store(false, Ordering::Release);
         self.task.abort();
         if let Ok(mut pending) = self.shared.pending.lock() {

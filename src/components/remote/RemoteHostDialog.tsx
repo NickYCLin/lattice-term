@@ -43,6 +43,7 @@ export function RemoteHostDialog({
   const [port, setPort] = useState(settings.port);
   const [fps, setFps] = useState(settings.fps);
   const [allowInput, setAllowInput] = useState(settings.allowInput === true);
+  const [allowCli, setAllowCli] = useState(settings.allowCli === true);
   const [allowChat, setAllowChat] = useState(settings.allowChat === true);
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
@@ -129,6 +130,7 @@ export function RemoteHostDialog({
         fps,
         allowInput,
         allowChat,
+        allowCli,
         allowCommands: platform === "windows" && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
@@ -262,6 +264,7 @@ export function RemoteHostDialog({
                     ? t("remote.host.modeViewOnly")
                     : t("remote.host.modeInteractive")}
                 </span>
+                {host.status.cli && <span className="badge tone-warn">{t("remote.cli.title")}</span>}
                 {host.status.commands && <span className="badge tone-warn">{t("remote.commands.title")}</span>}
                 {host.status.fileTransfer && (
                   <span className="badge tone-security">
@@ -527,6 +530,8 @@ export function RemoteHostDialog({
                 </span>
               </label>
 
+              <label className="checkbox-field"><input type="checkbox" checked={allowCli} onChange={e => setAllowCli(e.currentTarget.checked)} />{t("remote.cli.allow")}</label>
+              <p className="muted">{t("remote.cli.shareHint")}</p>
               <label className="checkbox-field"><input type="checkbox" checked={allowChat} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
               <p className="muted">{t("remote.chat.shareHint")}</p>
               {platform === "windows" && <label className="remote-host-toggle">

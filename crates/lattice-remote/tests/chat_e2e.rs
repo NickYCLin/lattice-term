@@ -12,7 +12,7 @@ use tokio::{
 };
 #[tokio::test]
 async fn encrypted_chat_capability_routes_only_to_the_granted_desktop() {
-    for allowed in [false, true] {
+    for (cli, allowed) in [(false, false), (false, true), (true, false), (true, true)] {
         let temp = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -26,7 +26,14 @@ async fn encrypted_chat_capability_routes_only_to_the_granted_desktop() {
             let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(value["token"].as_str().map(str::len), Some(64));
             let request: ChatRequest = serde_json::from_value(value["request"].clone()).unwrap();
-            assert_eq!(request.operation, ChatOperation::List);
+            assert_eq!(
+                request.operation,
+                if cli {
+                    ChatOperation::CliList
+                } else {
+                    ChatOperation::List
+                }
+            );
             let bytes = serde_json::to_vec(&ChatResponse {
                 id: request.id,
                 value: serde_json::json!([{"id":"existing-thread","title":"接續原本對話"}]),
@@ -51,6 +58,11 @@ async fn encrypted_chat_capability_routes_only_to_the_granted_desktop() {
             .arg(temp.path().canonicalize().unwrap().join("identity.json"))
             .env_remove("LATTICE_CHAT_BRIDGE")
             .env_remove("LATTICE_CHAT_TOKEN")
+            .env("LATTICE_CHAT_ALLOWED", if cli { "0" } else { "1" })
+            .env(
+                "LATTICE_CLI_ALLOWED",
+                if cli && allowed { "1" } else { "0" },
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -83,11 +95,16 @@ async fn encrypted_chat_capability_routes_only_to_the_granted_desktop() {
         let RemoteMessage::Hello(hello) = connection.receive().await.unwrap() else {
             panic!("missing hello")
         };
-        assert_eq!(hello.chat, allowed);
+        assert_eq!(hello.chat, allowed && !cli);
+        assert_eq!(hello.cli, allowed && cli);
         connection
             .send(&RemoteMessage::ChatRequest(ChatRequest {
                 id: "list-1".into(),
-                operation: ChatOperation::List,
+                operation: if cli {
+                    ChatOperation::CliList
+                } else {
+                    ChatOperation::List
+                },
             }))
             .await
             .unwrap();
