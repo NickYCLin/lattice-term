@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager};
 fn label(value: &str) -> String {
     let mut output = String::new();
     for c in value.chars().filter(|c| !c.is_control()) {
-        if output.len() + c.len_utf8() > 96 {
+        if output.len() + c.len_utf8() > 64 {
             break;
         }
         output.push(c);
@@ -219,6 +219,13 @@ mod tests {
         fn model(&self, _: &str, _: &str) {}
         fn usage(&self, _: &str, _: &AgentTokenUsage) {}
         fn queue(&self, _: &str, _: usize) {}
+    }
+    #[test]
+    fn escaped_labels_keep_a_full_list_within_the_wire_budget() {
+        let hostile = "\\\"".repeat(1000);
+        let value = json!({"id": "a".repeat(32), "label": label(&hostile), "groupLabel": label(&hostile), "agent": label(&hostile), "state": "needsAttention", "detached": false});
+        let response = json!({"id": "r".repeat(160), "value": vec![value; 100], "error": null});
+        assert!(serde_json::to_vec(&response).unwrap().len() <= 60 * 1024);
     }
     #[test]
     fn existing_pty_lists_reads_accepts_input_and_revokes_without_relaunch() {
