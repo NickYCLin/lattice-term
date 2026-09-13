@@ -57,6 +57,8 @@
   - 管理六種內建主題與跟隨系統模式、密度（舒適/緊湊）及動態偏好，並同步至 DOM 與 localStorage。
 - **加密備份橋接 (`src/app/encryptedBackup.ts`)**：
   - 只收集版本化 allowlist localStorage 鍵；Rust 完成驗證加密後才把密文交給瀏覽器下載，還原時精確移除備份中不存在的 allowlist 設定，避免混合兩台裝置的狀態。
+  - 主機密碼權威與 `remoteHostCleanupPending` 是本機執行狀態，匯出時會從 `credential_backend.json` 移除。還原後一律清除主機權威標記、將兩個本機後端記為待清理，並透過原生狀態讓 `useRemoteHost` 關閉下次 `useSavedPairingCode`；已執行 Agent 的記憶體密碼只保留到本次停止或應用程式重啟。
+  - 匯出依序取得 Remote host `start_lock` → credential backend 檔案鎖 → Vault 鎖；還原在 Remote host 鎖後多取 SSH tunnel restore barrier，再進 backend 與 Vault。barrier 把最終通道檢查與資料取代包在同一段無新啟動區間，避免通道啟動、主機密碼輪轉、備份快照與還原互相交錯。
 - **Agent Sessions Hook (`src/app/useAgentSessions.ts`)**：
   - 管理本機 PTY 工作階段、語意狀態事件、原生 Session ID 擷取、批次提示，以及安全啟動工作區的名稱、順序與 v3 儲存 command。
   - Codex 的受管續接命令會以 `--cd` 明確指定已正規化的專案目錄，保留續接 ID，避免舊對話的 Windows `\\?\` 路徑或搬移前的目錄再次觸發目錄選擇。進階參數中自行指定的 `--cd`／`-C` 優先保留；不改寫 CLI 的對話檔案。行為依據 [Codex CLI 續接說明](https://learn.chatgpt.com/docs/developer-commands?surface=cli)。
@@ -147,11 +149,11 @@
 
 ---
 
-## 9. 作業系統認證儲存
+## 9. 認證雙後端儲存
 
-- src-tauri/src/credentials.rs 以 profile UUID 與認證種類組成不含機密的帳號鍵；Windows 使用 Credential Manager、macOS 使用 Keychain、Linux 使用 Secret Service。
+- src-tauri/src/credentials.rs 以 profile UUID 與認證種類組成不含機密的帳號鍵；目前選定後端可為加密保管庫，或 Windows Credential Manager、macOS Keychain、Linux Secret Service 對應的作業系統認證儲存區。
 - Tauri IPC 只公開可用狀態、是否存在與確認刪除；沒有任何命令會把已保存密碼回傳 WebView。
-- SSH、SFTP 與 RDP 可使用已保存密碼，或在新密碼驗證成功後保存。若保存失敗，剛建立的工作階段會中止，避免畫面聲稱保存成功。
+- SSH、SFTP、RDP 與 VNC 可使用已保存密碼，或在新密碼驗證成功後保存至目前選定後端。若保存失敗，剛建立的工作階段會中止，避免畫面聲稱保存成功。
 - useSavedCredential 與 useCredentialInventory 負責連線對話框和保管庫的真實狀態；瀏覽器預覽或系統儲存區鎖定時顯示原因並退回單次輸入。
 - 刪除密碼是保管庫與連線對話框中的獨立確認操作，不會因刪除一般連線設定而隱含永久刪除。
 
@@ -164,7 +166,7 @@
 - **信任先於連線**：主機金鑰不在信任清單內，連線會被拒絕，並把指紋交回介面請使用者比對；金鑰與上次不同則直接擋下。任何情況下都不會留下一個「還沒決定信任與否」的工作階段。
 - **信任資料**：`known_hosts.json` 只存公開指紋（`SHA256:` 格式，與 `ssh-keygen -lf` 輸出一致），指紋本來就是公開比對用的，不是機密。
 - **讀不到信任檔時不會退化成空清單**：那會讓原本已信任的主機全部變成「第一次連線」，反而把金鑰變更藏在裡面。這種情況會直接拒絕連線並說明原因。
-- **密碼**：預設由對話框輸入並只用於當次連線；使用者可勾選保存，Rust 核心只在驗證成功後寫入作業系統認證儲存區。已保存密碼由 Rust 直接取用，不回傳 WebView。
+- **密碼**：預設由對話框輸入並只用於當次連線；使用者可勾選保存，Rust 核心只在驗證成功後寫入目前選定的認證後端。已保存密碼由 Rust 直接取用，不回傳 WebView。
 - **輸出管道**：Rust 端以 `SessionSink` 介面輸出，正式執行時發送 Tauri 事件，測試時收進緩衝區——這是連線流程能對真實伺服器做整合測試的原因。
 - **測試**：`src-tauri/tests/ssh_live.rs` 針對真實 SSH 伺服器驗證「拒絕→信任→開 shell→指令有輸出」、密碼錯誤、金鑰變更與連不上四種情況；預設標記 `#[ignore]`，需要時搭配拋棄式容器執行。
 - **Key Vault 管理介面**：`useHostTrust` 透過 `ssh_known_hosts`、`ssh_trust_host` 與 `ssh_forget_host` IPC 直接操作同一份信任資料。手動新增只接受完整 OpenSSH SHA-256 指紋，既有主機不可靜默覆蓋，移除前必須再次確認。
@@ -189,10 +191,10 @@
 - 遠端連線依握手協定而非應用程式版號判斷相容性。新版分享使用 OPAQUE 密碼握手後建立 Noise 通道，支援自訂 6～64 字元密碼。桌面與 CLI 可明確選用舊版相容模式連線到長碼主機；舊八位數主機另需既有裝置 ID 信任紀錄，在送出證明前核對永久金鑰。詳見[固定配對密碼](PAIRING_PASSWORD.zh-TW.md)及[版本相容](RELAY_SERVER.zh-TW.md#版本相容)。
 - 協定送出、解碼與 frame assembler 共用同一組資源驗證：Agent 名稱最多 256 bytes 且不能含控制字元，Close 原因最多 1,024 bytes；JPEG 最多 8 MiB、單邊最多 16,384 px、總像素最多 32 Mi，異常尺寸不會進入 Tauri 事件或 WebView Canvas。
 - `lattice-agent` 的直連模式預設只監聽 `127.0.0.1:44900`，分享完整主螢幕並使用五分鐘、單一工作階段的一次性32 位十六進位隨機配對碼；中繼模式則主動連出，以永久九位數裝置 ID 註冊並在工作階段結束後繼續等候，配對碼在停止分享前有效。兩種模式連續五次配對失敗都會停止。
-- `RemoteHostDialog` 提供「分享這台裝置」的明確開始／停止操作。直連可指定 loopback 或特定 LAN IP、連接埠與 1–10 FPS，萬用與 multicast 位址會由原生層拒絕；中繼模式改填 `wss://`／私網 relay 位址，並可設定大小寫英文、數字與特殊符號的固定配對密碼。永久身分檔位於 app data，含註冊 token 與 Noise 私鑰，Unix 建立或載入時都強制修正為 `0600`。配對嘗試限制另以不含秘密的檔案保存，十分鐘五次未完成驗證，重啟不會歸零。
+- `RemoteHostDialog` 提供「分享這台裝置」的明確開始／停止操作。直連可指定 loopback 或特定 LAN IP、連接埠與 1–10 FPS，萬用與 multicast 位址會由原生層拒絕；中繼模式改填 `wss://`／私網 relay 位址，並可設定大小寫英文、數字與特殊符號的固定配對密碼，選擇保存後可供無人值守重啟沿用。永久身分檔位於 app data，含註冊 token 與 Noise 私鑰，Unix 建立或載入時都強制修正為 `0600`。配對嘗試限制另以不含秘密的檔案保存，十分鐘五次未完成驗證，重啟不會歸零。
 - `RelayAddressField` 只在首次設定或按下修改時展開實際位址；成功保存後，分享與「以 ID 連線」的日常畫面只顯示已儲存狀態。位址保存在 WebView local storage，屬非機密連線 metadata；收合欄位是 UX，不是安全邊界。
 - 複製配對碼會走 `SensitiveClipboard` 原生狀態；只保存摘要並在可調整期限後比對、清除相同內容。新複製內容不會被覆蓋，設定頁亦可立即清除目前仍相符的敏感值；browser preview 以相同規則使用 Web Clipboard fallback。
-- Tauri 以 NDJSON 事件管理每次分享的 sidecar 生命週期。直連配對成功後立即從 UI 狀態移除一次性碼；中繼模式為了後續重連會保留本次碼到停止分享，但不寫入持久層，固定碼以 stdin 而非程序參數送入 sidecar。關閉對話框可選擇讓分享留在背景，停止分享或應用程式結束時會終止 Agent。
+- Tauri 以 NDJSON 事件管理每次分享的 sidecar 生命週期。直連配對成功後立即從 UI 狀態移除一次性碼；中繼模式為了後續重連會保留本次碼到停止分享。隨機碼不持久化；只有使用者明確選擇的固定密碼可由 Rust 原生層保存，明文不進 WebView settings、程序參數或日誌，並只以 stdin 送入 sidecar。關閉對話框可選擇讓分享留在背景，停止分享或應用程式結束時會終止 Agent。
 - 預設只傳送 JPEG 畫面（唯讀）。分享端可在 `RemoteHostDialog` 勾選「允許對方操控」（Agent 帶 `--allow-input`），Hello 的 `view_only` 隨之為 false；此時檢視端的滑鼠與鍵盤事件會以座標換算回真實螢幕後注入，斷線或停止時釋放所有按住的按鍵。UI 須依 `view_only` 標示目前是唯讀還是可操控。
 - 檔案分享是第二個獨立權限。主機勾選後可指定單一分享根目錄（留白由原生層解析家目錄），Agent 才會帶 `--file-root` 並在 Hello 宣告 `file_transfer`；檢視端可展開 `RemoteFilesPane` 查看虛擬 `/` 之下的資料夾清單、串流上傳與下載。主機端 canonicalize 每個既有路徑並限制在根目錄內，拒絕 `..`、控制字元與越界符號連結；上傳使用私有同目錄暫存檔，位元組完整、flush 與 sync 成功後才保護舊檔並替換，取消或斷線會移除半成品。介面雖允許留白使用家目錄，部署指引必須建議專用分享資料夾。
 - `--terminal` 會在 Agent 端建立 shell PTY，以 `RemoteTerminalView`／xterm 分頁傳送有界的 TerminalData、TerminalInput 與 resize 訊息，不擷取螢幕；沒有 `--allow-input` 時仍為唯讀。這是單一通用 shell 工作階段，不等於遠端 Agent Fleet 或既有 PTY 重新 attach。
@@ -200,12 +202,12 @@
 - 以 ID 連線成功後，該裝置由 `rememberRelayDevice()` 存成一般連線設定檔（`protocol: lattice` 加 `deviceId`／`relayAddress`），之後 `RemoteConnectFlow` 只索取配對碼。設定檔以身分定址，`hostname` 空、`port` 0，因此驗證改檢查九位數與中繼位址、重複判定改比對 `deviceId`——否則所有中繼設定檔會因共用空位址而互判重複。一次性配對碼不進設定檔。同一裝置換中繼位址時就地更新而不新增，且只在位址真的變了才寫入，使用者取過的名稱不會被對面 Agent 的名稱覆蓋。
 - 保存的中繼位址只在連線成功時更新，而過期的位址永遠連不上，所以另有就地修復：`connect` 在中繼本身連不上或位址讀不出來時回報 `stage: "relay"`，中繼有回應但拒絕撥號維持 `"connect"`（位址是對的，要修的是另一端）。`RemoteConnectFlow` 只在前者打開位址欄位，`relayConnectFollowUp()` 決定是否提議修改與是否寫回；只有真的載過工作階段的位址才會寫回，猜錯不會覆蓋原本可用的值。
 - 目前沒有雲端帳戶、跨裝置裝置清單、組織 ACL、2FA、管理員稽核、撤銷與每租戶配額；relay 適合自架個人／小團隊，不應因為九位數 ID 與收合位址就宣稱為完整公開遠端支援服務。公網入口需自行做來源限速、連線上限、監控與告警；relay 綁 loopback 時所有公網客戶端在它眼中都是 127.0.0.1，內建每 IP 限速預設全部放行，需以 `--client-ip-header` 指名 ingress 寫入真實來源的標頭才會生效。
-- 無人值守固定碼必須由被控端明確啟用。內嵌模式不持久化固定碼並以 stdin 送入 Agent；獨立服務應使用擁有者限定的 `--pair-code-file`。五次配對失敗會停止 Agent，服務管理器不得以無條件重啟繞過；Relay 不保存明文配對碼，也不取得桌面、終端或檔案解密能力。
+- 無人值守固定密碼必須由被控端明確啟用，而且只適用中繼模式。內嵌模式由 Rust 核心把認證綁定永久裝置 ID，確認 Agent 回報相同身分後才保存。`credential_backend.json` 的非秘密標記記錄權威後端，`remoteHostCleanupPending` 則持久記錄尚待清理的後端；主機載入只查標記指向處，不沿用一般認證的跨後端 fallback。輪替先耐久撤銷載入權並將兩端寫入清理日誌，再寫入選定後端，最後才原子啟用新位置標記。刪除也先清標記並記錄兩端待清理，再刪實體副本；因此中途失敗只會留下不可達的待清副本。`RemoteHostDialog` 顯示待清理警告與重試操作。系統認證儲存區可在重啟後直接沿用；加密保管庫重啟後仍須先解鎖。已執行中的 Agent 仍使用記憶體內的密碼直到本次停止或應用程式重啟。加密備份不攜帶這份可重用授權；還原會清權威標記、記錄兩端待清理，並讓前端關閉下次 `useSavedPairingCode`。獨立服務應使用擁有者限定的 `--pair-code-file`。五次配對失敗會停止 Agent，服務管理器不得以無條件重啟繞過；Relay 不保存明文配對碼，也不取得桌面、終端或檔案解密能力。
 
 ## 13. Web RDP Canvas
 
 - `crates/lattice-rdp` 是每個工作階段一個程序的 IronRDP engine，用 NDJSON stdin/stdout 與 Tauri bridge 溝通，以隔離 russh 與 IronRDP 的密碼學相依。
-- 密碼只出現在連線對話框、單次 Tauri IPC 與 engine 記憶體，不寫入 profile、事件或程序參數；使用者明確勾選時，成功連線後才會寫入作業系統認證儲存區。
+- 密碼只出現在連線對話框、單次 Tauri IPC 與 engine 記憶體，不寫入 profile、事件或程序參數；使用者明確勾選時，成功連線後才會寫入目前選定的認證後端。
 - TLS 預設嚴格驗證；自簽憑證第一次必定拒絕並回傳 SHA-256 指紋，只有使用者明確核對後才能針對同一指紋重試一次。
 - React 端以真正的 `<canvas>` 繪圖，輸入轉為 RDP FastPath；Canvas 失焦、離開或卸載時會釋放所有按鍵與滑鼠按鈕。
 - `CanvasCaptureControls` 同時供 Lattice Remote 與 Web RDP 使用。使用者可手動輸出 PNG，或以 `canvas.captureStream` 和 `MediaRecorder` 開始、停止並下載 WebM／MP4；只錄遠端畫布、不錄 UI、不自動啟動，也不上傳。
@@ -217,7 +219,7 @@
 - 架構與 RDP 相同：`crates/lattice-vnc` 是獨立的 sidecar 引擎（vnc-rs 純 Rust 客戶端），stdin/stdout 走一行一個 JSON 的協定；密碼只經 stdin 傳入引擎一次，不進事件、狀態或日誌。
 - 引擎在自己這端合成完整 framebuffer（Raw／Zrle／CopyRect 矩形更新、越界矩形一律裁切不信任），以每秒約 15 幀節流輸出 JPEG；WebView 只收合成後的畫面，不碰 VNC 線上格式。
 - 鍵盤走 X11 keysym（可列印字元用碼點、特殊鍵查表、左右修飾鍵區分），滑鼠按鍵與滾輪照 RFC 6143 的按鍵遮罩處理，滾輪是按放脈衝。
-- 傳統 VNC 沒有傳輸加密，連線視窗直接講明，並建議搭配本程式的 SSH 通道使用；密碼可存進系統認證儲存區（`CredentialKind::VncPassword`）。
+- 傳統 VNC 沒有傳輸加密，連線視窗直接講明，並建議搭配本程式的 SSH 通道使用；密碼可存進目前選定的認證後端（`CredentialKind::VncPassword`）。
 - 密碼錯誤會辨識為「驗證失敗」而不是籠統的連線錯誤（含伺服器用 SecurityResult 文字回絕的情況）。
 
 ---
@@ -274,8 +276,8 @@ SFTP 使用獨立 `sftp_read_text_file`／`sftp_save_text_file` 指令，沿用�
 - **為什麼不是 IOTA Stronghold**：藍圖原寫 Stronghold，但該專案已被原廠封存、不再維護；改用兩個活躍維護的標準元件自建同等能力——Argon2id（64 MiB、3 迭代）把主密碼拉伸成金鑰，XChaCha20-Poly1305 AEAD 密封整包內容。檔案被改動一個位元組就會驗證失敗，不會吐出爛掉的密碼。
 - **檔案**：`vault.json` 放在應用程式資料夾，內容只有 KDF 參數、鹽、nonce 與密文；連憑證的「名稱」都在密文裡。寫入走暫存檔＋fsync＋rename，中斷不會留半個保管庫。
 - **狀態**：未建立／鎖定／解鎖。金鑰與明文只存在解鎖期間的記憶體（zeroize），鎖定即丟。主密碼沒有救援路徑，介面直說。
-- **雙後端路由**（`credentials.rs`）：新密碼寫入使用者選的儲存區（系統認證儲存區或保管庫，「金鑰保管庫」分頁可切換）；讀取先查偏好後端、再查另一邊，切換偏好不會弄丟舊密碼；刪除兩邊都清，保管庫鎖定時會明說「還有一份在鎖著的保管庫裡」而不是假裝刪乾淨。
-- **鎖定時的行為**：偏好保管庫但未解鎖 → 儲存新密碼會失敗並提示解鎖；已存在系統儲存區的密碼照常可用。
+- **雙後端路由**（`credentials.rs`）：一般連線的新密碼寫入使用者選的儲存區（系統認證儲存區或保管庫，「金鑰保管庫」分頁可切換）；讀取先查偏好後端、再查另一邊，切換偏好不會弄丟舊密碼；刪除兩邊都清，保管庫鎖定時會明說「還有一份在鎖著的保管庫裡」而不是假裝刪乾淨。Lattice Remote 分享端固定密碼是安全例外：主機只載入 `credential_backend.json` 權威標記指向的後端，絕不 fallback；輪替先寫入撤銷狀態與兩端清理日誌，再寫選定後端、原子啟用新標記。刪除同樣先撤銷並記錄，實體清理失敗時由介面提示重試。
+- **鎖定時的行為**：一般連線若偏好保管庫但未解鎖，儲存新密碼會失敗並提示解鎖，已存在系統儲存區的密碼照常可用。分享端固定密碼只信任位置標記指向的後端；標記指向鎖定的 Vault 時不會退回讀取系統儲存區的舊副本。
 - 單元測試涵蓋：建立/解鎖/錯誤密碼/篡改偵測/改密碼（舊密碼失效、資料保留）/刪除/磁碟檔不含任何明文。
 
 ---

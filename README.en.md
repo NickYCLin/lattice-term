@@ -114,7 +114,9 @@ See the [storage and security design](docs/STORAGE_SECURITY_DECISION.zh-TW.md) f
 **Does Lattice Remote need a server?**
 
 Local-network pairing can connect directly. Connections by device ID across networks need a self-hosted
-`lattice-relay`. A hosted team service is not currently provided.
+`lattice-relay`. A host shared through a relay can securely save a fixed unattended password once and reuse it after restart
+(an encrypted-vault copy must be unlocked first). Encrypted backups deliberately carry no reusable host-password
+authority, so the sharing host must save it again after a restore. A hosted team service is not currently provided.
 See the [relay setup guide](docs/RELAY_SERVER.zh-TW.md).
 
 ## Documentation and contributions

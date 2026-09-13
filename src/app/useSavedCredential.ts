@@ -7,7 +7,10 @@ export type CredentialKind =
   | "sftpPassword"
   | "rdpPassword"
   | "vncPassword"
-  | "latticePairingCode";
+  | "latticePairingCode"
+  | "latticeHostPairingCode";
+
+export const REMOTE_HOST_CREDENTIAL_ID = "remote-host";
 
 export interface CredentialStoreStatus {
   ready: boolean;
@@ -16,13 +19,24 @@ export interface CredentialStoreStatus {
 }
 
 export type SavedCredentialState =
-  | { mode: "loading"; provider: string | null; detail: null }
-  | { mode: "saved" | "missing"; provider: string; detail: null }
+  | {
+      mode: "loading";
+      provider: string | null;
+      detail: null;
+      cleanupPending?: boolean;
+    }
+  | {
+      mode: "saved" | "missing";
+      provider: string;
+      detail: null;
+      cleanupPending?: boolean;
+    }
   | {
       mode: "unavailable";
       provider: string | null;
       detail: string;
       runtimeUnavailable: boolean;
+      cleanupPending?: boolean;
     };
 
 export interface CredentialInventoryEntry {
@@ -90,6 +104,12 @@ async function exists(
   return invoke<boolean>("credential_exists", { profileId, kind });
 }
 
+async function hostCleanupPending(kind: CredentialKind): Promise<boolean> {
+  if (kind !== "latticeHostPairingCode") return false;
+  const { invoke } = await core();
+  return invoke<boolean>("remote_host_pairing_code_cleanup_pending");
+}
+
 async function readState(
   profileId: string,
   kind: CredentialKind,
@@ -103,7 +123,31 @@ async function readState(
     };
   }
 
+  let cleanupPending = false;
   try {
+    cleanupPending = await hostCleanupPending(kind);
+    if (kind === "latticeHostPairingCode") {
+      // Host passwords have an authoritative backend marker and deliberately
+      // ignore the ordinary preferred-backend fallback. Probe that marker
+      // before checking whether the backend selected for *new* credentials is
+      // currently ready.
+      const saved = await exists(profileId, kind);
+      if (saved) {
+        let provider = "Secure storage";
+        try {
+          provider = (await readStatus()).provider;
+        } catch {
+          // The marked backend already confirmed the saved credential.
+        }
+        return {
+          mode: "saved",
+          provider,
+          detail: null,
+          cleanupPending,
+        };
+      }
+    }
+
     const status = await readStatus();
     if (!status.ready) {
       return {
@@ -111,13 +155,17 @@ async function readState(
         provider: status.provider,
         detail: status.detail ?? "Credential storage is unavailable.",
         runtimeUnavailable: false,
+        cleanupPending,
       };
     }
 
+    const saved =
+      kind === "latticeHostPairingCode" ? false : await exists(profileId, kind);
     return {
-      mode: (await exists(profileId, kind)) ? "saved" : "missing",
+      mode: saved ? "saved" : "missing",
       provider: status.provider,
       detail: null,
+      cleanupPending,
     };
   } catch (reason) {
     return {
@@ -125,6 +173,7 @@ async function readState(
       provider: null,
       detail: reason instanceof Error ? reason.message : String(reason),
       runtimeUnavailable: false,
+      cleanupPending,
     };
   }
 }
@@ -221,6 +270,7 @@ export function useSavedCredential(
       mode: "missing",
       provider: current.provider ?? "System credential store",
       detail: null,
+      cleanupPending: current.cleanupPending,
     }));
   }, [kind, profileId]);
 

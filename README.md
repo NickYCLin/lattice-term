@@ -105,6 +105,8 @@ iPhone／iPad 已可從 [App Store](https://apps.apple.com/app/latticeterm/id680
 **Lattice Remote 需要額外服務嗎？**
 
 區網可直接配對。跨網路使用裝置 ID 連線時，需要自架 `lattice-relay` 中繼；
+透過中繼分享的主機可把無人值守固定密碼安全保存一次，之後重啟沿用（加密保管庫需先解鎖）。
+加密備份不攜帶這份主機密碼的可重用授權，還原後要在被控端重新保存。
 目前沒有提供託管團隊服務。[中繼部署說明](docs/RELAY_SERVER.zh-TW.md)
 
 ## 文件與參與

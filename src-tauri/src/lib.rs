@@ -11,6 +11,7 @@ mod chat_attachments;
 pub mod clipboard;
 pub mod credentials;
 pub mod domain;
+mod durable_file;
 pub mod file_exports;
 pub mod hostkeys;
 #[cfg(target_os = "linux")]
@@ -266,7 +267,7 @@ async fn play_notification_sound(sound: String, volume: Option<u8>) -> Result<bo
     .map_err(|error| format!("Notification sound did not complete: {error}"))?
 }
 
-async fn credential_call<T, F>(operation: F) -> Result<T, String>
+pub(crate) async fn credential_call<T, F>(operation: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
@@ -409,20 +410,25 @@ async fn encrypted_backup_export(
     storage: State<'_, AppStorage>,
     plans: State<'_, AppAgentPlans>,
     trust: State<'_, TrustState>,
+    remote_hosts: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<EncryptedBackupExport, String> {
+    // Keep host credential marker updates out of the snapshot window.
+    let _remote_guard = remote_hosts.lock_configuration().await;
     let directory = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let (files, validated) = crate::vault::manager()?.run_while_locked(|| {
-        // Hold every mutable file-backed store while taking the snapshot, so
-        // one logical backup cannot contain half of a concurrent mutation.
-        let _storage = storage.lock().map_err(|error| error.to_string())?;
-        let _plans = plans.lock().map_err(|error| error.to_string())?;
-        let _trust = backup_trust_guard(trust.inner())?;
-        let files = crate::backup::read_app_files(&directory)?;
-        let validated = crate::backup::validate_app_files(&files)?;
-        Ok((files, validated))
+    let (files, validated) = crate::credentials::run_while_backend_file_locked(|| {
+        crate::vault::manager()?.run_while_locked(|| {
+            // Hold every mutable file-backed store while taking the snapshot,
+            // so one logical backup cannot contain half of a concurrent mutation.
+            let _storage = storage.lock().map_err(|error| error.to_string())?;
+            let _plans = plans.lock().map_err(|error| error.to_string())?;
+            let _trust = backup_trust_guard(trust.inner())?;
+            let files = crate::backup::read_app_files(&directory)?;
+            let validated = crate::backup::validate_app_files(&files)?;
+            Ok((files, validated))
+        })
     })?;
     let created_at = now_seconds();
     let app_file_count = files.len();
@@ -480,6 +486,9 @@ fn restore_failure_with_rollback(
 }
 
 #[tauri::command]
+// Tauri injects each managed state independently; keeping these command
+// inputs explicit makes the restore boundary and its lock order auditable.
+#[allow(clippy::too_many_arguments)]
 async fn encrypted_backup_restore(
     app: AppHandle,
     contents: String,
@@ -488,6 +497,7 @@ async fn encrypted_backup_restore(
     plans: State<'_, AppAgentPlans>,
     trust: State<'_, TrustState>,
     tunnels: State<'_, Arc<TunnelRegistry>>,
+    remote_hosts: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<EncryptedBackupRestore, String> {
     if tunnels
         .list()
@@ -517,6 +527,14 @@ async fn encrypted_backup_restore(
         vault_included,
     } = validated;
 
+    // Configuration/start/delete uses the same lock. The active Agent may
+    // finish its current in-memory session, but no future start can race the
+    // credential authority reset performed by restore.
+    let _remote_guard = remote_hosts.lock_configuration().await;
+    // A tunnel start takes the reader side through reservation. Once this
+    // writer lock is held, the following idle check remains true throughout
+    // the store replacement instead of racing a new Starting row.
+    let _tunnel_restore_guard = tunnels.lock_backup_restore().await;
     if tunnels
         .list()
         .iter()
@@ -529,23 +547,29 @@ async fn encrypted_backup_restore(
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    crate::vault::manager()?.run_while_locked(|| {
-        let mut storage_guard = storage.lock().map_err(|error| error.to_string())?;
-        let mut plans_guard = plans.lock().map_err(|error| error.to_string())?;
-        let mut trust_guard = backup_trust_guard(trust.inner())?;
-        let previous = crate::backup::replace_app_files(&directory, &files)?;
-        let (next_storage, next_plans, next_trust) = match restore_loaded_stores(&directory) {
-            Ok(stores) => stores,
-            Err(error) => {
-                return Err(restore_failure_with_rollback(&directory, &previous, error));
-            }
-        };
+    crate::credentials::run_while_backend_file_locked(|| {
+        crate::vault::manager()?.run_while_locked(|| {
+            let mut storage_guard = storage.lock().map_err(|error| error.to_string())?;
+            let mut plans_guard = plans.lock().map_err(|error| error.to_string())?;
+            let mut trust_guard = backup_trust_guard(trust.inner())?;
+            let previous = crate::backup::replace_app_files(&directory, &files)?;
+            let (next_storage, next_plans, next_trust) = match restore_loaded_stores(&directory) {
+                Ok(stores) => stores,
+                Err(error) => {
+                    return Err(restore_failure_with_rollback(&directory, &previous, error));
+                }
+            };
 
-        *storage_guard = next_storage;
-        *plans_guard = next_plans;
-        *trust_guard = next_trust;
-        Ok(())
+            *storage_guard = next_storage;
+            *plans_guard = next_plans;
+            *trust_guard = next_trust;
+            Ok(())
+        })
     })?;
+    // Restores deliberately exclude the reusable host-password authority.
+    // The current Agent can finish, but the frontend must not schedule its
+    // next run as if a reusable password still existed.
+    crate::remote_host::mark_pairing_code_unsaved(&app, remote_hosts.inner())?;
 
     Ok(EncryptedBackupRestore {
         source_created_at: created_at,
@@ -1942,6 +1966,9 @@ async fn credential_exists(profile_id: String, kind: CredentialKind) -> Result<b
 
 #[tauri::command]
 async fn credential_delete(profile_id: String, kind: CredentialKind) -> Result<bool, String> {
+    if kind == CredentialKind::LatticeHostPairingCode {
+        return Err("Use the dedicated Lattice Remote host password removal command.".to_string());
+    }
     credential_call(move || crate::credentials::delete(&profile_id, kind)).await
 }
 
@@ -2954,6 +2981,26 @@ async fn remote_host_stop(
 }
 
 #[tauri::command]
+async fn remote_host_forget_pairing_code(
+    app: AppHandle,
+    registry: State<'_, Arc<RemoteHostRegistry>>,
+) -> Result<remote_host::RemoteHostForgetResult, String> {
+    crate::remote_host::forget_pairing_code(&app, registry.inner()).await
+}
+
+#[tauri::command]
+async fn remote_host_retry_pairing_code_cleanup(
+    registry: State<'_, Arc<RemoteHostRegistry>>,
+) -> Result<remote_host::RemoteHostForgetResult, String> {
+    crate::remote_host::retry_pairing_code_cleanup(registry.inner()).await
+}
+
+#[tauri::command]
+async fn remote_host_pairing_code_cleanup_pending() -> Result<bool, String> {
+    credential_call(crate::credentials::remote_host_pairing_code_cleanup_pending).await
+}
+
+#[tauri::command]
 fn remote_host_status(
     registry: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<Option<RemoteHostStatus>, String> {
@@ -3230,6 +3277,10 @@ async fn tunnel_start(
     trust: State<'_, TrustState>,
     registry: State<'_, Arc<TunnelRegistry>>,
 ) -> Result<TunnelStatusSummary, String> {
+    // Hold the reader side from before the profile/trust snapshot until a
+    // Starting row exists. Backup restore takes the writer side, so it can
+    // neither replace these stores underneath this snapshot nor miss the row.
+    let tunnel_start_guard = registry.lock_tunnel_start().await;
     // A tunnel rides its own SSH session, so it needs the same two things a
     // terminal session needs: a trusted host key and a credential. Both are
     // resolved here, before any listener exists, so failure leaves nothing
@@ -3269,8 +3320,12 @@ async fn tunnel_start(
     // Reserve before keyring I/O. A flood of distinct tunnel ids must not
     // create an unbounded number of blocking credential jobs before the
     // tunnel runtime has applied its global admission limit.
-    let mut reservation =
-        crate::tunnel::reserve_tunnel_start(Arc::clone(registry.inner()), &request)?;
+    let mut reservation = crate::tunnel::reserve_tunnel_start(
+        Arc::clone(registry.inner()),
+        &request,
+        &tunnel_start_guard,
+    )?;
+    drop(tunnel_start_guard);
     let credential_profile = profile.clone();
     let admission = reservation.take_admission_for_credential()?;
     let mut credential_job = tauri::async_runtime::spawn_blocking(move || {
@@ -3371,6 +3426,10 @@ pub fn run() {
             // the executable, so it survives an update and follows the user
             // profile on a shared machine.
             let dir = app.path().app_data_dir()?;
+            // A Windows scanner can transiently block final deletion after a
+            // write-through rename. Retry only our recognisable, unreachable
+            // tombstones before opening any application stores.
+            let _ = crate::durable_file::cleanup_private_tombstones(&dir);
             // The credential router and the encrypted vault live in the same
             // directory as the rest of the app's data.
             crate::credentials::initialize(dir.clone());
@@ -3561,6 +3620,9 @@ pub fn run() {
             remote_file_transfer_dismiss,
             remote_file_transfers,
             remote_host_device_id,
+            remote_host_forget_pairing_code,
+            remote_host_pairing_code_cleanup_pending,
+            remote_host_retry_pairing_code_cleanup,
             remote_host_start,
             remote_host_stop,
             remote_host_status,

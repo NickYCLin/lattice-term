@@ -24,7 +24,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{
+    watch, OwnedSemaphorePermit, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore,
+};
 
 const MAX_TUNNEL_ID_BYTES: usize = 128;
 const MAX_HOST_BYTES: usize = 253;
@@ -114,6 +116,10 @@ pub struct TunnelRegistry {
     tunnels: Mutex<HashMap<String, ActiveTunnel>>,
     generations: AtomicU64,
     shutting_down: AtomicBool,
+    /// Backup restore takes the writer side before its definitive idle check;
+    /// every new reservation briefly takes the reader side. This closes the
+    /// check/start race without holding the gate for a tunnel's lifetime.
+    restore_barrier: RwLock<()>,
     tunnel_admission: Arc<Semaphore>,
     connection_admission: Arc<Semaphore>,
 }
@@ -124,6 +130,7 @@ impl Default for TunnelRegistry {
             tunnels: Mutex::new(HashMap::new()),
             generations: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
+            restore_barrier: RwLock::new(()),
             tunnel_admission: Arc::new(Semaphore::new(MAX_ACTIVE_TUNNELS)),
             connection_admission: Arc::new(Semaphore::new(MAX_GLOBAL_TUNNEL_CONNECTIONS)),
         }
@@ -254,12 +261,25 @@ impl TunnelRegistry {
         Self::default()
     }
 
+    /// Prevents new tunnel reservations until a backup restore has either
+    /// committed or left all application stores unchanged.
+    pub(crate) async fn lock_backup_restore(&self) -> RwLockWriteGuard<'_, ()> {
+        self.restore_barrier.write().await
+    }
+
+    /// Start commands take this before reading profiles or host trust and keep
+    /// it until their Starting row has been reserved.
+    pub(crate) async fn lock_tunnel_start(&self) -> RwLockReadGuard<'_, ()> {
+        self.restore_barrier.read().await
+    }
+
     #[cfg(test)]
     fn with_limits(max_tunnels: usize, max_connections: usize) -> Self {
         Self {
             tunnels: Mutex::new(HashMap::new()),
             generations: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
+            restore_barrier: RwLock::new(()),
             tunnel_admission: Arc::new(Semaphore::new(max_tunnels)),
             connection_admission: Arc::new(Semaphore::new(max_connections)),
         }
@@ -1388,6 +1408,7 @@ async fn open_session(
 pub(crate) fn reserve_tunnel_start(
     registry: Arc<TunnelRegistry>,
     request: &StartTunnelRequest,
+    _restore_guard: &RwLockReadGuard<'_, ()>,
 ) -> Result<TunnelStartReservation, String> {
     validate_request(request)?;
     registry.reserve_start(&request.tunnel_id)
@@ -1655,7 +1676,9 @@ pub async fn start_tunnel(
     password: &str,
     known: Option<HostKeyRecord>,
 ) -> Result<TunnelStatusSummary, String> {
-    let reservation = reserve_tunnel_start(registry, &request)?;
+    let restore_guard = registry.lock_tunnel_start().await;
+    let reservation = reserve_tunnel_start(Arc::clone(&registry), &request, &restore_guard)?;
+    drop(restore_guard);
     start_reserved_tunnel(reservation, request, password, known).await
 }
 
@@ -1821,6 +1844,43 @@ mod tests {
             ssh_port: 22,
             ssh_username: "operator".to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn backup_restore_barrier_cannot_miss_a_concurrent_start() {
+        let registry = Arc::new(TunnelRegistry::new());
+        let restore_guard = registry.lock_backup_restore().await;
+        let starting_registry = Arc::clone(&registry);
+        let mut starting = tokio::spawn(async move {
+            let guard = starting_registry.lock_tunnel_start().await;
+            let reservation = reserve_tunnel_start(
+                Arc::clone(&starting_registry),
+                &request(TunnelType::Local),
+                &guard,
+            )?;
+            drop(guard);
+            Ok::<_, String>(reservation)
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut starting)
+                .await
+                .is_err(),
+            "a start must wait while restore owns the barrier"
+        );
+        drop(restore_guard);
+
+        let reservation = tokio::time::timeout(Duration::from_secs(1), starting)
+            .await
+            .expect("the start should resume after restore")
+            .expect("the start task should not panic")
+            .expect("the start should reserve successfully");
+        assert_eq!(
+            registry.status("tunnel-1").unwrap().status,
+            TunnelStatus::Starting,
+            "a later restore writer must observe the reserved row"
+        );
+        drop(reservation);
     }
 
     #[tokio::test]
