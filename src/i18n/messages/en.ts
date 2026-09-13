@@ -1400,7 +1400,7 @@ export const en: Messages = {
   "automation.badge": "Scheduled",
   "automation.empty.title": "No automations yet",
   "automation.empty.body":
-    "Write instructions, pick a project and a time, and LatticeTerm runs a chat turn on schedule while it is open. Each run appears as a new conversation waiting for you.",
+    "Write instructions, choose a project and a time, and LatticeTerm runs a scheduled chat turn. Each result appears as a new conversation.",
   "automation.form.title": "Automation",
   "automation.name": "Name",
   "automation.instructions": "Instructions",
@@ -1420,7 +1420,7 @@ export const en: Messages = {
   "automation.error.afterMissing": "That automation no longer exists",
   "automation.error.afterCycle": "That would close a loop: the two would trigger each other forever",
   "automation.schedule.hint":
-    "Runs only while LatticeTerm is open. A time missed while it was closed runs once at the next start, then the schedule continues.",
+    "Runs here while the window is open, then through the background service if it is running. A schedule missed while the service was stopped runs once at the next start, then the regular schedule resumes.",
   "automation.time": "Time",
   "automation.days": "Days",
   "automation.every": "Every",
@@ -1574,7 +1574,7 @@ export const en: Messages = {
   "remote.files.transfer.clear": "Clear transfer",
   "remote.host.allowFilesWarnBody": "Paired viewers can read, upload and replace files within the shared root. Paths cannot escape this folder. Revoke file access in these settings.",
   "remote.host.allowInputWarnBody": "Paired viewers can control your desktop. Give pairing information only to trusted people; revoke control in these settings.",
-  "remote.host.securityBody": "A viewer must provide the correct pairing code to access the primary display and granted features. Data is end-to-end encrypted. Mouse/keyboard, files, commands and conversations are separate grants. Applying settings restarts the sharing connection.",
+  "remote.host.securityBody": "A viewer must provide the correct pairing code to access the display and granted features. Data is end-to-end encrypted. Mouse/keyboard, files, commands, conversations and existing CLIs are separate grants. Applying settings restarts the sharing connection.",
   "remote.host.applying": "Applying settings…",
   "remote.host.saveSettings": "Save settings",
   "remote.host.editSettings": "Connection and permission settings",

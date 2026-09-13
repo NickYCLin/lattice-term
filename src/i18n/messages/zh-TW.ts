@@ -1333,7 +1333,7 @@ export const zhTW = {
   "automation.badge": "排程",
   "automation.empty.title": "還沒有排程任務",
   "automation.empty.body":
-    "寫一段指示、選好專案與時間，LatticeTerm 開著的時候就會準時用對話模式跑一輪，結果會以新對話出現在清單裡等你看。",
+    "寫一段指示、選好專案與時間，LatticeTerm 就會依排程執行對話，結果以新對話出現在清單裡。",
   "automation.form.title": "排程任務",
   "automation.name": "名稱",
   "automation.instructions": "指示",
@@ -1353,7 +1353,7 @@ export const zhTW = {
   "automation.error.afterMissing": "那個排程已經不存在",
   "automation.error.afterCycle": "這樣會繞成一圈，兩個排程會互相觸發個不停",
   "automation.schedule.hint":
-    "只有 LatticeTerm 開著時才會執行；關著的時候錯過的，下次開啟會補跑一次，之後照原時間。",
+    "視窗開啟時在此執行，關閉後由仍在運行的背景服務執行。服務未啟動時錯過的排程，下次開啟會補跑一次，之後恢復原排程。",
   "automation.time": "時刻",
   "automation.days": "星期",
   "automation.every": "每隔",
@@ -1506,7 +1506,7 @@ export const zhTW = {
   "remote.host.action": "分享這台裝置",
   "remote.host.activeAction": "正在分享",
   "remote.host.securityTitle": "配對與操作權限",
-  "remote.host.securityBody": "配對端必須提供正確配對碼，才能取得完整主螢幕畫面與已授權的功能。資料全程端對端加密。鍵鼠、檔案、命令與對話分別授權；套用設定會重新建立分享連線。",
+  "remote.host.securityBody": "配對端必須提供正確配對碼，才能查看螢幕與使用已授權的功能。資料全程端對端加密。鍵鼠、檔案、命令、對話與既有 CLI 分別授權；套用設定會重新建立分享連線。",
   "remote.host.problemTitle": "分享狀態已變更",
   "remote.host.state.waiting": "等待配對",
   "remote.host.state.pairing": "正在驗證配對碼",
