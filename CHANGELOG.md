@@ -4,6 +4,13 @@
 
 ---
 
+## [2.3.0](https://github.com/NickYCLin/lattice-term/compare/v2.2.0...v2.3.0) (2026-09-13)
+
+
+### 🚀 新增功能
+
+* **remote:** 支援遠端既有 CLI 工作階段操作 ([5d5e8a5](https://github.com/NickYCLin/lattice-term/commit/5d5e8a5e0e55fad960c015b4b9640a31579ade1b))
+
 ## [2.2.0](https://github.com/NickYCLin/lattice-term/compare/v2.1.0...v2.2.0) (2026-09-13)
 
 
