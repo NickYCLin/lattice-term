@@ -1,3 +1,5 @@
+import { useFileDrop } from "../../app/fileDrop";
+import { localFileError } from "../../app/localFiles";
 import {
   useEffect,
   useRef,
@@ -63,7 +65,7 @@ export function SftpPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const dropRef = useRef<HTMLElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const refreshedPathUploads = useRef(new Set<string>());
   // The backend runs one listing per session and refuses a second, so every
@@ -270,44 +272,12 @@ export function SftpPane({
     }
   }
 
-  // OS drag-and-drop is delivered by Tauri as file paths (the webview's own
-  // drop events are suppressed), so only the active pane binds the listener.
-  useEffect(() => {
-    if (!active || editor.active) {
-      setDragging(false);
-      return;
-    }
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { getCurrentWebviewWindow } = await import(
-          "@tauri-apps/api/webviewWindow"
-        );
-        const stop = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-          if (cancelled) return;
-          if (event.payload.type === "enter" || event.payload.type === "over") {
-            setDragging(true);
-          } else if (event.payload.type === "leave") {
-            setDragging(false);
-          } else if (event.payload.type === "drop") {
-            setDragging(false);
-            void dropFiles(event.payload.paths);
-          }
-        });
-        if (cancelled) stop();
-        else unlisten = stop;
-      } catch {
-        // Browser preview has no native drag-drop bridge.
-      }
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      setDragging(false);
-    };
-    // Re-bind when the open directory changes so drops target the current one.
-  }, [active, editor.active, directory?.path, session.sessionId]);
+  const { dragging, ...dropHandlers } = useFileDrop({
+    ref: dropRef, disabled: !active || editor.active || !directory,
+    onPaths: dropFiles,
+    onFiles: async files => { for (const file of files) await upload(file); },
+    onError: error => setProblem(localFileError(error, t)),
+  });
 
   async function transferAction(operation: () => Promise<void>) {
     setProblem(null);
@@ -343,12 +313,14 @@ export function SftpPane({
 
   return (
     <section
+      ref={dropRef}
+      {...dropHandlers}
       className={`sftp-pane${dragging ? " sftp-pane--dropping" : ""}`}
       aria-label={t("sftp.title")}
     >
       <header className="sftp-toolbar">
         <form className="sftp-path" onSubmit={submitPath}>
-          <label className="sr-only" htmlFor={`sftp-path-${session.sessionId}`}>
+          <label className="visually-hidden" htmlFor={`sftp-path-${session.sessionId}`}>
             {t("sftp.path")}
           </label>
           <input
@@ -408,9 +380,10 @@ export function SftpPane({
           <input
             ref={uploadRef}
             type="file"
+            multiple
             hidden
             aria-label={t("sftp.upload")}
-            onChange={(event) => void upload(event.currentTarget.files?.[0])}
+            onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); void (async () => { for (const file of files) await upload(file); })(); }}
           />
         </div>
       </header>
@@ -560,7 +533,7 @@ export function SftpPane({
                 </span>
                 <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                   {transfer.state === "running"
-                    ? `${formatBytes(transfer.bytesDone)}${transfer.totalBytes ? ` / ${formatBytes(transfer.totalBytes)}` : ""}`
+                    ? `${formatBytes(transfer.bytesDone, tag)}${transfer.totalBytes ? ` / ${formatBytes(transfer.totalBytes, tag)}` : ""}`
                     : transfer.state === "error"
                       ? (transfer.detail ?? t("sftp.transfer.error"))
                       : (transfer.detail ??

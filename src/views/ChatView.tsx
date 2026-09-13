@@ -1,3 +1,5 @@
+import { PathDropZone } from "../components/files/PathDropZone";
+import { useFileDrop } from "../app/fileDrop";
 /**
  * Chat mode: talk to a local agent CLI in a message thread.
  *
@@ -441,7 +443,7 @@ function ThreadPane({
   const pastingImageRef = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const [draggingFiles, setDraggingFiles] = useState(false);
+  const composerDropRef = useRef<HTMLDivElement>(null);
   const [steering, setSteering] = useState(false);
   const steeringRef = useRef(false);
   const fresh = threadIsFresh(thread);
@@ -528,7 +530,7 @@ function ThreadPane({
         multiple: true,
         title: t(kind === "image" ? "chat.attachment.images" : "chat.attachment.files"),
         ...(kind === "image"
-          ? { filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] }
+          ? { filters: [{ name: t("chat.attachment.images"), extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] }
           : {}),
       });
       if (typeof selected === "string") addAttachments([selected]);
@@ -542,36 +544,11 @@ function ThreadPane({
     }
   }
 
-  // Tauri owns OS file drag-and-drop, so normal React drop events do not see
-  // desktop paths. Bind only while this conversation pane is mounted.
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-        const stop = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-          if (event.payload.type === "enter" || event.payload.type === "over") {
-            setDraggingFiles(true);
-          } else if (event.payload.type === "leave") {
-            setDraggingFiles(false);
-          } else if (event.payload.type === "drop") {
-            setDraggingFiles(false);
-            addAttachments(event.payload.paths);
-          }
-        });
-        if (cancelled) stop();
-        else unlisten = stop;
-      } catch {
-        // Browser previews have no native paths and cannot send a chat turn.
-      }
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      setDraggingFiles(false);
-    };
-  }, [thread.id, running]);
+  const { dragging: draggingFiles } = useFileDrop({
+    ref: composerDropRef,
+    onPaths: paths => { addAttachments(paths); },
+    onError: reason => setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) })),
+  });
 
   function onScroll() {
     const node = scrollRef.current;
@@ -741,6 +718,7 @@ function ThreadPane({
             )}
             <div className="field field--grow">
               <span className="field__label">{t("chat.directory")}</span>
+              <PathDropZone kind="directory" disabled={settingsLocked} onSelect={path => chat.updateThread(thread.id, { workingDirectory: path })}>
               <div className="chat-directory">
                 <button
                   type="button"
@@ -763,6 +741,7 @@ function ThreadPane({
                     : t("chat.directory.none")}
                 </span>
               </div>
+              </PathDropZone>
             </div>
             <label className="field">
               <span className="field__label">{t("chat.permission")}</span>
@@ -854,7 +833,7 @@ function ThreadPane({
       </div>
 
       <form className="chat-composer" onSubmit={submit}>
-        <div className={`chat-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
+        <div ref={composerDropRef} className={`chat-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
           {attachments.length > 0 && (
             <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
               {attachments.map((attachment) => (

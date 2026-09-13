@@ -1,3 +1,5 @@
+import { FileDropZone } from "../files/FileDropZone";
+import { readSelectedText, localFileError, type UploadFile } from "../../app/localFiles";
 import { useRef, useState } from "react";
 import type { Preferences } from "../../app/preferences";
 import {
@@ -5,7 +7,6 @@ import {
   backupPasswordIsValid,
   BACKUP_EXTENSION,
   exportEncryptedBackup,
-  readEncryptedBackupFile,
   restoreEncryptedBackup,
   type EncryptedBackupRestore,
 } from "../../app/encryptedBackup";
@@ -26,10 +27,6 @@ interface EncryptedBackupPanelProps {
 
 type Notice = { tone: "info" | "danger"; message: string } | null;
 
-function reasonText(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
-}
-
 export function EncryptedBackupPanel({
   preferences,
   backendAvailable,
@@ -42,7 +39,7 @@ export function EncryptedBackupPanel({
   const [exportPassword, setExportPassword] = useState("");
   const [exportConfirmation, setExportConfirmation] = useState("");
   const [restorePassword, setRestorePassword] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<UploadFile | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [busy, setBusy] = useState<"export" | "restore" | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -77,7 +74,7 @@ export function EncryptedBackupPanel({
     } catch (reason) {
       setNotice({
         tone: "danger",
-        message: t("settings.backup.failed", { error: reasonText(reason) }),
+        message: t("settings.backup.failed", { error: localFileError(reason, t) }),
       });
     } finally {
       setBusy(null);
@@ -90,7 +87,7 @@ export function EncryptedBackupPanel({
     setBusy("restore");
     setNotice(null);
     try {
-      const contents = await readEncryptedBackupFile(selectedFile);
+      const contents = await readSelectedText(selectedFile, 28 * 1024 * 1024);
       const result = await restoreEncryptedBackup(contents, restorePassword);
       const restoredPreferences = applyRestoredLocalStorage(
         window.localStorage,
@@ -111,7 +108,7 @@ export function EncryptedBackupPanel({
     } catch (reason) {
       setNotice({
         tone: "danger",
-        message: t("settings.backup.failed", { error: reasonText(reason) }),
+        message: t("settings.backup.failed", { error: localFileError(reason, t) }),
       });
     } finally {
       setBusy(null);
@@ -225,14 +222,15 @@ export function EncryptedBackupPanel({
               className="visually-hidden"
               type="file"
               accept={BACKUP_EXTENSION}
-              disabled={!backendAvailable}
+              disabled={!backendAvailable || busy !== null || confirmRestore}
               onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
             />
+            <FileDropZone disabled={!backendAvailable || busy !== null || confirmRestore} onSelect={setSelectedFile}>
             <div className="backup-file-picker">
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={!backendAvailable}
+                disabled={!backendAvailable || busy !== null || confirmRestore}
                 onClick={() => fileRef.current?.click()}
               >
                 {t("settings.backup.fileChoose")}
@@ -241,6 +239,7 @@ export function EncryptedBackupPanel({
                 {selectedFile?.name ?? t("settings.backup.fileNone")}
               </span>
             </div>
+            </FileDropZone>
           </div>
           <label className="field">
             <span className="field__label">{t("settings.backup.password")}</span>

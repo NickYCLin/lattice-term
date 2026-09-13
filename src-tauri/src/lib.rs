@@ -15,6 +15,7 @@ pub mod file_exports;
 pub mod hostkeys;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
+mod local_files;
 pub mod mcp_desktop;
 pub mod mcp_screen;
 pub mod metrics;
@@ -103,6 +104,22 @@ struct McpScreenSession {
     session_id: String,
     host: String,
     backend: mcp_desktop::Backend,
+}
+
+#[tauri::command]
+async fn local_path_info(path: String) -> Result<local_files::LocalPathInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || local_files::info(std::path::Path::new(&path)))
+        .await
+        .map_err(|_| "localFile.unreadable".to_string())?
+}
+
+#[tauri::command]
+async fn local_file_read_text(path: String, max_bytes: u64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        local_files::read_text(std::path::Path::new(&path), max_bytes)
+    })
+    .await
+    .map_err(|_| "localFile.unreadable".to_string())?
 }
 
 #[tauri::command]
@@ -2887,6 +2904,57 @@ async fn remote_file_upload_begin(
 }
 
 #[tauri::command]
+async fn remote_file_upload_path(
+    session_id: String,
+    transfer_id: String,
+    path: String,
+    size: u64,
+    registry: State<'_, Arc<RemoteRegistry>>,
+) -> Result<(), String> {
+    use base64::Engine;
+    use tokio::io::AsyncReadExt;
+    let result = async {
+        let file = tauri::async_runtime::spawn_blocking(move || {
+            local_files::open_regular(std::path::Path::new(&path))
+        })
+        .await
+        .map_err(|_| "localFile.unreadable".to_string())??;
+        if file.metadata().map_err(|_| "localFile.unreadable")?.len() != size {
+            return Err("localFile.changed".into());
+        }
+        let mut file = tokio::fs::File::from_std(file);
+        let mut buffer = vec![0; lattice_remote::FILE_CHUNK_SIZE];
+        let mut sent = 0u64;
+        loop {
+            let count = file
+                .read(&mut buffer)
+                .await
+                .map_err(|_| "localFile.unreadable")?;
+            if count == 0 {
+                break;
+            }
+            sent = sent.checked_add(count as u64).ok_or("localFile.changed")?;
+            if sent > size {
+                return Err("localFile.changed".into());
+            }
+            let data = base64::engine::general_purpose::STANDARD.encode(&buffer[..count]);
+            crate::remote::file_upload_chunk(registry.inner(), &session_id, &transfer_id, &data)
+                .await?;
+        }
+        if sent != size {
+            return Err("localFile.changed".into());
+        }
+        crate::remote::file_upload_finish(registry.inner(), &session_id, &transfer_id).await
+    }
+    .await;
+    if result.is_err() {
+        let _ =
+            crate::remote::file_transfer_cancel(registry.inner(), &session_id, &transfer_id).await;
+    }
+    result
+}
+
+#[tauri::command]
 async fn remote_file_upload_chunk(
     session_id: String,
     transfer_id: String,
@@ -3435,6 +3503,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            local_path_info,
+            local_file_read_text,
             runtime_summary,
             mcp_remote_targets,
             mcp_screen_sessions,
@@ -3555,6 +3625,7 @@ pub fn run() {
             remote_file_save_text,
             remote_file_download_start,
             remote_file_upload_begin,
+            remote_file_upload_path,
             remote_file_upload_chunk,
             remote_file_upload_finish,
             remote_file_transfer_cancel,

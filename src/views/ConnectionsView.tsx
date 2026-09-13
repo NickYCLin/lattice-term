@@ -1,3 +1,5 @@
+import { FileDropZone } from "../components/files/FileDropZone";
+import { readSelectedText, localFileError, type UploadFile } from "../app/localFiles";
 /**
  * Connections: the default area and the only one with live data.
  *
@@ -146,9 +148,12 @@ export function ConnectionsView({
     event.target.value = "";
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const result = parseAndValidateImport(String(reader.result ?? ""));
+    void importFile(file);
+  }
+
+  async function importFile(file: UploadFile) {
+    try {
+      const result = parseAndValidateImport(await readSelectedText(file, 1024 * 1024));
 
       if (result.validProfiles.length === 0) {
         setNotice({
@@ -192,15 +197,9 @@ export function ConnectionsView({
               }),
             },
       );
-    };
-    reader.onerror = () => {
-      setNotice({
-        tone: "warn",
-        title: t("transfer.import.failed"),
-        body: t("transfer.import.readFailedBody"),
-      });
-    };
-    reader.readAsText(file);
+    } catch (reason) {
+      setNotice({ tone: "warn", title: t("transfer.import.failed"), body: localFileError(reason, t) });
+    }
   }
 
   const filePicker = (
@@ -246,6 +245,7 @@ export function ConnectionsView({
               >
                 {t("connections.loadSamples")}
               </button>
+            <FileDropZone compact onSelect={importFile}>
               <button
                 type="button"
                 className="button button--ghost"
@@ -254,6 +254,7 @@ export function ConnectionsView({
                 <ImportIcon size={15} />
                 {t("connections.importJson")}
               </button>
+            </FileDropZone>
             </>
           }
           footnote={t("connections.empty.footnote")}
@@ -293,6 +294,7 @@ export function ConnectionsView({
             </select>
           </label>
 
+            <FileDropZone compact onSelect={importFile}>
           <button
             type="button"
             className="button button--ghost button--sm"
@@ -301,6 +303,7 @@ export function ConnectionsView({
             <ImportIcon size={14} />
             {t("common.import")}
           </button>
+            </FileDropZone>
           <button
             type="button"
             className="button button--ghost button--sm"

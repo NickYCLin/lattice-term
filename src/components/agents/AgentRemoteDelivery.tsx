@@ -1,3 +1,5 @@
+import { FileDropZone } from "../files/FileDropZone";
+import type { UploadFile } from "../../app/localFiles";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   RemoteApi,
@@ -18,7 +20,7 @@ type DeliveryRemoteApi = Pick<
 >;
 
 interface PendingDelivery {
-  file: File;
+  file: UploadFile;
   session: RemoteSessionSummary;
   parent: string;
   overwrite: boolean;
@@ -70,7 +72,7 @@ export function cancelRemoteDelivery(
 }
 
 export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sessions = useMemo(
     () => remoteFileSessions(remote.sessions),
@@ -80,7 +82,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
     () => sessions[0]?.sessionId ?? "",
   );
   const [parent, setParent] = useState("/");
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<UploadFile | null>(null);
   const [pending, setPending] = useState<PendingDelivery | null>(null);
   const [phase, setPhase] = useState<"checking" | "sending" | null>(null);
   const [active, setActive] = useState<ActiveDelivery | null>(null);
@@ -274,6 +276,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
                 setDelivered(null);
               }}
             />
+            <FileDropZone disabled={busy || pending !== null} onSelect={file => { setFile(file); setProblem(null); setDelivered(null); }}>
             <div className="agents-delivery__file-row">
               <button
                 type="button"
@@ -288,11 +291,12 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
                 {file
                   ? t("agents.delivery.selected", {
                       name: file.name,
-                      size: formatBytes(file.size),
+                      size: formatBytes(file.size, tag),
                     })
                   : t("agents.delivery.noFile")}
               </span>
             </div>
+            </FileDropZone>
           </div>
 
           <button
@@ -351,11 +355,11 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
           <span className="agents-delivery__progress-detail">
             {activeTransfer.totalBytes === null
               ? t("agents.delivery.progressUnknown", {
-                  done: formatBytes(activeTransfer.bytesDone),
+                  done: formatBytes(activeTransfer.bytesDone, tag),
                 })
               : t("agents.delivery.progress", {
-                  done: formatBytes(activeTransfer.bytesDone),
-                  total: formatBytes(activeTransfer.totalBytes),
+                  done: formatBytes(activeTransfer.bytesDone, tag),
+                  total: formatBytes(activeTransfer.totalBytes, tag),
                   percent: activePercent,
                 })}
           </span>

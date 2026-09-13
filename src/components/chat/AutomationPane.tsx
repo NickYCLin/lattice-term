@@ -1,3 +1,4 @@
+import { PathDropZone } from "../files/PathDropZone";
 /**
  * Scheduled automations: the editor for one, and its run history.
  *
@@ -123,7 +124,7 @@ export function AutomationPane({
   onDoneEditing: () => void;
   onOpenThread: (threadId: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const selected = automations.automations.find((entry) => entry.id === selectedId) ?? null;
   const [editingExisting, setEditingExisting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
@@ -212,7 +213,7 @@ export function AutomationPane({
           {!selected.enabled
             ? t("automation.paused")
             : selected.nextRunAt !== null
-              ? t("automation.next", { at: new Date(selected.nextRunAt).toLocaleString() })
+              ? t("automation.next", { at: new Date(selected.nextRunAt).toLocaleString(tag) })
               : selected.schedule.kind === "after"
                 ? t("automation.waiting", {
                     name:
@@ -271,7 +272,7 @@ export function AutomationPane({
 }
 
 function RunRow({ run, onOpen }: { run: AutomationRun; onOpen: () => void }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const outcomeKey: Record<AutomationRun["outcome"], MessageKey> = {
     running: "automation.run.running",
     ok: "automation.run.ok",
@@ -280,7 +281,7 @@ function RunRow({ run, onOpen }: { run: AutomationRun; onOpen: () => void }) {
   };
   return (
     <button type="button" className={`automation-run automation-run--${run.outcome}`} onClick={onOpen}>
-      <span className="automation-run__time">{new Date(run.startedAt).toLocaleString()}</span>
+      <span className="automation-run__time">{new Date(run.startedAt).toLocaleString(tag)}</span>
       <span className="automation-run__outcome">{t(outcomeKey[run.outcome])}</span>
       {run.error && <span className="automation-run__error">{run.error}</span>}
     </button>
@@ -402,6 +403,7 @@ function AutomationForm({
             />
             <div className="field field--grow">
               <span className="field__label">{t("chat.directory")}</span>
+              <PathDropZone kind="directory" onSelect={path => patch({ workingDirectory: path })}>
               <div className="chat-directory">
                 <button
                   type="button"
@@ -417,6 +419,7 @@ function AutomationForm({
                     : t("chat.directory.none")}
                 </span>
               </div>
+              </PathDropZone>
               {message("workingDirectory") && (
                 <span className="field__error">{message("workingDirectory")}</span>
               )}

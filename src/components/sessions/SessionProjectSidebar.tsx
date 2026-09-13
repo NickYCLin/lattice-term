@@ -1,3 +1,6 @@
+import { PathDropZone } from "../files/PathDropZone";
+import { FileDropZone } from "../files/FileDropZone";
+import type { UploadFile } from "../../app/localFiles";
 import {
   useEffect,
   useMemo,
@@ -120,6 +123,8 @@ export function SessionProjectSidebar({
   mobileOpen = false,
   onMobileClose,
   onChooseProject,
+  onDropProject,
+  onDropWorkspace,
   onLaunchProject,
   onSelect,
   onRemove,
@@ -143,6 +148,8 @@ export function SessionProjectSidebar({
   mobileOpen?: boolean;
   onMobileClose: () => void;
   onChooseProject: () => void;
+  onDropProject?: (path: string) => void | Promise<void>;
+  onDropWorkspace?: (file: UploadFile) => void | Promise<void>;
   onLaunchProject: (workingDirectory: string) => void;
   onSelect: (sessionId: string) => void;
   onRemove: (session: SessionSidebarSessionItem) => void;
@@ -895,6 +902,7 @@ export function SessionProjectSidebar({
           >
             <AgentIcon size={12} />
           </button>
+          <PathDropZone compact kind="directory" disabled={choosingProject || !onDropProject} onSelect={path => onDropProject?.(path)}>
           <button
             type="button"
             className="icon-button icon-button--sm"
@@ -905,6 +913,7 @@ export function SessionProjectSidebar({
           >
             <PlusIcon size={12} />
           </button>
+          </PathDropZone>
         </div>
         {statusLegendOpen && (
           <section
@@ -1137,6 +1146,7 @@ export function SessionProjectSidebar({
                 <ExportIcon size={12} />
                 {t("terminal.projects.export")}
               </button>
+              <FileDropZone compact disabled={!onDropWorkspace} onSelect={async file => { await onDropWorkspace?.(file); setLaunchMenu(null); }}>
               <button
                 type="button"
                 role="menuitem"
@@ -1149,6 +1159,7 @@ export function SessionProjectSidebar({
                 <ImportIcon size={12} />
                 {t("terminal.projects.import")}
               </button>
+              </FileDropZone>
               <button
                 type="button"
                 role="menuitem"

@@ -26,11 +26,13 @@ export function RemotePane({
   session,
   remote,
   theme,
+  active = true,
 }: {
   session: RemoteSessionSummary;
   remote: RemoteApi;
   /** Only used by the terminal view to follow palette changes. */
   theme: ThemeId;
+  active?: boolean;
 }) {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -305,7 +307,7 @@ export function RemotePane({
       </div>
 
       <div className={`remote-workspace${cliOpen ? " remote-workspace--cli" : ""}${chatOpen ? " remote-workspace--chat" : ""}${filesOpen || commandsOpen ? " remote-workspace--files" : ""}`}>
-        {cliOpen && <RemoteCliPane session={session} theme={theme} />}
+        {cliOpen && <RemoteCliPane session={session} theme={theme} active={active} />}
         {session.chat && <RemoteChatPane key={`chat-${session.sessionId}`} sessionId={session.sessionId} hidden={!chatOpen} />}
         {!!session.commandShells && <RemoteCommandPane key={session.sessionId} session={session} hidden={!commandsOpen} />}
         {filesOpen && session.fileTransfer && (

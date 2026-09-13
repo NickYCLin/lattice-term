@@ -1,3 +1,4 @@
+import { formatDecimal } from "./localizedNumbers";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 /**
  * SSH Tunnel & Port Forwarding domain model.
@@ -196,9 +197,10 @@ export function formatSshTunnelCommand(
 /**
  * Formats byte counts into human-readable strings (KB, MB, GB).
  */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+export function formatBytes(bytes: number, locale?: string): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${formatDecimal(bytes, 0, locale)} B`;
+  if (bytes < 1024 * 1024) return `${formatDecimal(bytes / 1024, 1, locale)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${formatDecimal(bytes / (1024 * 1024), 1, locale)} MB`;
+  return `${formatDecimal(bytes / (1024 * 1024 * 1024), 2, locale)} GB`;
 }

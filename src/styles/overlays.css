@@ -663,3 +663,7 @@
   color: var(--text-muted);
   white-space: pre-wrap;
 }
+
+/* A drop target remains usable without changing the file picker layout. */
+.path-drop-zone { min-width: 0; }
+.is-file-dropping { outline: 2px dashed var(--accent); outline-offset: -2px; }
