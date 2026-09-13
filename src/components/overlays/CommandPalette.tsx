@@ -114,7 +114,7 @@ export function CommandPalette({
         className="palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={t("palette.placeholder")}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         onKeyDown={onKeyDown}

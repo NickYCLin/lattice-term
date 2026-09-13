@@ -1,3 +1,5 @@
+import { useFileDrop } from "../../app/fileDrop";
+import { droppedUpload, localFileError, type UploadFile } from "../../app/localFiles";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   RemoteApi,
@@ -60,7 +62,7 @@ export function RemoteFilesPane({
       setDirectory(next);
       setPathInput(next.path);
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      setProblem(localFileError(reason, t));
     } finally {
       setLoading(false);
     }
@@ -80,7 +82,7 @@ export function RemoteFilesPane({
     try {
       await remote.downloadFile(session.sessionId, entry.path);
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      setProblem(localFileError(reason, t));
     }
   }
 
@@ -95,7 +97,7 @@ export function RemoteFilesPane({
 
   const { confirm, dialogs } = useAppDialogs();
 
-  async function upload(file: File | undefined) {
+  async function upload(file: UploadFile | undefined) {
     if (!file || !directory) return;
     const existing = directory.entries.find((entry) => entry.name === file.name);
     if (existing?.kind === "directory" || existing?.kind === "symlink") {
@@ -126,12 +128,20 @@ export function RemoteFilesPane({
       );
       await open(directory.path);
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      setProblem(localFileError(reason, t));
     } finally {
       setBusy(false);
       if (uploadRef.current) uploadRef.current.value = "";
     }
   }
+
+  const dropRef = useRef<HTMLDivElement>(null);
+  const { dragging, ...dropHandlers } = useFileDrop({
+    ref: dropRef, disabled: busy || loading || editor.active || !directory,
+    onPaths: async paths => { for (const path of paths) await upload(await droppedUpload(path)); },
+    onFiles: async files => { for (const file of files) await upload(file); },
+    onError: error => setProblem(localFileError(error, t)),
+  });
 
   function modified(entry: RemoteFileEntry): string {
     if (entry.modifiedAt === null) return "—";
@@ -142,7 +152,7 @@ export function RemoteFilesPane({
   }
 
   return (
-    <div className="remote-files-pane">
+    <div ref={dropRef} {...dropHandlers} className={`remote-files-pane${dragging ? " is-file-dropping" : ""}`}>
       <header className="remote-files-toolbar">
         <form className="remote-files-path" onSubmit={submitPath}>
           <FolderIcon size={14} />
@@ -185,9 +195,10 @@ export function RemoteFilesPane({
           <input
             ref={uploadRef}
             type="file"
+            multiple
             hidden
             aria-label={t("remote.files.upload")}
-            onChange={(event) => void upload(event.currentTarget.files?.[0])}
+            onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); void (async () => { for (const file of files) await upload(file); })(); }}
           />
         </div>
       </header>
@@ -251,7 +262,7 @@ export function RemoteFilesPane({
                       </button>
                     </td>
                     <td className="mono">
-                      {entry.kind === "file" ? formatBytes(entry.size) : "—"}
+                      {entry.kind === "file" ? formatBytes(entry.size, tag) : "—"}
                     </td>
                     <td>{modified(entry)}</td>
                     <td>
@@ -316,9 +327,9 @@ export function RemoteFilesPane({
                 </span>
                 <span className="remote-files-transfer__detail">
                   {transfer.state === "running"
-                    ? `${formatBytes(transfer.bytesDone)}${
+                    ? `${formatBytes(transfer.bytesDone, tag)}${
                         transfer.totalBytes !== null
-                          ? ` / ${formatBytes(transfer.totalBytes)}`
+                          ? ` / ${formatBytes(transfer.totalBytes, tag)}`
                           : ""
                       }`
                     : transfer.detail ?? t(`remote.files.transfer.${transfer.state}`)}

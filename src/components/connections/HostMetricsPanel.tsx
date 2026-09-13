@@ -158,8 +158,8 @@ function CompactHostMetrics({ metrics }: { metrics: HostMetrics }) {
     label: t("metrics.memory"),
     value: `${memoryPercent}%`,
     detail: t("metrics.usedOfTotal", {
-      used: formatBytes(metrics.memory.usedBytes),
-      total: formatBytes(metrics.memory.totalBytes),
+      used: formatBytes(metrics.memory.usedBytes, tag),
+      total: formatBytes(metrics.memory.totalBytes, tag),
     }),
     percent: memoryPercent,
   };
@@ -172,8 +172,8 @@ function CompactHostMetrics({ metrics }: { metrics: HostMetrics }) {
       detail: [
         disk.filesystem,
         t("metrics.usedOfTotal", {
-          used: formatBytes(disk.usedBytes),
-          total: formatBytes(disk.totalBytes),
+          used: formatBytes(disk.usedBytes, tag),
+          total: formatBytes(disk.totalBytes, tag),
         }),
       ]
         .filter(Boolean)
@@ -237,7 +237,7 @@ export function HostMetricsPanel({
   state: MetricsState;
   variant?: "cards" | "compact";
 }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
 
   if (variant === "compact" && state.status !== "ready") {
     const message =
@@ -317,8 +317,8 @@ export function HostMetricsPanel({
         label={t("metrics.memory")}
         value={t("metrics.percentUsed", { percent: memoryPercent })}
         detail={t("metrics.usedOfTotal", {
-          used: formatBytes(metrics.memory.usedBytes),
-          total: formatBytes(metrics.memory.totalBytes),
+          used: formatBytes(metrics.memory.usedBytes, tag),
+          total: formatBytes(metrics.memory.totalBytes, tag),
         })}
         percent={memoryPercent}
       />
@@ -332,8 +332,8 @@ export function HostMetricsPanel({
             label={`${t("metrics.disk")} ${disk.mountpoint}`}
             value={t("metrics.percentUsed", { percent })}
             detail={t("metrics.usedOfTotal", {
-              used: formatBytes(disk.usedBytes),
-              total: formatBytes(disk.totalBytes),
+              used: formatBytes(disk.usedBytes, tag),
+              total: formatBytes(disk.totalBytes, tag),
             })}
             percent={percent}
           />

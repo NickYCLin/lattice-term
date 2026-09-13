@@ -74,8 +74,11 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
     await act(async () => { (node as unknown as Record<string, { onClick: () => void }>)[key].onClick(); });
   };
+  const render = async (active: boolean) => {
+    await act(async () => { root.render(<StrictMode><I18nProvider locale="zh-TW"><RemoteCliPane session={{ sessionId: "connection", cli: true } as RemoteSessionSummary} theme="dark" active={active} /></I18nProvider></StrictMode>); });
+  };
   try {
-    await act(async () => { root.render(<StrictMode><I18nProvider locale="zh-TW"><RemoteCliPane session={{ sessionId: "connection", cli: true } as RemoteSessionSummary} theme="dark" /></I18nProvider></StrictMode>); });
+    await render(true);
     for (let attempt = 0; attempt < 10 && !container.textContent.includes("Existing CLI"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
     expect(container.textContent).toContain("Existing CLI");
     expect(container.textContent).toContain("背景工作階段");
@@ -85,9 +88,22 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     expect(rendered.text).toBe("abc");
     await act(async () => { await rendered.remote!.terminalInput("opaque", "中文\r"); await vi.advanceTimersByTimeAsync(35); });
     expect(operations.filter(op => op.kind === "cliInput")).toEqual([{ kind: "cliInput", sessionId: "opaque", data: "中文\r" }]);
+    await act(async () => { await rendered.remote!.terminalInput("opaque", "cancel pending"); });
+    await render(false);
+    const hiddenCount = operations.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(operations).toHaveLength(hiddenCount);
+    expect(operations.filter(op => op.kind === "cliInput")).toHaveLength(1);
+    await render(true);
+    for (let attempt = 0; attempt < 10 && !container.textContent.includes("已連接原本的 CLI"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
+    expect(container.textContent).toContain("已連接原本的 CLI");
     await click("返回清單");
     const count = operations.filter(op => op.kind === "cliRead").length;
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(operations.filter(op => op.kind === "cliRead")).toHaveLength(count);
+    await render(false);
+    const listCount = operations.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(operations).toHaveLength(listCount);
   } finally { await act(async () => { root.unmount(); }); }
 });
