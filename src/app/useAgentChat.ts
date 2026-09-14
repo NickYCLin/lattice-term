@@ -36,21 +36,18 @@ import {
   type ChatThread,
 } from "./agentChat";
 import { hasDesktopBackend } from "./nativeRuntime";
+import { useSharedSidebarLayout } from "./sharedSidebarLayout";
 import {
-  CHAT_SIDEBAR_LAYOUT_KEY,
   chatFolderNodeId,
   chatThreadNodeId,
   reconcileChatLayout,
 } from "./chatThreadLayout";
 import {
   createSessionSidebarFolder,
-  emptySessionSidebarLayout,
   expandSessionSidebarAncestors,
-  loadSessionSidebarLayout,
   moveSessionSidebarNode,
   removeSessionSidebarFolder,
   renameSessionSidebarFolder,
-  saveSessionSidebarLayout,
   toggleSessionSidebarFolder,
   type SessionSidebarLayout,
 } from "./sessionSidebarLayout";
@@ -155,23 +152,11 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
   });
   const modelsRef = useRef(models);
   modelsRef.current = models;
-  const [storedLayout, setStoredLayout] = useState<SessionSidebarLayout>(() =>
-    typeof localStorage === "undefined"
-      ? emptySessionSidebarLayout
-      : loadSessionSidebarLayout(localStorage, CHAT_SIDEBAR_LAYOUT_KEY),
-  );
-  // What the sidebar renders: the saved organisation fitted to the threads
-  // that exist right now.
+  const [storedLayout, setStoredLayout] = useSharedSidebarLayout();
   const layout = useMemo(() => reconcileChatLayout(storedLayout, threads), [storedLayout, threads]);
-
   useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    try {
-      saveSessionSidebarLayout(localStorage, layout, CHAT_SIDEBAR_LAYOUT_KEY);
-    } catch {
-      // Folders are a convenience; losing them costs no conversation.
-    }
-  }, [layout]);
+    setStoredLayout(current => reconcileChatLayout(current, threads));
+  }, [threads, setStoredLayout]);
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
   threadsRef.current = threads;

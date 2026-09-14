@@ -51,7 +51,8 @@ import {
   chatWorkspaceMirrorRows,
   type ChatWorkspaceMirrorRow,
 } from "../app/chatWorkspaceMirror";
-import { loadSessionSidebarLayout } from "../app/sessionSidebarLayout";
+import { toggleSessionSidebarFolder } from "../app/sessionSidebarLayout";
+import { useSharedSidebarLayout } from "../app/sharedSidebarLayout";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
@@ -187,13 +188,9 @@ export function ChatView({
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [sessionSidebarLayout] = useState(() =>
-    typeof localStorage === "undefined"
-      ? { version: 1 as const, folders: [], placements: {}, collapsedFolderIds: [] }
-      : loadSessionSidebarLayout(localStorage),
-  );
-  const [collapsedWorkspaceNodes, setCollapsedWorkspaceNodes] = useState(
-    () => new Set(sessionSidebarLayout.collapsedFolderIds),
+  const [sessionSidebarLayout, setSharedLayout] = useSharedSidebarLayout();
+  const collapsedWorkspaceNodes = useMemo(
+    () => new Set(sessionSidebarLayout.collapsedFolderIds), [sessionSidebarLayout],
   );
   const accountProfiles = useChatAccountProfiles();
   const workspaceRows = useMemo(
@@ -215,12 +212,7 @@ export function ChatView({
   );
 
   function toggleWorkspaceNode(nodeId: string) {
-    setCollapsedWorkspaceNodes((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
-      return next;
-    });
+    setSharedLayout(current => toggleSessionSidebarFolder(current, nodeId));
   }
 
   const cliLabel = (id: ChatDefinitionId) =>

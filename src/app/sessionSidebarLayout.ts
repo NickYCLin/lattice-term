@@ -2,8 +2,9 @@
 
 export const SESSION_SIDEBAR_LAYOUT_KEY = "latticeterm.sessionSidebar.v1";
 
-const MAX_FOLDERS = 64;
-const MAX_NODES = 512;
+// The shared tree can contain both legacy sidebars at their previous limits.
+const MAX_FOLDERS = 128;
+const MAX_NODES = 1024;
 const MAX_ID_BYTES = 1024;
 const MAX_FOLDER_NAME_BYTES = 80;
 

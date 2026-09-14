@@ -1,6 +1,10 @@
 /** Unified workspace for text terminals and graphical remote sessions. */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useSharedSidebarLayout,
+  reconcileSharedSessionLayout as reconcileSessionSidebarLayout,
+} from "../app/sharedSidebarLayout";
 import { open } from "@tauri-apps/plugin-dialog";
 import { downloadDir, homeDir, join } from "@tauri-apps/api/path";
 import type { RemoteApi } from "../app/useRemoteSessions";
@@ -49,15 +53,11 @@ import {
 } from "../app/agentSessionRelocation";
 import {
   createSessionSidebarFolder,
-  emptySessionSidebarLayout,
   expandSessionSidebarAncestors,
-  loadSessionSidebarLayout,
   mergeSessionSidebarLayouts,
   moveSessionSidebarNode,
-  reconcileSessionSidebarLayout,
   removeSessionSidebarFolder,
   renameSessionSidebarFolder,
-  saveSessionSidebarLayout,
   sessionSidebarSessionNodeId,
   toggleSessionSidebarFolder,
   type LiveSessionSidebarNode,
@@ -362,9 +362,7 @@ export function SessionsView({
     title: string;
     body: string;
   } | null>(null);
-  const [sidebarLayout, setSidebarLayout] = useState(() =>
-    loadSessionSidebarLayout(window.localStorage),
-  );
+  const [sidebarLayout, setSidebarLayout] = useSharedSidebarLayout();
   // A session launched into a collapsed project or folder has no sidebar row
   // yet, so the branch is opened once reconciliation gives it a node.
   const [pendingRevealSessionId, setPendingRevealSessionId] = useState<
@@ -762,12 +760,11 @@ export function SessionsView({
       ) {
         onSelect(null);
       }
-      setSidebarLayout({
-        ...emptySessionSidebarLayout,
-        folders: [],
-        placements: {},
-        collapsedFolderIds: [],
-      });
+      setSidebarLayout(current => ({
+        ...current,
+        placements: Object.fromEntries(Object.entries(current.placements).filter(([id]) =>
+          id.startsWith("folder:") || id.startsWith("thread:"))),
+      }));
       setPendingClearWorkspace(false);
       setWorkspaceTransferNotice({
         tone: "info",
@@ -1353,15 +1350,6 @@ export function SessionsView({
     );
     setPendingRevealSessionId(null);
   }, [liveSidebarKey, pendingRevealSessionId]);
-  useEffect(() => {
-    if (!sessionRestoreComplete) return;
-    try {
-      saveSessionSidebarLayout(window.localStorage, sidebarLayout);
-    } catch {
-      // Sidebar organization is a convenience and must not interrupt sessions.
-    }
-  }, [sessionRestoreComplete, sidebarLayout]);
-
   function openFolderEditor(
     parentId: string | null,
     folder: SessionSidebarFolder | null = null,

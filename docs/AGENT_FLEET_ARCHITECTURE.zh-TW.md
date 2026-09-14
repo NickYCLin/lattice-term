@@ -69,7 +69,7 @@ Agent Fleet 的每個工作階段都是真正的 PTY，但不是每個人都想�
 - **保存邊界**。對話串（CLI、工作目錄、權限、模型、CLI 對話 ID、訊息）存在 WebView 的 `localStorage`，每串最多 300 則、工具輸出截到 2 KiB、總量 4 MiB、最多 50 串，超過先丟最舊的；正在進行的回合不會被保存。完整逐字稿仍由各 CLI 自己保存。回覆以自家的小型 Markdown 讀取器渲染（段落、標題、清單、程式碼區塊、行內程式碼與粗體），沒有 HTML 直通，模型輸出不可能注入標記。
 - **單一模型清單**。設定區不再分開切助理與模型；`ModelField` 以助理分組，在一個下拉選單裡同時決定 CLI 與模型。Claude 送 `initialize` 握手取得 `models[]`，Codex 以 `app-server` 的 `model/list` 取得並略過 `hidden`；Gemini 沒有非互動模型列舉 API，因此提供官方穩定的 Auto／Pro／Flash／Flash Lite 路由別名。空值代表該 CLI 預設模型，既有但清單未知的模型仍會保留為可選值。Claude 的模型探查與每個對話程序在啟動階段共用非同步閘門：前一個程序回報初始化（探查則退出）後才啟動下一個，避免兩個 LatticeTerm 子程序同時刷新同一份 OAuth token；初始化後的實際回合仍可並行。若 LatticeTerm 以外的 Claude 程序占用 refresh lock，後端只對官方標為暫時性的 `another Claude Code process is refreshing` 錯誤退避重試兩次，而且必須尚未收到文字、工具呼叫或核准要求，確保不會重送已經開始執行的工作。
 - **Windows**。以管線啟動主控台程式會彈出黑視窗，所有 headless 程序統一經 `headless_command` 建立並加 `CREATE_NO_WINDOW`。
-- **側欄資料夾**。對話清單沿用工作項目側欄的 `sessionSidebarLayout` 模型（另一個儲存鍵），節點 id 為 `thread:<id>`；資料夾巢狀、收合、雙擊改名、指標拖曳搬移與排序，刪除資料夾時內容移到上一層。
+- **共用側欄資料夾**。對話與工作階段共用 `latticeterm.sharedSidebar.v1`，任一邊新增、改名、搬移、刪除或收合資料夾，另一邊立即更新。兩邊保留各自的內容與節點 ID，整理時只移除自己已刪除的內容。第一次使用會合併舊的兩份資料夾樹，ID 衝突時替對話資料夾產生新 ID 並保留子節點歸屬；舊儲存鍵保留作為恢復來源。刪除共用資料夾會將兩邊的內容移到上一層，不刪除對話或停止工作階段；清除本機 AI 工作項目則保留共用資料夾與對話。儲存空間不可用時只在目前視窗保留修改，不中斷執行中的對話。
 - **驗證邊界**。單元測試以實際協定形狀的 Claude／Codex／Gemini 事件驗證解析與參數組裝；另有 `#[ignore]` 的端對端測試可真的跑一輪（`LATTICETERM_CHAT_E2E=claude|codex|gemini cargo test -- --ignored`）；`ask` 模式另有一個端對端測試，會真的讓 Claude 對 WebFetch 提出核准、由測試放行並確認回合自行結束。
 
 ### 排程任務
