@@ -2,6 +2,8 @@
 
 # LatticeTerm
 
+[繁體中文](README.md) · **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md)
+
 **Your AI assistants and remote connections, in one workspace.**
 
 Use your preferred AI assistants to write code, review changes, or organize information.
@@ -119,7 +121,18 @@ Local-network pairing can connect directly. Connections by device ID across netw
 authority, so the sharing host must save it again after a restore. A hosted team service is not currently provided.
 See the [relay setup guide](docs/RELAY_SERVER.zh-TW.md).
 
+**Does terminal sharing include remote Agent Fleet?**
+
+SSH Fleet provides remote workspace orchestration through MCP, with separate workspace authorization
+and multiple independent PTYs. Sharing a single terminal through Lattice Remote does not provide
+multi-agent orchestration. Fleet over Relay is not yet complete. See the
+[Fleet architecture](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md) (Traditional Chinese) for the current boundaries.
+
 ## Documentation and contributions
+
+The language links at the top cover all nine interface languages. The Traditional Chinese and English
+READMEs provide fuller guides; the other editions offer a concise introduction, download instructions,
+quick start, and limitations.
 
 Detailed engineering guides are currently in Traditional Chinese:
 

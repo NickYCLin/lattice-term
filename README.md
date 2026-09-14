@@ -2,6 +2,8 @@
 
 # LatticeTerm
 
+**繁體中文** · [English](README.en.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md)
+
 **AI 助理與遠端連線，一個工作區。**
 
 使用你習慣的 AI 助理撰寫程式、檢查修改或整理資料。
@@ -111,7 +113,13 @@ iPhone／iPad 已可從 [App Store](https://apps.apple.com/app/latticeterm/id680
 加密備份不攜帶這份主機密碼的可重用授權，還原後要在被控端重新保存。
 目前沒有提供託管團隊服務。[中繼部署說明](docs/RELAY_SERVER.zh-TW.md)
 
+**終端分享也包含遠端 Agent Fleet 嗎？**
+
+Lattice Remote 的單一終端分享不等於遠端多 Agent 編排。SSH Fleet 已透過 MCP 提供獨立工作區授權與多 PTY；Relay Fleet 尚未完成，詳見 [Fleet 架構](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md)。
+
 ## 文件與參與
+
+本頁頂端可切換九種語言。繁中與英文提供較完整的使用說明，其餘語言先提供用途、下載、快速開始與限制；深入技術文件目前以繁中為主。
 
 | 想做什麼 | 從這裡開始 |
 | --- | --- |
