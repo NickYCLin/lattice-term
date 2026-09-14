@@ -13,8 +13,11 @@ import {
 
 const thread = createThread({ definitionId: "claude", workingDirectory: "/fixture", permission: "ask", model: "" }, "one", 1);
 let stored: Map<string, string>;
+let fixtureRevision = 0;
 beforeEach(() => {
-  stored = new Map([[SHARED_SIDEBAR_LAYOUT_KEY, JSON.stringify(emptySessionSidebarLayout)]]);
+  // A new durable revision distinguishes a fresh fixture from unsaved memory
+  // retained after the preceding test's simulated quota failure.
+  stored = new Map([[SHARED_SIDEBAR_LAYOUT_KEY, JSON.stringify({ ...emptySessionSidebarLayout, fixtureRevision: ++fixtureRevision })]]);
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null,
     setItem: (key: string, value: string) => stored.set(key, value),
@@ -121,6 +124,36 @@ describe("shared sidebar folders", () => {
     });
     expect(() => updateSharedSidebarLayout(current => createSessionSidebarFolder(current, { id: "folder:memory", name: "暫存" }, null))).not.toThrow();
     expect(readSharedSidebarLayout().folders[0].name).toBe("暫存");
+    expect(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)).toBe(durable);
+  });
+
+  it.each(["{broken", JSON.stringify({ version: 2 })])("does not overwrite an unreadable shared source: %s", raw => {
+    updateSharedSidebarLayout(current => createSessionSidebarFolder(current, { id: "folder:kept", name: "保留" }, null));
+    stored.set(SHARED_SIDEBAR_LAYOUT_KEY, raw);
+    expect(readSharedSidebarLayout().folders[0]?.name).toBe("保留");
+    updateSharedSidebarLayout(current => renameSessionSidebarFolder(current, "folder:kept", "暫存修改"));
+    expect(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)).toBe(raw);
+  });
+
+  it("retries an unsaved layout when the next reconciliation has no changes", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: () => { throw new Error("quota"); },
+    });
+    updateSharedSidebarLayout(current => createSessionSidebarFolder(current, { id: "folder:retry", name: "待保存" }, null));
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    });
+    updateSharedSidebarLayout(current => current);
+    expect(JSON.parse(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)!).folders[0]?.name).toBe("待保存");
+  });
+
+  it("does not persist a layout that cannot be loaded again", () => {
+    const durable = stored.get(SHARED_SIDEBAR_LAYOUT_KEY);
+    updateSharedSidebarLayout(current => ({ ...current, placements: Object.fromEntries(
+      Array.from({ length: 1025 }, (_, index) => [`thread:${index}`, { parentId: null, order: 0 }]),
+    ) }));
     expect(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)).toBe(durable);
   });
 });

@@ -20,6 +20,17 @@ const session = {
 };
 
 describe("session sidebar layout", () => {
+  it("does not add a folder beyond the total node limit", () => {
+    const layout = {
+      ...emptySessionSidebarLayout,
+      placements: Object.fromEntries(Array.from({ length: 1024 }, (_, index) =>
+        [`thread:${index}`, { parentId: null, order: index }])),
+    };
+    expect(sanitizeSessionSidebarLayout(layout)).not.toBeNull();
+    const next = createSessionSidebarFolder(layout, { id: "folder:overflow", name: "額外資料夾" }, null);
+    expect(sanitizeSessionSidebarLayout(next)).not.toBeNull();
+    expect(next).toBe(layout);
+  });
   it("places new sessions below their discovered project", () => {
     const layout = reconcileSessionSidebarLayout(emptySessionSidebarLayout, [
       project,

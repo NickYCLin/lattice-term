@@ -40,6 +40,8 @@ export function migrateSidebarLayouts(sessions: SessionSidebarLayout, chat: Sess
 
 let signature: string | undefined;
 let snapshot = emptySessionSidebarLayout;
+let readable = true;
+let pendingWrite = false;
 export function readSharedSidebarLayout(): SessionSidebarLayout {
   if (typeof localStorage === "undefined") return snapshot;
   try {
@@ -48,28 +50,42 @@ export function readSharedSidebarLayout(): SessionSidebarLayout {
       localStorage.getItem(SESSION_SIDEBAR_LAYOUT_KEY), localStorage.getItem(LEGACY_CHAT_KEY),
     ]);
     if (nextSignature !== signature) {
-      snapshot = raw
-        ? sanitizeSessionSidebarLayout(JSON.parse(raw)) ?? emptySessionSidebarLayout
+      const next = raw !== null
+        ? sanitizeSessionSidebarLayout(JSON.parse(raw))
         : migrateSidebarLayouts(loadSessionSidebarLayout(localStorage), loadSessionSidebarLayout(localStorage, LEGACY_CHAT_KEY));
+      if (!next || !sanitizeSessionSidebarLayout(next)) {
+        readable = false;
+        return snapshot;
+      }
+      snapshot = next;
       signature = nextSignature;
+      pendingWrite = false;
     }
-  } catch { /* Keep the last readable layout if storage becomes unavailable. */ }
+    readable = true;
+  } catch {
+    readable = false;
+    // Never replace unreadable or newer-format storage with an empty tree.
+  }
   return snapshot;
 }
 
 export function updateSharedSidebarLayout(update: SessionSidebarLayout | ((current: SessionSidebarLayout) => SessionSidebarLayout)) {
   const current = readSharedSidebarLayout();
   const next = typeof update === "function" ? update(current) : update;
-  if (JSON.stringify(next) === JSON.stringify(current)) return;
+  if (!sanitizeSessionSidebarLayout(next)) return;
   const serialized = JSON.stringify(next);
+  const changed = serialized !== JSON.stringify(current);
+  if (!changed && !pendingWrite) return;
   // Storage failure must not interrupt a running conversation. Keep edits
   // shared in memory while leaving the last durable copy untouched.
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(SHARED_SIDEBAR_LAYOUT_KEY, serialized);
+    if (!readable || typeof localStorage === "undefined") throw new Error("Sidebar storage unavailable");
+    localStorage.setItem(SHARED_SIDEBAR_LAYOUT_KEY, serialized);
     signature = serialized;
-  } catch { /* Same-window updates remain available until the app closes. */ }
+    pendingWrite = false;
+  } catch { pendingWrite = true; }
   snapshot = next;
-  listeners.forEach(notify => notify());
+  if (changed) listeners.forEach(notify => notify());
 }
 export function subscribeSharedSidebarLayout(notify: () => void) {
   listeners.add(notify);

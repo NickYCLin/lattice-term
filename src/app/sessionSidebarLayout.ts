@@ -348,6 +348,7 @@ export function createSessionSidebarFolder(
     !safeId(folder.id) ||
     !name ||
     layout.folders.length >= MAX_FOLDERS ||
+    Object.keys(layout.placements).length >= MAX_NODES ||
     layout.placements[folder.id]
   ) {
     return layout;
