@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "ワークスペース項目をインポート",
   "terminal.projects.clear": "ローカルワークスペースをクリアする",
   "terminal.projects.exportEmpty": "ローカルのAIワークスペースアイテムやエクスポート用のカスタムフォルダはありません。",
+  "terminal.projects.exportInvalid": "再インポート可能なファイルを作成できません。上限は 64 項目、1 MiB です。項目数と起動設定を確認してください。",
+  "terminal.projects.exportFailed": "ダウンロードを開始できません。ダウンロード権限を確認して再試行してください。",
   "terminal.projects.exportedTitle": "ワークスペース項目の輸出",
   "terminal.projects.exported": "{projects}プロジェクト、{sessions} CLIワークスペースアイテム、{folders}カスタムフォルダをエクスポートしました。",
   "terminal.projects.exportedLocation": "ファイル: {filename}; デフォルトのダウンロード場所: {path}",

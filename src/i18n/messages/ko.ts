@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "작업 공간 항목 가져오기",
   "terminal.projects.clear": "현지 업무 공간 항목",
   "terminal.projects.exportEmpty": "로컬 AI 작업 공간 항목 또는 사용자 정의 폴더가 없습니다.",
+  "terminal.projects.exportInvalid": "다시 가져올 수 있는 파일을 만들 수 없습니다. 최대 64개 항목, 1 MiB까지 지원합니다. 항목 수와 실행 설정을 확인하세요.",
+  "terminal.projects.exportFailed": "다운로드를 시작할 수 없습니다. 다운로드 권한을 확인한 후 다시 시도하세요.",
   "terminal.projects.exportedTitle": "작업 공간 항목을 내보냈습니다",
   "terminal.projects.exported": "{projects} 프로젝트, {sessions} CLI 작업 공간 항목 및 {folders} 사용자 정의 폴더.",
   "terminal.projects.exportedLocation": "파일: {filename}; 기본 다운로드 위치: {path}",

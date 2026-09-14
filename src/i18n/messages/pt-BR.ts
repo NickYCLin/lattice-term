@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "Importar os itens do espaço de trabalho",
   "terminal.projects.clear": "Limpar os itens da área de trabalho local",
   "terminal.projects.exportEmpty": "Não existem itens locais de espaço de trabalho de IA ou pastas personalizadas para exportar.",
+  "terminal.projects.exportInvalid": "Não foi possível criar um arquivo que possa ser importado novamente. O limite é de 64 itens e 1 MiB. Verifique a quantidade e as configurações de inicialização.",
+  "terminal.projects.exportFailed": "Não foi possível iniciar o download. Verifique as permissões de download e tente novamente.",
   "terminal.projects.exportedTitle": "Itens do espaço de trabalho exportados",
   "terminal.projects.exported": "Exportado {projects} projectos, {sessions} Itens de espaço de trabalho CLI, e {folders} pastas personalizadas.",
   "terminal.projects.exportedLocation": "Arquivo: {filename}; local de download padrão: {path}",

@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "导入工作项目",
   "terminal.projects.clear": "清除本机工作项目",
   "terminal.projects.exportEmpty": "目前没有可导出的本机 AI 工作项目或自订文件夹。",
+  "terminal.projects.exportInvalid": "无法创建可重新导入的文件。每次最多 64 个工作项，文件上限 1 MiB，请检查项目数量与启动设置。",
+  "terminal.projects.exportFailed": "无法开始下载，请检查下载权限后重试。",
   "terminal.projects.exportedTitle": "工作项目已导出",
   "terminal.projects.exported": "已导出 {projects} 个项目、{sessions} 个 CLI 工作项目与 {folders} 个自订文件夹。",
   "terminal.projects.exportedLocation": "文件：{filename}；缺省下载位置：{path}",

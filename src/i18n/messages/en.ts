@@ -785,6 +785,8 @@ export const en: Messages = {
   "terminal.projects.import": "Import workspace items",
   "terminal.projects.clear": "Clear local workspace items",
   "terminal.projects.exportEmpty": "There are no local AI workspace items or custom folders to export.",
+  "terminal.projects.exportInvalid": "Cannot create a file that can be imported again. Exports support up to 64 items and 1 MiB; check the item count and launch settings.",
+  "terminal.projects.exportFailed": "Could not start the download. Check download permissions and try again.",
   "terminal.projects.exportedTitle": "Workspace items exported",
   "terminal.projects.exported": "Exported {projects} projects, {sessions} CLI workspace items, and {folders} custom folders.",
   "terminal.projects.exportedLocation": "File: {filename}; default download location: {path}",

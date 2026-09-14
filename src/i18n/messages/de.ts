@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "Import von Workspace-Elementen",
   "terminal.projects.clear": "Lokale Workspace-Elemente löschen",
   "terminal.projects.exportEmpty": "Es gibt keine lokalen KI-Workspace-Elemente oder benutzerdefinierte Ordner zu exportieren.",
+  "terminal.projects.exportInvalid": "Keine erneut importierbare Datei möglich. Maximal 64 Einträge und 1 MiB sind erlaubt. Prüfen Sie Anzahl und Starteinstellungen.",
+  "terminal.projects.exportFailed": "Der Download konnte nicht gestartet werden. Prüfen Sie die Downloadberechtigungen und versuchen Sie es erneut.",
   "terminal.projects.exportedTitle": "Export von Workspace-Elementen",
   "terminal.projects.exported": "Ausgeführt {projects} Projekte, {sessions} CLI-Workspace-Elemente und {folders} benutzerdefinierte Ordner.",
   "terminal.projects.exportedLocation": "Datei: {filename}; Standard-Download-Standort: {path}",

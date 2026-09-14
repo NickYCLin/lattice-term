@@ -66,11 +66,13 @@ import {
 } from "../app/sessionSidebarLayout";
 import {
   MAX_WORKSPACE_TRANSFER_BYTES,
+  WorkspaceExportError,
   parseWorkspaceTransfer,
   serializeWorkspaceTransfer,
   type PortableWorkspaceItem,
   type WorkspaceTransferFile,
 } from "../app/workspaceTransfer";
+import { exportTextFile } from "../app/fileExport";
 import { useI18n } from "../i18n/context";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
@@ -163,13 +165,7 @@ function workspaceExportFilename(exportedAt = new Date()) {
 
 async function downloadWorkspaceFile(content: string) {
   const filename = workspaceExportFilename();
-  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+  await exportTextFile(content, filename);
   try {
     return { filename, path: await join(await downloadDir(), filename) };
   } catch {
@@ -632,9 +628,20 @@ export function SessionsView({
       });
       return;
     }
-    const exported = await downloadWorkspaceFile(
-      serializeWorkspaceTransfer(agents.sessions, reconciledSidebarLayout),
-    );
+    let exported: Awaited<ReturnType<typeof downloadWorkspaceFile>>;
+    try {
+      exported = await downloadWorkspaceFile(
+        serializeWorkspaceTransfer(agents.sessions, reconciledSidebarLayout),
+      );
+    } catch (reason) {
+      setWorkspaceTransferNotice({
+        tone: "danger",
+        title: t("terminal.projects.export"),
+        body: t(reason instanceof WorkspaceExportError
+          ? "terminal.projects.exportInvalid" : "terminal.projects.exportFailed"),
+      });
+      return;
+    }
     setWorkspaceTransferNotice({
       tone: "info",
       title: t("terminal.projects.exportedTitle"),

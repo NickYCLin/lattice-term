@@ -693,6 +693,8 @@ export const messages: Messages = {
   "terminal.projects.import": "Importer des éléments d'espace de travail",
   "terminal.projects.clear": "Effacer les éléments de l'espace de travail local",
   "terminal.projects.exportEmpty": "Il n'y a pas d'éléments locaux d'espace de travail AI ou de dossiers personnalisés à exporter.",
+  "terminal.projects.exportInvalid": "Impossible de créer un fichier réimportable. La limite est de 64 éléments et 1 MiB. Vérifiez leur nombre et les paramètres de lancement.",
+  "terminal.projects.exportFailed": "Impossible de démarrer le téléchargement. Vérifiez les autorisations de téléchargement et réessayez.",
   "terminal.projects.exportedTitle": "Espace de travail exporté",
   "terminal.projects.exported": "Exportations {projects} projets, {sessions} les éléments de l'espace de travail de l'ICL, et {folders} dossiers personnalisés.",
   "terminal.projects.exportedLocation": "Fichier: {filename}; emplacement de téléchargement par défaut: {path}",

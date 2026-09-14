@@ -9,6 +9,27 @@ export const MAX_WORKSPACE_TRANSFER_BYTES = 1024 * 1024;
 const MAX_ITEMS = 64;
 const MAX_ARGUMENTS = 64;
 
+export class WorkspaceExportError extends Error {
+  constructor() { super("Workspace export does not meet the import limits"); }
+}
+
+/** Shared folders are portable; chat identities are local to their conversations. */
+function portableSidebar(sidebar: SessionSidebarLayout): SessionSidebarLayout {
+  const placements = Object.fromEntries(Object.entries(sidebar.placements)
+    .filter(([id]) => !id.startsWith("thread:"))
+    .map(([id, placement]) => {
+      let parentId = placement.parentId;
+      const visited = new Set<string>();
+      while (parentId?.startsWith("thread:")) {
+        if (visited.has(parentId)) { parentId = null; break; }
+        visited.add(parentId);
+        parentId = sidebar.placements[parentId]?.parentId ?? null;
+      }
+      return [id, { ...placement, parentId }];
+    }));
+  return { ...sidebar, placements, collapsedFolderIds: sidebar.collapsedFolderIds.filter(id => !id.startsWith("thread:")) };
+}
+
 export interface PortableWorkspaceItem {
   groupKey: string;
   groupLabel: string;
@@ -73,7 +94,7 @@ export function createWorkspaceTransferFile(
       launchArguments: [...session.launchArguments],
       workingDirectory: session.workingDirectory,
     })),
-    sidebar,
+    sidebar: portableSidebar(sidebar),
   };
 }
 
@@ -82,11 +103,13 @@ export function serializeWorkspaceTransfer(
   sidebar: SessionSidebarLayout,
   exportedAt?: string,
 ): string {
-  return JSON.stringify(
+  const encoded = JSON.stringify(
     createWorkspaceTransferFile(sessions, sidebar, exportedAt),
     null,
     2,
   );
+  if (!parseWorkspaceTransfer(encoded)) throw new WorkspaceExportError();
+  return encoded;
 }
 
 export function parseWorkspaceTransfer(text: string): WorkspaceTransferFile | null {
@@ -155,6 +178,6 @@ export function parseWorkspaceTransfer(text: string): WorkspaceTransferFile | nu
     version: 1,
     exportedAt: record.exportedAt as string,
     items,
-    sidebar,
+    sidebar: portableSidebar(sidebar),
   };
 }

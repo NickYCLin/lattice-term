@@ -765,6 +765,8 @@ export const zhTW = {
   "terminal.projects.import": "匯入工作項目",
   "terminal.projects.clear": "清除本機工作項目",
   "terminal.projects.exportEmpty": "目前沒有可匯出的本機 AI 工作項目或自訂資料夾。",
+  "terminal.projects.exportInvalid": "無法建立可重新匯入的檔案。每次最多 64 個工作項目、檔案上限 1 MiB，請檢查項目數量與啟動設定。",
+  "terminal.projects.exportFailed": "無法開始下載，請檢查下載權限後再試一次。",
   "terminal.projects.exportedTitle": "工作項目已匯出",
   "terminal.projects.exported": "已匯出 {projects} 個專案、{sessions} 個 CLI 工作項目與 {folders} 個自訂資料夾。",
   "terminal.projects.exportedLocation": "檔案：{filename}；預設下載位置：{path}",
