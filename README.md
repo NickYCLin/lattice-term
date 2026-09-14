@@ -2,6 +2,8 @@
 
 # LatticeTerm
 
+**繁體中文** · [English](README.en.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português (Brasil)](README.pt-BR.md)
+
 **AI 助理與遠端連線，一個工作區。**
 
 使用你習慣的 AI 助理撰寫程式、檢查修改或整理資料。
@@ -47,6 +49,8 @@ GitHub Copilot CLI、Hermes Agent、Cursor Agent、Aider、Qwen Code、Kimi Code
 
 **對話模式**目前支援 Codex、Claude Code 與 Gemini CLI；Claude 和 Codex 可在工具執行前逐項詢問。
 各工具可用的模型取決於其自身支援與你的帳號，你可以依任務選擇助理。
+
+介面預設繁體中文，設定頁可切換英文、簡體中文、日文、韓文、西班牙文、法文、德文與巴西葡萄牙文；較新的未翻譯文字顯示英文。
 
 [查看完整功能與限制 →](docs/FEATURES.zh-TW.md)
 
@@ -109,7 +113,13 @@ iPhone／iPad 已可從 [App Store](https://apps.apple.com/app/latticeterm/id680
 加密備份不攜帶這份主機密碼的可重用授權，還原後要在被控端重新保存。
 目前沒有提供託管團隊服務。[中繼部署說明](docs/RELAY_SERVER.zh-TW.md)
 
+**終端分享也包含遠端 Agent Fleet 嗎？**
+
+Lattice Remote 的單一終端分享不等於遠端多 Agent 編排。SSH 與 [Relay Fleet](docs/RELAY_FLEET.zh-TW.md) 另透過 MCP 提供獨立工作區授權與多 PTY。Relay 實作目前在開發分支，尚待外部主機與安裝版驗收，也不包含遠端 Fleet 分割面板。
+
 ## 文件與參與
+
+本頁頂端可切換九種語言。繁中與英文提供較完整的使用說明，其餘語言先提供用途、下載、快速開始與限制；深入技術文件目前以繁中為主。
 
 | 想做什麼 | 從這裡開始 |
 | --- | --- |

@@ -19,6 +19,7 @@ export interface RemoteHostStatus {
   commands?: boolean;
   chat?: boolean;
   cli?: boolean;
+  fleet?: boolean;
   fileRoot?: string;
   state: "waiting" | "pairing" | "streaming" | "reconnecting";
   peer?: string;
@@ -41,6 +42,8 @@ export interface RemoteHostStartRequest {
   allowCommands?: boolean;
   allowChat?: boolean;
   allowCli?: boolean;
+  /** Granted afresh when sharing starts; not inherited from pairing or CLI access. */
+  fleet?: { directory: string; read: boolean; control: boolean; launch: boolean } | null;
   /** Independently authorises access to one shared folder. */
   allowFiles: boolean;
   /** Empty selects the current user's home folder in the native backend. */
@@ -384,6 +387,7 @@ export function useRemoteHost(autoStandby = false): RemoteHostApi {
       }
       const nextConfiguration = {
         ...request,
+        fleet: null,
         pairingCode: "",
         useSavedPairingCode: active.savedPairingCode === true,
         rememberPairingCode: false,

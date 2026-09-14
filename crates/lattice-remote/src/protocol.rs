@@ -154,6 +154,7 @@ pub struct RemoteHello {
     pub command_shells: u8,
     pub chat: bool,
     pub cli: bool,
+    pub fleet: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -545,19 +546,28 @@ impl RemoteMessage {
                     || hello.command_shells != 0
                     || hello.chat
                     || hello.cli
+                    || hello.fleet
                 {
                     output.push(u8::from(hello.terminal));
                 }
-                if hello.file_edit || hello.command_shells != 0 || hello.chat || hello.cli {
+                if hello.file_edit
+                    || hello.command_shells != 0
+                    || hello.chat
+                    || hello.cli
+                    || hello.fleet
+                {
                     output.push(u8::from(hello.file_edit));
                 }
-                if hello.command_shells != 0 || hello.chat || hello.cli {
+                if hello.command_shells != 0 || hello.chat || hello.cli || hello.fleet {
                     output.push(hello.command_shells);
                 }
-                if hello.chat || hello.cli {
+                if hello.chat || hello.cli || hello.fleet {
                     output.push(u8::from(hello.chat));
                 }
-                if hello.cli {
+                if hello.cli || hello.fleet {
+                    output.push(u8::from(hello.cli));
+                }
+                if hello.fleet {
                     output.push(1);
                 }
                 Ok(output)
@@ -728,6 +738,7 @@ impl RemoteMessage {
                     command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 3,
                     chat: body.get(base_len + 3).copied().unwrap_or(0) == 1,
                     cli: body.get(base_len + 4).copied().unwrap_or(0) == 1,
+                    fleet: body.get(base_len + 5).copied().unwrap_or(0) == 1,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -1490,6 +1501,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: false,
         });
         assert_eq!(
@@ -1513,6 +1525,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.command_shells = 3;
@@ -1543,6 +1556,7 @@ mod tests {
                 command_shells: 0,
                 chat: false,
                 cli: false,
+                fleet: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1618,6 +1632,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: true,
         })
         .encode()
@@ -1649,6 +1664,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: false,
         })
         .encode()
@@ -1667,6 +1683,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: true,
         })
         .encode()
@@ -1689,6 +1706,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1777,6 +1795,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: true,
         })
         .encode()
@@ -1888,6 +1907,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1904,6 +1924,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1920,6 +1941,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             terminal: false,
         })
         .encode()

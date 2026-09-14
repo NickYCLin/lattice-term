@@ -1046,6 +1046,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 agents={agents}
                 chat={chatRuntime.chat}
                 automations={chatRuntime.automations}
+                onOpenSession={(sessionId) => {
+                  setActiveSessionId(sessionId);
+                  setView("terminal");
+                }}
               />
             )}
             {view === "tunnels" && (

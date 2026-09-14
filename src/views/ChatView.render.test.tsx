@@ -6,27 +6,37 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { CHAT_ACCOUNT_PROFILES_KEY } from "../app/chatAccountProfiles";
+import { reconcileChatLayout } from "../app/chatThreadLayout";
+import { emptySessionSidebarLayout } from "../app/sessionSidebarLayout";
 import {
   fakeAgentApi,
   fakeAutomationsApi,
   fakeChatApi,
   fakeDefinition,
+  fakeSession,
   fakeThread,
   installFakeStorage,
 } from "../app/testFixtures/agentApis";
 import { I18nProvider } from "../i18n";
 import { ChatView } from "./ChatView";
 
-function render(chat = fakeChatApi()): string {
-  const agents = fakeAgentApi({
+function render(
+  chat = fakeChatApi(),
+  agents = fakeAgentApi({
     catalog: [
       fakeDefinition(),
       fakeDefinition({ id: "claude", label: "Claude Code", executable: "claude" }),
     ],
-  });
+  }),
+): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
-      <ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} />
+      <ChatView
+        agents={agents}
+        chat={chat}
+        automations={fakeAutomationsApi()}
+        onOpenSession={() => {}}
+      />
     </I18nProvider>,
   );
 }
@@ -74,6 +84,38 @@ describe("ChatView", () => {
     // The interface talks about assistants; the CLI is an implementation detail.
     const visibleText = markup.replace(/<[^>]+>/g, " ");
     expect(visibleText).not.toMatch(/\bCLI\b/);
+  });
+
+  it("always exposes delete from the conversation row", () => {
+    const thread = fakeThread({ title: "可以刪除的對話" });
+    const markup = render(
+      fakeChatApi({
+        threads: [thread],
+        activeThreadId: thread.id,
+        layout: reconcileChatLayout(emptySessionSidebarLayout, [thread]),
+      }),
+    );
+
+    expect(markup).toContain('aria-label="刪除對話：可以刪除的對話"');
+  });
+
+  it("mirrors live Work Sessions in the conversation sidebar", () => {
+    const agents = fakeAgentApi({
+      catalog: [fakeDefinition()],
+      sessions: [
+        fakeSession({
+          label: "OpenAI Codex",
+          workingDirectory: "D:\\project\\LatticeTerm",
+          model: "gpt-5.6-sol",
+        }),
+      ],
+    });
+    const markup = render(fakeChatApi(), agents);
+
+    expect(markup).toContain("工作階段");
+    expect(markup).toContain("LatticeTerm");
+    expect(markup).toContain("OpenAI Codex");
+    expect(markup).toContain("gpt-5.6-sol");
   });
 
   it("lists a named account with its login state in the thread settings", () => {

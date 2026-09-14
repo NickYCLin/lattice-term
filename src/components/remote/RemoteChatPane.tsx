@@ -41,12 +41,12 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, hidden, selected, before, refresh]);
   async function act(operation: RemoteChatOperation) {
-    if (busy) return;
+    if (busy || hidden) return;
     setBusy(true); setProblem(null);
     try {
       const result = await request(operation);
       if (!alive.current) return;
-      if (operation.kind === "send") setDrafts(value => value[operation.threadId] === operation.text ? { ...value, [operation.threadId]: "" } : value);
+      if (operation.kind === "send" || operation.kind === "steer") setDrafts(value => value[operation.threadId] === operation.text ? { ...value, [operation.threadId]: "" } : value);
       if (operation.kind === "create") { setSelected((result as RemoteChatThread).id); setPage(null); }
       setBefore(null); setRefresh(value => value + 1);
     } catch (error) { if (alive.current) setProblem(String(error)); }
@@ -81,10 +81,17 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
           </div>}
         </article>)}
       </div>
-      <form className="remote-chat-composer" onSubmit={event => { event.preventDefault(); if (draft.trim() && !busy && !current.thread.runningTurnId && new TextEncoder().encode(draft).length <= 16384) void act({ kind: "send", threadId: selected, text: draft }); }}>
+      <form className="remote-chat-composer" onSubmit={event => {
+        event.preventDefault();
+        if (!draft.trim() || busy || hidden || new TextEncoder().encode(draft).length > 16384) return;
+        if (current.thread.runningTurnId) {
+          if (current.thread.canSteer) void act({ kind: "steer", threadId: selected, turnId: current.thread.runningTurnId, text: draft });
+        } else void act({ kind: "send", threadId: selected, text: draft });
+      }}>
         <label className="field">{t("remote.chat.message")}<textarea className="input" rows={3} maxLength={16384} value={draft} onChange={e => setDrafts(value => ({ ...value, [selected]: e.target.value }))} /></label>
         <div className="remote-chat-actions"><span role="status">{current.thread.runningTurnId ? t("remote.chat.running") : t("remote.chat.idle")}</span>
-          {current.thread.runningTurnId ? <button type="button" className="button button--ghost" disabled={busy} onClick={() => { void act({ kind: "stop", threadId: selected, turnId: current.thread.runningTurnId! }); }}>{t("remote.chat.stop")}</button> : <button type="submit" className="button button--primary" disabled={busy || !draft.trim() || new TextEncoder().encode(draft).length > 16384}>{t("remote.chat.send")}</button>}
+          {current.thread.runningTurnId && <button type="button" className="button button--ghost" disabled={busy} onClick={() => { void act({ kind: "stop", threadId: selected, turnId: current.thread.runningTurnId! }); }}>{t("remote.chat.stop")}</button>}
+          {(!current.thread.runningTurnId || current.thread.canSteer) && <button type="submit" className="button button--primary" disabled={busy || !draft.trim() || new TextEncoder().encode(draft).length > 16384}>{current.thread.runningTurnId ? t("chat.steer.send") : t("remote.chat.send")}</button>}
         </div>
       </form>
     </> : <p role="status">{t("remote.chat.loading")}</p>}

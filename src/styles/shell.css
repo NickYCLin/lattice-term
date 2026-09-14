@@ -437,6 +437,28 @@
   }
 }
 
+@media (max-width: 40rem) {
+  .view-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding-inline: var(--space-4);
+  }
+
+  .view-header__text {
+    flex: 1 0 100%;
+  }
+
+  .view-header__actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .view-header__actions .button {
+    flex: 1 1 auto;
+  }
+}
+
 /* Mobile frame ----------------------------------------------------------- */
 /* On Android/iOS the rail becomes a bottom tab bar, the workspace is a
  * single column, and the resource sidebar and hover tooltips step aside. */

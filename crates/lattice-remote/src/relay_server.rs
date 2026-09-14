@@ -969,11 +969,34 @@ mod tests {
                     command_shells: 0,
                     chat: false,
                     cli: false,
+                    fleet: true,
                     terminal: false,
                 }))
                 .await
                 .unwrap();
             assert_eq!(secure.receive().await.unwrap(), RemoteMessage::KeepAlive);
+            let mut replies = Vec::new();
+            for _ in 0..2 {
+                let RemoteMessage::ChatRequest(request) = secure.receive().await.unwrap() else {
+                    panic!("expected Fleet request")
+                };
+                let crate::chat_protocol::ChatOperation::Fleet { request: call } =
+                    request.operation
+                else {
+                    panic!("expected isolated Fleet capability")
+                };
+                replies.push(crate::chat_protocol::ChatResponse {
+                    id: request.id,
+                    value: serde_json::json!({"sessionId":call.action["sessionId"],"cursor":42}),
+                    error: None,
+                });
+            }
+            for reply in replies.into_iter().rev() {
+                secure
+                    .send(&RemoteMessage::ChatResponse(reply))
+                    .await
+                    .unwrap();
+            }
         });
 
         let (stream, agent_name) = dial(&address.to_string(), &identity.device_id)
@@ -987,6 +1010,29 @@ mod tests {
         let hello = viewer.receive().await.unwrap();
         assert!(matches!(hello, RemoteMessage::Hello(_)));
         viewer.send(&RemoteMessage::KeepAlive).await.unwrap();
+        for id in ["pty-one", "pty-two"] {
+            let request = crate::chat_protocol::ChatRequest {
+                id: id.into(),
+                operation: crate::chat_protocol::ChatOperation::Fleet {
+                    request: crate::fleet_protocol::FleetRequest {
+                        version: 1,
+                        client: "a".repeat(64),
+                        action: serde_json::json!({"kind":"readOutput","sessionId":id,"cursor":0,"maxBytes":1024}),
+                    },
+                },
+            };
+            viewer
+                .send(&RemoteMessage::ChatRequest(request))
+                .await
+                .unwrap();
+        }
+        for expected in ["pty-two", "pty-one"] {
+            let RemoteMessage::ChatResponse(response) = viewer.receive().await.unwrap() else {
+                panic!("expected Fleet response")
+            };
+            assert_eq!(response.id, expected);
+            assert_eq!(response.value["sessionId"], expected);
+        }
         agent.await.unwrap();
     }
 

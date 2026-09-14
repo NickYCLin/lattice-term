@@ -86,6 +86,7 @@ pub struct RemoteSessionSummary {
     pub command_shells: u8,
     pub chat: bool,
     pub cli: bool,
+    pub fleet: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -255,7 +256,7 @@ struct RemoteSessionRecord {
     command_next: u32,
     chat_pending: std::collections::HashMap<
         String,
-        oneshot::Sender<lattice_remote::chat_protocol::ChatResponse>,
+        Option<oneshot::Sender<lattice_remote::chat_protocol::ChatResponse>>,
     >,
     admission: OwnedSemaphorePermit,
 }
@@ -543,6 +544,41 @@ impl RemoteRegistry {
             permit.send(message);
         }
         Ok(())
+    }
+
+    fn receive_chat_response(
+        &self,
+        session_id: &str,
+        generation: u64,
+        response: lattice_remote::chat_protocol::ChatResponse,
+    ) {
+        if let Ok(mut records) = self.state.lock() {
+            if let Some(record) = records
+                .sessions
+                .get_mut(session_id)
+                .filter(|record| record.generation == generation)
+            {
+                // Admission checked the request's independent capability. Keep the ID
+                // reserved until its caller drops the guard, including after delivery.
+                if let Some(tx) = record
+                    .chat_pending
+                    .get_mut(&response.id)
+                    .and_then(Option::take)
+                {
+                    let _ = tx.send(response);
+                }
+            }
+        }
+    }
+
+    pub fn fleet_generation(&self, session_id: &str) -> Option<u64> {
+        self.state
+            .lock()
+            .ok()?
+            .sessions
+            .get(session_id)
+            .filter(|r| r.summary.fleet)
+            .map(|r| r.generation)
     }
 
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
@@ -1078,6 +1114,7 @@ pub async fn connect(
         command_shells: hello.command_shells,
         chat: hello.chat,
         cli: hello.cli,
+        fleet: hello.fleet,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1178,17 +1215,7 @@ pub async fn connect(
                     }
                 }
                 Ok(RemoteMessage::ChatResponse(response)) => {
-                    if let Ok(mut records) = task_registry.state.lock() {
-                        if let Some(record) = records
-                            .sessions
-                            .get_mut(&task_session_id)
-                            .filter(|record| record.generation == generation && record.summary.chat)
-                        {
-                            if let Some(tx) = record.chat_pending.remove(&response.id) {
-                                let _ = tx.send(response);
-                            }
-                        }
-                    }
+                    task_registry.receive_chat_response(&task_session_id, generation, response);
                 }
                 Ok(RemoteMessage::ChatRequest(_)) | Ok(RemoteMessage::CommandRequest(_)) => {
                     break "The Agent sent a viewer-only command request.".into()
@@ -1537,6 +1564,26 @@ pub async fn disconnect(
     Ok(())
 }
 
+struct ChatPendingGuard<'a> {
+    registry: &'a RemoteRegistry,
+    session_id: &'a str,
+    generation: u64,
+    id: String,
+}
+impl Drop for ChatPendingGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut records) = self.registry.state.lock() {
+            if let Some(record) = records
+                .sessions
+                .get_mut(self.session_id)
+                .filter(|record| record.generation == self.generation)
+            {
+                record.chat_pending.remove(&self.id);
+            }
+        }
+    }
+}
+
 pub async fn chat_request(
     registry: &RemoteRegistry,
     session_id: &str,
@@ -1552,7 +1599,9 @@ pub async fn chat_request(
             .sessions
             .get_mut(session_id)
             .ok_or("The Remote connection ended.")?;
-        if !(if request.operation.is_cli() {
+        if !(if request.operation.is_fleet() {
+            record.summary.fleet
+        } else if request.operation.is_cli() {
             record.summary.cli
         } else {
             record.summary.chat
@@ -1563,10 +1612,16 @@ pub async fn chat_request(
             return Err("Another conversation request is pending.".into());
         }
         let (tx, rx) = oneshot::channel();
-        record.chat_pending.insert(id.clone(), tx);
+        record.chat_pending.insert(id.clone(), Some(tx));
         (record.outbound.clone(), record.generation, rx)
     };
-    let result = tokio::time::timeout(Duration::from_secs(15), async {
+    let _pending = ChatPendingGuard {
+        registry,
+        session_id,
+        generation,
+        id,
+    };
+    tokio::time::timeout(Duration::from_secs(15), async {
         outbound
             .send(RemoteMessage::ChatRequest(request))
             .await
@@ -1575,17 +1630,7 @@ pub async fn chat_request(
     })
     .await
     .map_err(|_| "No acknowledgement. Refresh the conversation before sending again.".to_string())
-    .and_then(|result| result.map_err(str::to_owned));
-    if let Ok(mut records) = registry.state.lock() {
-        if let Some(record) = records
-            .sessions
-            .get_mut(session_id)
-            .filter(|record| record.generation == generation)
-        {
-            record.chat_pending.remove(&id);
-        }
-    }
-    result
+    .and_then(|result| result.map_err(str::to_owned))
 }
 
 #[cfg(test)]
@@ -1597,6 +1642,160 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Barrier;
+
+    #[tokio::test]
+    async fn cancelled_fleet_requests_release_their_generation_bound_slots() {
+        let registry = Arc::new(RemoteRegistry::new());
+        let mut summary = remote_summary("fleet-test", true);
+        summary.fleet = true;
+        register_test_record(&registry, idle_test_record(summary, 7));
+        let request = lattice_remote::chat_protocol::ChatRequest {
+            id: "cancelled-read".into(),
+            operation: lattice_remote::chat_protocol::ChatOperation::Fleet {
+                request: lattice_remote::fleet_protocol::FleetRequest {
+                    version: 1,
+                    client: "a".repeat(64),
+                    action: serde_json::json!({"kind":"listSessions"}),
+                },
+            },
+        };
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            chat_request(&registry, "fleet-test", request)
+        )
+        .await
+        .is_err());
+        assert!(registry.state.lock().unwrap().sessions["fleet-test"]
+            .chat_pending
+            .is_empty());
+        let stale = ChatPendingGuard {
+            registry: &registry,
+            session_id: "fleet-test",
+            generation: 6,
+            id: "new-request".into(),
+        };
+        registry
+            .state
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut("fleet-test")
+            .unwrap()
+            .chat_pending
+            .insert("new-request".into(), Some(oneshot::channel().0));
+        drop(stale);
+        assert!(registry.state.lock().unwrap().sessions["fleet-test"]
+            .chat_pending
+            .contains_key("new-request"));
+    }
+
+    #[tokio::test]
+    async fn relay_fleet_grants_require_advertisement_and_expire_on_reconnection() {
+        use crate::mcp_desktop::*;
+        let registry = Arc::new(RemoteRegistry::new());
+        let (wire, mut peer) = mpsc::channel(4);
+        let mut record = idle_test_record(remote_summary("fleet-test", true), 7);
+        record.outbound = wire;
+        register_test_record(&registry, record);
+        let service = DesktopService::new(
+            Arc::new(crate::ssh::SshRegistry::new()),
+            Arc::new(crate::sftp::SftpRegistry::new()),
+        )
+        .with_screens(
+            Arc::new(crate::rdp::RdpRegistry::new()),
+            Arc::new(crate::vnc::VncRegistry::new()),
+            registry.clone(),
+            Arc::new(crate::mcp_screen::ScreenFrames::default()),
+        );
+        let request = || GrantRequest {
+            // This fixture uses only the host-selected Relay workspace.
+            session_id: "fleet-test".into(),
+            backend: Backend::Remote,
+            label: "fixture".into(),
+            scopes: Scopes {
+                fleet_observe: true,
+                ..Default::default()
+            },
+            exec_plans: vec![],
+            roots: vec![],
+            fleet: Some(FleetWorkspace {
+                platform: FleetPlatform::Unix,
+                executable: String::new(),
+                data_directory: String::new(),
+                directory: "shared".into(),
+            }),
+        };
+        let service = Arc::new(service);
+        assert!(service.grant(request()).await.is_err());
+        registry
+            .state
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut("fleet-test")
+            .unwrap()
+            .summary
+            .fleet = true;
+        let grant = service.grant(request()).await.unwrap();
+        let response_registry = registry.clone();
+        let responder = tokio::spawn(async move {
+            let RemoteMessage::ChatRequest(request) = peer.recv().await.unwrap() else {
+                panic!("expected Fleet request")
+            };
+            assert!(request.operation.is_fleet());
+            let response = lattice_remote::chat_protocol::ChatResponse {
+                id: request.id.clone(),
+                value: serde_json::json!({"sessions":[]}),
+                error: None,
+            };
+            response_registry.receive_chat_response("fleet-test", 7, response);
+        });
+        let listed = service
+            .execute(
+                "fixture",
+                DesktopOperation::Fleet {
+                    target_id: grant.id.clone(),
+                    action: FleetAction::ListSessions {},
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed["source"], "remoteFleet");
+        assert_eq!(listed["untrusted"], true);
+        assert_eq!(listed["result"]["sessions"], serde_json::json!([]));
+        responder.await.unwrap();
+        assert!(service
+            .execute(
+                "fixture",
+                DesktopOperation::Fleet {
+                    target_id: grant.id.clone(),
+                    action: FleetAction::Launch {
+                        plan_id: "one".into(),
+                        request_id: "launch-one".into()
+                    }
+                }
+            )
+            .await
+            .is_err());
+        registry
+            .state
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut("fleet-test")
+            .unwrap()
+            .generation = 8;
+        assert!(service
+            .execute(
+                "fixture",
+                DesktopOperation::Fleet {
+                    target_id: grant.id,
+                    action: FleetAction::ListSessions {}
+                }
+            )
+            .await
+            .is_err());
+    }
 
     #[test]
     fn releasing_held_keys_is_not_a_person_taking_over() {
@@ -1641,6 +1840,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1670,6 +1870,7 @@ mod tests {
             command_shells: 0,
             chat: false,
             cli: false,
+            fleet: false,
             file_root_label: String::new(),
             terminal,
         }

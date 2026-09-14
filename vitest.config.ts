@@ -7,8 +7,8 @@ export default defineConfig(async (environment) => {
     : await viteConfig;
   return mergeConfig(base, {
     test: {
-      // Browser/CLI smoke artifacts can contain third-party package tests.
-      exclude: [...configDefaults.exclude, "output/**"],
+      // Archived worktrees and smoke artifacts are not part of this checkout.
+      exclude: [...configDefaults.exclude, "output/**", ".worktrees/**"],
     },
   });
 });

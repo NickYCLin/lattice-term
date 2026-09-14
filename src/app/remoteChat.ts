@@ -6,12 +6,13 @@ export type RemoteChatOperation =
   | { kind: "list" }
   | { kind: "read"; threadId: string; before: string | null }
   | { kind: "send"; threadId: string; text: string }
+  | { kind: "steer"; threadId: string; turnId: string; text: string }
   | { kind: "stop"; threadId: string; turnId: string }
   | { kind: "respond"; threadId: string; turnId: string; requestId: string; allow: boolean }
   | { kind: "create"; templateId: string };
 export interface RemoteChatRequest { id: string; operation: RemoteChatOperation }
 export interface RemoteChatResponse { id: string; value: unknown; error: string | null }
-export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number }
+export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean }
 export interface RemoteChatItem { id: string; type: ChatItem["type"]; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();
@@ -29,7 +30,9 @@ function clipForJson(text: string, bytes: number): string {
   return result;
 }
 export function remoteThread(thread: ChatThread): RemoteChatThread {
-  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt };
+  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt,
+    canSteer: thread.definitionId === "codex" && !!thread.runningTurnId && !thread.pendingInputs?.length && !thread.items.some(item => item.type === "approval" && item.decision === "pending"),
+  };
 }
 function remoteItem(item: ChatItem): RemoteChatItem {
   let text: string;
@@ -63,6 +66,12 @@ export async function performRemoteChat(chat: AgentChatApi, profiles: readonly C
   const thread = chat.getThread(id);
   if (!thread) throw new Error("The conversation is no longer available.");
   if (operation.kind === "read") return remotePage(thread, operation.before);
+  if (operation.kind === "steer") {
+    if (thread.runningTurnId !== operation.turnId || !remoteThread(thread).canSteer) throw new Error("The active turn changed or is waiting for approval. Refresh before sending instructions.");
+    if (!operation.text.trim() || encoder.encode(operation.text).length > 16384 || operation.text.includes("\0")) throw new Error("The message must contain 1–16384 UTF-8 bytes without NUL.");
+    await chat.steer(thread.id, operation.text, [], operation.turnId);
+    return null;
+  }
   if (operation.kind === "create") {
     return remoteThread(chat.createThread({ definitionId: thread.definitionId, workingDirectory: thread.workingDirectory, permission: thread.permission, model: thread.model, accountProfileId: thread.accountProfileId, browserEnabled: thread.browserEnabled, activate: false }));
   }

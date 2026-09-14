@@ -210,6 +210,20 @@ function hostForForm(useSavedPairingCode: boolean): RemoteHostApi {
   };
 }
 
+it("grants one Fleet workspace explicitly and resets its authority after starting", async () => {
+  const host = hostForForm(true);
+  const view = await mountDialog(host);
+  const input = (label: string) => allNodes(view.find("LABEL", label)!).find(node => node.tagName === "INPUT")!;
+  try {
+    expect(props(input("分享 Agent Fleet 工作區")).checked).toBe(false);
+    await act(async () => { props(input("分享 Agent Fleet 工作區")).onChange!({ currentTarget: { checked: true } }); });
+    await act(async () => { props(input("此主機的工作區目錄")).onChange!({ currentTarget: { checked: false, value: "C:\\fixture\\project" } }); });
+    await act(async () => { await props(view.find("FORM")!).onSubmit!({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }); });
+    expect(host.start).toHaveBeenCalledWith(expect.objectContaining({ fleet: { directory: "C:\\fixture\\project", read: false, control: false, launch: false }, allowCli: false, allowChat: false }));
+    expect(props(input("分享 Agent Fleet 工作區")).checked).toBe(false);
+  } finally { await act(async () => { view.root.unmount(); }); }
+});
+
 it("opens permissions without immediately submitting the newly rendered save action", async () => {
   const host: RemoteHostApi = {
     deviceId: null, deviceIdError: null, ensureDeviceId: vi.fn(async () => {}),

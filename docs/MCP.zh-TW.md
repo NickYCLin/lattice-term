@@ -391,6 +391,6 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 
 - **B 的邊界**：只有畫面上自己寫明中斷鍵的 CLI 支援 `scope: "turn"`，其餘不猜按鍵；沒有官方就緒 hook 的 CLI 不能自動收取 MCP 指示。巢狀委派未支援，不自動把 orchestrator MCP 設定傳給啟動的 CLI；啟動數量另有上限（見上），所以就算有人想靠輸出誘導連環開 agent 也開不出來。
 - **C 驗收**：實作已接入桌面 registry；隔離 SSH／SFTP、桌面授權及跨平台實際驗收須依本次 PR 結果核對，不能沿用早期 A／B 的綠燈當成 C 通過。
-- **D 的延伸**：SSH 工作區與多 PTY 已接入 MCP；Lattice Remote／Relay 的 Fleet transport、桌面遠端 Fleet panes 與巢狀派工未提供。外部主機與真實 CLI 的驗收另列，不以 loopback fixture 代替。
+- **D 的延伸**：SSH 與 Lattice Remote／Relay 工作區、多 PTY 已接入 MCP；Relay 需主機端獨立工作區授權，詳見 [Relay Fleet](RELAY_FLEET.zh-TW.md)。桌面遠端 Fleet panes 與巢狀派工未提供。外部主機、安裝版與真實 CLI 的驗收另列，不以 loopback fixture 代替。
 
 歡迎在 #180 繼續討論優先順序。

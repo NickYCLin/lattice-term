@@ -33,6 +33,7 @@ export function ChatThreadTree({
   activeThreadId,
   renderThread,
   onSelectThread,
+  onRemoveThread,
   onToggleFolder,
   onRenameFolder,
   onRemoveFolder,
@@ -44,6 +45,7 @@ export function ChatThreadTree({
   activeThreadId: string | null;
   renderThread: (thread: ChatThread, active: boolean) => React.ReactNode;
   onSelectThread: (threadId: string) => void;
+  onRemoveThread: (thread: ChatThread) => void;
   onToggleFolder: (folderId: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
   onRemoveFolder: (folderId: string) => void;
@@ -295,6 +297,20 @@ export function ChatThreadTree({
             }}
           >
             {renderThread(row.thread, row.thread.id === activeThreadId)}
+            <span className="chat-tree__actions">
+              <button
+                type="button"
+                className="chat-tree__action chat-tree__action--danger"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveThread(row.thread);
+                }}
+                aria-label={`${t("chat.delete")}：${row.thread.title || t("chat.untitled")}`}
+                title={t("chat.delete")}
+              >
+                <TrashIcon />
+              </button>
+            </span>
           </div>
         );
       })}

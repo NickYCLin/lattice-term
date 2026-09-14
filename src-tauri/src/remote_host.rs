@@ -39,6 +39,8 @@ pub struct RemoteHostStartRequest {
     pub allow_chat: bool,
     #[serde(default)]
     pub allow_cli: bool,
+    #[serde(default)]
+    pub fleet: Option<crate::remote_fleet::HostGrant>,
     /// File access is independently authorised from keyboard/mouse control.
     #[serde(default)]
     pub allow_files: bool,
@@ -81,6 +83,7 @@ pub struct RemoteHostStatus {
     pub commands: bool,
     pub chat: bool,
     pub cli: bool,
+    pub fleet: bool,
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
@@ -411,8 +414,13 @@ async fn spawn_agent(
         .env_remove("LATTICE_CHAT_BRIDGE")
         .env_remove("LATTICE_CHAT_TOKEN")
         .env_remove("LATTICE_CHAT_ALLOWED")
-        .env_remove("LATTICE_CLI_ALLOWED");
+        .env_remove("LATTICE_CLI_ALLOWED")
+        .env_remove("LATTICE_FLEET_ALLOWED");
     if let Some(chat) = chat {
+        command.env(
+            "LATTICE_FLEET_ALLOWED",
+            if chat.fleet.is_some() { "1" } else { "0" },
+        );
         command
             .env("LATTICE_CHAT_BRIDGE", &chat.address)
             .env("LATTICE_CHAT_TOKEN", &chat.token)
@@ -648,13 +656,21 @@ async fn start_inner(
         stop_inner(&app, &registry).await?;
     }
     let sharing_id = host_id();
-    let chat = if request.allow_chat || request.allow_cli {
+    let fleet = request
+        .fleet
+        .as_ref()
+        .map(|grant| {
+            crate::remote_fleet::Access::new(app.state::<crate::AppDaemon>().paths().clone(), grant)
+        })
+        .transpose()?;
+    let chat = if request.allow_chat || request.allow_cli || fleet.is_some() {
         Some(
             crate::remote_chat_host::Bridge::start(
                 app.clone(),
                 sharing_id.clone(),
                 request.allow_chat,
                 request.allow_cli,
+                fleet,
             )
             .await?,
         )
@@ -778,6 +794,7 @@ async fn start_inner(
         commands,
         chat: request.allow_chat,
         cli: request.allow_cli,
+        fleet: request.fleet.is_some(),
         file_root,
         state: "waiting",
         peer: None,
@@ -1126,6 +1143,7 @@ mod tests {
                 commands: false,
                 chat: false,
                 cli: false,
+                fleet: false,
                 file_root: None,
                 state: "waiting",
                 peer: None,
@@ -1199,6 +1217,7 @@ mod tests {
             allow_commands: false,
             allow_chat: false,
             allow_cli: false,
+            fleet: None,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -1218,6 +1237,7 @@ mod tests {
             allow_commands: false,
             allow_chat: false,
             allow_cli: false,
+            fleet: None,
             allow_files: false,
             file_root: String::new(),
             mode: String::new(),
@@ -1241,6 +1261,7 @@ mod tests {
                 allow_commands: false,
                 allow_chat: false,
                 allow_cli: false,
+                fleet: None,
                 allow_files: false,
                 file_root: String::new(),
                 mode: String::new(),
@@ -1281,6 +1302,7 @@ mod tests {
             allow_commands: false,
             allow_chat: false,
             allow_cli: false,
+            fleet: None,
             allow_files: false,
             file_root: String::new(),
             mode: "relay".to_string(),
@@ -1314,6 +1336,7 @@ mod tests {
             commands: false,
             chat: false,
             cli: false,
+            fleet: false,
             file_root: None,
             state: "waiting",
             peer: None,
