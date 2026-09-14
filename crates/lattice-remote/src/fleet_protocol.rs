@@ -10,6 +10,22 @@ pub struct FleetRequest {
     pub action: serde_json::Value,
 }
 
+impl FleetRequest {
+    pub fn valid(&self) -> bool {
+        self.version == 1
+            && self.client.len() == 64
+            && self.client.bytes().all(|b| b.is_ascii_hexdigit())
+            && self.action.is_object()
+            && serde_json::to_vec(&self.action).is_ok_and(|v| v.len() <= 20 * 1024)
+    }
+    pub fn mutates(&self) -> bool {
+        !matches!(
+            self.action["kind"].as_str(),
+            Some("listSessions" | "listPlans" | "readOutput" | "waitState")
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,20 +90,5 @@ mod tests {
             panic!()
         };
         assert!(!legacy.fleet && !legacy.chat && !legacy.cli && legacy.view_only);
-    }
-}
-impl FleetRequest {
-    pub fn valid(&self) -> bool {
-        self.version == 1
-            && self.client.len() == 64
-            && self.client.bytes().all(|b| b.is_ascii_hexdigit())
-            && self.action.is_object()
-            && serde_json::to_vec(&self.action).is_ok_and(|v| v.len() <= 20 * 1024)
-    }
-    pub fn mutates(&self) -> bool {
-        !matches!(
-            self.action["kind"].as_str(),
-            Some("listSessions" | "listPlans" | "readOutput" | "waitState")
-        )
     }
 }
