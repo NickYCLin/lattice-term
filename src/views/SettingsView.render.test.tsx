@@ -56,6 +56,25 @@ function renderSettings(platform: string): string {
 }
 
 describe("Settings updater platform boundary", () => {
+  it("shows the common languages as a labelled selection grid", () => {
+    const markup = renderSettings("linux");
+
+    for (const language of [
+      "繁體中文",
+      "简体中文",
+      "English",
+      "日本語",
+      "한국어",
+      "Español",
+      "Français",
+      "Deutsch",
+    ]) {
+      expect(markup).toContain(language);
+    }
+    expect(markup).toContain('class="language-grid"');
+    expect(markup).toContain("尚未提供所選語言的文字會顯示英文");
+  });
+
   it("directs iOS users to their Apple installation channel", () => {
     const markup = renderSettings("ios");
 

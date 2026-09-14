@@ -48,6 +48,8 @@ GitHub Copilot CLI、Hermes Agent、Cursor Agent、Aider、Qwen Code、Kimi Code
 **對話模式**目前支援 Codex、Claude Code 與 Gemini CLI；Claude 和 Codex 可在工具執行前逐項詢問。
 各工具可用的模型取決於其自身支援與你的帳號，你可以依任務選擇助理。
 
+介面預設繁體中文，設定頁可切換英文、簡體中文、日文、韓文、西班牙文、法文、德文與巴西葡萄牙文；較新的未翻譯文字顯示英文。
+
 [查看完整功能與限制 →](docs/FEATURES.zh-TW.md)
 
 ## 下載

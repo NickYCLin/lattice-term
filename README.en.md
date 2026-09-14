@@ -66,7 +66,7 @@ Choose an installer from **[the latest release](https://github.com/NickYCLin/lat
 
 LatticeTerm is in public beta, with desktop as its primary experience. Mobile builds have a smaller feature set.
 The main branch can contain unreleased work; check the [release notes](https://github.com/NickYCLin/lattice-term/releases).
-You can switch the interface to English in **Settings**.
+**Settings** offers Traditional Chinese, English, Simplified Chinese, Japanese, Korean, Spanish, French, German, and Brazilian Portuguese. New text without a translation falls back to English.
 
 ## Get started
 

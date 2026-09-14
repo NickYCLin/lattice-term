@@ -10,6 +10,18 @@ import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
   // Common ----------------------------------------------------------------
+  "localFile.invalidPath": "Drop an absolute local path.",
+  "localFile.unreadable": "Cannot read this file.",
+  "localFile.unsupported": "Shortcuts, symbolic links and special files are not supported.",
+  "localFile.tooLarge": "The file exceeds the allowed size.",
+  "localFile.invalidText": "The file must contain UTF-8 text.",
+  "localFile.changed": "The file changed. Select it again.",
+  "localFile.expectedFile": "Drop a regular file.",
+  "localFile.expectedDirectory": "Drop a folder.",
+  "localFile.single": "Select one item at a time here.",
+  "localFile.dropFile": "Drop a file here to select it.",
+  "localFile.dropDirectory": "Drop a folder here to select it.",
+  "language.loadFailed": "The selected language could not be loaded. The previous language is still displayed; please try again.",
   "common.appName": "LatticeTerm",
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -465,6 +477,7 @@ export const en: Messages = {
   "settings.theme": "Theme",
   "settings.themeHint": "Pick whichever is easiest on your eyes.",
   "settings.language": "Language",
+  "settings.languageFallbackHint": "Text that is not yet available in your language is shown in English.",
   "settings.languageHint": "Language used across the interface.",
   "settings.density": "Density",
   "settings.densityHint":
@@ -1388,7 +1401,7 @@ export const en: Messages = {
   "automation.badge": "Scheduled",
   "automation.empty.title": "No automations yet",
   "automation.empty.body":
-    "Write instructions, pick a project and a time, and LatticeTerm runs a chat turn on schedule while it is open. Each run appears as a new conversation waiting for you.",
+    "Write instructions, choose a project and a time, and LatticeTerm runs a scheduled chat turn. Each result appears as a new conversation.",
   "automation.form.title": "Automation",
   "automation.name": "Name",
   "automation.instructions": "Instructions",
@@ -1408,7 +1421,7 @@ export const en: Messages = {
   "automation.error.afterMissing": "That automation no longer exists",
   "automation.error.afterCycle": "That would close a loop: the two would trigger each other forever",
   "automation.schedule.hint":
-    "Runs only while LatticeTerm is open. A time missed while it was closed runs once at the next start, then the schedule continues.",
+    "Runs here while the window is open, then through the background service if it is running. A schedule missed while the service was stopped runs once at the next start, then the regular schedule resumes.",
   "automation.time": "Time",
   "automation.days": "Days",
   "automation.every": "Every",
@@ -1417,7 +1430,7 @@ export const en: Messages = {
   "automation.unit.hours": "hours",
   "automation.permission.hint":
     "Nobody is there to answer a prompt in an unattended run, so \"ask each time\" is not offered. Read only by default; widen it only when you want changes made.",
-  "automation.storage.note": "Automations and their instructions live only in LatticeTerm on this computer and travel with the encrypted backup.",
+  "automation.storage.note": "Schedules and instructions are stored locally in LatticeTerm. They are currently excluded from encrypted backups. Keep a separate copy of important instructions.",
   "automation.weekday.0": "Sun",
   "automation.weekday.1": "Mon",
   "automation.weekday.2": "Tue",
@@ -1562,7 +1575,7 @@ export const en: Messages = {
   "remote.files.transfer.clear": "Clear transfer",
   "remote.host.allowFilesWarnBody": "Paired viewers can read, upload and replace files within the shared root. Paths cannot escape this folder. Revoke file access in these settings.",
   "remote.host.allowInputWarnBody": "Paired viewers can control your desktop. Give pairing information only to trusted people; revoke control in these settings.",
-  "remote.host.securityBody": "A viewer must provide the correct pairing code to access the primary display and granted features. Data is end-to-end encrypted. Mouse/keyboard, files, commands and conversations are separate grants. Applying settings restarts the sharing connection.",
+  "remote.host.securityBody": "A viewer must provide the correct pairing code to access the display and granted features. Data is end-to-end encrypted. Mouse/keyboard, files, commands, conversations and existing CLIs are separate grants. Applying settings restarts the sharing connection.",
   "remote.host.applying": "Applying settings…",
   "remote.host.saveSettings": "Save settings",
   "remote.host.editSettings": "Connection and permission settings",
@@ -1718,7 +1731,7 @@ export const en: Messages = {
   "vault.tabs.label": "Key Vault sections",
   "vault.tabs.encrypted": "Encrypted vault",
   "vault.encrypted.title": "Encrypted vault",
-  "vault.encrypted.body": "An encrypted file protected by one master password (Argon2id key derivation + XChaCha20-Poly1305), stored in the app data folder and easy to back up. It covers what the OS credential store cannot — some Linux setups, future mobile builds. There is no recovery: lose the master password and the entries are gone.",
+  "vault.encrypted.body": "An encrypted file protected by one master password, using Argon2id key derivation and XChaCha20-Poly1305. It is stored in the app data folder and can be backed up. It also works where the OS credential store is unavailable. There is no recovery: losing the master password makes the entries inaccessible.",
   "vault.encrypted.failedTitle": "That did not work",
   "vault.encrypted.noticeTitle": "Done",
   "vault.encrypted.created": "The vault is created and unlocked.",

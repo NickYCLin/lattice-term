@@ -64,4 +64,11 @@ describe("sanitizePreferences", () => {
     }
   });
 
+
+  it.each(["zh-CN", "ja", "ko", "es", "fr", "de"] as const)(
+    "preserves the supported %s locale",
+    (locale) => {
+      expect(sanitizePreferences({ locale }).locale).toBe(locale);
+    },
+  );
 });
