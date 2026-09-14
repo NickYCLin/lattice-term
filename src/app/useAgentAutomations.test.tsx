@@ -91,6 +91,73 @@ function installFakeDom() {
 }
 
 describe("useAgentAutomations", () => {
+  it("removes a conversation from storage immediately", async () => {
+    invoke.mockClear();
+    const root = installFakeDom();
+    const previousStorage = globalThis.localStorage;
+    const stored = new Map<string, string>();
+    stored.set(
+      "latticeterm.agentChat.v1",
+      JSON.stringify([
+        {
+          id: "delete-now",
+          definitionId: "codex",
+          title: "Delete now",
+          workingDirectory: "/work",
+          permission: "ask",
+          model: "",
+          accountProfileId: null,
+          nativeSessionId: null,
+          reportedModel: null,
+          handoff: null,
+          items: [],
+          createdAt: 1,
+          updatedAt: 1,
+          runningTurnId: null,
+          automationId: null,
+          unread: false,
+        },
+      ]),
+    );
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    });
+    const { createRoot } = await import("react-dom/client");
+    const { ChatRuntime } = await import("./ChatRuntime");
+    type Api = import("./ChatRuntime").ChatRuntimeApi;
+    let api: Api | null = null;
+    const reactRoot = createRoot(root as unknown as Element);
+    try {
+      await act(async () => {
+        reactRoot.render(
+          React.createElement(ChatRuntime, {
+            locale: "en",
+            onChange: (next: Api) => {
+              api = next;
+            },
+          }),
+        );
+      });
+      const current = () => (api as unknown as Api).chat;
+      expect(current().threads.map((thread) => thread.id)).toEqual([
+        "delete-now",
+      ]);
+
+      await act(async () => current().removeThread("delete-now"));
+
+      expect(current().threads).toEqual([]);
+      expect(stored.has("latticeterm.agentChat.v1")).toBe(false);
+      expect(invoke).toHaveBeenCalledWith("agent_chat_close", {
+        threadId: "delete-now",
+      });
+    } finally {
+      await act(async () => reactRoot.unmount());
+      vi.stubGlobal("localStorage", previousStorage);
+    }
+  });
+
   it("records steering only after receipt and keeps late receipts with the original turn", async () => {
     invoke.mockClear();
     const root = installFakeDom();

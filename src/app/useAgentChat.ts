@@ -379,10 +379,16 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
         .then(({ invoke }) => invoke("agent_chat_close", { threadId: id }))
         .catch(() => {});
     }
-    changeThreads((current) => current.filter((thread) => thread.id !== id));
+    const remaining = threadsRef.current.filter((thread) => thread.id !== id);
+    // A delete is a deliberate destructive action. Persist it immediately so
+    // closing or reloading the window cannot restore the thread during the
+    // normal delayed-save window used for streaming replies.
+    if (typeof localStorage !== "undefined") {
+      saveStoredThreads(localStorage, remaining);
+    }
+    changeThreads(() => remaining);
     setActiveThreadId((current) => {
       if (current !== id) return current;
-      const remaining = threadsRef.current.filter((thread) => thread.id !== id);
       return remaining[0]?.id ?? null;
     });
   }, []);
