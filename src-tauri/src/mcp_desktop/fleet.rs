@@ -76,7 +76,7 @@ fn queue_mode() -> String {
     "queue".into()
 }
 impl FleetAction {
-    pub(super) fn scope(&self) -> Scope {
+    pub(crate) fn scope(&self) -> Scope {
         match self {
             Self::ListSessions {} | Self::ListPlans {} | Self::WaitState { .. } => {
                 Scope::FleetObserve
@@ -94,7 +94,7 @@ impl FleetAction {
             _ => None,
         }
     }
-    pub(super) fn validate(&self) -> Result<(), ServiceError> {
+    pub(crate) fn validate(&self) -> Result<(), ServiceError> {
         match self {
             Self::ReadOutput {
                 session_id,
@@ -146,7 +146,7 @@ impl FleetAction {
         }
         Ok(())
     }
-    fn tool(&self) -> (&'static str, Value) {
+    pub(crate) fn tool(&self) -> (&'static str, Value) {
         match self {
             Self::ListSessions {} => ("list_agent_sessions", json!({})),
             Self::ListPlans {} => ("list_launch_plans", json!({})),
@@ -203,7 +203,7 @@ pub(super) fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError>
     let config = request.fleet.as_ref().ok_or_else(ServiceError::invalid)?;
     if !enabled
         || !scopes.fleet_observe
-        || request.backend != Backend::Ssh
+        || !matches!(request.backend, Backend::Ssh | Backend::Remote)
         || scopes.metrics
         || scopes.list
         || scopes.exec
@@ -215,6 +215,16 @@ pub(super) fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError>
         || !request.exec_plans.is_empty()
     {
         return Err(ServiceError::invalid());
+    }
+    if request.backend == Backend::Remote {
+        return if config.executable.is_empty()
+            && config.data_directory.is_empty()
+            && config.directory == "shared"
+        {
+            Ok(())
+        } else {
+            Err(ServiceError::invalid())
+        };
     }
     for path in [
         &config.executable,
@@ -361,7 +371,7 @@ fn structured(result: Value) -> Result<Value, ServiceError> {
     Ok(value)
 }
 
-fn intersect_scopes(value: &mut Value, scopes: &Scopes) {
+pub(crate) fn intersect_scopes(value: &mut Value, scopes: &Scopes) {
     fn session(value: &mut Value, scopes: &Scopes) {
         let readable = scopes.fleet_read && value["readOutput"] == true;
         let control = scopes.fleet_control && value["access"] == "control";
@@ -471,6 +481,49 @@ pub(super) async fn execute(
     tokio::time::timeout(Duration::from_secs(12), work)
         .await
         .map_err(|_| unknown())?
+}
+
+pub(super) async fn execute_relay(
+    registry: &crate::remote::RemoteRegistry,
+    session_id: &str,
+    client: &str,
+    target: &str,
+    action: &FleetAction,
+    scopes: &Scopes,
+) -> Result<Value, ServiceError> {
+    action.validate()?;
+    let client = sha256(format!("{target}\0{client}").as_bytes());
+    let mut nonce = [0u8; 32];
+    getrandom::fill(&mut nonce).map_err(|_| ServiceError::unavailable())?;
+    let identity = action
+        .request_id()
+        .map(str::to_owned)
+        .unwrap_or_else(|| sha256(&nonce));
+    let id = sha256(format!("relay-fleet\0{client}\0{identity}").as_bytes());
+    let call = lattice_remote::fleet_protocol::FleetRequest {
+        version: 1,
+        client,
+        action: serde_json::to_value(action).map_err(|_| ServiceError::invalid())?,
+    };
+    if !call.valid() {
+        return Err(ServiceError::invalid());
+    }
+    let response = crate::remote::chat_request(
+        registry,
+        session_id,
+        lattice_remote::chat_protocol::ChatRequest {
+            id,
+            operation: lattice_remote::chat_protocol::ChatOperation::Fleet { request: call },
+        },
+    )
+    .await
+    .map_err(|_| unknown())?;
+    if response.error.is_some() {
+        return Err(ServiceError::new("unknown_outcome", "The host did not confirm the Fleet operation. Check its workspace grants and session state before retrying."));
+    }
+    let mut value = response.value;
+    intersect_scopes(&mut value, scopes);
+    Ok(json!({"workspaceId":target,"source":"remoteFleet","untrusted":true,"result":value}))
 }
 
 #[cfg(test)]

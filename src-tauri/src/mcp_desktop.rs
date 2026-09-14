@@ -12,6 +12,7 @@ mod loopback_tests;
 mod paths;
 mod screen_input;
 mod ssh_jobs;
+pub(crate) use fleet::intersect_scopes as intersect_fleet_scopes;
 #[cfg(windows)]
 pub(crate) use fleet::valid_windows_workspace_path;
 pub use fleet::{FleetAction, FleetPlatform, FleetWorkspace};
@@ -436,7 +437,8 @@ impl DesktopService {
                 .map(|generation| generation as usize),
             Backend::Remote => self
                 .remote
-                .screen_generation(session_id)
+                .fleet_generation(session_id)
+                .or_else(|| self.remote.screen_generation(session_id))
                 .map(|generation| generation as usize),
         }
     }
@@ -460,6 +462,24 @@ impl DesktopService {
 
     pub async fn grant(&self, request: GrantRequest) -> Result<TargetView, ServiceError> {
         validate_grant(&request)?;
+        if request.backend == Backend::Remote
+            && request.scopes.screen
+            && self.remote.screen_generation(&request.session_id).is_none()
+        {
+            return Err(ServiceError::new(
+                "unsupported",
+                "This Remote session does not share a screen.",
+            ));
+        }
+        if request.backend == Backend::Remote
+            && request.scopes.fleet_observe
+            && self.remote.fleet_generation(&request.session_id).is_none()
+        {
+            return Err(ServiceError::new(
+                "unsupported",
+                "The host has not explicitly shared a Fleet workspace.",
+            ));
+        }
         let controllable = match request.backend {
             Backend::Rdp => self.rdp.screen_controllable(&request.session_id),
             Backend::Vnc => self.vnc.screen_controllable(&request.session_id),
@@ -825,6 +845,17 @@ impl DesktopService {
         let work = async {
             match operation {
                 DesktopOperation::Fleet { action, .. } => {
+                    if grant.view.backend == Backend::Remote {
+                        return fleet::execute_relay(
+                            &self.remote,
+                            &grant.session_id,
+                            client,
+                            &grant.view.id,
+                            action,
+                            &grant.view.scopes,
+                        )
+                        .await;
+                    }
                     let handle = self
                         .ssh
                         .session_handle(&grant.session_id)
@@ -1118,6 +1149,7 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
         return Err(ServiceError::invalid());
     }
     if request.backend.is_screen()
+        && !request.scopes.fleet_observe
         && (!request.scopes.screen
             || request.scopes.metrics
             || request.scopes.list

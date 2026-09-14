@@ -24,7 +24,7 @@ export function loadRemoteHostSettings(storage: Storage): RemoteHostStartRequest
 export function saveRemoteHostSettings(storage: Storage, request: RemoteHostStartRequest): void {
   // Pairing passwords and one-shot save intent never enter browser storage.
   // Only the non-secret instruction to ask the native credential store is kept.
-  const { pairingCode: _secret, rememberPairingCode: _oneShot, ...settings } = request;
+  const { pairingCode: _secret, rememberPairingCode: _oneShot, fleet: _fleetGrant, ...settings } = request;
   storage.setItem(KEY, JSON.stringify({
     ...settings,
     useSavedPairingCode:

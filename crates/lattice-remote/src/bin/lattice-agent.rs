@@ -2122,6 +2122,7 @@ where
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             chat: lattice_remote::chat_protocol::available(),
             cli: lattice_remote::chat_protocol::cli_available(),
+            fleet: lattice_remote::chat_protocol::fleet_available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2442,6 +2443,7 @@ where
             command_shells: lattice_remote::host_commands::supported_shells(allow_commands),
             chat: lattice_remote::chat_protocol::available(),
             cli: lattice_remote::chat_protocol::cli_available(),
+            fleet: lattice_remote::chat_protocol::fleet_available(),
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())

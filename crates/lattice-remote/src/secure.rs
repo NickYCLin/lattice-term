@@ -488,6 +488,7 @@ mod tests {
                     command_shells: 0,
                     chat: false,
                     cli: false,
+                    fleet: false,
                     terminal: true,
                 }))
                 .await
@@ -795,6 +796,7 @@ mod tests {
                     command_shells: 0,
                     chat: false,
                     cli: false,
+                    fleet: false,
                     terminal: false,
                 }))
                 .await

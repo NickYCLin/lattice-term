@@ -100,7 +100,8 @@ describe("remote host dialog", () => {
     expect(windows).toContain("允許 cmd／PowerShell 指令");
     expect(windows).toContain("不受分享資料夾範圍限制");
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
-    expect(checkboxes).toHaveLength(5);
+    expect(checkboxes).toHaveLength(6);
+    expect(windows).toContain("分享 Agent Fleet 工作區");
     expect(windows).toContain("分享 CLI 並允許操作");
     expect(checkboxes.every(input => !input.includes("checked"))).toBe(true);
     expect(render(null, null, "linux").markup).not.toContain("允許 cmd／PowerShell 指令");

@@ -10,6 +10,7 @@ pub mod chat_protocol;
 pub mod command_protocol;
 pub mod credentials;
 pub mod device_pins;
+pub mod fleet_protocol;
 #[cfg(feature = "agent")]
 pub mod host_commands;
 #[cfg(feature = "agent")]

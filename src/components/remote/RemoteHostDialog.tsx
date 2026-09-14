@@ -64,6 +64,11 @@ export function RemoteHostDialog({
   const [fps, setFps] = useState(settings.fps);
   const [allowInput, setAllowInput] = useState(settings.allowInput === true);
   const [allowCli, setAllowCli] = useState(settings.allowCli === true);
+  const [allowFleet, setAllowFleet] = useState(false);
+  const [fleetDirectory, setFleetDirectory] = useState("");
+  const [fleetRead, setFleetRead] = useState(false);
+  const [fleetControl, setFleetControl] = useState(false);
+  const [fleetLaunch, setFleetLaunch] = useState(false);
   const [allowChat, setAllowChat] = useState(settings.allowChat === true);
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
@@ -156,6 +161,7 @@ export function RemoteHostDialog({
         allowInput,
         allowChat,
         allowCli,
+        fleet: allowFleet ? { directory: fleetDirectory, read: fleetRead, control: fleetControl, launch: fleetLaunch } : null,
         allowCommands: platform === "windows" && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
@@ -175,6 +181,10 @@ export function RemoteHostDialog({
         saveRelayAddress(window.localStorage, relayAddress);
       }
       setFixedCode("");
+      setAllowFleet(false);
+      setFleetRead(false);
+      setFleetControl(false);
+      setFleetLaunch(false);
       setUseSavedPairingCode(started.savedPairingCode === true);
       if (started.savedPairingCode) void savedCredential.refresh();
       setEditing(false);
@@ -314,6 +324,7 @@ export function RemoteHostDialog({
           )}
 
           <p className="panel__hint" role="status">{t("remote.host.autoStandby")}</p>
+          {host.status?.fleet && <p role="status">{t("remote.fleet.active")}</p>}
           {host.status && !editing ? (
             <div className="remote-host-active">
               <div className="remote-host-state">
@@ -764,6 +775,15 @@ export function RemoteHostDialog({
 
               <label className="checkbox-field"><input type="checkbox" checked={allowCli} disabled={busy} onChange={e => setAllowCli(e.currentTarget.checked)} />{t("remote.cli.allow")}</label>
               <p className="muted">{t("remote.cli.shareHint")}</p>
+              <label className="checkbox-field"><input type="checkbox" checked={allowFleet} disabled={busy} onChange={e => setAllowFleet(e.currentTarget.checked)} />{t("remote.fleet.allow")}</label>
+              <p className="muted">{t("remote.fleet.hint")}</p>
+              {allowFleet && <fieldset disabled={busy} className="remote-host-fleet">
+                <legend>{t("settings.mcpRemote.scopes")}</legend>
+                <label className="field"><span>{t("remote.fleet.directory")}</span><input className="input" value={fleetDirectory} maxLength={4096} onChange={e => setFleetDirectory(e.currentTarget.value)} autoComplete="off" required /></label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetRead} onChange={e => setFleetRead(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetRead")}</label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetControl} onChange={e => setFleetControl(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetControl")}</label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetLaunch} onChange={e => setFleetLaunch(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetLaunch")}</label>
+              </fieldset>}
               <label className="checkbox-field"><input type="checkbox" checked={allowChat} disabled={busy} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
               <p className="muted">{t("remote.chat.shareHint")}</p>
               {platform === "windows" && <label className="remote-host-toggle">

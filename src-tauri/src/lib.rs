@@ -26,6 +26,7 @@ pub mod remote_chat_host;
 mod remote_cli;
 pub mod remote_commands;
 pub mod remote_files;
+mod remote_fleet;
 pub mod remote_host;
 pub mod remote_pins;
 pub mod sftp;
@@ -104,6 +105,8 @@ struct McpScreenSession {
     session_id: String,
     host: String,
     backend: mcp_desktop::Backend,
+    fleet: bool,
+    screen: bool,
 }
 
 #[tauri::command]
@@ -119,21 +122,27 @@ fn mcp_screen_sessions(
             session_id: session.session_id,
             host: session.host,
             backend: mcp_desktop::Backend::Rdp,
+            fleet: false,
+            screen: true,
         })
         .chain(vnc.list().into_iter().map(|session| McpScreenSession {
             session_id: session.session_id,
             host: session.host,
             backend: mcp_desktop::Backend::Vnc,
+            fleet: false,
+            screen: true,
         }))
         .chain(
             remote
                 .list()
                 .into_iter()
-                .filter(|session| !session.terminal)
+                .filter(|session| !session.terminal || session.fleet)
                 .map(|session| McpScreenSession {
                     session_id: session.session_id,
                     host: session.host,
                     backend: mcp_desktop::Backend::Remote,
+                    fleet: session.fleet,
+                    screen: !session.terminal,
                 }),
         )
         .collect();

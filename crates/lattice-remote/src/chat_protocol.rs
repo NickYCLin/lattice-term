@@ -15,6 +15,9 @@ pub struct ChatRequest {
     deny_unknown_fields
 )]
 pub enum ChatOperation {
+    Fleet {
+        request: crate::fleet_protocol::FleetRequest,
+    },
     List,
     CliList,
     CliRead {
@@ -58,6 +61,9 @@ pub enum ChatOperation {
     },
 }
 impl ChatOperation {
+    pub fn is_fleet(&self) -> bool {
+        matches!(self, Self::Fleet { .. })
+    }
     pub fn is_cli(&self) -> bool {
         matches!(
             self,
@@ -74,6 +80,7 @@ impl ChatRequest {
             return false;
         }
         match &self.operation {
+            ChatOperation::Fleet { request } => request.valid(),
             ChatOperation::List | ChatOperation::CliList => true,
             ChatOperation::CliRead { session_id, .. } => identifier(session_id),
             ChatOperation::CliInput { session_id, data } => {
@@ -117,6 +124,9 @@ impl ChatRequest {
         }
     }
     pub fn mutates(&self) -> bool {
+        if let ChatOperation::Fleet { request } = &self.operation {
+            return request.mutates();
+        }
         !matches!(
             self.operation,
             ChatOperation::List
@@ -206,11 +216,17 @@ pub fn cli_available() -> bool {
 }
 #[cfg(feature = "agent")]
 pub fn permits(operation: &ChatOperation) -> bool {
-    if operation.is_cli() {
+    if operation.is_fleet() {
+        fleet_available()
+    } else if operation.is_cli() {
         cli_available()
     } else {
         available()
     }
+}
+#[cfg(feature = "agent")]
+pub fn fleet_available() -> bool {
+    bridge_available() && std::env::var("LATTICE_FLEET_ALLOWED").as_deref() == Ok("1")
 }
 #[cfg(test)]
 mod tests {

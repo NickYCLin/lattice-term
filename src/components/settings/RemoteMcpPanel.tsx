@@ -18,7 +18,7 @@ type Scopes = Record<Scope, boolean>;
 const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false, input: false, fleetObserve: false, fleetRead: false, fleetControl: false, fleetLaunch: false };
 type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
 const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
-interface Session { sessionId: string; host: string; backend: Backend }
+interface Session { sessionId: string; host: string; backend: Backend; fleet?: boolean; screen?: boolean }
 
 interface Target { id: string; label: string; backend: string; scopes: Scopes; connected: boolean }
 
@@ -43,7 +43,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selected = sessions.find((session) => session.sessionId === sessionId);
-  const isScreen = !!selected && screenBackends.includes(selected.backend);
+  const isScreen = !!selected && selected.screen !== false && screenBackends.includes(selected.backend);
   const fileScope = scopes.list || scopes.upload || scopes.download;
   const transferScope = scopes.upload || scopes.download;
 
@@ -79,7 +79,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       const { invoke } = await import("@tauri-apps/api/core");
       setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
         sessionId, backend: selected.backend, label: label.trim(), scopes,
-        fleet: scopes.fleetObserve ? { platform: fleetPlatform, executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory } : null,
+        fleet: scopes.fleetObserve ? (selected.backend === "remote" ? { platform: fleetPlatform, executable: "", dataDirectory: "", directory: "shared" } : { platform: fleetPlatform, executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory }) : null,
         execPlans: scopes.exec ? execPlanRequests(plans) : [],
         roots: fileScope ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot, localPath: transferScope ? localRoot : null }] : [],
       } }));
@@ -108,7 +108,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     setAcknowledged(false);
   };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
-    && (!scopes.fleetObserve || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => fleetPlatform === "windows" ? /^[A-Za-z]:[\\/].+/.test(path) : path.startsWith("/") && path.length > 1))
+    && (!scopes.fleetObserve || selected.backend === "remote" || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => fleetPlatform === "windows" ? /^[A-Za-z]:[\\/].+/.test(path) : path.startsWith("/") && path.length > 1))
     && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
@@ -137,7 +137,10 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           <fieldset disabled={busy || !selected} className="mcp-remote__scopes"><legend>{t("settings.mcpRemote.scopes")}</legend>
             {(Object.keys(scopesOff) as Scope[]).map((scope) => <label key={scope}>
               <input type="checkbox" checked={scopes[scope]} disabled={
-                isScreen ? scope !== "screen" && scope !== "input"
+                selected?.backend === "remote" && scope.startsWith("fleet") ? selected.fleet !== true
+                : scopes.fleetObserve && !scope.startsWith("fleet") ? true
+                : selected?.backend === "remote" ? !isScreen || (scope !== "screen" && scope !== "input")
+                : isScreen ? scope !== "screen" && scope !== "input"
                 : scope === "screen" || scope === "input" ? true
                 : scope.startsWith("fleet") ? selected?.backend !== "ssh"
                 : scopes.fleetObserve ? true
@@ -156,7 +159,8 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
                 }} /> {t(`settings.mcpRemote.scope.${scope}`)}
             </label>)}
           </fieldset>
-          {scopes.fleetObserve && <fieldset disabled={busy} className="mcp-remote__plans">
+          {scopes.fleetObserve && selected?.backend === "remote" && <p>{t("remote.fleet.clientHint")}</p>}
+          {scopes.fleetObserve && selected?.backend === "ssh" && <fieldset disabled={busy} className="mcp-remote__plans">
             <legend>{t("settings.mcpRemote.fleetTitle")}</legend>
             <p className="setting__description">{t("settings.mcpRemote.fleetHint")}</p>
             <label className="field"><span className="field__label">{t("settings.mcpRemote.fleetPlatform")}</span>
