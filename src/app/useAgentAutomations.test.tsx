@@ -193,6 +193,9 @@ describe("useAgentAutomations", () => {
     expect(thread.items.map(item => item.type === "user" ? item.text : item.type)).toEqual(["first", "extra", "turnEnd", "next turn"]);
     expect(thread.runningTurnId).toBe(nextTurn);
     expect(thread.permission).toBe("ask");
+    const callsBeforeStaleSteer = invoke.mock.calls.length;
+    await expect(current().steer(id, "stale remote instruction", [], originalTurn)).rejects.toThrow("active turn changed");
+    expect(invoke.mock.calls).toHaveLength(callsBeforeStaleSteer);
     invoke.mockRejectedValueOnce(new Error("turn ended"));
     await act(async () => { await expect(current().steer(id, "rejected", [])).rejects.toThrow("turn ended"); });
     expect(current().threads[0].items).toEqual(thread.items);

@@ -117,7 +117,7 @@ export interface AgentChatApi {
     profileConfigPath?: string | null,
   ) => Promise<void>;
   stop: (id: string, expectedTurnId?: string) => Promise<void>;
-  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[]) => Promise<void>;
+  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => Promise<void>;
   enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
   removeQueued: (id: string, inputId: string) => void;
   resumeQueue: (id: string) => void;
@@ -438,9 +438,10 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     }
   }, []);
 
-  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[]) => {
+  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => {
     const thread = threadsRef.current.find(entry => entry.id === id);
     if (thread?.definitionId !== "codex" || !thread.runningTurnId) throw new Error("No Codex turn is running in this chat.");
+    if (expectedTurnId !== undefined && thread.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before sending instructions.");
     if (pendingSteers.current.has(id)) throw new Error("Another instruction is still awaiting confirmation.");
     pendingSteers.current.add(id);
     const turnId = thread.runningTurnId;

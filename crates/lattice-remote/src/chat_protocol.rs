@@ -38,6 +38,11 @@ pub enum ChatOperation {
         thread_id: String,
         text: String,
     },
+    Steer {
+        thread_id: String,
+        turn_id: String,
+        text: String,
+    },
     Stop {
         thread_id: String,
         turn_id: String,
@@ -84,6 +89,17 @@ impl ChatRequest {
             }
             ChatOperation::Send { thread_id, text } => {
                 identifier(thread_id)
+                    && !text.trim().is_empty()
+                    && text.len() <= 16 * 1024
+                    && !text.contains('\0')
+            }
+            ChatOperation::Steer {
+                thread_id,
+                turn_id,
+                text,
+            } => {
+                identifier(thread_id)
+                    && identifier(turn_id)
                     && !text.trim().is_empty()
                     && text.len() <= 16 * 1024
                     && !text.contains('\0')
@@ -198,6 +214,46 @@ pub fn permits(operation: &ChatOperation) -> bool {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn steering_requires_a_bounded_message_and_explicit_turn() {
+        let request = ChatRequest {
+            id: "request".into(),
+            operation: ChatOperation::Steer {
+                thread_id: "thread".into(),
+                turn_id: "turn".into(),
+                text: "先檢查\n再修改".into(),
+            },
+        };
+        assert!(request.valid());
+        assert!(request.mutates());
+        assert!(!request.operation.is_cli());
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(encoded["operation"]["turnId"], "turn");
+        assert_eq!(
+            serde_json::from_value::<ChatRequest>(encoded).unwrap(),
+            request
+        );
+        for (turn_id, text) in [
+            ("", "hello".into()),
+            ("turn", " ".into()),
+            ("turn", "\0".into()),
+            ("turn", "中".repeat(5462)),
+        ] {
+            assert!(!ChatRequest {
+                id: "request".into(),
+                operation: ChatOperation::Steer {
+                    thread_id: "thread".into(),
+                    turn_id: turn_id.into(),
+                    text
+                }
+            }
+            .valid());
+        }
+        assert!(serde_json::from_value::<ChatRequest>(
+            serde_json::json!({"id":"r","operation":{"kind":"steer","threadId":"t","text":"hello"}})
+        )
+        .is_err());
+    }
     use super::*;
     #[test]
     fn cli_messages_validate_bounds_and_classify_mutations() {
