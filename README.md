@@ -115,7 +115,7 @@ iPhone／iPad 已可從 [App Store](https://apps.apple.com/app/latticeterm/id680
 
 **終端分享也包含遠端 Agent Fleet 嗎？**
 
-Lattice Remote 的單一終端分享不等於遠端多 Agent 編排。SSH Fleet 已透過 MCP 提供獨立工作區授權與多 PTY；Relay Fleet 尚未完成，詳見 [Fleet 架構](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md)。
+Lattice Remote 的單一終端分享不等於遠端多 Agent 編排。SSH 與 [Relay Fleet](docs/RELAY_FLEET.zh-TW.md) 另透過 MCP 提供獨立工作區授權與多 PTY。Relay 實作目前在開發分支，尚待外部主機與安裝版驗收，也不包含遠端 Fleet 分割面板。
 
 ## 文件與參與
 

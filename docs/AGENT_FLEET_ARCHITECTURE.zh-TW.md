@@ -166,7 +166,7 @@ Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重�
 | 跨程序背景 daemon 與重新 attach | 已完成（第一版） | 勾選「留在背景」的工作階段由 `lattice-term agent-daemon` 持有：同一份 `AgentRegistry` 在 daemon 程序裡跑，桌面透過使用者專屬本機 socket 以 JSON 行協定 attach，關閉視窗後 CLI 繼續，下次開啟接回並重播 256 KiB 尾端；未勾選的仍隨桌面結束。保存的啟動項目記住此選項，還原時直接交給 daemon；對話排程在沒有視窗連著時由 daemon 執行，結果交回桌面成為未讀對話 |
 | 跨重啟還原 | 部分完成 | 已保存的 Codex 項目會續接同工作目錄最近的對話，Cursor 項目會使用 `agent --continue` 續接最近對話；正常關閉時，每個 Agent 最近 256 KiB 終端輸出會以 OS 安全儲存區中的裝置金鑰加密保存，重啟同一項目後先重播。若安全儲存區不可用就不落地輸出；原 PTY 程序與可互動 pane 仍無法跨程序存活 |
 | MCP Server | A／B 協作與 C 遠端工具已實作 | observer 角色連 daemon，metadata 分享、內容讀取、可控、啟動分開授權；派送需官方就緒且無人工編輯。C 需桌面逐項授權既有 SSH／SFTP，專用 exec channel 與核准檔案根目錄，不代登入或信任主機。操作紀錄支援私有快照跨重啟還原。沒有 PTY「中止本輪」或遠端畫面；各平台與真實 CLI 驗收分開記錄，見 [MCP Server](MCP.zh-TW.md) |
-| 遠端 Agent Fleet | SSH MCP 已實作 | 核准工作區內的多 PTY 可透過 MCP 分別列出、讀取、啟動與控制；遠端桌面 panes 與 Relay Fleet transport 尚未提供 |
+| 遠端 Agent Fleet | SSH 與 Relay MCP 已實作，Relay 尚待外部主機驗收 | 核准工作區內的多 PTY 可透過 MCP 分別列出、讀取、啟動與控制；遠端桌面 panes 尚未提供 |
 | 對話模式 | 已完成 | Claude Code 與 Gemini CLI 以官方 headless JSON 模式逐輪執行，Codex 每個對話常駐一個 app-server 加速追問；串流文字、工具卡片、用量統計與以 CLI 對話 ID 續接；Claude（stream-json 控制協定）與 Codex（app-server JSON-RPC）支援逐項核准；Gemini 的非互動模式無對應機制 |
 | 任務編排 | 部分完成 | broadcast prompt 與每個工作階段的提示佇列已完成；佇列上限 16 則，只有官方整合回報 `Done`／`Idle` 才放行一則，heuristic 猜測不放行；對話模式的排程任務與「接在某個排程之後」的依賴鏈已完成（見下）；Fleet 工作階段之間的依賴與資源限制仍待實作 |
 | 權限隔離 | 部分完成 | Linux 上可勾選以 bubblewrap 啟動：整個檔案系統唯讀，只有工作目錄、該 CLI 自己的登入／狀態目錄、帳號設定檔目錄與 /tmp 可寫，PID 命名空間隔離、網路共用；選項與工作區項目一起保存。macOS／Windows 尚無對應機制，也還沒有網路或資源限制 |
@@ -201,17 +201,21 @@ SSH 路徑已透過 `remote_fleet` 接入：本機使用者核准一條已信任
 adapter，遠端 daemon 保持多個獨立 PTY。握手固定 canonical 工作目錄，
 查詢與寫入都需同時通過工作區限制及兩端的獨立權限；目錄不是 OS
 沙箱，CLI 執行能力仍依遠端帳號。詳見 [MCP 工作區](MCP.zh-TW.md#dssh-跨主機-fleet-工作區)。
-這是 MCP 編排入口，不包含 Fleet 頁直接顯示遠端 panes，也不包含 Relay。
+這是 MCP 編排入口，不包含 Fleet 頁直接顯示遠端 panes。Relay 路徑見下方說明。
 
-Lattice Remote 現已能透過自架 Relay 端對端加密分享單一 shell PTY，但這只是通用純終端工作階段：它不認識 Agent Fleet 工作區、既有 CLI 程序、Reporter 或多 pane 狀態，不能宣稱為遠端 Fleet。真正的遠端 Fleet 仍須在目前裝置身分與 Relay transport 上建立獨立的 `terminal-control` capability、金鑰與授權畫面：
+Lattice Remote 的單一 shell PTY 分享仍只是通用純終端，不能代替 Fleet。
+開發分支另有獨立 Fleet 能力與工作區授權，透過現有端對端加密通道接入
+受限 MCP adapter，按 session ID 與 cursor 多工讀取背景服務的多個獨立 PTY。
+主機目錄、讀取、控制及啟動由使用者分項核准，仍須通過背景服務原有 MCP 權限。
+詳見 [Relay Fleet 使用與限制](RELAY_FLEET.zh-TW.md)。架構原則如下：
 
 1. 被控端 Lattice Agent 預設只監聽 loopback。
 2. 使用者明確啟用遠端 Agent Fleet，選擇可存取的工作目錄與操作範圍。
 3. 控制端以一次性配對或已釘選裝置金鑰建立端對端加密控制通道。
-4. 每個 PTY 使用獨立 multiplexed stream，控制訊息與終端資料有版本及大小上限。
+4. 每個 PTY 使用獨立 session ID 與輸出 cursor，在有界請求通道中多工；控制訊息與終端快照有版本及大小上限。
 5. Relay 只轉送密文；無人值守、檔案寫入與高風險指令要分開授權。
 
-MCP Fleet 已先支援 SSH transport，沿用主機信任與認證；已完成的 Lattice Remote 純終端 transport 可作為自建 Relay 與 NAT 環境的第二條路，但必須先補上工作區能力授權與多 PTY multiplexing。
+MCP Fleet 的 SSH transport 沿用主機信任與認證；Relay transport 使用獨立的 Fleet 宣告與主機工作區授權，不沿用純終端操作權限。兩條路徑都不接受模型任意指定工作目錄或執行檔。
 
 ### 4. 編排與可觀測性
 
@@ -222,6 +226,6 @@ MCP Fleet 已先支援 SSH transport，沿用主機信任與認證；已完成�
 - UI 顯示「可用」的能力必須有真實後端與測試。
 - 各平台必須通過原生 PTY 啟動、輸入輸出、resize、停止與應用程式退出清理。
 - 未安裝、立即退出、無權限、錯誤工作目錄與異常大量輸入都要回傳明確錯誤。
-- 通用 Lattice Remote 已有固定配對碼無人值守；遠端 Agent Fleet 若要沿用，仍必須另行完成工作區／能力授權、撤銷、重放防護、稽核與 Relay 威脅模型，不得直接把固定碼視為完整團隊權限系統。
+- 通用 Lattice Remote 已有固定配對碼無人值守；Fleet 授權不隨該密碼保存或自動恢復，重新分享須重新授權。這不是團隊帳號或角色權限系統，外部主機與安裝版仍須另行驗收。
 
 Windows 遠端 Fleet 沿用相同工作區與多 PTY 契約，以固定 PowerShell 啟動器跨接 Windows OpenSSH 的 cmd／PowerShell shell；平台由使用者授權，並以遠端能力握手核對。具名管道與 ConPTY 的 CI 不代替外部 Windows 主機驗收，見 [驗收紀錄](MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md)。

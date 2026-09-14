@@ -37,7 +37,7 @@ Wenn du nur SSH oder SFTP benötigst, öffne direkt die Verbindungsübersicht.
 
 Die Einstellungen des Arbeitsbereichs und eine lokale Kopie der Gespräche bleiben auf deinem Computer. Die CLI und der Modellanbieter können Anweisungen und Dateiinhalte erhalten, die für die Aufgabe benötigt werden.
 
-SSH Fleet steuert entfernte Arbeitsbereiche über MCP mit eigener Berechtigung und mehreren unabhängigen PTYs. Die Freigabe eines einzelnen Terminals über Lattice Remote ist noch keine Orchestrierung mehrerer entfernter Agenten. Fleet über Relay ist noch nicht fertiggestellt. Ein gehosteter Teamdienst wird derzeit nicht angeboten.
+SSH Fleet steuert entfernte Arbeitsbereiche über MCP mit eigener Berechtigung und mehreren unabhängigen PTYs. Die Freigabe eines einzelnen Terminals über Lattice Remote ist noch keine Orchestrierung mehrerer entfernter Agenten. [Fleet über Relay](docs/RELAY_FLEET.zh-TW.md) bietet MCP-Anbindung im Entwicklungsbranch; die Abnahme auf externen Hosts und mit der installierten Anwendung steht noch aus. Entfernte Fleet-Panels sind nicht enthalten. Ein gehosteter Teamdienst wird derzeit nicht angeboten.
 
 ## Dokumentation und Mitarbeit
 

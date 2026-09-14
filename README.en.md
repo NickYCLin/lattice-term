@@ -125,7 +125,8 @@ See the [relay setup guide](docs/RELAY_SERVER.zh-TW.md).
 
 SSH Fleet provides remote workspace orchestration through MCP, with separate workspace authorization
 and multiple independent PTYs. Sharing a single terminal through Lattice Remote does not provide
-multi-agent orchestration. Fleet over Relay is not yet complete. See the
+multi-agent orchestration. [Fleet over Relay](docs/RELAY_FLEET.zh-TW.md) is implemented on the development
+branch; external-host and installed-app acceptance remain pending, and remote Fleet panes are not included. See the
 [Fleet architecture](docs/AGENT_FLEET_ARCHITECTURE.zh-TW.md) (Traditional Chinese) for the current boundaries.
 
 ## Documentation and contributions

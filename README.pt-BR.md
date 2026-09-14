@@ -37,7 +37,7 @@ Para usar apenas SSH ou SFTP, vá direto à tela de conexões.
 
 As configurações do espaço de trabalho e uma cópia local das conversas ficam no seu computador. A CLI e o provedor do modelo podem receber as instruções e o conteúdo dos arquivos necessários para a tarefa.
 
-O SSH Fleet coordena espaços de trabalho remotos via MCP, com autorização própria e vários PTYs independentes. Compartilhar um único terminal pelo Lattice Remote não equivale a orquestrar vários agentes remotos. O Fleet via Relay ainda não está completo. No momento, não há serviço hospedado para equipes.
+O SSH Fleet coordena espaços de trabalho remotos via MCP, com autorização própria e vários PTYs independentes. Compartilhar um único terminal pelo Lattice Remote não equivale a orquestrar vários agentes remotos. O [Fleet via Relay](docs/RELAY_FLEET.zh-TW.md) já tem integração MCP na branch de desenvolvimento; faltam as verificações em hosts externos e no aplicativo instalado. Os painéis remotos do Fleet não estão incluídos. No momento, não há serviço hospedado para equipes.
 
 ## Documentação e contribuições
 

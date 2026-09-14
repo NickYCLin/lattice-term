@@ -37,7 +37,7 @@
 
 工作区设置和对话的本地副本保存在你的电脑上。CLI 和模型服务商可能接收任务所需的提示及文件内容。
 
-SSH Fleet 通过 MCP 提供远程工作区编排，需要单独授权，并使用多个独立 PTY。Lattice Remote 的单终端分享不等于远程多 Agent Fleet；通过 Relay 进行 Fleet 编排仍未完成。目前不提供托管团队服务。
+SSH Fleet 通过 MCP 提供远程工作区编排，需要单独授权，并使用多个独立 PTY。Lattice Remote 的单终端分享不等于远程多 Agent Fleet；[Relay Fleet](docs/RELAY_FLEET.zh-TW.md) 已在开发分支实现 MCP 编排，外部主机与安装版尚待验收，也不包含远程 Fleet 分屏。目前不提供托管团队服务。
 
 ## 文档与贡献
 
