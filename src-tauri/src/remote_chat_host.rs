@@ -68,6 +68,40 @@ pub struct Bridge {
     task: JoinHandle<()>,
 }
 impl Bridge {
+    #[cfg(test)]
+    pub(crate) async fn fleet_fixture(access: Arc<crate::remote_fleet::Access>) -> Arc<Self> {
+        let owner = Arc::new(std::sync::OnceLock::<std::sync::Weak<Self>>::new());
+        let reply_owner = owner.clone();
+        let dispatch_access = access.clone();
+        let mut bridge = Self::start_dispatch(Arc::new(move |request| {
+            let (owner, access) = (reply_owner.clone(), dispatch_access.clone());
+            tokio::spawn(async move {
+                let lattice_remote::chat_protocol::ChatOperation::Fleet { request: call } =
+                    request.operation
+                else {
+                    return;
+                };
+                let response = match access.perform(call).await {
+                    Ok(value) => ChatResponse {
+                        id: request.id,
+                        value,
+                        error: None,
+                    },
+                    Err(error) => ChatResponse::failed(request.id, &error),
+                };
+                if let Some(bridge) = owner.get().and_then(std::sync::Weak::upgrade) {
+                    let _ = bridge.reply(response);
+                }
+            });
+        }))
+        .await
+        .unwrap();
+        bridge.fleet = Some(access);
+        let bridge = Arc::new(bridge);
+        assert!(owner.set(Arc::downgrade(&bridge)).is_ok());
+        bridge
+    }
+
     pub async fn start(
         app: AppHandle,
         host_id: String,
