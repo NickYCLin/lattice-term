@@ -1912,6 +1912,9 @@ pub struct AgentRegistry {
     sessions: Mutex<HashMap<String, Arc<AgentSessionEntry>>>,
     counter: AtomicU64,
     reporter: Option<ReporterEndpoint>,
+    /// Process-only access to this installation's explicitly granted MCP
+    /// tools. Tests and embedders without an app data directory leave it off.
+    mcp: Option<crate::agent_mcp::McpLaunch>,
     /// Session ids start with this; the background daemon uses its own so
     /// the desktop can route by prefix. `None` is the desktop default.
     id_prefix: Option<String>,
@@ -1925,7 +1928,21 @@ impl AgentRegistry {
     pub fn with_local_reporter(sink: Arc<dyn AgentSink>) -> Result<Arc<Self>, String> {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
-        Self::with_local_reporter_executable(sink, executable, None)
+        Self::with_local_reporter_executable(sink, executable, None, None)
+    }
+
+    pub fn with_local_reporter_and_mcp(
+        sink: Arc<dyn AgentSink>,
+        data_dir: &Path,
+    ) -> Result<Arc<Self>, String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
+        Self::with_local_reporter_executable(
+            sink,
+            executable,
+            None,
+            Some(crate::agent_mcp::launch_for(data_dir)),
+        )
     }
 
     /// A registry whose session ids start with `prefix`, for the background
@@ -1936,7 +1953,22 @@ impl AgentRegistry {
     ) -> Result<Arc<Self>, String> {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
-        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()))
+        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()), None)
+    }
+
+    pub fn with_local_reporter_prefixed_and_mcp(
+        sink: Arc<dyn AgentSink>,
+        prefix: &str,
+        data_dir: &Path,
+    ) -> Result<Arc<Self>, String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
+        Self::with_local_reporter_executable(
+            sink,
+            executable,
+            Some(prefix.to_string()),
+            Some(crate::agent_mcp::launch_for(data_dir)),
+        )
     }
 
     #[cfg(test)]
@@ -1945,13 +1977,14 @@ impl AgentRegistry {
         executable: PathBuf,
         prefix: &str,
     ) -> Result<Arc<Self>, String> {
-        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_owned()))
+        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_owned()), None)
     }
 
     fn with_local_reporter_executable(
         sink: Arc<dyn AgentSink>,
         executable: PathBuf,
         id_prefix: Option<String>,
+        mcp: Option<crate::agent_mcp::McpLaunch>,
     ) -> Result<Arc<Self>, String> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|error| format!("Cannot start the local agent reporter: {error}"))?;
@@ -1963,6 +1996,7 @@ impl AgentRegistry {
                 address,
                 executable,
             }),
+            mcp,
             id_prefix,
             ..Self::default()
         });
@@ -5909,6 +5943,9 @@ pub fn launch_with_replay(
             integrated_completion = adapted != arguments;
             arguments = adapted;
         }
+        if let Some(mcp) = registry.mcp.as_ref() {
+            arguments = crate::agent_mcp::prepend_codex_arguments(arguments, mcp);
+        }
     } else if definition_id == "antigravity" {
         // Antigravity does not expose a new interactive conversation id on
         // stdout. Its process-scoped log does, so use an isolated temporary
@@ -8570,9 +8607,13 @@ model = "gpt-5.3-codex"
             reporter_executable.is_file(),
             "build the real reporter first with `cargo build --bin lattice-term`"
         );
-        let registry =
-            AgentRegistry::with_local_reporter_executable(sink.clone(), reporter_executable, None)
-                .unwrap();
+        let registry = AgentRegistry::with_local_reporter_executable(
+            sink.clone(),
+            reporter_executable,
+            None,
+            None,
+        )
+        .unwrap();
         let request = AgentLaunchRequest {
             definition_id: "hermes".to_string(),
             label: "Hermes lifecycle probe".to_string(),

@@ -287,11 +287,20 @@ pub struct AgentChatRegistry {
     /// Serialize only the authentication/startup window; turns remain free
     /// to run concurrently after Claude emits its initialization event.
     claude_startup: Arc<tokio::sync::Mutex<()>>,
+    /// Process-scoped MCP adapter for Codex chats launched by this app.
+    mcp: Option<crate::agent_mcp::McpLaunch>,
 }
 
 impl AgentChatRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_mcp(data_dir: &Path) -> Self {
+        Self {
+            mcp: Some(crate::agent_mcp::launch_for(data_dir)),
+            ..Self::default()
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunningTurn>> {
@@ -1210,6 +1219,7 @@ fn send_with_retry<S: ChatSink>(
                 &registry.codex,
                 codex_server::TurnRequest {
                     browser_enabled: request.browser_enabled,
+                    mcp: registry.mcp.as_ref(),
                     thread_id: &request.thread_id,
                     turn_id: &request.turn_id,
                     prompt: &prompt,

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_chat;
 pub mod agent_daemon;
 pub mod agent_history;
+mod agent_mcp;
 pub mod agent_plans;
 mod agent_process;
 #[cfg(desktop)]
@@ -3487,9 +3488,10 @@ pub fn run() {
             ));
             app.manage(Arc::new(TunnelRegistry::new()));
             app.manage(Arc::new(SensitiveClipboard::default()));
-            let agent_registry = AgentRegistry::with_local_reporter(Arc::new(
-                crate::agent::EventSink(app.handle().clone()),
-            ))
+            let agent_registry = AgentRegistry::with_local_reporter_and_mcp(
+                Arc::new(crate::agent::EventSink(app.handle().clone())),
+                &dir,
+            )
             .map_err(std::io::Error::other)?;
             app.manage(agent_registry);
             let data_dir = app.path().app_data_dir().map_err(std::io::Error::other)?;
@@ -3497,7 +3499,9 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
-            app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::new()));
+            app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::with_mcp(
+                &data_dir,
+            )));
             #[cfg(target_os = "macos")]
             crate::app_menu::install_guarded_quit(app.handle())?;
             Ok(())

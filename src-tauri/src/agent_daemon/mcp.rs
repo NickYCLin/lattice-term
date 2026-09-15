@@ -28,7 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -2139,33 +2141,7 @@ impl Drop for PendingRequest<'_> {
     }
 }
 
-/// How an MCP client should start this adapter for the given installation.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct McpLaunch {
-    pub command: String,
-    pub args: Vec<String>,
-}
-
-/// The command line that reaches this very installation's daemon. Inside an
-/// AppImage the running executable lives on a temporary mount, so the
-/// AppImage file itself is what the user must point their client at.
-pub fn launch_for(data_dir: &Path) -> McpLaunch {
-    let command = std::env::var_os("APPIMAGE")
-        .map(PathBuf::from)
-        .filter(|path| path.is_file())
-        .or_else(|| std::env::current_exe().ok())
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "lattice-term".to_string());
-    McpLaunch {
-        command,
-        args: vec![
-            "mcp".to_string(),
-            "--data-dir".to_string(),
-            data_dir.to_string_lossy().into_owned(),
-        ],
-    }
-}
+pub use crate::agent_mcp::{launch_for, McpLaunch};
 
 #[cfg(test)]
 mod tests {
@@ -3109,7 +3085,7 @@ mod tests {
 
     #[test]
     fn the_launch_line_points_at_this_installation() {
-        let launch = launch_for(Path::new("/tmp/data"));
+        let launch = launch_for(std::path::Path::new("/tmp/data"));
         assert_eq!(launch.args, ["mcp", "--data-dir", "/tmp/data"]);
         assert!(!launch.command.is_empty());
     }

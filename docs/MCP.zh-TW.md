@@ -2,6 +2,12 @@
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
+LatticeTerm 自己新開的 Codex 終端工作階段與對話會以程序參數自動載入
+同一個 MCP adapter，不修改所選帳號的 `config.toml`。因此 Codex 可使用下方
+明確授權的 SSH／SFTP 與遠端工具，不需要也無法讀取 LatticeTerm 儲存的
+密碼。更新前已經執行中的 Codex 不會在中途改寫工具清單，完成更新後請
+新開工作階段；連線與各項操作仍預設不授權。
+
 這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取與獨立授權的鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
