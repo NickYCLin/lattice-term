@@ -4571,7 +4571,8 @@ fn detect_agent_account(definition_id: &str) -> AgentAccountInfo {
         "claude" => read_account_file(&[".claude.json"])
             .map(|raw| claude_account_from_json(&raw))
             .unwrap_or_else(|| account_info(AgentAccountState::Unknown, None, None)),
-        "gemini" => read_account_file(&[".gemini", "google_accounts.json"])
+        "gemini" | "antigravity" => read_account_file(&[".antigravity", "google_accounts.json"])
+            .or_else(|| read_account_file(&[".gemini", "google_accounts.json"]))
             .map(|raw| gemini_account_from_json(&raw))
             .unwrap_or_else(|| account_info(AgentAccountState::Unknown, None, None)),
         _ => account_info(AgentAccountState::Unsupported, None, None),

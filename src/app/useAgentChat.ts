@@ -62,7 +62,12 @@ async function events() {
 
 const EVENT_CHAT = "agent-chat://event";
 const SAVE_DELAY_MS = 400;
-const FALLBACK_SUPPORTED: ChatDefinitionId[] = ["claude", "codex", "gemini"];
+const FALLBACK_SUPPORTED: ChatDefinitionId[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "antigravity",
+];
 
 export interface ChatThreadSettings {
   browserEnabled?: boolean;
@@ -149,6 +154,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     claude: { state: "idle" },
     codex: { state: "idle" },
     gemini: { state: "idle" },
+    antigravity: { state: "idle" },
   });
   const modelsRef = useRef(models);
   modelsRef.current = models;

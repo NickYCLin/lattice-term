@@ -176,6 +176,7 @@ export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi
       claude: { state: "idle" },
       codex: { state: "idle" },
       gemini: { state: "idle" },
+      antigravity: { state: "idle" },
     },
     loadModels: vi.fn(),
     layout: emptySessionSidebarLayout,

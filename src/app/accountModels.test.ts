@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel } from "./accountModels";
+import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels } from "./accountModels";
 import { fakeDefinition } from "./testFixtures/agentApis";
 import { selectThreadModel } from "./agentChat";
 import { fakeThread } from "./testFixtures/agentApis";
@@ -11,6 +11,14 @@ const status = { state: "signedIn" as const, label: null, method: null };
 const model = { value: "gpt-5.6", label: "GPT-5.6", description: null, isDefault: false };
 
 describe("account-aware model choices", () => {
+  it("recognises all supported chat definitions including Antigravity", () => {
+    expect(hasChatModels("codex")).toBe(true);
+    expect(hasChatModels("claude")).toBe(true);
+    expect(hasChatModels("gemini")).toBe(true);
+    expect(hasChatModels("antigravity")).toBe(true);
+    expect(hasChatModels("cursor")).toBe(false);
+  });
+
   it("omits account labels for a sole account, independently for each CLI", () => {
     const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [], {}, "預設帳號");
     expect(targets.every((target) => !target.showAccount)).toBe(true);

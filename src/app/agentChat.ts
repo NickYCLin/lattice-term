@@ -7,7 +7,7 @@
  * on its own. The hook in `useAgentChat` wires it to Tauri.
  */
 
-export type ChatDefinitionId = "claude" | "codex" | "gemini";
+export type ChatDefinitionId = "claude" | "codex" | "gemini" | "antigravity";
 
 import { restoreQueuedInputs, type QueuedChatInput } from "./chatInputQueue";
 
@@ -208,7 +208,13 @@ function assistantItem(item: ChatItem): item is Exclude<ChatItem, { type: "user"
 }
 
 function labelForTranscript(definitionId: ChatDefinitionId): string {
-  return definitionId === "codex" ? "Codex" : definitionId === "claude" ? "Claude" : "Gemini";
+  return definitionId === "codex"
+    ? "Codex"
+    : definitionId === "claude"
+      ? "Claude"
+      : definitionId === "antigravity"
+        ? "Antigravity"
+        : "Gemini";
 }
 
 /**

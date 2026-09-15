@@ -5,7 +5,7 @@
  */
 import type { ChatDefinitionId } from "./agentChat";
 
-export type ProfiledChatDefinitionId = Exclude<ChatDefinitionId, "gemini">;
+export type ProfiledChatDefinitionId = Exclude<ChatDefinitionId, "gemini" | "antigravity">;
 
 export interface ChatAccountProfile {
   id: string;

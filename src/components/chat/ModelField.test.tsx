@@ -29,6 +29,13 @@ const models: Record<ChatDefinitionId, ChatModelList> = {
       { value: "flash", label: "Flash", description: null, isDefault: false },
     ],
   },
+  antigravity: {
+    state: "ready",
+    models: [
+      { value: "", label: "Auto (default)", description: null, isDefault: true },
+      { value: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", description: null, isDefault: false },
+    ],
+  },
 };
 
 describe("ModelField", () => {
@@ -37,6 +44,7 @@ describe("ModelField", () => {
       claude: "Claude Code",
       codex: "OpenAI Codex",
       gemini: "Gemini CLI",
+      antigravity: "Google Antigravity CLI",
     };
     const markup = renderToStaticMarkup(
       <I18nProvider locale="zh-TW">

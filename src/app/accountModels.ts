@@ -25,7 +25,7 @@ export interface AccountModelOption extends AccountModelSelection {
 }
 
 export function hasChatModels(id: string): id is ChatDefinitionId {
-  return id === "codex" || id === "claude" || id === "gemini";
+  return id === "codex" || id === "claude" || id === "gemini" || id === "antigravity";
 }
 
 export function accountModelKey(selection: AccountModelSelection): string {
