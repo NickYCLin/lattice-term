@@ -104,6 +104,28 @@ struct McpRemoteSync(tokio::sync::Mutex<()>);
 #[serde(rename_all = "camelCase")]
 struct McpScreenSession {
     session_id: String,
+    profile_id: String,
+    host: String,
+    backend: mcp_desktop::Backend,
+    fleet: bool,
+    screen: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct McpSavedConnectionRequest {
+    profile_id: String,
+    /// SSH key paths are non-secret preferences kept by the WebView. Password
+    /// profiles leave this empty so only the native credential store is read.
+    #[serde(default)]
+    ssh_private_key_path: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpSavedConnectionSession {
+    session_id: String,
+    profile_id: String,
     host: String,
     backend: mcp_desktop::Backend,
     fleet: bool,
@@ -121,6 +143,7 @@ fn mcp_screen_sessions(
         .into_iter()
         .map(|session| McpScreenSession {
             session_id: session.session_id,
+            profile_id: session.profile_id,
             host: session.host,
             backend: mcp_desktop::Backend::Rdp,
             fleet: false,
@@ -128,6 +151,7 @@ fn mcp_screen_sessions(
         })
         .chain(vnc.list().into_iter().map(|session| McpScreenSession {
             session_id: session.session_id,
+            profile_id: session.profile_id,
             host: session.host,
             backend: mcp_desktop::Backend::Vnc,
             fleet: false,
@@ -140,6 +164,7 @@ fn mcp_screen_sessions(
                 .filter(|session| !session.terminal || session.fleet)
                 .map(|session| McpScreenSession {
                     session_id: session.session_id,
+                    profile_id: session.profile_id,
                     host: session.host,
                     backend: mcp_desktop::Backend::Remote,
                     fleet: session.fleet,
@@ -149,6 +174,302 @@ fn mcp_screen_sessions(
         .collect();
     sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
     sessions
+}
+
+/// Opens a profile from the MCP permission panel without exposing its saved
+/// password or pairing code to the WebView or model. This only creates the
+/// ordinary live session; [`mcp_remote_grant`] remains the separate authority
+/// for commands, files, screen capture, input and Fleet access.
+#[tauri::command]
+async fn mcp_saved_connection_connect(
+    app: AppHandle,
+    request: McpSavedConnectionRequest,
+    storage: State<'_, AppStorage>,
+    trust: State<'_, TrustState>,
+    ssh: State<'_, Arc<SshRegistry>>,
+    sftp: State<'_, Arc<SftpRegistry>>,
+    rdp: State<'_, Arc<RdpRegistry>>,
+    vnc: State<'_, Arc<VncRegistry>>,
+    remote: State<'_, Arc<RemoteRegistry>>,
+) -> Result<McpSavedConnectionSession, String> {
+    if request.profile_id.is_empty() || request.profile_id.len() > 128 {
+        return Err("The saved connection ID is invalid.".to_string());
+    }
+    if request.ssh_private_key_path.as_ref().is_some_and(|path| {
+        path.len() > 4096 || path.is_empty() || path.chars().any(char::is_control)
+    }) {
+        return Err("The saved SSH key path is invalid.".to_string());
+    }
+    let profile = {
+        let guard = storage.lock().map_err(|error| error.to_string())?;
+        guard
+            .get_profile(&request.profile_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The saved connection no longer exists.".to_string())?
+    };
+
+    let session = |session_id: String,
+                   host: String,
+                   backend: mcp_desktop::Backend,
+                   fleet: bool,
+                   screen: bool| McpSavedConnectionSession {
+        session_id,
+        profile_id: profile.id.clone(),
+        host,
+        backend,
+        fleet,
+        screen,
+    };
+
+    match profile.protocol {
+        Protocol::Ssh => {
+            if let Some(existing) = ssh
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Ssh,
+                    false,
+                    false,
+                ));
+            }
+            let key_path = request
+                .ssh_private_key_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty());
+            let outcome = ssh_connect(
+                app,
+                ConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    auth: match key_path {
+                        Some(path) => crate::ssh::AuthMethod::PrivateKey {
+                            path: path.to_string(),
+                            passphrase: None,
+                        },
+                        None => crate::ssh::AuthMethod::Password {
+                            password: String::new(),
+                        },
+                    },
+                    use_saved_password: key_path.is_none(),
+                    remember_password: false,
+                    cols: 120,
+                    rows: 32,
+                },
+                storage,
+                trust,
+                ssh,
+            )
+            .await?;
+            match outcome {
+                ConnectOutcome::Connected { session_id } => Ok(session(
+                    session_id,
+                    profile.hostname,
+                    mcp_desktop::Backend::Ssh,
+                    false,
+                    false,
+                )),
+                ConnectOutcome::HostUnknown { .. } => Err(
+                    "Open this SSH connection once and verify its host key before sharing it."
+                        .to_string(),
+                ),
+                ConnectOutcome::HostChanged { .. } => Err(
+                    "The SSH host key changed. Review it in the normal connection flow first."
+                        .to_string(),
+                ),
+                ConnectOutcome::AuthFailed => {
+                    Err("The saved SSH credential was rejected.".to_string())
+                }
+                ConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Sftp => {
+            if let Some(existing) = sftp
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Sftp,
+                    false,
+                    false,
+                ));
+            }
+            let outcome = sftp_connect(
+                SftpConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    auth: crate::ssh::AuthMethod::Password {
+                        password: String::new(),
+                    },
+                    use_saved_password: true,
+                    remember_password: false,
+                },
+                storage,
+                trust,
+                sftp,
+            )
+            .await?;
+            match outcome {
+                SftpConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Sftp,
+                    false,
+                    false,
+                )),
+                SftpConnectOutcome::HostUnknown { .. } => Err(
+                    "Open this SFTP connection once and verify its host key before sharing it."
+                        .to_string(),
+                ),
+                SftpConnectOutcome::HostChanged { .. } => Err(
+                    "The SFTP host key changed. Review it in the normal connection flow first."
+                        .to_string(),
+                ),
+                SftpConnectOutcome::AuthFailed => {
+                    Err("The saved SFTP credential was rejected.".to_string())
+                }
+                SftpConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Rdp => {
+            if let Some(existing) = rdp
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Rdp,
+                    false,
+                    true,
+                ));
+            }
+            let outcome = rdp_connect(
+                app,
+                RdpConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    password: String::new(),
+                    use_saved_password: true,
+                    remember_password: false,
+                    domain: None,
+                    width: 1280,
+                    height: 720,
+                },
+                storage,
+                rdp,
+            )
+            .await?;
+            match outcome {
+                RdpConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Rdp,
+                    false,
+                    true,
+                )),
+                RdpConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Vnc => {
+            if let Some(existing) = vnc
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Vnc,
+                    false,
+                    true,
+                ));
+            }
+            let outcome = vnc_connect(
+                app,
+                VncConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    password: String::new(),
+                    use_saved_password: true,
+                    remember_password: false,
+                },
+                storage,
+                vnc,
+            )
+            .await?;
+            match outcome {
+                VncConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Vnc,
+                    false,
+                    true,
+                )),
+                VncConnectOutcome::AuthFailed => {
+                    Err("The saved VNC credential was rejected.".to_string())
+                }
+                VncConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Lattice => {
+            if let Some(existing) = remote
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Remote,
+                    existing.fleet,
+                    !existing.terminal,
+                ));
+            }
+            let outcome = remote_connect(
+                app,
+                RemoteConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    pairing_code: String::new(),
+                    use_saved_pairing_code: true,
+                    remember_pairing_code: false,
+                    legacy_pairing: false,
+                    device_id: String::new(),
+                    relay_address: String::new(),
+                },
+                storage,
+                remote,
+            )
+            .await?;
+            match outcome {
+                RemoteConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Remote,
+                    connected.fleet,
+                    !connected.terminal,
+                )),
+                RemoteConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -3510,6 +3831,7 @@ pub fn run() {
             runtime_summary,
             mcp_remote_targets,
             mcp_screen_sessions,
+            mcp_saved_connection_connect,
             mcp_remote_grant,
             mcp_remote_revoke,
             play_notification_sound,
@@ -4009,6 +4331,28 @@ mod tests {
             device_id: None,
             relay_address: None,
         }
+    }
+
+    #[test]
+    fn saved_mcp_connection_request_cannot_carry_a_credential() {
+        let request = serde_json::from_value::<McpSavedConnectionRequest>(serde_json::json!({
+            "profileId": "saved-ssh",
+            "password": "must-not-cross-ipc",
+        }));
+
+        assert!(request.is_err());
+        let response = McpSavedConnectionSession {
+            session_id: "live-session".to_string(),
+            profile_id: "saved-remote".to_string(),
+            host: "redacted-host".to_string(),
+            backend: mcp_desktop::Backend::Remote,
+            fleet: true,
+            screen: false,
+        };
+        let encoded = serde_json::to_value(response).unwrap();
+        assert!(encoded.get("password").is_none());
+        assert!(encoded.get("pairingCode").is_none());
+        assert_eq!(encoded["backend"], "remote");
     }
 
     #[test]

@@ -4,11 +4,12 @@ LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprot
 
 LatticeTerm 自己新開的 Codex 終端工作階段與對話會以程序參數自動載入
 同一個 MCP adapter，不修改所選帳號的 `config.toml`。因此 Codex 可使用下方
-明確授權的 SSH／SFTP 與遠端工具，不需要也無法讀取 LatticeTerm 儲存的
-密碼。更新前已經執行中的 Codex 不會在中途改寫工具清單，完成更新後請
-新開工作階段；連線與各項操作仍預設不授權。
+明確授權的 SSH／SFTP 與遠端工具。設定頁可請原生層使用 LatticeTerm
+安全儲存的密碼、SSH 金鑰偏好或 Lattice Remote 配對碼開啟連線，模型與
+WebView 都拿不到憑證。更新前已經執行中的 Codex 不會在中途改寫工具清單，
+完成更新後請新開工作階段；連線與各項操作仍預設不授權。
 
-這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，使用既有 SSH／SFTP 連線並另外授權；D 已提供另外授權的 RDP／VNC／Lattice Remote 單張畫面擷取與獨立授權的鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。實作、測試與實機驗收分開記錄，見文末。
+這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，可使用現有工作階段，或先由原生層開啟「我的連線」中已保存憑證的 SSH／SFTP 連線，再另外授權；D 已提供同樣方式開啟 RDP／VNC／Lattice Remote，並另外授權單張畫面擷取與鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
 
@@ -195,6 +196,13 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 ## C：SSH／SFTP 與主機資訊
 
+「MCP 遠端操作授權」會列出目前在線的工作階段，以及「我的連線」中尚未
+開啟的 SSH、SFTP、RDP、VNC 與 Lattice Remote 項目。後者按下連線時只由
+Rust 原生層取用安全儲存的憑證，成功後仍須選擇 scope、固定指令與檔案根
+目錄並再次確認。SSH 第一次連線或主機金鑰變更不會在此接受，必須回一般
+連線流程由使用者核對；沒有保存憑證、加密 SSH 金鑰仍需 passphrase，或
+Lattice Remote 沒有綁定永久裝置 ID 時也會要求使用者先處理。
+
 每個授權可以核准多段具名指令（最多 8 段），每段各自設定逾時（1–60 秒）。`ssh_exec_job` 只能用 `planId` 指名其中一段，插不進參數；`list_authorized_connections` 只會回名稱與 id，不含指令內容。
 
 `get_host_metrics` 用的是固定的 Linux `/proc` 探針。主機沒有回報 Linux 資料時回 `unsupported`，重試也不會變，請改用其他方式；不會回一堆零假裝讀到了。
@@ -272,7 +280,7 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 `capture_remote_screen` 交出使用者明確分享的那個遠端畫面的最新一張，就是桌面此刻收到的那一幀。
 
 - **畫面與輸入分開授權**。只勾 `screen` 就只能看圖；`input` 需另外勾選，且必須同時允許畫面擷取。沒有連續串流或錄影。
-- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。授權在設定頁的「MCP 遠端操作授權」，與 SSH／SFTP 同一區，但畫面工作階段提供 `screen`／`input`，不能混用指令或檔案權限。Lattice Remote 分享端也必須已允許控制，MCP 不會替使用者申請或核准控制。
+- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。可在設定頁直接使用已保存憑證開啟；連線成功後仍要授權 `screen`／`input`，不能混用指令或檔案權限。Lattice Remote 分享端也必須已允許控制，MCP 不會替使用者申請或核准控制。
 - **授權綁定這一次連線**。斷線重連會產生新的一輪，舊授權即失效，要重新授權。保留的影格也綁定後端及連線世代，舊連線延遲送來的影格不得進入新連線。
 - **沒授權就不留畫面**。桌面平常不保留任何 frame；勾了分享才開始保留「最新的一張」，最後一筆畫面授權撤銷或工作階段結束就立刻丟掉；授權被拒時不開始保留。畫面只在記憶體裡，不落地。
 - **每兩秒一張**，超過回 `limit_reached`（`busy`）。還沒有畫面回 `not_ready`；單張超過 1.5 MB（JPEG 原始 bytes 上限；桌面橋接回覆上限為 2 MiB）回 `unsupported`，請降低遠端解析度或色深，不回傳上一張舊圖。
