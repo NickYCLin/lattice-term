@@ -86,6 +86,7 @@ const AGENT_ADAPTER_VERSION: u32 = 1;
 enum AgentResumeRecipe {
     Subcommand,
     Flag,
+    Conversation,
 }
 
 impl AgentResumeRecipe {
@@ -93,6 +94,7 @@ impl AgentResumeRecipe {
         match self {
             Self::Subcommand => vec!["resume".to_string(), session_id],
             Self::Flag => vec!["--resume".to_string(), session_id],
+            Self::Conversation => vec!["--conversation".to_string(), session_id],
         }
     }
 }
@@ -150,7 +152,7 @@ const AGENTS: [AgentSpec; 13] = [
         id: "antigravity",
         label: "Google Antigravity CLI",
         executable: "agy",
-        resume_recipe: None,
+        resume_recipe: Some(AgentResumeRecipe::Conversation),
         resume_latest_recipe: Some(AgentResumeLatestRecipe::Continue),
     },
     AgentSpec {
@@ -5914,7 +5916,7 @@ pub fn launch_with_replay(
     request: AgentLaunchRequest,
     restored_output: Option<Vec<u8>>,
 ) -> Result<AgentSessionSummary, String> {
-    let request =
+    let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
     let size = validated_size(request.cols, request.rows)?;
     let launch_arguments = request.arguments.clone();
@@ -5954,6 +5956,26 @@ pub fn launch_with_replay(
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::Antigravity);
+        // Antigravity supports native interactive startup seeding via
+        // --prompt-interactive (-i). Passing the handoff seed as a CLI argument
+        // lets Antigravity execute the initial briefing prompt interactively
+        // as its opening turn, without relying on PTY paste timing or bracketed paste.
+        if let Some(seed) = request
+            .seed_input
+            .take()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if !arguments.iter().any(|arg| {
+                arg == "--prompt-interactive"
+                    || arg == "-i"
+                    || arg.trim_start().starts_with("--prompt-interactive=")
+            }) {
+                arguments.push("--prompt-interactive".to_string());
+                arguments.push(seed);
+            } else {
+                request.seed_input = Some(seed);
+            }
+        }
     } else if definition_id == "claude" {
         if let Some(endpoint) = reporter.as_ref() {
             let adapted = claude_reporter_arguments(arguments.clone(), &endpoint.executable);

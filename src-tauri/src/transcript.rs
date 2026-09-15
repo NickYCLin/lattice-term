@@ -924,22 +924,111 @@ fn antigravity_conversation_id(value: &str) -> bool {
         })
 }
 
-fn locate_antigravity_in(root: &Path, captured: Option<&str>) -> Option<PathBuf> {
-    let captured = captured.filter(|value| antigravity_conversation_id(value))?;
-    let root = fs::canonicalize(root).ok()?;
-    let transcript = root
-        .join("brain")
-        .join(captured)
-        .join(".system_generated")
-        .join("logs")
-        .join("transcript.jsonl");
-    let canonical = fs::canonicalize(&transcript).ok()?;
-    canonical.starts_with(&root).then_some(canonical)
+fn path_matches_workspace(candidate: &str, expected_cwd: &Path) -> bool {
+    let candidate_raw = candidate.trim_start_matches(r"\\?\");
+    let candidate_path = PathBuf::from(candidate_raw);
+    if let Ok(canon_candidate) = fs::canonicalize(&candidate_path) {
+        if canon_candidate == expected_cwd {
+            return true;
+        }
+    }
+    let norm_candidate = candidate_raw
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase();
+    let norm_expected = expected_cwd
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase();
+    norm_candidate == norm_expected
 }
 
-fn locate_antigravity(captured: Option<&str>) -> Option<PathBuf> {
+fn locate_antigravity_in(
+    root: &Path,
+    working_directory: &str,
+    captured: Option<&str>,
+) -> Option<PathBuf> {
+    let root = fs::canonicalize(root).ok()?;
+    if let Some(captured) = captured.filter(|value| antigravity_conversation_id(value)) {
+        let transcript = root
+            .join("brain")
+            .join(captured)
+            .join(".system_generated")
+            .join("logs")
+            .join("transcript.jsonl");
+        if let Ok(canonical) = fs::canonicalize(&transcript) {
+            if canonical.starts_with(&root) && canonical.is_file() {
+                return Some(canonical);
+            }
+        }
+    }
+
+    let expected_cwd = fs::canonicalize(working_directory).ok()?;
+
+    // Fast path: history.jsonl records workspace paths alongside conversation IDs.
+    // Read from the newest line backwards to match the most recent conversation.
+    let history_file = root.join("history.jsonl");
+    if let Some(file) = open_regular_transcript(&history_file) {
+        let reader = BufReader::new(file);
+        let mut lines = Vec::new();
+        for line in reader.lines().map_while(Result::ok) {
+            if !line.trim().is_empty() {
+                lines.push(line);
+            }
+        }
+        for line in lines.into_iter().rev() {
+            let Ok(val) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(workspace) = val.get("workspace").and_then(Value::as_str) else {
+                continue;
+            };
+            if !path_matches_workspace(workspace, &expected_cwd) {
+                continue;
+            }
+            let Some(cid) = val
+                .get("conversationId")
+                .or_else(|| val.get("conversation_id"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            if !antigravity_conversation_id(cid) {
+                continue;
+            }
+            let candidate = root
+                .join("brain")
+                .join(cid)
+                .join(".system_generated")
+                .join("logs")
+                .join("transcript.jsonl");
+            if let Ok(canon) = fs::canonicalize(&candidate) {
+                if canon.starts_with(&root) && canon.is_file() {
+                    return Some(canon);
+                }
+            }
+        }
+    }
+
+    // Safety fallback: walk the brain directory for the most recently modified transcript.
+    let brain_dir = root.join("brain");
+    newest_matching(&brain_dir, |path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "transcript.jsonl")
+            && path
+                .parent()
+                .and_then(|logs| logs.file_name())
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "logs")
+    })
+}
+
+fn locate_antigravity(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
     let root = home()?.join(".gemini").join("antigravity-cli");
-    locate_antigravity_in(&root, captured)
+    locate_antigravity_in(&root, working_directory, captured)
 }
 
 /// Reads the source CLI's most relevant conversation and returns it as plain,
@@ -960,7 +1049,7 @@ pub fn export(
     }
     match kind {
         TranscriptKind::Antigravity => {
-            let path = locate_antigravity(captured_session_id)?;
+            let path = locate_antigravity(working_directory, captured_session_id)?;
             parse_antigravity(&path, max_chars)
         }
         TranscriptKind::Claude => {
@@ -1438,7 +1527,12 @@ mod tests {
         )
         .unwrap();
 
-        let located = locate_antigravity_in(directory.path(), Some(conversation_id)).unwrap();
+        let located = locate_antigravity_in(
+            directory.path(),
+            directory.path().to_str().unwrap(),
+            Some(conversation_id),
+        )
+        .unwrap();
         assert_eq!(located, fs::canonicalize(&transcript).unwrap());
         let text = parse_antigravity(&located, 5000).unwrap();
         assert!(text.contains("remember the blue folder"));
@@ -1446,7 +1540,74 @@ mod tests {
         assert!(!text.contains("private tool planning"));
         assert!(!text.contains("tool output"));
         assert!(!text.contains("unfinished answer"));
-        assert!(locate_antigravity_in(directory.path(), Some("../outside")).is_none());
+        assert!(locate_antigravity_in(
+            directory.path(),
+            directory.path().to_str().unwrap(),
+            Some("../outside")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn antigravity_locate_falls_back_to_history_jsonl_and_brain_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let project_path = project_dir.path().to_str().unwrap();
+
+        let conv1_id = "11111111-2222-3333-4444-555555555555";
+        let conv2_id = "66666666-7777-8888-9999-000000000000";
+
+        let log_dir1 = directory
+            .path()
+            .join("brain")
+            .join(conv1_id)
+            .join(".system_generated")
+            .join("logs");
+        fs::create_dir_all(&log_dir1).unwrap();
+        let transcript1 = log_dir1.join("transcript.jsonl");
+        fs::write(&transcript1, "{\"status\":\"DONE\",\"source\":\"USER_EXPLICIT\",\"type\":\"USER_INPUT\",\"content\":\"task 1\"}\n").unwrap();
+
+        let log_dir2 = directory
+            .path()
+            .join("brain")
+            .join(conv2_id)
+            .join(".system_generated")
+            .join("logs");
+        fs::create_dir_all(&log_dir2).unwrap();
+        let transcript2 = log_dir2.join("transcript.jsonl");
+        fs::write(&transcript2, "{\"status\":\"DONE\",\"source\":\"USER_EXPLICIT\",\"type\":\"USER_INPUT\",\"content\":\"task 2\"}\n").unwrap();
+
+        // 1. Without captured_session_id and without history.jsonl: falls back to brain newest.
+        let located_brain = locate_antigravity_in(directory.path(), project_path, None).unwrap();
+        assert!(
+            located_brain == fs::canonicalize(&transcript1).unwrap()
+                || located_brain == fs::canonicalize(&transcript2).unwrap()
+        );
+
+        // 2. With history.jsonl pointing project_path to conv2_id:
+        let history_file = directory.path().join("history.jsonl");
+        let history_lines = vec![
+            serde_json::json!({
+                "workspace": "D:\\unrelated\\path",
+                "conversationId": conv1_id,
+            }),
+            serde_json::json!({
+                "workspace": project_path,
+                "conversationId": conv2_id,
+            }),
+        ];
+        fs::write(
+            &history_file,
+            history_lines
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        let located_history = locate_antigravity_in(directory.path(), project_path, None).unwrap();
+        assert_eq!(located_history, fs::canonicalize(&transcript2).unwrap());
     }
 
     #[test]
