@@ -1425,6 +1425,7 @@ export const messages: Messages = {
   "remote.host.state.streaming": "正在加密发送画面",
   "remote.host.state.reconnecting": "与中继服务器重新连接中",
   "remote.host.peer": "连接来源：{peer}",
+  "remote.host.viewers": "已有 {count} 位用户连接",
   "remote.host.waiting": "尚未有查看端连入",
   "remote.host.address": "连接地址",
   "remote.host.code": "一次性配对码",

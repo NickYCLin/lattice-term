@@ -72,13 +72,10 @@ struct PendingJoin {
 #[derive(Default)]
 struct DialState {
     joins: HashMap<String, PendingJoin>,
-    /// The channel holding a device's single pending or linked Dial.
-    device_channels: HashMap<String, String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum DialReservationError {
-    DeviceBusy,
     Capacity,
     ChannelCollision,
 }
@@ -86,12 +83,11 @@ enum DialReservationError {
 struct DialReservation {
     state: Arc<RelayState>,
     channel_id: String,
-    device_id: String,
 }
 
 impl Drop for DialReservation {
     fn drop(&mut self) {
-        self.state.release_dial(&self.channel_id, &self.device_id);
+        self.state.release_dial(&self.channel_id);
     }
 }
 
@@ -226,9 +222,6 @@ impl RelayState {
         device_id: String,
     ) -> Result<(oneshot::Receiver<JoinedTransport>, DialReservation), DialReservationError> {
         let mut dials = self.dials.lock().expect("dial lock");
-        if dials.device_channels.contains_key(&device_id) {
-            return Err(DialReservationError::DeviceBusy);
-        }
         if dials.joins.len() >= self.max_pending_dials {
             return Err(DialReservationError::Capacity);
         }
@@ -236,9 +229,6 @@ impl RelayState {
             return Err(DialReservationError::ChannelCollision);
         }
         let (sender, receiver) = oneshot::channel();
-        dials
-            .device_channels
-            .insert(device_id.clone(), channel_id.clone());
         dials.joins.insert(
             channel_id.clone(),
             PendingJoin {
@@ -252,7 +242,6 @@ impl RelayState {
             DialReservation {
                 state: Arc::clone(self),
                 channel_id,
-                device_id,
             },
         ))
     }
@@ -273,22 +262,9 @@ impl RelayState {
         dials.joins.remove(channel_id).map(|pending| pending.sender)
     }
 
-    fn release_dial(&self, channel_id: &str, device_id: &str) {
+    fn release_dial(&self, channel_id: &str) {
         let mut dials = self.dials.lock().expect("dial lock");
-        if dials
-            .joins
-            .get(channel_id)
-            .is_some_and(|pending| pending.device_id == device_id)
-        {
-            dials.joins.remove(channel_id);
-        }
-        if dials
-            .device_channels
-            .get(device_id)
-            .is_some_and(|active_channel| active_channel == channel_id)
-        {
-            dials.device_channels.remove(device_id);
-        }
+        dials.joins.remove(channel_id);
     }
 
     fn verify_or_claim(&self, device_id: &str, auth_token: &str) -> Result<(), DeviceClaimError> {
@@ -604,11 +580,11 @@ async fn run_dial(
     let (channel_rx, _reservation) = match state.reserve_dial(channel_id.clone(), device_id.clone())
     {
         Ok(reservation) => reservation,
-        Err(DialReservationError::DeviceBusy | DialReservationError::Capacity) => {
+        Err(DialReservationError::Capacity) => {
             send_error(
                 &mut stream,
                 "busy",
-                "The device or relay is already handling another connection.",
+                "The relay is handling too many pending connections.",
             )
             .await;
             return;
@@ -1285,18 +1261,17 @@ mod tests {
     }
 
     #[test]
-    fn one_device_has_one_dial_and_cancel_restores_pending_capacity() {
-        let state = Arc::new(RelayState::with_limits(None, 8, 1, 8));
+    fn one_device_can_hold_multiple_dials_and_cancel_restores_capacity() {
+        let state = Arc::new(RelayState::with_limits(None, 8, 2, 8));
         let (first_receiver, first) = state
             .reserve_dial("channel-one".to_string(), "123456789".to_string())
             .unwrap();
 
+        let second = state
+            .reserve_dial("channel-two".to_string(), "123456789".to_string())
+            .expect("the same device can receive another viewer");
         assert!(matches!(
-            state.reserve_dial("channel-two".to_string(), "123456789".to_string()),
-            Err(DialReservationError::DeviceBusy)
-        ));
-        assert!(matches!(
-            state.reserve_dial("channel-two".to_string(), "987654321".to_string()),
+            state.reserve_dial("channel-three".to_string(), "987654321".to_string()),
             Err(DialReservationError::Capacity)
         ));
         assert!(state
@@ -1306,15 +1281,15 @@ mod tests {
 
         drop(first);
         assert!(first_receiver.blocking_recv().is_err());
-        assert!(state.dials.lock().unwrap().joins.is_empty());
-        assert!(state.dials.lock().unwrap().device_channels.is_empty());
+        assert_eq!(state.dials.lock().unwrap().joins.len(), 1);
         assert!(state
-            .reserve_dial("channel-two".to_string(), "987654321".to_string())
+            .reserve_dial("channel-three".to_string(), "987654321".to_string())
             .is_ok());
+        drop(second);
     }
 
     #[test]
-    fn a_join_keeps_the_device_reserved_until_the_link_ends() {
+    fn a_join_does_not_block_another_viewer_for_the_same_device() {
         let state = Arc::new(RelayState::with_limits(None, 8, 2, 8));
         let (_receiver, reservation) = state
             .reserve_dial("channel-one".to_string(), "123456789".to_string())
@@ -1325,15 +1300,11 @@ mod tests {
         drop(sender);
 
         assert!(state.dials.lock().unwrap().joins.is_empty());
-        assert!(matches!(
-            state.reserve_dial("channel-two".to_string(), "123456789".to_string()),
-            Err(DialReservationError::DeviceBusy)
-        ));
-
-        drop(reservation);
         assert!(state
             .reserve_dial("channel-two".to_string(), "123456789".to_string())
             .is_ok());
+
+        drop(reservation);
     }
 
     #[test]

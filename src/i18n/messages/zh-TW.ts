@@ -1519,6 +1519,7 @@ export const zhTW = {
   "remote.host.state.streaming": "正在加密傳送畫面",
   "remote.host.state.reconnecting": "與中繼伺服器重新連線中",
   "remote.host.peer": "連線來源：{peer}",
+  "remote.host.viewers": "已有 {count} 位使用者連線",
   "remote.host.waiting": "尚未有檢視端連入",
   "remote.host.address": "連線位址",
   "remote.host.code": "配對密碼",

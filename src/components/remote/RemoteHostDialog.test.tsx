@@ -192,6 +192,25 @@ describe("remote host dialog", () => {
     expect(markup).not.toContain("<form");
   });
 
+  it("shows the number of concurrent relay viewers", () => {
+    const { markup } = render("wss://relay.example/ws", {
+      hostId: "shared-host",
+      address: "wss://relay.example/ws",
+      pairingCode: "",
+      expiresAt: 0,
+      viewOnly: true,
+      fileTransfer: false,
+      state: "streaming",
+      peer: "relay",
+      activeSessions: 2,
+      attemptsRemaining: 5,
+      persistent: true,
+      savedPairingCode: false,
+    });
+
+    expect(markup).toContain("已有 2 位使用者連線");
+  });
+
   it("marks an active saved password without returning its plaintext", () => {
     const { markup } = render("wss://relay.example/ws", {
       hostId: "saved-host",

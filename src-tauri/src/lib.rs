@@ -2961,6 +2961,18 @@ async fn remote_connect(
         });
     }
 
+    // Reopening a connected profile is navigation, not another authentication
+    // attempt. Return before touching the credential store so an existing
+    // session remains usable even after its saved password was removed.
+    if let Some(session) = registry.session_for_target(
+        &request.profile_id,
+        &request.hostname,
+        request.port,
+        (!request.device_id.trim().is_empty()).then_some(request.device_id.as_str()),
+    ) {
+        return Ok(RemoteConnectOutcome::Connected { session });
+    }
+
     let credential_binding = if request.use_saved_pairing_code || request.remember_pairing_code {
         let Some(credential_profile) = profile.as_ref() else {
             return Ok(RemoteConnectOutcome::Failed {

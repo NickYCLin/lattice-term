@@ -603,6 +603,38 @@ impl RemoteRegistry {
         summaries
     }
 
+    pub fn session_for_target(
+        &self,
+        profile_id: &str,
+        hostname: &str,
+        port: u16,
+        device_id: Option<&str>,
+    ) -> Option<RemoteSessionSummary> {
+        let target_device = device_id.and_then(|value| normalize_device_id(value).ok());
+        self.state
+            .lock()
+            .ok()?
+            .sessions
+            .values()
+            .find(|record| {
+                let summary = &record.summary;
+                summary.profile_id == profile_id
+                    || match &target_device {
+                        Some(device_id) => {
+                            summary.via_relay
+                                && normalize_device_id(&summary.host).ok().as_ref()
+                                    == Some(device_id)
+                        }
+                        None => {
+                            !summary.via_relay
+                                && summary.port == port
+                                && summary.host.eq_ignore_ascii_case(hostname)
+                        }
+                    }
+            })
+            .map(|record| record.summary.clone())
+    }
+
     pub fn terminal_snapshots(&self) -> Result<Vec<RemoteTerminalSnapshot>, String> {
         let state = self.state.lock().map_err(|error| error.to_string())?;
         let mut snapshots: Vec<_> = state
@@ -955,6 +987,14 @@ pub async fn connect(
     let via_relay = device_id.is_some();
     if request.profile_id.trim().is_empty() || (!via_relay && request.hostname.trim().is_empty()) {
         return failed("connect", "The connection target is incomplete.");
+    }
+    if let Some(session) = registry.session_for_target(
+        &request.profile_id,
+        &request.hostname,
+        request.port,
+        device_id.as_deref(),
+    ) {
+        return RemoteConnectOutcome::Connected { session };
     }
     let pairing_code = match if request.legacy_pairing {
         lattice_remote::normalize_legacy_pairing_code(&request.pairing_code)
@@ -2166,11 +2206,25 @@ mod tests {
         assert_eq!(rejected, attempts - 1);
         drop(winner);
 
-        let record = idle_test_record(
-            remote_summary_for_profile("shared-profile", "remote-shared", true),
-            1,
-        );
+        let mut summary = remote_summary_for_profile("shared-profile", "remote-shared", true);
+        summary.host = "123 456 789".to_string();
+        let record = idle_test_record(summary, 1);
         register_test_record(&registry, record);
+        assert_eq!(
+            registry
+                .session_for_target("shared-profile", "", 0, None)
+                .map(|session| session.session_id),
+            Some("remote-shared".to_string())
+        );
+        assert_eq!(
+            registry
+                .session_for_target("saved-alias", "", 0, Some("123456789"))
+                .map(|session| session.session_id),
+            Some("remote-shared".to_string())
+        );
+        assert!(registry
+            .session_for_target("another-profile", "", 0, Some("987654321"))
+            .is_none());
         let error = registry
             .reserve("shared-profile".to_string())
             .err()

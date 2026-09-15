@@ -1595,6 +1595,7 @@ export const en: Messages = {
   "remote.host.state.streaming": "Sending encrypted display",
   "remote.host.state.reconnecting": "Reconnecting to the relay server",
   "remote.host.peer": "Connection from {peer}",
+  "remote.host.viewers": "{count} viewers connected",
   "remote.host.waiting": "No viewer is connected yet",
   "remote.host.address": "Connection address",
   "remote.host.code": "Pairing password",

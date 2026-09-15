@@ -23,6 +23,8 @@ export interface RemoteHostStatus {
   fileRoot?: string;
   state: "waiting" | "pairing" | "streaming" | "reconnecting";
   peer?: string;
+  /** Number of authenticated viewers; absent when an older sidecar is used. */
+  activeSessions?: number;
   attemptsRemaining: number;
   /** Relay mode: the permanent nine-digit device ID viewers dial. */
   deviceId?: string | null;

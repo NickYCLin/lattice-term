@@ -87,6 +87,7 @@ pub struct RemoteHostStatus {
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
+    pub active_sessions: u32,
     pub attempts_remaining: u32,
     /// Relay mode: the permanent nine-digit device ID viewers dial.
     pub device_id: Option<String>,
@@ -519,6 +520,25 @@ fn update_and_emit_current_status(
     let _ = registry.publish_status_if_current(record, update, |status| emit_status(app, status));
 }
 
+fn mark_session_paired(status: &mut RemoteHostStatus, peer: String) {
+    status.state = "streaming";
+    status.peer = Some(peer);
+    status.active_sessions = status.active_sessions.saturating_add(1);
+    if !status.persistent {
+        status.pairing_code.clear();
+    }
+}
+
+fn mark_session_ended(status: &mut RemoteHostStatus) {
+    status.active_sessions = status.active_sessions.saturating_sub(1);
+    if status.active_sessions == 0 {
+        status.state = "waiting";
+        status.peer = None;
+    } else {
+        status.state = "streaming";
+    }
+}
+
 fn identity_path(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
@@ -798,6 +818,7 @@ async fn start_inner(
         file_root,
         state: "waiting",
         peer: None,
+        active_sessions: 0,
         attempts_remaining: 5,
         device_id,
         relay,
@@ -833,8 +854,10 @@ async fn start_inner(
                         &watcher_registry,
                         &record,
                         move |status| {
-                            status.state = "pairing";
-                            status.peer = Some(peer);
+                            if status.active_sessions == 0 {
+                                status.state = "pairing";
+                                status.peer = Some(peer);
+                            }
                             true
                         },
                     );
@@ -845,8 +868,10 @@ async fn start_inner(
                         &watcher_registry,
                         &record,
                         |status| {
-                            status.state = "waiting";
-                            status.peer = None;
+                            if status.active_sessions == 0 {
+                                status.state = "waiting";
+                                status.peer = None;
+                            }
                             status.attempts_remaining = attempts_remaining;
                             true
                         },
@@ -858,13 +883,9 @@ async fn start_inner(
                         &watcher_registry,
                         &record,
                         move |status| {
-                            status.state = "streaming";
-                            status.peer = Some(peer);
                             // A one-shot code is spent now; a persistent share
                             // keeps its code for the sessions that follow.
-                            if !status.persistent {
-                                status.pairing_code.clear();
-                            }
+                            mark_session_paired(status, peer);
                             true
                         },
                     );
@@ -878,8 +899,7 @@ async fn start_inner(
                         &watcher_registry,
                         &record,
                         |status| {
-                            status.state = "waiting";
-                            status.peer = None;
+                            mark_session_ended(status);
                             true
                         },
                     );
@@ -1147,6 +1167,7 @@ mod tests {
                 file_root: None,
                 state: "waiting",
                 peer: None,
+                active_sessions: 0,
                 attempts_remaining: 5,
                 device_id: None,
                 relay: None,
@@ -1326,7 +1347,7 @@ mod tests {
     fn saved_host_password_is_redacted_before_status_serialization() {
         let mut pairing_code = Zeroizing::new("sentinel-host-password".to_string());
         let pairing_code = pairing_code_for_status(&mut pairing_code, true);
-        let status = RemoteHostStatus {
+        let mut status = RemoteHostStatus {
             host_id: "host".to_string(),
             address: "wss://relay.example.test".to_string(),
             pairing_code,
@@ -1340,6 +1361,7 @@ mod tests {
             file_root: None,
             state: "waiting",
             peer: None,
+            active_sessions: 0,
             attempts_remaining: 5,
             device_id: Some("123456789".to_string()),
             relay: Some("wss://relay.example.test".to_string()),
@@ -1350,6 +1372,17 @@ mod tests {
         assert!(!encoded.contains("sentinel-host-password"));
         assert!(encoded.contains("\"pairingCode\":\"\""));
         assert!(encoded.contains("\"savedPairingCode\":true"));
+
+        mark_session_paired(&mut status, "relay".to_string());
+        mark_session_paired(&mut status, "relay".to_string());
+        assert_eq!(status.active_sessions, 2);
+        mark_session_ended(&mut status);
+        assert_eq!(status.active_sessions, 1);
+        assert_eq!(status.state, "streaming");
+        mark_session_ended(&mut status);
+        assert_eq!(status.active_sessions, 0);
+        assert_eq!(status.state, "waiting");
+        assert!(status.peer.is_none());
     }
 
     #[test]

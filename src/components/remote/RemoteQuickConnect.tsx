@@ -67,6 +67,20 @@ export function RemoteQuickConnect({
       setProblem(t("remote.quick.idInvalid"));
       return;
     }
+    const existing = remote.sessions.find(
+      (session) =>
+        session.profileId === `relay:${normalizedId}` ||
+        (session.viaRelay && normalizeDeviceId(session.host) === normalizedId),
+    );
+    if (existing) {
+      onConnected({
+        sessionId: existing.sessionId,
+        deviceId: normalizedId,
+        relayAddress: relayAddress.trim() || savedRelay,
+        agentName: existing.agentName,
+      });
+      return;
+    }
     if (!normalizedToken) {
       setProblem(t("remote.connect.relayCodeInvalid"));
       return;

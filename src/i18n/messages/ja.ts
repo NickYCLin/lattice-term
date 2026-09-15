@@ -1425,6 +1425,7 @@ export const messages: Messages = {
   "remote.host.state.streaming": "暗号化された表示の送信",
   "remote.host.state.reconnecting": "リレーサーバへの再接続",
   "remote.host.peer": "{peer}からの接続",
+  "remote.host.viewers": "{count} 人の閲覧者が接続中",
   "remote.host.waiting": "視聴者がまだ接続されていない",
   "remote.host.address": "接続アドレス",
   "remote.host.code": "ワンタイムペアリングコード",

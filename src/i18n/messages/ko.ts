@@ -1425,6 +1425,7 @@ export const messages: Messages = {
   "remote.host.state.streaming": "암호화 된 표시를 전송",
   "remote.host.state.reconnecting": "릴레이 서버에 연결",
   "remote.host.peer": "{peer}에서 연결",
+  "remote.host.viewers": "뷰어 {count}명 연결됨",
   "remote.host.waiting": "뷰어가 아직 연결되지 않음",
   "remote.host.address": "연결 주소",
   "remote.host.code": "한 번 페어링 코드",

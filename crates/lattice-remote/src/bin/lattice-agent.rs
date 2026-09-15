@@ -26,6 +26,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch, Notify, OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 use xcap::Monitor;
 use zeroize::Zeroizing;
@@ -38,6 +39,10 @@ const MAX_PAIRING_FAILURES: u32 = 5;
 const PAIRING_LIFETIME: Duration = Duration::from_secs(5 * 60);
 const RELAY_PING_INTERVAL: Duration = Duration::from_secs(25);
 const RELAY_RECONNECT_CAP: Duration = Duration::from_secs(60);
+// Screen capture and input injection are deliberately local tasks because
+// their OS handles are not Send. Bounding the set keeps one shared machine
+// from multiplying capture, PTY, and file work without limit.
+const MAX_CONCURRENT_RELAY_SESSIONS: usize = 4;
 const REMOTE_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_INPUT_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 // File work is authorised by the viewer, but still untrusted. Keep blocking
@@ -2660,6 +2665,8 @@ where
 enum SessionOutcome {
     /// The viewer failed the pairing handshake.
     Rejected,
+    /// The invited carrier failed before a viewer was authenticated.
+    Failed(String),
     /// A paired session ran and finished for the given reason.
     Ended(String),
 }
@@ -2674,7 +2681,7 @@ async fn run_relay_session(
 ) -> SessionOutcome {
     let mut stream = match Transport::connect(&relay_endpoint).await {
         Ok(stream) => stream,
-        Err(error) => return SessionOutcome::Ended(format!("Could not reach the relay: {error}")),
+        Err(error) => return SessionOutcome::Failed(format!("Could not reach the relay: {error}")),
     };
     if write_client_message(
         &mut stream,
@@ -2687,11 +2694,11 @@ async fn run_relay_session(
     .await
     .is_err()
     {
-        return SessionOutcome::Ended("The relay dropped the session invite.".to_string());
+        return SessionOutcome::Failed("The relay dropped the session invite.".to_string());
     }
     match timeout(Duration::from_secs(10), read_server_message(&mut stream)).await {
         Ok(Ok(RelayServerMessage::Linked { .. })) => {}
-        _ => return SessionOutcome::Ended("The relay did not link the session.".to_string()),
+        _ => return SessionOutcome::Failed("The relay did not link the session.".to_string()),
     }
 
     emit_event(
@@ -2703,7 +2710,7 @@ async fn run_relay_session(
     // The permanent identity key lets returning viewers pin this device.
     let static_key = match identity.noise_private_bytes() {
         Ok(static_key) => static_key,
-        Err(error) => return SessionOutcome::Ended(format!("Identity key unavailable: {error}")),
+        Err(error) => return SessionOutcome::Failed(format!("Identity key unavailable: {error}")),
     };
     let permit = match reserve_pairing(&options) {
         Ok(permit) => permit,
@@ -2829,6 +2836,11 @@ async fn run_relay(options: &Options) -> String {
     let mut announced = false;
     let mut link_up = false;
     let mut reconnect_delay = Duration::from_secs(1);
+    let mut sessions = JoinSet::new();
+    enum RelayLoopEvent {
+        Control(Option<RelayServerMessage>),
+        Session(Option<SessionOutcome>),
+    }
 
     loop {
         let connected = async {
@@ -2945,45 +2957,63 @@ async fn run_relay(options: &Options) -> String {
             }
         });
 
-        // Sessions run inline: pings keep flowing from their own task, so a
-        // long session cannot get this device deregistered, and a second
-        // viewer's dial simply times out while a session streams. `serve`
-        // holds OS capture handles that are not `Send`, which also rules
-        // out spawning sessions onto other threads.
+        // `serve` owns OS capture handles that are not Send. Relay mode runs
+        // inside a LocalSet, so each accepted viewer can still progress as an
+        // independent task on this runtime thread while the control link
+        // remains responsive to more invites.
         let fatal = loop {
-            match read_server_message(&mut read_half).await {
-                Ok(RelayServerMessage::Invite { channel_id }) => {
-                    let outcome = run_relay_session(
+            let event = if sessions.is_empty() {
+                RelayLoopEvent::Control(read_server_message(&mut read_half).await.ok())
+            } else {
+                tokio::select! {
+                    message = read_server_message(&mut read_half) => {
+                        RelayLoopEvent::Control(message.ok())
+                    }
+                    completed = sessions.join_next() => {
+                        RelayLoopEvent::Session(completed.and_then(Result::ok))
+                    }
+                }
+            };
+            match event {
+                RelayLoopEvent::Control(Some(RelayServerMessage::Invite { channel_id })) => {
+                    if sessions.len() >= MAX_CONCURRENT_RELAY_SESSIONS {
+                        // The relay's bounded join timer turns an unanswered
+                        // invite into a busy result without disturbing any
+                        // viewer that is already connected.
+                        continue;
+                    }
+                    sessions.spawn_local(run_relay_session(
                         relay_endpoint.clone(),
                         channel_id,
                         identity.clone(),
                         options.clone(),
-                    )
-                    .await;
-                    match outcome {
-                        SessionOutcome::Rejected => {
-                            failed_pairings += 1;
-                            let attempts_remaining =
-                                MAX_PAIRING_FAILURES.saturating_sub(failed_pairings);
-                            emit_event(
-                                options.json,
-                                &AgentEvent::PairingRejected { attempts_remaining },
-                            );
-                            if failed_pairings >= MAX_PAIRING_FAILURES {
-                                break Some(
-                                    "Too many failed pairing attempts; the Agent stopped."
-                                        .to_string(),
-                                );
-                            }
-                        }
-                        SessionOutcome::Ended(reason) => {
-                            failed_pairings = 0;
-                            emit_event(options.json, &AgentEvent::SessionEnded { reason });
-                        }
+                    ));
+                }
+                RelayLoopEvent::Control(Some(_)) => {}
+                RelayLoopEvent::Control(None) => break None,
+                RelayLoopEvent::Session(Some(SessionOutcome::Rejected)) => {
+                    failed_pairings += 1;
+                    let attempts_remaining = MAX_PAIRING_FAILURES.saturating_sub(failed_pairings);
+                    emit_event(
+                        options.json,
+                        &AgentEvent::PairingRejected { attempts_remaining },
+                    );
+                    if failed_pairings >= MAX_PAIRING_FAILURES {
+                        break Some(
+                            "Too many failed pairing attempts; the Agent stopped.".to_string(),
+                        );
                     }
                 }
-                Ok(_) => {}
-                Err(_) => break None,
+                RelayLoopEvent::Session(Some(SessionOutcome::Ended(reason))) => {
+                    failed_pairings = 0;
+                    emit_event(options.json, &AgentEvent::SessionEnded { reason });
+                }
+                RelayLoopEvent::Session(Some(SessionOutcome::Failed(reason))) => {
+                    if !options.json {
+                        eprintln!("{reason}");
+                    }
+                }
+                RelayLoopEvent::Session(None) => {}
             }
         };
 
@@ -3022,7 +3052,9 @@ async fn main() {
     };
 
     if options.relay.is_some() {
-        let stop_reason = run_relay(&options).await;
+        let stop_reason = tokio::task::LocalSet::new()
+            .run_until(run_relay(&options))
+            .await;
         emit_event(
             options.json,
             &AgentEvent::Stopped {

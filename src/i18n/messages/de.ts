@@ -1425,6 +1425,7 @@ export const messages: Messages = {
   "remote.host.state.streaming": "Verschlüsselte Anzeige senden",
   "remote.host.state.reconnecting": "Wiedervernetzung mit dem Relaisserver",
   "remote.host.peer": "Verbindung von {peer}",
+  "remote.host.viewers": "{count} Betrachter verbunden",
   "remote.host.waiting": "Es ist noch kein Zuschauer angeschlossen",
   "remote.host.address": "Verbindungsadresse",
   "remote.host.code": "Einmaliger Paarungscode",

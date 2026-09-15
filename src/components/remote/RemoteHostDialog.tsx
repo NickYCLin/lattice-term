@@ -335,7 +335,9 @@ export function RemoteHostDialog({
                 <div>
                   <strong>{statusLabel}</strong>
                   <small>
-                    {host.status.peer
+                    {(host.status.activeSessions ?? 0) > 1
+                      ? t("remote.host.viewers", { count: host.status.activeSessions ?? 0 })
+                      : host.status.peer
                       ? t("remote.host.peer", { peer: host.status.peer })
                       : t("remote.host.waiting")}
                   </small>

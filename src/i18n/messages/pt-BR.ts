@@ -1425,6 +1425,7 @@ export const messages: Messages = {
   "remote.host.state.streaming": "Enviando exibição criptografada",
   "remote.host.state.reconnecting": "Reconectando ao servidor relé",
   "remote.host.peer": "Ligação de {peer}",
+  "remote.host.viewers": "{count} espectadores conectados",
   "remote.host.waiting": "Nenhum visualizador ainda está conectado",
   "remote.host.address": "Endereço da ligação",
   "remote.host.code": "Código de pareamento único",
