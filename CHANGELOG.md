@@ -4,6 +4,31 @@
 
 ---
 
+## [2.4.0](https://github.com/NickYCLin/lattice-term/compare/v2.3.0...v2.4.0) (2026-09-15)
+
+
+### 🚀 新增功能
+
+* **agent:** 支援加開 CLI 由 Google Antigravity 接手與對話匯出 ([2e30fcf](https://github.com/NickYCLin/lattice-term/commit/2e30fcf05d10b33de8b18ab41e79d37373173ad2))
+* **chat:** 在對話側欄接回工作階段並提供刪除入口 ([89cb8eb](https://github.com/NickYCLin/lattice-term/commit/89cb8eba72adbf1167188f95120ecc7011f2f4cd))
+* **chat:** 支援以 Google Antigravity 進行逐輪對話與模型探索 ([325294b](https://github.com/NickYCLin/lattice-term/commit/325294b9ddf30a80d5ce42933c66b8541bb9eae6))
+* **i18n:** 整合九語介面與語言選擇卡片 ([5c4584d](https://github.com/NickYCLin/lattice-term/commit/5c4584dd7ffdeb6335f3a1b7eb5898ef753d598a)), closes [#232](https://github.com/NickYCLin/lattice-term/issues/232)
+* **mcp:** 讓已儲存連線可直接授權 ([92d35c4](https://github.com/NickYCLin/lattice-term/commit/92d35c4f1acc20dd95792f895c85482f1fd3a922))
+* **remote:** 允許補充正在執行的 Codex 回合 ([6295be6](https://github.com/NickYCLin/lattice-term/commit/6295be64e413301b3935c87bca699466862e5716)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **remote:** 安全沿用無人值守密碼 ([#234](https://github.com/NickYCLin/lattice-term/issues/234)) ([06d1189](https://github.com/NickYCLin/lattice-term/commit/06d11896dbefe992045742f61fd7196a1db208f1))
+* **remote:** 接入 Relay Fleet 工作區編排 ([7dc8be1](https://github.com/NickYCLin/lattice-term/commit/7dc8be1b9184b276f0db66b4d5f13902ca0bae05)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **remote:** 支援中繼多人連線與重複連線重用工作階段 ([fd2ddb4](https://github.com/NickYCLin/lattice-term/commit/fd2ddb4c5d05134fd817b687d699e69c0f9c3996))
+* **sidebar:** 共用對話與工作階段的資料夾 ([5a6d364](https://github.com/NickYCLin/lattice-term/commit/5a6d364fe15605ecf15dcf377636983def738b2f))
+
+
+### 🛠️ 問題修正
+
+* **agent:** 讓 Codex 使用已授權的遠端連線 ([021a77b](https://github.com/NickYCLin/lattice-term/commit/021a77b0159af2f62e04bbbcdd81e8e165ce3961))
+* **remote:** 調整 Fleet 協定的測試模組順序 ([b5763da](https://github.com/NickYCLin/lattice-term/commit/b5763dace8316e3642f619ac9cb304c127dbba3a)), closes [#180](https://github.com/NickYCLin/lattice-term/issues/180)
+* **sidebar:** 避免共用資料夾儲存失敗後遺失 ([0f3324b](https://github.com/NickYCLin/lattice-term/commit/0f3324bd259097a96dada533562d943b6b2701d3))
+* **test:** 排除備存工作區的測試 ([cf95201](https://github.com/NickYCLin/lattice-term/commit/cf95201901255b07285ef0d0b3e12a9d4b5fe743))
+* **workspace:** 避免匯出無法重新匯入的工作區 ([0410503](https://github.com/NickYCLin/lattice-term/commit/041050382ddc3f74c160a5ca03c266b8ac58d9e5))
+
 ## [2.3.0](https://github.com/NickYCLin/lattice-term/compare/v2.2.0...v2.3.0) (2026-09-13)
 
 
