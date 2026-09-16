@@ -2112,6 +2112,31 @@ impl AgentRegistry {
         true
     }
 
+    /// Codex's turn-complete notification can arrive while its background
+    /// terminals are still running. Only an explicit working footer observed
+    /// after that notification may revise its completed status; ordinary PTY
+    /// guesses and other integrations still defer to the reporter.
+    fn update_codex_working_from_output(&self, session_id: &str) -> bool {
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        let Some(_input) = entry.input.try_lock().ok() else {
+            return false;
+        };
+        let Ok(mut summary) = entry.summary.lock() else {
+            return false;
+        };
+        if summary.definition_id != "codex"
+            || summary.state != AgentLifecycle::Done
+            || summary.state_source != AgentStateSource::Integration
+        {
+            return false;
+        }
+        summary.state = AgentLifecycle::Working;
+        summary.state_source = AgentStateSource::Heuristic;
+        true
+    }
+
     /// Submitted user input starts a new lifecycle turn, even when the previous
     /// turn was completed by an authoritative integration event.
     ///
@@ -2314,6 +2339,18 @@ impl AgentRegistry {
         // disabled by a higher-precedence user mode.
         entry.integrated_completion.store(true, Ordering::Release);
         let state_changed = self.update_state(session_id, next, AgentStateSource::Integration);
+        if next == AgentLifecycle::Done
+            && entry
+                .summary
+                .lock()
+                .is_ok_and(|summary| summary.definition_id == "codex")
+        {
+            // Do not reuse a footer buffered before the completion report as
+            // evidence that background work continued after it.
+            if let Ok(mut completion) = entry.completion_gate.lock() {
+                completion.cancel();
+            }
+        }
         let captured = if let Some(native_session_id) = native_session_id {
             let mut summary = entry.summary.lock().map_err(|error| error.to_string())?;
             if summary.captured_session_id.as_deref() == Some(native_session_id.as_str()) {
@@ -6363,15 +6400,19 @@ pub fn launch_with_replay(
                         break;
                     };
                     reader_sink.data(&reader_id, offset, bytes);
-                    let state = if let Ok(mut completion) = reader_entry.completion_gate.lock() {
-                        heuristic_state_from_output(
-                            &mut completion,
-                            bytes,
-                            reader_entry.integrated_completion.load(Ordering::Acquire),
-                        )
-                    } else {
-                        Some(lifecycle_from_output(bytes))
-                    };
+                    let (state, explicit_status) =
+                        if let Ok(mut completion) = reader_entry.completion_gate.lock() {
+                            (
+                                heuristic_state_from_output(
+                                    &mut completion,
+                                    bytes,
+                                    reader_entry.integrated_completion.load(Ordering::Acquire),
+                                ),
+                                true,
+                            )
+                        } else {
+                            (Some(lifecycle_from_output(bytes)), false)
+                        };
                     if state == Some(AgentLifecycle::Done) {
                         // A guess, not a verdict: wait for the terminal to go
                         // quiet before showing it. Redraws re-enable bracketed
@@ -6400,11 +6441,14 @@ pub fn launch_with_replay(
                             });
                         }
                     } else if let Some(state) = state {
-                        if reader_registry.update_state(
+                        let changed = reader_registry.update_state(
                             &reader_id,
                             state,
                             AgentStateSource::Heuristic,
-                        ) {
+                        ) || (explicit_status
+                            && state == AgentLifecycle::Working
+                            && reader_registry.update_codex_working_from_output(&reader_id));
+                        if changed {
                             reader_sink.state(&reader_id, state, AgentStateSource::Heuristic);
                         }
                     }
@@ -8250,6 +8294,84 @@ session id: 0199aa11-"
             assert_ne!(first, Some(AgentLifecycle::NeedsAttention));
             assert_ne!(second, Some(AgentLifecycle::NeedsAttention));
         }
+    }
+
+    #[test]
+    fn codex_background_work_can_resume_after_a_turn_completion_report() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = AgentRegistry::with_local_reporter(sink.clone()).unwrap();
+        #[cfg(unix)]
+        let (executable, arguments) = ("/bin/cat".to_string(), Vec::new());
+        #[cfg(windows)]
+        let (executable, arguments) = ("cmd.exe".to_string(), vec!["/Q".to_string()]);
+        let request = AgentLaunchRequest {
+            definition_id: "custom".to_string(),
+            label: "Background reporter test".to_string(),
+            executable,
+            arguments,
+            resume_session_id: None,
+            group_id: None,
+            seed_input: None,
+            restore_existing_session: false,
+            profile_config_path: None,
+            sandbox: false,
+            detached: false,
+            working_directory: std::env::current_dir().unwrap().display().to_string(),
+            cols: 80,
+            rows: 24,
+        };
+        let session = launch(sink, registry.clone(), request).unwrap();
+        let id = &session.session_id;
+        let (address, token) = registry.reporter_credentials(id).unwrap();
+        let entry = registry.get(id).unwrap();
+        // Use a local dummy process for the reporter test, without launching
+        // Codex or accessing its account; only the lifecycle label is Codex.
+        entry.summary.lock().unwrap().definition_id = "codex".to_string();
+
+        // A footer read before notify is not evidence of work after notify.
+        entry
+            .completion_gate
+            .lock()
+            .unwrap()
+            .observe_output(b"Working (1s; esc to interrupt)", true);
+        send_report_with_native_session(address, id, &token, AgentLifecycle::Done, None).unwrap();
+        assert_eq!(registry.list()[0].state, AgentLifecycle::Done);
+        assert_eq!(
+            entry
+                .completion_gate
+                .lock()
+                .unwrap()
+                .observe_output(b"ordinary redraw", true),
+            None
+        );
+
+        // A non-Codex CLI remains governed by its authoritative reporter.
+        entry.summary.lock().unwrap().definition_id = "custom".to_string();
+        assert!(!registry.update_codex_working_from_output(id));
+        entry.summary.lock().unwrap().definition_id = "codex".to_string();
+        assert!(!registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Heuristic));
+        assert_eq!(
+            entry.completion_gate.lock().unwrap().observe_output(
+                b"Working (27s; esc to interrupt) 3 background terminals running",
+                true,
+            ),
+            Some(AgentLifecycle::Working)
+        );
+        assert!(registry.update_codex_working_from_output(id));
+        let current = &registry.list()[0];
+        assert_eq!(current.state, AgentLifecycle::Working);
+        assert_eq!(current.state_source, AgentStateSource::Heuristic);
+        assert!(entry.integrated_completion.load(Ordering::Acquire));
+
+        // The next real completion report still takes precedence.
+        send_report_with_native_session(address, id, &token, AgentLifecycle::Done, None).unwrap();
+        assert_eq!(registry.list()[0].state, AgentLifecycle::Done);
+        assert_eq!(
+            registry.list()[0].state_source,
+            AgentStateSource::Integration
+        );
+        registry.stop_all();
     }
 
     #[test]
