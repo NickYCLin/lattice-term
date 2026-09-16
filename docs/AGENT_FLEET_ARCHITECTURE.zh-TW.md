@@ -119,6 +119,14 @@ Reporter 每次只傳一個最多 4 KiB 的 JSON 狀態或用量訊息。Registr
 使用系統金鑰圈的登入；已確認未登入的帳號會標示狀態。
 
 模型清單分別向各帳號查詢，不把預設帳號的可用模型套到其他帳號。
+Fleet 的「新專案」與「加開 CLI」另提供各個 Codex 帳號的 CLIProxyAPI
+選項。使用者須先依 [CLIProxyAPI 的 Codex 設定說明](https://help.router-for.me/agent-client/codex)
+在該帳號的 Codex 設定中建立 `cliproxyapi` provider、連線位址與認證，
+並自行啟動代理服務。Fleet 只接受使用者填入的模型 ID，以分離參數
+`-c model_provider=cliproxyapi --model <模型 ID>` 啟動 Codex；不從代理
+查詢模型清單，也不讀取、保存或傳送代理金鑰。原有 Codex 模型選項
+不會被改用代理，對話頁也仍使用原本的帳號模型清單。代理連線與模型
+是否可用由 Codex／CLIProxyAPI 在工作階段中回報，未經安裝版驗證。
 切換帳號或助理會保留對話畫面與有界交接摘要，但清除原生對話 ID；
 Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重新建立。
 已移除的帳號不能在對話頁靜默改用預設登入。

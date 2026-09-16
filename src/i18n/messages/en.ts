@@ -1334,6 +1334,8 @@ export const en: Messages = {
   "chat.model.handoff": "Changing assistants starts a new native conversation and safely hands over recent context.",
   "chat.accountProfile": "Account",
   "accountModel.choose": "Choose a model",
+  "terminal.proxy.model": "CLIProxyAPI model ID",
+  "terminal.proxy.hint": "Configure the cliproxyapi provider and key in this Codex account first, then enter a supported model ID. LatticeTerm does not read the key.",
   "accountModel.defaultAccount": "Default account",
   "accountModel.missing": "The account was removed. Choose a model again.",
   "chat.accountProfile.default": "Currently signed-in account (default)",

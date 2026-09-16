@@ -1268,6 +1268,8 @@ export const zhTW = {
   "chat.model.handoff": "切換不同助理會建立新的原生對話，並安全轉交近期脈絡。",
   "chat.accountProfile": "使用帳號",
   "accountModel.choose": "選擇模型",
+  "terminal.proxy.model": "CLIProxyAPI 模型 ID",
+  "terminal.proxy.hint": "先在這個帳號的 Codex 設好 cliproxyapi provider 與金鑰，再填代理支援的模型 ID；LatticeTerm 不會讀取金鑰。",
   "accountModel.defaultAccount": "預設帳號",
   "accountModel.missing": "原帳號已移除，請重新選擇模型",
   "chat.accountProfile.default": "目前登入的帳號（預設）",

@@ -1184,6 +1184,8 @@ export const messages: Messages = {
   "chat.model.handoff": "Changing Assistants는 새로운 네이티브 대화를 시작하고 최근의 상황에 따라 안전하게 손을 시작합니다.",
   "chat.accountProfile": "계정",
   "accountModel.choose": "모델 선택",
+  "terminal.proxy.model": "CLIProxyAPI 모델 ID",
+  "terminal.proxy.hint": "이 Codex 계정에 cliproxyapi provider와 키를 먼저 설정한 뒤 지원되는 모델 ID를 입력하세요. LatticeTerm은 키를 읽지 않습니다.",
   "accountModel.defaultAccount": "기본 계정",
   "accountModel.missing": "계정이 제거되었습니다. 다시 모델을 선택하십시오.",
   "chat.accountProfile.default": "현재 로그인 계정 (과태)",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels } from "./accountModels";
+import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
 import { fakeDefinition } from "./testFixtures/agentApis";
 import { selectThreadModel } from "./agentChat";
 import { fakeThread } from "./testFixtures/agentApis";
@@ -54,6 +54,31 @@ describe("account-aware model choices", () => {
     expect(options.filter((option) => option.accountProfileId === "b").map((option) => option.model)).toEqual([""]);
     expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: "deleted", model: "" }, [profile])).toThrow("missing-account");
     expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: "b", model: "" }, [profile])).toThrow("missing-account");
+  });
+
+  it("offers CLIProxyAPI only in Fleet for each Codex identity, without exposing it in chat", () => {
+    const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [profile], { b: status }, "Default");
+    expect(accountModelOptions(targets, {}, labels).some((option) => option.provider)).toBe(false);
+    const proxyOptions = accountModelOptions(targets, {}, labels, undefined, true).filter((option) => option.provider);
+    expect(proxyOptions).toHaveLength(2);
+    expect(proxyOptions.map((option) => option.accountProfileId)).toEqual([null, "b"]);
+    expect(proxyOptions.every((option) => option.definitionId === "codex")).toBe(true);
+    const selection = { ...proxyOptions[1], model: "claude-sonnet-4-5" };
+    expect(accountModelKey(selection)).toBe(accountModelKey(proxyOptions[1]));
+    expect(accountModelLaunchSettings(selection, [profile])).toEqual({
+      profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=cliproxyapi", "--model", "claude-sonnet-4-5"],
+    });
+    expect(accountModelLaunchSettings({ ...selection, provider: undefined }, [profile]).arguments).toEqual(["--model", "claude-sonnet-4-5"]);
+  });
+
+  it("rejects empty, suspicious or unsupported proxy model selections before launch", () => {
+    expect(validCliProxyModel("gpt-5.6-sol")).toBe(true);
+    for (const modelId of ["", " -c", "--help", "gpt 5", "gpt\n5", "a".repeat(257)]) {
+      expect(validCliProxyModel(modelId)).toBe(false);
+      expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: null, model: modelId, provider: "cliproxyapi" }, [])).toThrow("invalid-proxy-model");
+    }
+    expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: null, model: "sonnet", provider: "cliproxyapi" }, [])).toThrow("unsupported-provider");
+    expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: "removed", model: "gpt-5.6-sol", provider: "cliproxyapi" }, [profile])).toThrow("missing-account");
   });
 
   it("labels running Windows sessions without changing their stored CLI name", () => {

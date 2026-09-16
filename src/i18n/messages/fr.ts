@@ -1184,6 +1184,8 @@ export const messages: Messages = {
   "chat.model.handoff": "Le changement d'assistants commence une nouvelle conversation native et transmet en toute sécurité le contexte récent.",
   "chat.accountProfile": "Compte",
   "accountModel.choose": "Choisir un modèle",
+  "terminal.proxy.model": "ID du modèle CLIProxyAPI",
+  "terminal.proxy.hint": "Configurez le fournisseur cliproxyapi et la clé dans ce compte Codex, puis indiquez un ID de modèle compatible. LatticeTerm ne lit pas la clé.",
   "accountModel.defaultAccount": "Compte par défaut",
   "accountModel.missing": "Le compte a été supprimé. Choisissez à nouveau un modèle.",
   "chat.accountProfile.default": "Compte actuellement signé (par défaut)",

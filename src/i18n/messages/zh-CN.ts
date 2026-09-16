@@ -1184,6 +1184,8 @@ export const messages: Messages = {
   "chat.model.handoff": "切换不同助理会创建新的原生对话，并安全转交近期脉络。",
   "chat.accountProfile": "使用帐号",
   "accountModel.choose": "选择模型",
+  "terminal.proxy.model": "CLIProxyAPI 模型 ID",
+  "terminal.proxy.hint": "先在这个账号的 Codex 配置 cliproxyapi provider 和密钥，再填写代理支持的模型 ID；LatticeTerm 不读取密钥。",
   "accountModel.defaultAccount": "缺省帐号",
   "accountModel.missing": "原帐号已移除，请重新选择模型",
   "chat.accountProfile.default": "目前登录的帐号（缺省）",

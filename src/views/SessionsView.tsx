@@ -26,6 +26,7 @@ import {
   accountModelLaunchSettings,
   accountModelOptions,
   accountModelTargets,
+  validCliProxyModel,
   accountSessionLabel,
   type AccountModelSelection,
 } from "../app/accountModels";
@@ -480,14 +481,15 @@ export function SessionsView({
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
     defaultModel: t("terminal.model.pending"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined).map((option) => ({ ...option, disabled: false }));
+  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, true).map((option) => ({ ...option, disabled: false }));
   const defaultModelSelection = (definitionId?: string): AccountModelSelection | null => {
     const candidates = modelTargets.filter((target) => !definitionId || target.definitionId === definitionId);
     const target = candidates.find((candidate) => !candidate.signedOut) ?? candidates[0];
     return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" } : null;
   };
   const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"));
-  const projectModelAvailable = selectedProjectModel !== null && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedProjectModel));
+  const modelAvailable = (selection: AccountModelSelection | null) => selection !== null && (!selection.provider || validCliProxyModel(selection.model)) && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selection));
+  const projectModelAvailable = modelAvailable(selectedProjectModel);
 
   async function chooseProjectDirectory() {
     setChoosingProject(true);
@@ -1088,6 +1090,7 @@ export function SessionsView({
           <AccountModelField
             options={modelOptions}
             value={selectedProjectModel}
+            allowCliProxyApi
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
@@ -2163,12 +2166,13 @@ export function SessionsView({
                           <AccountModelField
                             options={modelOptions}
                             value={selectedAddModel}
+                            allowCliProxyApi
                             onChange={setSelectedAddModel}
                           />
                           <button
                             type="button"
                             className="button button--primary button--sm"
-                            disabled={!selectedAddModel || !modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedAddModel))}
+                            disabled={!modelAvailable(selectedAddModel)}
                             onClick={() => selectedAddModel && void addCli(group, selectedAddModel, carry)}
                           >{t("terminal.projects.launch")}</button>
                           {installed.length === 0 && (
