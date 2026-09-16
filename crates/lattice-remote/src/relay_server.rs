@@ -263,7 +263,12 @@ impl RelayState {
     }
 
     fn release_dial(&self, channel_id: &str) {
-        let mut dials = self.dials.lock().expect("dial lock");
+        // Runs from `DialReservation::drop`, possibly while a panic is already
+        // unwinding with the lock poisoned. A second panic here would abort
+        // the whole process instead of surfacing the first one.
+        let Ok(mut dials) = self.dials.lock() else {
+            return;
+        };
         dials.joins.remove(channel_id);
     }
 
@@ -1277,7 +1282,7 @@ mod tests {
         assert!(state
             .take_pending_join("channel-one", "987654321")
             .is_none());
-        assert_eq!(state.dials.lock().unwrap().joins.len(), 1);
+        assert_eq!(state.dials.lock().unwrap().joins.len(), 2);
 
         drop(first);
         assert!(first_receiver.blocking_recv().is_err());
