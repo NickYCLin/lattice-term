@@ -181,6 +181,7 @@ fn mcp_screen_sessions(
 /// ordinary live session; [`mcp_remote_grant`] remains the separate authority
 /// for commands, files, screen capture, input and Fleet access.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn mcp_saved_connection_connect(
     app: AppHandle,
     request: McpSavedConnectionRequest,
