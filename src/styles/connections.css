@@ -782,6 +782,124 @@
   .sound-event label { grid-column: 1 / -1; }
 }
 
+.setting--language {
+  align-items: flex-start;
+}
+
+.setting__title--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.setting__title--icon svg {
+  color: var(--accent);
+}
+
+.language-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+  gap: var(--space-2);
+  width: min(100%, 46rem);
+  flex: 1 1 32rem;
+}
+
+.language-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-hover);
+  color: var(--text);
+  text-align: left;
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    background-color var(--duration-fast) var(--ease),
+    transform var(--duration-fast) var(--ease);
+}
+
+.language-option:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.language-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.language-option__code {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.language-option.is-selected .language-option__code {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.language-option__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.language-option__text strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language-option__text small {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.language-option__check {
+  display: flex;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.language-fallback-hint {
+  flex: 1 0 100%;
+  margin-top: calc(var(--space-2) * -1);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  text-align: right;
+}
+
+.setting-notification-preview {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: 0 0 var(--space-4);
+  flex-wrap: wrap;
+}
+
+.setting-notification-preview small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.setting-notification-preview small.is-danger {
+  color: var(--danger);
+}
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));

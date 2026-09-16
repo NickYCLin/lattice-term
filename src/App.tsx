@@ -34,7 +34,7 @@ import {
 } from "./app/preferences";
 import type { EncryptedBackupRestore } from "./app/encryptedBackup";
 import { rememberRelayDevice } from "./app/rememberRelayDevice";
-import { saveRelayAddress } from "./app/remoteRelay";
+import { normalizeDeviceId, saveRelayAddress } from "./app/remoteRelay";
 import { findTheme, themeCatalog } from "./app/themes";
 import { useViewMotion } from "./app/useViewMotion";
 import { useRuntimeSummary } from "./app/useRuntimeSummary";
@@ -683,6 +683,34 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     window.setTimeout(() => searchRef.current?.focus(), 0);
   }, [onMobile, update]);
 
+  const openConnection = useCallback(
+    (profile: ConnectionProfile) => {
+      if (profile.protocol === "lattice") {
+        const targetDevice = profile.deviceId
+          ? normalizeDeviceId(profile.deviceId)
+          : null;
+        const existing = remote.sessions.find(
+          (session) =>
+            session.profileId === profile.id ||
+            (targetDevice !== null &&
+              session.viaRelay &&
+              normalizeDeviceId(session.host) === targetDevice) ||
+            (targetDevice === null &&
+              !session.viaRelay &&
+              session.port === profile.port &&
+              session.host.toLowerCase() === profile.hostname.toLowerCase()),
+        );
+        if (existing) {
+          setActiveSessionId(existing.sessionId);
+          setView("terminal");
+          return;
+        }
+      }
+      setConnectTarget(profile);
+    },
+    [remote.sessions],
+  );
+
   const saveDraft = useCallback(
     (draft: ConnectionDraft, connectAfterSave: boolean) => {
       const saved = drawer.profileId
@@ -693,10 +721,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         connectAfterSave &&
         canConnectProtocol(saved.protocol, supportedProtocols)
       ) {
-        setConnectTarget(saved);
+        openConnection(saved);
       }
     },
-    [drawer.profileId, addProfile, supportedProtocols, updateProfile],
+    [drawer.profileId, addProfile, openConnection, supportedProtocols, updateProfile],
   );
 
 
@@ -985,7 +1013,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   onCreate={openCreate}
                   onEdit={openEdit}
                   onDelete={requestDelete}
-                  onConnect={setConnectTarget}
+                  onConnect={openConnection}
                   supportedProtocols={supportedProtocols}
                   backendAvailable={runtime.host === "tauri"}
                   mobile={onMobile}
@@ -1047,6 +1075,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 agents={agents}
                 chat={chatRuntime.chat}
                 automations={chatRuntime.automations}
+                onOpenSession={(sessionId) => {
+                  setActiveSessionId(sessionId);
+                  setView("terminal");
+                }}
               />
             )}
             {view === "tunnels" && (

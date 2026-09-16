@@ -15,6 +15,9 @@ pub struct ChatRequest {
     deny_unknown_fields
 )]
 pub enum ChatOperation {
+    Fleet {
+        request: crate::fleet_protocol::FleetRequest,
+    },
     List,
     CliList,
     CliRead {
@@ -38,6 +41,11 @@ pub enum ChatOperation {
         thread_id: String,
         text: String,
     },
+    Steer {
+        thread_id: String,
+        turn_id: String,
+        text: String,
+    },
     Stop {
         thread_id: String,
         turn_id: String,
@@ -53,6 +61,9 @@ pub enum ChatOperation {
     },
 }
 impl ChatOperation {
+    pub fn is_fleet(&self) -> bool {
+        matches!(self, Self::Fleet { .. })
+    }
     pub fn is_cli(&self) -> bool {
         matches!(
             self,
@@ -69,6 +80,7 @@ impl ChatRequest {
             return false;
         }
         match &self.operation {
+            ChatOperation::Fleet { request } => request.valid(),
             ChatOperation::List | ChatOperation::CliList => true,
             ChatOperation::CliRead { session_id, .. } => identifier(session_id),
             ChatOperation::CliInput { session_id, data } => {
@@ -88,6 +100,17 @@ impl ChatRequest {
                     && text.len() <= 16 * 1024
                     && !text.contains('\0')
             }
+            ChatOperation::Steer {
+                thread_id,
+                turn_id,
+                text,
+            } => {
+                identifier(thread_id)
+                    && identifier(turn_id)
+                    && !text.trim().is_empty()
+                    && text.len() <= 16 * 1024
+                    && !text.contains('\0')
+            }
             ChatOperation::Stop { thread_id, turn_id } => {
                 identifier(thread_id) && identifier(turn_id)
             }
@@ -101,6 +124,9 @@ impl ChatRequest {
         }
     }
     pub fn mutates(&self) -> bool {
+        if let ChatOperation::Fleet { request } = &self.operation {
+            return request.mutates();
+        }
         !matches!(
             self.operation,
             ChatOperation::List
@@ -190,14 +216,60 @@ pub fn cli_available() -> bool {
 }
 #[cfg(feature = "agent")]
 pub fn permits(operation: &ChatOperation) -> bool {
-    if operation.is_cli() {
+    if operation.is_fleet() {
+        fleet_available()
+    } else if operation.is_cli() {
         cli_available()
     } else {
         available()
     }
 }
+#[cfg(feature = "agent")]
+pub fn fleet_available() -> bool {
+    bridge_available() && std::env::var("LATTICE_FLEET_ALLOWED").as_deref() == Ok("1")
+}
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn steering_requires_a_bounded_message_and_explicit_turn() {
+        let request = ChatRequest {
+            id: "request".into(),
+            operation: ChatOperation::Steer {
+                thread_id: "thread".into(),
+                turn_id: "turn".into(),
+                text: "先檢查\n再修改".into(),
+            },
+        };
+        assert!(request.valid());
+        assert!(request.mutates());
+        assert!(!request.operation.is_cli());
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(encoded["operation"]["turnId"], "turn");
+        assert_eq!(
+            serde_json::from_value::<ChatRequest>(encoded).unwrap(),
+            request
+        );
+        for (turn_id, text) in [
+            ("", "hello".into()),
+            ("turn", " ".into()),
+            ("turn", "\0".into()),
+            ("turn", "中".repeat(5462)),
+        ] {
+            assert!(!ChatRequest {
+                id: "request".into(),
+                operation: ChatOperation::Steer {
+                    thread_id: "thread".into(),
+                    turn_id: turn_id.into(),
+                    text
+                }
+            }
+            .valid());
+        }
+        assert!(serde_json::from_value::<ChatRequest>(
+            serde_json::json!({"id":"r","operation":{"kind":"steer","threadId":"t","text":"hello"}})
+        )
+        .is_err());
+    }
     use super::*;
     #[test]
     fn cli_messages_validate_bounds_and_classify_mutations() {

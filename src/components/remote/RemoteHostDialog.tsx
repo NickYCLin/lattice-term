@@ -12,10 +12,21 @@ import {
 } from "../../app/remoteRelay";
 import { copySensitiveText } from "../../app/sensitiveClipboard";
 import type { RemoteHostApi } from "../../app/useRemoteHost";
+import {
+  REMOTE_HOST_CREDENTIAL_ID,
+  useSavedCredential,
+} from "../../app/useSavedCredential";
 import { displayPath } from "../../app/displayPath";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
-import { CloseIcon, CopyIcon, ScreenShareIcon, ShieldIcon } from "../icons";
+import {
+  CheckIcon,
+  CloseIcon,
+  CopyIcon,
+  ScreenShareIcon,
+  ShieldIcon,
+  TrashIcon,
+} from "../icons";
 import { RelayAddressField } from "./RelayAddressField";
 import { moveRadioGroupFocus } from "../overlays/radioNavigation";
 import { useModalFocus } from "../overlays/modalFocus";
@@ -33,6 +44,10 @@ export function RemoteHostDialog({
 }) {
   const { t } = useI18n();
   const [settings] = useState(() => host.configuration ?? loadRemoteHostSettings(window.localStorage));
+  const savedCredential = useSavedCredential(
+    REMOTE_HOST_CREDENTIAL_ID,
+    "latticeHostPairingCode",
+  );
   const [editing, setEditing] = useState(false);
   const [savedRelay] = useState(() => loadRelayAddress(window.localStorage));
   const [mode, setMode] = useState<"relay" | "direct">(
@@ -40,17 +55,29 @@ export function RemoteHostDialog({
   );
   const [relayAddress, setRelayAddress] = useState(settings.relayAddress || savedRelay);
   const [fixedCode, setFixedCode] = useState("");
+  const [useSavedPairingCode, setUseSavedPairingCode] = useState(
+    settings.useSavedPairingCode === true,
+  );
+  const [rememberPairingCode, setRememberPairingCode] = useState(false);
+  const [removingCredential, setRemovingCredential] = useState(false);
   const [bindAddress, setBindAddress] = useState(settings.bindAddress);
   const [port, setPort] = useState(settings.port);
   const [fps, setFps] = useState(settings.fps);
   const [allowInput, setAllowInput] = useState(settings.allowInput === true);
   const [allowCli, setAllowCli] = useState(settings.allowCli === true);
+  const [allowFleet, setAllowFleet] = useState(false);
+  const [fleetDirectory, setFleetDirectory] = useState("");
+  const [fleetRead, setFleetRead] = useState(false);
+  const [fleetControl, setFleetControl] = useState(false);
+  const [fleetLaunch, setFleetLaunch] = useState(false);
   const [allowChat, setAllowChat] = useState(settings.allowChat === true);
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
   const [fileRoot, setFileRoot] = useState(settings.fileRoot);
   const [submitting, setBusy] = useState(false);
-  const busy = submitting || host.configuring === true;
+  const busy = submitting || host.configuring === true || removingCredential;
+  const usingSavedPairingCode =
+    mode === "relay" && useSavedPairingCode;
   const [problem, setProblem] = useState<string | null>(null);
   const [copyProblem, setCopyProblem] = useState<string | null>(null);
   const [copied, setCopied] = useState<"address" | "code" | "deviceId" | null>(
@@ -116,7 +143,10 @@ export function RemoteHostDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const password = mode === "relay" && fixedCode ? normalizePairingPassword(fixedCode) : "";
+    const password =
+      mode === "relay" && !usingSavedPairingCode && fixedCode
+        ? normalizePairingPassword(fixedCode)
+        : "";
     if (password === null) {
       setProblem(t("remote.connect.codeInvalid"));
       return;
@@ -125,30 +155,83 @@ export function RemoteHostDialog({
     setProblem(null);
     host.clearClosedReason();
     try {
-      await host.start({
+      const started = await host.start({
         bindAddress: bindAddress.trim(),
         port,
         fps,
         allowInput,
         allowChat,
         allowCli,
+        fleet: allowFleet ? { directory: fleetDirectory, read: fleetRead, control: fleetControl, launch: fleetLaunch } : null,
         allowCommands: platform === "windows" && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
         mode,
         relayAddress: mode === "relay" ? relayAddress.trim() : "",
-        pairingCode: password,
+        pairingCode: usingSavedPairingCode ? "" : password,
+        useSavedPairingCode: usingSavedPairingCode,
+        rememberPairingCode:
+          mode === "relay" &&
+          !usingSavedPairingCode &&
+          password.length > 0 &&
+          rememberPairingCode &&
+          (savedCredential.state.mode === "missing" ||
+            savedCredential.state.mode === "saved"),
       });
       if (mode === "relay") {
         saveRelayAddress(window.localStorage, relayAddress);
       }
       setFixedCode("");
+      setAllowFleet(false);
+      setFleetRead(false);
+      setFleetControl(false);
+      setFleetLaunch(false);
+      setUseSavedPairingCode(started.savedPairingCode === true);
+      if (started.savedPairingCode) void savedCredential.refresh();
       setEditing(false);
       setNow(Math.floor(Date.now() / 1_000));
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function removeSavedPairingCode() {
+    setRemovingCredential(true);
+    setProblem(null);
+    try {
+      await host.removeSavedPairingCode();
+      setUseSavedPairingCode(false);
+      await savedCredential.refresh();
+    } catch (reason) {
+      setUseSavedPairingCode(false);
+      await savedCredential.refresh();
+      setProblem(
+        t("credential.removeFailed.body", {
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      );
+    } finally {
+      setRemovingCredential(false);
+    }
+  }
+
+  async function retrySavedPairingCodeCleanup() {
+    setRemovingCredential(true);
+    setProblem(null);
+    try {
+      await host.retrySavedPairingCodeCleanup();
+      await savedCredential.refresh();
+    } catch (reason) {
+      await savedCredential.refresh();
+      setProblem(
+        t("credential.removeFailed.body", {
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      );
+    } finally {
+      setRemovingCredential(false);
     }
   }
 
@@ -242,6 +325,7 @@ export function RemoteHostDialog({
           )}
 
           <p className="panel__hint" role="status">{t("remote.host.autoStandby")}</p>
+          {host.status?.fleet && <p role="status">{t("remote.fleet.active")}</p>}
           {host.status && !editing ? (
             <div className="remote-host-active">
               <div className="remote-host-state">
@@ -252,7 +336,9 @@ export function RemoteHostDialog({
                 <div>
                   <strong>{statusLabel}</strong>
                   <small>
-                    {host.status.peer
+                    {(host.status.activeSessions ?? 0) > 1
+                      ? t("remote.host.viewers", { count: host.status.activeSessions ?? 0 })
+                      : host.status.peer
                       ? t("remote.host.peer", { peer: host.status.peer })
                       : t("remote.host.waiting")}
                   </small>
@@ -270,6 +356,11 @@ export function RemoteHostDialog({
                 {host.status.fileTransfer && (
                   <span className="badge tone-security">
                     {t("remote.host.modeFiles")}
+                  </span>
+                )}
+                {host.status.savedPairingCode && (
+                  <span className="badge tone-security">
+                    {t("remote.host.passwordStoredBadge")}
                   </span>
                 )}
               </div>
@@ -328,21 +419,23 @@ export function RemoteHostDialog({
                 )}
               </div>
 
-              {host.status.state !== "streaming" && (
-                <div className="remote-host-expiry">
-                  <ShieldIcon size={14} />
-                  <span>
-                    {host.status.expiresAt === 0
-                      ? t("remote.host.codePersistent")
-                      : t("remote.host.expires", { time: expiry })}
-                  </span>
-                  <span>
-                    {t("remote.host.attempts", {
-                      count: host.status.attemptsRemaining,
-                    })}
-                  </span>
-                </div>
-              )}
+              <div className="remote-host-expiry">
+                <ShieldIcon size={14} />
+                <span>
+                  {host.status.savedPairingCode
+                    ? t("remote.host.passwordSavedActive")
+                    : host.status.persistent && !host.status.pairingCode
+                    ? t("remote.host.passwordActiveNotStored")
+                    : host.status.expiresAt === 0
+                    ? t("remote.host.codePersistent")
+                    : t("remote.host.expires", { time: expiry })}
+                </span>
+                <span>
+                  {t("remote.host.attempts", {
+                    count: host.status.attemptsRemaining,
+                  })}
+                </span>
+              </div>
 
               {copied && (
                 <p className="text-muted" aria-live="polite">
@@ -442,7 +535,140 @@ export function RemoteHostDialog({
                     hint={t("remote.host.relayHint")}
                     onChange={setRelayAddress}
                   />
-                  <div className="field">
+                  {savedCredential.state.mode === "saved" && (
+                    <Callout
+                      tone="security"
+                      title={t("remote.host.savedPasswordTitle")}
+                    >
+                      <div className="credential-choice">
+                        <label className="checkbox">
+                          <input
+                            type="checkbox"
+                            checked={useSavedPairingCode}
+                            disabled={busy || removingCredential}
+                            onChange={(event) =>
+                              setUseSavedPairingCode(event.currentTarget.checked)
+                            }
+                          />
+                          <span className="checkbox__box" aria-hidden="true">
+                            <CheckIcon size={11} />
+                          </span>
+                          {t("remote.host.useSavedPassword")}
+                        </label>
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          disabled={busy || removingCredential}
+                          onClick={() => void removeSavedPairingCode()}
+                        >
+                          <TrashIcon size={13} />
+                          {removingCredential
+                            ? t("credential.removing")
+                            : t("remote.host.removeSavedPassword")}
+                        </button>
+                      </div>
+                    </Callout>
+                  )}
+                  {savedCredential.state.cleanupPending === true && (
+                    <Callout
+                      tone="warn"
+                      title={t("remote.host.cleanupPendingTitle")}
+                    >
+                      <div className="credential-choice">
+                        <span>{t("remote.host.cleanupPendingBody")}</span>
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          disabled={busy || removingCredential}
+                          onClick={() => void retrySavedPairingCodeCleanup()}
+                        >
+                          <TrashIcon size={13} />
+                          {removingCredential
+                            ? t("credential.removing")
+                            : t("remote.host.retryCleanup")}
+                        </button>
+                      </div>
+                    </Callout>
+                  )}
+                  {savedCredential.state.mode === "missing" &&
+                    usingSavedPairingCode && (
+                      <Callout
+                        tone="warn"
+                        title={t("remote.host.savedPasswordMissingTitle")}
+                      >
+                        <div className="credential-choice">
+                          <span>{t("remote.host.savedPasswordMissingBody")}</span>
+                          <label className="checkbox">
+                            <input
+                              type="checkbox"
+                              checked={useSavedPairingCode}
+                              disabled={busy}
+                              onChange={(event) =>
+                                setUseSavedPairingCode(
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <span className="checkbox__box" aria-hidden="true">
+                              <CheckIcon size={11} />
+                            </span>
+                            {t("remote.host.keepUsingSavedPassword")}
+                          </label>
+                        </div>
+                      </Callout>
+                    )}
+                  {savedCredential.state.mode === "unavailable" && (
+                    <Callout tone="warn" title={t("credential.unavailable.title")}>
+                      <div className="credential-choice">
+                        <span>
+                          {t(
+                            savedCredential.state.runtimeUnavailable
+                              ? "credential.unavailable.browserBody"
+                              : "credential.unavailable.body",
+                            { detail: savedCredential.state.detail },
+                          )}
+                        </span>
+                        {usingSavedPairingCode && (
+                          <label className="checkbox">
+                            <input
+                              type="checkbox"
+                              checked={useSavedPairingCode}
+                              disabled={busy}
+                              onChange={(event) =>
+                                setUseSavedPairingCode(
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <span className="checkbox__box" aria-hidden="true">
+                              <CheckIcon size={11} />
+                            </span>
+                            {t("remote.host.keepUsingSavedPassword")}
+                          </label>
+                        )}
+                        {!savedCredential.state.runtimeUnavailable && (
+                          <button
+                            type="button"
+                            className="button button--ghost button--sm"
+                            disabled={busy || removingCredential}
+                            onClick={() => void removeSavedPairingCode()}
+                          >
+                            <TrashIcon size={13} />
+                            {removingCredential
+                              ? t("credential.removing")
+                              : t("remote.host.removeSavedPassword")}
+                          </button>
+                        )}
+                      </div>
+                    </Callout>
+                  )}
+                  {savedCredential.state.mode === "loading" &&
+                    usingSavedPairingCode && (
+                      <p className="panel__hint" role="status">
+                        {t("remote.host.loadingSavedPassword")}
+                      </p>
+                    )}
+                  {!usingSavedPairingCode && <div className="field">
                     <label
                       className="field__label"
                       htmlFor="remote-host-fixed-code"
@@ -464,7 +690,26 @@ export function RemoteHostDialog({
                     <small className="field__optional">
                       {t("remote.host.fixedCodeHint")}
                     </small>
-                  </div>
+                    {(savedCredential.state.mode === "missing" ||
+                      savedCredential.state.mode === "saved") && (
+                      <label className="checkbox" style={{ marginTop: "var(--space-3)" }}>
+                        <input
+                          type="checkbox"
+                          checked={fixedCode.length > 0 && rememberPairingCode}
+                          disabled={busy || fixedCode.length === 0}
+                          onChange={(event) =>
+                            setRememberPairingCode(event.currentTarget.checked)
+                          }
+                        />
+                        <span className="checkbox__box" aria-hidden="true">
+                          <CheckIcon size={11} />
+                        </span>
+                        {t("remote.host.rememberPassword", {
+                          provider: savedCredential.state.provider,
+                        })}
+                      </label>
+                    )}
+                  </div>}
                 </>
               )}
 
@@ -531,9 +776,18 @@ export function RemoteHostDialog({
                 </span>
               </label>
 
-              <label className="checkbox-field"><input type="checkbox" checked={allowCli} onChange={e => setAllowCli(e.currentTarget.checked)} />{t("remote.cli.allow")}</label>
+              <label className="checkbox-field"><input type="checkbox" checked={allowCli} disabled={busy} onChange={e => setAllowCli(e.currentTarget.checked)} />{t("remote.cli.allow")}</label>
               <p className="muted">{t("remote.cli.shareHint")}</p>
-              <label className="checkbox-field"><input type="checkbox" checked={allowChat} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
+              <label className="checkbox-field"><input type="checkbox" checked={allowFleet} disabled={busy} onChange={e => setAllowFleet(e.currentTarget.checked)} />{t("remote.fleet.allow")}</label>
+              <p className="muted">{t("remote.fleet.hint")}</p>
+              {allowFleet && <fieldset disabled={busy} className="remote-host-fleet">
+                <legend>{t("settings.mcpRemote.scopes")}</legend>
+                <label className="field"><span>{t("remote.fleet.directory")}</span><input className="input" value={fleetDirectory} maxLength={4096} onChange={e => setFleetDirectory(e.currentTarget.value)} autoComplete="off" required /></label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetRead} onChange={e => setFleetRead(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetRead")}</label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetControl} onChange={e => setFleetControl(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetControl")}</label>
+                <label className="checkbox-field"><input type="checkbox" checked={fleetLaunch} onChange={e => setFleetLaunch(e.currentTarget.checked)} />{t("settings.mcpRemote.scope.fleetLaunch")}</label>
+              </fieldset>}
+              <label className="checkbox-field"><input type="checkbox" checked={allowChat} disabled={busy} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
               <p className="muted">{t("remote.chat.shareHint")}</p>
               {platform === "windows" && <label className="remote-host-toggle">
                 <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />

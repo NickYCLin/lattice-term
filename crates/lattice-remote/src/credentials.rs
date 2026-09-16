@@ -18,8 +18,16 @@ const MAX_PAIR_CODE_SOURCE_BYTES: u64 = 66;
 /// rejected on every platform so replacing a configured credential path does
 /// not silently redirect the reader elsewhere.
 pub fn read_pairing_code_file(path: &Path) -> Result<String, String> {
+    read_pairing_code_file_zeroizing(path).map(|secret| secret.as_str().to_string())
+}
+
+/// Same validation as [`read_pairing_code_file`], but the returned allocation
+/// is erased when the long-running host no longer needs it.
+pub fn read_pairing_code_file_zeroizing(path: &Path) -> Result<Zeroizing<String>, String> {
     let input = read_private_code_file(path)?;
-    normalize_pairing_code(input.trim_end_matches(['\r', '\n'])).map_err(|error| error.to_string())
+    normalize_pairing_code(input.trim_end_matches(['\r', '\n']))
+        .map(Zeroizing::new)
+        .map_err(|error| error.to_string())
 }
 
 /// Viewer-only reader; legacy codes still require a trusted device at pairing.

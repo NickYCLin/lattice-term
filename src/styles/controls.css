@@ -135,6 +135,12 @@
   color: var(--text-faint);
 }
 
+.field__hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 .input {
   height: 2.5rem;
   padding: 0 var(--space-4);

@@ -12,8 +12,10 @@ import { useFileDrop } from "../app/fileDrop";
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
   type ClipboardEvent,
@@ -47,6 +49,12 @@ import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
 import { ChatQueueError } from "../app/chatInputQueue";
+import {
+  chatWorkspaceMirrorRows,
+  type ChatWorkspaceMirrorRow,
+} from "../app/chatWorkspaceMirror";
+import { toggleSessionSidebarFolder } from "../app/sessionSidebarLayout";
+import { useSharedSidebarLayout } from "../app/sharedSidebarLayout";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
@@ -55,16 +63,20 @@ import { AccountModelField } from "../components/agents/AccountModelField";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
+  AgentIcon,
   ChatIcon,
+  ChevronRightIcon,
   CloseIcon,
   FileIcon,
   ClockIcon,
   FolderIcon,
+  FolderOpenIcon,
   ImageFileIcon,
   PlusIcon,
   SendIcon,
   SettingsIcon,
   StopIcon,
+  TerminalIcon,
   TrashIcon,
 } from "../components/icons";
 
@@ -88,14 +100,88 @@ function directoryName(path: string): string {
   return index === -1 ? trimmed : trimmed.slice(index + 1);
 }
 
+function ChatWorkspaceMirror({
+  rows,
+  sessionCount,
+  onOpenSession,
+  onToggle,
+}: {
+  rows: readonly ChatWorkspaceMirrorRow[];
+  sessionCount: number;
+  onOpenSession: (sessionId: string) => void;
+  onToggle: (nodeId: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="chat-workspace" aria-label={t("terminal.title")}>
+      <header className="chat-workspace__header">
+        <span>
+          <TerminalIcon size={13} />
+          {t("terminal.title")}
+        </span>
+        <span className="chat-workspace__count">{sessionCount}</span>
+      </header>
+      <div className="chat-workspace__tree">
+        {rows.map((row) => {
+          const style = {
+            "--chat-workspace-depth": row.depth,
+          } as CSSProperties;
+          if (row.kind === "session") {
+            return (
+              <button
+                type="button"
+                className={`chat-workspace__row chat-workspace__session is-${row.status}`}
+                style={style}
+                key={row.nodeId}
+                onClick={() => onOpenSession(row.sessionId)}
+                title={row.label}
+              >
+                <AgentIcon size={13} />
+                <span className="chat-workspace__label">
+                  <strong>{row.label}</strong>
+                  {row.detail && <small>{row.detail}</small>}
+                </span>
+                <span className="chat-workspace__status" aria-hidden="true" />
+              </button>
+            );
+          }
+          const FolderGlyph = row.collapsed ? FolderIcon : FolderOpenIcon;
+          return (
+            <button
+              type="button"
+              className={`chat-workspace__row chat-workspace__branch is-${row.kind}`}
+              style={style}
+              key={row.nodeId}
+              onClick={() => onToggle(row.nodeId)}
+              aria-expanded={row.hasChildren ? !row.collapsed : undefined}
+              title={row.label}
+            >
+              <ChevronRightIcon
+                size={12}
+                className={row.collapsed ? undefined : "is-open"}
+              />
+              <FolderGlyph size={13} />
+              <span className="chat-workspace__label">
+                <strong>{row.label}</strong>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function ChatView({
   agents,
   chat,
   automations,
+  onOpenSession,
 }: {
   agents: AgentApi;
   chat: AgentChatApi;
   automations: AgentAutomationsApi;
+  onOpenSession: (sessionId: string) => void;
 }) {
   const { t, tag } = useI18n();
   const [pendingDelete, setPendingDelete] = useState<ChatThread | null>(null);
@@ -104,7 +190,32 @@ export function ChatView({
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [sessionSidebarLayout, setSharedLayout] = useSharedSidebarLayout();
+  const collapsedWorkspaceNodes = useMemo(
+    () => new Set(sessionSidebarLayout.collapsedFolderIds), [sessionSidebarLayout],
+  );
   const accountProfiles = useChatAccountProfiles();
+  const workspaceRows = useMemo(
+    () =>
+      chatWorkspaceMirrorRows(
+        sessionSidebarLayout,
+        agents.sessions,
+        agents.catalog,
+        t("terminal.projects.generalChat"),
+        collapsedWorkspaceNodes,
+      ),
+    [
+      agents.catalog,
+      agents.sessions,
+      collapsedWorkspaceNodes,
+      sessionSidebarLayout,
+      t,
+    ],
+  );
+
+  function toggleWorkspaceNode(nodeId: string) {
+    setSharedLayout(current => toggleSessionSidebarFolder(current, nodeId));
+  }
 
   const cliLabel = (id: ChatDefinitionId) =>
     agents.catalog.find((definition) => definition.id === id)?.label ?? id;
@@ -240,11 +351,23 @@ export function ChatView({
         )}
         {mode === "threads" ? (
           <div className="chat-threads__list">
+            {workspaceRows.length > 0 && (
+              <>
+                <ChatWorkspaceMirror
+                  rows={workspaceRows}
+                  sessionCount={agents.sessions.length}
+                  onOpenSession={onOpenSession}
+                  onToggle={toggleWorkspaceNode}
+                />
+                <h2 className="chat-threads__section-title">{t("chat.title")}</h2>
+              </>
+            )}
             <ChatThreadTree
               layout={chat.layout}
               threads={chat.threads}
               activeThreadId={chat.activeThreadId}
               onSelectThread={(id) => chat.setActiveThreadId(id)}
+              onRemoveThread={setPendingDelete}
               onToggleFolder={chat.toggleFolder}
               onRenameFolder={chat.renameFolder}
               onRemoveFolder={chat.removeFolder}
@@ -402,6 +525,7 @@ export function ChatView({
           })}
           body={t("chat.delete.confirm.body")}
           confirmLabel={t("chat.delete.confirm.action")}
+          cancelLabel={t("common.cancel")}
           tone="danger"
           onConfirm={() => {
             chat.removeThread(pendingDelete.id);

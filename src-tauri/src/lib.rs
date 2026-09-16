@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_chat;
 pub mod agent_daemon;
 pub mod agent_history;
+mod agent_mcp;
 pub mod agent_plans;
 mod agent_process;
 #[cfg(desktop)]
@@ -11,6 +12,7 @@ mod chat_attachments;
 pub mod clipboard;
 pub mod credentials;
 pub mod domain;
+mod durable_file;
 pub mod file_exports;
 pub mod hostkeys;
 #[cfg(target_os = "linux")]
@@ -26,6 +28,7 @@ pub mod remote_chat_host;
 mod remote_cli;
 pub mod remote_commands;
 pub mod remote_files;
+mod remote_fleet;
 pub mod remote_host;
 pub mod remote_pins;
 pub mod sftp;
@@ -102,8 +105,32 @@ struct McpRemoteSync(tokio::sync::Mutex<()>);
 #[serde(rename_all = "camelCase")]
 struct McpScreenSession {
     session_id: String,
+    profile_id: String,
     host: String,
     backend: mcp_desktop::Backend,
+    fleet: bool,
+    screen: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct McpSavedConnectionRequest {
+    profile_id: String,
+    /// SSH key paths are non-secret preferences kept by the WebView. Password
+    /// profiles leave this empty so only the native credential store is read.
+    #[serde(default)]
+    ssh_private_key_path: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpSavedConnectionSession {
+    session_id: String,
+    profile_id: String,
+    host: String,
+    backend: mcp_desktop::Backend,
+    fleet: bool,
+    screen: bool,
 }
 
 #[tauri::command]
@@ -133,28 +160,333 @@ fn mcp_screen_sessions(
         .into_iter()
         .map(|session| McpScreenSession {
             session_id: session.session_id,
+            profile_id: session.profile_id,
             host: session.host,
             backend: mcp_desktop::Backend::Rdp,
+            fleet: false,
+            screen: true,
         })
         .chain(vnc.list().into_iter().map(|session| McpScreenSession {
             session_id: session.session_id,
+            profile_id: session.profile_id,
             host: session.host,
             backend: mcp_desktop::Backend::Vnc,
+            fleet: false,
+            screen: true,
         }))
         .chain(
             remote
                 .list()
                 .into_iter()
-                .filter(|session| !session.terminal)
+                .filter(|session| !session.terminal || session.fleet)
                 .map(|session| McpScreenSession {
                     session_id: session.session_id,
+                    profile_id: session.profile_id,
                     host: session.host,
                     backend: mcp_desktop::Backend::Remote,
+                    fleet: session.fleet,
+                    screen: !session.terminal,
                 }),
         )
         .collect();
     sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
     sessions
+}
+
+/// Opens a profile from the MCP permission panel without exposing its saved
+/// password or pairing code to the WebView or model. This only creates the
+/// ordinary live session; [`mcp_remote_grant`] remains the separate authority
+/// for commands, files, screen capture, input and Fleet access.
+#[tauri::command]
+async fn mcp_saved_connection_connect(
+    app: AppHandle,
+    request: McpSavedConnectionRequest,
+    storage: State<'_, AppStorage>,
+    trust: State<'_, TrustState>,
+    ssh: State<'_, Arc<SshRegistry>>,
+    sftp: State<'_, Arc<SftpRegistry>>,
+    rdp: State<'_, Arc<RdpRegistry>>,
+    vnc: State<'_, Arc<VncRegistry>>,
+    remote: State<'_, Arc<RemoteRegistry>>,
+) -> Result<McpSavedConnectionSession, String> {
+    if request.profile_id.is_empty() || request.profile_id.len() > 128 {
+        return Err("The saved connection ID is invalid.".to_string());
+    }
+    if request.ssh_private_key_path.as_ref().is_some_and(|path| {
+        path.len() > 4096 || path.is_empty() || path.chars().any(char::is_control)
+    }) {
+        return Err("The saved SSH key path is invalid.".to_string());
+    }
+    let profile = {
+        let guard = storage.lock().map_err(|error| error.to_string())?;
+        guard
+            .get_profile(&request.profile_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The saved connection no longer exists.".to_string())?
+    };
+
+    let session = |session_id: String,
+                   host: String,
+                   backend: mcp_desktop::Backend,
+                   fleet: bool,
+                   screen: bool| McpSavedConnectionSession {
+        session_id,
+        profile_id: profile.id.clone(),
+        host,
+        backend,
+        fleet,
+        screen,
+    };
+
+    match profile.protocol {
+        Protocol::Ssh => {
+            if let Some(existing) = ssh
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Ssh,
+                    false,
+                    false,
+                ));
+            }
+            let key_path = request
+                .ssh_private_key_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty());
+            let outcome = ssh_connect(
+                app,
+                ConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    auth: match key_path {
+                        Some(path) => crate::ssh::AuthMethod::PrivateKey {
+                            path: path.to_string(),
+                            passphrase: None,
+                        },
+                        None => crate::ssh::AuthMethod::Password {
+                            password: String::new(),
+                        },
+                    },
+                    use_saved_password: key_path.is_none(),
+                    remember_password: false,
+                    cols: 120,
+                    rows: 32,
+                },
+                storage,
+                trust,
+                ssh,
+            )
+            .await?;
+            match outcome {
+                ConnectOutcome::Connected { session_id } => Ok(session(
+                    session_id,
+                    profile.hostname,
+                    mcp_desktop::Backend::Ssh,
+                    false,
+                    false,
+                )),
+                ConnectOutcome::HostUnknown { .. } => Err(
+                    "Open this SSH connection once and verify its host key before sharing it."
+                        .to_string(),
+                ),
+                ConnectOutcome::HostChanged { .. } => Err(
+                    "The SSH host key changed. Review it in the normal connection flow first."
+                        .to_string(),
+                ),
+                ConnectOutcome::AuthFailed => {
+                    Err("The saved SSH credential was rejected.".to_string())
+                }
+                ConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Sftp => {
+            if let Some(existing) = sftp
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Sftp,
+                    false,
+                    false,
+                ));
+            }
+            let outcome = sftp_connect(
+                SftpConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    auth: crate::ssh::AuthMethod::Password {
+                        password: String::new(),
+                    },
+                    use_saved_password: true,
+                    remember_password: false,
+                },
+                storage,
+                trust,
+                sftp,
+            )
+            .await?;
+            match outcome {
+                SftpConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Sftp,
+                    false,
+                    false,
+                )),
+                SftpConnectOutcome::HostUnknown { .. } => Err(
+                    "Open this SFTP connection once and verify its host key before sharing it."
+                        .to_string(),
+                ),
+                SftpConnectOutcome::HostChanged { .. } => Err(
+                    "The SFTP host key changed. Review it in the normal connection flow first."
+                        .to_string(),
+                ),
+                SftpConnectOutcome::AuthFailed => {
+                    Err("The saved SFTP credential was rejected.".to_string())
+                }
+                SftpConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Rdp => {
+            if let Some(existing) = rdp
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Rdp,
+                    false,
+                    true,
+                ));
+            }
+            let outcome = rdp_connect(
+                app,
+                RdpConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    username: String::new(),
+                    password: String::new(),
+                    use_saved_password: true,
+                    remember_password: false,
+                    domain: None,
+                    width: 1280,
+                    height: 720,
+                },
+                storage,
+                rdp,
+            )
+            .await?;
+            match outcome {
+                RdpConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Rdp,
+                    false,
+                    true,
+                )),
+                RdpConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Vnc => {
+            if let Some(existing) = vnc
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Vnc,
+                    false,
+                    true,
+                ));
+            }
+            let outcome = vnc_connect(
+                app,
+                VncConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    password: String::new(),
+                    use_saved_password: true,
+                    remember_password: false,
+                },
+                storage,
+                vnc,
+            )
+            .await?;
+            match outcome {
+                VncConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Vnc,
+                    false,
+                    true,
+                )),
+                VncConnectOutcome::AuthFailed => {
+                    Err("The saved VNC credential was rejected.".to_string())
+                }
+                VncConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+        Protocol::Lattice => {
+            if let Some(existing) = remote
+                .list()
+                .into_iter()
+                .find(|item| item.profile_id == profile.id)
+            {
+                return Ok(session(
+                    existing.session_id,
+                    existing.host,
+                    mcp_desktop::Backend::Remote,
+                    existing.fleet,
+                    !existing.terminal,
+                ));
+            }
+            let outcome = remote_connect(
+                app,
+                RemoteConnectRequest {
+                    profile_id: profile.id.clone(),
+                    hostname: String::new(),
+                    port: 0,
+                    pairing_code: String::new(),
+                    use_saved_pairing_code: true,
+                    remember_pairing_code: false,
+                    legacy_pairing: false,
+                    device_id: String::new(),
+                    relay_address: String::new(),
+                },
+                storage,
+                remote,
+            )
+            .await?;
+            match outcome {
+                RemoteConnectOutcome::Connected { session: connected } => Ok(session(
+                    connected.session_id,
+                    connected.host,
+                    mcp_desktop::Backend::Remote,
+                    connected.fleet,
+                    !connected.terminal,
+                )),
+                RemoteConnectOutcome::Failed { stage, detail } => Err(format!("{stage}: {detail}")),
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -283,7 +615,7 @@ async fn play_notification_sound(sound: String, volume: Option<u8>) -> Result<bo
     .map_err(|error| format!("Notification sound did not complete: {error}"))?
 }
 
-async fn credential_call<T, F>(operation: F) -> Result<T, String>
+pub(crate) async fn credential_call<T, F>(operation: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
@@ -426,20 +758,25 @@ async fn encrypted_backup_export(
     storage: State<'_, AppStorage>,
     plans: State<'_, AppAgentPlans>,
     trust: State<'_, TrustState>,
+    remote_hosts: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<EncryptedBackupExport, String> {
+    // Keep host credential marker updates out of the snapshot window.
+    let _remote_guard = remote_hosts.lock_configuration().await;
     let directory = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let (files, validated) = crate::vault::manager()?.run_while_locked(|| {
-        // Hold every mutable file-backed store while taking the snapshot, so
-        // one logical backup cannot contain half of a concurrent mutation.
-        let _storage = storage.lock().map_err(|error| error.to_string())?;
-        let _plans = plans.lock().map_err(|error| error.to_string())?;
-        let _trust = backup_trust_guard(trust.inner())?;
-        let files = crate::backup::read_app_files(&directory)?;
-        let validated = crate::backup::validate_app_files(&files)?;
-        Ok((files, validated))
+    let (files, validated) = crate::credentials::run_while_backend_file_locked(|| {
+        crate::vault::manager()?.run_while_locked(|| {
+            // Hold every mutable file-backed store while taking the snapshot,
+            // so one logical backup cannot contain half of a concurrent mutation.
+            let _storage = storage.lock().map_err(|error| error.to_string())?;
+            let _plans = plans.lock().map_err(|error| error.to_string())?;
+            let _trust = backup_trust_guard(trust.inner())?;
+            let files = crate::backup::read_app_files(&directory)?;
+            let validated = crate::backup::validate_app_files(&files)?;
+            Ok((files, validated))
+        })
     })?;
     let created_at = now_seconds();
     let app_file_count = files.len();
@@ -497,6 +834,9 @@ fn restore_failure_with_rollback(
 }
 
 #[tauri::command]
+// Tauri injects each managed state independently; keeping these command
+// inputs explicit makes the restore boundary and its lock order auditable.
+#[allow(clippy::too_many_arguments)]
 async fn encrypted_backup_restore(
     app: AppHandle,
     contents: String,
@@ -505,6 +845,7 @@ async fn encrypted_backup_restore(
     plans: State<'_, AppAgentPlans>,
     trust: State<'_, TrustState>,
     tunnels: State<'_, Arc<TunnelRegistry>>,
+    remote_hosts: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<EncryptedBackupRestore, String> {
     if tunnels
         .list()
@@ -534,6 +875,14 @@ async fn encrypted_backup_restore(
         vault_included,
     } = validated;
 
+    // Configuration/start/delete uses the same lock. The active Agent may
+    // finish its current in-memory session, but no future start can race the
+    // credential authority reset performed by restore.
+    let _remote_guard = remote_hosts.lock_configuration().await;
+    // A tunnel start takes the reader side through reservation. Once this
+    // writer lock is held, the following idle check remains true throughout
+    // the store replacement instead of racing a new Starting row.
+    let _tunnel_restore_guard = tunnels.lock_backup_restore().await;
     if tunnels
         .list()
         .iter()
@@ -546,23 +895,29 @@ async fn encrypted_backup_restore(
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    crate::vault::manager()?.run_while_locked(|| {
-        let mut storage_guard = storage.lock().map_err(|error| error.to_string())?;
-        let mut plans_guard = plans.lock().map_err(|error| error.to_string())?;
-        let mut trust_guard = backup_trust_guard(trust.inner())?;
-        let previous = crate::backup::replace_app_files(&directory, &files)?;
-        let (next_storage, next_plans, next_trust) = match restore_loaded_stores(&directory) {
-            Ok(stores) => stores,
-            Err(error) => {
-                return Err(restore_failure_with_rollback(&directory, &previous, error));
-            }
-        };
+    crate::credentials::run_while_backend_file_locked(|| {
+        crate::vault::manager()?.run_while_locked(|| {
+            let mut storage_guard = storage.lock().map_err(|error| error.to_string())?;
+            let mut plans_guard = plans.lock().map_err(|error| error.to_string())?;
+            let mut trust_guard = backup_trust_guard(trust.inner())?;
+            let previous = crate::backup::replace_app_files(&directory, &files)?;
+            let (next_storage, next_plans, next_trust) = match restore_loaded_stores(&directory) {
+                Ok(stores) => stores,
+                Err(error) => {
+                    return Err(restore_failure_with_rollback(&directory, &previous, error));
+                }
+            };
 
-        *storage_guard = next_storage;
-        *plans_guard = next_plans;
-        *trust_guard = next_trust;
-        Ok(())
+            *storage_guard = next_storage;
+            *plans_guard = next_plans;
+            *trust_guard = next_trust;
+            Ok(())
+        })
     })?;
+    // Restores deliberately exclude the reusable host-password authority.
+    // The current Agent can finish, but the frontend must not schedule its
+    // next run as if a reusable password still existed.
+    crate::remote_host::mark_pairing_code_unsaved(&app, remote_hosts.inner())?;
 
     Ok(EncryptedBackupRestore {
         source_created_at: created_at,
@@ -1959,6 +2314,9 @@ async fn credential_exists(profile_id: String, kind: CredentialKind) -> Result<b
 
 #[tauri::command]
 async fn credential_delete(profile_id: String, kind: CredentialKind) -> Result<bool, String> {
+    if kind == CredentialKind::LatticeHostPairingCode {
+        return Err("Use the dedicated Lattice Remote host password removal command.".to_string());
+    }
     credential_call(move || crate::credentials::delete(&profile_id, kind)).await
 }
 
@@ -2620,6 +2978,18 @@ async fn remote_connect(
         });
     }
 
+    // Reopening a connected profile is navigation, not another authentication
+    // attempt. Return before touching the credential store so an existing
+    // session remains usable even after its saved password was removed.
+    if let Some(session) = registry.session_for_target(
+        &request.profile_id,
+        &request.hostname,
+        request.port,
+        (!request.device_id.trim().is_empty()).then_some(request.device_id.as_str()),
+    ) {
+        return Ok(RemoteConnectOutcome::Connected { session });
+    }
+
     let credential_binding = if request.use_saved_pairing_code || request.remember_pairing_code {
         let Some(credential_profile) = profile.as_ref() else {
             return Ok(RemoteConnectOutcome::Failed {
@@ -3022,6 +3392,26 @@ async fn remote_host_stop(
 }
 
 #[tauri::command]
+async fn remote_host_forget_pairing_code(
+    app: AppHandle,
+    registry: State<'_, Arc<RemoteHostRegistry>>,
+) -> Result<remote_host::RemoteHostForgetResult, String> {
+    crate::remote_host::forget_pairing_code(&app, registry.inner()).await
+}
+
+#[tauri::command]
+async fn remote_host_retry_pairing_code_cleanup(
+    registry: State<'_, Arc<RemoteHostRegistry>>,
+) -> Result<remote_host::RemoteHostForgetResult, String> {
+    crate::remote_host::retry_pairing_code_cleanup(registry.inner()).await
+}
+
+#[tauri::command]
+async fn remote_host_pairing_code_cleanup_pending() -> Result<bool, String> {
+    credential_call(crate::credentials::remote_host_pairing_code_cleanup_pending).await
+}
+
+#[tauri::command]
 fn remote_host_status(
     registry: State<'_, Arc<RemoteHostRegistry>>,
 ) -> Result<Option<RemoteHostStatus>, String> {
@@ -3298,6 +3688,10 @@ async fn tunnel_start(
     trust: State<'_, TrustState>,
     registry: State<'_, Arc<TunnelRegistry>>,
 ) -> Result<TunnelStatusSummary, String> {
+    // Hold the reader side from before the profile/trust snapshot until a
+    // Starting row exists. Backup restore takes the writer side, so it can
+    // neither replace these stores underneath this snapshot nor miss the row.
+    let tunnel_start_guard = registry.lock_tunnel_start().await;
     // A tunnel rides its own SSH session, so it needs the same two things a
     // terminal session needs: a trusted host key and a credential. Both are
     // resolved here, before any listener exists, so failure leaves nothing
@@ -3337,8 +3731,12 @@ async fn tunnel_start(
     // Reserve before keyring I/O. A flood of distinct tunnel ids must not
     // create an unbounded number of blocking credential jobs before the
     // tunnel runtime has applied its global admission limit.
-    let mut reservation =
-        crate::tunnel::reserve_tunnel_start(Arc::clone(registry.inner()), &request)?;
+    let mut reservation = crate::tunnel::reserve_tunnel_start(
+        Arc::clone(registry.inner()),
+        &request,
+        &tunnel_start_guard,
+    )?;
+    drop(tunnel_start_guard);
     let credential_profile = profile.clone();
     let admission = reservation.take_admission_for_credential()?;
     let mut credential_job = tauri::async_runtime::spawn_blocking(move || {
@@ -3439,6 +3837,10 @@ pub fn run() {
             // the executable, so it survives an update and follows the user
             // profile on a shared machine.
             let dir = app.path().app_data_dir()?;
+            // A Windows scanner can transiently block final deletion after a
+            // write-through rename. Retry only our recognisable, unreachable
+            // tombstones before opening any application stores.
+            let _ = crate::durable_file::cleanup_private_tombstones(&dir);
             // The credential router and the encrypted vault live in the same
             // directory as the rest of the app's data.
             crate::credentials::initialize(dir.clone());
@@ -3487,9 +3889,10 @@ pub fn run() {
             ));
             app.manage(Arc::new(TunnelRegistry::new()));
             app.manage(Arc::new(SensitiveClipboard::default()));
-            let agent_registry = AgentRegistry::with_local_reporter(Arc::new(
-                crate::agent::EventSink(app.handle().clone()),
-            ))
+            let agent_registry = AgentRegistry::with_local_reporter_and_mcp(
+                Arc::new(crate::agent::EventSink(app.handle().clone())),
+                &dir,
+            )
             .map_err(std::io::Error::other)?;
             app.manage(agent_registry);
             let data_dir = app.path().app_data_dir().map_err(std::io::Error::other)?;
@@ -3497,7 +3900,9 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
-            app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::new()));
+            app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::with_mcp(
+                &data_dir,
+            )));
             #[cfg(target_os = "macos")]
             crate::app_menu::install_guarded_quit(app.handle())?;
             Ok(())
@@ -3508,6 +3913,7 @@ pub fn run() {
             runtime_summary,
             mcp_remote_targets,
             mcp_screen_sessions,
+            mcp_saved_connection_connect,
             mcp_remote_grant,
             mcp_remote_revoke,
             play_notification_sound,
@@ -3632,6 +4038,9 @@ pub fn run() {
             remote_file_transfer_dismiss,
             remote_file_transfers,
             remote_host_device_id,
+            remote_host_forget_pairing_code,
+            remote_host_pairing_code_cleanup_pending,
+            remote_host_retry_pairing_code_cleanup,
             remote_host_start,
             remote_host_stop,
             remote_host_status,
@@ -4005,6 +4414,28 @@ mod tests {
             device_id: None,
             relay_address: None,
         }
+    }
+
+    #[test]
+    fn saved_mcp_connection_request_cannot_carry_a_credential() {
+        let request = serde_json::from_value::<McpSavedConnectionRequest>(serde_json::json!({
+            "profileId": "saved-ssh",
+            "password": "must-not-cross-ipc",
+        }));
+
+        assert!(request.is_err());
+        let response = McpSavedConnectionSession {
+            session_id: "live-session".to_string(),
+            profile_id: "saved-remote".to_string(),
+            host: "redacted-host".to_string(),
+            backend: mcp_desktop::Backend::Remote,
+            fleet: true,
+            screen: false,
+        };
+        let encoded = serde_json::to_value(response).unwrap();
+        assert!(encoded.get("password").is_none());
+        assert!(encoded.get("pairingCode").is_none());
+        assert_eq!(encoded["backend"], "remote");
     }
 
     #[test]

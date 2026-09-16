@@ -56,20 +56,20 @@ Adapter 會把舊工作區的識別值當成單一 argument，不經 shell；長
 
 Agent Fleet 的每個工作階段都是真正的 PTY，但不是每個人都想面對終端機。對話模式（`src-tauri/src/agent_chat.rs`、`src/views/ChatView.tsx`）提供 Codex Desktop 風格的聊天視窗，底層仍是同一批 CLI：
 
-- **Claude 與 Gemini 一輪一個程序，Codex 一個對話一個常駐程序**。Claude Code 與 Gemini 每則訊息以官方 headless JSON 模式啟動一次程序：`claude -p --output-format stream-json --verbose --include-partial-messages`、`gemini --output-format stream-json`，提示從 stdin 送入並關閉。Codex 不論權限模式一律走 `codex app-server`（JSON-RPC over stdio），由 `agent_chat/codex_server.rs` 為每個 LatticeTerm 對話保留一個伺服器：第一則訊息 spawn 程序、送 `initialize`／`initialized` 後 `thread/start`（有既有 thread ID 則 `thread/resume`），之後每一輪只送 `turn/start`，省掉重新啟動與重新載入紀錄的時間（本機實測含核准的首輪約 12 秒，追問約 5 秒）。同一對話一次只跑一輪；閒置 15 分鐘、刪除對話（`agent_chat_close`）、程序退出或 LatticeTerm 關閉時清掉。`turn/start` 的 `approvalPolicy`、`sandboxPolicy`、`cwd` 與 `model` 每輪重送，所以權限與模型仍可逐輪調整。提示一律不放在命令列參數，因此不受參數長度限制也不會出現在程序清單。程序以使用者權限執行，工作目錄由使用者選擇並經 canonicalize 與 is_dir 驗證。
-- **續接靠 CLI 自己的對話 ID**。第一輪的 `system/init`（Claude）、`thread/start` 回應（Codex）或 `init`（Gemini）回報的 ID 隨 `Started`／`Finished` 事件交給前端，下一輪以 `claude --resume <id>`、`gemini --resume <id>` 續接；Codex 只有在常駐伺服器已經不在（重啟 LatticeTerm、閒置回收）時才會以 `thread/resume <id>` 重開。LatticeTerm 不讀寫任何 CLI 的原生對話檔；三種助理每輪都可指定模型（Claude 與 Gemini 是 `--model`，Codex 在 `turn/start` 帶 `model`）。
+- **Claude、Gemini 與 Antigravity 一輪一個程序，Codex 一個對話一個常駐程序**。Claude Code、Gemini 與 Google Antigravity 每則訊息以官方 headless JSON 模式啟動一次程序：`claude -p --output-format stream-json --verbose --include-partial-messages`、`gemini --output-format stream-json`、`agy --output-format stream-json`，提示從 stdin 送入並關閉。Codex 不論權限模式一律走 `codex app-server`（JSON-RPC over stdio），由 `agent_chat/codex_server.rs` 為每個 LatticeTerm 對話保留一個伺服器：第一則訊息 spawn 程序、送 `initialize`／`initialized` 後 `thread/start`（有既有 thread ID 則 `thread/resume`），之後每一輪只送 `turn/start`，省掉重新啟動與重新載入紀錄的時間（本機實測含核准的首輪約 12 秒，追問約 5 秒）。同一對話一次只跑一輪；閒置 15 分鐘、刪除對話（`agent_chat_close`）、程序退出或 LatticeTerm 關閉時清掉。`turn/start` 的 `approvalPolicy`、`sandboxPolicy`、`cwd` 與 `model` 每輪重送，所以權限與模型仍可逐輪調整。提示一律不放在命令列參數，因此不受參數長度限制也不會出現在程序清單。程序以使用者權限執行，工作目錄由使用者選擇並經 canonicalize 與 is_dir 驗證。
+- **續接靠 CLI 自己的對話 ID**。第一輪的 `system/init`（Claude）、`thread/start` 回應（Codex）、`init`（Gemini）或 `init` 的 `conversation_id`（Antigravity）回報的 ID 隨 `Started`／`Finished` 事件交給前端，下一輪以 `claude --resume <id>`、`gemini --resume <id>`、`agy --conversation <id>` 續接；Codex 只有在常駐伺服器已經不在（重啟 LatticeTerm、閒置回收）時才會以 `thread/resume <id>` 重開。LatticeTerm 不讀寫任何 CLI 的原生對話檔；各助理每輪都可指定模型（Claude、Gemini 與 Antigravity 是 `--model`，Codex 在 `turn/start` 帶 `model`）。
 - **帳號設定檔（介面上稱「帳號」）與 Skills**。對話與 Fleet 可為 Codex 或 Claude Code 新增多個具名帳號；選用設定檔時，子程序分別收到 `CODEX_HOME` 或 `CLAUDE_CONFIG_DIR`，因此個人、公司與專案帳號不共用 CLI 的登入狀態。新增對話框只保留名稱與「加入並登入」：`agent_account_profile_directory` 在 app data 下建立 `agent-profiles/<cli>/<id>`（Unix 為 0700）並回傳路徑，前端先保存帳號，再明確帶入新路徑啟動可見的終端機，不沿用卡片的工作提示或背景模式，也不依賴尚未更新的帳號選取狀態。新增中禁止重複送出；建立失敗留在對話框，啟動失敗則保留帳號並提示按「啟動」重試。舊版自行指定的設定目錄繼續保留使用，但新增流程不再要求或提供目錄選擇。每個帳號的登入狀態由 `agent_account_profile_status` 從該帳號自己的目錄讀取（Codex 的 `auth.json`、Claude 的 `.claude.json` 或 `.credentials.json`，只回傳狀態、email 標籤與登入方式），顯示在下拉選單裡；還沒登入的帳號在卡片與對話設定都會提示怎麼登入，前端在有帳號未登入時每 10 秒重讀一次。移除帳號時，LatticeTerm 自己建立的目錄由 `agent_account_profile_remove` 連登入資料一起刪除（只接受固定的 `agent-profiles/<cli>/<id>` 形狀），舊版使用者自行指定的目錄則只從清單移除。LatticeTerm 只保存顯示名稱、目錄與是否自建，不保存 token；切換設定檔會建立新的 CLI 原生對話，並以既有的受限文字交接保留脈絡。設定面板也可只讀探索設定檔與工作目錄的標準 `SKILL.md`，僅顯示名稱與說明，不讀取憑證、對話或 Skill 指示內容。
 - **記憶交接不阻塞**。舊 CLI 的對話檔掃描與交接檔寫入都在背景 blocking worker 進行；大型或網路掛載的歷史目錄不會占用 Tauri 命令執行緒，因此其他對話、連線與工作階段仍可操作。
 - **跨模型轉交不共用 session**。既有對話可在設定的單一模型選單改選另一家 CLI；目標 CLI 必定以新的原生對話啟動，絕不接收來源 CLI 的 session ID。下一則訊息前端只附帶最多 48 KiB、近期的使用者訊息與最終文字回覆，並用明確界線標為不可信參考：它不能授權工具、修改指示或覆蓋目前使用者要求。推理內容、工具輸入／輸出與核准資料都不轉交；目標開始回報原生 session 後才會清除待轉交內容，因此啟動失敗可以安全重試。歷史回覆會保留其原助理標籤。
 - **圖片與檔案附件**。編輯器可由原生檔案選擇器加入圖片／檔案，或把本機檔案拖進視窗；送出前能逐一移除，歷史訊息只保存檔名、路徑與類型，不複製檔案內容。後端 canonicalize 後只接受一般檔案，最多 10 個、單檔 32 MiB、合計 96 MiB，並把路徑列成「使用者明確選取、內容不可信」的 stdin 參考；檔案內容不能授權工具或改寫指示。Codex 的 PNG/JPEG/GIF/WebP/BMP 另使用官方 `--image` 傳給新建或續接回合；其他 CLI 依其正常檔案讀取與權限模型處理路徑。這些路徑不會出現在一般 prompt 命令列參數中。
-- **事件正規化**。Rust 逐行解析 JSON，映射成 `started`、`textDelta`、`text`、`reasoning`、`toolStarted`、`toolFinished`、`notice`、`finished` 八種事件，經 `agent-chat://event` 送到 WebView；前端只依 item id 就地更新，不理解各家格式。Claude 的 `stream_event` 與 Gemini 的 `message` 提供逐字 delta，Codex 則是 item 級事件。工具卡片摘要取最能辨識的欄位（Bash／Gemini shell 的 command、Read／Edit 的 file_path、Codex 的 command 或變更檔案清單），工具輸出每張最多 8 KiB，單行最多 16 MiB，超過就跳過並提示。
-- **權限以效果命名**。`readOnly`／`workspaceWrite`／`full` 分別映射到 Claude `--permission-mode plan`／`acceptEdits`／`bypassPermissions`、Codex `-s read-only`／`-s workspace-write`／`--dangerously-bypass-approvals-and-sandbox`，以及 Gemini `--approval-mode plan`／`auto_edit`／`yolo`。前三種是一次性回合：Claude 與 Gemini 在編輯模式下遇到仍需要審核的指令會拒絕並在回覆中說明；`full` 在介面上有明確警告。第四種 `ask` Claude 與 Codex 有。Claude：以 `--permission-mode manual --input-format stream-json --permission-prompt-tool stdio` 啟動，stdin 整輪保持開啟，先送 SDK 的 `initialize` 握手再把提示包成 `user` 訊息；CLI 規則放行不了的工具呼叫會以 `control_request`（`can_use_tool`）送出，Rust 轉成 `approvalRequested` 事件並把原始 input 留在 registry，使用者按允許／拒絕後以 `control_response` 回寫（allow 會原樣回傳 `updatedInput`，deny 附理由）；看到 `result` 就關閉 stdin，程序才會結束。停止或程序結束時未回答的卡片標成失效。Codex：四種權限模式都走同一個常駐 app-server（見上），差別只在 `turn/start` 的 `approvalPolicy`（`ask` 為 `untrusted`，其餘為 `never`）與 `sandboxPolicy`（`readOnly`／`workspaceWrite`／`dangerFullAccess`）；`item/agentMessage/delta`、`item/started`／`item/completed`（v2 camelCase 項目）、`thread/tokenUsage/updated`、`turn/completed` 映射成同一組事件；伺服器請求 `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval` 變成核准卡片，回覆 `{"id":<rpc id>,"result":{"decision":"accept"|"decline"}}`；介面畫不出來的請求（`item/tool/requestUserInput`、MCP elicitation）以 JSON-RPC error 拒絕讓回合繼續。`turn/completed` 後伺服器留著等下一輪；「停止」先送 `turn/interrupt`，5 秒內沒收到 `turn/completed` 才結束程序；程序意外退出時進行中的回合以錯誤結束，下一輪會自動重開。伺服器在回合之間送來的通知會被丟棄、請求會被拒絕，不會誤掛到別的回合。Gemini 的非互動模式沒有對應機制，介面不提供該選項，後端也會拒絕。
+- **事件正規化**。Rust 逐行解析 JSON，映射成 `started`、`textDelta`、`text`、`reasoning`、`toolStarted`、`toolFinished`、`notice`、`finished` 八種事件，經 `agent-chat://event` 送到 WebView；前端只依 item id 就地更新，不理解各家格式。Claude 的 `stream_event`、Gemini 的 `message` 與 Antigravity 的 `step_update` 提供逐字 delta，Codex 則是 item 級事件。工具卡片摘要取最能辨識的欄位（Bash／Gemini shell 的 command、Read／Edit 的 file_path、Codex 的 command 或變更檔案清單、Antigravity 的 CommandLine／AbsolutePath），工具輸出每張最多 8 KiB，單行最多 16 MiB，超過就跳過並提示。
+- **權限以效果命名**。`readOnly`／`workspaceWrite`／`full` 分別映射到 Claude `--permission-mode plan`／`acceptEdits`／`bypassPermissions`、Codex `-s read-only`／`-s workspace-write`／`--dangerously-bypass-approvals-and-sandbox`、Gemini `--approval-mode plan`／`auto_edit`／`yolo`，以及 Antigravity `--mode plan`／`--mode accept-edits`／`--dangerously-skip-permissions`。前三種是一次性回合：Claude 與 Gemini 在編輯模式下遇到仍需要審核的指令會拒絕並在回覆中說明；`full` 在介面上有明確警告。第四種 `ask` Claude 與 Codex 有。Claude：以 `--permission-mode manual --input-format stream-json --permission-prompt-tool stdio` 啟動，stdin 整輪保持開啟，先送 SDK 的 `initialize` 握手再把提示包成 `user` 訊息；CLI 規則放行不了的工具呼叫會以 `control_request`（`can_use_tool`）送出，Rust 轉成 `approvalRequested` 事件並把原始 input 留在 registry，使用者按允許／拒絕後以 `control_response` 回寫（allow 會原樣回傳 `updatedInput`，deny 附理由）；看到 `result` 就關閉 stdin，程序才會結束。停止或程序結束時未回答的卡片標成失效。Codex：四種權限模式都走同一個常駐 app-server（見上），差別只在 `turn/start` 的 `approvalPolicy`（`ask` 為 `untrusted`，其餘為 `never`）與 `sandboxPolicy`（`readOnly`／`workspaceWrite`／`dangerFullAccess`）；`item/agentMessage/delta`、`item/started`／`item/completed`（v2 camelCase 項目）、`thread/tokenUsage/updated`、`turn/completed` 映射成同一組事件；伺服器請求 `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval` 變成核准卡片，回覆 `{"id":<rpc id>,"result":{"decision":"accept"|"decline"}}`；介面畫不出來的請求（`item/tool/requestUserInput`、MCP elicitation）以 JSON-RPC error 拒絕讓回合繼續。`turn/completed` 後伺服器留著等下一輪；「停止」先送 `turn/interrupt`，5 秒內沒收到 `turn/completed` 才結束程序；程序意外退出時進行中的回合以錯誤結束，下一輪會自動重開。伺服器在回合之間送來的通知會被丟棄、請求會被拒絕，不會誤掛到別的回合。Gemini 與 Antigravity 的非互動模式沒有逐次提問機制，介面不提供該選項，後端也會拒絕。
 - **環境隔離**。子程序移除 `CLAUDECODE`、`CLAUDE_CODE_ENTRYPOINT`、`HERDR_*` 與 `LATTICETERM_AGENT_*`：對話回合不是任何 Fleet 工作階段的 hook 目標，也不該因 LatticeTerm 本身由某個 CLI 啟動而拒絕巢狀執行。
 - **停止與退出**。每個對話同時只允許一輪；「停止」對該子程序 `start_kill`，`Finished` 仍會在程序結束後送出並標記錯誤。應用程式離開時終止所有回合。
 - **保存邊界**。對話串（CLI、工作目錄、權限、模型、CLI 對話 ID、訊息）存在 WebView 的 `localStorage`，每串最多 300 則、工具輸出截到 2 KiB、總量 4 MiB、最多 50 串，超過先丟最舊的；正在進行的回合不會被保存。完整逐字稿仍由各 CLI 自己保存。回覆以自家的小型 Markdown 讀取器渲染（段落、標題、清單、程式碼區塊、行內程式碼與粗體），沒有 HTML 直通，模型輸出不可能注入標記。
-- **單一模型清單**。設定區不再分開切助理與模型；`ModelField` 以助理分組，在一個下拉選單裡同時決定 CLI 與模型。Claude 送 `initialize` 握手取得 `models[]`，Codex 以 `app-server` 的 `model/list` 取得並略過 `hidden`；Gemini 沒有非互動模型列舉 API，因此提供官方穩定的 Auto／Pro／Flash／Flash Lite 路由別名。空值代表該 CLI 預設模型，既有但清單未知的模型仍會保留為可選值。Claude 的模型探查與每個對話程序在啟動階段共用非同步閘門：前一個程序回報初始化（探查則退出）後才啟動下一個，避免兩個 LatticeTerm 子程序同時刷新同一份 OAuth token；初始化後的實際回合仍可並行。若 LatticeTerm 以外的 Claude 程序占用 refresh lock，後端只對官方標為暫時性的 `another Claude Code process is refreshing` 錯誤退避重試兩次，而且必須尚未收到文字、工具呼叫或核准要求，確保不會重送已經開始執行的工作。
+- **單一模型清單**。設定區不再分開切助理與模型；`ModelField` 以助理分組，在一個下拉選單裡同時決定 CLI 與模型。Claude 送 `initialize` 握手取得 `models[]`，Codex 以 `app-server` 的 `model/list` 取得並略過 `hidden`，Antigravity 透過 `agy models` 子指令動態列出；Gemini 沒有非互動模型列舉 API，因此提供官方穩定的 Auto／Pro／Flash／Flash Lite 路由別名。空值代表該 CLI 預設模型，既有但清單未知的模型仍會保留為可選值。Claude 的模型探查與每個對話程序在啟動階段共用非同步閘門：前一個程序回報初始化（探查則退出）後才啟動下一個，避免兩個 LatticeTerm 子程序同時刷新同一份 OAuth token；初始化後的實際回合仍可並行。若 LatticeTerm 以外的 Claude 程序占用 refresh lock，後端只對官方標為暫時性的 `another Claude Code process is refreshing` 錯誤退避重試兩次，而且必須尚未收到文字、工具呼叫或核准要求，確保不會重送已經開始執行的工作。
 - **Windows**。以管線啟動主控台程式會彈出黑視窗，所有 headless 程序統一經 `headless_command` 建立並加 `CREATE_NO_WINDOW`。
-- **側欄資料夾**。對話清單沿用工作項目側欄的 `sessionSidebarLayout` 模型（另一個儲存鍵），節點 id 為 `thread:<id>`；資料夾巢狀、收合、雙擊改名、指標拖曳搬移與排序，刪除資料夾時內容移到上一層。
+- **共用側欄資料夾**。對話與工作階段共用 `latticeterm.sharedSidebar.v1`，任一邊新增、改名、搬移、刪除或收合資料夾，另一邊立即更新。兩邊保留各自的內容與節點 ID，整理時只移除自己已刪除的內容。第一次使用會合併舊的兩份資料夾樹，ID 衝突時替對話資料夾產生新 ID 並保留子節點歸屬；舊儲存鍵保留作為恢復來源。刪除共用資料夾會將兩邊的內容移到上一層，不刪除對話或停止工作階段；清除本機 AI 工作項目則保留共用資料夾與對話。儲存空間不可用時只在目前視窗保留修改，不中斷執行中的對話。
 - **驗證邊界**。單元測試以實際協定形狀的 Claude／Codex／Gemini 事件驗證解析與參數組裝；另有 `#[ignore]` 的端對端測試可真的跑一輪（`LATTICETERM_CHAT_E2E=claude|codex|gemini cargo test -- --ignored`）；`ask` 模式另有一個端對端測試，會真的讓 Claude 對 WebFetch 提出核准、由測試放行並確認回合自行結束。
 
 ### 排程任務
@@ -119,6 +119,14 @@ Reporter 每次只傳一個最多 4 KiB 的 JSON 狀態或用量訊息。Registr
 使用系統金鑰圈的登入；已確認未登入的帳號會標示狀態。
 
 模型清單分別向各帳號查詢，不把預設帳號的可用模型套到其他帳號。
+Fleet 的「新專案」與「加開 CLI」另提供各個 Codex 帳號的 CLIProxyAPI
+選項。使用者須先依 [CLIProxyAPI 的 Codex 設定說明](https://help.router-for.me/agent-client/codex)
+在該帳號的 Codex 設定中建立 `cliproxyapi` provider、連線位址與認證，
+並自行啟動代理服務。Fleet 只接受使用者填入的模型 ID，以分離參數
+`-c model_provider=cliproxyapi --model <模型 ID>` 啟動 Codex；不從代理
+查詢模型清單，也不讀取、保存或傳送代理金鑰。原有 Codex 模型選項
+不會被改用代理，對話頁也仍使用原本的帳號模型清單。代理連線與模型
+是否可用由 Codex／CLIProxyAPI 在工作階段中回報，未經安裝版驗證。
 切換帳號或助理會保留對話畫面與有界交接摘要，但清除原生對話 ID；
 Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重新建立。
 已移除的帳號不能在對話頁靜默改用預設登入。
@@ -165,9 +173,9 @@ Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重�
 | 工具專用語意 Adapter | 部分完成 | Codex `notify`、Claude Code、Gemini CLI、Hermes Agent、Qwen Code lifecycle hooks，以及 OpenCode、GitHub Copilot CLI plugin events 已接上 Reporter；Hermes 已提供 token buckets，舊工作區續接 recipe 與保守的 session ID 擷取仍保留，其他工具 hook、token 與 cost 擷取尚未完成 |
 | 跨程序背景 daemon 與重新 attach | 已完成（第一版） | 勾選「留在背景」的工作階段由 `lattice-term agent-daemon` 持有：同一份 `AgentRegistry` 在 daemon 程序裡跑，桌面透過使用者專屬本機 socket 以 JSON 行協定 attach，關閉視窗後 CLI 繼續，下次開啟接回並重播 256 KiB 尾端；未勾選的仍隨桌面結束。保存的啟動項目記住此選項，還原時直接交給 daemon；對話排程在沒有視窗連著時由 daemon 執行，結果交回桌面成為未讀對話 |
 | 跨重啟還原 | 部分完成 | 已保存的 Codex 項目會續接同工作目錄最近的對話，Cursor 項目會使用 `agent --continue` 續接最近對話；正常關閉時，每個 Agent 最近 256 KiB 終端輸出會以 OS 安全儲存區中的裝置金鑰加密保存，重啟同一項目後先重播。若安全儲存區不可用就不落地輸出；原 PTY 程序與可互動 pane 仍無法跨程序存活 |
-| MCP Server | A／B 協作與 C 遠端工具已實作 | observer 角色連 daemon，metadata 分享、內容讀取、可控、啟動分開授權；派送需官方就緒且無人工編輯。C 需桌面逐項授權既有 SSH／SFTP，專用 exec channel 與核准檔案根目錄，不代登入或信任主機。操作紀錄支援私有快照跨重啟還原。沒有 PTY「中止本輪」或遠端畫面；各平台與真實 CLI 驗收分開記錄，見 [MCP Server](MCP.zh-TW.md) |
-| 遠端 Agent Fleet | SSH MCP 已實作 | 核准工作區內的多 PTY 可透過 MCP 分別列出、讀取、啟動與控制；遠端桌面 panes 與 Relay Fleet transport 尚未提供 |
-| 對話模式 | 已完成 | Claude Code 與 Gemini CLI 以官方 headless JSON 模式逐輪執行，Codex 每個對話常駐一個 app-server 加速追問；串流文字、工具卡片、用量統計與以 CLI 對話 ID 續接；Claude（stream-json 控制協定）與 Codex（app-server JSON-RPC）支援逐項核准；Gemini 的非互動模式無對應機制 |
+| MCP Server | A／B 協作與 C 遠端工具已實作 | observer 角色連 daemon，metadata 分享、內容讀取、可控、啟動分開授權；派送需官方就緒且無人工編輯。C 需桌面逐項授權；可用既有工作階段，或由原生層取安全儲存憑證開啟 SSH／SFTP／RDP／VNC／Lattice Remote。主機信任不自動處理，專用 exec channel 與檔案根目錄仍須另外核准。操作紀錄支援私有快照跨重啟還原。各平台與真實 CLI 驗收分開記錄，見 [MCP Server](MCP.zh-TW.md) |
+| 遠端 Agent Fleet | SSH 與 Relay MCP 已實作，Relay 尚待外部主機驗收 | 核准工作區內的多 PTY 可透過 MCP 分別列出、讀取、啟動與控制；遠端桌面 panes 尚未提供 |
+| 對話模式 | 已完成 | Claude Code、Gemini CLI 與 Google Antigravity CLI 以官方 headless JSON 模式逐輪執行，Codex 每個對話常駐一個 app-server 加速追問；串流文字、工具卡片、用量統計與以 CLI 對話 ID 續接；Claude（stream-json 控制協定）與 Codex（app-server JSON-RPC）支援逐項核准；Gemini 與 Antigravity 的非互動模式無逐次核准機制 |
 | 任務編排 | 部分完成 | broadcast prompt 與每個工作階段的提示佇列已完成；佇列上限 16 則，只有官方整合回報 `Done`／`Idle` 才放行一則，heuristic 猜測不放行；對話模式的排程任務與「接在某個排程之後」的依賴鏈已完成（見下）；Fleet 工作階段之間的依賴與資源限制仍待實作 |
 | 權限隔離 | 部分完成 | Linux 上可勾選以 bubblewrap 啟動：整個檔案系統唯讀，只有工作目錄、該 CLI 自己的登入／狀態目錄、帳號設定檔目錄與 /tmp 可寫，PID 命名空間隔離、網路共用；選項與工作區項目一起保存。macOS／Windows 尚無對應機制，也還沒有網路或資源限制 |
 
@@ -192,7 +200,7 @@ Reporter 傳輸與狀態模型已完成，Codex、Claude Code、Gemini CLI、Ope
 
 MCP 另有桌面專用 `mcpHistory` 查詢，保留最近 256 筆 Agent 寫入、遠端操作與遠端授權變更。私有快照由有界 worker 原子寫入，跨重啟還原；不主動收集提示、request ID、錯誤原文或憑證。observer 不能查詢，桌面每 10 秒更新，區分 pending／ready／memoryOnly／unavailable，失聯不當成空紀錄。詳細限制見 [MCP 操作紀錄](MCP.zh-TW.md#操作紀錄的邊界)。
 
-遠端工具以 `desktopBridgeProtocol` 協商，daemon 只保存 redacted grants，定向轉送到註冊它的 desktop connection。實際操作由 `mcp_desktop::DesktopService` 使用既有 SSH／SFTP registry，兩端檢查 scope；pending reply 綁定 owner 與 grant revision，撤權和失聯不得釋放舊結果。SSH 使用專用 exec channel，不碰使用者 PTY；SFTP 使用核准根目錄與既有 staging transfer。RDP／VNC／Lattice Remote 可另外授權單張畫面擷取，影格只在記憶體保留並綁定後端及連線世代。這不等同遠端多 PTY Fleet；鍵鼠另需 input scope、client 專屬十秒畫面憑據與未變動的影像；使用者操作遠端視窗即撤銷 MCP 控制。
+遠端工具以 `desktopBridgeProtocol` 協商，daemon 只保存 redacted grants，定向轉送到註冊它的 desktop connection。授權頁同時列出 live session 與保存的非機密 profile；後者由 Rust 直接向安全儲存區取憑證並建立普通工作階段，WebView 與模型只收到 session metadata。主機信任、scope、固定指令與根目錄仍分開確認。實際操作由 `mcp_desktop::DesktopService` 使用既有 registry，兩端檢查 scope；pending reply 綁定 owner 與 grant revision，撤權和失聯不得釋放舊結果。SSH 使用專用 exec channel，不碰使用者 PTY；SFTP 使用核准根目錄與既有 staging transfer。RDP／VNC／Lattice Remote 可另外授權單張畫面擷取，影格只在記憶體保留並綁定後端及連線世代。這不等同遠端多 PTY Fleet；鍵鼠另需 input scope、client 專屬十秒畫面憑據與未變動的影像；使用者操作遠端視窗即撤銷 MCP 控制。
 
 ### 3. 自建遠端 Fleet
 
@@ -201,17 +209,21 @@ SSH 路徑已透過 `remote_fleet` 接入：本機使用者核准一條已信任
 adapter，遠端 daemon 保持多個獨立 PTY。握手固定 canonical 工作目錄，
 查詢與寫入都需同時通過工作區限制及兩端的獨立權限；目錄不是 OS
 沙箱，CLI 執行能力仍依遠端帳號。詳見 [MCP 工作區](MCP.zh-TW.md#dssh-跨主機-fleet-工作區)。
-這是 MCP 編排入口，不包含 Fleet 頁直接顯示遠端 panes，也不包含 Relay。
+這是 MCP 編排入口，不包含 Fleet 頁直接顯示遠端 panes。Relay 路徑見下方說明。
 
-Lattice Remote 現已能透過自架 Relay 端對端加密分享單一 shell PTY，但這只是通用純終端工作階段：它不認識 Agent Fleet 工作區、既有 CLI 程序、Reporter 或多 pane 狀態，不能宣稱為遠端 Fleet。真正的遠端 Fleet 仍須在目前裝置身分與 Relay transport 上建立獨立的 `terminal-control` capability、金鑰與授權畫面：
+Lattice Remote 的單一 shell PTY 分享仍只是通用純終端，不能代替 Fleet。
+開發分支另有獨立 Fleet 能力與工作區授權，透過現有端對端加密通道接入
+受限 MCP adapter，按 session ID 與 cursor 多工讀取背景服務的多個獨立 PTY。
+主機目錄、讀取、控制及啟動由使用者分項核准，仍須通過背景服務原有 MCP 權限。
+詳見 [Relay Fleet 使用與限制](RELAY_FLEET.zh-TW.md)。架構原則如下：
 
 1. 被控端 Lattice Agent 預設只監聽 loopback。
 2. 使用者明確啟用遠端 Agent Fleet，選擇可存取的工作目錄與操作範圍。
 3. 控制端以一次性配對或已釘選裝置金鑰建立端對端加密控制通道。
-4. 每個 PTY 使用獨立 multiplexed stream，控制訊息與終端資料有版本及大小上限。
+4. 每個 PTY 使用獨立 session ID 與輸出 cursor，在有界請求通道中多工；控制訊息與終端快照有版本及大小上限。
 5. Relay 只轉送密文；無人值守、檔案寫入與高風險指令要分開授權。
 
-MCP Fleet 已先支援 SSH transport，沿用主機信任與認證；已完成的 Lattice Remote 純終端 transport 可作為自建 Relay 與 NAT 環境的第二條路，但必須先補上工作區能力授權與多 PTY multiplexing。
+MCP Fleet 的 SSH transport 沿用主機信任與認證；Relay transport 使用獨立的 Fleet 宣告與主機工作區授權，不沿用純終端操作權限。兩條路徑都不接受模型任意指定工作目錄或執行檔。
 
 ### 4. 編排與可觀測性
 
@@ -222,6 +234,6 @@ MCP Fleet 已先支援 SSH transport，沿用主機信任與認證；已完成�
 - UI 顯示「可用」的能力必須有真實後端與測試。
 - 各平台必須通過原生 PTY 啟動、輸入輸出、resize、停止與應用程式退出清理。
 - 未安裝、立即退出、無權限、錯誤工作目錄與異常大量輸入都要回傳明確錯誤。
-- 通用 Lattice Remote 已有固定配對碼無人值守；遠端 Agent Fleet 若要沿用，仍必須另行完成工作區／能力授權、撤銷、重放防護、稽核與 Relay 威脅模型，不得直接把固定碼視為完整團隊權限系統。
+- 通用 Lattice Remote 已有固定配對碼無人值守；Fleet 授權不隨該密碼保存或自動恢復，重新分享須重新授權。這不是團隊帳號或角色權限系統，外部主機與安裝版仍須另行驗收。
 
 Windows 遠端 Fleet 沿用相同工作區與多 PTY 契約，以固定 PowerShell 啟動器跨接 Windows OpenSSH 的 cmd／PowerShell shell；平台由使用者授權，並以遠端能力握手核對。具名管道與 ConPTY 的 CI 不代替外部 Windows 主機驗收，見 [驗收紀錄](MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md)。

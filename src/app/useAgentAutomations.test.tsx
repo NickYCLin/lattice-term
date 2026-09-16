@@ -91,6 +91,73 @@ function installFakeDom() {
 }
 
 describe("useAgentAutomations", () => {
+  it("removes a conversation from storage immediately", async () => {
+    invoke.mockClear();
+    const root = installFakeDom();
+    const previousStorage = globalThis.localStorage;
+    const stored = new Map<string, string>();
+    stored.set(
+      "latticeterm.agentChat.v1",
+      JSON.stringify([
+        {
+          id: "delete-now",
+          definitionId: "codex",
+          title: "Delete now",
+          workingDirectory: "/work",
+          permission: "ask",
+          model: "",
+          accountProfileId: null,
+          nativeSessionId: null,
+          reportedModel: null,
+          handoff: null,
+          items: [],
+          createdAt: 1,
+          updatedAt: 1,
+          runningTurnId: null,
+          automationId: null,
+          unread: false,
+        },
+      ]),
+    );
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    });
+    const { createRoot } = await import("react-dom/client");
+    const { ChatRuntime } = await import("./ChatRuntime");
+    type Api = import("./ChatRuntime").ChatRuntimeApi;
+    let api: Api | null = null;
+    const reactRoot = createRoot(root as unknown as Element);
+    try {
+      await act(async () => {
+        reactRoot.render(
+          React.createElement(ChatRuntime, {
+            locale: "en",
+            onChange: (next: Api) => {
+              api = next;
+            },
+          }),
+        );
+      });
+      const current = () => (api as unknown as Api).chat;
+      expect(current().threads.map((thread) => thread.id)).toEqual([
+        "delete-now",
+      ]);
+
+      await act(async () => current().removeThread("delete-now"));
+
+      expect(current().threads).toEqual([]);
+      expect(stored.has("latticeterm.agentChat.v1")).toBe(false);
+      expect(invoke).toHaveBeenCalledWith("agent_chat_close", {
+        threadId: "delete-now",
+      });
+    } finally {
+      await act(async () => reactRoot.unmount());
+      vi.stubGlobal("localStorage", previousStorage);
+    }
+  });
+
   it("records steering only after receipt and keeps late receipts with the original turn", async () => {
     invoke.mockClear();
     const root = installFakeDom();
@@ -126,6 +193,9 @@ describe("useAgentAutomations", () => {
     expect(thread.items.map(item => item.type === "user" ? item.text : item.type)).toEqual(["first", "extra", "turnEnd", "next turn"]);
     expect(thread.runningTurnId).toBe(nextTurn);
     expect(thread.permission).toBe("ask");
+    const callsBeforeStaleSteer = invoke.mock.calls.length;
+    await expect(current().steer(id, "stale remote instruction", [], originalTurn)).rejects.toThrow("active turn changed");
+    expect(invoke.mock.calls).toHaveLength(callsBeforeStaleSteer);
     invoke.mockRejectedValueOnce(new Error("turn ended"));
     await act(async () => { await expect(current().steer(id, "rejected", [])).rejects.toThrow("turn ended"); });
     expect(current().threads[0].items).toEqual(thread.items);

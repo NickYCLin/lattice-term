@@ -36,21 +36,18 @@ import {
   type ChatThread,
 } from "./agentChat";
 import { hasDesktopBackend } from "./nativeRuntime";
+import { useSharedSidebarLayout } from "./sharedSidebarLayout";
 import {
-  CHAT_SIDEBAR_LAYOUT_KEY,
   chatFolderNodeId,
   chatThreadNodeId,
   reconcileChatLayout,
 } from "./chatThreadLayout";
 import {
   createSessionSidebarFolder,
-  emptySessionSidebarLayout,
   expandSessionSidebarAncestors,
-  loadSessionSidebarLayout,
   moveSessionSidebarNode,
   removeSessionSidebarFolder,
   renameSessionSidebarFolder,
-  saveSessionSidebarLayout,
   toggleSessionSidebarFolder,
   type SessionSidebarLayout,
 } from "./sessionSidebarLayout";
@@ -65,7 +62,12 @@ async function events() {
 
 const EVENT_CHAT = "agent-chat://event";
 const SAVE_DELAY_MS = 400;
-const FALLBACK_SUPPORTED: ChatDefinitionId[] = ["claude", "codex", "gemini"];
+const FALLBACK_SUPPORTED: ChatDefinitionId[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "antigravity",
+];
 
 export interface ChatThreadSettings {
   browserEnabled?: boolean;
@@ -117,7 +119,7 @@ export interface AgentChatApi {
     profileConfigPath?: string | null,
   ) => Promise<void>;
   stop: (id: string, expectedTurnId?: string) => Promise<void>;
-  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[]) => Promise<void>;
+  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => Promise<void>;
   enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
   removeQueued: (id: string, inputId: string) => void;
   resumeQueue: (id: string) => void;
@@ -152,26 +154,15 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     claude: { state: "idle" },
     codex: { state: "idle" },
     gemini: { state: "idle" },
+    antigravity: { state: "idle" },
   });
   const modelsRef = useRef(models);
   modelsRef.current = models;
-  const [storedLayout, setStoredLayout] = useState<SessionSidebarLayout>(() =>
-    typeof localStorage === "undefined"
-      ? emptySessionSidebarLayout
-      : loadSessionSidebarLayout(localStorage, CHAT_SIDEBAR_LAYOUT_KEY),
-  );
-  // What the sidebar renders: the saved organisation fitted to the threads
-  // that exist right now.
+  const [storedLayout, setStoredLayout] = useSharedSidebarLayout();
   const layout = useMemo(() => reconcileChatLayout(storedLayout, threads), [storedLayout, threads]);
-
   useEffect(() => {
-    if (typeof localStorage === "undefined") return;
-    try {
-      saveSessionSidebarLayout(localStorage, layout, CHAT_SIDEBAR_LAYOUT_KEY);
-    } catch {
-      // Folders are a convenience; losing them costs no conversation.
-    }
-  }, [layout]);
+    setStoredLayout(current => reconcileChatLayout(current, threads));
+  }, [threads, setStoredLayout]);
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
   threadsRef.current = threads;
@@ -379,10 +370,16 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
         .then(({ invoke }) => invoke("agent_chat_close", { threadId: id }))
         .catch(() => {});
     }
-    changeThreads((current) => current.filter((thread) => thread.id !== id));
+    const remaining = threadsRef.current.filter((thread) => thread.id !== id);
+    // A delete is a deliberate destructive action. Persist it immediately so
+    // closing or reloading the window cannot restore the thread during the
+    // normal delayed-save window used for streaming replies.
+    if (typeof localStorage !== "undefined") {
+      saveStoredThreads(localStorage, remaining);
+    }
+    changeThreads(() => remaining);
     setActiveThreadId((current) => {
       if (current !== id) return current;
-      const remaining = threadsRef.current.filter((thread) => thread.id !== id);
       return remaining[0]?.id ?? null;
     });
   }, []);
@@ -432,9 +429,10 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     }
   }, []);
 
-  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[]) => {
+  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => {
     const thread = threadsRef.current.find(entry => entry.id === id);
     if (thread?.definitionId !== "codex" || !thread.runningTurnId) throw new Error("No Codex turn is running in this chat.");
+    if (expectedTurnId !== undefined && thread.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before sending instructions.");
     if (pendingSteers.current.has(id)) throw new Error("Another instruction is still awaiting confirmation.");
     pendingSteers.current.add(id);
     const turnId = thread.runningTurnId;

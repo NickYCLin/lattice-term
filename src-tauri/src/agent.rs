@@ -86,6 +86,7 @@ const AGENT_ADAPTER_VERSION: u32 = 1;
 enum AgentResumeRecipe {
     Subcommand,
     Flag,
+    Conversation,
 }
 
 impl AgentResumeRecipe {
@@ -93,6 +94,7 @@ impl AgentResumeRecipe {
         match self {
             Self::Subcommand => vec!["resume".to_string(), session_id],
             Self::Flag => vec!["--resume".to_string(), session_id],
+            Self::Conversation => vec!["--conversation".to_string(), session_id],
         }
     }
 }
@@ -150,7 +152,7 @@ const AGENTS: [AgentSpec; 13] = [
         id: "antigravity",
         label: "Google Antigravity CLI",
         executable: "agy",
-        resume_recipe: None,
+        resume_recipe: Some(AgentResumeRecipe::Conversation),
         resume_latest_recipe: Some(AgentResumeLatestRecipe::Continue),
     },
     AgentSpec {
@@ -1912,6 +1914,9 @@ pub struct AgentRegistry {
     sessions: Mutex<HashMap<String, Arc<AgentSessionEntry>>>,
     counter: AtomicU64,
     reporter: Option<ReporterEndpoint>,
+    /// Process-only access to this installation's explicitly granted MCP
+    /// tools. Tests and embedders without an app data directory leave it off.
+    mcp: Option<crate::agent_mcp::McpLaunch>,
     /// Session ids start with this; the background daemon uses its own so
     /// the desktop can route by prefix. `None` is the desktop default.
     id_prefix: Option<String>,
@@ -1925,7 +1930,21 @@ impl AgentRegistry {
     pub fn with_local_reporter(sink: Arc<dyn AgentSink>) -> Result<Arc<Self>, String> {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
-        Self::with_local_reporter_executable(sink, executable, None)
+        Self::with_local_reporter_executable(sink, executable, None, None)
+    }
+
+    pub fn with_local_reporter_and_mcp(
+        sink: Arc<dyn AgentSink>,
+        data_dir: &Path,
+    ) -> Result<Arc<Self>, String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
+        Self::with_local_reporter_executable(
+            sink,
+            executable,
+            None,
+            Some(crate::agent_mcp::launch_for(data_dir)),
+        )
     }
 
     /// A registry whose session ids start with `prefix`, for the background
@@ -1936,7 +1955,22 @@ impl AgentRegistry {
     ) -> Result<Arc<Self>, String> {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
-        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()))
+        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_string()), None)
+    }
+
+    pub fn with_local_reporter_prefixed_and_mcp(
+        sink: Arc<dyn AgentSink>,
+        prefix: &str,
+        data_dir: &Path,
+    ) -> Result<Arc<Self>, String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
+        Self::with_local_reporter_executable(
+            sink,
+            executable,
+            Some(prefix.to_string()),
+            Some(crate::agent_mcp::launch_for(data_dir)),
+        )
     }
 
     #[cfg(test)]
@@ -1945,13 +1979,14 @@ impl AgentRegistry {
         executable: PathBuf,
         prefix: &str,
     ) -> Result<Arc<Self>, String> {
-        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_owned()))
+        Self::with_local_reporter_executable(sink, executable, Some(prefix.to_owned()), None)
     }
 
     fn with_local_reporter_executable(
         sink: Arc<dyn AgentSink>,
         executable: PathBuf,
         id_prefix: Option<String>,
+        mcp: Option<crate::agent_mcp::McpLaunch>,
     ) -> Result<Arc<Self>, String> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|error| format!("Cannot start the local agent reporter: {error}"))?;
@@ -1963,6 +1998,7 @@ impl AgentRegistry {
                 address,
                 executable,
             }),
+            mcp,
             id_prefix,
             ..Self::default()
         });
@@ -2073,6 +2109,31 @@ impl AgentRegistry {
         }
         summary.state = next;
         summary.state_source = source;
+        true
+    }
+
+    /// Codex's turn-complete notification can arrive while its background
+    /// terminals are still running. Only an explicit working footer observed
+    /// after that notification may revise its completed status; ordinary PTY
+    /// guesses and other integrations still defer to the reporter.
+    fn update_codex_working_from_output(&self, session_id: &str) -> bool {
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        let Some(_input) = entry.input.try_lock().ok() else {
+            return false;
+        };
+        let Ok(mut summary) = entry.summary.lock() else {
+            return false;
+        };
+        if summary.definition_id != "codex"
+            || summary.state != AgentLifecycle::Done
+            || summary.state_source != AgentStateSource::Integration
+        {
+            return false;
+        }
+        summary.state = AgentLifecycle::Working;
+        summary.state_source = AgentStateSource::Heuristic;
         true
     }
 
@@ -2278,6 +2339,18 @@ impl AgentRegistry {
         // disabled by a higher-precedence user mode.
         entry.integrated_completion.store(true, Ordering::Release);
         let state_changed = self.update_state(session_id, next, AgentStateSource::Integration);
+        if next == AgentLifecycle::Done
+            && entry
+                .summary
+                .lock()
+                .is_ok_and(|summary| summary.definition_id == "codex")
+        {
+            // Do not reuse a footer buffered before the completion report as
+            // evidence that background work continued after it.
+            if let Ok(mut completion) = entry.completion_gate.lock() {
+                completion.cancel();
+            }
+        }
         let captured = if let Some(native_session_id) = native_session_id {
             let mut summary = entry.summary.lock().map_err(|error| error.to_string())?;
             if summary.captured_session_id.as_deref() == Some(native_session_id.as_str()) {
@@ -4535,7 +4608,8 @@ fn detect_agent_account(definition_id: &str) -> AgentAccountInfo {
         "claude" => read_account_file(&[".claude.json"])
             .map(|raw| claude_account_from_json(&raw))
             .unwrap_or_else(|| account_info(AgentAccountState::Unknown, None, None)),
-        "gemini" => read_account_file(&[".gemini", "google_accounts.json"])
+        "gemini" | "antigravity" => read_account_file(&[".antigravity", "google_accounts.json"])
+            .or_else(|| read_account_file(&[".gemini", "google_accounts.json"]))
             .map(|raw| gemini_account_from_json(&raw))
             .unwrap_or_else(|| account_info(AgentAccountState::Unknown, None, None)),
         _ => account_info(AgentAccountState::Unsupported, None, None),
@@ -5880,7 +5954,7 @@ pub fn launch_with_replay(
     request: AgentLaunchRequest,
     restored_output: Option<Vec<u8>>,
 ) -> Result<AgentSessionSummary, String> {
-    let request =
+    let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
     let size = validated_size(request.cols, request.rows)?;
     let launch_arguments = request.arguments.clone();
@@ -5909,6 +5983,9 @@ pub fn launch_with_replay(
             integrated_completion = adapted != arguments;
             arguments = adapted;
         }
+        if let Some(mcp) = registry.mcp.as_ref() {
+            arguments = crate::agent_mcp::prepend_codex_arguments(arguments, mcp);
+        }
     } else if definition_id == "antigravity" {
         // Antigravity does not expose a new interactive conversation id on
         // stdout. Its process-scoped log does, so use an isolated temporary
@@ -5917,6 +5994,26 @@ pub fn launch_with_replay(
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::Antigravity);
+        // Antigravity supports native interactive startup seeding via
+        // --prompt-interactive (-i). Passing the handoff seed as a CLI argument
+        // lets Antigravity execute the initial briefing prompt interactively
+        // as its opening turn, without relying on PTY paste timing or bracketed paste.
+        if let Some(seed) = request
+            .seed_input
+            .take()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if !arguments.iter().any(|arg| {
+                arg == "--prompt-interactive"
+                    || arg == "-i"
+                    || arg.trim_start().starts_with("--prompt-interactive=")
+            }) {
+                arguments.push("--prompt-interactive".to_string());
+                arguments.push(seed);
+            } else {
+                request.seed_input = Some(seed);
+            }
+        }
     } else if definition_id == "claude" {
         if let Some(endpoint) = reporter.as_ref() {
             let adapted = claude_reporter_arguments(arguments.clone(), &endpoint.executable);
@@ -6303,15 +6400,19 @@ pub fn launch_with_replay(
                         break;
                     };
                     reader_sink.data(&reader_id, offset, bytes);
-                    let state = if let Ok(mut completion) = reader_entry.completion_gate.lock() {
-                        heuristic_state_from_output(
-                            &mut completion,
-                            bytes,
-                            reader_entry.integrated_completion.load(Ordering::Acquire),
-                        )
-                    } else {
-                        Some(lifecycle_from_output(bytes))
-                    };
+                    let (state, explicit_status) =
+                        if let Ok(mut completion) = reader_entry.completion_gate.lock() {
+                            (
+                                heuristic_state_from_output(
+                                    &mut completion,
+                                    bytes,
+                                    reader_entry.integrated_completion.load(Ordering::Acquire),
+                                ),
+                                true,
+                            )
+                        } else {
+                            (Some(lifecycle_from_output(bytes)), false)
+                        };
                     if state == Some(AgentLifecycle::Done) {
                         // A guess, not a verdict: wait for the terminal to go
                         // quiet before showing it. Redraws re-enable bracketed
@@ -6340,11 +6441,14 @@ pub fn launch_with_replay(
                             });
                         }
                     } else if let Some(state) = state {
-                        if reader_registry.update_state(
+                        let changed = reader_registry.update_state(
                             &reader_id,
                             state,
                             AgentStateSource::Heuristic,
-                        ) {
+                        ) || (explicit_status
+                            && state == AgentLifecycle::Working
+                            && reader_registry.update_codex_working_from_output(&reader_id));
+                        if changed {
                             reader_sink.state(&reader_id, state, AgentStateSource::Heuristic);
                         }
                     }
@@ -8193,6 +8297,84 @@ session id: 0199aa11-"
     }
 
     #[test]
+    fn codex_background_work_can_resume_after_a_turn_completion_report() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = AgentRegistry::with_local_reporter(sink.clone()).unwrap();
+        #[cfg(unix)]
+        let (executable, arguments) = ("/bin/cat".to_string(), Vec::new());
+        #[cfg(windows)]
+        let (executable, arguments) = ("cmd.exe".to_string(), vec!["/Q".to_string()]);
+        let request = AgentLaunchRequest {
+            definition_id: "custom".to_string(),
+            label: "Background reporter test".to_string(),
+            executable,
+            arguments,
+            resume_session_id: None,
+            group_id: None,
+            seed_input: None,
+            restore_existing_session: false,
+            profile_config_path: None,
+            sandbox: false,
+            detached: false,
+            working_directory: std::env::current_dir().unwrap().display().to_string(),
+            cols: 80,
+            rows: 24,
+        };
+        let session = launch(sink, registry.clone(), request).unwrap();
+        let id = &session.session_id;
+        let (address, token) = registry.reporter_credentials(id).unwrap();
+        let entry = registry.get(id).unwrap();
+        // Use a local dummy process for the reporter test, without launching
+        // Codex or accessing its account; only the lifecycle label is Codex.
+        entry.summary.lock().unwrap().definition_id = "codex".to_string();
+
+        // A footer read before notify is not evidence of work after notify.
+        entry
+            .completion_gate
+            .lock()
+            .unwrap()
+            .observe_output(b"Working (1s; esc to interrupt)", true);
+        send_report_with_native_session(address, id, &token, AgentLifecycle::Done, None).unwrap();
+        assert_eq!(registry.list()[0].state, AgentLifecycle::Done);
+        assert_eq!(
+            entry
+                .completion_gate
+                .lock()
+                .unwrap()
+                .observe_output(b"ordinary redraw", true),
+            None
+        );
+
+        // A non-Codex CLI remains governed by its authoritative reporter.
+        entry.summary.lock().unwrap().definition_id = "custom".to_string();
+        assert!(!registry.update_codex_working_from_output(id));
+        entry.summary.lock().unwrap().definition_id = "codex".to_string();
+        assert!(!registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Heuristic));
+        assert_eq!(
+            entry.completion_gate.lock().unwrap().observe_output(
+                b"Working (27s; esc to interrupt) 3 background terminals running",
+                true,
+            ),
+            Some(AgentLifecycle::Working)
+        );
+        assert!(registry.update_codex_working_from_output(id));
+        let current = &registry.list()[0];
+        assert_eq!(current.state, AgentLifecycle::Working);
+        assert_eq!(current.state_source, AgentStateSource::Heuristic);
+        assert!(entry.integrated_completion.load(Ordering::Acquire));
+
+        // The next real completion report still takes precedence.
+        send_report_with_native_session(address, id, &token, AgentLifecycle::Done, None).unwrap();
+        assert_eq!(registry.list()[0].state, AgentLifecycle::Done);
+        assert_eq!(
+            registry.list()[0].state_source,
+            AgentStateSource::Integration
+        );
+        registry.stop_all();
+    }
+
+    #[test]
     fn codex_busy_diff_and_permanent_composer_are_not_a_question() {
         let mut readiness = CompletionReadiness::default();
         readiness.observe_input(b"fix the task\r");
@@ -8570,9 +8752,13 @@ model = "gpt-5.3-codex"
             reporter_executable.is_file(),
             "build the real reporter first with `cargo build --bin lattice-term`"
         );
-        let registry =
-            AgentRegistry::with_local_reporter_executable(sink.clone(), reporter_executable, None)
-                .unwrap();
+        let registry = AgentRegistry::with_local_reporter_executable(
+            sink.clone(),
+            reporter_executable,
+            None,
+            None,
+        )
+        .unwrap();
         let request = AgentLaunchRequest {
             definition_id: "hermes".to_string(),
             label: "Hermes lifecycle probe".to_string(),

@@ -4,6 +4,10 @@ import { localFileError, readSelectedText, type UploadFile } from "../app/localF
 /** Unified workspace for text terminals and graphical remote sessions. */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useSharedSidebarLayout,
+  reconcileSharedSessionLayout as reconcileSessionSidebarLayout,
+} from "../app/sharedSidebarLayout";
 import { open } from "@tauri-apps/plugin-dialog";
 import { downloadDir, homeDir, join } from "@tauri-apps/api/path";
 import type { RemoteApi } from "../app/useRemoteSessions";
@@ -25,6 +29,7 @@ import {
   accountModelLaunchSettings,
   accountModelOptions,
   accountModelTargets,
+  validCliProxyModel,
   accountSessionLabel,
   type AccountModelSelection,
 } from "../app/accountModels";
@@ -52,15 +57,11 @@ import {
 } from "../app/agentSessionRelocation";
 import {
   createSessionSidebarFolder,
-  emptySessionSidebarLayout,
   expandSessionSidebarAncestors,
-  loadSessionSidebarLayout,
   mergeSessionSidebarLayouts,
   moveSessionSidebarNode,
-  reconcileSessionSidebarLayout,
   removeSessionSidebarFolder,
   renameSessionSidebarFolder,
-  saveSessionSidebarLayout,
   sessionSidebarSessionNodeId,
   toggleSessionSidebarFolder,
   type LiveSessionSidebarNode,
@@ -69,11 +70,13 @@ import {
 } from "../app/sessionSidebarLayout";
 import {
   MAX_WORKSPACE_TRANSFER_BYTES,
+  WorkspaceExportError,
   parseWorkspaceTransfer,
   serializeWorkspaceTransfer,
   type PortableWorkspaceItem,
   type WorkspaceTransferFile,
 } from "../app/workspaceTransfer";
+import { exportTextFile } from "../app/fileExport";
 import { useI18n } from "../i18n/context";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
@@ -166,13 +169,7 @@ function workspaceExportFilename(exportedAt = new Date()) {
 
 async function downloadWorkspaceFile(content: string) {
   const filename = workspaceExportFilename();
-  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+  await exportTextFile(content, filename);
   try {
     return { filename, path: await join(await downloadDir(), filename) };
   } catch {
@@ -367,9 +364,7 @@ export function SessionsView({
     title: string;
     body: string;
   } | null>(null);
-  const [sidebarLayout, setSidebarLayout] = useState(() =>
-    loadSessionSidebarLayout(window.localStorage),
-  );
+  const [sidebarLayout, setSidebarLayout] = useSharedSidebarLayout();
   // A session launched into a collapsed project or folder has no sidebar row
   // yet, so the branch is opened once reconciliation gives it a node.
   const [pendingRevealSessionId, setPendingRevealSessionId] = useState<
@@ -491,14 +486,15 @@ export function SessionsView({
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
     defaultModel: t("terminal.model.pending"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined).map((option) => ({ ...option, disabled: false }));
+  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, true).map((option) => ({ ...option, disabled: false }));
   const defaultModelSelection = (definitionId?: string): AccountModelSelection | null => {
     const candidates = modelTargets.filter((target) => !definitionId || target.definitionId === definitionId);
     const target = candidates.find((candidate) => !candidate.signedOut) ?? candidates[0];
     return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" } : null;
   };
   const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"));
-  const projectModelAvailable = selectedProjectModel !== null && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedProjectModel));
+  const modelAvailable = (selection: AccountModelSelection | null) => selection !== null && (!selection.provider || validCliProxyModel(selection.model)) && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selection));
+  const projectModelAvailable = modelAvailable(selectedProjectModel);
 
   async function chooseProjectDirectory(droppedPath?: string) {
     setChoosingProject(true);
@@ -639,9 +635,20 @@ export function SessionsView({
       });
       return;
     }
-    const exported = await downloadWorkspaceFile(
-      serializeWorkspaceTransfer(agents.sessions, reconciledSidebarLayout),
-    );
+    let exported: Awaited<ReturnType<typeof downloadWorkspaceFile>>;
+    try {
+      exported = await downloadWorkspaceFile(
+        serializeWorkspaceTransfer(agents.sessions, reconciledSidebarLayout),
+      );
+    } catch (reason) {
+      setWorkspaceTransferNotice({
+        tone: "danger",
+        title: t("terminal.projects.export"),
+        body: t(reason instanceof WorkspaceExportError
+          ? "terminal.projects.exportInvalid" : "terminal.projects.exportFailed"),
+      });
+      return;
+    }
     setWorkspaceTransferNotice({
       tone: "info",
       title: t("terminal.projects.exportedTitle"),
@@ -762,12 +769,11 @@ export function SessionsView({
       ) {
         onSelect(null);
       }
-      setSidebarLayout({
-        ...emptySessionSidebarLayout,
-        folders: [],
-        placements: {},
-        collapsedFolderIds: [],
-      });
+      setSidebarLayout(current => ({
+        ...current,
+        placements: Object.fromEntries(Object.entries(current.placements).filter(([id]) =>
+          id.startsWith("folder:") || id.startsWith("thread:"))),
+      }));
       setPendingClearWorkspace(false);
       setWorkspaceTransferNotice({
         tone: "info",
@@ -1084,6 +1090,7 @@ export function SessionsView({
           <AccountModelField
             options={modelOptions}
             value={selectedProjectModel}
+            allowCliProxyApi
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
@@ -1353,15 +1360,6 @@ export function SessionsView({
     );
     setPendingRevealSessionId(null);
   }, [liveSidebarKey, pendingRevealSessionId]);
-  useEffect(() => {
-    if (!sessionRestoreComplete) return;
-    try {
-      saveSessionSidebarLayout(window.localStorage, sidebarLayout);
-    } catch {
-      // Sidebar organization is a convenience and must not interrupt sessions.
-    }
-  }, [sessionRestoreComplete, sidebarLayout]);
-
   function openFolderEditor(
     parentId: string | null,
     folder: SessionSidebarFolder | null = null,
@@ -2176,12 +2174,13 @@ export function SessionsView({
                           <AccountModelField
                             options={modelOptions}
                             value={selectedAddModel}
+                            allowCliProxyApi
                             onChange={setSelectedAddModel}
                           />
                           <button
                             type="button"
                             className="button button--primary button--sm"
-                            disabled={!selectedAddModel || !modelOptions.some((option) => accountModelKey(option) === accountModelKey(selectedAddModel))}
+                            disabled={!modelAvailable(selectedAddModel)}
                             onClick={() => selectedAddModel && void addCli(group, selectedAddModel, carry)}
                           >{t("terminal.projects.launch")}</button>
                           {installed.length === 0 && (

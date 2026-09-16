@@ -31,6 +31,33 @@ function session(): AgentSessionSummary {
 }
 
 describe("workspace transfer", () => {
+  it("refuses exports that exceed the import item limit", () => {
+    const atLimit = serializeWorkspaceTransfer(Array.from({ length: 64 }, session), emptySessionSidebarLayout);
+    expect(parseWorkspaceTransfer(atLimit)?.items).toHaveLength(64);
+    expect(() => serializeWorkspaceTransfer(Array.from({ length: 65 }, session), emptySessionSidebarLayout)).toThrow();
+  });
+
+  it("refuses exports with unsupported arguments or an oversized file", () => {
+    expect(() => serializeWorkspaceTransfer([{ ...session(), launchArguments: ["line\nbreak"] }], emptySessionSidebarLayout)).toThrow();
+    const large = { ...session(), launchArguments: Array.from({ length: 64 }, () => "a".repeat(4096)) };
+    expect(() => serializeWorkspaceTransfer(Array.from({ length: 5 }, () => large), emptySessionSidebarLayout)).toThrow();
+  });
+
+  it("does not transfer chat node IDs from the shared sidebar in either direction", () => {
+    const sidebar = { ...emptySessionSidebarLayout, folders: [{ id: "folder:shared", name: "共用" }], placements: {
+      "folder:shared": { parentId: null, order: 0 },
+      "thread:private-chat": { parentId: "folder:shared", order: 0 },
+      "session:agent:group-portable-1": { parentId: "folder:shared", order: 1 },
+    } };
+    const encoded = serializeWorkspaceTransfer([session()], sidebar);
+    expect(encoded).not.toContain("thread:private-chat");
+    expect(sidebar.placements["thread:private-chat"]).toBeDefined();
+    const legacy = JSON.parse(encoded);
+    legacy.sidebar = sidebar;
+    const parsed = parseWorkspaceTransfer(JSON.stringify(legacy));
+    expect(parsed?.sidebar.placements["thread:private-chat"]).toBeUndefined();
+    expect(parsed?.sidebar.placements["session:agent:group-portable-1"].parentId).toBe("folder:shared");
+  });
   it("round trips portable launch intent without conversation or process state", () => {
     const layout = {
       version: 1 as const,

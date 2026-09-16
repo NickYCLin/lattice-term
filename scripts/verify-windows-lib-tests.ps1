@@ -248,7 +248,8 @@ try {
     $report.manifest.testCopySha256 = (Get-FileHash -LiteralPath $testCopy -Algorithm SHA256).Hash
     foreach ($filter in @("codex_input_profile", "codex_mcp_submit", "startup_seed",
             "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
-            "remote_host::", "remote_commands::", "remote_chat_host::", "notification_sound::")) {
+            "remote_host::", "remote_commands::", "remote_chat_host::", "notification_sound::",
+            "durable_file::", "backup::", "credentials::", "vault::")) {
         $check = [ordered]@{ filter = $filter; passed = $false }
         $report.tests += $check
         $all = @(Get-TestNames (Invoke-NativeChecked $testCopy @($filter, "--list", "--format", "terse")))

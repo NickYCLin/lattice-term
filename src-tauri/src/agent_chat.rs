@@ -287,11 +287,20 @@ pub struct AgentChatRegistry {
     /// Serialize only the authentication/startup window; turns remain free
     /// to run concurrently after Claude emits its initialization event.
     claude_startup: Arc<tokio::sync::Mutex<()>>,
+    /// Process-scoped MCP adapter for Codex chats launched by this app.
+    mcp: Option<crate::agent_mcp::McpLaunch>,
 }
 
 impl AgentChatRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_mcp(data_dir: &Path) -> Self {
+        Self {
+            mcp: Some(crate::agent_mcp::launch_for(data_dir)),
+            ..Self::default()
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunningTurn>> {
@@ -364,6 +373,7 @@ enum Dialect {
     Claude,
     Codex,
     Gemini,
+    Antigravity,
 }
 
 impl Dialect {
@@ -372,6 +382,7 @@ impl Dialect {
             "claude" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
             "gemini" => Some(Self::Gemini),
+            "antigravity" => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -380,7 +391,7 @@ impl Dialect {
 /// Which CLIs chat mode can drive. Only those with a documented headless
 /// JSON mode qualify; anything else stays a terminal in the Agent Fleet.
 pub fn supported_definitions() -> &'static [&'static str] {
-    &["claude", "codex", "gemini"]
+    &["claude", "codex", "gemini", "antigravity"]
 }
 
 fn validate_id(value: &str, label: &str) -> Result<(), String> {
@@ -486,7 +497,7 @@ fn profile_config_directory(
     let Some(raw) = raw.map(str::trim).filter(|path| !path.is_empty()) else {
         return Ok(None);
     };
-    if dialect == Dialect::Gemini {
+    if dialect == Dialect::Gemini || dialect == Dialect::Antigravity {
         return Err("This CLI does not support isolated account profiles here.".to_string());
     }
     let path = Path::new(raw);
@@ -512,7 +523,7 @@ fn apply_profile_environment(command: &mut Command, dialect: Dialect, directory:
         Dialect::Claude => {
             command.env("CLAUDE_CONFIG_DIR", directory);
         }
-        Dialect::Gemini => {}
+        Dialect::Gemini | Dialect::Antigravity => {}
     }
 }
 
@@ -672,6 +683,28 @@ fn turn_arguments(
             }
             // A piped stdin makes Gemini enter headless mode without putting
             // the user's prompt in the process list.
+        }
+        Dialect::Antigravity => {
+            args.extend(["--output-format", "stream-json"].map(OsString::from));
+            match permission {
+                ChatPermission::ReadOnly | ChatPermission::Ask => {
+                    args.extend(["--mode", "plan"].map(OsString::from));
+                }
+                ChatPermission::WorkspaceWrite => {
+                    args.extend(["--mode", "accept-edits"].map(OsString::from));
+                }
+                ChatPermission::Full => {
+                    args.push("--dangerously-skip-permissions".into());
+                }
+            }
+            if let Some(model) = model {
+                args.push("--model".into());
+                args.push(model.into());
+            }
+            if let Some(id) = native_session_id {
+                args.push("--conversation".into());
+                args.push(id.into());
+            }
         }
     }
     args
@@ -849,6 +882,9 @@ pub fn list_skills(
         Dialect::Codex => home_directory().map(|home| home.join(".codex")),
         Dialect::Claude => home_directory().map(|home| home.join(".claude")),
         Dialect::Gemini => None,
+        Dialect::Antigravity => {
+            home_directory().map(|home| home.join(".gemini").join("antigravity-cli"))
+        }
     };
     let config_directory = config_directory.or(default_config);
     let mut skills = Vec::new();
@@ -865,6 +901,8 @@ pub fn list_skills(
         working_directory.join(".agents").join("skills"),
         working_directory.join(".claude").join("skills"),
         working_directory.join(".codex").join("skills"),
+        working_directory.join(".gemini").join("skills"),
+        working_directory.join(".antigravity").join("skills"),
     ] {
         append_skills_from_root(&directory, "專案", &mut seen, &mut skills);
     }
@@ -930,6 +968,24 @@ pub async fn list_models(
         // concrete targets can change with account access and CLI updates.
         return Ok(gemini_model_choices());
     }
+    if dialect == Dialect::Antigravity {
+        let mut command = headless_command(&executable);
+        command.arg("models");
+        apply_profile_environment(&mut command, dialect, profile_config_directory.as_deref());
+        let output = tokio::time::timeout(MODEL_LIST_TIMEOUT, command.output())
+            .await
+            .map_err(|_| "The agent did not list its models in time.".to_string())?
+            .map_err(|error| format!("Cannot ask {definition_id} for its models: {error}"))?;
+        if !output.status.success() {
+            return Err("The agent ended before listing its models.".to_string());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let choices = parse_antigravity_models(&stdout);
+        if choices.is_empty() {
+            return Err("The agent returned no models.".to_string());
+        }
+        return Ok(choices);
+    }
     // Keep the guard until the probe has answered and its process has exited.
     // A turn requested meanwhile waits instead of racing Claude's token refresh.
     let _startup_guard = registry.startup_guard(dialect).await;
@@ -985,7 +1041,9 @@ pub async fn list_models(
                 "2",
             )
         }
-        Dialect::Gemini => unreachable!("Gemini model aliases return without a subprocess"),
+        Dialect::Gemini | Dialect::Antigravity => {
+            unreachable!("Model discovery is handled before the subprocess probe")
+        }
     };
     let mut child = command
         .spawn()
@@ -1110,7 +1168,7 @@ fn models_from_reply(
                     .collect(),
             )
         }
-        Dialect::Gemini => None,
+        Dialect::Gemini | Dialect::Antigravity => None,
     }
 }
 
@@ -1173,7 +1231,7 @@ fn send_with_retry<S: ChatSink>(
         // Claude asks through its stream-json control protocol and Codex
         // through its app-server JSON-RPC; Gemini's headless mode has no
         // channel for an answer.
-        if interactive && dialect == Dialect::Gemini {
+        if interactive && (dialect == Dialect::Gemini || dialect == Dialect::Antigravity) {
             return Err("This CLI cannot ask for approval in chat mode.".to_string());
         }
         if request.prompt.trim().is_empty() && request.attachments.is_empty() {
@@ -1210,6 +1268,7 @@ fn send_with_retry<S: ChatSink>(
                 &registry.codex,
                 codex_server::TurnRequest {
                     browser_enabled: request.browser_enabled,
+                    mcp: registry.mcp.as_ref(),
                     thread_id: &request.thread_id,
                     turn_id: &request.turn_id,
                     prompt: &prompt,
@@ -1687,6 +1746,8 @@ struct TurnState {
     pending_inputs: Vec<(String, Value)>,
     /// Lines the parser owes the CLI on stdin; the reader loop sends them.
     pending_writes: Vec<String>,
+    /// Tracks whether text deltas/messages were seen so result response doesn't duplicate.
+    had_assistant_text: bool,
 }
 
 fn parse_line(dialect: Dialect, state: &mut TurnState, line: &str) -> Vec<ChatEvent> {
@@ -1707,6 +1768,7 @@ fn parse_line(dialect: Dialect, state: &mut TurnState, line: &str) -> Vec<ChatEv
         // Codex lines are read by its own server module.
         Dialect::Codex => Vec::new(),
         Dialect::Gemini => parse_gemini(state, &value),
+        Dialect::Antigravity => parse_antigravity(state, &value),
     }
 }
 
@@ -2203,6 +2265,201 @@ fn gemini_tool_summary(name: &str, parameters: &Value) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| json_value_text(parameters));
     truncate(summary.lines().next().unwrap_or_default(), 200)
+}
+
+fn parse_antigravity(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
+    let mut events = Vec::new();
+    match str_field(value, "event") {
+        Some("init") => {
+            if let Some(id) = str_field(value, "conversation_id") {
+                state.native_session_id = Some(id.to_string());
+            }
+            events.push(ChatEvent::Started {
+                native_session_id: state.native_session_id.clone(),
+                model: None,
+            });
+        }
+        Some("step_update") => {
+            let Some(update) = value.get("step_update") else {
+                return events;
+            };
+            let step_index = u64_field(update, "step_index");
+            let step_type = str_field(update, "step_type");
+            let step_state = str_field(update, "state");
+
+            if let Some(usage) = update.get("usage") {
+                state.usage = Some(ChatUsage {
+                    input_tokens: u64_field(usage, "input_tokens"),
+                    output_tokens: u64_field(usage, "output_tokens"),
+                    cache_read_tokens: u64_field(usage, "cache_read_tokens"),
+                    cache_write_tokens: u64_field(usage, "cache_write_tokens"),
+                    reasoning_tokens: u64_field(usage, "thinking_tokens"),
+                });
+            }
+
+            match step_type {
+                Some("agent_response") => {
+                    if let Some(delta) = str_field(update, "text_delta") {
+                        if !delta.is_empty() {
+                            state.had_assistant_text = true;
+                            events.push(ChatEvent::TextDelta {
+                                item_id: format!("antigravity-msg-{step_index}"),
+                                delta: delta.to_string(),
+                            });
+                        }
+                    } else if step_state == Some("DONE") {
+                        if let Some(response) = str_field(update, "response") {
+                            if !response.is_empty() {
+                                state.had_assistant_text = true;
+                                events.push(ChatEvent::Text {
+                                    item_id: format!("antigravity-msg-{step_index}"),
+                                    text: response.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                Some("tool") => {
+                    let tool_name = str_field(update, "tool_name").unwrap_or("tool");
+                    let tool_info = update.get("tool_info");
+                    let item_id = format!("antigravity-tool-{step_index}");
+
+                    if step_state == Some("ACTIVE") {
+                        let parameters = tool_info
+                            .and_then(|info| info.get("parameters"))
+                            .unwrap_or(&Value::Null);
+                        events.push(ChatEvent::ToolStarted {
+                            item_id,
+                            name: tool_name.to_string(),
+                            summary: antigravity_tool_summary(tool_name, parameters),
+                        });
+                    } else if step_state == Some("DONE") {
+                        let output = tool_info
+                            .and_then(|info| info.get("output"))
+                            .map(json_value_text)
+                            .unwrap_or_default();
+                        events.push(ChatEvent::ToolFinished {
+                            item_id,
+                            name: Some(tool_name.to_string()),
+                            summary: None,
+                            output: bounded_output(&output),
+                            is_error: false,
+                        });
+                    }
+                }
+                Some("error") => {
+                    let message = truncate(
+                        str_field(update, "message")
+                            .unwrap_or("Antigravity CLI reported an error."),
+                        2048,
+                    );
+                    state.error = Some(message.clone());
+                    events.push(ChatEvent::Notice { message });
+                }
+                _ => {}
+            }
+        }
+        Some("result") => {
+            state.turn_complete = true;
+            let Some(result) = value.get("result") else {
+                return events;
+            };
+            if let Some(id) = str_field(result, "conversation_id") {
+                state.native_session_id = Some(id.to_string());
+            }
+            if let Some(duration_seconds) = result.get("duration_seconds").and_then(Value::as_f64) {
+                state.duration_ms = Some((duration_seconds * 1000.0) as u64);
+            }
+            if let Some(usage) = result.get("usage") {
+                state.usage = Some(ChatUsage {
+                    input_tokens: u64_field(usage, "input_tokens"),
+                    output_tokens: u64_field(usage, "output_tokens"),
+                    cache_read_tokens: u64_field(usage, "cache_read_tokens"),
+                    cache_write_tokens: u64_field(usage, "cache_write_tokens"),
+                    reasoning_tokens: u64_field(usage, "thinking_tokens"),
+                });
+            }
+            if !state.had_assistant_text {
+                if let Some(response) = str_field(result, "response") {
+                    if !response.is_empty() {
+                        events.push(ChatEvent::Text {
+                            item_id: "antigravity-response".to_string(),
+                            text: response.to_string(),
+                        });
+                    }
+                }
+            }
+            let status = str_field(result, "status");
+            if status == Some("SUCCESS") {
+                state.error = None;
+            } else if state.error.is_none() {
+                let msg = str_field(result, "error")
+                    .or_else(|| str_field(result, "message"))
+                    .unwrap_or("Antigravity CLI reported an error.");
+                state.error = Some(truncate(msg, 2048));
+            }
+        }
+        _ => {}
+    }
+    events
+}
+
+fn antigravity_tool_summary(name: &str, parameters: &Value) -> String {
+    let pick = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| str_field(parameters, key))
+            .map(str::to_string)
+    };
+    let summary = match name {
+        "run_command" => pick(&["CommandLine", "command_line", "command"]),
+        "view_file" | "replace_file_content" | "write_to_file" => {
+            pick(&["AbsolutePath", "TargetFile", "path", "file_path"])
+        }
+        "find_by_name" => pick(&["Pattern", "SearchDirectory"]),
+        "list_dir" => pick(&["DirectoryPath", "path"]),
+        "grep_search" => pick(&["Query", "query"]),
+        "search_web" => pick(&["query", "Query"]),
+        "read_url_content" | "open_browser_url" | "read_browser_page" => pick(&["Url", "url"]),
+        "schedule" => pick(&["Prompt", "prompt"]),
+        "send_message" => pick(&["Recipient", "recipient"]),
+        _ => None,
+    };
+    let summary = summary.unwrap_or_else(|| match parameters {
+        Value::Object(map) => map
+            .values()
+            .find_map(|value| value.as_str().map(str::to_string))
+            .unwrap_or_else(|| serde_json::to_string(parameters).unwrap_or_default()),
+        _ => String::new(),
+    });
+    truncate(summary.lines().next().unwrap_or_default(), 200)
+}
+
+fn parse_antigravity_models(raw: &str) -> Vec<ChatModelChoice> {
+    let mut choices = Vec::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Fetching available models") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('\t').collect();
+        let value = parts[0].trim();
+        if value.is_empty() {
+            continue;
+        }
+        let label = parts
+            .get(1)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(value);
+        let is_default = choices.is_empty();
+        choices.push(ChatModelChoice {
+            value: value.to_string(),
+            label: label.to_string(),
+            description: None,
+            is_default,
+        });
+    }
+    choices
 }
 
 fn json_value_text(value: &Value) -> String {
@@ -2886,6 +3143,137 @@ mod tests {
             ]
         );
         assert!(!args.iter().any(|argument| argument.contains("prompt")));
+    }
+
+    #[test]
+    fn antigravity_stream_reports_text_tools_usage_and_session() {
+        let raw = r#"{"event":"init","conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","init":{"cwd":"/work","tools":["list_dir"],"permission_mode":"request-review"}}
+{"event":"step_update","step_update":{"conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"list_dir","tool_info":{"name":"list_dir","parameters":{"DirectoryPath":"/work"}}}}
+{"event":"step_update","step_update":{"conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","step_index":1,"state":"DONE","step_type":"tool","tool_name":"list_dir","duration_seconds":0.12,"tool_info":{"name":"list_dir","parameters":{"DirectoryPath":"/work"},"output":"Cargo.toml\nsrc/"}}}
+{"event":"step_update","step_update":{"conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Found files."}}
+{"event":"step_update","step_update":{"conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"\n","duration_seconds":1.2,"usage":{"input_tokens":120,"output_tokens":15,"thinking_tokens":10,"cache_read_tokens":5,"total_tokens":135}}}
+{"event":"result","result":{"conversation_id":"a49a1af5-0ea7-44c3-a514-d39807e68914","status":"SUCCESS","response":"Found files.\n","duration_seconds":1.5,"num_turns":1,"usage":{"input_tokens":120,"output_tokens":15,"thinking_tokens":10,"cache_read_tokens":5,"total_tokens":135}}}"#;
+        let (state, events) = lines(Dialect::Antigravity, raw);
+
+        assert_eq!(
+            events[0],
+            ChatEvent::Started {
+                native_session_id: Some("a49a1af5-0ea7-44c3-a514-d39807e68914".to_string()),
+                model: None,
+            }
+        );
+        assert_eq!(
+            events[1],
+            ChatEvent::ToolStarted {
+                item_id: "antigravity-tool-1".to_string(),
+                name: "list_dir".to_string(),
+                summary: "/work".to_string(),
+            }
+        );
+        assert_eq!(
+            events[2],
+            ChatEvent::ToolFinished {
+                item_id: "antigravity-tool-1".to_string(),
+                name: Some("list_dir".to_string()),
+                summary: None,
+                output: "Cargo.toml\nsrc/".to_string(),
+                is_error: false,
+            }
+        );
+        assert_eq!(
+            events[3],
+            ChatEvent::TextDelta {
+                item_id: "antigravity-msg-2".to_string(),
+                delta: "Found files.".to_string(),
+            }
+        );
+        assert_eq!(
+            events[4],
+            ChatEvent::TextDelta {
+                item_id: "antigravity-msg-2".to_string(),
+                delta: "\n".to_string(),
+            }
+        );
+        assert_eq!(
+            state.usage,
+            Some(ChatUsage {
+                input_tokens: 120,
+                output_tokens: 15,
+                cache_read_tokens: 5,
+                cache_write_tokens: 0,
+                reasoning_tokens: 10,
+            })
+        );
+        assert_eq!(state.duration_ms, Some(1500));
+        assert!(state.turn_complete);
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn antigravity_arguments_set_mode_and_resume_by_id() {
+        let args = turn_arguments(
+            Dialect::Antigravity,
+            Path::new("/work"),
+            ChatPermission::WorkspaceWrite,
+            Some("gemini-3.8-flash-high"),
+            Some("conv-123"),
+            &[],
+        );
+        let args: Vec<String> = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--output-format",
+                "stream-json",
+                "--mode",
+                "accept-edits",
+                "--model",
+                "gemini-3.8-flash-high",
+                "--conversation",
+                "conv-123",
+            ]
+        );
+    }
+
+    #[test]
+    fn antigravity_models_parsed_from_stdout() {
+        let stdout = "Fetching available models...\n\
+gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n\
+gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\n\
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
+        let models = parse_antigravity_models(stdout);
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0].value, "gemini-3.8-flash-high");
+        assert_eq!(models[0].label, "Gemini 3.8 Flash (High)");
+        assert!(models[0].is_default);
+        assert_eq!(models[1].value, "gemini-3.8-flash-medium");
+        assert!(!models[1].is_default);
+        assert_eq!(models[2].value, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn antigravity_tool_summary_extracts_salient_fields() {
+        assert_eq!(
+            antigravity_tool_summary(
+                "run_command",
+                &serde_json::json!({"CommandLine": "git status"})
+            ),
+            "git status"
+        );
+        assert_eq!(
+            antigravity_tool_summary(
+                "view_file",
+                &serde_json::json!({"AbsolutePath": "/work/file.txt"})
+            ),
+            "/work/file.txt"
+        );
+        assert_eq!(
+            antigravity_tool_summary("find_by_name", &serde_json::json!({"Pattern": "*.rs"})),
+            "*.rs"
+        );
     }
 
     #[test]

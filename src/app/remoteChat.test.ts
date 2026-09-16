@@ -4,6 +4,36 @@ import { fakeChatApi } from "./testFixtures/agentApis";
 import { performRemoteChat, remotePage, remoteThread } from "./remoteChat";
 function thread() { return createThread({ definitionId: "codex", workingDirectory: "/work", permission: "ask", model: "" }, "thread", 1); }
 describe("Remote conversation projection", () => {
+  it("binds supplemental instructions to the observed Codex turn", async () => {
+    const value = { ...thread(), runningTurnId: "active-turn" };
+    const steer = vi.fn(async () => {});
+    const chat = fakeChatApi({ threads: [value], steer });
+    expect(remoteThread(value).canSteer).toBe(true);
+    await performRemoteChat(chat, [], { kind: "steer", threadId: value.id, turnId: "active-turn", text: "先檢查測試\n再修改" });
+    expect(steer).toHaveBeenCalledWith(value.id, "先檢查測試\n再修改", [], "active-turn");
+    await expect(performRemoteChat(chat, [], { kind: "steer", threadId: value.id, turnId: "expired-turn", text: "不要送到下一輪" })).rejects.toThrow("changed");
+    expect(steer).toHaveBeenCalledTimes(1);
+  });
+  it("does not steer unsupported, idle, queued or approval-blocked conversations", async () => {
+    for (const patch of [
+      { definitionId: "claude" as const, runningTurnId: "turn" },
+      { runningTurnId: null },
+      { runningTurnId: "turn", pendingInputs: [{ id: "queued", prompt: "next", attachments: [], profileConfigPath: null, createdAt: 1 }] },
+      { runningTurnId: "turn", items: [{ id: "approval", type: "approval" as const, requestId: "request", name: "tool", summary: "review", input: "{}", decision: "pending" as const }] },
+    ]) {
+      const value = { ...thread(), ...patch };
+      const steer = vi.fn(async () => {});
+      expect(remoteThread(value).canSteer).toBe(false);
+      await expect(performRemoteChat(fakeChatApi({ threads: [value], steer }), [], { kind: "steer", threadId: value.id, turnId: "turn", text: "hello" })).rejects.toThrow();
+      expect(steer).not.toHaveBeenCalled();
+    }
+  });
+  it.each([" ", "\0", "中".repeat(5462)])("rejects empty, NUL or oversized instructions before dispatch", async (text) => {
+    const value = { ...thread(), runningTurnId: "turn" };
+    const steer = vi.fn(async () => {});
+    await expect(performRemoteChat(fakeChatApi({ threads: [value], steer }), [], { kind: "steer", threadId: value.id, turnId: "turn", text })).rejects.toThrow("UTF-8");
+    expect(steer).not.toHaveBeenCalled();
+  });
   it("pages real transcript items within the wire budget without exporting account or native session identities", () => {
     const value = { ...thread(), nativeSessionId: "private-native-id", accountProfileId: "private-profile", items: Array.from({length: 100}, (_, i) => ({ type: "text" as const, id: `item-${i}`, text: "中文\\\"".repeat(9000) })) };
     const last = remotePage(value, null);

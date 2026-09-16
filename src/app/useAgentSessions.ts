@@ -285,7 +285,7 @@ const FALLBACK_CATALOG_SOURCE: [string, string, string, boolean][] = [
   ["codex", "OpenAI Codex", "codex", true],
   ["claude", "Claude Code", "claude", true],
   ["gemini", "Gemini CLI", "gemini", true],
-  ["antigravity", "Google Antigravity CLI", "agy", false],
+  ["antigravity", "Google Antigravity CLI", "agy", true],
   ["opencode", "OpenCode", "opencode", false],
   ["copilot", "GitHub Copilot CLI", "copilot", false],
   ["hermes", "Hermes Agent", "hermes", true],

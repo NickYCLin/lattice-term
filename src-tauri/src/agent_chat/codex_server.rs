@@ -388,6 +388,7 @@ fn opening_lines(
 /// Everything `send` has validated about one turn.
 pub(super) struct TurnRequest<'a> {
     pub browser_enabled: bool,
+    pub mcp: Option<&'a crate::agent_mcp::McpLaunch>,
     pub thread_id: &'a str,
     pub turn_id: &'a str,
     pub prompt: &'a str,
@@ -503,6 +504,9 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.profile_config_directory,
     );
     command.arg("app-server");
+    if let Some(mcp) = request.mcp {
+        command.args(crate::agent_mcp::codex_arguments(mcp));
+    }
     if request.browser_enabled {
         command.args(super::browser::codex_arguments());
     }
@@ -1337,6 +1341,7 @@ mod tests {
                 &servers,
                 TurnRequest {
                     browser_enabled: false,
+                    mcp: None,
                     thread_id: "e2e-codex",
                     turn_id,
                     prompt,

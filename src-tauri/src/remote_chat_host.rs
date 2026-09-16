@@ -33,6 +33,7 @@ struct Shared {
     active: AtomicBool,
     pending: Mutex<HashMap<String, oneshot::Sender<ChatResponse>>>,
     completed: Mutex<HashMap<String, ChatResponse>>,
+    fingerprints: Mutex<HashMap<String, [u8; 32]>>,
 }
 // CLI typing needs more identities than chat turns. Keep the cache bounded
 // even when a conversation mutation returns a large projection.
@@ -62,20 +63,66 @@ pub struct Bridge {
     pub token: String,
     pub allow_chat: bool,
     pub cli: Arc<crate::remote_cli::Access>,
+    pub fleet: Option<Arc<crate::remote_fleet::Access>>,
     shared: Arc<Shared>,
     task: JoinHandle<()>,
 }
 impl Bridge {
+    #[cfg(test)]
+    pub(crate) async fn fleet_fixture(access: Arc<crate::remote_fleet::Access>) -> Arc<Self> {
+        let owner = Arc::new(std::sync::OnceLock::<std::sync::Weak<Self>>::new());
+        let reply_owner = owner.clone();
+        let dispatch_access = access.clone();
+        let mut bridge = Self::start_dispatch(Arc::new(move |request| {
+            let (owner, access) = (reply_owner.clone(), dispatch_access.clone());
+            tokio::spawn(async move {
+                let lattice_remote::chat_protocol::ChatOperation::Fleet { request: call } =
+                    request.operation
+                else {
+                    return;
+                };
+                let response = match access.perform(call).await {
+                    Ok(value) => ChatResponse {
+                        id: request.id,
+                        value,
+                        error: None,
+                    },
+                    Err(error) => ChatResponse::failed(request.id, &error),
+                };
+                if let Some(bridge) = owner.get().and_then(std::sync::Weak::upgrade) {
+                    let _ = bridge.reply(response);
+                }
+            });
+        }))
+        .await
+        .unwrap();
+        bridge.fleet = Some(access);
+        let bridge = Arc::new(bridge);
+        assert!(owner.set(Arc::downgrade(&bridge)).is_ok());
+        bridge
+    }
+
     pub async fn start(
         app: AppHandle,
         host_id: String,
         allow_chat: bool,
         allow_cli: bool,
+        fleet: Option<Arc<crate::remote_fleet::Access>>,
     ) -> Result<Self, String> {
         let cli = Arc::new(crate::remote_cli::Access::new(allow_cli));
         let access = cli.clone();
+        let fleet_access = fleet.clone();
         let mut bridge = Self::start_dispatch(Arc::new(move |request| {
-            if request.operation.is_cli() || !allow_chat {
+            if request.operation.is_fleet() {
+                let (app, host_id, fleet) = (app.clone(), host_id.clone(), fleet_access.clone());
+                tokio::spawn(async move {
+                    let lattice_remote::chat_protocol::ChatOperation::Fleet { request: call } = request.operation else { return; };
+                    let result = match fleet { Some(access) => access.perform(call).await, None => Err("Fleet sharing is disabled.".into()) };
+                    let response = match result { Ok(value) => ChatResponse { id: request.id, value, error: None }, Err(message) => ChatResponse::failed(request.id, &message) };
+                    let registry = app.state::<Arc<crate::remote_host::RemoteHostRegistry>>();
+                    let _ = crate::remote_host::chat_reply(&registry, &host_id, response);
+                });
+            } else if request.operation.is_cli() || !allow_chat {
                 let (app, host_id, access) = (app.clone(), host_id.clone(), access.clone());
                 tokio::spawn(async move {
                     let result = if request.operation.is_cli() { access.perform(&app, request.operation).await } else { Err("Conversation sharing is disabled.".into()) };
@@ -92,6 +139,7 @@ impl Bridge {
         })).await?;
         bridge.allow_chat = allow_chat;
         bridge.cli = cli;
+        bridge.fleet = fleet;
         Ok(bridge)
     }
     async fn start_dispatch(
@@ -112,6 +160,7 @@ impl Bridge {
             active: AtomicBool::new(true),
             pending: Mutex::new(HashMap::new()),
             completed: Mutex::new(HashMap::new()),
+            fingerprints: Mutex::new(HashMap::new()),
         });
         let state = shared.clone();
         let bearer = token.clone();
@@ -142,8 +191,11 @@ impl Bridge {
                         if !state.active.load(Ordering::Acquire) { return None; }
                         let request = envelope.request;
                         let id = request.id.clone();
+                        use sha2::{Digest, Sha256};
+                        let fingerprint: [u8; 32] = Sha256::digest(serde_json::to_vec(&request).ok()?).into();
+                        let conflict = state.fingerprints.lock().ok()?.get(&id).is_some_and(|saved| saved != &fingerprint);
                         let cached = state.completed.lock().ok()?.get(&id).cloned();
-                        let response = if let Some(cached) = cached { cached } else {
+                        let response = if conflict { ChatResponse::failed(id.clone(), "The request ID was already used for a different operation.") } else if let Some(cached) = cached { cached } else {
                             if request.mutates() && state.completed.lock().ok()?.len() >= 65536 {
                                 ChatResponse::failed(id.clone(), "Restart sharing before issuing more operations.")
                             } else {
@@ -152,6 +204,7 @@ impl Bridge {
                                 let _pending = PendingGuard { state: state.clone(), id: id.clone() };
                                 // Reserve mutation identity before dispatch, including uncertain outcomes.
                                 if request.mutates() {
+                                    state.fingerprints.lock().ok()?.insert(id.clone(), fingerprint);
                                     state.completed.lock().ok()?.insert(id.clone(), ChatResponse::failed(id.clone(), "The operation was already submitted. Refresh its state before continuing."));
                                 }
                                 dispatch(request.clone());
@@ -181,6 +234,7 @@ impl Bridge {
             cli: Arc::new(crate::remote_cli::Access::new(false)),
             shared,
             task,
+            fleet: None,
         })
     }
     pub fn reply(&self, response: ChatResponse) -> Result<(), String> {
@@ -206,6 +260,9 @@ impl Bridge {
     }
     pub fn stop(&self) {
         self.cli.revoke();
+        if let Some(fleet) = &self.fleet {
+            fleet.revoke();
+        }
         self.shared.active.store(false, Ordering::Release);
         self.task.abort();
         if let Ok(mut pending) = self.shared.pending.lock() {
@@ -283,6 +340,16 @@ mod tests {
             .await,
             Some(response)
         );
+        assert!(rx.try_recv().is_err());
+        let mut conflicting = request.clone();
+        conflicting.operation = ChatOperation::Stop {
+            thread_id: "thread-1".into(),
+            turn_id: "turn-1".into(),
+        };
+        let conflict = call(bridge.address.clone(), bridge.token.clone(), conflicting)
+            .await
+            .unwrap();
+        assert!(conflict.error.is_some());
         assert!(rx.try_recv().is_err());
         bridge.stop();
         assert!(call(bridge.address.clone(), bridge.token.clone(), request)

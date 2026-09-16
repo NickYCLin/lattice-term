@@ -7,6 +7,7 @@ export interface AccountModelSelection {
   definitionId: string;
   accountProfileId: string | null;
   model: string;
+  provider?: "cliproxyapi";
 }
 
 export interface AccountModelTarget {
@@ -25,11 +26,12 @@ export interface AccountModelOption extends AccountModelSelection {
 }
 
 export function hasChatModels(id: string): id is ChatDefinitionId {
-  return id === "codex" || id === "claude" || id === "gemini";
+  return id === "codex" || id === "claude" || id === "gemini" || id === "antigravity";
 }
 
 export function accountModelKey(selection: AccountModelSelection): string {
-  return JSON.stringify([selection.definitionId, selection.accountProfileId, selection.model]);
+  // CLIProxyAPI's model ID is entered separately from the account/provider picker.
+  return JSON.stringify([selection.definitionId, selection.accountProfileId, selection.provider ?? null, selection.provider ? "" : selection.model]);
 }
 
 export function accountModelTargetKey(target: Pick<AccountModelTarget, "definitionId" | "configDirectory">): string {
@@ -76,6 +78,7 @@ export function accountModelOptions(
   lists: Readonly<Record<string, ChatModelList>>,
   labels: { defaultModel: string; loading: string; signedOut: string },
   selected?: AccountModelSelection,
+  includeCliProxyApi = false,
 ): AccountModelOption[] {
   return targets.flatMap((target) => {
     const list = lists[accountModelTargetKey(target)];
@@ -83,16 +86,20 @@ export function accountModelOptions(
     if (!choices.some((choice) => choice.value === "")) {
       choices.unshift({ value: "", label: list?.state === "loading" ? labels.loading : labels.defaultModel, description: null, isDefault: true });
     }
-    if (selected?.definitionId === target.definitionId && selected.accountProfileId === target.accountProfileId && selected.model && !choices.some((choice) => choice.value === selected.model)) {
+    if (!selected?.provider && selected?.definitionId === target.definitionId && selected.accountProfileId === target.accountProfileId && selected.model && !choices.some((choice) => choice.value === selected.model)) {
       choices.push({ value: selected.model, label: selected.model, description: null, isDefault: false });
     }
-    return choices.map((choice) => ({
+    const options: AccountModelOption[] = choices.map((choice) => ({
       definitionId: target.definitionId,
       accountProfileId: target.accountProfileId,
       model: choice.value,
       label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + (target.signedOut ? `（${labels.signedOut}）` : ""),
       disabled: target.signedOut,
     }));
+    if (includeCliProxyApi && target.definitionId === "codex") {
+      options.push({ definitionId: "codex", accountProfileId: target.accountProfileId, model: "", provider: "cliproxyapi", label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, "CLIProxyAPI"].filter(Boolean).join(" · ") + (target.signedOut ? `（${labels.signedOut}）` : ""), disabled: target.signedOut });
+    }
+    return options;
   });
 }
 
@@ -104,10 +111,18 @@ export function accountModelLaunchSettings(
 ): Pick<AgentLaunchRequest, "profileConfigPath" | "arguments"> {
   const profile = selection.accountProfileId === null ? null : profilesFor(profiles, selection.definitionId).find((entry) => entry.id === selection.accountProfileId);
   if (selection.accountProfileId !== null && !profile) throw new Error("account-model:missing-account");
+  if (selection.provider) {
+    if (selection.provider !== "cliproxyapi" || selection.definitionId !== "codex") throw new Error("account-model:unsupported-provider");
+    if (!validCliProxyModel(selection.model)) throw new Error("account-model:invalid-proxy-model");
+  }
   return {
     profileConfigPath: profile?.configDirectory ?? null,
-    arguments: selection.model ? ["--model", selection.model] : [],
+    arguments: selection.provider ? ["-c", "model_provider=cliproxyapi", "--model", selection.model] : selection.model ? ["--model", selection.model] : [],
   };
+}
+
+export function validCliProxyModel(model: string): boolean {
+  return model.length > 0 && model.length <= 256 && model.trim() === model && !/[\s\p{Cc}]/u.test(model) && !model.startsWith("-");
 }
 
 function accountPathKey(path: string | null | undefined): string {

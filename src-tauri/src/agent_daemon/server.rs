@@ -105,9 +105,10 @@ fn run(data_dir: &Path) -> i32 {
         }
     };
     let sink = Arc::new(DaemonSink::default());
-    let registry = match AgentRegistry::with_local_reporter_prefixed(
+    let registry = match AgentRegistry::with_local_reporter_prefixed_and_mcp(
         Arc::clone(&sink) as Arc<dyn AgentSink>,
         SESSION_ID_PREFIX,
+        data_dir,
     ) {
         Ok(registry) => registry,
         Err(error) => {
@@ -128,7 +129,7 @@ fn run(data_dir: &Path) -> i32 {
     // Chat turns spawn onto Tauri's runtime handle; here that is ours.
     tauri::async_runtime::set(runtime.handle().clone());
     let scheduler = Arc::new(Scheduler::open(data_dir));
-    let chat = Arc::new(AgentChatRegistry::new());
+    let chat = Arc::new(AgentChatRegistry::with_mcp(data_dir));
     log.line("Lattice Agent daemon starting");
     let result = runtime.block_on(serve(
         paths.clone(),

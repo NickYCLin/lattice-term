@@ -22,7 +22,7 @@ import type { MessageKey } from "../i18n/context";
 import { Chip } from "../components/common/Badge";
 import { Callout } from "../components/common/Callout";
 import { ReleaseNotes } from "../components/common/ReleaseNotes";
-import { CheckIcon, PlayIcon } from "../components/icons";
+import { CheckIcon, GlobeIcon, PlayIcon } from "../components/icons";
 import { useAppUpdater, type AppUpdater } from "../app/useAppUpdater";
 import { canUseInAppUpdater } from "../app/platformCapabilities";
 import { APP_VERSION } from "../app/version";
@@ -127,6 +127,72 @@ function SegmentedSetting<T extends string>({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LanguageSetting({
+  value,
+  onChange,
+}: {
+  value: Locale;
+  onChange: (value: Locale) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="setting setting--language">
+      <div className="setting__text">
+        <strong className="setting__title setting__title--icon">
+          <GlobeIcon size={15} />
+          {t("settings.language")}
+        </strong>
+        <p className="setting__description">{t("settings.languageHint")}</p>
+      </div>
+      <div
+        className="language-grid"
+        role="radiogroup"
+        aria-label={t("settings.language")}
+      >
+        {localeCatalog.map((entry, index) => {
+          const selected = value === entry.id;
+          return (
+            <button
+              type="button"
+              role="radio"
+              aria-label={entry.label}
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              className={`language-option${selected ? " is-selected" : ""}`}
+              key={entry.id}
+              lang={entry.tag}
+              onClick={() => onChange(entry.id)}
+              onKeyDown={(event) =>
+                moveRadioGroupFocus(event, index, (nextIndex) =>
+                  onChange(localeCatalog[nextIndex].id),
+                )
+              }
+            >
+              <span className="language-option__code" aria-hidden="true">
+                {entry.shortLabel}
+              </span>
+              <span className="language-option__text">
+                <strong>{entry.label}</strong>
+                {entry.englishLabel !== entry.label && (
+                  <small>{entry.englishLabel}</small>
+                )}
+              </span>
+              {selected && (
+                <span className="language-option__check">
+                  <CheckIcon size={14} />
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <p className="language-fallback-hint">
+        {t("settings.languageFallbackHint")}
+      </p>
     </div>
   );
 }
@@ -254,13 +320,7 @@ export function SettingsView({
         </div>
 
         <div className="setting-list">
-          <SegmentedSetting
-            title={t("settings.language")}
-            description={t("settings.languageHint")}
-            choices={localeCatalog.map((entry) => ({
-              value: entry.id,
-              label: entry.label,
-            }))}
+          <LanguageSetting
             value={preferences.locale}
             onChange={(locale: Locale) => onChange({ locale })}
           />

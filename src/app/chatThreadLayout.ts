@@ -1,6 +1,6 @@
 /**
- * Folders for chat threads, on the same layout model the session sidebar
- * uses: named folders that nest, a placement per node, and a collapsed set.
+ * Chat projection of the shared session/chat tree: named folders that nest,
+ * a placement per node, and a shared collapsed set.
  * Threads are the leaves; a thread that the layout has never seen lands at
  * the top level in discovery order.
  */
@@ -12,6 +12,7 @@ import {
 } from "./sessionSidebarLayout";
 import type { ChatThread } from "./agentChat";
 
+/** Legacy migration source; new edits use sharedSidebarLayout. */
 export const CHAT_SIDEBAR_LAYOUT_KEY = "latticeterm.chatSidebar.v1";
 
 export function chatThreadNodeId(threadId: string): string {
@@ -29,7 +30,12 @@ export function reconcileChatLayout(
 ): SessionSidebarLayout {
   return reconcileSessionSidebarLayout(
     layout,
-    threads.map((thread) => ({ id: chatThreadNodeId(thread.id), defaultParentId: null })),
+    [
+      ...Object.entries(layout.placements)
+        .filter(([id]) => !id.startsWith("thread:") && !id.startsWith("folder:"))
+        .map(([id, placement]) => ({ id, defaultParentId: placement.parentId })),
+      ...threads.map((thread) => ({ id: chatThreadNodeId(thread.id), defaultParentId: null })),
+    ],
   );
 }
 
@@ -68,6 +74,7 @@ export function chatSidebarRows(
       }
       const thread = threadsByNode.get(nodeId);
       if (thread) rows.push({ kind: "thread", nodeId, thread, depth });
+      else walk(nodeId, depth); // Project containers are transparent in the chat tree.
     }
   };
   walk(null, 0);
