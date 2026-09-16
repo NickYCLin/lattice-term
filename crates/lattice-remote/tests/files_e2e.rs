@@ -8,7 +8,7 @@ use lattice_remote::{
     RemoteFileRequest, RemoteFileResponse, RemoteMessage, SecureConnection, Transport,
     PROTOCOL_VERSION,
 };
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -73,7 +73,18 @@ async fn paired_viewer_lists_uploads_and_downloads_within_shared_root() {
     let mut connection = SecureConnection::connect("127.0.0.1", port, "24681357")
         .await
         .expect("connect");
-    match connection.receive().await.expect("hello") {
+    let hello = match connection.receive().await {
+        Ok(hello) => hello,
+        Err(error) => {
+            let _ = agent.kill();
+            let _ = agent.wait();
+            let mut events = String::new();
+            let _ = agent_events.take(16 * 1024).read_to_string(&mut events);
+            let _ = std::fs::remove_dir_all(&root);
+            panic!("hello: {error}; agent events: {events}");
+        }
+    };
+    match hello {
         RemoteMessage::Hello(hello) => {
             assert_eq!(hello.protocol_version, PROTOCOL_VERSION);
             assert!(hello.file_transfer);

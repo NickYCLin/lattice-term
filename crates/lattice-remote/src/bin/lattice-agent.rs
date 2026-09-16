@@ -2103,10 +2103,16 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let monitors = Monitor::all().map_err(|error| error.to_string())?;
+    // X11 and virtual-display setups may have usable monitors without a
+    // primary flag. Pairing must not immediately close in that configuration.
+    let index = monitors
+        .iter()
+        .position(|monitor| monitor.is_primary().unwrap_or(false))
+        .unwrap_or(0);
     let monitor = monitors
         .into_iter()
-        .find(|monitor| monitor.is_primary().unwrap_or(false))
-        .ok_or_else(|| "no primary display is available".to_string())?;
+        .nth(index)
+        .ok_or_else(|| "no display is available".to_string())?;
     let mut capture = capture_jpeg(&monitor)?;
     let mut width = capture.stream_width;
     let mut height = capture.stream_height;

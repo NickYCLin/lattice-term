@@ -1,3 +1,4 @@
+import { PathDropZone } from "../files/PathDropZone";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { loadRemoteHostSettings } from "../../app/remoteHostSettings";
@@ -817,6 +818,7 @@ export function RemoteHostDialog({
                     <label className="field__label" htmlFor="remote-host-file-root">
                       {t("remote.host.fileRoot")}
                     </label>
+                    <PathDropZone kind="directory" disabled={busy} onSelect={setFileRoot}>
                     <input
                       id="remote-host-file-root"
                       className="input mono"
@@ -825,6 +827,7 @@ export function RemoteHostDialog({
                       placeholder={t("remote.host.fileRootPlaceholder")}
                       onChange={(event) => setFileRoot(event.currentTarget.value)}
                     />
+                    </PathDropZone>
                     <small className="field__optional">
                       {t("remote.host.fileRootHint")}
                     </small>

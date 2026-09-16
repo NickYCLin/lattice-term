@@ -1,3 +1,4 @@
+import { PathDropZone } from "../components/files/PathDropZone";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentMcpHistory } from "../components/agents/AgentMcpHistory";
 import type {
@@ -693,6 +694,7 @@ export function AgentsView({
           </button>
         </div>
 
+        <PathDropZone kind="directory" onSelect={setWorkingDirectory}>
         <label className="field agents-cwd">
           <span className="field__label">
             <FolderIcon size={13} />
@@ -707,6 +709,7 @@ export function AgentsView({
           />
           <span className="agents-field-hint">{t("agents.cwd.hint")}</span>
         </label>
+        </PathDropZone>
 
         <label className="field agents-cwd">
           <span className="field__label">{t("agents.launchNote")}</span>

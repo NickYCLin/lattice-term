@@ -6,7 +6,7 @@ import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import "./RemoteCliPane.css";
 
-export function RemoteCliPane({ session, theme }: { session: RemoteSessionSummary; theme: ThemeId }) {
+export function RemoteCliPane({ session, theme, active = true }: { session: RemoteSessionSummary; theme: ThemeId; active?: boolean }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<RemoteCliSession[]>([]);
   const [selected, setSelected] = useState<RemoteCliSession | null>(null);
@@ -14,7 +14,7 @@ export function RemoteCliPane({ session, theme }: { session: RemoteSessionSummar
   const [loaded, setLoaded] = useState(false);
   const [generation, refresh] = useState(0);
   useEffect(() => {
-    if (!session.cli || selected) return;
+    if (!active || !session.cli || selected) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
@@ -26,13 +26,13 @@ export function RemoteCliPane({ session, theme }: { session: RemoteSessionSummar
     }
     void poll();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [session.sessionId, session.cli, selected, generation]);
+  }, [active, session.sessionId, session.cli, selected, generation]);
   return <section className="remote-cli-pane" aria-label={t("remote.cli.title")}>
     <header><strong>{t("remote.cli.title")}</strong>
       {selected && <button className="button button--ghost" onClick={() => setSelected(null)}>{t("remote.cli.back")}</button>}
       <button className="button button--ghost" onClick={() => { setProblem(false); refresh(value => value + 1); }}>{t("remote.chat.refresh")}</button>
     </header>
-    {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
+    {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
       <p className="muted">{t("remote.cli.hint")}</p>
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
       {!problem && <p role="status">{!loaded ? t("remote.cli.loading") : sessions.length === 0 ? t("remote.cli.empty") : ""}</p>}

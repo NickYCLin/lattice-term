@@ -47,7 +47,7 @@ export function TunnelsView({
   backendAvailable,
   onActivity,
 }: TunnelsViewProps) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const sshProfiles = useMemo(() => profiles.filter((profile) => profile.protocol === "ssh"), [profiles]);
   const {
     tunnels,
@@ -228,7 +228,7 @@ export function TunnelsView({
             {t("tunnels.metrics.traffic")}
           </div>
           <div style={{ fontSize: "var(--text-2xl)", fontWeight: 700, color: "var(--accent)" }}>
-            {formatBytes(totalUploaded + totalDownloaded)}
+            {formatBytes(totalUploaded + totalDownloaded, tag)}
           </div>
         </div>
       </div>
@@ -491,7 +491,7 @@ export function TunnelsView({
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "var(--space-3)", borderTop: "1px solid var(--line)", paddingTop: "var(--space-3)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
                     <span>
-                      {t("tunnels.stats.transferred")}: <strong style={{ color: "var(--text)" }}>{formatBytes(state.bytesUploaded + state.bytesDownloaded)}</strong>
+                      {t("tunnels.stats.transferred")}: <strong style={{ color: "var(--text)" }}>{formatBytes(state.bytesUploaded + state.bytesDownloaded, tag)}</strong>
                     </span>
                     {isActive && (
                       <span>
@@ -848,7 +848,7 @@ function TunnelFormModal({ initial, profiles, onClose, onSave }: TunnelFormModal
                   type="text"
                   className="input mono"
                   style={{ width: "100%" }}
-                  placeholder="e.g. 10.0.0.5 or localhost"
+                  placeholder="192.0.2.5 / localhost"
                   value={remoteHost}
                   onChange={(e) => {
                     setRemoteHost(e.target.value);

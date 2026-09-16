@@ -1,3 +1,4 @@
+import { PathDropZone } from "../files/PathDropZone";
 /**
  * Everything between pressing Connect and having a terminal.
  *
@@ -496,6 +497,7 @@ export function ConnectFlow({
                 <label className="field__label" htmlFor="connect-key-path">
                   {t("connect.keyPath")}
                 </label>
+                <PathDropZone kind="file" disabled={busy || choosingKey} onSelect={setKeyPath}>
                 <div className="field__input-action">
                   <input
                     id="connect-key-path"
@@ -519,6 +521,7 @@ export function ConnectFlow({
                     {t("connect.keyPath.choose")}
                   </button>
                 </div>
+                </PathDropZone>
                 {detectedKeys.length > 0 && (
                   <datalist id="connect-key-suggestions">
                     {detectedKeys.map((key) => (

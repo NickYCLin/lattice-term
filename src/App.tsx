@@ -1037,6 +1037,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   }}
                 >
                   <SessionsView
+                    visible={view === "terminal"}
                     mobile={onMobile}
                     agents={agents}
                     ssh={ssh}

@@ -1,3 +1,6 @@
+import { PathDropZone } from "../components/files/PathDropZone";
+import { FileDropZone } from "../components/files/FileDropZone";
+import { localFileError, readSelectedText, type UploadFile } from "../app/localFiles";
 /** Unified workspace for text terminals and graphical remote sessions. */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -235,6 +238,7 @@ export function SessionsView({
   restoredWorkspaceSessions,
   unrestoredWorkspaceSessions,
   mobile = false,
+  visible = true,
 }: {
   agents: AgentApi;
   ssh: SshApi;
@@ -249,6 +253,7 @@ export function SessionsView({
   restoredWorkspaceSessions: readonly SavedWorkspaceSession[];
   unrestoredWorkspaceSessions: readonly SavedWorkspaceSession[];
   mobile?: boolean;
+  visible?: boolean;
 }) {
   const { t, tag } = useI18n();
   const sessionTabsId = useId();
@@ -491,11 +496,11 @@ export function SessionsView({
   const modelAvailable = (selection: AccountModelSelection | null) => selection !== null && (!selection.provider || validCliProxyModel(selection.model)) && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selection));
   const projectModelAvailable = modelAvailable(selectedProjectModel);
 
-  async function chooseProjectDirectory() {
+  async function chooseProjectDirectory(droppedPath?: string) {
     setChoosingProject(true);
     setNewProjectError(null);
     try {
-      const selected = await open({
+      const selected = droppedPath ?? await open({
         directory: true,
         multiple: false,
         title: t("terminal.projects.choose"),
@@ -511,12 +516,12 @@ export function SessionsView({
     }
   }
 
-  async function chooseRelocationDirectory(session: AgentSessionRef) {
+  async function chooseRelocationDirectory(session: AgentSessionRef, droppedPath?: string) {
     setChoosingRelocation(true);
     setRelocationError(null);
     setRelocationNotice(null);
     try {
-      const selected = await open({
+      const selected = droppedPath ?? await open({
         directory: true,
         multiple: false,
         title: t("terminal.directory.choose"),
@@ -662,26 +667,21 @@ export function SessionsView({
     });
   }
 
-  async function readWorkspaceImport(file: File) {
+  async function readWorkspaceImport(file: UploadFile) {
     setWorkspaceTransferNotice(null);
     setWorkspaceImportError(null);
     try {
       if (file.size > MAX_WORKSPACE_TRANSFER_BYTES) {
         throw new Error(t("terminal.projects.importInvalid"));
       }
-      const transfer = parseWorkspaceTransfer(await file.text());
+      const transfer = parseWorkspaceTransfer(await readSelectedText(file, MAX_WORKSPACE_TRANSFER_BYTES));
       if (!transfer) throw new Error(t("terminal.projects.importInvalid"));
       setWorkspaceImport(transfer);
     } catch (reason) {
       setWorkspaceTransferNotice({
         tone: "danger",
         title: t("terminal.projects.importFailedTitle"),
-        body:
-          reason instanceof Error
-            ? reason.message
-            : t("terminal.projects.importReadFailed", {
-                detail: String(reason),
-              }),
+        body: localFileError(reason, t),
       });
     }
   }
@@ -1572,6 +1572,8 @@ export function SessionsView({
       mobileOpen={mobileTreeOpen}
       onMobileClose={() => setMobileTreeOpen(false)}
       onChooseProject={() => void chooseProjectDirectory()}
+      onDropProject={path => chooseProjectDirectory(path)}
+      onDropWorkspace={readWorkspaceImport}
       onLaunchProject={openSavedProject}
       onSelect={(sessionId) => {
         setMobileTreeOpen(false);
@@ -1687,6 +1689,7 @@ export function SessionsView({
                       {t("terminal.projects")}
                     </button>
                   )}
+                  <PathDropZone compact kind="directory" disabled={choosingProject} onSelect={path => chooseProjectDirectory(path)}>
                   <button
                     type="button"
                     className="button button--primary"
@@ -1700,6 +1703,8 @@ export function SessionsView({
                         : "terminal.projects.add",
                     )}
                   </button>
+                  </PathDropZone>
+                  <FileDropZone compact disabled={importingWorkspace || workspaceImport !== null} onSelect={readWorkspaceImport}>
                   <button
                     type="button"
                     className="button button--ghost"
@@ -1708,6 +1713,7 @@ export function SessionsView({
                     <ImportIcon size={14} />
                     {t("terminal.projects.import")}
                   </button>
+                  </FileDropZone>
                   {homeDirectory && installedAgents.length > 0 && (
                   <div className="terminal-empty-quick">
                     <small>{t("terminal.empty.quickChat")}</small>
@@ -1924,6 +1930,7 @@ export function SessionsView({
                 <div className="session-header__actions">
                   {active.kind === "agent" && editingTab !== active.sessionId && (
                     <>
+                  <PathDropZone compact kind="directory" disabled={choosingRelocation} onSelect={path => chooseRelocationDirectory(active, path)}>
                       <button
                         type="button"
                         className="icon-button icon-button--sm"
@@ -1934,6 +1941,7 @@ export function SessionsView({
                       >
                         <FolderIcon size={12} />
                       </button>
+                  </PathDropZone>
                       <button
                         type="button"
                         className="icon-button icon-button--sm"
@@ -2249,7 +2257,7 @@ export function SessionsView({
                     <SftpPane
                       session={sftpSession}
                       sftp={sftp}
-                      active={isActive}
+                      active={visible && isActive}
                     />
                     {isActive && (
                       <div className="ssh-split__metrics">
@@ -2294,7 +2302,7 @@ export function SessionsView({
               <SftpPane
                 session={session}
                 sftp={sftp}
-                active={session.sessionId === active.sessionId}
+                active={visible && session.sessionId === active.sessionId}
               />
             </div>
           ))}
@@ -2304,7 +2312,7 @@ export function SessionsView({
             key={session.sessionId}
             hidden={session.sessionId !== active.sessionId}
           >
-            <RemotePane session={session} remote={remote} theme={theme} />
+            <RemotePane session={session} remote={remote} theme={theme} active={visible && session.sessionId === active.sessionId} />
           </div>
         ))}
         {rdp.sessions.map((session) => (

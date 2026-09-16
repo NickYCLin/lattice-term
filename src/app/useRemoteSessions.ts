@@ -1,3 +1,4 @@
+import type { UploadFile } from "./localFiles";
 /** Lattice Remote sessions and their latest encrypted-stream frame. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -151,7 +152,7 @@ export interface RemoteApi {
   uploadFile: (
     sessionId: string,
     parent: string,
-    file: File,
+    file: UploadFile,
     overwrite: boolean,
     onStarted?: (transfer: RemoteFileTransfer) => void,
   ) => Promise<void>;
@@ -942,7 +943,7 @@ export function useRemoteSessions(): RemoteApi {
     async (
       sessionId: string,
       parent: string,
-      file: File,
+      file: UploadFile,
       overwrite: boolean,
       onStarted?: (transfer: RemoteFileTransfer) => void,
     ) => {
@@ -965,6 +966,10 @@ export function useRemoteSessions(): RemoteApi {
         ),
       }));
       onStarted?.(transfer);
+      if ("nativePath" in file) {
+        await invoke("remote_file_upload_path", { sessionId, transferId: transfer.transferId, path: file.nativePath, size: file.size });
+        return;
+      }
       await streamRemoteFileUpload(
         file,
         sessionId,
