@@ -1540,12 +1540,17 @@ mod tests {
         assert!(!text.contains("private tool planning"));
         assert!(!text.contains("tool output"));
         assert!(!text.contains("unfinished answer"));
-        assert!(locate_antigravity_in(
-            directory.path(),
-            directory.path().to_str().unwrap(),
-            Some("../outside")
-        )
-        .is_none());
+        // A captured id that is not a conversation id is never joined into a
+        // path; the lookup ignores it and falls back to the newest transcript.
+        assert_eq!(
+            locate_antigravity_in(
+                directory.path(),
+                directory.path().to_str().unwrap(),
+                Some("../outside")
+            )
+            .unwrap(),
+            fs::canonicalize(&transcript).unwrap()
+        );
     }
 
     #[test]
@@ -1586,7 +1591,7 @@ mod tests {
 
         // 2. With history.jsonl pointing project_path to conv2_id:
         let history_file = directory.path().join("history.jsonl");
-        let history_lines = vec![
+        let history_lines = [
             serde_json::json!({
                 "workspace": "D:\\unrelated\\path",
                 "conversationId": conv1_id,

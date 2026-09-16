@@ -8605,6 +8605,7 @@ model = "gpt-5.3-codex"
             ("gemini", vec!["--resume", "session-42"]),
             ("hermes", vec!["--resume", "session-42"]),
             ("cursor", vec!["--resume", "session-42"]),
+            ("antigravity", vec!["--conversation", "session-42"]),
         ] {
             let spec = AGENTS
                 .iter()
@@ -8624,7 +8625,14 @@ model = "gpt-5.3-codex"
             .collect();
         assert_eq!(
             supported,
-            HashSet::from(["codex", "claude", "gemini", "hermes", "cursor"])
+            HashSet::from([
+                "codex",
+                "claude",
+                "gemini",
+                "hermes",
+                "cursor",
+                "antigravity"
+            ])
         );
         let latest_supported: HashSet<_> = definitions
             .iter()

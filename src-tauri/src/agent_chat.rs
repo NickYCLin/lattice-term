@@ -2903,7 +2903,10 @@ mod tests {
 
     #[test]
     fn gemini_uses_its_documented_routing_aliases() {
-        assert_eq!(supported_definitions(), ["claude", "codex", "gemini"]);
+        assert_eq!(
+            supported_definitions(),
+            ["claude", "codex", "gemini", "antigravity"]
+        );
         let models = gemini_model_choices();
         assert_eq!(models[0].value, "");
         assert!(models[0].is_default);
