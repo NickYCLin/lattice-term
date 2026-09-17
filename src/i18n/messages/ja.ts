@@ -1422,6 +1422,7 @@ export const messages: Messages = {
   "remote.host.activeAction": "活動的な共有",
   "remote.host.securityTitle": "ペアリングと権限",
   "remote.host.problemTitle": "共有ステータスが変更されました",
+  "remote.host.relayDnsFailure": "中継サーバーが見つかりません。下のアドレスとネットワーク、DNS の設定を確認してください。LatticeTerm は自動的に再試行します。",
   "remote.host.state.waiting": "ペアリングの待ち合わせ",
   "remote.host.state.pairing": "ペアリングコードの検証",
   "remote.host.state.streaming": "暗号化された表示の送信",

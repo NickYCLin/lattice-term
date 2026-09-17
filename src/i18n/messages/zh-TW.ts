@@ -1516,6 +1516,7 @@ export const zhTW = {
   "remote.host.securityTitle": "配對與操作權限",
   "remote.host.securityBody": "配對端必須提供正確配對碼，才能查看螢幕與使用已授權的功能。資料全程端對端加密。鍵鼠、檔案、命令、對話與既有 CLI 分別授權；套用設定會重新建立分享連線。",
   "remote.host.problemTitle": "分享狀態已變更",
+  "remote.host.relayDnsFailure": "找不到中繼伺服器。請確認下方位址是否仍有效，並檢查網路與 DNS 設定；LatticeTerm 會自動重試。",
   "remote.host.state.waiting": "等待配對",
   "remote.host.state.pairing": "正在驗證配對碼",
   "remote.host.state.streaming": "正在加密傳送畫面",

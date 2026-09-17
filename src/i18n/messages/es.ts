@@ -1422,6 +1422,7 @@ export const messages: Messages = {
   "remote.host.activeAction": "Compartir activamente",
   "remote.host.securityTitle": "Matriculación y permisos",
   "remote.host.problemTitle": "Distribución de la situación cambiada",
+  "remote.host.relayDnsFailure": "No se encuentra el servidor de retransmisión. Comprueba la dirección de abajo y la configuración de red y DNS. LatticeTerm volverá a intentarlo automáticamente.",
   "remote.host.state.waiting": "Esperando pareja",
   "remote.host.state.pairing": "Código de emparejamiento verificable",
   "remote.host.state.streaming": "Envío de pantalla cifrada",

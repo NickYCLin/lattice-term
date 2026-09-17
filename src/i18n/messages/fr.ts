@@ -1422,6 +1422,7 @@ export const messages: Messages = {
   "remote.host.activeAction": "Partage actif",
   "remote.host.securityTitle": "Jumelage et permissions",
   "remote.host.problemTitle": "Le statut de partage a changé",
+  "remote.host.relayDnsFailure": "Le serveur relais est introuvable. Vérifiez l’adresse ci-dessous ainsi que les paramètres réseau et DNS. LatticeTerm réessaiera automatiquement.",
   "remote.host.state.waiting": "Attendre l'appariement",
   "remote.host.state.pairing": "Vérification du code d'appariement",
   "remote.host.state.streaming": "Envoi de l'affichage chiffré",

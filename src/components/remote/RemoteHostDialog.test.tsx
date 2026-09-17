@@ -33,6 +33,7 @@ describe("remote host dialog", () => {
     status: RemoteHostApi["status"] = null,
     platform?: string,
     useSavedPairingCode = false,
+    closedReason: string | null = null,
   ) {
     const storage: Storage = {
       length: 0,
@@ -65,7 +66,7 @@ describe("remote host dialog", () => {
         rememberPairingCode: false,
       } : undefined,
       status,
-      closedReason: null,
+      closedReason,
       start: vi.fn(),
       removeSavedPairingCode: vi.fn(async () => {}),
       retrySavedPairingCodeCleanup: vi.fn(async () => {}),
@@ -93,6 +94,29 @@ describe("remote host dialog", () => {
     expect(markup).toContain("123 456 789");
     expect(markup).toContain("重新啟動 LatticeTerm 或電腦後仍會保持相同");
     expect(markup).toContain('aria-label="複製裝置 ID"');
+  });
+
+  it("explains a relay DNS failure and exposes the saved address", () => {
+    const { markup } = render(
+      "wss://relay.example/ws",
+      null,
+      undefined,
+      false,
+      "relay: I/O error: 無法識別遠台主機。(os error 11001)",
+    );
+    expect(markup).toContain("找不到中繼伺服器");
+    expect(markup).toContain('id="remote-host-relay"');
+    expect(markup).toContain('value="wss://relay.example/ws"');
+    expect(markup).not.toContain("os error 11001");
+  });
+
+  it("preserves other relay errors and keeps the saved address collapsed", () => {
+    const { markup } = render(
+      "wss://relay.example/ws", null, undefined, false,
+      "relay: I/O error: Connection refused (os error 10061)",
+    );
+    expect(markup).toContain("Connection refused");
+    expect(markup).not.toContain('id="remote-host-relay"');
   });
 
   it("offers independent commands only on Windows and keeps all execution grants off", () => {

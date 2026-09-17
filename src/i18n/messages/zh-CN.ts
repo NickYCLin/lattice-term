@@ -1422,6 +1422,7 @@ export const messages: Messages = {
   "remote.host.activeAction": "正在分享",
   "remote.host.securityTitle": "配对与操作权限",
   "remote.host.problemTitle": "分享状态已变更",
+  "remote.host.relayDnsFailure": "找不到中继服务器。请确认下方地址是否仍有效，并检查网络与 DNS 设置；LatticeTerm 会自动重试。",
   "remote.host.state.waiting": "等待配对",
   "remote.host.state.pairing": "正在验证配对码",
   "remote.host.state.streaming": "正在加密发送画面",

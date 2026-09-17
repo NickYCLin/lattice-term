@@ -12,6 +12,7 @@ export function RelayAddressField({
   id,
   value,
   hasSaved,
+  reveal = false,
   busy,
   required = false,
   hint,
@@ -20,6 +21,8 @@ export function RelayAddressField({
   id: string;
   value: string;
   hasSaved: boolean;
+  /** A failed lookup needs the saved address visible for correction. */
+  reveal?: boolean;
   busy: boolean;
   required?: boolean;
   hint: string;
@@ -28,7 +31,7 @@ export function RelayAddressField({
   const { t } = useI18n();
   const [editing, setEditing] = useState(!hasSaved);
 
-  if (!editing) {
+  if (!editing && !reveal) {
     return (
       <div className="field">
         <span className="field__label">{t("remote.host.relayAddress")}</span>

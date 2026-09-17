@@ -1422,6 +1422,7 @@ export const messages: Messages = {
   "remote.host.activeAction": "공유하기",
   "remote.host.securityTitle": "페어링 및 권한",
   "remote.host.problemTitle": "공유 상태 변경",
+  "remote.host.relayDnsFailure": "중계 서버를 찾을 수 없습니다. 아래 주소와 네트워크 및 DNS 설정을 확인하세요. LatticeTerm이 자동으로 다시 시도합니다.",
   "remote.host.state.waiting": "페어링을 위한 대기",
   "remote.host.state.pairing": "페어링 코드 검증",
   "remote.host.state.streaming": "암호화 된 표시를 전송",

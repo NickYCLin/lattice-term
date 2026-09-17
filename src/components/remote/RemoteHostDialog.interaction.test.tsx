@@ -224,6 +224,27 @@ it("grants one Fleet workspace explicitly and resets its authority after startin
   } finally { await act(async () => { view.root.unmount(); }); }
 });
 
+it("shows a helpful relay lookup error from a failed save and reveals the address", async () => {
+  const host = hostForForm(false);
+  host.start = vi.fn(async () => {
+    throw new Error("relay: I/O error: No such host is known (os error 11001)");
+  });
+  const { root, find, findById } = await mountDialog(host);
+  try {
+    await act(async () => {
+      await props(find("FORM")!).onSubmit!({
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      });
+    });
+    expect(find("DIV", "找不到中繼伺服器")).toBeDefined();
+    expect(findById("remote-host-relay")).toBeDefined();
+    expect(find("DIV", "os error 11001")).toBeUndefined();
+  } finally {
+    await act(async () => { root.unmount(); });
+  }
+});
+
 it("opens permissions without immediately submitting the newly rendered save action", async () => {
   const host: RemoteHostApi = {
     deviceId: null, deviceIdError: null, ensureDeviceId: vi.fn(async () => {}),

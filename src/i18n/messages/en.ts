@@ -1592,6 +1592,7 @@ export const en: Messages = {
   "remote.host.activeAction": "Sharing active",
   "remote.host.securityTitle": "Pairing and permissions",
   "remote.host.problemTitle": "Sharing status changed",
+  "remote.host.relayDnsFailure": "The relay server could not be found. Check the address below and your network and DNS settings. LatticeTerm will retry automatically.",
   "remote.host.state.waiting": "Waiting for pairing",
   "remote.host.state.pairing": "Verifying pairing code",
   "remote.host.state.streaming": "Sending encrypted display",

@@ -2,6 +2,7 @@ import { PathDropZone } from "../files/PathDropZone";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { loadRemoteHostSettings } from "../../app/remoteHostSettings";
+import { isRelayDnsFailure } from "../../app/remoteHostFailure";
 import { normalizePairingPassword } from "../../app/pairingToken";
 import type { SensitiveClipboardClearChoice } from "../../app/preferences";
 import { copyTextToClipboard } from "../../app/clipboardText";
@@ -270,6 +271,8 @@ export function RemoteHostDialog({
   const statusLabel = host.status
     ? t(`remote.host.state.${host.status.state}`)
     : null;
+  const sharingProblem = problem ?? host.closedReason;
+  const relayDnsFailure = mode === "relay" && isRelayDnsFailure(sharingProblem);
 
   return (
     <div
@@ -313,9 +316,9 @@ export function RemoteHostDialog({
             {t("remote.host.securityBody")}
           </Callout>
 
-          {(problem || host.closedReason) && (
+          {sharingProblem && (
             <Callout tone="warn" title={t("remote.host.problemTitle")}>
-              {problem ?? host.closedReason}
+              {relayDnsFailure ? t("remote.host.relayDnsFailure") : sharingProblem}
             </Callout>
           )}
           {copyProblem && (
@@ -530,6 +533,7 @@ export function RemoteHostDialog({
                     id="remote-host-relay"
                     value={relayAddress}
                     hasSaved={!!savedRelay}
+                    reveal={relayDnsFailure}
                     busy={busy}
                     required
                     hint={t("remote.host.relayHint")}
