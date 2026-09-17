@@ -177,11 +177,13 @@ export function ChatView({
   chat,
   automations,
   onOpenSession,
+  onBrowseHistory,
 }: {
   agents: AgentApi;
   chat: AgentChatApi;
   automations: AgentAutomationsApi;
   onOpenSession: (sessionId: string) => void;
+  onBrowseHistory?: () => void;
 }) {
   const { t, tag } = useI18n();
   const [pendingDelete, setPendingDelete] = useState<ChatThread | null>(null);
@@ -295,6 +297,11 @@ export function ChatView({
             </button>
           </div>
           <div className="chat-composer__actions">
+            {mode === "threads" && onBrowseHistory && (
+              <button type="button" className="button button--ghost button--sm" onClick={onBrowseHistory}>
+                {t("history.browse")}
+              </button>
+            )}
             {mode === "threads" && (
               <button
                 type="button"
@@ -480,7 +487,7 @@ export function ChatView({
               {t("desktopBackend.required.body")}
             </Callout>
           </div>
-        ) : installed.length === 0 && agents.mode === "ready" ? (
+        ) : installed.length === 0 && agents.mode === "ready" && !active?.archived ? (
           <EmptyState
             icon={<ChatIcon />}
             title={t("chat.none.title")}
@@ -785,7 +792,7 @@ function ThreadPane({
             <div>
               <h2>{thread.title || t("chat.untitled")}</h2>
               <div className="chat-chips">
-                <button
+                {!thread.archived && <button
                   type="button"
                   className="chat-chip"
                   onClick={() => setSettingsOpen((current) => !current)}
@@ -794,26 +801,26 @@ function ThreadPane({
                 >
                   <SettingsIcon />
                   {modelLabel}
-                </button>
-                <span className="chat-chip" title={thread.workingDirectory}>
+                </button>}
+                {!thread.archived && <span className="chat-chip" title={thread.workingDirectory}>
                   <FolderIcon />
                   {thread.workingDirectory
                     ? directoryName(thread.workingDirectory)
                     : t("chat.directory.none")}
-                </span>
-                <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>
+                </span>}
+                {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
               </div>
             </div>
           </div>
           <div className="chat-composer__actions">
-            <button
+            {!thread.archived && <button
               type="button"
               className="button button--ghost button--sm"
               onClick={() => setSettingsOpen((current) => !current)}
               aria-expanded={settingsOpen}
             >
               {settingsOpen ? t("chat.settings.hide") : t("chat.settings")}
-            </button>
+            </button>}
             <button
               type="button"
               className="button button--ghost button--danger button--sm"
@@ -825,7 +832,7 @@ function ThreadPane({
             </button>
           </div>
         </div>
-        {settingsOpen && (
+        {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             <AccountModelField
               options={modelOptions}
@@ -900,7 +907,7 @@ function ThreadPane({
             </p>
           </div>
         )}
-        {thread.permission === "full" && (
+        {thread.permission === "full" && !thread.archived && (
           <Callout tone="warn">{t("chat.permission.full.hint")}</Callout>
         )}
         {thread.handoff && (
@@ -908,7 +915,7 @@ function ThreadPane({
             {t("chat.handoff.pending", { assistant })}
           </Callout>
         )}
-        {!cliInstalled && (
+        {!cliInstalled && !thread.archived && (
           <Callout tone="warn">
             {t("chat.notInstalled", { cli: cliLabel(thread.definitionId) })}
           </Callout>
@@ -956,7 +963,7 @@ function ThreadPane({
         </div>
       </div>
 
-      <form className="chat-composer" onSubmit={submit}>
+      {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer" onSubmit={submit}>
         <div ref={composerDropRef} className={`chat-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
           {attachments.length > 0 && (
             <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
@@ -1076,7 +1083,7 @@ function ThreadPane({
             </div>
           </div>
         </div>
-      </form>
+      </form>}
     </>
   );
 }

@@ -12,6 +12,7 @@
 //! Only CLIs whose on-disk format is verified are supported; everything else
 //! returns `None` so the caller can stop an opt-in transfer safely.
 
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -748,6 +749,7 @@ struct CodexSessionMeta {
     cwd: Option<String>,
     source_is_string: bool,
     source_is_known_main_cli: bool,
+    source_is_interactive: bool,
 }
 
 /// Codex keeps the session identity in the first JSONL row. Read only a
@@ -785,6 +787,11 @@ fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
             .map(str::to_string),
         source_is_string: source.is_some(),
         source_is_known_main_cli: source == Some("cli")
+            || matches!(
+                (source, originator),
+                (Some("unknown"), Some("codex_cli_rs"))
+            ),
+        source_is_interactive: matches!(source, Some("cli" | "vscode" | "appServer"))
             || matches!(
                 (source, originator),
                 (Some("unknown"), Some("codex_cli_rs"))
@@ -832,6 +839,336 @@ fn locate_codex_in(
 fn locate_codex(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
     let root = home()?.join(".codex").join("sessions");
     locate_codex_in(&root, working_directory, captured)
+}
+
+/// A local CLI account explicitly configured in LatticeTerm. Never read its
+/// authentication files: only the known sessions/projects subtree is visited.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryProfile {
+    pub definition_id: String,
+    pub profile_id: String,
+    pub config_directory: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalConversation {
+    pub definition_id: String,
+    pub profile_id: Option<String>,
+    pub native_session_id: String,
+    pub working_directory: String,
+    pub resumable: bool,
+    pub title: String,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalConversationMessage {
+    pub role: &'static str,
+    pub text: String,
+}
+
+const HISTORY_MAX_PROFILES: usize = 24;
+const HISTORY_MAX_ENTRIES: usize = 50_000;
+const HISTORY_MAX_RESULTS: usize = 100;
+const HISTORY_MAX_MESSAGES: usize = 300;
+const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
+
+fn history_root(kind: TranscriptKind, profile: Option<&Path>) -> Option<PathBuf> {
+    let name = match kind {
+        TranscriptKind::Codex => "sessions",
+        TranscriptKind::Claude => "projects",
+        _ => return None,
+    };
+    let parent = match profile {
+        Some(path) => path.to_path_buf(),
+        None => match kind {
+            TranscriptKind::Codex => std::env::var_os("CODEX_HOME").map(PathBuf::from),
+            TranscriptKind::Claude => std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+            _ => None,
+        }
+        .unwrap_or_else(|| {
+            home().unwrap_or_default().join(format!(
+                ".{}",
+                if kind == TranscriptKind::Codex {
+                    "codex"
+                } else {
+                    "claude"
+                }
+            ))
+        }),
+    };
+    fs::canonicalize(parent.join(name)).ok()
+}
+
+fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
+    let file = open_regular_transcript(path)?;
+    let mut reader = BufReader::new(file).take(256 * 1024);
+    let mut line = Vec::new();
+    for _ in 0..64 {
+        if !read_bounded_line(&mut reader, &mut line, 32 * 1024)
+            .ok()?
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        let (role, content) = match kind {
+            TranscriptKind::Codex => {
+                let Some(payload) = value.get("payload") else {
+                    continue;
+                };
+                if payload.get("type").and_then(Value::as_str) != Some("message") {
+                    continue;
+                }
+                (
+                    payload.get("role").and_then(Value::as_str),
+                    payload.get("content"),
+                )
+            }
+            TranscriptKind::Claude => {
+                let msg = value.get("message");
+                (
+                    value.get("type").and_then(Value::as_str),
+                    msg.and_then(|m| m.get("content")),
+                )
+            }
+            _ => return None,
+        };
+        if role != Some("user") {
+            continue;
+        }
+        let text = content.map(content_text).unwrap_or_default();
+        if let Some(first) = text.lines().map(str::trim).find(|line| !line.is_empty()) {
+            return Some(first.chars().take(80).collect());
+        }
+    }
+    None
+}
+
+fn scan_local_conversations(
+    kind: TranscriptKind,
+    root: &Path,
+    profile_id: Option<&str>,
+    result: &mut Vec<(LocalConversation, PathBuf)>,
+) {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut visited = 0;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > HISTORY_MAX_ENTRIES {
+                return;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if depth < 5 {
+                    stack.push((entry.path(), depth + 1));
+                }
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let candidate = match kind {
+                TranscriptKind::Codex if is_codex_rollout(&path) => read_codex_session_meta(&path)
+                    .and_then(|meta| meta.source_is_interactive.then_some((meta.id?, meta.cwd?))),
+                TranscriptKind::Claude if is_jsonl(&path) => read_claude_session_meta(&path)
+                    .and_then(|meta| meta.is_main.then_some((meta.id, meta.cwd))),
+                _ => None,
+            };
+            let Some((id, cwd)) = candidate else { continue };
+            if id.len() > 128
+                || id.is_empty()
+                || id.starts_with('-')
+                || id.chars().any(char::is_control)
+            {
+                continue;
+            }
+            // Keep readable history even when its project has since moved;
+            // only the resume actions need a still-existing directory.
+            let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
+            let resumable = canonical.is_some();
+            let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd));
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let updated_at = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |time| time.as_secs());
+            result.push((
+                LocalConversation {
+                    definition_id: if kind == TranscriptKind::Codex {
+                        "codex"
+                    } else {
+                        "claude"
+                    }
+                    .into(),
+                    profile_id: profile_id.map(str::to_string),
+                    native_session_id: id,
+                    working_directory: cwd.to_string_lossy().into_owned(),
+                    resumable,
+                    title: String::new(),
+                    updated_at,
+                },
+                path,
+            ));
+            // Keep a bounded newest-first working set even when several
+            // accounts have very large histories.
+            if result.len() >= 2_000 {
+                result.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+                result.truncate(1_000);
+            }
+        }
+    }
+}
+
+pub fn list_local_conversations(
+    profiles: &[HistoryProfile],
+) -> Result<Vec<LocalConversation>, String> {
+    if profiles.len() > HISTORY_MAX_PROFILES {
+        return Err("Too many account profiles.".into());
+    }
+    let mut entries = Vec::new();
+    for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
+        if let Some(root) = history_root(kind, None) {
+            scan_local_conversations(kind, &root, None, &mut entries);
+        }
+    }
+    for profile in profiles {
+        let kind = TranscriptKind::from_definition(&profile.definition_id)
+            .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
+            .ok_or("Unknown account profile type.")?;
+        if profile.profile_id.is_empty() || profile.profile_id.len() > 64 {
+            return Err("Invalid account profile ID.".into());
+        }
+        let path = Path::new(&profile.config_directory);
+        if !path.is_absolute() {
+            return Err("Account profile directory must be absolute.".into());
+        }
+        if let Some(root) = history_root(kind, Some(path)) {
+            scan_local_conversations(kind, &root, Some(&profile.profile_id), &mut entries);
+        }
+    }
+    entries.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+    let mut seen = std::collections::HashSet::new();
+    let mut selected = Vec::new();
+    for (mut conversation, path) in entries {
+        if !seen.insert((
+            conversation.definition_id.clone(),
+            conversation.profile_id.clone(),
+            conversation.native_session_id.clone(),
+        )) {
+            continue;
+        }
+        let kind =
+            TranscriptKind::from_definition(&conversation.definition_id).expect("validated above");
+        conversation.title =
+            history_preview(&path, kind).unwrap_or_else(|| conversation.native_session_id.clone());
+        selected.push(conversation);
+        if selected.len() == HISTORY_MAX_RESULTS {
+            break;
+        }
+    }
+    Ok(selected)
+}
+
+pub fn read_local_conversation(
+    definition_id: &str,
+    session_id: &str,
+    profile_id: Option<&str>,
+    profiles: &[HistoryProfile],
+) -> Result<Vec<LocalConversationMessage>, String> {
+    // Resolve identity from the list again; never trust a renderer-provided
+    // path or follow a symlink outside a known account's transcript tree.
+    let selected = list_local_conversations(profiles)?
+        .into_iter()
+        .find(|entry| {
+            entry.definition_id == definition_id
+                && entry.native_session_id == session_id
+                && entry.profile_id.as_deref() == profile_id
+        })
+        .ok_or("The local conversation is no longer available.")?;
+    let kind = TranscriptKind::from_definition(definition_id).ok_or("Unknown assistant.")?;
+    let profile = profile_id
+        .and_then(|id| {
+            profiles
+                .iter()
+                .find(|p| p.profile_id == id && p.definition_id == definition_id)
+        })
+        .map(|p| Path::new(&p.config_directory));
+    let root =
+        history_root(kind, profile).ok_or("The local conversation is no longer available.")?;
+    let path = match kind {
+        TranscriptKind::Codex => {
+            locate_codex_in(&root, &selected.working_directory, Some(session_id))
+        }
+        TranscriptKind::Claude => {
+            locate_claude_in(&root, &selected.working_directory, Some(session_id))
+        }
+        _ => None,
+    }
+    .ok_or("The local conversation is no longer available.")?;
+    let mut messages = Vec::new();
+    let mut bytes = 0;
+    visit_transcript_rows(&path, |value| {
+        let (role, content) = match kind {
+            TranscriptKind::Codex => {
+                let Some(payload) = value.get("payload") else {
+                    return;
+                };
+                if payload.get("type").and_then(Value::as_str) != Some("message") {
+                    return;
+                }
+                (
+                    payload.get("role").and_then(Value::as_str),
+                    payload.get("content"),
+                )
+            }
+            TranscriptKind::Claude => {
+                let role = value.get("type").and_then(Value::as_str);
+                (role, value.get("message").and_then(|m| m.get("content")))
+            }
+            _ => return,
+        };
+        if !matches!(role, Some("user" | "assistant")) {
+            return;
+        }
+        let text = content.map(content_text).unwrap_or_default();
+        if text.is_empty() {
+            return;
+        }
+        bytes += text.len();
+        messages.push(LocalConversationMessage {
+            role: if role == Some("user") {
+                "user"
+            } else {
+                "assistant"
+            },
+            text,
+        });
+        while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
+            let removed: LocalConversationMessage = messages.remove(0);
+            bytes -= removed.text.len();
+        }
+    })
+    .ok_or("The local conversation could not be read safely.")?;
+    Ok(messages)
 }
 
 fn is_gemini_session(path: &Path) -> bool {
@@ -1230,6 +1567,64 @@ mod tests {
         ];
         fs::write(path, rows.join("\n")).unwrap();
         set_modified(path, modified);
+    }
+
+    #[test]
+    fn local_history_lists_app_server_and_claude_and_reads_only_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let codex = directory.path().join("codex-account");
+        let claude = directory.path().join("claude-account");
+        let cwd = directory.path();
+        let codex_file = codex.join("sessions/2026/01/01/rollout-desktop.jsonl");
+        write_codex_rollout(
+            &codex_file,
+            "desktop",
+            cwd,
+            serde_json::json!("appServer"),
+            "Codex Desktop",
+            100,
+        );
+        let mut rows = fs::read_to_string(&codex_file).unwrap();
+        rows.push_str("\n");
+        rows.push_str(&serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"},{"type":"image","url":"private"}]}}).to_string());
+        fs::write(&codex_file, rows).unwrap();
+        let claude_file = claude.join("projects/project/claude.jsonl");
+        write_claude_session(&claude_file, "claude", cwd, false, 90);
+        write_codex_rollout(
+            &codex.join("sessions/2026/01/01/rollout-moved.jsonl"),
+            "moved",
+            &directory.path().join("removed-project"),
+            serde_json::json!("cli"),
+            "codex_cli_rs",
+            80,
+        );
+        let profiles = vec![
+            HistoryProfile {
+                definition_id: "codex".into(),
+                profile_id: "codex-account".into(),
+                config_directory: codex.to_string_lossy().into_owned(),
+            },
+            HistoryProfile {
+                definition_id: "claude".into(),
+                profile_id: "claude-account".into(),
+                config_directory: claude.to_string_lossy().into_owned(),
+            },
+        ];
+        let found = list_local_conversations(&profiles).unwrap();
+        assert!(found
+            .iter()
+            .any(|item| item.native_session_id == "desktop" && item.title == "desktop"));
+        assert!(found.iter().any(|item| item.native_session_id == "claude"));
+        assert!(found
+            .iter()
+            .any(|item| item.native_session_id == "moved" && !item.resumable));
+        let messages =
+            read_local_conversation("codex", "desktop", Some("codex-account"), &profiles).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].text, "Hello");
+        assert!(
+            read_local_conversation("codex", "desktop", Some("claude-account"), &profiles).is_err()
+        );
     }
 
     #[test]

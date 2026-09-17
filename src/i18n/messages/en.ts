@@ -9,6 +9,25 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "history.viewArchive": "View read-only copy in Chat",
+  "history.directoryMissing": "The original working directory is gone. You can read this history, but restore that folder before continuing.",
+  "history.archive": "Read-only export",
+  "history.archiveHint": "This manually imported cloud export is read-only. It is not synchronized and cannot resume the original conversation. Continue in the original app.",
+  "history.importExport": "Select an exported conversations.json (up to 8 MB; processed locally)",
+  "history.importArchive": "Import selected conversation (read-only)",
+  "history.exportTooLarge": "The export exceeds 8 MB; split it first.",
+  "history.exportEmpty": "No supported conversations found. Select the extracted conversation JSON file.",
+  "history.browse": "External conversations",
+  "history.title": "Codex / Claude conversations",
+  "history.intro": "Local Codex Desktop, Codex CLI and Claude Code history. Select a conversation to read it and continue it in Chat or Sessions.",
+  "history.empty": "No local conversations found. Cloud-only conversations do not appear here.",
+  "history.user": "You",
+  "history.assistant": "Assistant",
+  "history.concurrent": "Stop any ongoing reply in the original app before continuing the same conversation here.",
+  "history.cloud": "Cloud-only conversations are not synchronized. Open the original app:",
+  "history.profileMissing": "This account profile no longer exists.",
+  "history.openSession": "Continue in Sessions",
+  "history.openChat": "Continue in Chat",
   // Common ----------------------------------------------------------------
   "localFile.invalidPath": "Drop an absolute local path.",
   "localFile.unreadable": "Cannot read this file.",

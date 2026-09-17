@@ -20,6 +20,8 @@ import {
   decideApproval,
   failTurn,
   handoffThreadAccount,
+  importNativeConversation,
+  importArchivedConversation,
   handoffThread,
   changeThreadDirectory,
   selectThreadModel,
@@ -34,6 +36,7 @@ import {
   type ChatModelList,
   type ChatPermission,
   type ChatThread,
+  type NativeHistoryMessage,
 } from "./agentChat";
 import { hasDesktopBackend } from "./nativeRuntime";
 import { useSharedSidebarLayout } from "./sharedSidebarLayout";
@@ -93,6 +96,19 @@ export interface AgentChatApi {
   /** CLIs the backend can drive in chat mode. */
   supported: readonly ChatDefinitionId[];
   createThread: (settings: ChatThreadCreation) => ChatThread;
+  importNativeConversation: (settings: {
+    definitionId: "codex" | "claude";
+    nativeSessionId: string;
+    workingDirectory: string;
+    title: string;
+    accountProfileId: string | null;
+    messages: readonly NativeHistoryMessage[];
+  }) => ChatThread;
+  importArchivedConversation: (settings: {
+    definitionId: "codex" | "claude";
+    title: string;
+    messages: readonly NativeHistoryMessage[];
+  }) => ChatThread;
   /**
    * A turn that already happened elsewhere (the background service ran an
    * automation): the thread is created and the recorded events are folded
@@ -241,6 +257,29 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     if (settings.activate !== false) setActiveThreadId(thread.id);
     return thread;
   }, []);
+
+  const importNative = useCallback((settings: Parameters<typeof importNativeConversation>[0]) => {
+    const existing = threadsRef.current.find((thread) =>
+      thread.definitionId === settings.definitionId &&
+      thread.nativeSessionId === settings.nativeSessionId &&
+      thread.accountProfileId === settings.accountProfileId,
+    );
+    if (existing) {
+      setActiveThreadId(existing.id);
+      return existing;
+    }
+    const thread = importNativeConversation(settings);
+    changeThreads((current) => [thread, ...current]);
+    setActiveThreadId(thread.id);
+    return thread;
+  }, [changeThreads]);
+
+  const importArchive = useCallback((settings: Parameters<typeof importArchivedConversation>[0]) => {
+    const thread = importArchivedConversation(settings);
+    changeThreads((current) => [thread, ...current]);
+    setActiveThreadId(thread.id);
+    return thread;
+  }, [changeThreads]);
 
   const importRecordedTurn = useCallback(
     (
@@ -538,6 +577,8 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
       setActiveThreadId: activate,
       supported,
       createThread: create,
+      importNativeConversation: importNative,
+      importArchivedConversation: importArchive,
       importRecordedTurn,
       markUnread,
       updateThread: update,

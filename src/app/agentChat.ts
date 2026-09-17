@@ -158,6 +158,8 @@ export interface ChatHandoff {
 
 export interface ChatThread {
   browserEnabled?: boolean;
+  /** Imported cloud export: a read-only reference, never a resumable CLI session. */
+  archived?: boolean;
   id: string;
   definitionId: ChatDefinitionId;
   /** First message, shortened; what the thread list shows. */
@@ -186,6 +188,56 @@ export interface ChatThread {
   automationId: string | null;
   /** A finished run nobody has looked at yet; the thread list is the inbox. */
   unread: boolean;
+}
+
+/** Text-only view of another local client's native Codex/Claude Code thread. */
+export interface NativeHistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export function importNativeConversation(
+  settings: {
+    definitionId: "codex" | "claude";
+    nativeSessionId: string;
+    workingDirectory: string;
+    title: string;
+    accountProfileId: string | null;
+    messages: readonly NativeHistoryMessage[];
+  },
+  now = Date.now(),
+): ChatThread {
+  const thread = createThread({
+    definitionId: settings.definitionId,
+    workingDirectory: settings.workingDirectory,
+    permission: defaultPermission(settings.definitionId),
+    model: "",
+    title: threadTitle(settings.title),
+  }, crypto.randomUUID(), now);
+  return {
+    ...thread,
+    nativeSessionId: settings.nativeSessionId,
+    accountProfileId: settings.accountProfileId,
+    items: settings.messages.slice(-MAX_STORED_ITEMS).map((message, index) =>
+      message.role === "user"
+        ? { type: "user" as const, id: `history:${index}`, text: message.text, at: now }
+        : { type: "text" as const, id: `history:${index}`, text: message.text },
+    ),
+  };
+}
+
+export function importArchivedConversation(settings: {
+  definitionId: "codex" | "claude";
+  title: string;
+  messages: readonly NativeHistoryMessage[];
+}, now = Date.now()): ChatThread {
+  const thread = importNativeConversation({
+    ...settings,
+    nativeSessionId: "",
+    workingDirectory: "",
+    accountProfileId: null,
+  }, now);
+  return { ...thread, archived: true, nativeSessionId: null };
 }
 
 export const MAX_TITLE_LENGTH = 60;
@@ -729,6 +781,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
       ),
       title: typeof thread.title === "string" ? thread.title : "",
       browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
+      archived: thread.archived === true,
       model: typeof thread.model === "string" ? thread.model : "",
       nativeSessionId:
         typeof thread.nativeSessionId === "string" ? thread.nativeSessionId : null,

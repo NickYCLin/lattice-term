@@ -1,0 +1,10 @@
+.local-history { width: min(64rem, 100%); max-height: min(90vh, 58rem); overflow: auto; }
+.local-history__columns { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr); gap: 1rem; margin: 1rem 0; text-align: left; }
+.local-history__list, .local-history__preview { min-height: 14rem; max-height: 45vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); padding: .5rem; }
+.local-history__entry { display: flex; flex-direction: column; width: 100%; gap: .3rem; text-align: left; padding: .6rem; color: inherit; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; overflow-wrap: anywhere; }
+.local-history__entry:hover, .local-history__entry.is-active { background: var(--surface-active); }
+.local-history__entry small { color: var(--text-muted); }
+.local-history__message { margin-bottom: 1rem; overflow-wrap: anywhere; }
+.local-history__message p { white-space: pre-wrap; margin: .4rem 0; }
+.local-history__browse { display: block; width: calc(100% - 2rem); margin: 0 1rem .5rem; }
+@media (max-width: 600px) { .local-history__columns { grid-template-columns: 1fr; } .local-history__list { min-height: 5rem; max-height: 20vh; } }

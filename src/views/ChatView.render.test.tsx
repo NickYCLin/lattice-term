@@ -28,6 +28,7 @@ function render(
       fakeDefinition({ id: "claude", label: "Claude Code", executable: "claude" }),
     ],
   }),
+  onBrowseHistory?: () => void,
 ): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
@@ -36,12 +37,16 @@ function render(
         chat={chat}
         automations={fakeAutomationsApi()}
         onOpenSession={() => {}}
+        onBrowseHistory={onBrowseHistory}
       />
     </I18nProvider>,
   );
 }
 
 describe("ChatView", () => {
+  it("offers external Codex and Claude conversations in Chat", () => {
+    expect(render(fakeChatApi(), undefined, () => {})).toContain("外部對話");
+  });
   it("does not offer approval for an unsupported MCP form", () => {
     const thread = fakeThread({ items: [{
       id: "form", type: "approval", requestId: "request", name: "unsupported_input",

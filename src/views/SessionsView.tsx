@@ -233,6 +233,7 @@ export function SessionsView({
   vnc,
   activeSessionId,
   onSelect,
+  onBrowseHistory,
   theme,
   sessionRestoreComplete,
   restoredWorkspaceSessions,
@@ -248,6 +249,7 @@ export function SessionsView({
   vnc: VncApi;
   activeSessionId: string | null;
   onSelect: (sessionId: string | null) => void;
+  onBrowseHistory: () => void;
   theme: ThemeId;
   sessionRestoreComplete: boolean;
   restoredWorkspaceSessions: readonly SavedWorkspaceSession[];
@@ -1574,6 +1576,7 @@ export function SessionsView({
       onChooseProject={() => void chooseProjectDirectory()}
       onDropProject={path => chooseProjectDirectory(path)}
       onDropWorkspace={readWorkspaceImport}
+      onBrowseHistory={onBrowseHistory}
       onLaunchProject={openSavedProject}
       onSelect={(sessionId) => {
         setMobileTreeOpen(false);

@@ -6,6 +6,25 @@
  */
 
 export const zhTW = {
+  "history.viewArchive": "在對話檢視唯讀副本",
+  "history.directoryMissing": "原工作目錄已不存在；仍可閱讀紀錄，但要接續請先還原該資料夾。",
+  "history.archive": "唯讀匯出檔",
+  "history.archiveHint": "這是手動匯入的雲端對話備份，只能閱讀；不會同步，也無法以原對話 ID 接續。請在原應用程式繼續對話。",
+  "history.importExport": "選擇手動匯出的 conversations.json（最多 8 MB；本機處理）",
+  "history.importArchive": "匯入選取的對話（唯讀）",
+  "history.exportTooLarge": "匯出檔超過 8 MB，請先拆分。",
+  "history.exportEmpty": "找不到支援的對話格式；請選擇解壓後的對話 JSON 檔。",
+  "history.browse": "外部對話",
+  "history.title": "Codex／Claude 對話",
+  "history.intro": "列出本機 Codex Desktop、Codex CLI 與 Claude Code 的對話。選取後可閱讀，並在對話或工作階段接續。",
+  "history.empty": "找不到本機對話；只有雲端的對話不會出現在這裡。",
+  "history.user": "你",
+  "history.assistant": "助理",
+  "history.concurrent": "接續同一對話前，請先停止原應用程式正在進行的回覆，避免兩邊交錯寫入。",
+  "history.cloud": "純雲端對話不會自動同步，請開啟原應用程式：",
+  "history.profileMissing": "此帳號設定檔已不存在。",
+  "history.openSession": "在工作階段接續",
+  "history.openChat": "在對話接續",
   // 共用 ------------------------------------------------------------------
   "localFile.invalidPath": "請拖入完整的本機路徑。",
   "localFile.unreadable": "無法讀取這個檔案。",

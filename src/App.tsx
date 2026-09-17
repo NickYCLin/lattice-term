@@ -91,7 +91,9 @@ import { anyAgentSessionJustCompleted } from "./app/sessionStatus";
 import { useMobileViewport } from "./app/useMobileViewport";
 import { PlusIcon, ScreenShareIcon } from "./components/icons";
 import { useModalFocus } from "./components/overlays/modalFocus";
+import { LocalConversationDialog } from "./components/chat/LocalConversationDialog";
 import "./styles/index.css";
+import "./styles/local-history.css";
 
 const ConnectionsView = lazy(() =>
   import("./views/ConnectionsView").then((module) => ({
@@ -312,6 +314,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   // keeps firing while another view is open) but loads lazily, so its code
   // stays out of the entry bundle.
   const [chatRuntime, setChatRuntime] = useState<ChatRuntimeApi | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [mobileResourceSidebarOpen, setMobileResourceSidebarOpen] =
     useState(false);
   // A desktop-only view reached on mobile (stale state) snaps back home.
@@ -1047,6 +1050,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     vnc={vnc}
                     activeSessionId={activeSessionId}
                     onSelect={setActiveSessionId}
+                    onBrowseHistory={() => setHistoryOpen(true)}
                     theme={activeTheme}
                     sessionRestoreComplete={sessionRestoreComplete}
                     restoredWorkspaceSessions={restoredWorkspaceSessions}
@@ -1074,6 +1078,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               <ChatView
                 agents={agents}
                 chat={chatRuntime.chat}
+                onBrowseHistory={() => setHistoryOpen(true)}
                 automations={chatRuntime.automations}
                 onOpenSession={(sessionId) => {
                   setActiveSessionId(sessionId);
@@ -1248,6 +1253,19 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           platform={platform}
           sensitiveClipboardClear={preferences.sensitiveClipboardClear}
           onClose={() => setRemoteHostOpen(false)}
+        />
+      )}
+
+      {historyOpen && (
+        <LocalConversationDialog
+          agents={agents}
+          chat={chatRuntime?.chat ?? null}
+          onClose={() => setHistoryOpen(false)}
+          onOpenChat={() => setView("chat")}
+          onOpenSession={(sessionId) => {
+            setActiveSessionId(sessionId);
+            setView("terminal");
+          }}
         />
       )}
 

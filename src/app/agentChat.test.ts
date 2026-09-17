@@ -9,6 +9,8 @@ import {
   defaultPermission,
   failTurn,
   formatTokens,
+  importNativeConversation,
+  importArchivedConversation,
   handoffThreadAccount,
   handoffThread,
   handoffTranscript,
@@ -345,6 +347,22 @@ describe("storage", () => {
       map,
     };
   }
+
+  it("keeps a local native session resumable but marks a cloud export read-only", () => {
+    const messages = [{ role: "user" as const, text: "hello" }, { role: "assistant" as const, text: "world" }];
+    const native = importNativeConversation({
+      definitionId: "codex", nativeSessionId: "desktop-1", workingDirectory: "/work",
+      title: "Test", accountProfileId: null, messages,
+    }, 1000);
+    const archive = importArchivedConversation({ definitionId: "claude", title: "Export", messages }, 2000);
+    expect(native.nativeSessionId).toBe("desktop-1");
+    expect(native.items).toHaveLength(2);
+    expect(archive.nativeSessionId).toBeNull();
+    expect(archive.archived).toBe(true);
+    const storage = memoryStorage();
+    expect(saveStoredThreads(storage, [archive, native])).toBe(true);
+    expect(loadStoredThreads(storage)[0].archived).toBe(true);
+  });
 
   it("round-trips threads and forgets any running turn", () => {
     const storage = memoryStorage();

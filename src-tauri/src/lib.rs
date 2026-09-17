@@ -1137,6 +1137,38 @@ fn agent_chat_supported() -> Vec<String> {
         .collect()
 }
 
+/// Lists only local Codex/Claude Code conversation metadata. Profiles are
+/// passed explicitly; no third-party credentials or browser data are read.
+#[tauri::command]
+async fn agent_chat_local_history(
+    profiles: Vec<crate::transcript::HistoryProfile>,
+) -> Result<Vec<crate::transcript::LocalConversation>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transcript::list_local_conversations(&profiles)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn agent_chat_local_history_read(
+    definition_id: String,
+    native_session_id: String,
+    profile_id: Option<String>,
+    profiles: Vec<crate::transcript::HistoryProfile>,
+) -> Result<Vec<crate::transcript::LocalConversationMessage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transcript::read_local_conversation(
+            &definition_id,
+            &native_session_id,
+            profile_id.as_deref(),
+            &profiles,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Runs one chat turn. Returns once the CLI is running; its reply arrives
 /// as `agent-chat://event` events carrying the same thread and turn ids.
 #[tauri::command]
@@ -3929,6 +3961,8 @@ pub fn run() {
             agent_enqueue,
             agent_clear_queue,
             agent_chat_supported,
+            agent_chat_local_history,
+            agent_chat_local_history_read,
             agent_account_profile_directory,
             agent_account_profile_status,
             agent_account_profile_remove,

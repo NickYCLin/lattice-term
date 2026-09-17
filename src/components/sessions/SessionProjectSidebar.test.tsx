@@ -70,6 +70,7 @@ describe("session project sidebar", () => {
           mobileOpen
           onMobileClose={vi.fn()}
           onChooseProject={vi.fn()}
+          onBrowseHistory={vi.fn()}
           onLaunchProject={vi.fn()}
           onSelect={vi.fn()}
           onRemove={vi.fn()}
@@ -88,6 +89,7 @@ describe("session project sidebar", () => {
     );
 
     expect(markup).toContain("LatticeTerm");
+    expect(markup).toContain("外部對話");
     expect(markup).toContain("Codex");
     expect(markup).toContain("Claude Code");
     expect(markup).toContain("OpenAI Codex");
