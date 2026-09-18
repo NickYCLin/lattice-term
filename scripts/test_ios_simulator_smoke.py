@@ -137,7 +137,7 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
-    def test_capture_timeout_retries_without_recognizing_partial_image(self):
+    def test_a_stalled_capture_does_not_spend_the_apps_readiness_budget(self):
         now = [0.0]
         attempts = []
 
@@ -155,11 +155,13 @@ class FailureEvidenceTests(unittest.TestCase):
                     [], 0, stdout='["No connections yet", "Add connection"]')) as recognize:
             result = smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"))
         self.assertTrue(result["renderedStartup"])
-        self.assertEqual(attempts, [60, 30])
+        # The retry gets a full attempt rather than the 30 seconds the stall
+        # left behind, and the partial image is still never recognized.
+        self.assertEqual(attempts, [60, 60])
         self.assertEqual(recognize.call_count, 1)
-        self.assertEqual(recognize.call_args.kwargs["timeout"], 28)
+        self.assertEqual(recognize.call_args.kwargs["timeout"], 45)
 
-    def test_persistent_capture_timeout_fails_without_extending_deadline(self):
+    def test_a_wedged_simulator_stops_in_bounded_time_and_leaves_evidence(self):
         now = [0.0]
         attempts = []
 
@@ -168,14 +170,20 @@ class FailureEvidenceTests(unittest.TestCase):
             now[0] += kwargs["timeout"]
             raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
-        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
                 patch.object(smoke.os, "kill"), \
                 patch.object(smoke, "simctl", side_effect=capture), \
                 patch.object(smoke.subprocess, "run") as recognize:
-            with self.assertRaises(subprocess.TimeoutExpired):
-                smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"))
-        self.assertEqual(now[0], 90)
-        self.assertEqual(attempts, [60, 30])
+            screenshot = Path(directory) / "capture.png"
+            # Names the device that never showed its screen, not `xcrun`, and
+            # says the captures stalled rather than the app rendering slowly.
+            with self.assertRaisesRegex(RuntimeError, "owned-device.*停擺"):
+                smoke.wait_for_frontend("owned-device", 123, screenshot, Path("reader"))
+            self.assertEqual(json.loads(screenshot.with_suffix(".ocr.json").read_text()), [])
+        # Two stalls are absorbed, the third gives up: bounded at 90 + 2 x 60.
+        self.assertEqual(attempts, [60, 60, 60])
+        self.assertEqual(now[0], 180)
         recognize.assert_not_called()
 
     def test_ocr_timeout_retries_a_fresh_capture_without_extending_deadline(self):
@@ -200,7 +208,7 @@ class FailureEvidenceTests(unittest.TestCase):
         self.assertEqual(capture.call_count, 2)
         self.assertEqual(attempts, [45, 45])
 
-    def test_persistent_ocr_timeouts_fail_at_the_original_deadline(self):
+    def test_persistent_ocr_timeouts_also_stop_after_the_stall_allowance(self):
         now = [0.0]
         attempts = []
 
@@ -209,14 +217,16 @@ class FailureEvidenceTests(unittest.TestCase):
             now[0] += kwargs["timeout"]
             raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
-        with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
                 patch.object(smoke.os, "kill"), \
                 patch.object(smoke, "simctl"), \
                 patch.object(smoke.subprocess, "run", side_effect=recognize):
-            with self.assertRaises(subprocess.TimeoutExpired):
-                smoke.wait_for_frontend("owned-device", 123, Path("capture.png"), Path("reader"), timeout=70)
-        self.assertEqual(now[0], 70)
-        self.assertEqual(attempts, [45, 25])
+            with self.assertRaisesRegex(RuntimeError, "owned-device.*停擺"):
+                smoke.wait_for_frontend(
+                    "owned-device", 123, Path(directory) / "capture.png", Path("reader"), timeout=70)
+        self.assertEqual(attempts, [45, 45, 45])
+        self.assertEqual(now[0], 135)
 
     def test_success_checks_and_cleans_only_new_devices_and_saves_both_results(self):
         commands = []
