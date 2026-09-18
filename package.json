@@ -40,7 +40,8 @@
     "ios:build": "node scripts/ios-release.mjs build",
     "ios:check": "vitest run scripts/ios-config.test.mjs scripts/ios-release.test.mjs src/app/platformCapabilities.test.ts src/app/fileExport.test.ts src/views/ConnectionsView.render.test.tsx src/views/SettingsView.render.test.tsx",
     "build:vnc": "node scripts/build-vnc-engine.mjs",
-    "build:vnc:release": "node scripts/build-vnc-engine.mjs --release"
+    "build:vnc:release": "node scripts/build-vnc-engine.mjs --release",
+    "release:calendar-version": "node scripts/calendar-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

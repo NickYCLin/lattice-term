@@ -67,8 +67,8 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      - name: Resolve the generated Release PR branch
-        if: steps.release.outputs.prs_created == 'true'
+      - name: Resolve the open Release PR branch
+        if: steps.metadata.outputs.recovery != 'true'
         id: release-pr
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
@@ -76,33 +76,45 @@ jobs:
         with:
           result-encoding: string
           script: |
-            return JSON.parse(process.env.RELEASE_PR).headBranchName;
+            // Release Please only rewrites the pending list when the notes
+            // change, so a list drafted in one month can still be waiting in
+            // the next. Resolving the open PR either way lets the calendar
+            // version be recomputed before that list is published.
+            if (process.env.RELEASE_PR) return JSON.parse(process.env.RELEASE_PR).headBranchName;
+            const open = await github.paginate(github.rest.pulls.list, {
+              ...context.repo, state: 'open', base: 'main', per_page: 100,
+            });
+            const pending = open.filter((pull) => pull.head.ref.startsWith('release-please--'));
+            if (pending.length > 1) throw new Error('Found more than one open Release PR.');
+            return pending.length === 1 ? pending[0].head.ref : '';
 
       # Cargo.lock is generated and strips custom version annotations. Also,
       # merge commits may duplicate their child commit in the generated
       # changelog. Normalize both files on the generated Release PR.
-      - name: Check out the generated Release PR
-        if: steps.release.outputs.prs_created == 'true'
+      - name: Check out the Release PR
+        if: steps.release-pr.outputs.result != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.release-pr.outputs.result }}
           fetch-depth: 0
 
       - name: Normalize the generated release files
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release-pr.outputs.result != ''
         shell: bash
         run: |
+          npm run release:calendar-version
           npm run release:normalize-changelog
           npm run version:sync-lock
           node scripts/check-version-sync.mjs
-          if git diff --quiet -- CHANGELOG.md src-tauri/Cargo.lock; then
+          RELEASE_FILES="CHANGELOG.md package.json package-lock.json .release-please-manifest.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock"
+          if git diff --quiet -- $RELEASE_FILES; then
             echo "Release files are already normalized."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- CHANGELOG.md src-tauri/Cargo.lock
-          git commit -m "chore(版本): 正規化版本檔案"
+          git add -- $RELEASE_FILES
+          git commit -m "chore(版本): 改寫為日曆版號並正規化版本檔案"
           git push origin "HEAD:${{ steps.release-pr.outputs.result }}"
 
       - name: Return to the main snapshot for the release decision
