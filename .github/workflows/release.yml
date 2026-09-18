@@ -3,10 +3,10 @@ name: Release
 on:
   push:
     branches: [main]
-  # Daily at 10:17 Asia/Taipei, at most one normal release per local date.
+  # Daily at 06:00 Asia/Taipei, at most one normal release per local date.
   # Pushes only maintain the pending draft PR.
   schedule:
-    - cron: '17 2 * * *'
+    - cron: '0 22 * * *'
   workflow_dispatch:
 
 permissions:

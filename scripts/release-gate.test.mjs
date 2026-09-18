@@ -190,7 +190,7 @@ describe("release workflow wiring", () => {
   const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   it("checks daily and keeps releases behind the reusable candidate CI", () => {
-    expect(workflow).toContain("cron: '17 2 * * *'");
+    expect(workflow).toContain("cron: '0 22 * * *'");
     expect(workflow).toContain("run: node scripts/create-calendar-release-pr.mjs");
     expect(workflow).toContain("if: steps.metadata.outputs.recovery == 'true' || steps.release.outputs.version_available == 'true'");
     expect(workflow).toContain("needs: [release-plan, verify-candidate]");

@@ -1,6 +1,6 @@
 # Release 自動化與版本規則
 
-LatticeTerm 只提供一條正式版更新通道，不區分 Beta、Nightly 或其他測試版。Release Please、Conventional Commits 與 Tauri Action 負責版本、待發布清單、驗證與安裝包。**日常 commit／push 不會立即發版**；每天台灣時間 10:17 自動檢查，當天尚未發布、有新內容且完整 CI 通過，才自動合併 Release PR 並發布，不需人工確認。draft Release PR 只是下一版的待發布清單，不是另一種版本。
+LatticeTerm 只提供一條正式版更新通道，不區分 Beta、Nightly 或其他測試版。Release Please、Conventional Commits 與 Tauri Action 負責版本、待發布清單、驗證與安裝包。**日常 commit／push 不會立即發版**；每天台灣時間早上 6:00 自動檢查，當天尚未發布、有新內容且完整 CI 通過，才自動合併 Release PR 並發布，不需人工確認。draft Release PR 只是下一版的待發布清單，不是另一種版本。
 
 ## 版本如何判定
 
@@ -47,7 +47,7 @@ Windows 目前只出 NSIS 安裝包，可用此格式；若未來新增 MSI，�
 一般正式版必須同時符合：
 
 - 由每日排程觸發，或執行例行 `workflow_dispatch`。
-- 最近一次已公開正式版的 `published_at` 換算為台灣日期後，早於本次檢查日期；不以 tag 建立時間、草稿建立時間或 commit 數計算。排程是 UTC `17 2 * * *`，即台灣時間每天 10:17；GitHub 排程可能延遲，因此這是檢查時間，不是保證公開安裝包的時間。
+- 最近一次已公開正式版的 `published_at` 換算為台灣日期後，早於本次檢查日期；不以 tag 建立時間、草稿建立時間或 commit 數計算。排程是 UTC `0 22 * * *`，即台灣時間每天早上 6:00；GitHub 排程可能延遲，因此這是檢查時間，不是保證公開安裝包的時間。
 - 自上次公開版本起，至少有一個 `feat`／`fix`／`perf` 或不相容變更；只有維護提交或沒有內容就跳過。不相容變更必須說明影響與遷移方式，但不會自動升主版號，也不代表急件。
 - 對即將發布的不可變 commit SHA 跑完整前端、Rust、SFTP 整合測試與 lint，全部成功。
 - 測試期間主分支與 Release PR 沒有變動，合併後的檔案樹與測試快照一致。
