@@ -41,6 +41,11 @@ function fixture() {
 }
 
 describe("published release metadata", () => {
+  it("upgrades from the old version scheme and orders date versions across years", () => {
+    expect(releaseState([release("v2.4.0"), release("v2026.9.18", { draft: true })], "2026.9.18").draft.tag_name).toBe("v2026.9.18");
+    expect(releaseState([release("v2026.12.31"), release("v2027.1.1", { draft: true })], "2027.1.1").draft.tag_name).toBe("v2027.1.1");
+    expect(() => releaseState([release("v2027.1.1"), release("v2026.12.31", { draft: true })], "2026.12.31")).toThrow(/obsolete/);
+  });
   it("uses publication time instead of tag creation order and ignores other channels", () => {
     const state = releaseState([
       release("v2.1.0", { draft: true, published_at: null }),
@@ -186,7 +191,7 @@ describe("release workflow wiring", () => {
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   it("checks daily and keeps releases behind the reusable candidate CI", () => {
     expect(workflow).toContain("cron: '17 2 * * *'");
-    expect(workflow).toContain("skip-github-release: true");
+    expect(workflow).toContain("run: node scripts/create-calendar-release-pr.mjs");
     expect(workflow).toContain("needs: [release-plan, verify-candidate]");
     expect(workflow).toContain("ref: ${{ needs.release-plan.outputs.candidate_sha }}");
     expect(ci).toContain("workflow_call:");
