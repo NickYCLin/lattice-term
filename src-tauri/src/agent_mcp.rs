@@ -7,6 +7,9 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+/// The server name this installation registers in every CLI it starts.
+const SERVER_NAME: &str = "latticeterm";
+
 /// How an MCP client should start this installation's local adapter.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +117,57 @@ pub fn apply_claude_arguments(mut arguments: Vec<String>, launch: &McpLaunch) ->
     arguments
 }
 
+/// Gemini CLI and its Qwen Code fork read stdio servers from the same
+/// `mcpServers` map. The settings this fills live in a process-scoped
+/// temporary file, so the user's own `settings.json` keeps its servers.
+///
+/// `trust` stays false on purpose: Gemini then asks before each tool call,
+/// which runs ahead of the desktop's own grant checks.
+pub fn apply_gemini_settings(settings: &mut serde_json::Value, launch: &McpLaunch) {
+    let Some(settings) = settings.as_object_mut() else {
+        return;
+    };
+    let servers = settings
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(servers) = servers.as_object_mut() else {
+        return;
+    };
+    servers.insert(
+        SERVER_NAME.to_string(),
+        serde_json::json!({
+            "command": launch.command,
+            "args": launch.args,
+            "timeout": 30000,
+            "trust": false
+        }),
+    );
+}
+
+/// OpenCode names a local server with one command array. The config this
+/// fills is handed over as inline JSON for a single run, which leaves the
+/// global, project and administrator layers untouched.
+pub fn apply_opencode_config(config: &mut serde_json::Value, launch: &McpLaunch) {
+    let Some(config) = config.as_object_mut() else {
+        return;
+    };
+    let mut command = Vec::with_capacity(launch.args.len() + 1);
+    command.push(launch.command.clone());
+    command.extend(launch.args.iter().cloned());
+    let servers = config.entry("mcp").or_insert_with(|| serde_json::json!({}));
+    let Some(servers) = servers.as_object_mut() else {
+        return;
+    };
+    servers.insert(
+        SERVER_NAME.to_string(),
+        serde_json::json!({
+            "type": "local",
+            "command": command,
+            "enabled": true
+        }),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +233,46 @@ mod tests {
         assert_eq!(arguments[0], "說明這個專案");
         assert_eq!(arguments[1], "--mcp-config");
         assert_eq!(&arguments[3..], &["--", "--not-a-flag"]);
+    }
+
+    #[test]
+    fn gemini_keeps_the_hooks_that_were_already_in_the_settings() {
+        let mut settings = serde_json::json!({ "hooks": { "BeforeAgent": [] } });
+        apply_gemini_settings(&mut settings, &launch());
+        assert!(settings["hooks"]["BeforeAgent"].is_array());
+        assert_eq!(
+            settings["mcpServers"]["latticeterm"]["args"],
+            serde_json::json!(["mcp", "--data-dir", r#"C:\Users\me\App Data\LatticeTerm"#])
+        );
+    }
+
+    #[test]
+    fn gemini_still_confirms_every_tool_call() {
+        let mut settings = serde_json::json!({});
+        apply_gemini_settings(&mut settings, &launch());
+        assert_eq!(
+            settings["mcpServers"]["latticeterm"]["trust"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn opencode_gets_one_command_array_next_to_its_plugin() {
+        let mut config = serde_json::json!({ "plugin": ["/tmp/status.js"] });
+        apply_opencode_config(&mut config, &launch());
+        assert_eq!(config["plugin"], serde_json::json!(["/tmp/status.js"]));
+        assert_eq!(
+            config["mcp"]["latticeterm"],
+            serde_json::json!({
+                "type": "local",
+                "command": [
+                    r#"C:\Program Files\LatticeTerm\lattice-term.exe"#,
+                    "mcp",
+                    "--data-dir",
+                    r#"C:\Users\me\App Data\LatticeTerm"#
+                ],
+                "enabled": true
+            })
+        );
     }
 }

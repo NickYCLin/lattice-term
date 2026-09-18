@@ -2,11 +2,15 @@
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
-LatticeTerm 自己新開的 Codex 終端工作階段與對話，以及 Claude Code 終端
-工作階段，都會以程序參數自動載入同一個 MCP adapter，不修改所選帳號的
-`config.toml` 或 `.claude.json`。因此在工作階段裡的 CLI 可以直接使用下方
-明確授權的 SSH／SFTP 與遠端工具，不必請你到終端機代打指令。自己帶了
-`--mcp-config` 的啟動參數，或用 `--safe-mode`／`--bare` 開的 Claude Code，
+LatticeTerm 自己新開的 Codex 終端工作階段與對話，以及 Claude Code、Gemini
+CLI、Qwen Code、OpenCode 的終端工作階段，都會自動載入同一個 MCP adapter：
+Codex 與 Claude Code 走程序參數，Gemini 與 Qwen 走程序範圍的臨時設定檔，
+OpenCode 走一次性的內嵌設定，都不會動到所選帳號的 `config.toml`、
+`.claude.json`、`~/.gemini` 或 OpenCode 的全域設定。因此在工作階段裡的 CLI
+可以直接使用下方明確授權的 SSH／SFTP 與遠端工具，不必請你到終端機代打
+指令；每次呼叫仍由該 CLI 自己先詢問，再經過桌面的授權檢查。自己帶了
+`--mcp-config` 的啟動參數、用 `--safe-mode`／`--bare` 開的 Claude Code 或
+Qwen、`--pure` 模式的 OpenCode，以及已有系統管理層設定檔的 Gemini／Qwen，
 LatticeTerm 都不插手。設定頁可請原生層使用 LatticeTerm
 安全儲存的密碼、SSH 金鑰偏好或 Lattice Remote 配對碼開啟連線，模型與
 WebView 都拿不到憑證。更新前已經執行中的 CLI 不會在中途改寫工具清單，

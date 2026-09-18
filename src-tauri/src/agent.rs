@@ -3093,7 +3093,7 @@ const GEMINI_REPORTER_COMMAND: &str = r#"& "$env:LATTICETERM_AGENT_REPORTER" age
 #[cfg(not(windows))]
 const GEMINI_REPORTER_COMMAND: &str = r#""$LATTICETERM_AGENT_REPORTER" agent-gemini-hook"#;
 
-fn gemini_reporter_settings_value() -> serde_json::Value {
+fn gemini_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> serde_json::Value {
     let handler = serde_json::json!({
         "name": "latticeterm-agent-status",
         "type": "command",
@@ -3107,13 +3107,17 @@ fn gemini_reporter_settings_value() -> serde_json::Value {
         }
         value
     };
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "hooks": {
             "BeforeAgent": [hook(None)],
             "AfterAgent": [hook(None)],
             "Notification": [hook(Some("ToolPermission"))]
         }
-    })
+    });
+    if let Some(mcp) = mcp {
+        crate::agent_mcp::apply_gemini_settings(&mut settings, mcp);
+    }
+    settings
 }
 
 fn default_gemini_system_settings_paths() -> Option<(PathBuf, PathBuf)> {
@@ -3134,7 +3138,9 @@ fn default_gemini_system_settings_paths() -> Option<(PathBuf, PathBuf)> {
     })
 }
 
-fn gemini_reporter_settings_file() -> Result<Option<tempfile::NamedTempFile>, String> {
+fn gemini_reporter_settings_file(
+    mcp: Option<&crate::agent_mcp::McpLaunch>,
+) -> Result<Option<tempfile::NamedTempFile>, String> {
     // Never replace an administrator-selected settings layer. Pointing Gemini
     // at our temporary file would otherwise bypass system policy for this PTY.
     if std::env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH").is_some() {
@@ -3153,7 +3159,7 @@ fn gemini_reporter_settings_file() -> Result<Option<tempfile::NamedTempFile>, St
         .suffix(".json")
         .tempfile()
         .map_err(|error| format!("Cannot create Gemini hook settings: {error}"))?;
-    serde_json::to_writer(&mut file, &gemini_reporter_settings_value())
+    serde_json::to_writer(&mut file, &gemini_reporter_settings_value(mcp))
         .map_err(|error| format!("Cannot write Gemini hook settings: {error}"))?;
     file.flush()
         .map_err(|error| format!("Cannot finish Gemini hook settings: {error}"))?;
@@ -3186,7 +3192,7 @@ const QWEN_REPORTER_COMMAND: &str = r#"& "$env:LATTICETERM_AGENT_REPORTER" agent
 #[cfg(not(windows))]
 const QWEN_REPORTER_COMMAND: &str = r#""$LATTICETERM_AGENT_REPORTER" agent-qwen-hook"#;
 
-fn qwen_reporter_settings_value() -> serde_json::Value {
+fn qwen_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> serde_json::Value {
     let handler = serde_json::json!({
         "name": "latticeterm-agent-status",
         "type": "command",
@@ -3200,7 +3206,7 @@ fn qwen_reporter_settings_value() -> serde_json::Value {
         }
         value
     };
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [hook(None)],
             "PermissionRequest": [hook(None)],
@@ -3211,7 +3217,11 @@ fn qwen_reporter_settings_value() -> serde_json::Value {
             "StopFailure": [hook(None)],
             "Notification": [hook(Some("permission_prompt"))]
         }
-    })
+    });
+    if let Some(mcp) = mcp {
+        crate::agent_mcp::apply_gemini_settings(&mut settings, mcp);
+    }
+    settings
 }
 
 fn qwen_reporter_allowed(arguments: &[String]) -> bool {
@@ -3245,6 +3255,7 @@ fn default_qwen_system_settings_paths() -> Option<(PathBuf, PathBuf)> {
 
 fn qwen_reporter_settings_file(
     arguments: &[String],
+    mcp: Option<&crate::agent_mcp::McpLaunch>,
 ) -> Result<Option<tempfile::NamedTempFile>, String> {
     // Bare and safe mode intentionally disable hooks. Existing administrator
     // paths also win so a per-session status integration never bypasses policy.
@@ -3266,7 +3277,7 @@ fn qwen_reporter_settings_file(
         .suffix(".json")
         .tempfile()
         .map_err(|error| format!("Cannot create Qwen hook settings: {error}"))?;
-    serde_json::to_writer(&mut file, &qwen_reporter_settings_value())
+    serde_json::to_writer(&mut file, &qwen_reporter_settings_value(mcp))
         .map_err(|error| format!("Cannot write Qwen hook settings: {error}"))?;
     file.flush()
         .map_err(|error| format!("Cannot finish Qwen hook settings: {error}"))?;
@@ -3519,7 +3530,9 @@ fn opencode_reporter_allowed(
     })
 }
 
-fn write_opencode_reporter_plugin() -> Result<OpenCodeReporterPlugin, String> {
+fn write_opencode_reporter_plugin(
+    mcp: Option<&crate::agent_mcp::McpLaunch>,
+) -> Result<OpenCodeReporterPlugin, String> {
     let mut file = tempfile::Builder::new()
         .prefix("latticeterm-opencode-status-")
         .suffix(".js")
@@ -3533,7 +3546,11 @@ fn write_opencode_reporter_plugin() -> Result<OpenCodeReporterPlugin, String> {
         .path()
         .to_str()
         .ok_or_else(|| "OpenCode status plugin path is not valid UTF-8.".to_string())?;
-    let config_content = serde_json::json!({ "plugin": [path] }).to_string();
+    let mut config = serde_json::json!({ "plugin": [path] });
+    if let Some(mcp) = mcp {
+        crate::agent_mcp::apply_opencode_config(&mut config, mcp);
+    }
+    let config_content = config.to_string();
     Ok(OpenCodeReporterPlugin {
         _file: file,
         config_content,
@@ -3542,6 +3559,7 @@ fn write_opencode_reporter_plugin() -> Result<OpenCodeReporterPlugin, String> {
 
 fn opencode_reporter_plugin(
     arguments: &[String],
+    mcp: Option<&crate::agent_mcp::McpLaunch>,
 ) -> Result<Option<OpenCodeReporterPlugin>, String> {
     if !opencode_reporter_allowed(
         arguments,
@@ -3550,7 +3568,7 @@ fn opencode_reporter_plugin(
     ) {
         return Ok(None);
     }
-    write_opencode_reporter_plugin().map(Some)
+    write_opencode_reporter_plugin(mcp).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -6048,7 +6066,7 @@ pub fn launch_with_replay(
         // Gemini has no one-shot --settings argument. Its documented system
         // settings path is process-scoped, so a temporary file adds hooks
         // without touching ~/.gemini or the selected workspace.
-        integration_settings = gemini_reporter_settings_file()
+        integration_settings = gemini_reporter_settings_file(registry.mcp.as_ref())
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::Gemini);
@@ -6060,7 +6078,7 @@ pub fn launch_with_replay(
         // OpenCode merges runtime config with global/project/admin layers. A
         // temporary local plugin observes only this process and never edits
         // the user's files. Explicit inline config or pure mode wins.
-        integration_settings = opencode_reporter_plugin(&arguments)
+        integration_settings = opencode_reporter_plugin(&arguments, registry.mcp.as_ref())
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::OpenCode);
@@ -6089,7 +6107,7 @@ pub fn launch_with_replay(
         // Qwen's system settings override can be scoped to this child process.
         // Keep heuristics enabled until the first hook actually reports: user
         // settings may intentionally disable hooks even when this file loads.
-        integration_settings = qwen_reporter_settings_file(&arguments)
+        integration_settings = qwen_reporter_settings_file(&arguments, registry.mcp.as_ref())
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::Qwen);
@@ -9868,7 +9886,7 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     #[test]
     fn gemini_reporter_uses_process_scoped_lifecycle_hooks() {
-        let settings = gemini_reporter_settings_value();
+        let settings = gemini_reporter_settings_value(None);
         let before = &settings["hooks"]["BeforeAgent"][0]["hooks"][0];
         let after = &settings["hooks"]["AfterAgent"][0]["hooks"][0];
         let permission = &settings["hooks"]["Notification"][0];
@@ -9880,6 +9898,26 @@ notify = ["notify.exe", "turn-ended"]"#,
         assert_eq!(permission["matcher"], "ToolPermission");
         assert_eq!(permission["hooks"][0], *before);
         assert!(settings.get("hooksConfig").is_none());
+        assert!(settings.get("mcpServers").is_none());
+    }
+
+    #[test]
+    fn gemini_and_qwen_reach_the_desktop_through_the_same_settings_file() {
+        let launch = crate::agent_mcp::McpLaunch {
+            command: "/opt/lattice-term".to_string(),
+            args: vec!["mcp".to_string()],
+        };
+        for settings in [
+            gemini_reporter_settings_value(Some(&launch)),
+            qwen_reporter_settings_value(Some(&launch)),
+        ] {
+            assert_eq!(
+                settings["mcpServers"]["latticeterm"]["command"],
+                "/opt/lattice-term"
+            );
+            assert_eq!(settings["mcpServers"]["latticeterm"]["trust"], false);
+            assert!(settings["hooks"].is_object());
+        }
     }
 
     #[test]
@@ -9916,7 +9954,7 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     #[test]
     fn qwen_reporter_uses_process_scoped_lifecycle_hooks() {
-        let settings = qwen_reporter_settings_value();
+        let settings = qwen_reporter_settings_value(None);
         let submitted = &settings["hooks"]["UserPromptSubmit"][0]["hooks"][0];
         let stop = &settings["hooks"]["Stop"][0]["hooks"][0];
         let permission = &settings["hooks"]["Notification"][0];
@@ -10465,7 +10503,7 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     #[test]
     fn opencode_plugin_is_process_scoped_without_editing_user_config() {
-        let plugin = write_opencode_reporter_plugin().unwrap();
+        let plugin = write_opencode_reporter_plugin(None).unwrap();
         assert_eq!(
             std::fs::read_to_string(plugin._file.path()).unwrap(),
             OPENCODE_REPORTER_PLUGIN
@@ -10476,6 +10514,27 @@ notify = ["notify.exe", "turn-ended"]"#,
             plugin._file.path().to_string_lossy().as_ref()
         );
         assert!(config.get("permission").is_none());
+        assert!(config.get("mcp").is_none());
+    }
+
+    #[test]
+    fn opencode_carries_the_desktop_server_in_the_same_inline_config() {
+        let plugin = write_opencode_reporter_plugin(Some(&crate::agent_mcp::McpLaunch {
+            command: "/opt/lattice-term".to_string(),
+            args: vec![
+                "mcp".to_string(),
+                "--data-dir".to_string(),
+                "/tmp".to_string(),
+            ],
+        }))
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&plugin.config_content).unwrap();
+        assert_eq!(config["plugin"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            config["mcp"]["latticeterm"]["command"],
+            serde_json::json!(["/opt/lattice-term", "mcp", "--data-dir", "/tmp"])
+        );
+        assert_eq!(config["mcp"]["latticeterm"]["type"], "local");
     }
 
     #[test]
