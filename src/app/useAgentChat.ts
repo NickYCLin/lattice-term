@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
-import { loadCliProxySettings } from "./cliProxyApi";
+import { findCliProxy, loadCliProxySettings } from "./cliProxyApi";
 import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInputQueue";
 import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
@@ -75,6 +75,7 @@ const FALLBACK_SUPPORTED: ChatDefinitionId[] = [
 
 export interface ChatThreadSettings {
   provider?: "cliproxyapi";
+  proxyId?: string;
   browserEnabled?: boolean;
   definitionId: ChatDefinitionId;
   workingDirectory: string;
@@ -378,6 +379,9 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
           model: patch.model ?? thread.model,
           provider: Object.prototype.hasOwnProperty.call(patch, "provider") || (patch.definitionId && patch.definitionId !== thread.definitionId)
             ? patch.provider : thread.provider,
+          proxyId: Object.prototype.hasOwnProperty.call(patch, "proxyId") || Object.prototype.hasOwnProperty.call(patch, "provider")
+            || (patch.definitionId && patch.definitionId !== thread.definitionId)
+            ? patch.proxyId : thread.proxyId,
         });
         return {
           ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
@@ -445,6 +449,11 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     }
     completionTracker.current.start(id, turnId);
     const visiblePrompt = prompt.trim() ? prompt : "Please inspect the attached files.";
+    // Resolved per turn: the address or the key of that proxy may have changed
+    // since the thread was created.
+    const proxy = thread.provider === "cliproxyapi" && typeof localStorage !== "undefined"
+      ? findCliProxy(loadCliProxySettings(localStorage), thread.proxyId)
+      : null;
     changeThreads(() => snapshot);
     try {
       const { invoke } = await core();
@@ -459,7 +468,8 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
           permission: thread.permission,
           model: thread.model.trim() || null,
           profileConfigPath,
-          cliProxyBaseUrl: thread.provider === "cliproxyapi" ? loadCliProxySettings(localStorage).baseUrl : null,
+          cliProxyBaseUrl: proxy?.baseUrl ?? null,
+          cliProxyId: proxy?.id ?? null,
           nativeSessionId: thread.nativeSessionId,
           attachments: attachments.map(({ path }) => ({ path })),
         },

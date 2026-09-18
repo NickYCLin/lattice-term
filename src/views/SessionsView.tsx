@@ -34,7 +34,7 @@ import {
   type AccountModelSelection,
 } from "../app/accountModels";
 import { useAccountModels } from "../app/useAccountModels";
-import { useCliProxyModels, useCliProxySettings } from "../app/useCliProxyApi";
+import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
@@ -488,18 +488,18 @@ export function SessionsView({
   // The proxy is only asked while a launcher is open, and only when the
   // user has pointed Settings at one.
   const cliProxySettings = useCliProxySettings();
-  const cliProxyModels = useCliProxyModels(cliProxySettings, newProjectDirectory !== null || addCliFor !== null);
+  const cliProxyModels = useCliProxyModelLists(cliProxySettings, newProjectDirectory !== null || addCliFor !== null).lists;
   // A terminal may also be opened to log in, so signed-out accounts can launch
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
     defaultModel: t("terminal.model.pending"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, true).map((option) => ({ ...option, disabled: false }));
+  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, cliProxySettings.proxies).map((option) => ({ ...option, disabled: false }));
   const defaultModelSelection = (definitionId?: string): AccountModelSelection | null => {
     const candidates = modelTargets.filter((target) => !definitionId || target.definitionId === definitionId);
     const target = candidates.find((candidate) => !candidate.signedOut) ?? candidates[0];
     return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" } : null;
   };
-  const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"));
+  const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"), cliProxySettings.proxies);
   const modelAvailable = (selection: AccountModelSelection | null) => selection !== null && (!selection.provider || validCliProxyModel(selection.model)) && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selection));
   const projectModelAvailable = modelAvailable(selectedProjectModel);
 
@@ -877,7 +877,7 @@ export function SessionsView({
         definitionId: selection.definitionId,
         label: "",
         executable: "",
-        ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.baseUrl),
+        ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -1045,7 +1045,7 @@ export function SessionsView({
         definitionId: definition.id,
         label: "",
         executable: "",
-        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.baseUrl),
+        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.proxies),
         resumeSessionId: null,
         groupId: null,
         seedInput: null,

@@ -1,3 +1,4 @@
+import { launchedThroughCliProxy } from "./cliProxyApi";
 import type { AgentSessionSummary } from "./useAgentSessions";
 import type { SessionSummary as SshSessionSummary } from "./useSshSessions";
 
@@ -358,7 +359,7 @@ export function agentRestoreArguments(session: SavedAgentSession): string[] {
   if (session.resumeSessionId) {
     // The native conversation does not retain our process-local provider/key.
     // Restore public proxy metadata; the desktop reloads the bound credential.
-    return session.definitionId === "codex" && session.launchArguments.includes("model_provider=latticeterm_cliproxyapi")
+    return session.definitionId === "codex" && launchedThroughCliProxy(session.launchArguments)
       ? [...session.launchArguments] : [];
   }
   const launchArguments = agentFreshLaunchArguments(session);

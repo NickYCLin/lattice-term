@@ -10,6 +10,7 @@
 export type ChatDefinitionId = "claude" | "codex" | "gemini" | "antigravity";
 
 import { restoreQueuedInputs, type QueuedChatInput } from "./chatInputQueue";
+import { validCliProxyId } from "./cliProxyApi";
 
 /** What the CLI may do during a turn; see `ChatPermission` in Rust. */
 export type ChatPermission = "ask" | "readOnly" | "workspaceWrite" | "full";
@@ -158,6 +159,8 @@ export interface ChatHandoff {
 
 export interface ChatThread {
   provider?: "cliproxyapi";
+  /** Which configured proxy answers this thread. */
+  proxyId?: string;
   browserEnabled?: boolean;
   /** Imported cloud export: a read-only reference, never a resumable CLI session. */
   archived?: boolean;
@@ -316,6 +319,7 @@ export function handoffThread(
     ...thread,
     definitionId,
     provider: undefined,
+    proxyId: undefined,
     accountProfileId: null,
     model: model.trim(),
     permission: permissionsFor(definitionId).includes(thread.permission)
@@ -378,7 +382,7 @@ export function changeThreadDirectory(thread: ChatThread, directory: string): Ch
 /** Apply the provider, account and model as one choice, never an intermediate identity. */
 export function selectThreadModel(
   thread: ChatThread,
-  selection: { definitionId: ChatDefinitionId; accountProfileId: string | null; model: string; provider?: "cliproxyapi" },
+  selection: { definitionId: ChatDefinitionId; accountProfileId: string | null; model: string; provider?: "cliproxyapi"; proxyId?: string },
   now: number = Date.now(),
 ): ChatThread {
   if (thread.runningTurnId) return thread;
@@ -386,10 +390,13 @@ export function selectThreadModel(
     ? { ...handoffThread(thread, selection.definitionId, selection.model, now), accountProfileId: selection.accountProfileId }
     : handoffThreadAccount(thread, selection.accountProfileId, now);
   const provider = selection.definitionId === "codex" ? selection.provider : undefined;
-  const providerChanged = provider !== thread.provider;
+  const proxyId = provider ? selection.proxyId : undefined;
+  // Another proxy is another upstream account: the native conversation of the
+  // previous one cannot be resumed against it.
+  const providerChanged = provider !== thread.provider || proxyId !== thread.proxyId;
   const transcript = providerChanged ? handoffTranscript(thread.items, thread.definitionId) : "";
   return {
-    ...next, provider, model: selection.model.trim(), updatedAt: now,
+    ...next, provider, proxyId, model: selection.model.trim(), updatedAt: now,
     ...(providerChanged ? {
       nativeSessionId: null, reportedModel: null,
       handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
@@ -425,13 +432,14 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "accountProfileId">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
   return {
     id,
     provider: settings.definitionId === "codex" ? settings.provider : undefined,
+    proxyId: settings.definitionId === "codex" && settings.provider ? settings.proxyId : undefined,
     browserEnabled: settings.definitionId === "codex" && settings.browserEnabled === true,
     definitionId: settings.definitionId,
     title: settings.title ?? "",
@@ -794,6 +802,10 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
       title: typeof thread.title === "string" ? thread.title : "",
       browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
       provider: thread.definitionId === "codex" && thread.provider === "cliproxyapi" ? "cliproxyapi" : undefined,
+      proxyId:
+        thread.definitionId === "codex" && thread.provider === "cliproxyapi" && typeof thread.proxyId === "string" && validCliProxyId(thread.proxyId)
+          ? thread.proxyId
+          : undefined,
       archived: thread.archived === true,
       model: typeof thread.model === "string" ? thread.model : "",
       nativeSessionId:

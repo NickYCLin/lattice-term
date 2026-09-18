@@ -6,7 +6,37 @@ use zeroize::Zeroizing;
 
 pub const PROVIDER: &str = "latticeterm_cliproxyapi";
 pub const KEY_ENV: &str = "LATTICETERM_CLI_PROXY_API_KEY";
-const BASE_OVERRIDE: &str = "model_providers.latticeterm_cliproxyapi.base_url=";
+
+/// Which configured proxy a saved launch belongs to. The marker of the proxy
+/// that predates multiple entries carries no identifier, so restoring an
+/// older workspace still finds the key in its original slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyTarget {
+    pub base_url: String,
+    pub id: Option<String>,
+}
+
+fn saved_provider(proxy_id: Option<&str>) -> String {
+    match proxy_id.filter(|id| *id != crate::credentials::CLI_PROXY_DEFAULT_ID) {
+        Some(id) => format!("{PROVIDER}_{id}"),
+        None => PROVIDER.to_string(),
+    }
+}
+
+/// `None` when the marker is not ours; `Some(id)` when it is, where the inner
+/// value names the configured proxy.
+fn saved_provider_id(name: &str) -> Option<Option<String>> {
+    if name == PROVIDER {
+        return Some(None);
+    }
+    let suffix = name.strip_prefix(PROVIDER)?.strip_prefix('_')?;
+    let valid = !suffix.is_empty()
+        && suffix.len() <= 32
+        && suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit());
+    valid.then(|| Some(suffix.to_string()))
+}
 
 pub struct ProxyLaunch {
     base_url: String,
@@ -15,10 +45,10 @@ pub struct ProxyLaunch {
 }
 
 impl ProxyLaunch {
-    pub fn load(base_url: &str) -> Result<Self, String> {
+    pub fn load(base_url: &str, proxy_id: Option<&str>) -> Result<Self, String> {
         let base_url = super::normalize_base_url(base_url)?;
-        let key = if crate::credentials::cli_proxy_key_exists()? {
-            Some(crate::credentials::load_cli_proxy_key(&base_url)?)
+        let key = if crate::credentials::cli_proxy_key_exists(proxy_id)? {
+            Some(crate::credentials::load_cli_proxy_key(proxy_id, &base_url)?)
         } else {
             None
         };
@@ -90,37 +120,57 @@ impl ProxyLaunch {
     }
 }
 
-pub fn base_from_arguments(arguments: &[String]) -> Result<Option<String>, String> {
+pub fn base_from_arguments(arguments: &[String]) -> Result<Option<ProxyTarget>, String> {
     let overrides: Vec<&str> = arguments
         .windows(2)
         .filter(|pair| pair[0] == "-c" || pair[0] == "--config")
         .map(|pair| pair[1].as_str())
         .collect();
-    if !overrides.contains(&"model_provider=latticeterm_cliproxyapi") {
+    let providers: Vec<&str> = overrides
+        .iter()
+        .filter_map(|value| value.strip_prefix("model_provider="))
+        .collect();
+    let Some(marker) = providers.first().copied() else {
         return Ok(None);
-    }
+    };
+    let Some(id) = saved_provider_id(marker) else {
+        return Ok(None);
+    };
+    let marker_override = format!("model_provider={marker}");
+    let base_override = format!("model_providers.{marker}.base_url=");
     let bases: Vec<_> = overrides
         .iter()
-        .filter_map(|value| value.strip_prefix(BASE_OVERRIDE))
+        .filter_map(|value| value.strip_prefix(base_override.as_str()))
         .collect();
     if bases.len() != 1
-        || overrides
-            .iter()
-            .filter(|value| value.starts_with("model_provider="))
-            .count()
-            != 1
+        || providers.len() != 1
         || arguments
             .iter()
             .any(|arg| arg.starts_with("--config=") || (arg.starts_with("-c") && arg != "-c"))
-        || overrides.iter().any(|value| {
-            *value != "model_provider=latticeterm_cliproxyapi" && !value.starts_with(BASE_OVERRIDE)
-        })
+        || overrides
+            .iter()
+            .any(|value| *value != marker_override && !value.starts_with(base_override.as_str()))
     {
         return Err("CLIProxyAPI launch settings conflict with another provider override.".into());
     }
     let endpoint: String = serde_json::from_str(bases[0]).map_err(|_| "cliproxy.url.invalid")?;
     let root = endpoint.strip_suffix("/v1").ok_or("cliproxy.url.invalid")?;
-    super::normalize_base_url(root).map(Some)
+    super::normalize_base_url(root).map(|base_url| Some(ProxyTarget { base_url, id }))
+}
+
+/// The arguments LatticeTerm stores for a saved launch; the running process
+/// receives the fresh provider name built in `arguments` instead.
+pub fn saved_arguments(base_url: &str, proxy_id: Option<&str>) -> Vec<String> {
+    let provider = saved_provider(proxy_id);
+    vec![
+        "-c".into(),
+        format!("model_provider={provider}"),
+        "-c".into(),
+        format!(
+            "model_providers.{provider}.base_url={}",
+            serde_json::Value::String(format!("{base_url}/v1"))
+        ),
+    ]
 }
 
 #[cfg(test)]
@@ -154,17 +204,14 @@ mod tests {
 
     #[test]
     fn saved_launches_keep_the_address_and_reject_conflicting_overrides() {
-        let args = vec![
-            "-c".into(),
-            format!("model_provider={PROVIDER}"),
-            "-c".into(),
-            format!("{BASE_OVERRIDE}\"http://localhost:8317/v1\""),
-            "--model".into(),
-            "test-model".into(),
-        ];
+        let mut args = saved_arguments("http://localhost:8317", None);
+        args.extend(["--model".into(), "test-model".into()]);
         assert_eq!(
-            base_from_arguments(&args).unwrap().as_deref(),
-            Some("http://localhost:8317")
+            base_from_arguments(&args).unwrap(),
+            Some(ProxyTarget {
+                base_url: "http://localhost:8317".into(),
+                id: None
+            })
         );
         let configured = launch(Some("fixture-secret")).configure_arguments(args.clone());
         assert!(!configured
@@ -191,5 +238,50 @@ mod tests {
             base_from_arguments(&["--model".into(), "test-model".into()]).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn each_configured_proxy_keeps_its_own_marker() {
+        assert_eq!(
+            saved_arguments("http://localhost:8317", Some("default")),
+            saved_arguments("http://localhost:8317", None)
+        );
+        let args = saved_arguments("https://proxy.example", Some("7f3a91"));
+        assert_eq!(
+            base_from_arguments(&args).unwrap(),
+            Some(ProxyTarget {
+                base_url: "https://proxy.example".into(),
+                id: Some("7f3a91".into())
+            })
+        );
+        // A marker that is not ours, and an identifier we would never write,
+        // are both left to whatever other provider owns them.
+        assert_eq!(
+            base_from_arguments(&[
+                "-c".into(),
+                "model_provider=other".into(),
+                "-c".into(),
+                "model_providers.other.base_url=\"http://localhost/v1\"".into(),
+            ])
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            base_from_arguments(&[
+                "-c".into(),
+                format!("model_provider={PROVIDER}_Upper"),
+                "-c".into(),
+                format!("model_providers.{PROVIDER}_Upper.base_url=\"http://localhost/v1\""),
+            ])
+            .unwrap(),
+            None
+        );
+        // One proxy's arguments must not smuggle in a second provider table.
+        let mut mixed = args.clone();
+        mixed.extend([
+            "-c".into(),
+            format!("model_providers.{PROVIDER}.base_url=\"http://localhost/v1\""),
+        ]);
+        assert!(base_from_arguments(&mixed).is_err());
     }
 }

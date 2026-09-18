@@ -1,5 +1,5 @@
-import { cliProxyMessageKey, cliProxyStatusCode, groupCliProxyModels } from "../../app/cliProxyApi";
-import type { CliProxyModelList } from "../../app/useCliProxyApi";
+import { CLI_PROXY_DEFAULT_ID, cliProxyMessageKey, cliProxyStatusCode, groupCliProxyModels } from "../../app/cliProxyApi";
+import type { CliProxyModelList, CliProxyModelLists } from "../../app/useCliProxyApi";
 import { accountModelKey, type AccountModelOption, type AccountModelSelection } from "../../app/accountModels";
 import { useI18n } from "../../i18n/context";
 
@@ -49,17 +49,20 @@ function CliProxyModel({ value, models, disabled, onChange }: {
   </>;
 }
 
-export function AccountModelField({ options, value, disabled, onChange, allowCliProxyApi = false, proxyModels = { state: "idle" } }: {
+export function AccountModelField({ options, value, disabled, onChange, allowCliProxyApi = false, proxyModels = {} }: {
   options: readonly AccountModelOption[];
   value: AccountModelSelection | null;
   disabled?: boolean;
   allowCliProxyApi?: boolean;
-  proxyModels?: CliProxyModelList;
+  /** One model list per configured proxy, keyed by its identifier. */
+  proxyModels?: CliProxyModelLists;
   onChange: (selection: AccountModelSelection) => void;
 }) {
   const { t } = useI18n();
   const selectedKey = value ? accountModelKey(value) : "";
   const missing = value && !options.some((option) => accountModelKey(option) === selectedKey);
+  const listFor = (proxyId: string | undefined): CliProxyModelList =>
+    proxyModels[proxyId ?? CLI_PROXY_DEFAULT_ID] ?? { state: "idle" };
   const proxyOptions = options.filter((option) => option.provider === "cliproxyapi");
   const nativeOptions = options.filter((option) => option.provider !== "cliproxyapi");
   const renderOption = (option: AccountModelOption) => <option key={accountModelKey(option)} value={accountModelKey(option)} disabled={option.disabled}>{option.label}</option>;
@@ -67,10 +70,10 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
     <span className="field__label">{t("chat.model")}</span>
     <select className="select" aria-label={t("chat.model")} value={selectedKey} disabled={disabled} onChange={(event) => {
       const selected = options.find((option) => accountModelKey(option) === event.currentTarget.value);
-      if (selected && !selected.disabled) {
-        onChange(selected.provider && proxyModels.state === "ready"
-          ? { ...selected, model: groupCliProxyModels(proxyModels.models)[0]?.models[0]?.id ?? "" } : selected);
-      }
+      if (!selected || selected.disabled) return;
+      const list = selected.provider ? listFor(selected.proxyId) : null;
+      onChange(list?.state === "ready"
+        ? { ...selected, model: groupCliProxyModels(list.models)[0]?.models[0]?.id ?? "" } : selected);
     }}>
       {!value && <option value="" disabled>{t("accountModel.choose")}</option>}
       {missing && <option value={selectedKey} disabled>{t("accountModel.missing")}</option>}
@@ -80,6 +83,6 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
       {nativeOptions.map(renderOption)}
     </select>
     {allowCliProxyApi && value?.provider === "cliproxyapi" &&
-      <CliProxyModel value={value} models={proxyModels} disabled={disabled} onChange={onChange} />}
+      <CliProxyModel value={value} models={listFor(value.proxyId)} disabled={disabled} onChange={onChange} />}
   </div>;
 }

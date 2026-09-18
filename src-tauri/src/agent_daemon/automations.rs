@@ -505,6 +505,7 @@ pub async fn execute(
     let automation_id = planned.record.automation_id.clone();
     let request = ChatTurnRequest {
         cli_proxy_base_url: None,
+        cli_proxy_id: None,
         browser_enabled: false,
         thread_id: planned.record.thread_id.clone(),
         turn_id: planned.record.turn_id.clone(),

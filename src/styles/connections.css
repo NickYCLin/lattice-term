@@ -786,6 +786,30 @@
   align-items: flex-start;
 }
 
+/* Each configured CLIProxyAPI server is its own card, so the address, the key
+   and the model list that belong together stay visually together. */
+.cli-proxy-entry {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.cli-proxy-entry__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cli-proxy-entry__head strong {
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
 .setting__title--icon {
   display: inline-flex;
   align-items: center;

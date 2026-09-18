@@ -409,6 +409,27 @@ fn remote_host_pairing_code_exists() -> Result<bool, String> {
 /// deletion.
 pub const CLI_PROXY_CREDENTIAL_ID: &str = "cliproxyapi";
 
+/// The proxy that existed before several could be configured. Its key stays
+/// in the original slot so an upgrade keeps working without re-entry.
+pub const CLI_PROXY_DEFAULT_ID: &str = "default";
+
+/// One slot per configured proxy: the same server can be reached with two
+/// different keys, and removing one proxy must not delete another's key.
+pub fn cli_proxy_credential_id(proxy_id: Option<&str>) -> Result<String, String> {
+    let Some(id) = proxy_id.filter(|id| *id != CLI_PROXY_DEFAULT_ID) else {
+        return Ok(CLI_PROXY_CREDENTIAL_ID.to_string());
+    };
+    if id.is_empty()
+        || id.len() > 32
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+    {
+        return Err("cliproxy.id.invalid".to_string());
+    }
+    Ok(format!("{CLI_PROXY_CREDENTIAL_ID}-{id}"))
+}
+
 /// Ties the key to the exact address it was entered for. Pointing the setting
 /// at another host therefore fails to decode instead of quietly sending the
 /// key somewhere the user did not mean to send it.
@@ -424,10 +445,15 @@ fn cli_proxy_binding_sha256(base_url: &str) -> String {
         .collect()
 }
 
-pub fn store_cli_proxy_key(base_url: &str, secret: &str) -> Result<(), String> {
+pub fn store_cli_proxy_key(
+    proxy_id: Option<&str>,
+    base_url: &str,
+    secret: &str,
+) -> Result<(), String> {
     if secret.is_empty() {
         return Err("An empty credential cannot be saved.".to_string());
     }
+    let credential_id = cli_proxy_credential_id(proxy_id)?;
     let encoded = Zeroizing::new(
         serde_json::to_string(&BoundCredentialEnvelope {
             version: BOUND_CREDENTIAL_VERSION,
@@ -436,18 +462,15 @@ pub fn store_cli_proxy_key(base_url: &str, secret: &str) -> Result<(), String> {
         })
         .map_err(|error| error.to_string())?,
     );
-    store(
-        CLI_PROXY_CREDENTIAL_ID,
-        CredentialKind::CliProxyApiKey,
-        &encoded,
-    )
+    store(&credential_id, CredentialKind::CliProxyApiKey, &encoded)
 }
 
-pub fn load_cli_proxy_key(base_url: &str) -> Result<Zeroizing<String>, String> {
-    let encoded = Zeroizing::new(load(
-        CLI_PROXY_CREDENTIAL_ID,
-        CredentialKind::CliProxyApiKey,
-    )?);
+pub fn load_cli_proxy_key(
+    proxy_id: Option<&str>,
+    base_url: &str,
+) -> Result<Zeroizing<String>, String> {
+    let credential_id = cli_proxy_credential_id(proxy_id)?;
+    let encoded = Zeroizing::new(load(&credential_id, CredentialKind::CliProxyApiKey)?);
     let envelope: BoundCredentialEnvelope =
         serde_json::from_str(&encoded).map_err(|_| LEGACY_CREDENTIAL_ERROR.to_string())?;
     if envelope.version != BOUND_CREDENTIAL_VERSION
@@ -461,15 +484,19 @@ pub fn load_cli_proxy_key(base_url: &str) -> Result<Zeroizing<String>, String> {
     Ok(Zeroizing::new(envelope.secret.clone()))
 }
 
-pub fn cli_proxy_key_exists() -> Result<bool, String> {
+pub fn cli_proxy_key_exists(proxy_id: Option<&str>) -> Result<bool, String> {
+    let credential_id = cli_proxy_credential_id(proxy_id)?;
     merge_exists_results(
-        keyring_exists(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey),
-        vault_exists(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey),
+        keyring_exists(&credential_id, CredentialKind::CliProxyApiKey),
+        vault_exists(&credential_id, CredentialKind::CliProxyApiKey),
     )
 }
 
-pub fn delete_cli_proxy_key() -> Result<bool, String> {
-    delete(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey)
+pub fn delete_cli_proxy_key(proxy_id: Option<&str>) -> Result<bool, String> {
+    delete(
+        &cli_proxy_credential_id(proxy_id)?,
+        CredentialKind::CliProxyApiKey,
+    )
 }
 
 /// Stable, non-secret identity of the endpoint a saved credential belongs to.

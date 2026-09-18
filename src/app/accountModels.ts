@@ -1,7 +1,14 @@
 import type { ChatDefinitionId, ChatModelList } from "./agentChat";
 import { profilesFor, type ChatAccountProfile } from "./chatAccountProfiles";
 import type { AccountProfileStatuses } from "./useAccountProfileStatus";
-import { CLI_PROXY_NAME, cliProxyLaunchArguments, launchedThroughCliProxy } from "./cliProxyApi";
+import {
+  CLI_PROXY_DEFAULT_ID,
+  CLI_PROXY_NAME,
+  cliProxyIdFromArguments,
+  cliProxyLabel,
+  cliProxyLaunchArguments,
+  type CliProxyEndpoint,
+} from "./cliProxyApi";
 import type { AgentDefinition, AgentLaunchRequest, AgentSessionSummary } from "./useAgentSessions";
 
 export interface AccountModelSelection {
@@ -9,6 +16,8 @@ export interface AccountModelSelection {
   accountProfileId: string | null;
   model: string;
   provider?: "cliproxyapi";
+  /** Which configured proxy answers, when the provider is the proxy. */
+  proxyId?: string;
 }
 
 export interface AccountModelTarget {
@@ -32,7 +41,13 @@ export function hasChatModels(id: string): id is ChatDefinitionId {
 
 export function accountModelKey(selection: AccountModelSelection): string {
   // CLIProxyAPI's model ID is entered separately from the account/provider picker.
-  return JSON.stringify([selection.definitionId, selection.accountProfileId, selection.provider ?? null, selection.provider ? "" : selection.model]);
+  return JSON.stringify([
+    selection.definitionId,
+    selection.accountProfileId,
+    selection.provider ?? null,
+    selection.provider ? selection.proxyId ?? CLI_PROXY_DEFAULT_ID : null,
+    selection.provider ? "" : selection.model,
+  ]);
 }
 
 export function accountModelTargetKey(target: Pick<AccountModelTarget, "definitionId" | "configDirectory">): string {
@@ -79,7 +94,7 @@ export function accountModelOptions(
   lists: Readonly<Record<string, ChatModelList>>,
   labels: { defaultModel: string; loading: string; signedOut: string },
   selected?: AccountModelSelection,
-  includeCliProxyApi = false,
+  proxies: readonly CliProxyEndpoint[] = [],
 ): AccountModelOption[] {
   return targets.flatMap((target) => {
     const list = lists[accountModelTargetKey(target)];
@@ -97,8 +112,20 @@ export function accountModelOptions(
       label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + (target.signedOut ? `（${labels.signedOut}）` : ""),
       disabled: target.signedOut,
     }));
-    if (includeCliProxyApi && target.definitionId === "codex") {
-      options.push({ definitionId: "codex", accountProfileId: target.accountProfileId, model: "", provider: "cliproxyapi", label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, "CLIProxyAPI"].filter(Boolean).join(" · "), disabled: false });
+    // One entry per configured proxy; the picker already groups them under
+    // the proxy's own heading, so the option names the proxy, not the CLI.
+    if (target.definitionId === "codex") {
+      for (const endpoint of proxies) {
+        options.push({
+          definitionId: "codex",
+          accountProfileId: target.accountProfileId,
+          model: "",
+          provider: "cliproxyapi",
+          proxyId: endpoint.id,
+          label: [target.showAccount || target.signedOut ? target.accountName : null, cliProxyLabel(endpoint)].filter(Boolean).join(" · "),
+          disabled: false,
+        });
+      }
     }
     return options;
   });
@@ -109,17 +136,24 @@ export function accountModelOptions(
 export function accountModelLaunchSettings(
   selection: AccountModelSelection,
   profiles: readonly ChatAccountProfile[],
-  proxyBaseUrl = "",
+  proxies: readonly CliProxyEndpoint[] = [],
 ): Pick<AgentLaunchRequest, "profileConfigPath" | "arguments"> {
   const profile = selection.accountProfileId === null ? null : profilesFor(profiles, selection.definitionId).find((entry) => entry.id === selection.accountProfileId);
   if (selection.accountProfileId !== null && !profile) throw new Error("account-model:missing-account");
-  if (selection.provider) {
-    if (selection.provider !== "cliproxyapi" || selection.definitionId !== "codex") throw new Error("account-model:unsupported-provider");
-    if (!validCliProxyModel(selection.model)) throw new Error("account-model:invalid-proxy-model");
+  const profileConfigPath = profile?.configDirectory ?? null;
+  if (!selection.provider) {
+    return { profileConfigPath, arguments: selection.model ? ["--model", selection.model] : [] };
   }
+  if (selection.provider !== "cliproxyapi" || selection.definitionId !== "codex") throw new Error("account-model:unsupported-provider");
+  if (!validCliProxyModel(selection.model)) throw new Error("account-model:invalid-proxy-model");
+  // A removed proxy must stop the launch: falling back to another one would
+  // send the conversation to a server the user did not choose.
+  const wanted = selection.proxyId ?? CLI_PROXY_DEFAULT_ID;
+  const endpoint = proxies.find((candidate) => candidate.id === wanted);
+  if (!endpoint) throw new Error("account-model:missing-proxy");
   return {
-    profileConfigPath: profile?.configDirectory ?? null,
-    arguments: selection.provider ? [...cliProxyLaunchArguments(proxyBaseUrl), "--model", selection.model] : selection.model ? ["--model", selection.model] : [],
+    profileConfigPath,
+    arguments: [...cliProxyLaunchArguments(endpoint.baseUrl, endpoint.id), "--model", selection.model],
   };
 }
 
@@ -137,8 +171,16 @@ export function accountSessionLabel(
     Partial<Pick<AgentSessionSummary, "launchArguments">>,
   targets: readonly AccountModelTarget[],
   missing: string,
+  proxies: readonly CliProxyEndpoint[] = [],
 ): string {
-  if (launchedThroughCliProxy(session.launchArguments)) return CLI_PROXY_NAME;
+  const proxyId = cliProxyIdFromArguments(session.launchArguments);
+  if (proxyId !== null) {
+    const endpoint = proxies.find((candidate) => candidate.id === proxyId);
+    // The proxy's own name only earns a place once it distinguishes something.
+    return endpoint && (endpoint.label !== "" || proxies.length > 1)
+      ? `${CLI_PROXY_NAME} · ${cliProxyLabel(endpoint)}`
+      : CLI_PROXY_NAME;
+  }
   const target = targets.find((entry) => entry.definitionId === session.definitionId && accountPathKey(entry.configDirectory) === accountPathKey(session.profileConfigPath));
   if (!target) return session.profileConfigPath ? `${session.label} · ${missing}` : session.label;
   // Earlier account-login launches included the name in the stored label.

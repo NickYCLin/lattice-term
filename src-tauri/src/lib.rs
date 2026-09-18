@@ -2251,20 +2251,27 @@ async fn credential_backend_set(
 /// It is never returned to the interface, so the commands below report only
 /// whether one is stored.
 #[tauri::command]
-async fn cliproxy_save_key(base_url: String, key: String) -> Result<(), String> {
+async fn cliproxy_save_key(
+    proxy_id: Option<String>,
+    base_url: String,
+    key: String,
+) -> Result<(), String> {
     let base_url = crate::cliproxy::normalize_base_url(&base_url)?;
     let key = crate::cliproxy::validate_key(&key)?;
-    credential_call(move || crate::credentials::store_cli_proxy_key(&base_url, &key)).await
+    credential_call(move || {
+        crate::credentials::store_cli_proxy_key(proxy_id.as_deref(), &base_url, &key)
+    })
+    .await
 }
 
 #[tauri::command]
-async fn cliproxy_forget_key() -> Result<bool, String> {
-    credential_call(crate::credentials::delete_cli_proxy_key).await
+async fn cliproxy_forget_key(proxy_id: Option<String>) -> Result<bool, String> {
+    credential_call(move || crate::credentials::delete_cli_proxy_key(proxy_id.as_deref())).await
 }
 
 #[tauri::command]
-async fn cliproxy_key_exists() -> Result<bool, String> {
-    credential_call(crate::credentials::cli_proxy_key_exists).await
+async fn cliproxy_key_exists(proxy_id: Option<String>) -> Result<bool, String> {
+    credential_call(move || crate::credentials::cli_proxy_key_exists(proxy_id.as_deref())).await
 }
 
 #[tauri::command]
@@ -2276,13 +2283,20 @@ async fn cliproxy_probe(base_url: String) -> Result<crate::cliproxy::ProxyProbe,
 /// asking the proxy without it would report "no models" for what is really a
 /// stale credential, so the mismatch is surfaced.
 #[tauri::command]
-async fn cliproxy_models(base_url: String) -> Result<Vec<crate::cliproxy::ProxyModel>, String> {
+async fn cliproxy_models(
+    proxy_id: Option<String>,
+    base_url: String,
+) -> Result<Vec<crate::cliproxy::ProxyModel>, String> {
     let normalized = crate::cliproxy::normalize_base_url(&base_url)?;
     let stored = normalized.clone();
-    let key = credential_call(move || match crate::credentials::cli_proxy_key_exists() {
-        Ok(false) => Ok(None),
-        Ok(true) => crate::credentials::load_cli_proxy_key(&stored).map(Some),
-        Err(error) => Err(error),
+    let key = credential_call(move || {
+        match crate::credentials::cli_proxy_key_exists(proxy_id.as_deref()) {
+            Ok(false) => Ok(None),
+            Ok(true) => {
+                crate::credentials::load_cli_proxy_key(proxy_id.as_deref(), &stored).map(Some)
+            }
+            Err(error) => Err(error),
+        }
     })
     .await?;
     crate::cliproxy::models(&normalized, key).await

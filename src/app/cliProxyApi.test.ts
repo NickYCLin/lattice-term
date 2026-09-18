@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLI_PROXY_DEFAULT_ID,
+  CLI_PROXY_LEGACY_SETTINGS_KEY,
+  CLI_PROXY_LIMIT,
   CLI_PROXY_SETTINGS_KEY,
+  cliProxyIdFromArguments,
   cliProxyLaunchArguments,
   cliProxyConfigured,
   cliProxyMessageKey,
@@ -13,34 +17,74 @@ import {
   saveCliProxySettings,
 } from "./cliProxyApi";
 
-const reader = (raw: string | null) => ({ getItem: () => raw });
+const reader = (values: Record<string, string | null>) => ({
+  getItem: (key: string) => values[key] ?? null,
+});
+const listed = (proxies: unknown) => JSON.stringify({ proxies });
 
 describe("cliProxyApi settings", () => {
-  it("keeps a trimmed address and treats anything unusable as unset", () => {
-    expect(loadCliProxySettings(reader(JSON.stringify({ baseUrl: " http://127.0.0.1:8317 " })))).toEqual({
-      baseUrl: "http://127.0.0.1:8317",
+  it("keeps every usable proxy and drops the entries a picker could not use", () => {
+    const stored = listed([
+      { id: "default", label: " 工作代理 ", baseUrl: " http://127.0.0.1:8317 " },
+      { id: "7f3a91", label: "", baseUrl: "https://proxy.example" },
+      { id: "7f3a91", label: "重複", baseUrl: "https://other.example" },
+      { id: "NOT-AN-ID", label: "", baseUrl: "https://proxy.example" },
+      { id: "blank", label: "", baseUrl: "   " },
+      { id: "toolong", label: "", baseUrl: `http://${"h".repeat(300)}` },
+    ]);
+    expect(loadCliProxySettings(reader({ [CLI_PROXY_SETTINGS_KEY]: stored }))).toEqual({
+      proxies: [
+        { id: "default", label: "工作代理", baseUrl: "http://127.0.0.1:8317" },
+        { id: "7f3a91", label: "", baseUrl: "https://proxy.example" },
+      ],
     });
-    for (const raw of [null, "not json", "[]", "{}", JSON.stringify({ baseUrl: "   " }), JSON.stringify({ baseUrl: 7 })]) {
-      expect(loadCliProxySettings(reader(raw)), raw ?? "null").toEqual(emptyCliProxySettings);
+    for (const raw of [null, "not json", "[]", "{}", listed("nope"), listed([7])]) {
+      expect(loadCliProxySettings(reader({ [CLI_PROXY_SETTINGS_KEY]: raw })), raw ?? "null").toEqual(
+        emptyCliProxySettings,
+      );
     }
-    expect(loadCliProxySettings(reader(JSON.stringify({ baseUrl: `http://${"h".repeat(300)}` })))).toEqual(
-      emptyCliProxySettings,
-    );
+  });
+
+  it("stops at the readable limit instead of filling the picker", () => {
+    const many = Array.from({ length: CLI_PROXY_LIMIT + 3 }, (_unused, index) => ({
+      id: `p${index}`, label: "", baseUrl: `http://127.0.0.1:${8317 + index}`,
+    }));
+    expect(loadCliProxySettings(reader({ [CLI_PROXY_SETTINGS_KEY]: listed(many) })).proxies).toHaveLength(CLI_PROXY_LIMIT);
+  });
+
+  it("carries the single proxy saved before the list existed", () => {
+    expect(loadCliProxySettings(reader({
+      [CLI_PROXY_LEGACY_SETTINGS_KEY]: JSON.stringify({ baseUrl: " http://127.0.0.1:8317 " }),
+    }))).toEqual({
+      proxies: [{ id: CLI_PROXY_DEFAULT_ID, label: "", baseUrl: "http://127.0.0.1:8317" }],
+    });
+    expect(loadCliProxySettings(reader({
+      [CLI_PROXY_LEGACY_SETTINGS_KEY]: JSON.stringify({ baseUrl: "  " }),
+    }))).toEqual(emptyCliProxySettings);
   });
 
   it("removes the entry instead of storing a blank address", () => {
     const setItem = vi.fn();
     const removeItem = vi.fn();
-    saveCliProxySettings({ setItem, removeItem }, { baseUrl: " http://localhost:8317 " });
-    expect(setItem).toHaveBeenCalledWith(CLI_PROXY_SETTINGS_KEY, JSON.stringify({ baseUrl: "http://localhost:8317" }));
+    saveCliProxySettings({ setItem, removeItem }, {
+      proxies: [
+        { id: "default", label: " 工作代理 ", baseUrl: " http://localhost:8317 " },
+        { id: "bad id", label: "", baseUrl: "http://localhost:8318" },
+      ],
+    });
+    expect(setItem).toHaveBeenCalledWith(CLI_PROXY_SETTINGS_KEY, listed([
+      { id: "default", label: "工作代理", baseUrl: "http://localhost:8317" },
+    ]));
+    // The migrated copy must not resurrect a proxy that was just removed.
+    expect(removeItem).toHaveBeenCalledWith(CLI_PROXY_LEGACY_SETTINGS_KEY);
 
-    saveCliProxySettings({ setItem, removeItem }, { baseUrl: "  " });
+    saveCliProxySettings({ setItem, removeItem }, { proxies: [] });
     expect(removeItem).toHaveBeenCalledWith(CLI_PROXY_SETTINGS_KEY);
   });
 
   it("knows when a proxy has been set up", () => {
-    expect(cliProxyConfigured({ baseUrl: "http://127.0.0.1:8317" })).toBe(true);
-    expect(cliProxyConfigured({ baseUrl: " " })).toBe(false);
+    expect(cliProxyConfigured({ proxies: [{ id: "default", label: "", baseUrl: "http://127.0.0.1:8317" }] })).toBe(true);
+    expect(cliProxyConfigured(emptyCliProxySettings)).toBe(false);
   });
 });
 
@@ -107,6 +151,18 @@ describe("proxy launch metadata", () => {
       'model_providers.latticeterm_cliproxyapi.base_url="https://proxy.example/prefix/v1"',
     ]);
     expect(() => cliProxyLaunchArguments(" ")).toThrow("cliproxy.url.empty");
+    expect(() => cliProxyLaunchArguments("http://127.0.0.1:8317", "Not An Id")).toThrow("cliproxy.id.invalid");
+  });
+
+  it("names the proxy that answers, and leaves the first one's marker alone", () => {
+    // The marker written before the list existed must keep working, so an
+    // already-running session still finds its key after the upgrade.
+    expect(cliProxyLaunchArguments("http://127.0.0.1:8317", CLI_PROXY_DEFAULT_ID))
+      .toEqual(cliProxyLaunchArguments("http://127.0.0.1:8317"));
+    expect(cliProxyLaunchArguments("https://proxy.example", "7f3a91")).toEqual([
+      "-c", "model_provider=latticeterm_cliproxyapi_7f3a91", "-c",
+      'model_providers.latticeterm_cliproxyapi_7f3a91.base_url="https://proxy.example/v1"',
+    ]);
   });
 });
 
@@ -115,5 +171,12 @@ describe("launchedThroughCliProxy", () => {
     expect(launchedThroughCliProxy(cliProxyLaunchArguments("http://127.0.0.1:8317"))).toBe(true);
     expect(launchedThroughCliProxy(["--model", "gpt-5.6"])).toBe(false);
     expect(launchedThroughCliProxy(undefined)).toBe(false);
+  });
+
+  it("reports which configured proxy a saved launch belongs to", () => {
+    expect(cliProxyIdFromArguments(cliProxyLaunchArguments("http://127.0.0.1:8317"))).toBe(CLI_PROXY_DEFAULT_ID);
+    expect(cliProxyIdFromArguments(cliProxyLaunchArguments("https://proxy.example", "7f3a91"))).toBe("7f3a91");
+    expect(cliProxyIdFromArguments(["-c", "model_provider=other"])).toBeNull();
+    expect(cliProxyIdFromArguments(["model_provider=latticeterm_cliproxyapi"])).toBeNull();
   });
 });

@@ -60,7 +60,8 @@ import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
 import { AccountModelField } from "../components/agents/AccountModelField";
-import { useCliProxyModels, useCliProxySettings } from "../app/useCliProxyApi";
+import { findCliProxy } from "../app/cliProxyApi";
+import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
@@ -593,10 +594,10 @@ function ThreadPane({
   const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"));
   const accountModels = useAccountModels(modelTargets, settingsOpen);
   const cliProxySettings = useCliProxySettings();
-  const cliProxyModels = useCliProxyModels(cliProxySettings, settingsOpen);
+  const cliProxyModels = useCliProxyModelLists(cliProxySettings, settingsOpen).lists;
   const modelOptions = accountModelOptions(modelTargets, accountModels, {
     defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, thread, true);
+  }, thread, cliProxySettings.proxies);
   const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(thread));
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
@@ -605,7 +606,7 @@ function ThreadPane({
     !pastingImage &&
     !activeProfileMissing &&
     !activeProfileSignedOut &&
-    (!thread.provider || (!!cliProxySettings.baseUrl && validCliProxyModel(thread.model))) &&
+    (!thread.provider || (findCliProxy(cliProxySettings, thread.proxyId) !== null && validCliProxyModel(thread.model))) &&
     cliInstalled &&
     (draft.trim() !== "" || attachments.length > 0);
   const assistant = cliLabel(thread.definitionId);
@@ -845,8 +846,8 @@ function ThreadPane({
               disabled={settingsLocked}
               allowCliProxyApi
               proxyModels={cliProxyModels}
-              onChange={({ definitionId, accountProfileId, model, provider }) => {
-                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model, provider });
+              onChange={({ definitionId, accountProfileId, model, provider, proxyId }) => {
+                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model, provider, proxyId });
               }}
             />
             {(activeProfileSignedOut || activeProfileMissing) && (

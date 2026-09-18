@@ -5967,7 +5967,9 @@ pub fn launch_with_replay(
         resolve_launch(&request)?;
     let proxy = if definition_id == "codex" {
         crate::cliproxy::launch::base_from_arguments(&arguments)?
-            .map(|base| crate::cliproxy::launch::ProxyLaunch::load(&base))
+            .map(|target| {
+                crate::cliproxy::launch::ProxyLaunch::load(&target.base_url, target.id.as_deref())
+            })
             .transpose()?
     } else {
         None

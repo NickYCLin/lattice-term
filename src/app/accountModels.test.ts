@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
-import { cliProxyLaunchArguments } from "./cliProxyApi";
+import { cliProxyLaunchArguments, type CliProxyEndpoint } from "./cliProxyApi";
 import { fakeDefinition } from "./testFixtures/agentApis";
 import { selectThreadModel } from "./agentChat";
 import { fakeThread } from "./testFixtures/agentApis";
@@ -10,6 +10,10 @@ const definition = fakeDefinition({ account: { state: "signedIn", label: "A 帳�
 const labels = { defaultModel: "預設模型", loading: "讀取中", signedOut: "尚未登入" };
 const status = { state: "signedIn" as const, label: null, method: null };
 const model = { value: "gpt-5.6", label: "GPT-5.6", description: null, isDefault: false };
+const proxies: CliProxyEndpoint[] = [
+  { id: "default", label: "工作代理", baseUrl: "http://localhost:8317" },
+  { id: "7f3a91", label: "備援代理", baseUrl: "https://proxy.example" },
+];
 
 describe("account-aware model choices", () => {
   it("recognises all supported chat definitions including Antigravity", () => {
@@ -60,15 +64,21 @@ describe("account-aware model choices", () => {
   it("offers opt-in CLIProxyAPI models for every Codex identity", () => {
     const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [profile], { b: status }, "Default");
     expect(accountModelOptions(targets, {}, labels).some((option) => option.provider)).toBe(false);
-    const proxyOptions = accountModelOptions(targets, {}, labels, undefined, true).filter((option) => option.provider);
-    expect(proxyOptions).toHaveLength(2);
-    expect(proxyOptions.map((option) => option.accountProfileId)).toEqual([null, "b"]);
+    const proxyOptions = accountModelOptions(targets, {}, labels, undefined, proxies).filter((option) => option.provider);
+    expect(proxyOptions).toHaveLength(4);
+    expect(proxyOptions.map((option) => option.accountProfileId)).toEqual([null, null, "b", "b"]);
+    expect(proxyOptions.map((option) => option.proxyId)).toEqual(["default", "7f3a91", "default", "7f3a91"]);
     expect(proxyOptions.every((option) => option.definitionId === "codex")).toBe(true);
-    const selection = { ...proxyOptions[1], model: "claude-sonnet-4-5" };
-    expect(accountModelKey(selection)).toBe(accountModelKey(proxyOptions[1]));
-    expect(accountModelLaunchSettings(selection, [profile], "http://localhost:8317")).toEqual({
+    const selection = { ...proxyOptions[2], model: "claude-sonnet-4-5" };
+    expect(accountModelKey(selection)).toBe(accountModelKey(proxyOptions[2]));
+    expect(accountModelKey(selection)).not.toBe(accountModelKey(proxyOptions[3]));
+    expect(accountModelLaunchSettings(selection, [profile], proxies)).toEqual({
       profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=latticeterm_cliproxyapi", "-c", 'model_providers.latticeterm_cliproxyapi.base_url="http://localhost:8317/v1"', "--model", "claude-sonnet-4-5"],
     });
+    // A second proxy launches against its own address, under its own marker.
+    expect(accountModelLaunchSettings({ ...proxyOptions[3], model: "claude-sonnet-4-5" }, [profile], proxies).arguments)
+      .toEqual([...cliProxyLaunchArguments("https://proxy.example", "7f3a91"), "--model", "claude-sonnet-4-5"]);
+    expect(() => accountModelLaunchSettings({ ...selection, proxyId: "removed" }, [profile], proxies)).toThrow("missing-proxy");
     expect(accountModelLaunchSettings({ ...selection, provider: undefined }, [profile]).arguments).toEqual(["--model", "claude-sonnet-4-5"]);
   });
 
@@ -84,11 +94,11 @@ describe("account-aware model choices", () => {
 
   it("does not require native Codex login for a proxy", () => {
     const targets = accountModelTargets([{ ...definition, account: { ...definition.account, state: "signedOut" } }], [], {}, "Default");
-    const options = accountModelOptions(targets, {}, labels, undefined, true);
+    const options = accountModelOptions(targets, {}, labels, undefined, proxies);
     expect(options.filter(option => !option.provider).every(option => option.disabled)).toBe(true);
     expect(options.find(option => option.provider)?.disabled).toBe(false);
     expect(options.find(option => option.provider)?.label).not.toContain(labels.signedOut);
-    expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: null, model: "proxy-model", provider: "cliproxyapi" }, [])).toThrow("cliproxy.url.empty");
+    expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: null, model: "proxy-model", provider: "cliproxyapi" }, [])).toThrow("missing-proxy");
   });
 
   it("resets native identity when entering or leaving the proxy, but not when changing its model", () => {

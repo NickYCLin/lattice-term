@@ -5,12 +5,13 @@ import { accountModelKey, type AccountModelOption } from "../../app/accountModel
 import { AccountModelField } from "./AccountModelField";
 
 const normal: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "gpt-5.6", label: "Codex · GPT-5.6", disabled: false };
-const proxy: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", label: "Codex · CLIProxyAPI", disabled: false };
+const proxy: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: "default", label: "工作代理", disabled: false };
+const spare: AccountModelOption = { ...proxy, proxyId: "7f3a91", label: "備援代理" };
 
 describe("Fleet account model picker", () => {
   it("puts every proxy account before native models without changing the selection", () => {
     const teamNormal = { ...normal, accountProfileId: "team", label: "團隊 · Codex · GPT-5.6", disabled: true };
-    const teamProxy = { ...proxy, accountProfileId: "team", label: "團隊 · Codex · CLIProxyAPI" };
+    const teamProxy = { ...proxy, accountProfileId: "team", label: "團隊 · 工作代理" };
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy, teamNormal, teamProxy]} value={normal} allowCliProxyApi onChange={vi.fn()} /></I18nProvider>);
     const group = html.match(/<optgroup label="CLIProxyAPI">(.*?)<\/optgroup>/)?.[1];
     expect(group).toBeDefined();
@@ -38,7 +39,7 @@ describe("Fleet account model picker", () => {
       { id: "gpt-5.6-sol", ownedBy: "openai" },
       { id: "claude-opus-5", ownedBy: null },
     ] } as const;
-    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model: "gpt-5.6-sol" }} allowCliProxyApi proxyModels={models} onChange={vi.fn()} /></I18nProvider>);
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model: "gpt-5.6-sol" }} allowCliProxyApi proxyModels={{ default: models }} onChange={vi.fn()} /></I18nProvider>);
     // Same brand shares one group and the stronger model comes first.
     const brand = html.match(/<optgroup label="openai">(.*?)<\/optgroup>/)?.[1] ?? "";
     expect(brand).not.toBe("");
@@ -53,16 +54,29 @@ describe("Fleet account model picker", () => {
     const render = (proxyModels: Parameters<typeof AccountModelField>[0]["proxyModels"], model: string) =>
       renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model }} allowCliProxyApi proxyModels={proxyModels} onChange={vi.fn()} /></I18nProvider>);
 
-    const unavailable = render({ state: "unavailable", reason: "cliproxy.models.unauthorized" }, "");
+    const unavailable = render({ default: { state: "unavailable", reason: "cliproxy.models.unauthorized" } }, "");
     expect(unavailable).toContain("代理拒絕了這把金鑰");
     expect(unavailable).toContain('placeholder="gpt-5.6-sol"');
 
     // A model the proxy did not list is still launchable; the picker switches
     // itself to the manual entry rather than silently dropping the value.
     const models = { state: "ready", models: [{ id: "gpt-5.6-sol", ownedBy: null }] } as const;
-    const unknown = render(models, "gpt-5.6-terra");
+    const unknown = render({ default: models }, "gpt-5.6-terra");
     expect(unknown).toContain('value="gpt-5.6-terra"');
     expect(unknown).toContain('placeholder="gpt-5.6-sol"');
+  });
+
+  it("asks the chosen proxy for its models, not whichever one was saved first", () => {
+    const lists = {
+      default: { state: "ready", models: [{ id: "gpt-5.6-sol", ownedBy: null }] },
+      "7f3a91": { state: "ready", models: [{ id: "claude-opus-5", ownedBy: null }] },
+    } as const;
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy, spare]} value={{ ...spare, model: "claude-opus-5" }} allowCliProxyApi proxyModels={lists} onChange={vi.fn()} /></I18nProvider>);
+    const group = html.match(/<optgroup label="CLIProxyAPI">(.*?)<\/optgroup>/)?.[1] ?? "";
+    expect(group).toContain("工作代理");
+    expect(group).toContain("備援代理");
+    expect(html).toContain("claude-opus-5");
+    expect(html).not.toContain("gpt-5.6-sol");
   });
 
   it("does not add the proxy ID field to the shared chat picker", () => {

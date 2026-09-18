@@ -77,6 +77,10 @@ pub enum ChatPermission {
 pub struct ChatTurnRequest {
     #[serde(default)]
     pub cli_proxy_base_url: Option<String>,
+    /// Which configured proxy the address belongs to, so the turn uses that
+    /// proxy's own key instead of whichever one was saved first.
+    #[serde(default)]
+    pub cli_proxy_id: Option<String>,
     #[serde(default)]
     pub browser_enabled: bool,
     pub thread_id: String,
@@ -1262,7 +1266,12 @@ fn send_with_retry<S: ChatSink>(
         let proxy = request
             .cli_proxy_base_url
             .as_deref()
-            .map(crate::cliproxy::launch::ProxyLaunch::load)
+            .map(|base_url| {
+                crate::cliproxy::launch::ProxyLaunch::load(
+                    base_url,
+                    request.cli_proxy_id.as_deref(),
+                )
+            })
             .transpose()?;
         let attachments = validate_attachments(&request.attachments)?;
         let prompt = prompt_with_attachments(&request.prompt, &attachments);
@@ -2848,6 +2857,7 @@ mod tests {
             Arc::new(AgentChatRegistry::new()),
             ChatTurnRequest {
                 cli_proxy_base_url: None,
+                cli_proxy_id: None,
                 browser_enabled: false,
                 thread_id: "t".into(),
                 turn_id: "u".into(),
@@ -3355,6 +3365,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::clone(&registry),
             ChatTurnRequest {
                 cli_proxy_base_url: None,
+                cli_proxy_id: None,
                 browser_enabled: false,
                 thread_id: "e2e-ask".into(),
                 turn_id: "e2e-ask-turn".into(),
@@ -3416,6 +3427,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::clone(&registry),
             ChatTurnRequest {
                 cli_proxy_base_url: None,
+                cli_proxy_id: None,
                 browser_enabled: false,
                 thread_id: "e2e-thread".into(),
                 turn_id: "e2e-turn".into(),

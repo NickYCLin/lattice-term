@@ -144,7 +144,7 @@ describe("ChatView", () => {
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
     expect(markup).toContain("公司帳號 · OpenAI Codex");
-    expect(markup).toContain('value="[&quot;codex&quot;,&quot;work&quot;,null,&quot;&quot;]" selected');
+    expect(markup).toContain('value="[&quot;codex&quot;,&quot;work&quot;,null,null,&quot;&quot;]" selected');
     expect(markup).not.toContain("使用帳號");
   });
 

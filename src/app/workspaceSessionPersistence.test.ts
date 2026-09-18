@@ -340,6 +340,14 @@ describe("workspace session persistence", () => {
     expect(agentRestoreArguments(saved)).toEqual(launchArguments);
   });
 
+  it("also recognises a session started through a second proxy", () => {
+    const launchArguments = [...cliProxyLaunchArguments("http://localhost:8319", "7f3a91"), "--model", "proxy-model"];
+    const saved = snapshotLiveWorkspaceSessions([agent({ launchArguments, capturedSessionId: "proxy-native" })], [], "agent-live-1").sessions[0];
+    expect(saved.kind).toBe("agent");
+    if (saved.kind !== "agent") return;
+    expect(agentRestoreArguments(saved)).toEqual(launchArguments);
+  });
+
   it("never writes more entries than a later start will accept", () => {
     const agents = Array.from({ length: 40 }, (_, index) =>
       agent({
