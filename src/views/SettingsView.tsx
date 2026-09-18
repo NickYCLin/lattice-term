@@ -580,6 +580,28 @@ export function SettingsView({
               {t(usesAppleUpdates ? "settings.updater.iosHint" : "settings.updaterHint")}
             </p>
           </div>
+          {inAppUpdaterAvailable &&
+            updater.status !== "available" &&
+            updater.status !== "downloaded" &&
+            updater.status !== "installing" && (
+            <div className="panel__actions">
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={
+                  updater.status === "checking" ||
+                  updater.status === "downloading"
+                }
+                onClick={() => {
+                  void updater.checkForUpdates();
+                }}
+              >
+                {updater.status === "checking"
+                  ? t("settings.updater.checking")
+                  : t("settings.updater.check")}
+              </button>
+            </div>
+          )}
         </header>
 
         <dl className="field-list">
@@ -695,29 +717,6 @@ export function SettingsView({
               onClick={() => void updater.relaunchApp()}
             >
               {t("settings.updater.relaunch")}
-            </button>
-          </div>
-        )}
-
-        {inAppUpdaterAvailable &&
-          updater.status !== "available" &&
-          updater.status !== "downloaded" &&
-          updater.status !== "installing" && (
-          <div style={{ marginTop: "var(--space-4)" }}>
-            <button
-              type="button"
-              className="button button--ghost"
-              disabled={
-                updater.status === "checking" ||
-                updater.status === "downloading"
-              }
-              onClick={() => {
-                void updater.checkForUpdates();
-              }}
-            >
-              {updater.status === "checking"
-                ? t("settings.updater.checking")
-                : t("settings.updater.check")}
             </button>
           </div>
         )}

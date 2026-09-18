@@ -106,6 +106,13 @@ describe("Settings updater platform boundary", () => {
     expect(markup).toMatch(/<button[^>]*>檢查更新<\/button>/);
     expect(markup).not.toContain("請在桌面應用程式檢查與安裝更新");
   });
+
+  it("shows the update check as a primary action above the other update settings", () => {
+    const markup = renderSettings("linux");
+
+    expect(markup).toMatch(/<div class="panel__actions"><button[^>]*class="button button--primary"[^>]*>檢查更新<\/button><\/div>/);
+    expect(markup.indexOf("檢查更新<")).toBeLessThan(markup.indexOf("啟動時檢查更新"));
+  });
   it("offers twelve new previews, independent event sounds and volume", () => {
     const markup = renderSettings("linux");
     for (const label of ["柔和", "清亮", "自然", "電子", "綻放", "微風", "月光", "水滴", "玻璃鈴", "星點", "木琴", "撥弦", "竹響", "軌道", "脈衝", "像素", "霧藍"]) expect(markup).toContain(label);
