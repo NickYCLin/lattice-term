@@ -103,14 +103,14 @@ async function catchUpReleasePr(github, context, core, pr, sourceSha, wait) {
   throw new Error("Release PR did not pick up the main snapshot in time.");
 }
 
-export async function prepareRelease({ github, context, core, metadata, commits, forced = false, now = Date.now(), wait = (ms) => new Promise((done) => setTimeout(done, ms)) }) {
+export async function prepareRelease({ github, context, core, metadata, commits, now = Date.now(), wait = (ms) => new Promise((done) => setTimeout(done, ms)) }) {
   core.setOutput("ready", "false");
   if (!canPublishFrom(context.eventName)) {
     core.info("Push: update the draft PR only; no release approval is needed at the scheduled check.");
     return;
   }
   if (metadata.recovery) {
-    const window = releaseWindow({ lastPublishedAt: metadata.lastPublishedAt, eventName: context.eventName, forced, now });
+    const window = releaseWindow({ lastPublishedAt: metadata.lastPublishedAt, eventName: context.eventName, now });
     core.info(window.reason);
     if (!window.release) return;
     // Finishing an unpublished version is not a new release or a new tag.
@@ -119,7 +119,7 @@ export async function prepareRelease({ github, context, core, metadata, commits,
     core.setOutput("ready", "true");
     return;
   }
-  const decision = decideRelease({ commits, lastPublishedAt: metadata.lastPublishedAt, eventName: context.eventName, forced, now });
+  const decision = decideRelease({ commits, lastPublishedAt: metadata.lastPublishedAt, eventName: context.eventName, now });
   core.info(decision.reason);
   if (!decision.release) return;
   const pulls = await releasePrs(github, context, "open");

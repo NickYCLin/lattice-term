@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyCommit, decideRelease, RELEASE_INTERVAL_MS, unreleasedCommits } from "./decide-release.mjs";
+import { classifyCommit, decideRelease, unreleasedCommits } from "./decide-release.mjs";
 
 const now = Date.parse("2026-09-15T02:17:00Z");
-const weekAgo = new Date(now - RELEASE_INTERVAL_MS).toISOString();
+const yesterday = "2026-09-14T03:30:00Z";
 const recent = new Date(now - 60_000).toISOString();
 const commit = (subject, body = "") => ({ subject, body });
 const decide = (overrides = {}) => decideRelease({
-  commits: [commit("fix(ui): 修正提示遮擋")], lastPublishedAt: weekAgo,
+  commits: [commit("fix(ui): 修正提示遮擋")], lastPublishedAt: yesterday,
   now, eventName: "schedule", ...overrides,
 });
 
@@ -24,19 +24,28 @@ describe("classifyCommit", () => {
   });
 });
 
-describe("weekly stable release", () => {
+describe("daily stable release", () => {
+  it("waits after a release earlier on the same Taipei date", () => {
+    expect(decide({ lastPublishedAt: "2026-09-14T16:01:00Z" }).release).toBe(false);
+  });
+  it("publishes the next day even when the previous build finished less than 24 hours ago", () => {
+    expect(decide().release).toBe(true);
+  });
+  it("uses midnight in Taipei, including month and year boundaries", () => {
+    for (const lastPublishedAt of ["2026-09-30T15:59:59Z", "2026-12-31T15:59:59Z"]) {
+      const published = Date.parse(lastPublishedAt);
+      expect(decide({ lastPublishedAt, now: published }).release).toBe(false);
+      expect(decide({ lastPublishedAt, now: published + 1000 }).release).toBe(true);
+    }
+  });
   it.each(["push", "pull_request", "workflow_run", "unknown"])("never publishes from %s, even with force", (eventName) => {
     expect(decide({ eventName, forced: true, commits: [commit("feat(api)!: 改變協定")] }).release).toBe(false);
   });
-  it("holds three or many commits until seven days have elapsed", () => {
+  it("holds three or many commits until the next Taipei date", () => {
     for (const count of [3, 100]) expect(decide({ lastPublishedAt: recent, commits: Array.from({ length: count }, () => commit("fix(ui): 同一問題的後續修正")) }).release).toBe(false);
   });
   it("does not treat breaking changes as urgent", () => {
     expect(decide({ lastPublishedAt: recent, commits: [commit("feat(api)!: 改變協定")] }).release).toBe(false);
-  });
-  it("allows one useful fix at the exact seven-day boundary", () => {
-    expect(decide({ now: now - 1 }).release).toBe(false);
-    expect(decide().release).toBe(true);
   });
   it("still handles breaking changes classified as refactors", () => {
     expect(decide({ commits: [commit("refactor(api)!: 更換相容介面")] }).release).toBe(true);
@@ -46,8 +55,8 @@ describe("weekly stable release", () => {
       expect(decide({ commits, eventName: "workflow_dispatch", forced: true }).release).toBe(false);
     }
   });
-  it("only an explicit emergency dispatch can bypass the interval", () => {
-    expect(decide({ lastPublishedAt: recent, eventName: "workflow_dispatch", forced: true }).release).toBe(true);
+  it("does not reuse the same date even for a manual or legacy forced run", () => {
+    expect(decide({ lastPublishedAt: recent, eventName: "workflow_dispatch", forced: true }).release).toBe(false);
     expect(decide({ lastPublishedAt: recent, eventName: "workflow_dispatch" }).release).toBe(false);
     expect(decide({ lastPublishedAt: recent, forced: true }).release).toBe(false);
   });

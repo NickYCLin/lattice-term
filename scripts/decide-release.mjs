@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * One stable channel: pushes maintain the draft PR; daily checks may publish
- * after seven days since the last public release. Commit count and breaking
- * changes never bypass the interval. CI is a separate mandatory gate.
+ * once per Asia/Taipei calendar day. Commit count and breaking changes
+ * never bypass this limit. CI is a separate mandatory gate.
  */
 
 import { execFileSync } from "node:child_process";
@@ -17,7 +17,11 @@ import { pathToFileURL } from "node:url";
  */
 export const RELEASABLE_TYPES = new Set(["feat", "fix", "perf"]);
 
-export const RELEASE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+// The previous build may finish after today's scheduled check time. Requiring
+// 24 elapsed hours would skip the next day's release despite new changes.
+const taipeiDate = (timestamp) => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(timestamp);
 
 const HEADER = /^(?<type>[a-z]+)(?<scope>\([^)]*\))?(?<breaking>!)?:/;
 
@@ -49,7 +53,6 @@ export function decideRelease({
   lastPublishedAt,
   now = Date.now(),
   eventName = "push",
-  forced = false,
 }) {
   if (!canPublishFrom(eventName)) {
     return { release: false, reason: "pushes only update the draft release PR" };
@@ -64,24 +67,21 @@ export function decideRelease({
     // still prompting every installation to update.
     return { release: false, reason: "nothing releasable is waiting" };
   }
-  return releaseWindow({ lastPublishedAt, now, eventName, forced });
+  return releaseWindow({ lastPublishedAt, now, eventName });
 }
 
-export function releaseWindow({ lastPublishedAt, now = Date.now(), eventName = "push", forced = false }) {
+export function releaseWindow({ lastPublishedAt, now = Date.now(), eventName = "push" }) {
   if (!canPublishFrom(eventName)) return { release: false, reason: "pushes only update the draft release PR" };
   const publishedAt = typeof lastPublishedAt === "string" ? Date.parse(lastPublishedAt) : NaN;
   if (!Number.isFinite(now) || (lastPublishedAt !== null && (!Number.isFinite(publishedAt) || publishedAt > now))) {
     return { release: false, reason: "missing or invalid publication timestamp" };
   }
-  if (forced && eventName === "workflow_dispatch") {
-    return { release: true, reason: "explicit emergency release; CI is still required" };
-  }
-  if (lastPublishedAt === null || now - publishedAt >= RELEASE_INTERVAL_MS) {
-    return { release: true, reason: "new changes are ready for the weekly stable release" };
+  if (lastPublishedAt === null || taipeiDate(now) !== taipeiDate(publishedAt)) {
+    return { release: true, reason: "new changes are ready for the daily stable release" };
   }
   return {
     release: false,
-    reason: "fewer than seven days since the last published stable release",
+    reason: "a stable release was already published today in Asia/Taipei",
   };
 }
 
@@ -119,7 +119,6 @@ function main() {
     commits,
     lastPublishedAt: process.env.RELEASE_LAST_PUBLISHED_AT === "none" ? null : process.env.RELEASE_LAST_PUBLISHED_AT,
     eventName: process.env.GITHUB_EVENT_NAME,
-    forced: process.env.RELEASE_FORCE === "true",
   });
   const summary = `release=${decision.release} (${decision.reason})`;
   console.log(summary);
