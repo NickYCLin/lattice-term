@@ -10,6 +10,7 @@ pub mod app_menu;
 pub mod backup;
 mod chat_attachments;
 pub mod clipboard;
+pub mod cliproxy;
 pub mod credentials;
 pub mod domain;
 mod durable_file;
@@ -2246,6 +2247,47 @@ async fn credential_backend_set(
     credential_call(move || crate::credentials::set_preferred_backend(backend)).await
 }
 
+/// The saved CLIProxyAPI key is read here and dropped when the request ends.
+/// It is never returned to the interface, so the commands below report only
+/// whether one is stored.
+#[tauri::command]
+async fn cliproxy_save_key(base_url: String, key: String) -> Result<(), String> {
+    let base_url = crate::cliproxy::normalize_base_url(&base_url)?;
+    let key = crate::cliproxy::validate_key(&key)?;
+    credential_call(move || crate::credentials::store_cli_proxy_key(&base_url, &key)).await
+}
+
+#[tauri::command]
+async fn cliproxy_forget_key() -> Result<bool, String> {
+    credential_call(crate::credentials::delete_cli_proxy_key).await
+}
+
+#[tauri::command]
+async fn cliproxy_key_exists() -> Result<bool, String> {
+    credential_call(crate::credentials::cli_proxy_key_exists).await
+}
+
+#[tauri::command]
+async fn cliproxy_probe(base_url: String) -> Result<crate::cliproxy::ProxyProbe, String> {
+    crate::cliproxy::probe(&base_url).await
+}
+
+/// A stored key that belongs to a different address is not silently skipped:
+/// asking the proxy without it would report "no models" for what is really a
+/// stale credential, so the mismatch is surfaced.
+#[tauri::command]
+async fn cliproxy_models(base_url: String) -> Result<Vec<crate::cliproxy::ProxyModel>, String> {
+    let normalized = crate::cliproxy::normalize_base_url(&base_url)?;
+    let stored = normalized.clone();
+    let key = credential_call(move || match crate::credentials::cli_proxy_key_exists() {
+        Ok(false) => Ok(None),
+        Ok(true) => crate::credentials::load_cli_proxy_key(&stored).map(Some),
+        Err(error) => Err(error),
+    })
+    .await?;
+    crate::cliproxy::models(&normalized, key).await
+}
+
 #[tauri::command]
 fn vault_status() -> Result<crate::vault::VaultStatus, String> {
     Ok(crate::vault::manager()?.status())
@@ -4004,6 +4046,11 @@ pub fn run() {
             credential_status,
             credential_backend_get,
             credential_backend_set,
+            cliproxy_save_key,
+            cliproxy_forget_key,
+            cliproxy_key_exists,
+            cliproxy_probe,
+            cliproxy_models,
             vault_status,
             vault_create,
             vault_unlock,
