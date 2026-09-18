@@ -8,6 +8,21 @@ const normal: AccountModelOption = { definitionId: "codex", accountProfileId: nu
 const proxy: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", label: "Codex · CLIProxyAPI", disabled: false };
 
 describe("Fleet account model picker", () => {
+  it("puts every proxy account before native models without changing the selection", () => {
+    const teamNormal = { ...normal, accountProfileId: "team", label: "團隊 · Codex · GPT-5.6", disabled: true };
+    const teamProxy = { ...proxy, accountProfileId: "team", label: "團隊 · Codex · CLIProxyAPI" };
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy, teamNormal, teamProxy]} value={normal} allowCliProxyApi onChange={vi.fn()} /></I18nProvider>);
+    const group = html.match(/<optgroup label="CLIProxyAPI">(.*?)<\/optgroup>/)?.[1];
+    expect(group).toBeDefined();
+    expect(group).toContain(proxy.label);
+    expect(group).toContain(teamProxy.label);
+    expect(group).not.toContain(normal.label);
+    expect(html.indexOf("</optgroup>")).toBeLessThan(html.indexOf(normal.label));
+    expect(html.match(/<option /g)).toHaveLength(4);
+    expect(html).toContain(`value="${accountModelKey(normal).replace(/"/g, "&quot;")}" selected=""`);
+    expect(html).toContain(`value="${accountModelKey(teamNormal).replace(/"/g, "&quot;")}" disabled=""`);
+  });
+
   it("shows a proxy model ID only for the selected proxy option", () => {
     const render = (value: AccountModelOption) => renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={value} allowCliProxyApi onChange={vi.fn()} /></I18nProvider>);
     expect(render(normal)).not.toContain("CLIProxyAPI 模型 ID");

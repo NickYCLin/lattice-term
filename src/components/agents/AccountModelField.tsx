@@ -56,6 +56,9 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
   const { t } = useI18n();
   const selectedKey = value ? accountModelKey(value) : "";
   const missing = value && !options.some((option) => accountModelKey(option) === selectedKey);
+  const proxyOptions = options.filter((option) => option.provider === "cliproxyapi");
+  const nativeOptions = options.filter((option) => option.provider !== "cliproxyapi");
+  const renderOption = (option: AccountModelOption) => <option key={accountModelKey(option)} value={accountModelKey(option)} disabled={option.disabled}>{option.label}</option>;
   return <div className="field field--grow">
     <span className="field__label">{t("chat.model")}</span>
     <select className="select" aria-label={t("chat.model")} value={selectedKey} disabled={disabled} onChange={(event) => {
@@ -67,7 +70,10 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
     }}>
       {!value && <option value="" disabled>{t("accountModel.choose")}</option>}
       {missing && <option value={selectedKey} disabled>{t("accountModel.missing")}</option>}
-      {options.map((option) => <option key={accountModelKey(option)} value={accountModelKey(option)} disabled={option.disabled}>{option.label}</option>)}
+      {proxyOptions.length > 0 && <optgroup label={t("settings.cliProxy.title")}>
+        {proxyOptions.map(renderOption)}
+      </optgroup>}
+      {nativeOptions.map(renderOption)}
     </select>
     {allowCliProxyApi && value?.provider === "cliproxyapi" &&
       <CliProxyModel value={value} models={proxyModels} disabled={disabled} onChange={onChange} />}
