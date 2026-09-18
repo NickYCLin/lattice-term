@@ -3054,6 +3054,7 @@ dependencies = [
  "libc",
  "png 0.18.1",
  "portable-pty",
+ "reqwest",
  "russh",
  "russh-sftp",
  "rustls",
