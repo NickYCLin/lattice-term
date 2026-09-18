@@ -60,4 +60,18 @@ describe("pinned Release Please date integration", () => {
   it("requires an explicit date instead of silently falling back to SemVer", async () => {
     await expect(calendarManifest({ github })).rejects.toThrow(/日期版號/);
   });
+  it("refreshes a waiting PR when the day changes even without another feature commit", async () => {
+    const bodies = [];
+    for (const version of ["2026.9.30", "2026.10.1", "2027.1.1"]) {
+      const manifest = await calendarManifest({ github, version });
+      const strategy = await buildStrategy({ github, targetBranch: "main", ...manifest.repositoryConfig["."] });
+      const candidate = await strategy.buildReleasePullRequest(
+        parseConventionalCommits([{ sha: "a".repeat(40), message: "fix(遠端): 修正連線" }]),
+        { tag: new TagName(Version.parse("2.4.0")), sha: "b".repeat(40) }, true,
+      );
+      expect(candidate.body.toString()).toContain(`v${version}`);
+      bodies.push(candidate.body.toString());
+    }
+    expect(new Set(bodies).size).toBe(3);
+  });
 });

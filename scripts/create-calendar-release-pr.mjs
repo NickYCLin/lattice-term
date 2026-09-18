@@ -34,7 +34,7 @@ async function main() {
     console.log("今天的版號已有 tag，保留後續變更到下一個發布日。");
   }
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,
-    `prs_created=${pulls.length > 0}\npr=${pulls[0] ? JSON.stringify(pulls[0]) : ""}\n`);
+    `version_available=${Boolean(version)}\nprs_created=${pulls.length > 0}\npr=${pulls[0] ? JSON.stringify(pulls[0]) : ""}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

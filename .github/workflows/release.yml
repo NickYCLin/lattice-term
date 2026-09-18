@@ -115,6 +115,9 @@ jobs:
           fetch-depth: 0
 
       - name: Select the immutable release candidate
+        # An abandoned tag also reserves today's date. Never fall through to
+        # an older open Release PR when no new date version is available.
+        if: steps.metadata.outputs.recovery == 'true' || steps.release.outputs.version_available == 'true'
         id: candidate
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
