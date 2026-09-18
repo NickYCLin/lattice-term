@@ -4,6 +4,28 @@
 
 ---
 
+## [2026.9.19](https://github.com/NickYCLin/lattice-term/compare/v2026.9.18...v2026.9.19) (2026-09-18)
+
+
+### 🚀 新增功能
+
+* **agents:** Claude Code 工作階段自動接上 LatticeTerm MCP ([556f33f](https://github.com/NickYCLin/lattice-term/commit/556f33f7f4430c46050400b585badad415a6f081))
+* **agents:** Copilot 工作階段也自動接上 MCP ([fae80d8](https://github.com/NickYCLin/lattice-term/commit/fae80d8c9cce79b799fb118421daa416eff2456c))
+* **agents:** Gemini、Qwen、OpenCode 也自動接上 MCP ([bd278a7](https://github.com/NickYCLin/lattice-term/commit/bd278a7a5d1278e4e26a4d7449b963bad5af5944))
+* **chat:** 對話側欄把工作階段與對話併成一棵樹 ([647f2c3](https://github.com/NickYCLin/lattice-term/commit/647f2c3d7e076839798e69c1180cd44005edd8e8))
+* **cliproxy:** 代理模型選單依品牌分組並由強到弱排列 ([b57ade1](https://github.com/NickYCLin/lattice-term/commit/b57ade1445822ad1f8164b5e358b1f459ab663b2))
+* **cliproxy:** 支援設定多組代理並各自保管金鑰 ([6c32122](https://github.com/NickYCLin/lattice-term/commit/6c321226b9786ec4e14eac33b612130fe12a4990))
+* **cliproxy:** 讓終端機與對話直接沿用代理設定 ([64c61be](https://github.com/NickYCLin/lattice-term/commit/64c61bec7ff5aeb3ab4e1dca3de9da497aa13b54))
+
+
+### 🛠️ 問題修正
+
+* **agents:** 代理工作階段改用 CLIProxyAPI 命名 ([058af67](https://github.com/NickYCLin/lattice-term/commit/058af673b15a3c9a6d8416d6c5f0ae96fc062441))
+* **cliproxy:** 將代理選項獨立分組並移到選單前方 ([4c07b4a](https://github.com/NickYCLin/lattice-term/commit/4c07b4ab7899a1a358bd7de2c066f3822336df5c))
+* **sessions:** 加開 CLI 的啟動按鈕固定在彈窗底部 ([c211fbb](https://github.com/NickYCLin/lattice-term/commit/c211fbb2c85908074c61481d3deb0530d3c991a0))
+* **settings:** 更新紀錄只列仍在發佈的日期版號 ([3890497](https://github.com/NickYCLin/lattice-term/commit/3890497c9cf975e4355dd71db03243b529ab941d))
+* **settings:** 檢查更新改放面板標題列的主要按鈕 ([248eb2c](https://github.com/NickYCLin/lattice-term/commit/248eb2cf95f0e8a30a0154e5f79682c378aac54f))
+
 ## [2026.9.18](https://github.com/NickYCLin/lattice-term/compare/v2.4.0...v2026.9.18) (2026-09-18)
 
 
