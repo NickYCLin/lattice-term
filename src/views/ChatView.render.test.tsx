@@ -115,7 +115,7 @@ describe("ChatView", () => {
     expect(markup).toContain('aria-label="刪除對話：可以刪除的對話"');
   });
 
-  it("mirrors live Work Sessions in the conversation sidebar", () => {
+  it("puts live sessions and conversations in the same sidebar tree", () => {
     const agents = fakeAgentApi({
       catalog: [fakeDefinition()],
       sessions: [
@@ -126,12 +126,16 @@ describe("ChatView", () => {
         }),
       ],
     });
-    const markup = render(fakeChatApi(), agents);
+    const thread = fakeThread({ title: "改版討論" });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), agents);
 
-    expect(markup).toContain("工作階段");
+    // One tree, one folder column: only the row markup tells the kinds apart.
+    expect(markup.match(/class="chat-tree"/g)).toHaveLength(1);
     expect(markup).toContain("LatticeTerm");
     expect(markup).toContain("OpenAI Codex");
     expect(markup).toContain("gpt-5.6-sol");
+    expect(markup).toContain("chat-session");
+    expect(markup).toContain("改版討論");
   });
 
   it("lists a named account with its login state in the thread settings", () => {

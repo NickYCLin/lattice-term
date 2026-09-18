@@ -11,14 +11,18 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { ChatThread } from "../../app/agentChat";
-import { chatSidebarRows, type ChatSidebarRow } from "../../app/chatThreadLayout";
+import {
+  chatSidebarRows,
+  type ChatSidebarRow,
+  type ChatSidebarWorkspace,
+} from "../../app/chatThreadLayout";
 import {
   sessionSidebarDropPlacement,
   type SessionSidebarLayout,
 } from "../../app/sessionSidebarLayout";
 import { useI18n } from "../../i18n/context";
 import { ConfirmDialog } from "../overlays/ConfirmDialog";
-import { ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
+import { AgentIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
 
 const DRAG_THRESHOLD_PX = 6;
 
@@ -32,7 +36,9 @@ export function ChatThreadTree({
   threads,
   activeThreadId,
   renderThread,
+  workspace,
   onSelectThread,
+  onOpenSession,
   onRemoveThread,
   onToggleFolder,
   onRenameFolder,
@@ -44,7 +50,9 @@ export function ChatThreadTree({
   threads: readonly ChatThread[];
   activeThreadId: string | null;
   renderThread: (thread: ChatThread, active: boolean) => React.ReactNode;
+  workspace?: ChatSidebarWorkspace;
   onSelectThread: (threadId: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   onRemoveThread: (thread: ChatThread) => void;
   onToggleFolder: (folderId: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
@@ -53,7 +61,7 @@ export function ChatThreadTree({
   onMoveNode: (nodeId: string, parentId: string | null, beforeNodeId: string | null) => void;
 }) {
   const { t } = useI18n();
-  const rows = chatSidebarRows(layout, threads);
+  const rows = chatSidebarRows(layout, threads, workspace);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -71,7 +79,8 @@ export function ChatThreadTree({
   const dropRef = useRef<DropTarget | null>(null);
   dropRef.current = dropTarget;
 
-  const isFolder = (nodeId: string) => layout.folders.some((folder) => folder.id === nodeId);
+  const isFolder = (nodeId: string) =>
+    layout.folders.some((folder) => folder.id === nodeId) || (workspace?.projects.has(nodeId) ?? false);
 
   function targetAt(x: number, y: number): DropTarget | null {
     const element = document.elementFromPoint(x, y);
@@ -174,10 +183,15 @@ export function ChatThreadTree({
     <div className="chat-tree" ref={listRef}>
       {rows.map((row) => {
         const indent = { paddingLeft: `${row.depth * 0.9}rem` };
-        if (row.kind === "folder") {
-          const count = threads.filter(
-            (thread) => layout.placements[`thread:${thread.id}`]?.parentId === row.nodeId,
+        if (row.kind === "folder" || row.kind === "project") {
+          // Everything filed directly in the branch counts, sessions included.
+          const count = Object.entries(layout.placements).filter(
+            ([nodeId, placement]) =>
+              placement.parentId === row.nodeId &&
+              (threads.some((thread) => `thread:${thread.id}` === nodeId) ||
+                (workspace?.sessions.has(nodeId) ?? false)),
           ).length;
+          const editable = row.kind === "folder";
           return (
             <div key={row.nodeId}>
               <div
@@ -186,7 +200,7 @@ export function ChatThreadTree({
                 data-node-id={row.nodeId}
                 onPointerDown={(event) => onPointerDown(event, row.nodeId)}
               >
-                {renaming?.id === row.nodeId ? (
+                {editable && renaming?.id === row.nodeId ? (
                   <form
                     className="chat-folder-form"
                     style={{ padding: 0, flex: 1 }}
@@ -213,9 +227,11 @@ export function ChatThreadTree({
                   <>
                     <button
                       type="button"
-                      className="chat-folder"
+                      className={`chat-folder${editable ? "" : " chat-folder--project"}`}
                       onClick={() => onToggleFolder(row.nodeId)}
-                      onDoubleClick={() => setRenaming({ id: row.nodeId, name: row.name })}
+                      onDoubleClick={() => {
+                        if (editable) setRenaming({ id: row.nodeId, name: row.name });
+                      }}
                       aria-expanded={!row.collapsed}
                       title={row.collapsed ? t("chat.folder.expand") : t("chat.folder.collapse")}
                     >
@@ -226,7 +242,7 @@ export function ChatThreadTree({
                       <span className="chat-folder__name">{row.name}</span>
                       {count > 0 && <span className="chat-folder__count">{count}</span>}
                     </button>
-                    <span className="chat-tree__actions">
+                    {editable && <span className="chat-tree__actions">
                       <button
                         type="button"
                         className="chat-tree__action"
@@ -248,7 +264,7 @@ export function ChatThreadTree({
                       >
                         <TrashIcon />
                       </button>
-                    </span>
+                    </span>}
                   </>
                 )}
               </div>
@@ -282,6 +298,42 @@ export function ChatThreadTree({
                   {t("chat.folder.empty")}
                 </p>
               )}
+            </div>
+          );
+        }
+        if (row.kind === "session") {
+          return (
+            <div
+              key={row.nodeId}
+              className={`chat-tree__row${dragging === row.nodeId ? " is-dragging" : ""}${dropClass(row.nodeId)}`}
+              style={indent}
+              data-node-id={row.nodeId}
+              onPointerDown={(event) => onPointerDown(event, row.nodeId)}
+              onClick={() => {
+                if (!press.current?.moved) onOpenSession?.(row.session.sessionId);
+              }}
+            >
+              <div
+                className={`chat-session is-${row.session.status}`}
+                role="button"
+                tabIndex={0}
+                title={row.session.label}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onOpenSession?.(row.session.sessionId);
+                  }
+                }}
+              >
+                <AgentIcon size={13} />
+                <span className="chat-session__label">
+                  <span className="chat-thread__title">{row.session.label}</span>
+                  <span className="chat-thread__meta">
+                    {row.session.detail ?? t("terminal.title")}
+                  </span>
+                </span>
+                <span className="chat-session__status" aria-hidden="true" />
+              </div>
             </div>
           );
         }
