@@ -122,11 +122,21 @@ Reporter 每次只傳一個最多 4 KiB 的 JSON 狀態或用量訊息。Registr
 Fleet 的「新專案」與「加開 CLI」另提供各個 Codex 帳號的 CLIProxyAPI
 選項。使用者須先依 [CLIProxyAPI 的 Codex 設定說明](https://help.router-for.me/agent-client/codex)
 在該帳號的 Codex 設定中建立 `cliproxyapi` provider、連線位址與認證，
-並自行啟動代理服務。Fleet 只接受使用者填入的模型 ID，以分離參數
-`-c model_provider=cliproxyapi --model <模型 ID>` 啟動 Codex；不從代理
-查詢模型清單，也不讀取、保存或傳送代理金鑰。原有 Codex 模型選項
-不會被改用代理，對話頁也仍使用原本的帳號模型清單。代理連線與模型
-是否可用由 Codex／CLIProxyAPI 在工作階段中回報，未經安裝版驗證。
+並自行啟動代理服務；啟動仍以分離參數
+`-c model_provider=cliproxyapi --model <模型 ID>` 交給 Codex。
+
+設定頁可另外登記代理位址。桌面端以該位址打 `/healthz` 判斷是否可達、
+讀 `/v1/models` 取回代理實際接受的模型，啟動選單就列這份清單而不是要
+使用者自己記模型 ID；清單讀不到、金鑰被拒，或要用比清單新的模型時，
+仍可自行填入 ID。位址只接受 http 與 https，請求不跟隨轉址也不走系統
+代理，回應有大小上限與逾時。
+
+代理金鑰存在既有的憑證存放（系統金鑰圈或加密保管庫），信封綁定正規化
+後的位址，改位址就解不開而不是默默往新主機送。金鑰只在桌面端送出請求
+時讀取，不回傳前端、不寫入日誌，也不寫進任何 CLI 的設定檔——CLI 那側
+的 provider 與認證仍由使用者自己維護。原有 Codex 模型選項不會被改用
+代理，對話頁也仍使用原本的帳號模型清單。代理連線與模型是否可用由
+Codex／CLIProxyAPI 在工作階段中回報，未經安裝版驗證。
 切換帳號或助理會保留對話畫面與有界交接摘要，但清除原生對話 ID；
 Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重新建立。
 已移除的帳號不能在對話頁靜默改用預設登入。
