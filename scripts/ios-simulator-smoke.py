@@ -94,10 +94,27 @@ def frontend_is_visible(texts):
     )
 
 
+# CoreSimulator's screenshot IPC stalls for a whole attempt on some iPad
+# runtimes: the capture neither completes nor fails, it just holds the timeout.
+# That is the simulator being stuck, not the app being slow to render, so the
+# readiness budget is restored afterwards. Stalls are still counted and capped,
+# so a permanently wedged device fails in bounded time (90 + 2 x 60 seconds)
+# rather than holding the runner.
+MAX_CAPTURE_STALLS = 2
+
+
+def allow_stall(device_id, stalls):
+    if stalls <= MAX_CAPTURE_STALLS:
+        return True
+    print(f"{device_id}: 截圖連續停擺 {stalls} 次，不再重試", flush=True)
+    return False
+
+
 def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     started = time.monotonic()
     deadline = started + timeout
     texts = []
+    stalls = 0
     while time.monotonic() < deadline:
         os.kill(pid, 0)
         remaining = deadline - time.monotonic()
@@ -106,31 +123,31 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         # Large iPad captures can finish writing before simctl exits on a
         # loaded runner. Keep the shared readiness deadline, but do not impose
         # a shorter 20-second cutoff on a capture that is still completing.
+        attempt = time.monotonic()
         try:
             simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
         except subprocess.TimeoutExpired:
-            # CoreSimulator's screenshot IPC can stall even after launch.
-            # Reap the timed-out helper and request a new capture, without
-            # accepting a partial image or extending the readiness deadline.
-            if time.monotonic() >= deadline:
-                raise
-            print(f"{device_id}: 截圖指令逾時，在原啟動畫面期限內重新擷取", flush=True)
+            stalls += 1
+            if not allow_stall(device_id, stalls):
+                break
+            deadline += time.monotonic() - attempt
+            print(f"{device_id}: 截圖指令逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
             continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
+        attempt = time.monotonic()
         try:
             result = subprocess.run(
                 [str(reader), str(screenshot.resolve())],
                 check=True, capture_output=True, text=True, timeout=min(45, remaining),
             )
         except subprocess.TimeoutExpired:
-            # Vision may stall on the first capture while Springboard hands
-            # over to the app. run() has reaped that helper; retry a fresh
-            # capture only within the original app-readiness deadline.
-            if time.monotonic() >= deadline:
-                raise
-            print(f"{device_id}: 截圖辨識逾時，在原啟動畫面期限內重新擷取", flush=True)
+            stalls += 1
+            if not allow_stall(device_id, stalls):
+                break
+            deadline += time.monotonic() - attempt
+            print(f"{device_id}: 截圖辨識逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
             continue
         texts = json.loads(result.stdout)
         if not isinstance(texts, list) or not all(isinstance(text, str) for text in texts):
@@ -140,9 +157,12 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
             return {"renderedStartup": True, "renderWaitSeconds": round(time.monotonic() - started, 1)}
         time.sleep(min(3, max(0, deadline - time.monotonic())))
     # Keep the last screenshot and recognized text, so a spinner or render
-    # failure is reviewable even when the job fails.
+    # failure is reviewable even when the job fails. A stalled capture used to
+    # escape as a bare TimeoutExpired, which skipped this evidence and named
+    # `xcrun` rather than the device that never showed its first screen.
     screenshot.with_suffix(".ocr.json").write_text(json.dumps(texts, ensure_ascii=False) + "\n")
-    raise RuntimeError(f"{device_id}: 連線頁在 {timeout} 秒內未顯示，已保存 {screenshot}")
+    stalled = f"，其中 {stalls} 次截圖或辨識停擺" if stalls else ""
+    raise RuntimeError(f"{device_id}: 連線頁在 {timeout} 秒內未顯示{stalled}，已保存 {screenshot}")
 
 
 def simctl(*args, timeout=60):
