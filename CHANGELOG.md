@@ -4,6 +4,26 @@
 
 ---
 
+## [2026.9.18](https://github.com/NickYCLin/lattice-term/compare/v2.4.0...v2026.9.18) (2026-09-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **發布:** 手動發版不再接受 force 參數， 同一天的正式版不可重複發布。
+
+### 🚀 新增功能
+
+* **chat:** 匯入並接續本機 Codex 與 Claude 對話 ([e33533f](https://github.com/NickYCLin/lattice-term/commit/e33533f0b2063140e77634fd6f6fc695c7e33790))
+* **cliproxy:** 桌面端登記代理位址並列出它實際接受的模型 ([#248](https://github.com/NickYCLin/lattice-term/issues/248)) ([bce65bd](https://github.com/NickYCLin/lattice-term/commit/bce65bda833c344efca2cdaa6b8b189e846a1b4e))
+* **發布:** 改用日期版號並每日檢查更新 ([#251](https://github.com/NickYCLin/lattice-term/issues/251)) ([4f4e5bf](https://github.com/NickYCLin/lattice-term/commit/4f4e5bf26d625778a35e65b530a7a416a3a69089))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 修正對話匯入留下的 clippy 錯誤與測試污染 ([#247](https://github.com/NickYCLin/lattice-term/issues/247)) ([37d243a](https://github.com/NickYCLin/lattice-term/commit/37d243ad553b49ccdca11bda97a99a9e85dd7e3b))
+* **ci:** iPad 截圖停擺不再吃掉 App 的啟動預算 ([#250](https://github.com/NickYCLin/lattice-term/issues/250)) ([c039953](https://github.com/NickYCLin/lattice-term/commit/c039953ce55e20b4280f5b6fb40317cf910ec850))
+* **remote:** 分享中繼主機找不到時提示檢查位址 ([a5ab2d0](https://github.com/NickYCLin/lattice-term/commit/a5ab2d03565452ea26e324ada7e1b23efeb6ba88))
+
 ## [2.4.0](https://github.com/NickYCLin/lattice-term/compare/v2.3.0...v2.4.0) (2026-09-16)
 
 
