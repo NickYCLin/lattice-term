@@ -2,11 +2,14 @@
 
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
-LatticeTerm 自己新開的 Codex 終端工作階段與對話會以程序參數自動載入
-同一個 MCP adapter，不修改所選帳號的 `config.toml`。因此 Codex 可使用下方
-明確授權的 SSH／SFTP 與遠端工具。設定頁可請原生層使用 LatticeTerm
+LatticeTerm 自己新開的 Codex 終端工作階段與對話，以及 Claude Code 終端
+工作階段，都會以程序參數自動載入同一個 MCP adapter，不修改所選帳號的
+`config.toml` 或 `.claude.json`。因此在工作階段裡的 CLI 可以直接使用下方
+明確授權的 SSH／SFTP 與遠端工具，不必請你到終端機代打指令。自己帶了
+`--mcp-config` 的啟動參數，或用 `--safe-mode`／`--bare` 開的 Claude Code，
+LatticeTerm 都不插手。設定頁可請原生層使用 LatticeTerm
 安全儲存的密碼、SSH 金鑰偏好或 Lattice Remote 配對碼開啟連線，模型與
-WebView 都拿不到憑證。更新前已經執行中的 Codex 不會在中途改寫工具清單，
+WebView 都拿不到憑證。更新前已經執行中的 CLI 不會在中途改寫工具清單，
 完成更新後請新開工作階段；連線與各項操作仍預設不授權。
 
 這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，可使用現有工作階段，或先由原生層開啟「我的連線」中已保存憑證的 SSH／SFTP 連線，再另外授權；D 已提供同樣方式開啟 RDP／VNC／Lattice Remote，並另外授權單張畫面擷取與鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。實作、測試與實機驗收分開記錄，見文末。

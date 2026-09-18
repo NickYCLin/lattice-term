@@ -65,6 +65,55 @@ pub fn prepend_codex_arguments(arguments: Vec<String>, launch: &McpLaunch) -> Ve
     configured
 }
 
+fn has_explicit_claude_config(arguments: &[String]) -> bool {
+    arguments.iter().any(|argument| {
+        argument == "--mcp-config" || argument.trim_start().starts_with("--mcp-config=")
+    })
+}
+
+/// Claude Code reads MCP servers from a JSON string given on the command
+/// line, which leaves `~/.claude.json` and the user's own servers alone.
+pub fn claude_arguments(launch: &McpLaunch) -> Vec<String> {
+    let config = serde_json::json!({
+        "mcpServers": {
+            "latticeterm": { "command": launch.command, "args": launch.args }
+        }
+    });
+    match serde_json::to_string(&config) {
+        Ok(config) => vec!["--mcp-config".to_string(), config],
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Adds this installation's adapter to a Claude Code launch.
+///
+/// `--mcp-config` takes a space-separated list, so whatever follows the value
+/// must be another flag; a launch that starts with a positional argument gets
+/// the pair at the end instead, before any `--` separator.
+pub fn apply_claude_arguments(mut arguments: Vec<String>, launch: &McpLaunch) -> Vec<String> {
+    // A caller who named their own servers decides what this session talks to.
+    if has_explicit_claude_config(&arguments) {
+        return arguments;
+    }
+    let configured = claude_arguments(launch);
+    if configured.is_empty() {
+        return arguments;
+    }
+    let leads_with_flag = arguments
+        .first()
+        .is_none_or(|argument| argument.starts_with('-'));
+    let at = if leads_with_flag {
+        0
+    } else {
+        arguments
+            .iter()
+            .position(|argument| argument == "--")
+            .unwrap_or(arguments.len())
+    };
+    arguments.splice(at..at, configured);
+    arguments
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +150,34 @@ mod tests {
             &arguments[arguments.len() - 2..],
             &["resume", "conversation-id"]
         );
+    }
+
+    #[test]
+    fn claude_gets_the_same_adapter_without_touching_its_config_file() {
+        let arguments = apply_claude_arguments(vec!["--continue".into()], &launch());
+        assert_eq!(arguments[0], "--mcp-config");
+        let config: serde_json::Value = serde_json::from_str(&arguments[1]).expect("valid JSON");
+        assert_eq!(
+            config["mcpServers"]["latticeterm"]["command"],
+            serde_json::json!(r#"C:\Program Files\LatticeTerm\lattice-term.exe"#)
+        );
+        assert_eq!(arguments[2], "--continue");
+    }
+
+    #[test]
+    fn a_caller_that_named_its_own_servers_is_left_alone() {
+        let chosen = vec!["--mcp-config".to_string(), "{}".to_string()];
+        assert_eq!(apply_claude_arguments(chosen.clone(), &launch()), chosen);
+    }
+
+    #[test]
+    fn a_leading_prompt_keeps_the_value_from_swallowing_it() {
+        let arguments = apply_claude_arguments(
+            vec!["說明這個專案".into(), "--".into(), "--not-a-flag".into()],
+            &launch(),
+        );
+        assert_eq!(arguments[0], "說明這個專案");
+        assert_eq!(arguments[1], "--mcp-config");
+        assert_eq!(&arguments[3..], &["--", "--not-a-flag"]);
     }
 }

@@ -6037,6 +6037,13 @@ pub fn launch_with_replay(
             integrated_completion = adapted != arguments;
             arguments = adapted;
         }
+        // Safe/bare mode deliberately runs without user customizations; adding
+        // a server back would defeat that recovery path.
+        if let Some(mcp) = registry.mcp.as_ref() {
+            if !claude_customizations_disabled(&arguments) {
+                arguments = crate::agent_mcp::apply_claude_arguments(arguments, mcp);
+            }
+        }
     } else if definition_id == "gemini" && reporter.is_some() {
         // Gemini has no one-shot --settings argument. Its documented system
         // settings path is process-scoped, so a temporary file adds hooks
