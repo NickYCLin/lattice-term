@@ -1,4 +1,4 @@
-import { cliProxyMessageKey, cliProxyModelLabel, cliProxyStatusCode } from "../../app/cliProxyApi";
+import { cliProxyMessageKey, cliProxyStatusCode, groupCliProxyModels } from "../../app/cliProxyApi";
 import type { CliProxyModelList } from "../../app/useCliProxyApi";
 import { accountModelKey, type AccountModelOption, type AccountModelSelection } from "../../app/accountModels";
 import { useI18n } from "../../i18n/context";
@@ -19,6 +19,7 @@ function CliProxyModel({ value, models, disabled, onChange }: {
 }) {
   const { t } = useI18n();
   const listed = models.state === "ready" ? models.models : [];
+  const grouped = groupCliProxyModels(listed);
   const known = listed.some((model) => model.id === value.model);
   const manual = !known;
   const explain = (reason: unknown) => {
@@ -27,12 +28,15 @@ function CliProxyModel({ value, models, disabled, onChange }: {
     const status = cliProxyStatusCode(reason);
     return status === null ? t("terminal.proxy.unavailable") : t("cliproxy.models.status", { status });
   };
+  const renderModel = (model: { id: string }) => <option key={model.id} value={model.id}>{model.id}</option>;
   return <>
     {listed.length > 0 && <label className="field"><span className="field__label">{t("terminal.proxy.model")}</span>
       <select className="select" value={manual ? MANUAL : value.model} disabled={disabled}
         onChange={(event) => onChange({ ...value, model: event.currentTarget.value === MANUAL ? "" : event.currentTarget.value })}>
         {!value.model && <option value="" disabled>{t("terminal.proxy.choose")}</option>}
-        {listed.map((model) => <option key={model.id} value={model.id}>{cliProxyModelLabel(model)}</option>)}
+        {grouped.map((group) => group.brand
+          ? <optgroup key={group.brand} label={group.brand}>{group.models.map(renderModel)}</optgroup>
+          : group.models.map(renderModel))}
         <option value={MANUAL}>{t("terminal.proxy.manual")}</option>
       </select></label>}
     {models.state === "loading" && <span className="field__hint">{t("settings.cliProxy.modelsLoading")}</span>}
@@ -65,7 +69,7 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
       const selected = options.find((option) => accountModelKey(option) === event.currentTarget.value);
       if (selected && !selected.disabled) {
         onChange(selected.provider && proxyModels.state === "ready"
-          ? { ...selected, model: proxyModels.models[0]?.id ?? "" } : selected);
+          ? { ...selected, model: groupCliProxyModels(proxyModels.models)[0]?.models[0]?.id ?? "" } : selected);
       }
     }}>
       {!value && <option value="" disabled>{t("accountModel.choose")}</option>}

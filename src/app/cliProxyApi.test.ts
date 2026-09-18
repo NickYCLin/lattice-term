@@ -7,6 +7,7 @@ import {
   cliProxyModelLabel,
   cliProxyStatusCode,
   emptyCliProxySettings,
+  groupCliProxyModels,
   loadCliProxySettings,
   saveCliProxySettings,
 } from "./cliProxyApi";
@@ -62,6 +63,41 @@ describe("cliProxyApi messages", () => {
   });
 });
 
+describe("cliProxyApi model grouping", () => {
+  it("keeps one brand together regardless of case and sorts it strongest first", () => {
+    const groups = groupCliProxyModels([
+      { id: "gpt-image-2.5-flare", ownedBy: "openai" },
+      { id: "claude-haiku-4.5", ownedBy: "anthropic" },
+      { id: "gpt-5.6-sol", ownedBy: "OpenAI" },
+      { id: "claude-opus-5", ownedBy: "anthropic" },
+      { id: "gpt-6-astra", ownedBy: "openai" },
+    ]);
+    expect(groups.map((group) => group.brand)).toEqual(["openai", "anthropic"]);
+    expect(groups[0].models.map((model) => model.id)).toEqual([
+      "gpt-6-astra", "gpt-5.6-sol", "gpt-image-2.5-flare",
+    ]);
+    expect(groups[1].models.map((model) => model.id)).toEqual(["claude-opus-5", "claude-haiku-4.5"]);
+  });
+
+  it("reads dotted versions numerically, not as text", () => {
+    const [group] = groupCliProxyModels([
+      { id: "gemini-3.9-pro", ownedBy: "google" },
+      { id: "gemini-3.16-pro", ownedBy: "google" },
+    ]);
+    expect(group.models.map((model) => model.id)).toEqual(["gemini-3.16-pro", "gemini-3.9-pro"]);
+  });
+
+  it("parks unversioned models and unbranded models at the end", () => {
+    const groups = groupCliProxyModels([
+      { id: "mystery", ownedBy: null },
+      { id: "gemini-embedding", ownedBy: "google" },
+      { id: "gemini-3-flash", ownedBy: "google" },
+    ]);
+    expect(groups.map((group) => group.brand)).toEqual(["google", null]);
+    expect(groups[0].models.map((model) => model.id)).toEqual(["gemini-3-flash", "gemini-embedding"]);
+    expect(groups[1].models.map((model) => model.id)).toEqual(["mystery"]);
+  });
+});
 
 describe("proxy launch metadata", () => {
   it("keeps reverse proxy prefixes and refuses missing setup", () => {

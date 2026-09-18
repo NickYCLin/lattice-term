@@ -33,9 +33,16 @@ describe("Fleet account model picker", () => {
   });
 
   it("offers the proxy's own models and keeps typing one available", () => {
-    const models = { state: "ready", models: [{ id: "gpt-5.6-sol", ownedBy: "openai" }, { id: "claude-opus-5", ownedBy: null }] } as const;
+    const models = { state: "ready", models: [
+      { id: "gpt-image-2.5-flare", ownedBy: "openai" },
+      { id: "gpt-5.6-sol", ownedBy: "openai" },
+      { id: "claude-opus-5", ownedBy: null },
+    ] } as const;
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model: "gpt-5.6-sol" }} allowCliProxyApi proxyModels={models} onChange={vi.fn()} /></I18nProvider>);
-    expect(html).toContain("gpt-5.6-sol · openai");
+    // Same brand shares one group and the stronger model comes first.
+    const brand = html.match(/<optgroup label="openai">(.*?)<\/optgroup>/)?.[1] ?? "";
+    expect(brand).not.toBe("");
+    expect(brand.indexOf("gpt-5.6-sol")).toBeLessThan(brand.indexOf("gpt-image-2.5-flare"));
     expect(html).toContain("claude-opus-5");
     expect(html).toContain("其他──自己填模型 ID");
     // A model the list already offers does not also get a free-text box.

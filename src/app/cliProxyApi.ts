@@ -98,3 +98,50 @@ export function cliProxyStatusCode(reason: unknown): number | null {
 export function cliProxyModelLabel(model: CliProxyModel): string {
   return model.ownedBy ? `${model.id} · ${model.ownedBy}` : model.id;
 }
+
+export interface CliProxyModelGroup {
+  brand: string | null;
+  models: readonly CliProxyModel[];
+}
+
+/**
+ * The picker shows one brand at a time, strongest model first. The proxy
+ * list arrives in whatever order the proxy chose, and the id is the only
+ * strength signal available, so the numbers inside it (6, 5.6, 2.5, …) are
+ * compared from the left as dotted versions and bigger means stronger.
+ * Models without a number, and models without a brand, sink to the end of
+ * their group and of the list; ties keep the proxy's own order.
+ */
+export function groupCliProxyModels(models: readonly CliProxyModel[]): CliProxyModelGroup[] {
+  const groups: { brand: string | null; key: string | null; models: CliProxyModel[] }[] = [];
+  for (const model of models) {
+    const brand = model.ownedBy?.trim() || null;
+    const key = brand === null ? null : brand.toLowerCase();
+    const existing = groups.find((group) => group.key === key);
+    if (existing) existing.models.push(model);
+    else groups.push({ brand, key, models: [model] });
+  }
+  for (const group of groups) {
+    group.models.sort((first, second) => compareModelStrength(first.id, second.id));
+  }
+  return [...groups.filter((group) => group.key !== null), ...groups.filter((group) => group.key === null)]
+    .map(({ brand, models: grouped }) => ({ brand, models: grouped }));
+}
+
+function dottedVersions(id: string): number[][] {
+  return (id.match(/\d+(?:\.\d+)*/g) ?? []).map((version) => version.split(".").map(Number));
+}
+
+function compareModelStrength(first: string, second: string): number {
+  const left = dottedVersions(first);
+  const right = dottedVersions(second);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const leftParts = left[index] ?? [];
+    const rightParts = right[index] ?? [];
+    for (let part = 0; part < Math.max(leftParts.length, rightParts.length); part += 1) {
+      const difference = (rightParts[part] ?? 0) - (leftParts[part] ?? 0);
+      if (difference !== 0) return difference;
+    }
+  }
+  return 0;
+}
