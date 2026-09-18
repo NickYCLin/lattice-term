@@ -34,6 +34,7 @@ import {
   type AccountModelSelection,
 } from "../app/accountModels";
 import { useAccountModels } from "../app/useAccountModels";
+import { useCliProxyModels, useCliProxySettings } from "../app/useCliProxyApi";
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
@@ -484,6 +485,10 @@ export function SessionsView({
   const { statuses: accountStatuses } = useAccountProfileStatus(accountProfiles);
   const modelTargets = accountModelTargets(installedAgents, accountProfiles, accountStatuses, t("accountModel.defaultAccount"));
   const modelLists = useAccountModels(modelTargets, newProjectDirectory !== null || addCliFor !== null);
+  // The proxy is only asked while a launcher is open, and only when the
+  // user has pointed Settings at one.
+  const cliProxySettings = useCliProxySettings();
+  const cliProxyModels = useCliProxyModels(cliProxySettings, newProjectDirectory !== null || addCliFor !== null);
   // A terminal may also be opened to log in, so signed-out accounts can launch
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
@@ -1093,6 +1098,7 @@ export function SessionsView({
             options={modelOptions}
             value={selectedProjectModel}
             allowCliProxyApi
+            proxyModels={cliProxyModels}
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
@@ -2178,6 +2184,7 @@ export function SessionsView({
                             options={modelOptions}
                             value={selectedAddModel}
                             allowCliProxyApi
+                            proxyModels={cliProxyModels}
                             onChange={setSelectedAddModel}
                           />
                           <button
