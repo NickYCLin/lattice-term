@@ -2187,17 +2187,19 @@ export function SessionsView({
                             proxyModels={cliProxyModels}
                             onChange={setSelectedAddModel}
                           />
-                          <button
-                            type="button"
-                            className="button button--primary button--sm"
-                            disabled={!modelAvailable(selectedAddModel)}
-                            onClick={() => selectedAddModel && void addCli(group, selectedAddModel, carry)}
-                          >{t("terminal.projects.launch")}</button>
                           {installed.length === 0 && (
                             <span className="cli-switch__menu-empty">
                               {t("terminal.addCli.none")}
                             </span>
                           )}
+                          <div className="cli-switch__menu-actions">
+                            <button
+                              type="button"
+                              className="button button--primary button--sm"
+                              disabled={!modelAvailable(selectedAddModel)}
+                              onClick={() => selectedAddModel && void addCli(group, selectedAddModel, carry)}
+                            >{t("terminal.projects.launch")}</button>
+                          </div>
                         </div>
                       );
                     })()}
