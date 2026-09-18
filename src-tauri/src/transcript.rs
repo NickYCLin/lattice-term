@@ -876,6 +876,24 @@ const HISTORY_MAX_RESULTS: usize = 100;
 const HISTORY_MAX_MESSAGES: usize = 300;
 const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 
+// A unit test runs on a machine that already has `~/.codex` and `~/.claude`.
+// Scanning those pushes the test's own fixtures past the result cap, so the
+// assertions would depend on how much history that machine happens to hold.
+#[cfg(test)]
+thread_local! {
+    static ONLY_PROFILE_HISTORY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn scan_default_history_roots() -> bool {
+    !ONLY_PROFILE_HISTORY.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn scan_default_history_roots() -> bool {
+    true
+}
+
 fn history_root(kind: TranscriptKind, profile: Option<&Path>) -> Option<PathBuf> {
     let name = match kind {
         TranscriptKind::Codex => "sessions",
@@ -1031,7 +1049,7 @@ fn scan_local_conversations(
             // Keep a bounded newest-first working set even when several
             // accounts have very large histories.
             if result.len() >= 2_000 {
-                result.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+                result.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
                 result.truncate(1_000);
             }
         }
@@ -1045,9 +1063,11 @@ pub fn list_local_conversations(
         return Err("Too many account profiles.".into());
     }
     let mut entries = Vec::new();
-    for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
-        if let Some(root) = history_root(kind, None) {
-            scan_local_conversations(kind, &root, None, &mut entries);
+    if scan_default_history_roots() {
+        for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
+            if let Some(root) = history_root(kind, None) {
+                scan_local_conversations(kind, &root, None, &mut entries);
+            }
         }
     }
     for profile in profiles {
@@ -1065,7 +1085,7 @@ pub fn list_local_conversations(
             scan_local_conversations(kind, &root, Some(&profile.profile_id), &mut entries);
         }
     }
-    entries.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
     let mut seen = std::collections::HashSet::new();
     let mut selected = Vec::new();
     for (mut conversation, path) in entries {
@@ -1571,6 +1591,7 @@ mod tests {
 
     #[test]
     fn local_history_lists_app_server_and_claude_and_reads_only_text() {
+        ONLY_PROFILE_HISTORY.with(|flag| flag.set(true));
         let directory = tempfile::tempdir().unwrap();
         let codex = directory.path().join("codex-account");
         let claude = directory.path().join("claude-account");
@@ -1585,7 +1606,7 @@ mod tests {
             100,
         );
         let mut rows = fs::read_to_string(&codex_file).unwrap();
-        rows.push_str("\n");
+        rows.push('\n');
         rows.push_str(&serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"},{"type":"image","url":"private"}]}}).to_string());
         fs::write(&codex_file, rows).unwrap();
         let claude_file = claude.join("projects/project/claude.jsonl");

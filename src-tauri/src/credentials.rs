@@ -210,6 +210,7 @@ pub enum CredentialKind {
     VncPassword,
     LatticePairingCode,
     LatticeHostPairingCode,
+    CliProxyApiKey,
 }
 
 impl CredentialKind {
@@ -221,16 +222,20 @@ impl CredentialKind {
             Self::VncPassword => "vnc-password",
             Self::LatticePairingCode => "lattice-pairing-code",
             Self::LatticeHostPairingCode => "lattice-host-pairing-code",
+            Self::CliProxyApiKey => "cliproxyapi-key",
         }
     }
 
-    fn protocol(self) -> Protocol {
+    /// `None` for a credential that does not belong to a saved connection
+    /// profile, and therefore cannot be stored with a profile binding.
+    fn protocol(self) -> Option<Protocol> {
         match self {
-            Self::SshPassword => Protocol::Ssh,
-            Self::SftpPassword => Protocol::Sftp,
-            Self::RdpPassword => Protocol::Rdp,
-            Self::VncPassword => Protocol::Vnc,
-            Self::LatticePairingCode | Self::LatticeHostPairingCode => Protocol::Lattice,
+            Self::SshPassword => Some(Protocol::Ssh),
+            Self::SftpPassword => Some(Protocol::Sftp),
+            Self::RdpPassword => Some(Protocol::Rdp),
+            Self::VncPassword => Some(Protocol::Vnc),
+            Self::LatticePairingCode | Self::LatticeHostPairingCode => Some(Protocol::Lattice),
+            Self::CliProxyApiKey => None,
         }
     }
 }
@@ -399,6 +404,74 @@ fn remote_host_pairing_code_exists() -> Result<bool, String> {
     )
 }
 
+/// The CLIProxyAPI key belongs to one address rather than to a saved
+/// connection, but it still needs a stable, non-secret key for status and
+/// deletion.
+pub const CLI_PROXY_CREDENTIAL_ID: &str = "cliproxyapi";
+
+/// Ties the key to the exact address it was entered for. Pointing the setting
+/// at another host therefore fails to decode instead of quietly sending the
+/// key somewhere the user did not mean to send it.
+fn cli_proxy_binding_sha256(base_url: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"latticeterm-cliproxy-binding-v1\0");
+    digest.update((base_url.len() as u64).to_be_bytes());
+    digest.update(base_url.as_bytes());
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn store_cli_proxy_key(base_url: &str, secret: &str) -> Result<(), String> {
+    if secret.is_empty() {
+        return Err("An empty credential cannot be saved.".to_string());
+    }
+    let encoded = Zeroizing::new(
+        serde_json::to_string(&BoundCredentialEnvelope {
+            version: BOUND_CREDENTIAL_VERSION,
+            binding_sha256: cli_proxy_binding_sha256(base_url),
+            secret: secret.to_string(),
+        })
+        .map_err(|error| error.to_string())?,
+    );
+    store(
+        CLI_PROXY_CREDENTIAL_ID,
+        CredentialKind::CliProxyApiKey,
+        &encoded,
+    )
+}
+
+pub fn load_cli_proxy_key(base_url: &str) -> Result<Zeroizing<String>, String> {
+    let encoded = Zeroizing::new(load(
+        CLI_PROXY_CREDENTIAL_ID,
+        CredentialKind::CliProxyApiKey,
+    )?);
+    let envelope: BoundCredentialEnvelope =
+        serde_json::from_str(&encoded).map_err(|_| LEGACY_CREDENTIAL_ERROR.to_string())?;
+    if envelope.version != BOUND_CREDENTIAL_VERSION
+        || envelope.binding_sha256 != cli_proxy_binding_sha256(base_url)
+    {
+        return Err("cliproxy.key.rebound".to_string());
+    }
+    if envelope.secret.is_empty() {
+        return Err("The saved credential is empty.".to_string());
+    }
+    Ok(Zeroizing::new(envelope.secret.clone()))
+}
+
+pub fn cli_proxy_key_exists() -> Result<bool, String> {
+    merge_exists_results(
+        keyring_exists(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey),
+        vault_exists(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey),
+    )
+}
+
+pub fn delete_cli_proxy_key() -> Result<bool, String> {
+    delete(CLI_PROXY_CREDENTIAL_ID, CredentialKind::CliProxyApiKey)
+}
+
 /// Stable, non-secret identity of the endpoint a saved credential belongs to.
 /// Length-prefixing prevents ambiguous concatenations. Every endpoint field is
 /// byte-exact so the digest always matches what the protocol engine actually
@@ -437,7 +510,7 @@ pub fn profile_binding_sha256_with_context(
 }
 
 fn validate_bound_kind(profile: &ConnectionProfile, kind: CredentialKind) -> Result<(), String> {
-    if profile.protocol != kind.protocol() {
+    if kind.protocol() != Some(profile.protocol) {
         return Err("The credential kind does not match the connection protocol.".to_string());
     }
     Ok(())
