@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseChangelog } from "./changelog";
+import { changelogReleases, isCalendarVersion, parseChangelog } from "./changelog";
 
 describe("parseChangelog", () => {
   it("keeps releases, dates, sections and Traditional Chinese items", () => {
@@ -41,5 +41,19 @@ describe("parseChangelog", () => {
 - 修正啟動問題
 `),
     ).toHaveLength(1);
+  });
+});
+
+describe("isCalendarVersion", () => {
+  it("accepts date versions and rejects the earlier semantic ones", () => {
+    expect(isCalendarVersion("2026.9.18")).toBe(true);
+    expect(isCalendarVersion("2026.12.1")).toBe(true);
+    expect(isCalendarVersion("2.4.0")).toBe(false);
+    expect(isCalendarVersion("0.46.1")).toBe(false);
+  });
+
+  it("lists only versions that are still published as releases", () => {
+    expect(changelogReleases.length).toBeGreaterThan(0);
+    expect(changelogReleases.every((release) => isCalendarVersion(release.version))).toBe(true);
   });
 });

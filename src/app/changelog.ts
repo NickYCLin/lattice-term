@@ -13,6 +13,11 @@ export interface ChangelogRelease {
 }
 
 const releasePattern = /^## \[([^\]]+)]\((https?:\/\/[^)]+)\) \(([^)]+)\)$/;
+const calendarVersionPattern = /^\d{4}\.\d{1,2}\.\d{1,2}$/;
+
+export function isCalendarVersion(version: string): boolean {
+  return calendarVersionPattern.test(version);
+}
 
 export function parseChangelog(source: string): ChangelogRelease[] {
   const releases: ChangelogRelease[] = [];
@@ -53,4 +58,8 @@ export function parseChangelog(source: string): ChangelogRelease[] {
   return releases.filter((entry) => entry.sections.some((entrySection) => entrySection.items.length));
 }
 
-export const changelogReleases = parseChangelog(changelogSource);
+/* Settings lists only the calendar versions that are still published; the
+   semantic-version history stays in CHANGELOG.md. */
+export const changelogReleases = parseChangelog(changelogSource).filter(
+  (release) => isCalendarVersion(release.version),
+);
