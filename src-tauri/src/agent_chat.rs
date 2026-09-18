@@ -76,6 +76,8 @@ pub enum ChatPermission {
 #[serde(rename_all = "camelCase")]
 pub struct ChatTurnRequest {
     #[serde(default)]
+    pub cli_proxy_base_url: Option<String>,
+    #[serde(default)]
     pub browser_enabled: bool,
     pub thread_id: String,
     pub turn_id: String,
@@ -1251,6 +1253,17 @@ fn send_with_retry<S: ChatSink>(
         let working_directory = validate_working_directory(&request.working_directory)?;
         let profile_config_directory =
             profile_config_directory(dialect, request.profile_config_path.as_deref())?;
+        if request.cli_proxy_base_url.is_some() && dialect != Dialect::Codex {
+            return Err("CLIProxyAPI requires Codex.".into());
+        }
+        if request.cli_proxy_base_url.is_some() && model.is_none() {
+            return Err("Select a CLIProxyAPI model first.".into());
+        }
+        let proxy = request
+            .cli_proxy_base_url
+            .as_deref()
+            .map(crate::cliproxy::launch::ProxyLaunch::load)
+            .transpose()?;
         let attachments = validate_attachments(&request.attachments)?;
         let prompt = prompt_with_attachments(&request.prompt, &attachments);
         if prompt.len() > MAX_PROMPT_BYTES {
@@ -1267,6 +1280,7 @@ fn send_with_retry<S: ChatSink>(
                 sink,
                 &registry.codex,
                 codex_server::TurnRequest {
+                    proxy: proxy.as_ref(),
                     browser_enabled: request.browser_enabled,
                     mcp: registry.mcp.as_ref(),
                     thread_id: &request.thread_id,
@@ -2833,6 +2847,7 @@ mod tests {
             Arc::new(RecordingSink(tx)),
             Arc::new(AgentChatRegistry::new()),
             ChatTurnRequest {
+                cli_proxy_base_url: None,
                 browser_enabled: false,
                 thread_id: "t".into(),
                 turn_id: "u".into(),
@@ -3339,6 +3354,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                cli_proxy_base_url: None,
                 browser_enabled: false,
                 thread_id: "e2e-ask".into(),
                 turn_id: "e2e-ask-turn".into(),
@@ -3399,6 +3415,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                cli_proxy_base_url: None,
                 browser_enabled: false,
                 thread_id: "e2e-thread".into(),
                 turn_id: "e2e-turn".into(),

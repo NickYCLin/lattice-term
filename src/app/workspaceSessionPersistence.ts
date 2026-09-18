@@ -355,7 +355,12 @@ export function agentFreshLaunchArguments(session: SavedAgentSession): string[] 
 }
 
 export function agentRestoreArguments(session: SavedAgentSession): string[] {
-  if (session.resumeSessionId) return [];
+  if (session.resumeSessionId) {
+    // The native conversation does not retain our process-local provider/key.
+    // Restore public proxy metadata; the desktop reloads the bound credential.
+    return session.definitionId === "codex" && session.launchArguments.includes("model_provider=latticeterm_cliproxyapi")
+      ? [...session.launchArguments] : [];
+  }
   const launchArguments = agentFreshLaunchArguments(session);
   // Claude's --continue resumes the most recent conversation in this working
   // directory and still accepts ordinary startup flags such as --model.

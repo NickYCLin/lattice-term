@@ -56,7 +56,7 @@ describe("account-aware model choices", () => {
     expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: "b", model: "" }, [profile])).toThrow("missing-account");
   });
 
-  it("offers CLIProxyAPI only in Fleet for each Codex identity, without exposing it in chat", () => {
+  it("offers opt-in CLIProxyAPI models for every Codex identity", () => {
     const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [profile], { b: status }, "Default");
     expect(accountModelOptions(targets, {}, labels).some((option) => option.provider)).toBe(false);
     const proxyOptions = accountModelOptions(targets, {}, labels, undefined, true).filter((option) => option.provider);
@@ -65,8 +65,8 @@ describe("account-aware model choices", () => {
     expect(proxyOptions.every((option) => option.definitionId === "codex")).toBe(true);
     const selection = { ...proxyOptions[1], model: "claude-sonnet-4-5" };
     expect(accountModelKey(selection)).toBe(accountModelKey(proxyOptions[1]));
-    expect(accountModelLaunchSettings(selection, [profile])).toEqual({
-      profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=cliproxyapi", "--model", "claude-sonnet-4-5"],
+    expect(accountModelLaunchSettings(selection, [profile], "http://localhost:8317")).toEqual({
+      profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=latticeterm_cliproxyapi", "-c", 'model_providers.latticeterm_cliproxyapi.base_url="http://localhost:8317/v1"', "--model", "claude-sonnet-4-5"],
     });
     expect(accountModelLaunchSettings({ ...selection, provider: undefined }, [profile]).arguments).toEqual(["--model", "claude-sonnet-4-5"]);
   });
@@ -79,6 +79,28 @@ describe("account-aware model choices", () => {
     }
     expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: null, model: "sonnet", provider: "cliproxyapi" }, [])).toThrow("unsupported-provider");
     expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: "removed", model: "gpt-5.6-sol", provider: "cliproxyapi" }, [profile])).toThrow("missing-account");
+  });
+
+  it("does not require native Codex login for a proxy", () => {
+    const targets = accountModelTargets([{ ...definition, account: { ...definition.account, state: "signedOut" } }], [], {}, "Default");
+    const options = accountModelOptions(targets, {}, labels, undefined, true);
+    expect(options.filter(option => !option.provider).every(option => option.disabled)).toBe(true);
+    expect(options.find(option => option.provider)?.disabled).toBe(false);
+    expect(options.find(option => option.provider)?.label).not.toContain(labels.signedOut);
+    expect(() => accountModelLaunchSettings({ definitionId: "codex", accountProfileId: null, model: "proxy-model", provider: "cliproxyapi" }, [])).toThrow("cliproxy.url.empty");
+  });
+
+  it("resets native identity when entering or leaving the proxy, but not when changing its model", () => {
+    const original = fakeThread({ nativeSessionId: "native-a", items: [{ type: "user", id: "u", text: "近期脈絡", at: 1 }] });
+    const proxy = selectThreadModel(original, { definitionId: "codex", accountProfileId: null, model: "proxy-model", provider: "cliproxyapi" });
+    expect(proxy.provider).toBe("cliproxyapi");
+    expect(proxy.nativeSessionId).toBeNull();
+    expect(proxy.handoff?.transcript).toContain("近期脈絡");
+    const next = selectThreadModel({ ...proxy, nativeSessionId: "proxy-native" }, { definitionId: "codex", accountProfileId: null, model: "another-model", provider: "cliproxyapi" });
+    expect(next.nativeSessionId).toBe("proxy-native");
+    const native = selectThreadModel(next, { definitionId: "codex", accountProfileId: null, model: "" });
+    expect(native.provider).toBeUndefined();
+    expect(native.nativeSessionId).toBeNull();
   });
 
   it("labels running Windows sessions without changing their stored CLI name", () => {

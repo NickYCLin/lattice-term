@@ -91,6 +91,17 @@ describe("ChatView", () => {
     expect(visibleText).not.toMatch(/\bCLI\b/);
   });
 
+  it("shows the proxy model field even when native Codex is signed out", () => {
+    const thread = fakeThread({ provider: "cliproxyapi", model: "proxy-model" });
+    const definition = fakeDefinition();
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), fakeAgentApi({
+      catalog: [{ ...definition, account: { ...definition.account, state: "signedOut" } }],
+    }));
+    expect(markup).toContain("CLIProxyAPI 模型 ID");
+    expect(markup).toContain('value="proxy-model"');
+    expect(markup).not.toContain('chat-settings__warning');
+  });
+
   it("always exposes delete from the conversation row", () => {
     const thread = fakeThread({ title: "可以刪除的對話" });
     const markup = render(

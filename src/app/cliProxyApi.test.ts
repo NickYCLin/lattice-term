@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CLI_PROXY_SETTINGS_KEY,
+  cliProxyLaunchArguments,
   cliProxyConfigured,
   cliProxyMessageKey,
   cliProxyModelLabel,
@@ -58,5 +59,16 @@ describe("cliProxyApi messages", () => {
   it("names the provider next to the model when the proxy reports one", () => {
     expect(cliProxyModelLabel({ id: "gpt-5.6-sol", ownedBy: "openai" })).toBe("gpt-5.6-sol · openai");
     expect(cliProxyModelLabel({ id: "gpt-5.6-sol", ownedBy: null })).toBe("gpt-5.6-sol");
+  });
+});
+
+
+describe("proxy launch metadata", () => {
+  it("keeps reverse proxy prefixes and refuses missing setup", () => {
+    expect(cliProxyLaunchArguments(" https://proxy.example/prefix/ ")).toEqual([
+      "-c", "model_provider=latticeterm_cliproxyapi", "-c",
+      'model_providers.latticeterm_cliproxyapi.base_url="https://proxy.example/prefix/v1"',
+    ]);
+    expect(() => cliProxyLaunchArguments(" ")).toThrow("cliproxy.url.empty");
   });
 });

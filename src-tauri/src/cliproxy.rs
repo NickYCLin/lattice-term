@@ -1,18 +1,14 @@
 //! Talking to a CLIProxyAPI server the user runs themselves.
 //!
-//! CLIProxyAPI fronts several coding-plan subscriptions behind one local
-//! OpenAI/Claude/Gemini-compatible endpoint. LatticeTerm only needs two
-//! things from it: proof that the address answers, and the list of models it
-//! will accept. Everything else — which provider a model comes from, how the
-//! proxy authenticates upstream — stays inside the proxy.
-//!
-//! The API key never leaves this process. It is read from the credential
-//! store for one request and dropped; it is not returned to the interface,
-//! written to a log, or placed in a CLI's configuration file.
+//! The desktop discovers models and configures Codex processes for the proxy.
+//! Keys stay in the credential store and are passed only through the child
+//! environment, never through launch arguments or CLI configuration files.
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use zeroize::Zeroizing;
+
+pub mod launch;
 
 /// The proxy's own default. Shown as a placeholder, never assumed.
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8317";

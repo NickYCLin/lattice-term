@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   CLI_PROXY_DEFAULT_BASE_URL,
+  CLI_PROXY_SETTINGS_CHANGED,
   cliProxyMessageKey,
   cliProxyModelLabel,
   cliProxyStatusCode,
@@ -73,14 +74,14 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
     await invoke("cliproxy_save_key", { baseUrl: savedBaseUrl || baseUrl, key });
     setKey("");
     await refreshKey();
-    models.reload();
+    window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
   const forgetKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke<boolean>("cliproxy_forget_key");
     await refreshKey();
-    models.reload();
+    window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
   const clear = () => run(async () => {

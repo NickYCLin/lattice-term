@@ -5293,7 +5293,10 @@ fn normalize_resume_session_id(
             spec.label
         ));
     }
-    if !arguments.is_empty() {
+    let can_resume = arguments.is_empty()
+        || (spec.id == "codex"
+            && crate::cliproxy::launch::base_from_arguments(arguments)?.is_some());
+    if !can_resume {
         return Err(
             "Native session restore cannot be combined with additional launch arguments."
                 .to_string(),
@@ -5517,10 +5520,12 @@ fn resolve_launch(
     if let Some(resume_session_id) =
         normalize_resume_session_id(spec, request.resume_session_id.as_deref(), &arguments)?
     {
-        arguments = spec
+        let mut resumed = spec
             .and_then(|agent| agent.resume_recipe)
             .expect("validated resume recipe")
             .arguments(resume_session_id);
+        resumed.extend(arguments);
+        arguments = resumed;
     }
 
     let executable = spec
@@ -5960,6 +5965,16 @@ pub fn launch_with_replay(
     let launch_arguments = request.arguments.clone();
     let (definition_id, label, executable, mut arguments, working_directory) =
         resolve_launch(&request)?;
+    let proxy = if definition_id == "codex" {
+        crate::cliproxy::launch::base_from_arguments(&arguments)?
+            .map(|base| crate::cliproxy::launch::ProxyLaunch::load(&base))
+            .transpose()?
+    } else {
+        None
+    };
+    if let Some(proxy) = &proxy {
+        arguments = proxy.configure_arguments(arguments);
+    }
     let profile_config_path =
         profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
     let launch_model = model_from_arguments(&arguments).or_else(|| {
@@ -6142,6 +6157,10 @@ pub fn launch_with_replay(
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("LATTICETERM_AGENT_SESSION", &session_id);
+    command.env_remove(crate::cliproxy::launch::KEY_ENV);
+    if let Some(key) = proxy.as_ref().and_then(|proxy| proxy.key()) {
+        command.env(crate::cliproxy::launch::KEY_ENV, key);
+    }
     if let Some(profile_config_path) = profile_config_path.as_deref() {
         if definition_id == "codex" {
             command.env("CODEX_HOME", profile_config_path);
@@ -9380,6 +9399,33 @@ model = "gpt-5.3-codex"
     fn input_decoder_rejects_oversized_events() {
         let encoded = encode(&vec![0_u8; MAX_INPUT_BYTES + 1]);
         assert!(decode(&encoded).unwrap_err().contains("at most"));
+    }
+
+    #[test]
+    fn proxy_resume_preserves_the_explicit_provider() {
+        let arguments = vec![
+            "-c".into(),
+            "model_provider=latticeterm_cliproxyapi".into(),
+            "-c".into(),
+            "model_providers.latticeterm_cliproxyapi.base_url=\"http://localhost:8317/v1\"".into(),
+            "--model".into(),
+            "proxy-model".into(),
+        ];
+        let codex = AGENTS.iter().find(|spec| spec.id == "codex");
+        assert_eq!(
+            normalize_resume_session_id(codex, Some("native-proxy"), &arguments)
+                .unwrap()
+                .as_deref(),
+            Some("native-proxy")
+        );
+        let claude = AGENTS.iter().find(|spec| spec.id == "claude");
+        assert!(normalize_resume_session_id(claude, Some("native-proxy"), &arguments).is_err());
+        assert!(normalize_resume_session_id(
+            codex,
+            Some("native-proxy"),
+            &["--model".into(), "native-model".into()]
+        )
+        .is_err());
     }
 
     #[test]

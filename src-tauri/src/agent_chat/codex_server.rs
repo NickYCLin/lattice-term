@@ -81,6 +81,7 @@ struct ServerState {
 }
 
 pub(super) struct CodexServer {
+    proxy_identity: Option<[u8; 32]>,
     browser_enabled: bool,
     thread_id: String,
     profile_config_directory: Option<PathBuf>,
@@ -346,6 +347,7 @@ fn opening_lines(
     permission: ChatPermission,
     model: Option<&str>,
     native_session_id: Option<&str>,
+    model_provider: Option<&str>,
 ) -> Vec<String> {
     let (approval_policy, _) = turn_policies(permission);
     let sandbox = match permission {
@@ -358,6 +360,9 @@ fn opening_lines(
         "approvalPolicy": approval_policy,
         "sandbox": sandbox,
     });
+    if let Some(provider) = model_provider {
+        thread["modelProvider"] = Value::String(provider.to_string());
+    }
     let method = match native_session_id {
         Some(id) => {
             thread["threadId"] = Value::String(id.to_string());
@@ -387,6 +392,7 @@ fn opening_lines(
 
 /// Everything `send` has validated about one turn.
 pub(super) struct TurnRequest<'a> {
+    pub proxy: Option<&'a crate::cliproxy::launch::ProxyLaunch>,
     pub browser_enabled: bool,
     pub mcp: Option<&'a crate::agent_mcp::McpLaunch>,
     pub thread_id: &'a str,
@@ -430,6 +436,7 @@ pub(super) async fn send_turn<S: ChatSink>(
             } else if state.active.is_some() || state.queued.is_some() {
                 return Err("This conversation is still answering.".to_string());
             } else if server.browser_enabled != request.browser_enabled
+                || server.proxy_identity != request.proxy.map(|proxy| proxy.identity())
                 || !same_server_identity(
                     server.profile_config_directory.as_deref(),
                     state.codex_thread_id.as_deref(),
@@ -504,6 +511,13 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.profile_config_directory,
     );
     command.arg("app-server");
+    command.env_remove(crate::cliproxy::launch::KEY_ENV);
+    if let Some(proxy) = request.proxy {
+        command.args(proxy.arguments());
+        if let Some(key) = proxy.key() {
+            command.env(crate::cliproxy::launch::KEY_ENV, key);
+        }
+    }
     if let Some(mcp) = request.mcp {
         command.args(crate::agent_mcp::codex_arguments(mcp));
     }
@@ -539,6 +553,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.working_directory,
     );
     let server = Arc::new(CodexServer {
+        proxy_identity: request.proxy.map(|proxy| proxy.identity()),
         browser_enabled: request.browser_enabled,
         profile_config_directory: request.profile_config_directory.map(Path::to_path_buf),
         thread_id: request.thread_id.to_string(),
@@ -640,6 +655,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.permission,
         request.model,
         request.native_session_id,
+        request.proxy.map(|proxy| proxy.provider()),
     );
     for line in &opening {
         if let Err(error) = server.write_line(line).await {
@@ -1340,6 +1356,7 @@ mod tests {
                 Arc::clone(&sink),
                 &servers,
                 TurnRequest {
+                    proxy: None,
                     browser_enabled: false,
                     mcp: None,
                     thread_id: "e2e-codex",
@@ -1470,6 +1487,7 @@ mod tests {
         // A stdin nobody reads is fine for the parser: tests never write.
         let (_, child_stdin) = fake_stdin();
         CodexServer {
+            proxy_identity: None,
             browser_enabled: false,
             thread_id: "thread-1".into(),
             profile_config_directory: None,
@@ -1891,10 +1909,31 @@ mod tests {
         assert_eq!(params["model"], "gpt-5.6-terra");
         assert_eq!(params["cwd"], "/w");
 
-        let lines = opening_lines(Path::new("/w"), ChatPermission::ReadOnly, None, Some("old"));
+        let lines = opening_lines(
+            Path::new("/w"),
+            ChatPermission::ReadOnly,
+            None,
+            Some("old"),
+            None,
+        );
         let open: Value = serde_json::from_str(&lines[2]).unwrap();
         assert_eq!(open["method"], "thread/resume");
         assert_eq!(open["params"]["threadId"], "old");
         assert_eq!(open["params"]["sandbox"], "read-only");
+        assert!(open["params"].get("modelProvider").is_none());
+        for native in [None, Some("old-proxy-thread")] {
+            let lines = opening_lines(
+                Path::new("/w"),
+                ChatPermission::ReadOnly,
+                Some("proxy-model"),
+                native,
+                Some("latticeterm_cliproxyapi_fresh"),
+            );
+            let open: Value = serde_json::from_str(&lines[2]).unwrap();
+            assert_eq!(
+                open["params"]["modelProvider"],
+                "latticeterm_cliproxyapi_fresh"
+            );
+        }
     }
 }

@@ -60,7 +60,10 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
     <span className="field__label">{t("chat.model")}</span>
     <select className="select" aria-label={t("chat.model")} value={selectedKey} disabled={disabled} onChange={(event) => {
       const selected = options.find((option) => accountModelKey(option) === event.currentTarget.value);
-      if (selected && !selected.disabled) onChange(selected);
+      if (selected && !selected.disabled) {
+        onChange(selected.provider && proxyModels.state === "ready"
+          ? { ...selected, model: proxyModels.models[0]?.id ?? "" } : selected);
+      }
     }}>
       {!value && <option value="" disabled>{t("accountModel.choose")}</option>}
       {missing && <option value={selectedKey} disabled>{t("accountModel.missing")}</option>}

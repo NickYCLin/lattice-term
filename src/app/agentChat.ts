@@ -157,6 +157,7 @@ export interface ChatHandoff {
 }
 
 export interface ChatThread {
+  provider?: "cliproxyapi";
   browserEnabled?: boolean;
   /** Imported cloud export: a read-only reference, never a resumable CLI session. */
   archived?: boolean;
@@ -314,6 +315,7 @@ export function handoffThread(
   return {
     ...thread,
     definitionId,
+    provider: undefined,
     accountProfileId: null,
     model: model.trim(),
     permission: permissionsFor(definitionId).includes(thread.permission)
@@ -376,14 +378,23 @@ export function changeThreadDirectory(thread: ChatThread, directory: string): Ch
 /** Apply the provider, account and model as one choice, never an intermediate identity. */
 export function selectThreadModel(
   thread: ChatThread,
-  selection: { definitionId: ChatDefinitionId; accountProfileId: string | null; model: string },
+  selection: { definitionId: ChatDefinitionId; accountProfileId: string | null; model: string; provider?: "cliproxyapi" },
   now: number = Date.now(),
 ): ChatThread {
   if (thread.runningTurnId) return thread;
   const next = selection.definitionId !== thread.definitionId
     ? { ...handoffThread(thread, selection.definitionId, selection.model, now), accountProfileId: selection.accountProfileId }
     : handoffThreadAccount(thread, selection.accountProfileId, now);
-  return { ...next, model: selection.model.trim(), updatedAt: now };
+  const provider = selection.definitionId === "codex" ? selection.provider : undefined;
+  const providerChanged = provider !== thread.provider;
+  const transcript = providerChanged ? handoffTranscript(thread.items, thread.definitionId) : "";
+  return {
+    ...next, provider, model: selection.model.trim(), updatedAt: now,
+    ...(providerChanged ? {
+      nativeSessionId: null, reportedModel: null,
+      handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
+    } : {}),
+  };
 }
 
 /** Wraps a handoff transcript so the target treats it as reference, not authority. */
@@ -414,12 +425,13 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "accountProfileId">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
   return {
     id,
+    provider: settings.definitionId === "codex" ? settings.provider : undefined,
     browserEnabled: settings.definitionId === "codex" && settings.browserEnabled === true,
     definitionId: settings.definitionId,
     title: settings.title ?? "",
@@ -428,7 +440,7 @@ export function createThread(
     workingDirectory: settings.workingDirectory,
     permission: settings.permission,
     model: settings.model.trim(),
-    accountProfileId: null,
+    accountProfileId: settings.accountProfileId ?? null,
     nativeSessionId: null,
     reportedModel: null,
     handoff: null,
@@ -781,6 +793,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
       ),
       title: typeof thread.title === "string" ? thread.title : "",
       browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
+      provider: thread.definitionId === "codex" && thread.provider === "cliproxyapi" ? "cliproxyapi" : undefined,
       archived: thread.archived === true,
       model: typeof thread.model === "string" ? thread.model : "",
       nativeSessionId:

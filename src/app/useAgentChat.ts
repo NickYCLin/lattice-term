@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
+import { loadCliProxySettings } from "./cliProxyApi";
 import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInputQueue";
 import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
@@ -73,6 +74,7 @@ const FALLBACK_SUPPORTED: ChatDefinitionId[] = [
 ];
 
 export interface ChatThreadSettings {
+  provider?: "cliproxyapi";
   browserEnabled?: boolean;
   definitionId: ChatDefinitionId;
   workingDirectory: string;
@@ -374,6 +376,8 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
             ? (patch.definitionId && patch.definitionId !== thread.definitionId ? null : thread.accountProfileId)
             : patch.accountProfileId,
           model: patch.model ?? thread.model,
+          provider: Object.prototype.hasOwnProperty.call(patch, "provider") || (patch.definitionId && patch.definitionId !== thread.definitionId)
+            ? patch.provider : thread.provider,
         });
         return {
           ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
@@ -455,6 +459,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
           permission: thread.permission,
           model: thread.model.trim() || null,
           profileConfigPath,
+          cliProxyBaseUrl: thread.provider === "cliproxyapi" ? loadCliProxySettings(localStorage).baseUrl : null,
           nativeSessionId: thread.nativeSessionId,
           attachments: attachments.map(({ path }) => ({ path })),
         },

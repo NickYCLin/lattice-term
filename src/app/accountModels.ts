@@ -1,6 +1,7 @@
 import type { ChatDefinitionId, ChatModelList } from "./agentChat";
 import { profilesFor, type ChatAccountProfile } from "./chatAccountProfiles";
 import type { AccountProfileStatuses } from "./useAccountProfileStatus";
+import { cliProxyLaunchArguments } from "./cliProxyApi";
 import type { AgentDefinition, AgentLaunchRequest, AgentSessionSummary } from "./useAgentSessions";
 
 export interface AccountModelSelection {
@@ -97,7 +98,7 @@ export function accountModelOptions(
       disabled: target.signedOut,
     }));
     if (includeCliProxyApi && target.definitionId === "codex") {
-      options.push({ definitionId: "codex", accountProfileId: target.accountProfileId, model: "", provider: "cliproxyapi", label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, "CLIProxyAPI"].filter(Boolean).join(" · ") + (target.signedOut ? `（${labels.signedOut}）` : ""), disabled: target.signedOut });
+      options.push({ definitionId: "codex", accountProfileId: target.accountProfileId, model: "", provider: "cliproxyapi", label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, "CLIProxyAPI"].filter(Boolean).join(" · "), disabled: false });
     }
     return options;
   });
@@ -108,6 +109,7 @@ export function accountModelOptions(
 export function accountModelLaunchSettings(
   selection: AccountModelSelection,
   profiles: readonly ChatAccountProfile[],
+  proxyBaseUrl = "",
 ): Pick<AgentLaunchRequest, "profileConfigPath" | "arguments"> {
   const profile = selection.accountProfileId === null ? null : profilesFor(profiles, selection.definitionId).find((entry) => entry.id === selection.accountProfileId);
   if (selection.accountProfileId !== null && !profile) throw new Error("account-model:missing-account");
@@ -117,7 +119,7 @@ export function accountModelLaunchSettings(
   }
   return {
     profileConfigPath: profile?.configDirectory ?? null,
-    arguments: selection.provider ? ["-c", "model_provider=cliproxyapi", "--model", selection.model] : selection.model ? ["--model", selection.model] : [],
+    arguments: selection.provider ? [...cliProxyLaunchArguments(proxyBaseUrl), "--model", selection.model] : selection.model ? ["--model", selection.model] : [],
   };
 }
 

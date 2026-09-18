@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cliProxyLaunchArguments } from "./cliProxyApi";
 import {
   agentFreshLaunchArguments,
   agentRestoreArguments,
@@ -328,6 +329,15 @@ describe("workspace session persistence", () => {
     if (!codex || codex.kind !== "agent") return;
     expect(agentFreshLaunchArguments(codex)).toEqual([]);
     expect(agentRestoreArguments(codex)).toEqual(["resume", "--last"]);
+  });
+
+  it("retains proxy connection metadata when resuming a native Codex session", () => {
+    const launchArguments = [...cliProxyLaunchArguments("http://localhost:8317"), "--model", "proxy-model"];
+    const saved = snapshotLiveWorkspaceSessions([agent({ launchArguments, capturedSessionId: "proxy-native" })], [], "agent-live-1").sessions[0];
+    expect(saved.kind).toBe("agent");
+    if (saved.kind !== "agent") return;
+    expect(saved.resumeSessionId).toBe("proxy-native");
+    expect(agentRestoreArguments(saved)).toEqual(launchArguments);
   });
 
   it("never writes more entries than a later start will accept", () => {

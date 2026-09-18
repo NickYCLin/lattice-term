@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CLI_PROXY_SETTINGS_CHANGED,
   CLI_PROXY_SETTINGS_KEY,
@@ -41,21 +41,19 @@ export function useCliProxySettings(): CliProxySettings {
 export function useCliProxyModels(settings: CliProxySettings, enabled = true): CliProxyModelList & { reload: () => void } {
   const [list, setList] = useState<CliProxyModelList>({ state: "idle" });
   const [attempt, setAttempt] = useState(0);
-  const requested = useRef<string | null>(null);
   const baseUrl = settings.baseUrl.trim();
   const reload = useCallback(() => {
-    requested.current = null;
     setAttempt((value) => value + 1);
   }, []);
   useEffect(() => {
+    window.addEventListener(CLI_PROXY_SETTINGS_CHANGED, reload);
+    return () => window.removeEventListener(CLI_PROXY_SETTINGS_CHANGED, reload);
+  }, [reload]);
+  useEffect(() => {
     if (!enabled || !hasDesktopBackend() || !cliProxyConfigured({ baseUrl })) {
       setList({ state: "idle" });
-      requested.current = null;
       return;
     }
-    const key = `${attempt}:${baseUrl}`;
-    if (requested.current === key) return;
-    requested.current = key;
     let current = true;
     setList({ state: "loading" });
     import("@tauri-apps/api/core")

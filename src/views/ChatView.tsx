@@ -44,7 +44,7 @@ import {
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
-import { accountModelKey, accountModelOptions, accountModelTargets, hasChatModels } from "../app/accountModels";
+import { accountModelKey, accountModelOptions, accountModelTargets, hasChatModels, validCliProxyModel } from "../app/accountModels";
 import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
@@ -60,6 +60,7 @@ import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
 import { AccountModelField } from "../components/agents/AccountModelField";
+import { useCliProxyModels, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
@@ -241,6 +242,7 @@ export function ChatView({
           ? previous.permission
           : defaultPermission(definitionId),
       model: previous?.definitionId === definitionId ? previous.model : "",
+      provider: previous?.definitionId === definitionId ? previous.provider : undefined,
       accountProfileId: previous?.definitionId === definitionId ? previous.accountProfileId : null,
     });
   }
@@ -590,9 +592,11 @@ function ThreadPane({
   const { statuses: profileStatuses } = useAccountProfileStatus(accountProfiles);
   const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"));
   const accountModels = useAccountModels(modelTargets, settingsOpen);
+  const cliProxySettings = useCliProxySettings();
+  const cliProxyModels = useCliProxyModels(cliProxySettings, settingsOpen);
   const modelOptions = accountModelOptions(modelTargets, accountModels, {
     defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, thread);
+  }, thread, true);
   const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(thread));
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
@@ -601,6 +605,7 @@ function ThreadPane({
     !pastingImage &&
     !activeProfileMissing &&
     !activeProfileSignedOut &&
+    (!thread.provider || (!!cliProxySettings.baseUrl && validCliProxyModel(thread.model))) &&
     cliInstalled &&
     (draft.trim() !== "" || attachments.length > 0);
   const assistant = cliLabel(thread.definitionId);
@@ -838,8 +843,10 @@ function ThreadPane({
               options={modelOptions}
               value={thread}
               disabled={settingsLocked}
-              onChange={({ definitionId, accountProfileId, model }) => {
-                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model });
+              allowCliProxyApi
+              proxyModels={cliProxyModels}
+              onChange={({ definitionId, accountProfileId, model, provider }) => {
+                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model, provider });
               }}
             />
             {(activeProfileSignedOut || activeProfileMissing) && (

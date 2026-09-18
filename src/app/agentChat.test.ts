@@ -375,6 +375,15 @@ describe("storage", () => {
     expect(loaded[0].items).toHaveLength(1);
   });
 
+  it("restores the proxy choice without storing credentials", () => {
+    const storage = memoryStorage();
+    const proxy = thread({ definitionId: "codex", provider: "cliproxyapi", model: "proxy-model", nativeSessionId: "proxy-native" });
+    saveStoredThreads(storage, [proxy]);
+    expect(loadStoredThreads(storage)[0]).toMatchObject({ provider: "cliproxyapi", model: "proxy-model", nativeSessionId: "proxy-native" });
+    saveStoredThreads(storage, [{ ...proxy, definitionId: "claude" }]);
+    expect(loadStoredThreads(storage)[0].provider).toBeUndefined();
+  });
+
   it("drops entries that are not threads", () => {
     const storage = memoryStorage();
     storage.setItem(
