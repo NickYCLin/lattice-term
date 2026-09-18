@@ -1,7 +1,7 @@
 import type { ChatDefinitionId, ChatModelList } from "./agentChat";
 import { profilesFor, type ChatAccountProfile } from "./chatAccountProfiles";
 import type { AccountProfileStatuses } from "./useAccountProfileStatus";
-import { cliProxyLaunchArguments } from "./cliProxyApi";
+import { CLI_PROXY_NAME, cliProxyLaunchArguments, launchedThroughCliProxy } from "./cliProxyApi";
 import type { AgentDefinition, AgentLaunchRequest, AgentSessionSummary } from "./useAgentSessions";
 
 export interface AccountModelSelection {
@@ -133,10 +133,12 @@ function accountPathKey(path: string | null | undefined): string {
 }
 
 export function accountSessionLabel(
-  session: Pick<AgentSessionSummary, "definitionId" | "label" | "profileConfigPath">,
+  session: Pick<AgentSessionSummary, "definitionId" | "label" | "profileConfigPath"> &
+    Partial<Pick<AgentSessionSummary, "launchArguments">>,
   targets: readonly AccountModelTarget[],
   missing: string,
 ): string {
+  if (launchedThroughCliProxy(session.launchArguments)) return CLI_PROXY_NAME;
   const target = targets.find((entry) => entry.definitionId === session.definitionId && accountPathKey(entry.configDirectory) === accountPathKey(session.profileConfigPath));
   if (!target) return session.profileConfigPath ? `${session.label} · ${missing}` : session.label;
   // Earlier account-login launches included the name in the stored label.

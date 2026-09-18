@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
+import { cliProxyLaunchArguments } from "./cliProxyApi";
 import { fakeDefinition } from "./testFixtures/agentApis";
 import { selectThreadModel } from "./agentChat";
 import { fakeThread } from "./testFixtures/agentApis";
@@ -108,6 +109,13 @@ describe("account-aware model choices", () => {
     expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "\\\\?\\C:\\profiles\\b" }, targets, "已移除")).toBe("B 帳號 · OpenAI Codex");
     expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "/missing" }, targets, "已移除")).toBe("OpenAI Codex · 已移除");
     expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex" }, accountModelTargets([definition], [], {}, "預設帳號"), "已移除")).toBe("OpenAI Codex");
+  });
+
+  it("names a proxy-launched session after CLIProxyAPI instead of the CLI account", () => {
+    const targets = accountModelTargets([definition], [profile], { b: status }, "預設帳號");
+    const launchArguments = [...cliProxyLaunchArguments("http://127.0.0.1:8317"), "--model", "claude-opus-5"];
+    expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "/profiles/b", launchArguments }, targets, "已移除")).toBe("CLIProxyAPI");
+    expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "/profiles/b", launchArguments: ["--model", "gpt-5.6"] }, targets, "已移除")).toBe("B 帳號 · OpenAI Codex");
   });
 
   it("atomically changes account/model without reusing the native conversation", () => {

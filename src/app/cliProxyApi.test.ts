@@ -8,6 +8,7 @@ import {
   cliProxyStatusCode,
   emptyCliProxySettings,
   groupCliProxyModels,
+  launchedThroughCliProxy,
   loadCliProxySettings,
   saveCliProxySettings,
 } from "./cliProxyApi";
@@ -106,5 +107,13 @@ describe("proxy launch metadata", () => {
       'model_providers.latticeterm_cliproxyapi.base_url="https://proxy.example/prefix/v1"',
     ]);
     expect(() => cliProxyLaunchArguments(" ")).toThrow("cliproxy.url.empty");
+  });
+});
+
+describe("launchedThroughCliProxy", () => {
+  it("recognises the proxy provider inside stored launch arguments", () => {
+    expect(launchedThroughCliProxy(cliProxyLaunchArguments("http://127.0.0.1:8317"))).toBe(true);
+    expect(launchedThroughCliProxy(["--model", "gpt-5.6"])).toBe(false);
+    expect(launchedThroughCliProxy(undefined)).toBe(false);
   });
 });

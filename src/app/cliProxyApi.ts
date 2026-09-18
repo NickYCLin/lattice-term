@@ -15,11 +15,20 @@ export const CLI_PROXY_SETTINGS_KEY = "latticeterm.cliProxyApi.v1";
 export const CLI_PROXY_SETTINGS_CHANGED = "latticeterm:cliproxy-changed";
 export const CLI_PROXY_DEFAULT_BASE_URL = "http://127.0.0.1:8317";
 /** Reserved provider; only public connection metadata goes into saved launches. */
+const PROVIDER_ARGUMENT = "model_provider=latticeterm_cliproxyapi";
+export const CLI_PROXY_NAME = "CLIProxyAPI";
+
 export function cliProxyLaunchArguments(baseUrl: string): string[] {
   const base = baseUrl.trim().replace(/\/+$/, "");
   if (!base) throw new Error("cliproxy.url.empty");
-  return ["-c", "model_provider=latticeterm_cliproxyapi", "-c",
+  return ["-c", PROVIDER_ARGUMENT, "-c",
     `model_providers.latticeterm_cliproxyapi.base_url=${JSON.stringify(`${base}/v1`)}`];
+}
+
+/** A session started through the proxy is named after the proxy, because the
+ * model it answers with belongs to the proxy rather than to the CLI account. */
+export function launchedThroughCliProxy(launchArguments: readonly string[] | undefined): boolean {
+  return launchArguments?.includes(PROVIDER_ARGUMENT) ?? false;
 }
 const MAX_BASE_URL_LENGTH = 256;
 
