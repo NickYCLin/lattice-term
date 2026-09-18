@@ -168,6 +168,50 @@ pub fn apply_opencode_config(config: &mut serde_json::Value, launch: &McpLaunch)
     );
 }
 
+fn has_explicit_copilot_config(arguments: &[String]) -> bool {
+    arguments.iter().any(|argument| {
+        argument == "--additional-mcp-config"
+            || argument
+                .trim_start()
+                .starts_with("--additional-mcp-config=")
+    })
+}
+
+/// Copilot CLI merges `--additional-mcp-config` on top of its own
+/// `mcp-config.json` for one run only, so the user's servers, login and
+/// trusted directories stay exactly where they are.
+pub fn copilot_arguments(launch: &McpLaunch) -> Vec<String> {
+    let config = serde_json::json!({
+        "mcpServers": {
+            SERVER_NAME: {
+                "type": "local",
+                "command": launch.command,
+                "args": launch.args,
+                "tools": ["*"]
+            }
+        }
+    });
+    match serde_json::to_string(&config) {
+        Ok(config) => vec!["--additional-mcp-config".to_string(), config],
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Adds this installation's adapter to a Copilot CLI launch.
+pub fn apply_copilot_arguments(mut arguments: Vec<String>, launch: &McpLaunch) -> Vec<String> {
+    // A caller who passed their own additional config decides what this
+    // session talks to.
+    if has_explicit_copilot_config(&arguments) {
+        return arguments;
+    }
+    let configured = copilot_arguments(launch);
+    if configured.is_empty() {
+        return arguments;
+    }
+    arguments.splice(0..0, configured);
+    arguments
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +318,24 @@ mod tests {
                 "enabled": true
             })
         );
+    }
+
+    #[test]
+    fn copilot_gets_a_session_only_server_beside_its_own_config() {
+        let arguments = apply_copilot_arguments(vec!["--model=auto".into()], &launch());
+        assert_eq!(arguments[0], "--additional-mcp-config");
+        let config: serde_json::Value = serde_json::from_str(&arguments[1]).expect("valid JSON");
+        assert_eq!(
+            config["mcpServers"]["latticeterm"]["command"],
+            serde_json::json!(r#"C:\Program Files\LatticeTerm\lattice-term.exe"#)
+        );
+        assert_eq!(config["mcpServers"]["latticeterm"]["type"], "local");
+        assert_eq!(arguments[2], "--model=auto");
+    }
+
+    #[test]
+    fn copilot_keeps_the_servers_a_caller_chose_for_the_run() {
+        let chosen = vec!["--additional-mcp-config".to_string(), "{}".to_string()];
+        assert_eq!(apply_copilot_arguments(chosen.clone(), &launch()), chosen);
     }
 }

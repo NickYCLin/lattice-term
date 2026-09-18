@@ -6091,6 +6091,11 @@ pub fn launch_with_replay(
             arguments = copilot_reporter_arguments(arguments, &plugin);
             integration_settings = Some(AgentIntegrationSettings::Copilot(plugin));
         }
+        // The additional config is merged over Copilot's own mcp-config.json
+        // for this run only, so nothing the user registered is replaced.
+        if let Some(mcp) = registry.mcp.as_ref() {
+            arguments = crate::agent_mcp::apply_copilot_arguments(arguments, mcp);
+        }
         // Repository settings may intentionally disable all non-policy hooks.
         // Keep heuristics enabled until the first real hook event arrives.
     } else if definition_id == "hermes" && reporter.is_some() {
