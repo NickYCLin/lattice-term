@@ -17,6 +17,7 @@ import {
   applyChatEvent,
   appendSteeredInput,
   beginTurn,
+  branchThread,
   createThread,
   decideApproval,
   failTurn,
@@ -131,6 +132,13 @@ export interface AgentChatApi {
   handoffThread: (id: string, definitionId: ChatDefinitionId, model: string) => void;
   handoffThreadAccount: (id: string, accountProfileId: string | null) => void;
   removeThread: (id: string) => void;
+  /** Moves a thread out of the main list, or back into it. */
+  shelveThread: (id: string, shelved: boolean) => void;
+  /**
+   * Starts a new thread from an earlier point of `id`, up to and including
+   * `throughItemId`, and opens it. `suffix` marks its title as a branch.
+   */
+  branchThread: (id: string, throughItemId: string, suffix: string) => ChatThread | null;
   send: (
     id: string,
     prompt: string,
@@ -431,6 +439,31 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
     });
   }, []);
 
+  const shelve = useCallback((id: string, shelved: boolean) => {
+    changeThreads((current) =>
+      current.map((thread) =>
+        thread.id === id && Boolean(thread.shelvedAt) !== shelved
+          ? { ...thread, shelvedAt: shelved ? Date.now() : null }
+          : thread,
+      ),
+    );
+    if (shelved) {
+      setActiveThreadId((current) => {
+        if (current !== id) return current;
+        return threadsRef.current.find((thread) => thread.id !== id && !thread.shelvedAt)?.id ?? null;
+      });
+    }
+  }, [changeThreads]);
+
+  const branch = useCallback((id: string, throughItemId: string, suffix: string) => {
+    const source = threadsRef.current.find((thread) => thread.id === id);
+    const thread = source ? branchThread(source, throughItemId, suffix) : null;
+    if (!thread) return null;
+    changeThreads((current) => [thread, ...current]);
+    setActiveThreadId(thread.id);
+    return thread;
+  }, [changeThreads]);
+
   const send = useCallback(async (
     id: string,
     prompt: string,
@@ -600,6 +633,8 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
       handoffThread: handoff,
       handoffThreadAccount: handoffAccount,
       removeThread: remove,
+      shelveThread: shelve,
+      branchThread: branch,
       send,
       steer,
       enqueue,
@@ -628,6 +663,8 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
       handoff,
       handoffAccount,
       remove,
+      shelve,
+      branch,
       send,
       steer,
       enqueue,

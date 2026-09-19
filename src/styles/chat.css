@@ -1287,3 +1287,73 @@ button.chat-chip:hover {
   overflow-wrap: anywhere;
   color: var(--text-muted);
 }
+
+.chat-shelf {
+  margin-top: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-shelf summary {
+  padding: var(--space-1, 0.25rem) var(--space-2);
+  cursor: pointer;
+}
+
+.chat-shelf ul {
+  display: grid;
+  gap: var(--space-1, 0.25rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-shelf li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.chat-shelf li .chat-thread {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-msg {
+  position: relative;
+}
+
+.chat-msg__branch {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  color: var(--text-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.chat-msg:hover .chat-msg__branch,
+.chat-msg__branch:focus-visible {
+  opacity: 1;
+}
+
+.chat-msg__branch:hover {
+  color: var(--text);
+}
+
+@media (hover: none) {
+  .chat-msg__branch {
+    opacity: 0.6;
+  }
+}
+
+.chat-msg--user .chat-msg__branch {
+  right: auto;
+  left: 0;
+}

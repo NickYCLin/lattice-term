@@ -164,6 +164,11 @@ export interface ChatThread {
   browserEnabled?: boolean;
   /** Imported cloud export: a read-only reference, never a resumable CLI session. */
   archived?: boolean;
+  /**
+   * When the user put this thread away. Unlike `archived` it is still a
+   * normal, resumable conversation; it only leaves the main list.
+   */
+  shelvedAt?: number | null;
   id: string;
   definitionId: ChatDefinitionId;
   /** First message, shortened; what the thread list shows. */
@@ -363,6 +368,54 @@ export function handoffThreadAccount(
         : item,
     ),
     updatedAt: now,
+  };
+}
+
+/**
+ * A new conversation that starts from an earlier point of this one. The
+ * items up to and including `throughItemId` are copied for reading, and the
+ * same bounded transcript a CLI switch uses is what the new native session
+ * receives, because no CLI can resume a conversation from its middle.
+ */
+export function branchThread(
+  thread: ChatThread,
+  throughItemId: string,
+  suffix: string,
+  id: string = crypto.randomUUID(),
+  now: number = Date.now(),
+): ChatThread | null {
+  const end = thread.items.findIndex((item) => item.id === throughItemId);
+  if (end < 0) return null;
+  const items = thread.items.slice(0, end + 1).map((item) =>
+    item.type === "approval"
+      ? closePendingApproval(item)
+      : assistantItem(item) && !item.assistantDefinitionId
+        ? { ...item, assistantDefinitionId: thread.definitionId }
+        : item,
+  );
+  const transcript = handoffTranscript(items, thread.definitionId);
+  const base = thread.title || "";
+  const title = base.length + suffix.length + 1 > MAX_TITLE_LENGTH
+    ? `${base.slice(0, Math.max(0, MAX_TITLE_LENGTH - suffix.length - 2))}… ${suffix}`
+    : `${base} ${suffix}`.trim();
+  return {
+    ...createThread(
+      {
+        definitionId: thread.definitionId,
+        workingDirectory: thread.workingDirectory,
+        permission: thread.permission,
+        model: thread.model,
+        title,
+        browserEnabled: thread.browserEnabled,
+        provider: thread.provider,
+        proxyId: thread.proxyId,
+        accountProfileId: thread.accountProfileId,
+      },
+      id,
+      now,
+    ),
+    items,
+    handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
   };
 }
 
@@ -807,6 +860,10 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           ? thread.proxyId
           : undefined,
       archived: thread.archived === true,
+      shelvedAt:
+        typeof thread.shelvedAt === "number" && Number.isFinite(thread.shelvedAt)
+          ? thread.shelvedAt
+          : null,
       model: typeof thread.model === "string" ? thread.model : "",
       nativeSessionId:
         typeof thread.nativeSessionId === "string" ? thread.nativeSessionId : null,

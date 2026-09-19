@@ -22,7 +22,7 @@ import {
 } from "../../app/sessionSidebarLayout";
 import { useI18n } from "../../i18n/context";
 import { ConfirmDialog } from "../overlays/ConfirmDialog";
-import { AgentIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
+import { AgentIcon, ArchiveFileIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
 
 const DRAG_THRESHOLD_PX = 6;
 
@@ -40,6 +40,7 @@ export function ChatThreadTree({
   onSelectThread,
   onOpenSession,
   onRemoveThread,
+  onShelveThread,
   onToggleFolder,
   onRenameFolder,
   onRemoveFolder,
@@ -54,6 +55,8 @@ export function ChatThreadTree({
   onSelectThread: (threadId: string) => void;
   onOpenSession?: (sessionId: string) => void;
   onRemoveThread: (thread: ChatThread) => void;
+  /** Puts a thread away without deleting it. */
+  onShelveThread?: (thread: ChatThread) => void;
   onToggleFolder: (folderId: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
   onRemoveFolder: (folderId: string) => void;
@@ -350,6 +353,20 @@ export function ChatThreadTree({
           >
             {renderThread(row.thread, row.thread.id === activeThreadId)}
             <span className="chat-tree__actions">
+              {onShelveThread && (
+                <button
+                  type="button"
+                  className="chat-tree__action"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onShelveThread(row.thread);
+                  }}
+                  aria-label={`${t("chat.shelve")}：${row.thread.title || t("chat.untitled")}`}
+                  title={t("chat.shelve")}
+                >
+                  <ArchiveFileIcon />
+                </button>
+              )}
               <button
                 type="button"
                 className="chat-tree__action chat-tree__action--danger"

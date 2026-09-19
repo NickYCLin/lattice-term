@@ -66,8 +66,10 @@ import { webSources } from "../app/chatWebSources";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
+  ArchiveFileIcon,
   ChatIcon,
   CloseIcon,
+  DuplicateIcon,
   FileIcon,
   ClockIcon,
   FolderIcon,
@@ -132,9 +134,18 @@ export function ChatView({
       ),
     [agents.catalog, agents.sessions, t],
   );
+  // Shelved threads leave the tree and wait in their own list below it.
+  const listedThreads = useMemo(() => chat.threads.filter((thread) => !thread.shelvedAt), [chat.threads]);
+  const shelvedThreads = useMemo(
+    () =>
+      chat.threads
+        .filter((thread) => thread.shelvedAt)
+        .sort((a, b) => (b.shelvedAt ?? 0) - (a.shelvedAt ?? 0)),
+    [chat.threads],
+  );
   const sidebarLayout = useMemo(
-    () => chatSidebarLayout(sessionSidebarLayout, chat.threads, workspace.nodes),
-    [chat.threads, sessionSidebarLayout, workspace.nodes],
+    () => chatSidebarLayout(sessionSidebarLayout, listedThreads, workspace.nodes),
+    [listedThreads, sessionSidebarLayout, workspace.nodes],
   );
 
   function moveSidebarNode(nodeId: string, parentId: string | null, beforeNodeId: string | null) {
@@ -291,12 +302,13 @@ export function ChatView({
             <SidebarStorageNotice />
             <ChatThreadTree
               layout={sidebarLayout}
-              threads={chat.threads}
+              threads={listedThreads}
               workspace={workspace}
               activeThreadId={chat.activeThreadId}
               onSelectThread={(id) => chat.setActiveThreadId(id)}
               onOpenSession={onOpenSession}
               onRemoveThread={setPendingDelete}
+              onShelveThread={(thread) => chat.shelveThread(thread.id, true)}
               onToggleFolder={chat.toggleFolder}
               onRenameFolder={chat.renameFolder}
               onRemoveFolder={chat.removeFolder}
@@ -336,6 +348,31 @@ export function ChatView({
             />
             {chat.layout.folders.length > 0 && (
               <p className="chat-threads__hint">{t("chat.folder.dragHint")}</p>
+            )}
+            {shelvedThreads.length > 0 && (
+              <details className="chat-shelf">
+                <summary>{t("chat.shelf.title", { count: shelvedThreads.length })}</summary>
+                <ul>
+                  {shelvedThreads.map((thread) => (
+                    <li key={thread.id}>
+                      <button
+                        type="button"
+                        className={`chat-thread${thread.id === chat.activeThreadId ? " is-active" : ""}`}
+                        onClick={() => chat.setActiveThreadId(thread.id)}
+                      >
+                        <span className="chat-thread__title">{thread.title || t("chat.untitled")}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--sm"
+                        onClick={() => chat.shelveThread(thread.id, false)}
+                      >
+                        {t("chat.unshelve")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </div>
         ) : (
@@ -748,6 +785,15 @@ function ThreadPane({
             </button>}
             <button
               type="button"
+              className="button button--ghost button--sm"
+              onClick={() => chat.shelveThread(thread.id, !thread.shelvedAt)}
+              aria-label={t(thread.shelvedAt ? "chat.unshelve" : "chat.shelve")}
+              title={t(thread.shelvedAt ? "chat.unshelve" : "chat.shelve")}
+            >
+              <ArchiveFileIcon />
+            </button>
+            <button
+              type="button"
               className="button button--ghost button--danger button--sm"
               onClick={onDelete}
               aria-label={t("chat.delete")}
@@ -875,6 +921,11 @@ function ThreadPane({
               streaming={running && index === thread.items.length - 1}
               tag={tag}
               onAnswer={answer}
+              onBranch={
+                running && index === thread.items.length - 1
+                  ? undefined
+                  : () => chat.branchThread(thread.id, item.id, t("chat.branch.suffix"))
+              }
             />
           ))}
           {running && thread.items[thread.items.length - 1]?.type === "user" && (
@@ -1021,14 +1072,28 @@ function ChatItemView({
   streaming,
   tag,
   onAnswer,
+  onBranch,
 }: {
   item: ChatItem;
   assistant: string;
   streaming: boolean;
   tag: string;
   onAnswer: (requestId: string, allow: boolean, message?: string) => Promise<void>;
+  /** Starts a new conversation that ends at this message. */
+  onBranch?: () => void;
 }) {
   const { t } = useI18n();
+  const branchButton = onBranch && (
+    <button
+      type="button"
+      className="chat-msg__branch"
+      onClick={onBranch}
+      aria-label={t("chat.branch")}
+      title={t("chat.branch")}
+    >
+      <DuplicateIcon size={13} />
+    </button>
+  );
   switch (item.type) {
     case "user":
       return (
@@ -1046,6 +1111,7 @@ function ChatItemView({
               </div>
             )}
           </div>
+          {branchButton}
         </div>
       );
     case "text":
@@ -1060,6 +1126,7 @@ function ChatItemView({
               <ChatMarkdown source={item.text} />
             </div>
           </div>
+          {!streaming && branchButton}
         </div>
       );
     case "reasoning":
