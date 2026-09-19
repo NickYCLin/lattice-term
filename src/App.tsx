@@ -336,9 +336,17 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         else stop = unlisten;
       })
       .catch(() => {});
+    const openFromWindow = (event: Event) => {
+      const threadId = (event as CustomEvent<string>).detail;
+      if (typeof threadId !== "string") return;
+      setView("chat");
+      chatRuntimeRef.current?.chat.setActiveThreadId(threadId);
+    };
+    window.addEventListener("latticeterm:open-chat", openFromWindow);
     return () => {
       disposed = true;
       stop?.();
+      window.removeEventListener("latticeterm:open-chat", openFromWindow);
     };
   }, []);
   const [historyOpen, setHistoryOpen] = useState(false);

@@ -185,6 +185,10 @@ export interface AgentChatApi {
   toggleFolder: (folderId: string) => void;
 }
 
+/** Asks the app to show a conversation, from outside the chat view. */
+export const OPEN_CHAT_EVENT = "latticeterm:open-chat";
+const NOTIFICATION_RETURN_MS = 2 * 60 * 1000;
+
 export function useAgentChat(
   completionSound: NotificationSoundChoice = "off",
   completionVolume = 60,
@@ -197,6 +201,24 @@ export function useAgentChat(
   volumeRef.current = completionVolume;
   const notifyRef = useRef(completionNotification);
   notifyRef.current = completionNotification;
+  /** The conversation the last system notification was about, and when. */
+  const notifiedRef = useRef<{ threadId: string; at: number } | null>(null);
+
+  // Where the system cannot report a click on the notification (macOS and
+  // Windows through the plugin), clicking it brings the window forward;
+  // coming back soon after a notification opens the conversation it named.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    const onFocus = () => {
+      const notified = notifiedRef.current;
+      notifiedRef.current = null;
+      if (notified && Date.now() - notified.at < NOTIFICATION_RETURN_MS) {
+        window.dispatchEvent(new CustomEvent(OPEN_CHAT_EVENT, { detail: notified.threadId }));
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
   const [threads, setThreads] = useState<ChatThread[]>(() =>
     typeof localStorage === "undefined" ? [] : loadStoredThreads(localStorage),
   );
@@ -271,7 +293,11 @@ export function useAgentChat(
           // Only while the window is in the background: in front, the reply
           // is already on screen.
           if (notification && typeof document !== "undefined" && !document.hasFocus()) {
-            void invoke("chat_notify", { threadId: thread!.id, ...notification }).catch(() => {});
+            void invoke("chat_notify", { threadId: thread!.id, ...notification })
+              .then(() => {
+                notifiedRef.current = { threadId: thread!.id, at: Date.now() };
+              })
+              .catch(() => {});
           }
         }
         changeThreads((current) => {
