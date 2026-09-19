@@ -25,6 +25,7 @@ import {
   moveAgentLaunchPlan,
 } from "../app/useAgentSessions";
 import { AgentRemoteDelivery } from "../components/agents/AgentRemoteDelivery";
+import { RemoteFleetPanel } from "../components/agents/RemoteFleetPanel";
 import { AgentAccountProfileDialog } from "../components/agents/AgentAccountProfileDialog";
 import { AgentSkillsPanel } from "../components/agents/AgentSkillsPanel";
 import { SharedAgentRulesPanel } from "../components/agents/SharedAgentRulesPanel";
@@ -1491,6 +1492,8 @@ export function AgentsView({
       </section>
 
       <AgentRemoteDelivery remote={remote} />
+
+      <RemoteFleetPanel />
 
       <section className="agents-running">
         <div className="agents-section-heading">

@@ -497,6 +497,25 @@ async fn mcp_saved_connection_connect(
     }
 }
 
+/// Drives an authorized remote Fleet workspace from the desktop's own panel.
+/// It goes through the same grant, scopes and host checks an MCP client
+/// gets; the panel is just another client of the connection the user shared.
+#[tauri::command]
+async fn remote_fleet_action(
+    target_id: String,
+    action: mcp_desktop::FleetAction,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<serde_json::Value, String> {
+    service
+        .inner()
+        .execute(
+            "latticeterm-desktop-fleet-panel",
+            mcp_desktop::DesktopOperation::Fleet { target_id, action },
+        )
+        .await
+        .map_err(|error| error.message)
+}
+
 #[tauri::command]
 fn mcp_remote_targets(
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
@@ -4337,6 +4356,7 @@ pub fn run() {
             local_file_read_text,
             runtime_summary,
             mcp_remote_targets,
+            remote_fleet_action,
             mcp_remote_pending_commands,
             mcp_remote_command_decide,
             mcp_remote_quiet_commands,
