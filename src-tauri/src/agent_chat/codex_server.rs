@@ -1440,6 +1440,91 @@ mod tests {
         assert!(servers.close("e2e-codex"));
     }
 
+    /// Runs real Codex against `mcp_elicit_probe.py`, whose one tool asks a
+    /// form question: `cargo test --lib a_real_mcp_elicitation_form --
+    /// --ignored --nocapture` (needs codex signed in and python3).
+    #[test]
+    #[ignore]
+    fn a_real_mcp_elicitation_form_reaches_the_server() {
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/agent_chat/mcp_elicit_probe.py"
+        );
+        let workdir = tempfile::tempdir().expect("tempdir");
+        let executable = crate::agent::catalog_executable("codex").expect("codex installed");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sink = Arc::new(RecordingSink(tx));
+        let servers = CodexServers::default();
+        let mcp = crate::agent_mcp::McpLaunch {
+            command: "python3".into(),
+            args: vec![script.into()],
+        };
+        tauri::async_runtime::block_on(send_turn(
+            Arc::clone(&sink),
+            &servers,
+            TurnRequest {
+                proxy: None,
+                browser_enabled: false,
+                mcp: Some(&mcp),
+                thread_id: "e2e-elicit",
+                turn_id: "t1",
+                prompt: "Call the ask_favorite tool from the latticeterm MCP server, then reply with exactly the text it returned and nothing else.",
+                attachments: &[],
+                permission: ChatPermission::Ask,
+                model: None,
+                effort: None,
+                native_session_id: None,
+                working_directory: workdir.path(),
+                profile_config_directory: None,
+                executable: &executable,
+            },
+        ))
+        .expect("turn starts");
+        let deadline = Instant::now() + Duration::from_secs(300);
+        let mut text = String::new();
+        let mut kinds = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(remaining) {
+                Ok((
+                    _,
+                    ChatEvent::ApprovalRequested {
+                        request_id,
+                        name,
+                        summary,
+                        ..
+                    },
+                )) => {
+                    eprintln!("approval {name}: {summary}");
+                    let answer = (name == "mcp_form").then_some(r#"{"color":"teal"}"#);
+                    kinds.push(name);
+                    tauri::async_runtime::block_on(respond(
+                        &servers,
+                        "e2e-elicit",
+                        &request_id,
+                        true,
+                        answer,
+                    ))
+                    .expect("answer delivered");
+                }
+                Ok((_, ChatEvent::Text { text: t, .. })) => text.push_str(&t),
+                Ok((_, ChatEvent::Finished { error, .. })) => {
+                    assert_eq!(error, None, "turn failed");
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => panic!("no Finished event within the deadline"),
+            }
+        }
+        eprintln!("kinds {kinds:?}; reply {text:?}");
+        assert!(
+            kinds.iter().any(|kind| kind == "mcp_form"),
+            "no form was asked: {kinds:?}"
+        );
+        assert!(text.contains("teal"), "reply was {text:?}");
+        assert!(servers.close("e2e-elicit"));
+    }
+
     #[test]
     fn account_or_native_conversation_changes_cannot_reuse_a_server() {
         let a = Some(Path::new("/profiles/a"));

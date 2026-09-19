@@ -404,6 +404,17 @@ pub fn inspect(
 mod tests {
     use super::*;
 
+    /// Reads this machine's real CLI configuration:
+    /// `cargo test --lib real_mcp_inventory -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_mcp_inventory() {
+        for cli in ["claude", "codex", "gemini"] {
+            let servers = inspect(cli, None, None).unwrap();
+            println!("{cli}: {}", serde_json::to_string_pretty(&servers).unwrap());
+        }
+    }
+
     #[test]
     fn credentials_never_leave_the_module() {
         assert_eq!(
