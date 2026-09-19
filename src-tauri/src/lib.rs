@@ -20,6 +20,7 @@ pub mod hostkeys;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
 mod local_files;
+pub mod local_terminal;
 pub mod mcp_desktop;
 pub mod mcp_screen;
 pub mod metrics;
@@ -2099,6 +2100,61 @@ struct AgentDaemonStatus {
     mcp: crate::agent_daemon::mcp::McpLaunch,
 }
 
+struct LocalTerminalEvents(AppHandle);
+
+impl crate::local_terminal::LocalTerminalSink for LocalTerminalEvents {
+    fn data(&self, event: crate::local_terminal::LocalTerminalData) {
+        let _ = self.0.emit(crate::local_terminal::EVENT_DATA, event);
+    }
+    fn exit(&self, event: crate::local_terminal::LocalTerminalExit) {
+        let _ = self.0.emit(crate::local_terminal::EVENT_EXIT, event);
+    }
+}
+
+/// Opens the user's shell in a folder for the chat window's terminal panel.
+#[tauri::command]
+fn local_terminal_open(
+    app: AppHandle,
+    working_directory: Option<String>,
+    cols: u16,
+    rows: u16,
+    terminals: State<'_, Arc<crate::local_terminal::LocalTerminals>>,
+) -> Result<String, String> {
+    terminals.open(
+        Arc::new(LocalTerminalEvents(app)),
+        working_directory.as_deref(),
+        cols,
+        rows,
+    )
+}
+
+#[tauri::command]
+fn local_terminal_write(
+    terminal_id: String,
+    data: String,
+    terminals: State<'_, Arc<crate::local_terminal::LocalTerminals>>,
+) -> Result<(), String> {
+    terminals.write(&terminal_id, &data)
+}
+
+#[tauri::command]
+fn local_terminal_resize(
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+    terminals: State<'_, Arc<crate::local_terminal::LocalTerminals>>,
+) -> Result<(), String> {
+    terminals.resize(&terminal_id, cols, rows)
+}
+
+#[tauri::command]
+fn local_terminal_close(
+    terminal_id: String,
+    terminals: State<'_, Arc<crate::local_terminal::LocalTerminals>>,
+) -> Result<(), String> {
+    terminals.close(&terminal_id)
+}
+
 /// The instruction files a chat CLI would read for this conversation.
 #[tauri::command]
 async fn agent_instruction_files(
@@ -4107,6 +4163,7 @@ pub fn run() {
             };
             app.manage(trust);
             app.manage(Arc::new(SshRegistry::new()));
+            app.manage(Arc::new(crate::local_terminal::LocalTerminals::default()));
             app.manage(Arc::new(SftpRegistry::new()));
             app.manage(Arc::new(mcp_screen::ScreenFrames::default()));
             app.manage(McpRemoteSync::default());
@@ -4230,6 +4287,10 @@ pub fn run() {
             agent_automations_take_runs,
             agent_shared_rules_inspect,
             agent_instruction_files,
+            local_terminal_open,
+            local_terminal_write,
+            local_terminal_resize,
+            local_terminal_close,
             agent_shared_rules_save,
             agent_plan_snapshot,
             agent_plan_save,
@@ -4378,6 +4439,9 @@ pub fn run() {
             handle
                 .state::<Arc<crate::agent_chat::AgentChatRegistry>>()
                 .shutdown();
+            handle
+                .state::<Arc<crate::local_terminal::LocalTerminals>>()
+                .close_all();
             handle.state::<Arc<TunnelRegistry>>().stop_all();
             handle.state::<Arc<RdpRegistry>>().stop_all();
             handle.state::<Arc<VncRegistry>>().stop_all();

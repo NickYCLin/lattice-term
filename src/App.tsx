@@ -1081,6 +1081,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 chat={chatRuntime.chat}
                 onBrowseHistory={() => setHistoryOpen(true)}
                 automations={chatRuntime.automations}
+                theme={activeTheme}
                 onOpenSession={(sessionId) => {
                   setActiveSessionId(sessionId);
                   setView("terminal");

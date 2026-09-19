@@ -63,6 +63,8 @@ import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyAp
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
+import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
+import type { ThemeId } from "../app/themes";
 import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
 import { webSources } from "../app/chatWebSources";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
@@ -70,6 +72,7 @@ import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   ArchiveFileIcon,
   ChatIcon,
+  TerminalIcon,
   CloseIcon,
   DuplicateIcon,
   FileIcon,
@@ -109,12 +112,14 @@ export function ChatView({
   automations,
   onOpenSession,
   onBrowseHistory,
+  theme = "dark",
 }: {
   agents: AgentApi;
   chat: AgentChatApi;
   automations: AgentAutomationsApi;
   onOpenSession: (sessionId: string) => void;
   onBrowseHistory?: () => void;
+  theme?: ThemeId;
 }) {
   const { t, tag } = useI18n();
   const [pendingDelete, setPendingDelete] = useState<ChatThread | null>(null);
@@ -481,6 +486,7 @@ export function ChatView({
             cliLabel={cliLabel}
             tag={tag}
             accountProfiles={accountProfiles}
+            theme={theme}
             onDelete={() => setPendingDelete(active)}
           />
         )}
@@ -514,6 +520,7 @@ function ThreadPane({
   cliLabel,
   tag,
   accountProfiles,
+  theme,
   onDelete,
 }: {
   thread: ChatThread;
@@ -523,6 +530,7 @@ function ThreadPane({
   cliLabel: (id: ChatDefinitionId) => string;
   tag: string;
   accountProfiles: readonly ChatAccountProfile[];
+  theme: ThemeId;
   onDelete: () => void;
 }) {
   const { t } = useI18n();
@@ -540,6 +548,7 @@ function ThreadPane({
   const steeringRef = useRef(false);
   const fresh = threadIsFresh(thread);
   const [settingsOpen, setSettingsOpen] = useState(fresh);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
@@ -785,6 +794,18 @@ function ThreadPane({
             >
               {settingsOpen ? t("chat.settings.hide") : t("chat.settings")}
             </button>}
+            {!thread.archived && (
+              <button
+                type="button"
+                className={`button button--ghost button--sm${terminalOpen ? " is-active" : ""}`}
+                onClick={() => setTerminalOpen((current) => !current)}
+                aria-pressed={terminalOpen}
+                aria-label={t("chat.terminal")}
+                title={t("chat.terminal")}
+              >
+                <TerminalIcon />
+              </button>
+            )}
             <button
               type="button"
               className="button button--ghost button--sm"
@@ -975,6 +996,14 @@ function ThreadPane({
           )}
         </div>
       </div>
+
+      {terminalOpen && !thread.archived && (
+        <ChatTerminalPanel
+          workingDirectory={thread.workingDirectory}
+          theme={theme}
+          onClose={() => setTerminalOpen(false)}
+        />
+      )}
 
       {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer" onSubmit={submit}>
         <div ref={composerDropRef} className={`chat-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
