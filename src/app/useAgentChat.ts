@@ -18,6 +18,7 @@ import {
   appendSteeredInput,
   beginTurn,
   branchThread,
+  effortForTurn,
   createThread,
   decideApproval,
   failTurn,
@@ -83,6 +84,8 @@ export interface ChatThreadSettings {
   permission: ChatPermission;
   model: string;
   accountProfileId?: string | null;
+  /** Reasoning level; null returns to the default. */
+  effort?: string | null;
 }
 
 export interface ChatThreadCreation extends ChatThreadSettings {
@@ -391,10 +394,18 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
             || (patch.definitionId && patch.definitionId !== thread.definitionId)
             ? patch.proxyId : thread.proxyId,
         });
+        // Levels belong to an assistant (and for Codex to one model), so a
+        // new choice of either starts again from its default.
+        const effort = Object.prototype.hasOwnProperty.call(patch, "effort")
+          ? patch.effort ?? null
+          : next.definitionId !== thread.definitionId || next.model !== thread.model
+            ? null
+            : thread.effort ?? null;
         return {
           ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
           browserEnabled: next.definitionId === "codex" && (patch.browserEnabled ?? next.browserEnabled) === true,
           permission: patch.permission ?? next.permission,
+          effort,
         };
       }),
     );
@@ -500,6 +511,7 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
           prompt: promptForTurn(thread, visiblePrompt),
           permission: thread.permission,
           model: thread.model.trim() || null,
+          effort: effortForTurn(thread, modelsRef.current[thread.definitionId]),
           profileConfigPath,
           cliProxyBaseUrl: proxy?.baseUrl ?? null,
           cliProxyId: proxy?.id ?? null,

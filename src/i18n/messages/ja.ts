@@ -1298,6 +1298,8 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "返信...",
   "chat.reasoning": "推論",
+  "chat.effort": "推論の深さ",
+  "chat.effort.default": "既定（モデルに従う）",
   "chat.instructions.title": "指示とメモリ",
   "chat.instructions.hint": "このアシスタントが会話開始前に自動で読み込む指示ファイルです。ここでは表示のみで変更しません。プロジェクト共有の AGENTS.md は下で編集できます。",
   "chat.instructions.user": "ユーザー",

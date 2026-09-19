@@ -1298,6 +1298,8 @@ export const messages: Messages = {
   "chat.stop": "Detener",
   "chat.running": "Respondiendo...",
   "chat.reasoning": "Razonamiento",
+  "chat.effort": "Esfuerzo de razonamiento",
+  "chat.effort.default": "Predeterminado (según el modelo)",
   "chat.instructions.title": "Instrucciones y memoria",
   "chat.instructions.hint": "Archivos de instrucciones que este asistente lee por su cuenta antes de la conversación. Solo lectura; el AGENTS.md compartido del proyecto se puede editar abajo.",
   "chat.instructions.user": "Usuario",

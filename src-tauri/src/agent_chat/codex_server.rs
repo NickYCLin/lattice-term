@@ -401,6 +401,9 @@ pub(super) struct TurnRequest<'a> {
     pub attachments: &'a [ChatAttachment],
     pub permission: ChatPermission,
     pub model: Option<&'a str>,
+    /// Codex keeps an override for later turns too, so the window sends the
+    /// model's own default rather than nothing when the user goes back to it.
+    pub effort: Option<&'a str>,
     pub native_session_id: Option<&'a str>,
     pub working_directory: &'a Path,
     pub profile_config_directory: Option<&'a Path>,
@@ -452,7 +455,7 @@ pub(super) async fn send_turn<S: ChatSink>(
                     .codex_thread_id
                     .clone()
                     .ok_or_else(|| "The agent has not opened its thread yet.".to_string())?;
-                let params = turn_params(
+                let mut params = turn_params(
                     &codex_thread_id,
                     request.prompt,
                     request.attachments,
@@ -460,6 +463,9 @@ pub(super) async fn send_turn<S: ChatSink>(
                     request.model,
                     request.working_directory,
                 );
+                if let Some(effort) = request.effort {
+                    params["effort"] = Value::from(effort);
+                }
                 let id = state.next_rpc;
                 state.next_rpc += 1;
                 state.pending_rpc.insert(
@@ -544,7 +550,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         .native_session_id
         .map(str::to_string)
         .or_else(|| Some(String::new()));
-    let queued_params = turn_params(
+    let mut queued_params = turn_params(
         native_session_id.as_deref().unwrap_or_default(),
         request.prompt,
         request.attachments,
@@ -552,6 +558,9 @@ pub(super) async fn send_turn<S: ChatSink>(
         request.model,
         request.working_directory,
     );
+    if let Some(effort) = request.effort {
+        queued_params["effort"] = Value::from(effort);
+    }
     let server = Arc::new(CodexServer {
         proxy_identity: request.proxy.map(|proxy| proxy.identity()),
         browser_enabled: request.browser_enabled,
@@ -1355,6 +1364,7 @@ mod tests {
                     attachments: &[],
                     permission: ChatPermission::Ask,
                     model: None,
+                    effort: None,
                     native_session_id: native,
                     working_directory: workdir.path(),
                     profile_config_directory: None,

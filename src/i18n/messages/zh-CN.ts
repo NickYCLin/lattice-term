@@ -1317,6 +1317,8 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "回复中…",
   "chat.reasoning": "思考过程",
+  "chat.effort": "推理深度",
+  "chat.effort.default": "默认（按模型）",
   "chat.instructions.title": "指示与记忆",
   "chat.instructions.hint": "这个助理开始对话前会自行读取的指示文件。这里只显示，不会修改；项目共用的 AGENTS.md 可以在下方编辑。",
   "chat.instructions.user": "用户",

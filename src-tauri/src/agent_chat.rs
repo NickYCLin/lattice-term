@@ -92,6 +92,9 @@ pub struct ChatTurnRequest {
     pub permission: ChatPermission,
     #[serde(default)]
     pub model: Option<String>,
+    /// How hard the model should think; `None` keeps the CLI's own default.
+    #[serde(default)]
+    pub effort: Option<String>,
     /// The CLI's own id for this conversation, from an earlier `Started` or
     /// `Finished` event. Absent on the first turn.
     #[serde(default)]
@@ -412,6 +415,27 @@ fn validate_id(value: &str, label: &str) -> Result<(), String> {
         return Err(format!("Invalid {label}."));
     }
     Ok(())
+}
+
+/// Claude Code's documented `--effort` levels.
+const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// A reasoning effort the dialect accepts. Codex advertises its levels per
+/// model, so only their shape is checked here and the app-server decides;
+/// Claude's fixed list is checked exactly because it becomes an argument.
+fn validate_effort(dialect: Dialect, effort: &str) -> Result<(), String> {
+    let shaped =
+        !effort.is_empty() && effort.len() <= 16 && effort.chars().all(|c| c.is_ascii_lowercase());
+    match dialect {
+        Dialect::Claude if CLAUDE_EFFORTS.contains(&effort) => Ok(()),
+        Dialect::Codex if shaped => Ok(()),
+        Dialect::Claude | Dialect::Codex => {
+            Err("That reasoning effort is not available.".to_string())
+        }
+        Dialect::Gemini | Dialect::Antigravity => {
+            Err("This assistant has no reasoning effort setting.".to_string())
+        }
+    }
 }
 
 fn validate_model(model: &str) -> Result<(), String> {
@@ -768,6 +792,18 @@ pub struct ChatModelChoice {
     pub label: String,
     pub description: Option<String>,
     pub is_default: bool,
+    /// Reasoning levels this model offers, when its CLI says so per model.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<ChatEffortChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatEffortChoice {
+    pub value: String,
+    pub description: Option<String>,
 }
 
 /// Metadata from a local `SKILL.md`, deliberately excluding its instructions.
@@ -932,24 +968,32 @@ fn gemini_model_choices() -> Vec<ChatModelChoice> {
             label: "Auto (default)".to_string(),
             description: None,
             is_default: true,
+            efforts: Vec::new(),
+            default_effort: None,
         },
         ChatModelChoice {
             value: "pro".to_string(),
             label: "Pro".to_string(),
             description: None,
             is_default: false,
+            efforts: Vec::new(),
+            default_effort: None,
         },
         ChatModelChoice {
             value: "flash".to_string(),
             label: "Flash".to_string(),
             description: None,
             is_default: false,
+            efforts: Vec::new(),
+            default_effort: None,
         },
         ChatModelChoice {
             value: "flash-lite".to_string(),
             label: "Flash Lite".to_string(),
             description: None,
             is_default: false,
+            efforts: Vec::new(),
+            default_effort: None,
         },
     ]
 }
@@ -1140,6 +1184,8 @@ fn models_from_reply(
                             label: str_field(model, "displayName").unwrap_or(raw).to_string(),
                             description: str_field(model, "description").map(str::to_string),
                             is_default,
+                            efforts: Vec::new(),
+                            default_effort: None,
                         })
                     })
                     .collect(),
@@ -1170,6 +1216,25 @@ fn models_from_reply(
                                 .get("isDefault")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
+                            efforts: model
+                                .get("supportedReasoningEfforts")
+                                .and_then(Value::as_array)
+                                .map(|options| {
+                                    options
+                                        .iter()
+                                        .filter_map(|option| {
+                                            Some(ChatEffortChoice {
+                                                value: str_field(option, "reasoningEffort")?
+                                                    .to_string(),
+                                                description: str_field(option, "description")
+                                                    .map(str::to_string),
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            default_effort: str_field(model, "defaultReasoningEffort")
+                                .map(str::to_string),
                         })
                     })
                     .collect(),
@@ -1252,6 +1317,14 @@ fn send_with_retry<S: ChatSink>(
         if let Some(model) = model {
             validate_model(model)?;
         }
+        let effort = request
+            .effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(effort) = effort {
+            validate_effort(dialect, effort)?;
+        }
         if let Some(id) = request.native_session_id.as_deref() {
             validate_native_session_id(id)?;
         }
@@ -1299,6 +1372,7 @@ fn send_with_retry<S: ChatSink>(
                     attachments: &attachments,
                     permission: request.permission,
                     model,
+                    effort,
                     native_session_id: request.native_session_id.as_deref(),
                     working_directory: &working_directory,
                     profile_config_directory: profile_config_directory.as_deref(),
@@ -1323,6 +1397,10 @@ fn send_with_retry<S: ChatSink>(
             request.native_session_id.as_deref(),
             &attachments,
         ));
+        if let Some(effort) = effort {
+            // Only Claude reaches this point with an effort (validated above).
+            command.args(["--effort", effort]);
+        }
         command.current_dir(&working_directory);
 
         let mut child = command
@@ -2487,6 +2565,8 @@ fn parse_antigravity_models(raw: &str) -> Vec<ChatModelChoice> {
             label: label.to_string(),
             description: None,
             is_default,
+            efforts: Vec::new(),
+            default_effort: None,
         });
     }
     choices
@@ -2873,6 +2953,7 @@ mod tests {
                 prompt: "hi".into(),
                 permission: ChatPermission::Ask,
                 model: None,
+                effort: None,
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],
@@ -2931,6 +3012,37 @@ mod tests {
             "2"
         )
         .is_none());
+    }
+
+    #[test]
+    fn codex_models_carry_their_reasoning_levels() {
+        let reply: Value = serde_json::json!({"id": 3, "result": {"data": [
+            {"id": "gpt-5.6-sol", "displayName": "GPT-5.6-Sol", "defaultReasoningEffort": "medium",
+             "supportedReasoningEfforts": [
+                {"reasoningEffort": "low", "description": "Fast"},
+                {"reasoningEffort": "high", "description": "Thorough"}
+             ]}
+        ]}});
+        let models = models_from_reply(Dialect::Codex, &reply, "3").unwrap();
+        assert_eq!(models[0].default_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            models[0]
+                .efforts
+                .iter()
+                .map(|effort| effort.value.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+    }
+
+    #[test]
+    fn reasoning_effort_is_checked_per_assistant() {
+        assert!(validate_effort(Dialect::Claude, "xhigh").is_ok());
+        assert!(validate_effort(Dialect::Claude, "extreme").is_err());
+        assert!(validate_effort(Dialect::Codex, "minimal").is_ok());
+        assert!(validate_effort(Dialect::Codex, "--help").is_err());
+        assert!(validate_effort(Dialect::Codex, "High").is_err());
+        assert!(validate_effort(Dialect::Gemini, "high").is_err());
     }
 
     #[test]
@@ -3403,6 +3515,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
                 prompt: "Use the WebFetch tool on https://example.com to get the page title, then reply with the single word DONE.".into(),
                 permission: ChatPermission::Ask,
                 model: None,
+                effort: None,
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],
@@ -3465,6 +3578,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
                 prompt: "Reply with exactly the word OK and nothing else.".into(),
                 permission: ChatPermission::ReadOnly,
                 model: None,
+                effort: None,
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],

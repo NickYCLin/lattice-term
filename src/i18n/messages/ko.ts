@@ -1298,6 +1298,8 @@ export const messages: Messages = {
   "chat.stop": "중지",
   "chat.running": "댓글 ...",
   "chat.reasoning": "추론",
+  "chat.effort": "추론 깊이",
+  "chat.effort.default": "기본값(모델 기준)",
   "chat.instructions.title": "지침과 메모리",
   "chat.instructions.hint": "이 어시스턴트가 대화를 시작하기 전에 스스로 읽는 지침 파일입니다. 여기서는 보기만 하고 바꾸지 않습니다. 프로젝트 공유 AGENTS.md는 아래에서 편집할 수 있습니다.",
   "chat.instructions.user": "사용자",

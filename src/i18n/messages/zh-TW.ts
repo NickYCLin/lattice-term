@@ -1402,6 +1402,8 @@ export const zhTW = {
   "chat.stop": "停止",
   "chat.running": "回覆中…",
   "chat.reasoning": "思考過程",
+  "chat.effort": "推理深度",
+  "chat.effort.default": "預設（依模型）",
   "chat.instructions.title": "指示與記憶",
   "chat.instructions.hint": "這個助理開始對話前會自己讀進來的指示檔。這裡只顯示，不會改動；專案共用的 AGENTS.md 可以在下方編輯。",
   "chat.instructions.user": "使用者",

@@ -514,6 +514,7 @@ pub async fn execute(
         prompt: planned.instructions,
         permission: planned.record.permission,
         model: (!planned.record.model.is_empty()).then(|| planned.record.model.clone()),
+        effort: None,
         native_session_id: None,
         profile_config_path: None,
         attachments: Vec::new(),

@@ -23,6 +23,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsImage } from "../app/chatAttachments";
 import {
   defaultPermission,
+  effortChoices,
   formatTokens,
   permissionsFor,
   threadIsFresh,
@@ -821,6 +822,30 @@ function ThreadPane({
                 {t(activeProfileMissing ? "accountModel.missing" : "chat.accountProfile.notSignedIn")}
               </p>
             )}
+            {(() => {
+              if (thread.provider) return null;
+              const efforts = effortChoices(thread.definitionId, thread.model, chat.models[thread.definitionId]);
+              if (efforts.length === 0) return null;
+              return (
+                <label className="field">
+                  <span className="field__label">{t("chat.effort")}</span>
+                  <select
+                    className="select"
+                    value={thread.effort ?? ""}
+                    disabled={settingsLocked}
+                    onChange={(event) => chat.updateThread(thread.id, { effort: event.target.value || null })}
+                  >
+                    <option value="">{t("chat.effort.default")}</option>
+                    {efforts.map((effort) => (
+                      <option key={effort.value} value={effort.value} title={effort.description ?? undefined}>
+                        {effort.value}
+                        {effort.description ? ` — ${effort.description}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })()}
             <div className="field field--grow">
               <span className="field__label">{t("chat.directory")}</span>
               <PathDropZone kind="directory" disabled={settingsLocked} onSelect={path => chat.updateThread(thread.id, { workingDirectory: path })}>

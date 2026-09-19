@@ -53,6 +53,46 @@ export interface ChatModelChoice {
   label: string;
   description: string | null;
   isDefault: boolean;
+  /** Reasoning levels this model offers, when its CLI lists them per model. */
+  efforts?: { value: string; description: string | null }[];
+  defaultEffort?: string;
+}
+
+/** Claude Code's documented `--effort` levels, the same for every model. */
+export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * The reasoning levels offered for a thread's assistant and model, or none
+ * when the assistant has no such setting (or its model list is not loaded).
+ */
+export function effortChoices(
+  definitionId: ChatDefinitionId,
+  model: string,
+  list: ChatModelList | undefined,
+): { value: string; description: string | null }[] {
+  if (definitionId === "claude") return CLAUDE_EFFORTS.map((value) => ({ value, description: null }));
+  if (definitionId !== "codex" || list?.state !== "ready") return [];
+  const chosen = list.models.find((entry) => entry.value === model.trim())
+    ?? (model.trim() ? undefined : list.models.find((entry) => entry.isDefault));
+  return chosen?.efforts ?? [];
+}
+
+/**
+ * What a turn sends. Codex remembers an override across turns, so going
+ * back to "default" sends the model's own default level instead of nothing.
+ */
+export function effortForTurn(
+  thread: Pick<ChatThread, "definitionId" | "model" | "effort">,
+  list: ChatModelList | undefined,
+): string | null {
+  const offered = effortChoices(thread.definitionId, thread.model, list);
+  if (thread.effort && (thread.definitionId === "claude" || offered.some((entry) => entry.value === thread.effort))) {
+    return thread.effort;
+  }
+  if (thread.definitionId !== "codex" || list?.state !== "ready") return null;
+  const chosen = list.models.find((entry) => entry.value === thread.model.trim())
+    ?? (thread.model.trim() ? undefined : list.models.find((entry) => entry.isDefault));
+  return chosen?.defaultEffort ?? null;
 }
 
 /** The picker's state for one CLI: not asked yet, asking, the list, or why not. */
@@ -180,6 +220,8 @@ export interface ChatThread {
   accountProfileId: string | null;
   /** The CLI's own conversation id, once the first turn announced it. */
   nativeSessionId: string | null;
+  /** Chosen reasoning level; null leaves it to the CLI and model default. */
+  effort?: string | null;
   /** Model the CLI reported, when it did; never guessed from the name. */
   reportedModel: string | null;
   /** Pending until the target CLI starts its own native conversation. */
@@ -415,6 +457,7 @@ export function branchThread(
       now,
     ),
     items,
+    effort: thread.effort ?? null,
     handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
   };
 }
@@ -865,6 +908,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           ? thread.shelvedAt
           : null,
       model: typeof thread.model === "string" ? thread.model : "",
+      effort: typeof thread.effort === "string" && /^[a-z]{1,16}$/.test(thread.effort) ? thread.effort : null,
       nativeSessionId:
         typeof thread.nativeSessionId === "string" ? thread.nativeSessionId : null,
       reportedModel:
