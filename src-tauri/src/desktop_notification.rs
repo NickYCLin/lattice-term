@@ -6,7 +6,7 @@
 //! On macOS and Windows the notification plugin shows it; clicking there
 //! brings the app forward the way the system does for any notification.
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
 
 /// Emitted with the conversation id when a notification was clicked.
 pub const EVENT_OPEN: &str = "chat-notification-open";
@@ -36,15 +36,6 @@ fn escape_markup(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn open_conversation(app: &AppHandle, thread_id: &str) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-    let _ = app.emit(EVENT_OPEN, thread_id.to_string());
-}
-
 pub fn show(app: &AppHandle, thread_id: &str, title: &str, body: &str) -> Result<(), String> {
     let title = clean(title, MAX_TITLE_CHARS);
     let body = clean(body, MAX_BODY_CHARS);
@@ -53,11 +44,21 @@ pub fn show(app: &AppHandle, thread_id: &str, title: &str, body: &str) -> Result
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::open_conversation;
+    use super::EVENT_OPEN;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tauri::AppHandle;
+    use tauri::{Emitter, Manager};
     use zbus::zvariant::Value;
+
+    fn open_conversation(app: &AppHandle, thread_id: &str) {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = app.emit(EVENT_OPEN, thread_id.to_string());
+    }
 
     /// Waiting threads for clicks; beyond this, notifications still show but
     /// nobody listens for their click.
