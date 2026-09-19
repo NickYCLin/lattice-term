@@ -874,7 +874,7 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
         assert_eq!(pending[0].target_label, "Isolated SSH");
         assert_eq!(pending[0].client, "client");
         assert_eq!(peer.execs.load(Ordering::Relaxed), 0);
-        service.decide_command(&pending[0].operation_id, CommandDecision::Deny);
+        service.decide_command(&pending[0].operation_id, CommandDecision::Deny, 0);
         let operation_id = refused["operationId"].as_str().unwrap().to_string();
         let declined = loop {
             match service
@@ -899,7 +899,7 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
 
         let accepted = service.execute("client", propose("c2")).await.unwrap();
         let pending = waiting(&service).await;
-        service.decide_command(&pending[0].operation_id, CommandDecision::Approve);
+        service.decide_command(&pending[0].operation_id, CommandDecision::Approve, 0);
         let result = poll(
             &service,
             &grant.id,
@@ -910,6 +910,40 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
         assert_eq!(result["exitStatus"], 7);
         assert_eq!(peer.execs.load(Ordering::Relaxed), 1);
         assert!(service.pending_commands().is_empty());
+
+        // A quiet stretch the user asked for skips the card, and taking it
+        // back brings the card straight back.
+        let quiet = service.execute("client", propose("c4")).await.unwrap();
+        let pending = waiting(&service).await;
+        service.decide_command(&pending[0].operation_id, CommandDecision::Approve, 5);
+        poll(&service, &grant.id, quiet["operationId"].as_str().unwrap()).await;
+        assert_eq!(service.quiet_windows().len(), 1);
+        assert!(service.quiet_windows()[0].seconds_left <= 5 * 60);
+        let unasked = service.execute("client", propose("c5")).await.unwrap();
+        let result = poll(
+            &service,
+            &grant.id,
+            unasked["operationId"].as_str().unwrap(),
+        )
+        .await;
+        assert_eq!(result["exitStatus"], 7);
+        assert!(service.pending_commands().is_empty());
+        service.clear_quiet_window(&grant.id);
+        assert!(service.quiet_windows().is_empty());
+        let asked_again = service.execute("client", propose("c6")).await.unwrap();
+        let pending = waiting(&service).await;
+        service.decide_command(&pending[0].operation_id, CommandDecision::Deny, 0);
+        assert!(service
+            .execute(
+                "client",
+                DesktopOperation::OperationStatus {
+                    target_id: grant.id.clone(),
+                    operation_id: asked_again["operationId"].as_str().unwrap().into(),
+                }
+            )
+            .await
+            .is_ok());
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 3);
 
         // Withdrawing the grant ends a proposal that is still on screen.
         let orphan = service.execute("client", propose("c3")).await.unwrap();
@@ -925,7 +959,7 @@ async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
             )
             .await
             .is_err());
-        assert_eq!(peer.execs.load(Ordering::Relaxed), 1);
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 3);
         crate::ssh::disconnect(&ssh, &session_id).await.unwrap();
     })
     .await;

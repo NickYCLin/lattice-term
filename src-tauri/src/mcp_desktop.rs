@@ -41,6 +41,9 @@ const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
 /// cannot bury a real request under a pile of its own.
 const MAX_PENDING_APPROVALS: usize = 8;
 const MAX_COMMAND_BYTES: usize = 4096;
+/// The longest stretch the user may waive the card for, and the ceiling the
+/// window's own choice is clamped to.
+const MAX_QUIET_MINUTES: u32 = 120;
 /// One minute on its own channel, the same ceiling a saved plan may ask for.
 const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 
@@ -361,6 +364,9 @@ struct Grant {
     identity: usize,
     plans: Vec<ExecPlan>,
     roots: Vec<paths::Root>,
+    /// Until when this grant may skip the approval card, if the user asked
+    /// for a quiet stretch. It is never stored and dies with the grant.
+    quiet_until: Mutex<Option<Instant>>,
     revoked: watch::Sender<bool>,
 }
 
@@ -375,6 +381,14 @@ pub struct PendingCommandView {
     pub command: String,
     pub timeout_ms: u32,
     pub expires_in_ms: u64,
+}
+
+/// A grant that is currently skipping the card, as the settings page shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QuietWindowView {
+    pub target_id: String,
+    pub seconds_left: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -610,6 +624,7 @@ impl DesktopService {
             identity,
             plans: request.exec_plans,
             roots,
+            quiet_until: Mutex::new(None),
             revoked: watch::channel(false).0,
         });
         let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
@@ -1086,10 +1101,63 @@ impl DesktopService {
 
     /// Records what the person chose. An unknown or already answered
     /// proposal is not an error the window needs to explain.
-    pub fn decide_command(&self, operation_id: &str, decision: CommandDecision) {
+    ///
+    /// `quiet_minutes` is the stretch the user agreed to stop being asked
+    /// about this one connection. It only ever follows an acceptance, is
+    /// capped, and disappears with the grant.
+    pub fn decide_command(
+        &self,
+        operation_id: &str,
+        decision: CommandDecision,
+        quiet_minutes: u32,
+    ) {
         if let Ok(state) = self.state.lock() {
-            if let Some(pending) = state.approvals.get(operation_id) {
-                pending.decision.send_replace(Some(decision));
+            let Some(pending) = state.approvals.get(operation_id) else {
+                return;
+            };
+            if decision == CommandDecision::Approve && quiet_minutes > 0 {
+                let minutes = quiet_minutes.min(MAX_QUIET_MINUTES);
+                if let Some(grant) = state.grants.get(&pending.target_id) {
+                    if let Ok(mut quiet) = grant.quiet_until.lock() {
+                        *quiet =
+                            Some(Instant::now() + Duration::from_secs(u64::from(minutes) * 60));
+                    }
+                }
+            }
+            pending.decision.send_replace(Some(decision));
+        }
+        self.notify_approvals();
+    }
+
+    /// The connections currently skipping the card, so the settings page can
+    /// show the stretch and take it back.
+    pub fn quiet_windows(&self) -> Vec<QuietWindowView> {
+        let Ok(state) = self.state.lock() else {
+            return Vec::new();
+        };
+        let mut windows: Vec<_> = state
+            .grants
+            .values()
+            .filter_map(|grant| {
+                let until = (*grant.quiet_until.lock().ok()?)?;
+                let left = until.checked_duration_since(Instant::now())?;
+                Some(QuietWindowView {
+                    target_id: grant.view.id.clone(),
+                    seconds_left: left.as_secs(),
+                })
+            })
+            .collect();
+        windows.sort_by(|left, right| left.target_id.cmp(&right.target_id));
+        windows
+    }
+
+    /// Goes back to being asked every time, without touching the grant.
+    pub fn clear_quiet_window(&self, target_id: &str) {
+        if let Ok(state) = self.state.lock() {
+            if let Some(grant) = state.grants.get(target_id) {
+                if let Ok(mut quiet) = grant.quiet_until.lock() {
+                    *quiet = None;
+                }
             }
         }
         self.notify_approvals();
@@ -1118,6 +1186,15 @@ impl DesktopService {
         mut revoked: watch::Receiver<bool>,
         mut cancel: watch::Receiver<bool>,
     ) -> Result<(), ServiceError> {
+        let quiet = grant
+            .quiet_until
+            .lock()
+            .ok()
+            .and_then(|quiet| *quiet)
+            .is_some_and(|until| until > Instant::now());
+        if quiet {
+            return Ok(());
+        }
         let mut decided = {
             let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
             state
@@ -1726,6 +1803,7 @@ mod tests {
                 identity: 1,
                 plans: vec![],
                 roots: vec![],
+                quiet_until: Mutex::new(None),
                 revoked: watch::channel(false).0,
             })
         };

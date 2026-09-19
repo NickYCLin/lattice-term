@@ -573,6 +573,7 @@ fn mcp_remote_pending_commands(
 fn mcp_remote_command_decide(
     operation_id: String,
     approve: bool,
+    quiet_minutes: Option<u32>,
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Vec<mcp_desktop::PendingCommandView> {
     service.decide_command(
@@ -582,8 +583,25 @@ fn mcp_remote_command_decide(
         } else {
             mcp_desktop::CommandDecision::Deny
         },
+        quiet_minutes.unwrap_or(0),
     );
     service.pending_commands()
+}
+
+#[tauri::command]
+fn mcp_remote_quiet_commands(
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Vec<mcp_desktop::QuietWindowView> {
+    service.quiet_windows()
+}
+
+#[tauri::command]
+fn mcp_remote_quiet_clear(
+    target_id: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Vec<mcp_desktop::QuietWindowView> {
+    service.clear_quiet_window(&target_id);
+    service.quiet_windows()
 }
 
 const MAX_CLIPBOARD_IMAGE_EDGE: u32 = 16_384;
@@ -4043,6 +4061,8 @@ pub fn run() {
             mcp_remote_targets,
             mcp_remote_pending_commands,
             mcp_remote_command_decide,
+            mcp_remote_quiet_commands,
+            mcp_remote_quiet_clear,
             mcp_screen_sessions,
             mcp_saved_connection_connect,
             mcp_remote_grant,

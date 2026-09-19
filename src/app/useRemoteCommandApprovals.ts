@@ -9,6 +9,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { hasDesktopBackend } from "./nativeRuntime";
 
+/** How long the card stays away when the user asks for a quiet stretch. */
+export const QUIET_MINUTES = 15;
+
 export interface PendingRemoteCommand {
   operationId: string;
   targetId: string;
@@ -53,14 +56,18 @@ export function useRemoteCommandApprovals() {
     };
   }, []);
 
-  const decide = useCallback(async (operationId: string, approve: boolean) => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const rest = await invoke<PendingRemoteCommand[]>("mcp_remote_command_decide", {
-      operationId,
-      approve,
-    });
-    setPending(rest);
-  }, []);
+  const decide = useCallback(
+    async (operationId: string, approve: boolean, quietMinutes = 0) => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const rest = await invoke<PendingRemoteCommand[]>("mcp_remote_command_decide", {
+        operationId,
+        approve,
+        quietMinutes,
+      });
+      setPending(rest);
+    },
+    [],
+  );
 
   return { pending, decide };
 }

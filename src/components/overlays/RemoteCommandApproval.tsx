@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  QUIET_MINUTES,
   useRemoteCommandApprovals,
   type PendingRemoteCommand,
 } from "../../app/useRemoteCommandApprovals";
@@ -26,7 +27,7 @@ function ApprovalDialog({
 }: {
   request: PendingRemoteCommand;
   waiting: number;
-  onDecide: (approve: boolean) => void;
+  onDecide: (approve: boolean, quietMinutes?: number) => void;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -87,6 +88,13 @@ function ApprovalDialog({
           <button type="button" className="button button--ghost button--danger" onClick={() => onDecide(true)}>
             {t("mcp.commandApproval.approve")}
           </button>
+          <button
+            type="button"
+            className="button button--ghost button--danger"
+            onClick={() => onDecide(true, QUIET_MINUTES)}
+          >
+            {t("mcp.commandApproval.approveQuiet", { minutes: QUIET_MINUTES })}
+          </button>
         </div>
       </div>
     </div>
@@ -101,7 +109,9 @@ export function RemoteCommandApproval() {
     <ApprovalDialog
       request={request}
       waiting={pending.length - 1}
-      onDecide={(approve) => void decide(request.operationId, approve)}
+      onDecide={(approve, quietMinutes) =>
+        void decide(request.operationId, approve, quietMinutes)
+      }
     />
   );
 }

@@ -5,7 +5,8 @@ import type { PendingRemoteCommand } from "../../app/useRemoteCommandApprovals";
 
 const waiting: PendingRemoteCommand[] = [];
 const decide = vi.fn();
-vi.mock("../../app/useRemoteCommandApprovals", () => ({
+vi.mock("../../app/useRemoteCommandApprovals", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/useRemoteCommandApprovals")>()),
   useRemoteCommandApprovals: () => ({ pending: waiting, decide }),
 }));
 
@@ -50,6 +51,8 @@ describe("RemoteCommandApproval", () => {
     // proposal is never decided by answering another.
     expect(html.indexOf("拒絕")).toBeLessThan(html.indexOf("允許這一次"));
     expect(html).toContain("還有 1 筆等你決定");
+    // The quiet stretch is offered last and never as the default action.
+    expect(html.indexOf("允許這一次")).toBeLessThan(html.indexOf("15 分鐘內不再問"));
   });
 
   it("counts down to the deadline and never below zero", () => {

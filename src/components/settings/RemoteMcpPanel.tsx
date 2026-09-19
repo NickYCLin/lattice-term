@@ -27,12 +27,14 @@ export function savedProfilesNotConnected(profiles: ConnectionProfile[], session
 }
 
 interface Target { id: string; label: string; backend: string; scopes: Scopes; connected: boolean }
+interface QuietWindow { targetId: string; secondsLeft: number }
 
 export function RemoteMcpPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<McpConnectionSession[]>([]);
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
+  const [quiet, setQuiet] = useState<QuietWindow[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [savedProfileId, setSavedProfileId] = useState("");
   const [label, setLabel] = useState("");
@@ -60,12 +62,13 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [ssh, sftp, screens, saved, next] = await Promise.all([
+    const [ssh, sftp, screens, saved, next, quietWindows] = await Promise.all([
       invoke<Omit<McpConnectionSession, "backend">[]>("ssh_sessions"),
       invoke<Omit<McpConnectionSession, "backend">[]>("sftp_sessions"),
       invoke<McpConnectionSession[]>("mcp_screen_sessions"),
       invoke<ConnectionProfile[]>("list_connection_profiles"),
       invoke<Target[]>("mcp_remote_targets"),
+      invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
     ]);
     setSessions([
       ...ssh.map((s) => ({ ...s, backend: "ssh" as const })),
@@ -74,6 +77,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     ]);
     setProfiles(saved);
     setTargets(next);
+    setQuiet(quietWindows);
   }, [available]);
 
   useEffect(() => {
@@ -128,6 +132,10 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     } catch (reason) { setError(String(reason)); await refresh().catch(() => {}); }
     finally { setBusy(false); }
   };
+  const stopQuiet = async (targetId: string) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    setQuiet(await invoke<QuietWindow[]>("mcp_remote_quiet_clear", { targetId }));
+  };
   const addPlan = () => {
     const next = addExecPlan(plans, { label: commandLabel, command, timeoutSeconds });
     if (next === plans) return;
@@ -154,6 +162,11 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           <p className="mono">{target.id}</p>
           <p>{(Object.keys(scopesOff) as Scope[]).filter((scope) => target.scopes[scope]).map((scope) => t(`settings.mcpRemote.scope.${scope}`)).join(" · ")}</p>
           {!target.connected && <p>{t("settings.mcpRemote.offline")}</p>}
+          {quiet.filter((window) => window.targetId === target.id).map((window) => <p key={window.targetId}>
+            {t("settings.mcpRemote.quietActive", { minutes: Math.max(1, Math.ceil(window.secondsLeft / 60)) })}
+            <button type="button" className="button button--ghost" disabled={busy} onClick={() => void stopQuiet(target.id)}>
+              {t("settings.mcpRemote.quietClear")}</button>
+          </p>)}
         </div>
         <button type="button" className="button button--danger" disabled={busy} onClick={() => void revoke(target.id)}>{t("settings.mcpRemote.revoke")}</button>
       </div>)}
