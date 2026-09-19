@@ -1485,6 +1485,7 @@ export const en: Messages = {
   "chat.stop": "Stop",
   "chat.running": "Replying…",
   "chat.reasoning": "Reasoning",
+  "chat.instructions.memory": "Memory",
   "chat.instructions.edit": "Edit",
   "chat.instructions.save": "Save",
   "chat.instructions.create": "Create {path}",

@@ -1315,6 +1315,7 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "返信...",
   "chat.reasoning": "推論",
+  "chat.instructions.memory": "メモリ",
   "chat.instructions.edit": "編集",
   "chat.instructions.save": "保存",
   "chat.instructions.create": "{path} を作成",

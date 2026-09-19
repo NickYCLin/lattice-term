@@ -18,6 +18,43 @@ const MAX_SHOWN_BYTES: u64 = 64 * 1024;
 pub enum InstructionScope {
     User,
     Project,
+    /// Claude Code's own memory notes for this project, read-only here.
+    Memory,
+}
+
+const MAX_MEMORY_FILES: usize = 30;
+
+/// Claude Code names a project's folder by replacing every character that
+/// is not an ASCII letter or digit in its path with `-`.
+fn claude_project_slug(directory: &Path) -> String {
+    directory
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn claude_memory_files(user_directory: &Path, working_directory: &Path) -> Vec<PathBuf> {
+    let memory = user_directory
+        .join("projects")
+        .join(claude_project_slug(working_directory))
+        .join("memory");
+    let Ok(entries) = std::fs::read_dir(&memory) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "md")
+                && std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file())
+        })
+        .collect();
+    files.sort();
+    // The index first, the notes after it.
+    files.sort_by_key(|path| path.file_name().is_none_or(|name| name != "MEMORY.md"));
+    files.truncate(MAX_MEMORY_FILES);
+    files
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -92,6 +129,15 @@ fn candidates(
                 .into_iter()
                 .map(|name| (InstructionScope::Project, directory.join(name))),
         );
+        if definition_id == "claude" {
+            if let Some(user) = user_dir("CLAUDE_CONFIG_DIR", ".claude") {
+                files.extend(
+                    claude_memory_files(&user, directory)
+                        .into_iter()
+                        .map(|path| (InstructionScope::Memory, path)),
+                );
+            }
+        }
     }
     Ok(files)
 }
@@ -333,5 +379,28 @@ mod tests {
             "missing"
         )
         .is_err());
+    }
+
+    #[test]
+    fn claude_memory_notes_are_listed_read_only() {
+        let config = tempfile::tempdir().unwrap();
+        let work = Path::new("/data/me/My Project");
+        let memory = config
+            .path()
+            .join("projects")
+            .join("-data-me-My-Project")
+            .join("memory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("b-note.md"), "note").unwrap();
+        std::fs::write(memory.join("MEMORY.md"), "- index").unwrap();
+        std::fs::write(memory.join("skip.txt"), "x").unwrap();
+        let files = candidates("claude", Some(work), Some(config.path()), None, &no_env).unwrap();
+        let notes: Vec<_> = files
+            .iter()
+            .filter(|(scope, _)| *scope == InstructionScope::Memory)
+            .map(|(_, path)| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(notes, ["MEMORY.md", "b-note.md"]);
+        assert_eq!(claude_project_slug(work), "-data-me-My-Project");
     }
 }

@@ -1315,6 +1315,7 @@ export const messages: Messages = {
   "chat.stop": "중지",
   "chat.running": "댓글 ...",
   "chat.reasoning": "추론",
+  "chat.instructions.memory": "메모리",
   "chat.instructions.edit": "편집",
   "chat.instructions.save": "저장",
   "chat.instructions.create": "{path} 만들기",

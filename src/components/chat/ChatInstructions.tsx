@@ -6,7 +6,7 @@ import { useI18n } from "../../i18n/context";
 import { SharedAgentRulesPanel } from "../agents/SharedAgentRulesPanel";
 
 export interface InstructionFile {
-  scope: "user" | "project";
+  scope: "user" | "project" | "memory";
   path: string;
   exists: boolean;
   bytes: number;
@@ -134,7 +134,13 @@ export function ChatInstructions({
         <details className="chat-card chat-instructions__file" key={file.path}>
           <summary>
             <span className="chat-card__label">
-              {t(file.scope === "user" ? "chat.instructions.user" : "chat.instructions.project")}
+              {t(
+                file.scope === "user"
+                  ? "chat.instructions.user"
+                  : file.scope === "memory"
+                    ? "chat.instructions.memory"
+                    : "chat.instructions.project",
+              )}
             </span>
             <code className="chat-card__summary" title={file.path}>
               {displayPath(file.path)}

@@ -1419,6 +1419,7 @@ export const zhTW = {
   "chat.stop": "停止",
   "chat.running": "回覆中…",
   "chat.reasoning": "思考過程",
+  "chat.instructions.memory": "記憶",
   "chat.instructions.edit": "編輯",
   "chat.instructions.save": "儲存",
   "chat.instructions.create": "建立 {path}",

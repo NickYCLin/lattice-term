@@ -1334,6 +1334,7 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "回复中…",
   "chat.reasoning": "思考过程",
+  "chat.instructions.memory": "记忆",
   "chat.instructions.edit": "编辑",
   "chat.instructions.save": "保存",
   "chat.instructions.create": "创建 {path}",

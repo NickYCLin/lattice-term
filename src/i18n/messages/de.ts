@@ -1315,6 +1315,7 @@ export const messages: Messages = {
   "chat.stop": "Stoppen",
   "chat.running": "Ich will nicht...",
   "chat.reasoning": "Denkprozess",
+  "chat.instructions.memory": "Gedächtnis",
   "chat.instructions.edit": "Bearbeiten",
   "chat.instructions.save": "Speichern",
   "chat.instructions.create": "{path} anlegen",
