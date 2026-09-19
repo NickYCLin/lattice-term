@@ -256,6 +256,20 @@ impl<'a> PlatformClipboardTextIo<'a> {
         }
     }
 
+    /// Files copied in a file manager, when the clipboard holds some.
+    fn read_file_list(&self) -> Vec<std::path::PathBuf> {
+        #[cfg(desktop)]
+        {
+            self.clipboard
+                .with_mut(|clipboard| clipboard.get().file_list())
+                .unwrap_or_default()
+        }
+        #[cfg(mobile)]
+        {
+            Vec::new()
+        }
+    }
+
     fn read_image_rgba(&self) -> Result<Option<(u32, u32, Vec<u8>)>, String> {
         #[cfg(desktop)]
         {
@@ -392,6 +406,12 @@ impl SensitiveClipboard {
         let _turn = self.io_gate.enter();
         let io = PlatformClipboardTextIo::new(self, app)?;
         write_terminal_text(&io, text)
+    }
+
+    pub fn read_file_list(&self, app: &AppHandle) -> Result<Vec<std::path::PathBuf>, String> {
+        let _operation = self.begin_operation()?;
+        let _turn = self.io_gate.enter();
+        Ok(PlatformClipboardTextIo::new(self, app)?.read_file_list())
     }
 
     pub fn read_image_rgba(&self, app: &AppHandle) -> Result<Option<(u32, u32, Vec<u8>)>, String> {

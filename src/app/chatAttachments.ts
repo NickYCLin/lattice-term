@@ -16,6 +16,16 @@ export function mergeAttachmentPaths(current: readonly ChatAttachment[], paths: 
   return [...current, ...added];
 }
 
+/** Files copied in a file manager arrive as a URI list (or as file items). */
+export function pasteContainsFiles(items: ArrayLike<Pick<DataTransferItem, "kind" | "type">>): boolean {
+  return Array.from(items).some(
+    (item) =>
+      item.type === "text/uri-list" ||
+      item.type === "x-special/gnome-copied-files" ||
+      (item.kind === "file" && !item.type.startsWith("image/")),
+  );
+}
+
 export function pasteContainsImage(items: ArrayLike<Pick<DataTransferItem, "kind" | "type">>): boolean {
   return Array.from(items).some(item => item.kind === "file" && item.type.startsWith("image/"));
 }

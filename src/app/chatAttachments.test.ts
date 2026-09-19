@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeAttachmentPaths, pasteContainsImage } from "./chatAttachments";
+import { pasteContainsFiles, mergeAttachmentPaths, pasteContainsImage } from "./chatAttachments";
 
 describe("chat attachments", () => {
   it("adds images from native paths without losing existing attachments or duplicating files", () => {
@@ -22,3 +22,14 @@ describe("chat attachments", () => {
     expect(pasteContainsImage([])).toBe(false);
   });
 });
+
+describe("pasted files", () => {
+  it("recognises files copied in a file manager but not a plain image", () => {
+    expect(pasteContainsFiles([{ kind: "string", type: "text/uri-list" }])).toBe(true);
+    expect(pasteContainsFiles([{ kind: "string", type: "x-special/gnome-copied-files" }])).toBe(true);
+    expect(pasteContainsFiles([{ kind: "file", type: "application/pdf" }])).toBe(true);
+    expect(pasteContainsFiles([{ kind: "file", type: "image/png" }])).toBe(false);
+    expect(pasteContainsFiles([{ kind: "string", type: "text/plain" }])).toBe(false);
+  });
+});
+

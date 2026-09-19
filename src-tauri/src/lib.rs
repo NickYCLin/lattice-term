@@ -1470,6 +1470,27 @@ async fn agent_broadcast(
     Ok(outcomes)
 }
 
+/// Files copied in a file manager, as chat attachments: only existing
+/// regular files by absolute path, at most as many as one message takes.
+#[tauri::command]
+async fn agent_chat_paste_files(
+    app: AppHandle,
+    clipboard: State<'_, Arc<SensitiveClipboard>>,
+) -> Result<Vec<String>, String> {
+    let clipboard = Arc::clone(clipboard.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(clipboard
+            .read_file_list(&app)?
+            .into_iter()
+            .filter(|path| path.is_absolute() && path.is_file())
+            .take(32)
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect())
+    })
+    .await
+    .map_err(|error| format!("Clipboard operation did not complete: {error}"))?
+}
+
 /// Saves an explicitly pasted chat image for later sends and queued turns.
 #[tauri::command]
 async fn agent_chat_paste_image(
@@ -4344,6 +4365,7 @@ pub fn run() {
             agent_chat_skills,
             agent_paste_clipboard_image,
             agent_chat_paste_image,
+            agent_chat_paste_files,
             agent_export_transcript,
             agent_import_memory_handoff,
             agent_write_handoff_file,

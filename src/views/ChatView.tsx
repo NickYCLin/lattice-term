@@ -20,7 +20,7 @@ import {
   type ClipboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsImage } from "../app/chatAttachments";
+import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteContainsImage } from "../app/chatAttachments";
 import {
   defaultPermission,
   effortChoices,
@@ -614,6 +614,14 @@ function ThreadPane({
     setNotice(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
+      // Files copied in a file manager come first: their clipboard entry can
+      // also carry an icon image that is not what the user meant to paste.
+      const files = await invoke<string[]>("agent_chat_paste_files");
+      if (!mounted.current) return;
+      if (files.length > 0) {
+        addAttachments(files);
+        return;
+      }
       const path = await invoke<string | null>("agent_chat_paste_image", { threadId: thread.id });
       if (!mounted.current) return;
       if (path) addAttachments([path]);
@@ -627,7 +635,7 @@ function ThreadPane({
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!pasteContainsImage(event.clipboardData.items)) return;
+    if (!pasteContainsImage(event.clipboardData.items) && !pasteContainsFiles(event.clipboardData.items)) return;
     event.preventDefault();
     void pasteImage();
   }
