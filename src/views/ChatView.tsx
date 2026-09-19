@@ -68,6 +68,7 @@ import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
+import { chatProjects, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -131,7 +132,9 @@ export function ChatView({
 }) {
   const { t, tag } = useI18n();
   const [pendingDelete, setPendingDelete] = useState<ChatThread | null>(null);
-  const [mode, setMode] = useState<"threads" | "automations">("threads");
+  const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
+  // A project picked in the projects tab narrows the conversation list to it.
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -150,7 +153,17 @@ export function ChatView({
     [agents.catalog, agents.sessions, t],
   );
   // Shelved threads leave the tree and wait in their own list below it.
-  const listedThreads = useMemo(() => chat.threads.filter((thread) => !thread.shelvedAt), [chat.threads]);
+  const projects = useMemo(() => chatProjects(chat.threads), [chat.threads]);
+  const listedThreads = useMemo(
+    () =>
+      chat.threads.filter(
+        (thread) =>
+          !thread.shelvedAt &&
+          (projectFilter === null ||
+            (thread.workingDirectory.replace(/[\\/]+$/, "") || thread.workingDirectory) === projectFilter),
+      ),
+    [chat.threads, projectFilter],
+  );
   const shelvedThreads = useMemo(
     () =>
       chat.threads
@@ -181,7 +194,7 @@ export function ChatView({
   );
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
 
-  function startThread() {
+  function startThread(workingDirectory = "") {
     // Keep the assistant choice; selecting a project is optional for each chat.
     const previous = chat.threads[0];
     const definitionId =
@@ -190,7 +203,7 @@ export function ChatView({
         : (installed[0] ?? chat.supported[0] ?? "claude");
     chat.createThread({
       definitionId,
-      workingDirectory: "",
+      workingDirectory,
       permission:
         previous && permissionsFor(definitionId).includes(previous.permission)
           ? previous.permission
@@ -239,6 +252,16 @@ export function ChatView({
             <button
               type="button"
               role="tab"
+              aria-selected={mode === "projects"}
+              className={`chat-mode__tab${mode === "projects" ? " is-active" : ""}`}
+              onClick={() => setMode("projects")}
+            >
+              <FolderIcon />
+              {t("chat.projects")}
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={mode === "automations"}
               className={`chat-mode__tab${mode === "automations" ? " is-active" : ""}`}
               onClick={() => setMode("automations")}
@@ -276,10 +299,10 @@ export function ChatView({
             <button
               type="button"
               className="button button--primary button--sm"
-              onClick={mode === "threads" ? startThread : startAutomation}
+              onClick={mode === "automations" ? startAutomation : () => startThread(projectFilter ?? "")}
               disabled={agents.mode !== "ready"}
-              aria-label={mode === "threads" ? t("chat.new") : t("automation.new")}
-              title={mode === "threads" ? t("chat.new") : t("automation.new")}
+              aria-label={mode === "automations" ? t("automation.new") : t("chat.new")}
+              title={mode === "automations" ? t("automation.new") : t("chat.new")}
             >
               <PlusIcon />
             </button>
@@ -314,6 +337,21 @@ export function ChatView({
         )}
         {mode === "threads" ? (
           <div className="chat-threads__list">
+            {projectFilter !== null && (
+              <div className="chat-project-filter">
+                <FolderIcon />
+                <span title={projectFilter}>{projectName(projectFilter)}</span>
+                <button
+                  type="button"
+                  className="chat-tree__action"
+                  onClick={() => setProjectFilter(null)}
+                  aria-label={t("chat.projects.clear")}
+                  title={t("chat.projects.clear")}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            )}
             <SidebarStorageNotice />
             <ChatThreadTree
               layout={sidebarLayout}
@@ -390,6 +428,43 @@ export function ChatView({
               </details>
             )}
           </div>
+        ) : mode === "projects" ? (
+          <ul className="chat-threads__list chat-projects">
+            {projects.length === 0 && <li className="chat-threads__hint">{t("chat.projects.none")}</li>}
+            {projects.map((project) => (
+              <li key={project.directory}>
+                <button
+                  type="button"
+                  className={`chat-thread${projectFilter === project.directory ? " is-active" : ""}`}
+                  title={project.directory}
+                  onClick={() => {
+                    setProjectFilter(project.directory);
+                    setMode("threads");
+                  }}
+                >
+                  <span>
+                    <span className="chat-thread__title">{project.name}</span>
+                    <span className="chat-thread__meta">
+                      {t("chat.projects.count", { count: project.threads })} · {displayPath(project.directory)}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-tree__action"
+                  aria-label={t("chat.projects.newChat", { name: project.name })}
+                  title={t("chat.projects.newChat", { name: project.name })}
+                  onClick={() => {
+                    setProjectFilter(project.directory);
+                    setMode("threads");
+                    startThread(project.directory);
+                  }}
+                >
+                  <PlusIcon />
+                </button>
+              </li>
+            ))}
+          </ul>
         ) : (
           <ul className="chat-threads__list">
             {automations.automations.map((automation) => (
@@ -476,7 +551,7 @@ export function ChatView({
               <button
                 type="button"
                 className="button button--primary"
-                onClick={startThread}
+                onClick={() => startThread(projectFilter ?? "")}
                 disabled={agents.mode !== "ready"}
               >
                 <PlusIcon />

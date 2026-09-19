@@ -84,6 +84,7 @@
 .agents-workspace,
 .agents-orchestration,
 .agents-delivery,
+.agents-remote-fleet,
 .agents-running {
   display: grid;
   gap: var(--space-5);
@@ -856,6 +857,7 @@
   .agents-workspace,
   .agents-orchestration,
   .agents-delivery,
+  .agents-remote-fleet,
   .agents-running {
     padding: var(--space-5);
   }
@@ -1103,10 +1105,6 @@
   max-width: 14rem;
 }
 
-.agents-remote-fleet {
-  display: grid;
-  gap: var(--space-3);
-}
 
 .agents-remote-fleet__plans {
   display: flex;

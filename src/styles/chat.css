@@ -397,6 +397,9 @@
 
 .chat-header {
   display: grid;
+  /* An implicit auto column grows to its widest content; keep the header,
+     its settings and panels inside the pane instead. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--line);
@@ -1798,4 +1801,35 @@ button.chat-diff__line.is-commentable:focus-visible {
 .chat-card__output--diff .chat-diff__line {
   display: block;
   padding-inline: var(--space-3);
+}
+
+.chat-projects li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 0.25rem);
+}
+
+.chat-projects li .chat-thread {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-project-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-1, 0.25rem) var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-project-filter span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
