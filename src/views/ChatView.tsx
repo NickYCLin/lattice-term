@@ -198,7 +198,20 @@ export function ChatView({
 
   function startThread(workingDirectory = "") {
     // Keep the assistant choice; selecting a project is optional for each chat.
-    const previous = chat.threads[0];
+    // Inside a project, its own latest conversation is the better guide:
+    // projects tend to keep one assistant, model and permission.
+    const normalized = workingDirectory.replace(/[\\/]+$/, "") || workingDirectory;
+    const inProject = normalized
+      ? chat.threads
+          .filter(
+            (thread) => (thread.workingDirectory.replace(/[\\/]+$/, "") || thread.workingDirectory) === normalized,
+          )
+          .reduce<ChatThread | undefined>(
+            (latest, thread) => (!latest || thread.updatedAt > latest.updatedAt ? thread : latest),
+            undefined,
+          )
+      : undefined;
+    const previous = inProject ?? chat.threads[0];
     const definitionId =
       previous && installed.includes(previous.definitionId)
         ? previous.definitionId
