@@ -1260,3 +1260,30 @@ button.chat-chip:hover {
   border-color: var(--accent);
   color: var(--text);
 }
+
+.chat-elicitation {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.chat-elicitation p {
+  margin: 0;
+}
+
+.chat-elicitation__hint {
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+.chat-elicitation__url {
+  display: grid;
+  gap: var(--space-1, 0.25rem);
+  font-size: var(--text-xs);
+}
+
+.chat-elicitation__url code {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}

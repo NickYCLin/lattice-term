@@ -61,6 +61,7 @@ import { findCliProxy } from "../app/cliProxyApi";
 import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
+import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
 import { webSources } from "../app/chatWebSources";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
@@ -1093,7 +1094,9 @@ function ChatItemView({
           )}
         </>
       );
-    case "approval":
+    case "approval": {
+      const elicitation =
+        item.name === "mcp_form" || item.name === "mcp_url" ? parseElicitation(item.input) : null;
       return (
         <div
           className={`chat-card chat-card--approval chat-approval--${item.decision}`}
@@ -1117,6 +1120,16 @@ function ChatItemView({
               onAnswer={(allow, message) => onAnswer(item.requestId, allow, message)}
             />
           )}
+          {(item.name === "mcp_form" || item.name === "mcp_url") &&
+            item.decision === "pending" &&
+            (elicitation ? (
+              <McpElicitation
+                request={elicitation}
+                onAnswer={(allow, message) => onAnswer(item.requestId, allow, message)}
+              />
+            ) : (
+              <p className="chat-notice">{t("chat.question.unsupported")}</p>
+            ))}
           {item.name === "unsupported_input" && item.decision === "pending" && (
             <p className="chat-notice">{t("chat.question.unsupported")}</p>
           )}
@@ -1126,9 +1139,11 @@ function ChatItemView({
               <pre className="chat-card__output">{item.input}</pre>
             </details>
           )}
-          {item.decision === "pending" && item.name !== "user_input" && (
+          {item.decision === "pending" && item.name !== "user_input" && !elicitation && (
             <div className="chat-card__actions">
-              {item.name !== "unsupported_input" && (
+              {item.name !== "unsupported_input" &&
+                item.name !== "mcp_form" &&
+                item.name !== "mcp_url" && (
                 <button
                   type="button"
                   className="button button--primary button--sm"
@@ -1148,6 +1163,7 @@ function ChatItemView({
           )}
         </div>
       );
+    }
     case "notice":
       return <p className="chat-notice">{item.text}</p>;
     case "turnEnd":

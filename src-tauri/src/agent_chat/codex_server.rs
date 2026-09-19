@@ -872,13 +872,21 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                     ChatEvent::ApprovalRequested {
                         request_id: request_id.clone(),
                         tool_use_id: None,
-                        name: if is_mcp_tool_approval(&params) {
-                            "mcp_tool"
-                        } else {
-                            "unsupported_input"
-                        }
-                        .to_string(),
-                        summary: truncate(str_field(&params, "message").unwrap_or_default(), 200),
+                        name: super::elicitation::kind(&params).card_name().to_string(),
+                        // Who is asking matters as much as what: a form can
+                        // come from any MCP server the CLI has configured.
+                        summary: truncate(
+                            &match str_field(&params, "serverName") {
+                                Some(server) => format!(
+                                    "{server}: {}",
+                                    str_field(&params, "message").unwrap_or_default()
+                                ),
+                                None => str_field(&params, "message")
+                                    .unwrap_or_default()
+                                    .to_string(),
+                            },
+                            200,
+                        ),
                         input: bounded_output(
                             &serde_json::to_string_pretty(&params).unwrap_or_default(),
                         ),
@@ -1138,13 +1146,7 @@ fn response_line(pending: &Value, allow: bool, message: Option<&str>) -> Result<
     let id = &pending["latticeterm_rpc_id"];
     let result = match pending["method"].as_str() {
         Some("mcpServer/elicitation/request") => {
-            if allow && !is_mcp_tool_approval(&pending["params"]) {
-                return Err("This input format is not supported yet.".to_string());
-            }
-            serde_json::json!({
-                "action": if allow { "accept" } else { "decline" },
-                "content": if allow { serde_json::json!({}) } else { Value::Null },
-            })
+            super::elicitation::result(&pending["params"], allow, message)?
         }
         Some("item/tool/requestUserInput" | "tool/requestUserInput") => {
             if !allow {
@@ -1183,18 +1185,6 @@ fn response_line(pending: &Value, allow: bool, message: Option<&str>) -> Result<
         _ => return Ok(codex_approval_line(id, allow)),
     };
     Ok(serde_json::json!({"id": id, "result": result}).to_string())
-}
-
-// Codex's MCP tool approval is an empty form with an explicit semantic tag.
-// Never turn a login form or another structured input into a generic Yes.
-fn is_mcp_tool_approval(params: &Value) -> bool {
-    let meta = params.get("_meta").or_else(|| params.get("meta"));
-    params["mode"] == "form"
-        && meta
-            .and_then(|meta| meta.get("codex_approval_kind"))
-            .and_then(Value::as_str)
-            == Some("mcp_tool_call")
-        && params["requestedSchema"] == serde_json::json!({"type": "object", "properties": {}})
 }
 
 /// Interrupts the turn in flight, keeping the server for the next one. A
@@ -1322,7 +1312,7 @@ mod tests {
     #[test]
     fn unknown_mcp_forms_cannot_be_accepted_as_tool_approval() {
         for params in [
-            serde_json::json!({"mode": "url", "url": "https://example.com"}),
+            serde_json::json!({"mode": "url", "url": "file:///etc/passwd"}),
             serde_json::json!({"mode": "form", "requestedSchema": {"type": "object", "properties": {}}}),
             serde_json::json!({"mode": "form", "_meta": {"codex_approval_kind": "mcp_tool_call"}, "requestedSchema": {"type": "object", "properties": {"password": {"type": "string"}}}}),
         ] {

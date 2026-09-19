@@ -28,6 +28,7 @@ use tokio::process::{Child, Command};
 
 mod browser;
 mod codex_server;
+mod elicitation;
 
 pub const EVENT_CHAT: &str = "agent-chat://event";
 
