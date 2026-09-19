@@ -65,6 +65,7 @@ import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
+import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -1009,6 +1010,7 @@ function ThreadPane({
               streaming={running && index === thread.items.length - 1}
               tag={tag}
               onAnswer={answer}
+              workingDirectory={thread.workingDirectory}
               onBranch={
                 running && index === thread.items.length - 1
                   ? undefined
@@ -1184,6 +1186,7 @@ function ChatItemView({
   tag,
   onAnswer,
   onBranch,
+  workingDirectory = "",
 }: {
   item: ChatItem;
   assistant: string;
@@ -1192,6 +1195,8 @@ function ChatItemView({
   onAnswer: (requestId: string, allow: boolean, message?: string) => Promise<void>;
   /** Starts a new conversation that ends at this message. */
   onBranch?: () => void;
+  /** Where images a reply mentions may be previewed from. */
+  workingDirectory?: string;
 }) {
   const { t } = useI18n();
   const branchButton = onBranch && (
@@ -1236,6 +1241,9 @@ function ChatItemView({
             <div className={streaming ? "chat-cursor" : undefined}>
               <ChatMarkdown source={item.text} />
             </div>
+            {!streaming && workingDirectory && (
+              <ChatImagePreviews text={item.text} workingDirectory={workingDirectory} />
+            )}
           </div>
           {!streaming && branchButton}
         </div>

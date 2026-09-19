@@ -10,6 +10,7 @@ mod agent_process;
 pub mod app_menu;
 pub mod backup;
 mod chat_attachments;
+pub mod chat_images;
 pub mod clipboard;
 pub mod cliproxy;
 pub mod credentials;
@@ -1468,6 +1469,15 @@ async fn agent_broadcast(
         }
     }
     Ok(outcomes)
+}
+
+/// A thumbnail of an image a reply mentions, from the conversation folder.
+#[tauri::command]
+async fn chat_image_preview(
+    working_directory: String,
+    path: String,
+) -> Result<Option<String>, String> {
+    blocking(move || crate::chat_images::preview(&working_directory, &path)).await
 }
 
 /// Files copied in a file manager, as chat attachments: only existing
@@ -4366,6 +4376,7 @@ pub fn run() {
             agent_paste_clipboard_image,
             agent_chat_paste_image,
             agent_chat_paste_files,
+            chat_image_preview,
             agent_export_transcript,
             agent_import_memory_handoff,
             agent_write_handoff_file,

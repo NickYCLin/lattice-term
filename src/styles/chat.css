@@ -1734,3 +1734,50 @@ button.chat-diff__line.is-commentable:focus-visible {
   color: var(--text-muted);
   font-size: var(--text-2xs);
 }
+
+.chat-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.chat-images figure {
+  display: grid;
+  gap: 4px;
+  width: 10rem;
+  margin: 0;
+}
+
+.chat-images figure.is-enlarged {
+  width: min(100%, 42rem);
+}
+
+.chat-images button {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  cursor: zoom-in;
+}
+
+.chat-images figure.is-enlarged button {
+  cursor: zoom-out;
+}
+
+.chat-images img {
+  display: block;
+  width: 100%;
+  max-height: 32rem;
+  object-fit: contain;
+}
+
+.chat-images figcaption {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
