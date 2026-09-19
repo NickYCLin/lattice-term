@@ -18,6 +18,7 @@ import {
   appendSteeredInput,
   beginTurn,
   branchThread,
+  noteDelegationFinished,
   threadTitle,
   defaultPermission,
   permissionsFor,
@@ -273,11 +274,21 @@ export function useAgentChat(
             void invoke("chat_notify", { threadId: thread!.id, ...notification }).catch(() => {});
           }
         }
-        changeThreads((current) =>
-          current.map((thread) =>
+        changeThreads((current) => {
+          const next = current.map((thread) =>
             thread.id === envelope.threadId ? applyChatEvent(thread, envelope) : thread,
-          ),
-        );
+          );
+          if (envelope.event.kind !== "finished") return next;
+          const child = next.find((thread) => thread.id === envelope.threadId);
+          const parentId = child?.delegatedFrom;
+          if (!child || !parentId) return next;
+          const failed = envelope.event.error !== null;
+          return next.map((thread) =>
+            thread.id === parentId
+              ? { ...noteDelegationFinished(thread, child.id, envelope.turnId, failed), unread: true }
+              : thread,
+          );
+        });
       });
       if (disposed) unlisten();
       else stop = unlisten;

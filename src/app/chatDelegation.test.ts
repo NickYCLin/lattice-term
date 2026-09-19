@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { delegationPrompt, delegationResult, delegationState } from "./agentChat";
+import { createThread, delegationPrompt, delegationResult, delegationState, noteDelegationFinished } from "./agentChat";
 
 const turnEnd = (error: string | null) => ({
   type: "turnEnd" as const,
@@ -33,3 +33,14 @@ describe("delegated subtasks", () => {
     expect(delegationResult({ title: "x", items: [] })).toBe("");
   });
 });
+
+describe("subtask notes", () => {
+  it("adds one note per finished subtask turn to the asking conversation", () => {
+    const parent = createThread({ definitionId: "claude", workingDirectory: "/w", permission: "readOnly", model: "" }, "p", 1);
+    const once = noteDelegationFinished(parent, "child", "turn-1", false);
+    expect(once.items).toEqual([{ type: "delegation", id: "delegation:child:turn-1", childId: "child", failed: false }]);
+    expect(noteDelegationFinished(once, "child", "turn-1", false)).toBe(once);
+    expect(noteDelegationFinished(once, "child", "turn-2", true).items).toHaveLength(2);
+  });
+});
+

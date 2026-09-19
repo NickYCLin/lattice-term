@@ -24,6 +24,7 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteC
 import {
   defaultPermission,
   effortChoices,
+  delegationResult,
   supportsBrowser,
   looksLikeDiff,
   formatTokens,
@@ -1110,13 +1111,24 @@ function ThreadPane({
             <ChatItemView
               key={item.id}
               item={item}
-              assistant={cliLabel(item.type !== "user" && item.type !== "notice" && item.type !== "turnEnd"
+              assistant={cliLabel(item.type !== "user" && item.type !== "notice" && item.type !== "turnEnd" && item.type !== "delegation"
                 ? item.assistantDefinitionId ?? thread.definitionId
                 : thread.definitionId)}
               streaming={running && index === thread.items.length - 1}
               tag={tag}
               onAnswer={answer}
               workingDirectory={thread.workingDirectory}
+              subtask={(childId) => {
+                const child = chat.getThread(childId);
+                if (!child) return null;
+                const result = delegationResult(child);
+                return {
+                  title: child.title,
+                  result,
+                  open: () => chat.setActiveThreadId(child.id),
+                  bringBack: () => setDraft((current) => (current ? `${current}\n\n${result}` : result)),
+                };
+              }}
               onBranch={
                 running && index === thread.items.length - 1
                   ? undefined
@@ -1304,6 +1316,7 @@ function ChatItemView({
   onAnswer,
   onBranch,
   workingDirectory = "",
+  subtask,
 }: {
   item: ChatItem;
   assistant: string;
@@ -1314,6 +1327,8 @@ function ChatItemView({
   onBranch?: () => void;
   /** Where images a reply mentions may be previewed from. */
   workingDirectory?: string;
+  /** Resolves a delegated subtask for its "finished" note. */
+  subtask?: (childId: string) => { title: string; result: string; open: () => void; bringBack: () => void } | null;
 }) {
   const { t } = useI18n();
   const branchButton = onBranch && (
@@ -1492,6 +1507,30 @@ function ChatItemView({
     }
     case "notice":
       return <p className="chat-notice">{item.text}</p>;
+    case "delegation": {
+      const child = subtask?.(item.childId) ?? null;
+      return (
+        <div className={`chat-delegation-note${item.failed ? " is-failed" : ""}`} role="status">
+          <span>
+            {t(item.failed ? "chat.delegate.noteFailed" : "chat.delegate.noteDone", {
+              title: child?.title.replace(/^↳\s*/, "") ?? t("chat.delegate.noteGone"),
+            })}
+          </span>
+          {child && (
+            <>
+              <button type="button" className="button button--ghost button--sm" onClick={child.open}>
+                {t("chat.delegate.open")}
+              </button>
+              {!item.failed && child.result && (
+                <button type="button" className="button button--secondary button--sm" onClick={child.bringBack}>
+                  {t("chat.delegate.bringBack")}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
     case "turnEnd":
       if (item.error) {
         // A headless turn cannot open the CLI's own login screen, so an

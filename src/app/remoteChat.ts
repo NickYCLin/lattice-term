@@ -13,7 +13,7 @@ export type RemoteChatOperation =
 export interface RemoteChatRequest { id: string; operation: RemoteChatOperation }
 export interface RemoteChatResponse { id: string; value: unknown; error: string | null }
 export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean }
-export interface RemoteChatItem { id: string; type: ChatItem["type"]; text: string; requestId?: string; pending?: boolean; truncated: boolean }
+export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();
 function clip(text: string, bytes: number) {
@@ -35,6 +35,10 @@ export function remoteThread(thread: ChatThread): RemoteChatThread {
   };
 }
 function remoteItem(item: ChatItem): RemoteChatItem {
+  // A subtask note only means something next to the local subtask list.
+  if (item.type === "delegation") {
+    return { id: item.id, type: "notice", text: item.failed ? "Subtask failed." : "Subtask finished.", truncated: false };
+  }
   let text: string;
   if (item.type === "tool") text = `${item.name}\n${item.summary}\n${item.output ?? ""}`;
   else if (item.type === "approval") text = `${item.name}\n${item.summary}\n${item.input}`;

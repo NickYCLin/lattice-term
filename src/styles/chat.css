@@ -1897,3 +1897,24 @@ button.chat-diff__line.is-commentable:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.chat-delegation-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+}
+
+.chat-delegation-note.is-failed {
+  border-left-color: var(--danger);
+}
+
+.chat-delegation-note > span {
+  flex: 1;
+  min-width: 0;
+}

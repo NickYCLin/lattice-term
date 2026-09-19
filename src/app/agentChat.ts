@@ -190,6 +190,8 @@ export type ChatItem =
       assistantDefinitionId?: ChatDefinitionId;
     }
   | { type: "notice"; id: string; text: string }
+  /** A subtask this conversation delegated finished a turn. */
+  | { type: "delegation"; id: string; childId: string; failed: boolean }
   | {
       type: "approval";
       id: string;
@@ -328,7 +330,7 @@ function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
-function assistantItem(item: ChatItem): item is Exclude<ChatItem, { type: "user" | "notice" | "turnEnd" }> {
+function assistantItem(item: ChatItem): item is Exclude<ChatItem, { type: "user" | "notice" | "turnEnd" | "delegation" }> {
   return item.type === "text" || item.type === "reasoning" || item.type === "tool" || item.type === "approval";
 }
 
@@ -1029,4 +1031,22 @@ export function delegationResult(thread: Pick<ChatThread, "items" | "title">, ma
 export function delegationPrompt(thread: Pick<ChatThread, "items">): string {
   const first = thread.items.find((item) => item.type === "user");
   return first && first.type === "user" ? first.text : "";
+}
+
+/**
+ * Records in the delegating conversation that a subtask's turn ended, so
+ * the result is noticed where the work was asked for. Once per turn.
+ */
+export function noteDelegationFinished(
+  parent: ChatThread,
+  childId: string,
+  turnId: string,
+  failed: boolean,
+): ChatThread {
+  const id = `delegation:${childId}:${turnId}`;
+  if (parent.items.some((item) => item.id === id)) return parent;
+  return {
+    ...parent,
+    items: [...parent.items, { type: "delegation", id, childId, failed }],
+  };
 }
