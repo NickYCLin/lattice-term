@@ -1298,6 +1298,7 @@ export const messages: Messages = {
   "chat.stop": "중지",
   "chat.running": "댓글 ...",
   "chat.reasoning": "추론",
+  "chat.sources": "출처 {count}개",
   "chat.tool.running": "실행 중",
   "chat.tool.failed": "실패",
   "chat.turn.done": "완료",

@@ -60,6 +60,8 @@ import { AccountModelField } from "../components/agents/AccountModelField";
 import { findCliProxy } from "../app/cliProxyApi";
 import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
+import { ChatWebSources } from "../components/chat/ChatWebSources";
+import { webSources } from "../app/chatWebSources";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
@@ -1070,21 +1072,26 @@ function ChatItemView({
       );
     case "tool":
       return (
-        <details
-          className={`chat-card chat-card--tool${item.isError ? " is-error" : ""}${!item.done ? " is-running" : ""}`}
-          open={item.isError || undefined}
-        >
-          <summary>
-            <span className="chat-card__label">{item.name}</span>
-            <code className="chat-card__summary" title={item.summary}>
-              {item.summary}
-            </code>
-            <span className="chat-card__state">
-              {!item.done ? t("chat.tool.running") : item.isError ? t("chat.tool.failed") : ""}
-            </span>
-          </summary>
-          {item.output && <pre className="chat-card__output">{item.output}</pre>}
-        </details>
+        <>
+          <details
+            className={`chat-card chat-card--tool${item.isError ? " is-error" : ""}${!item.done ? " is-running" : ""}`}
+            open={item.isError || undefined}
+          >
+            <summary>
+              <span className="chat-card__label">{item.name}</span>
+              <code className="chat-card__summary" title={item.summary}>
+                {item.summary}
+              </code>
+              <span className="chat-card__state">
+                {!item.done ? t("chat.tool.running") : item.isError ? t("chat.tool.failed") : ""}
+              </span>
+            </summary>
+            {item.output && <pre className="chat-card__output">{item.output}</pre>}
+          </details>
+          {item.done && !item.isError && (
+            <ChatWebSources sources={webSources(item.name, item.output)} />
+          )}
+        </>
       );
     case "approval":
       return (

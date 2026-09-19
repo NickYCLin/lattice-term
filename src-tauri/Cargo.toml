@@ -52,6 +52,7 @@ tempfile = "3.27.0"
 dirs = "7"
 png = "0.18.1"
 if-addrs = "0.15"
+tauri-plugin-opener = "2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }

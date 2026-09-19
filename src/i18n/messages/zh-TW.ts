@@ -1402,6 +1402,7 @@ export const zhTW = {
   "chat.stop": "停止",
   "chat.running": "回覆中…",
   "chat.reasoning": "思考過程",
+  "chat.sources": "來源 {count} 個",
   "chat.tool.running": "執行中",
   "chat.tool.failed": "失敗",
   "chat.turn.done": "完成",

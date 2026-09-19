@@ -4044,6 +4044,9 @@ pub fn run() {
     #[cfg(mobile)]
     let builder = tauri::Builder::default();
     let builder = builder.plugin(tauri_plugin_dialog::init());
+    // Opens web links the user clicks (search sources) in the default
+    // browser; the capability limits it to http(s) URLs.
+    let builder = builder.plugin(tauri_plugin_opener::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     // Auto-update and relaunch are desktop concerns; mobile installs come

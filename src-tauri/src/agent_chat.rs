@@ -2160,11 +2160,17 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
         Some("webSearch") => {
             let summary = str_field(item, "query").unwrap_or_default().to_string();
             if completed {
+                // Codex reports no result list, only the page it opened or
+                // searched inside; that address is the source worth showing.
+                let output = item
+                    .get("action")
+                    .and_then(|action| str_field(action, "url"))
+                    .unwrap_or_default();
                 events.push(ChatEvent::ToolFinished {
                     item_id,
                     name: Some("web_search".to_string()),
                     summary: Some(truncate(&summary, 200)),
-                    output: String::new(),
+                    output: bounded_output(output),
                     is_error: false,
                 });
             } else {
@@ -3040,6 +3046,28 @@ mod tests {
             codex_request_id(&Value::from("x")),
             codex_request_id(&Value::from("y"))
         );
+    }
+
+    #[test]
+    fn codex_web_search_keeps_the_page_it_opened() {
+        let item = serde_json::json!({
+            "type": "webSearch",
+            "id": "ws-1",
+            "query": "tauri opener",
+            "action": { "type": "openPage", "url": "https://v2.tauri.app/plugin/opener/" }
+        });
+        match codex_v2_item_events(&item, true).as_slice() {
+            [ChatEvent::ToolFinished { name, output, .. }] => {
+                assert_eq!(name.as_deref(), Some("web_search"));
+                assert_eq!(output, "https://v2.tauri.app/plugin/opener/");
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+        let plain = serde_json::json!({ "type": "webSearch", "id": "ws-2", "query": "q" });
+        match codex_v2_item_events(&plain, true).as_slice() {
+            [ChatEvent::ToolFinished { output, .. }] => assert!(output.is_empty()),
+            other => panic!("unexpected events {other:?}"),
+        }
     }
 
     #[test]

@@ -1468,6 +1468,7 @@ export const en: Messages = {
   "chat.stop": "Stop",
   "chat.running": "Replying…",
   "chat.reasoning": "Reasoning",
+  "chat.sources": "{count} sources",
   "chat.tool.running": "Running",
   "chat.tool.failed": "Failed",
   "chat.turn.done": "Done",

@@ -1317,6 +1317,7 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "回复中…",
   "chat.reasoning": "思考过程",
+  "chat.sources": "来源 {count} 个",
   "chat.tool.running": "运行中",
   "chat.tool.failed": "失败",
   "chat.turn.done": "完成",

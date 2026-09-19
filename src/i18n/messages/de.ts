@@ -1298,6 +1298,7 @@ export const messages: Messages = {
   "chat.stop": "Stoppen",
   "chat.running": "Ich will nicht...",
   "chat.reasoning": "Denkprozess",
+  "chat.sources": "{count} Quellen",
   "chat.tool.running": "Wird ausgeführt",
   "chat.tool.failed": "Fehlgeschlagen",
   "chat.turn.done": "Fertig",

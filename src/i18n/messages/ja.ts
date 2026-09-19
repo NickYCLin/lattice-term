@@ -1298,6 +1298,7 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "返信...",
   "chat.reasoning": "推論",
+  "chat.sources": "ソース {count} 件",
   "chat.tool.running": "実行中",
   "chat.tool.failed": "失敗",
   "chat.turn.done": "完了",
