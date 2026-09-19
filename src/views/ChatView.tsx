@@ -63,6 +63,7 @@ import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyAp
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
+import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -943,11 +944,18 @@ function ThreadPane({
             {(thread.definitionId === "claude" ||
               thread.definitionId === "codex" ||
               thread.definitionId === "gemini") && (
-              <ChatInstructions
-                definitionId={thread.definitionId}
-                workingDirectory={thread.workingDirectory}
-                configDirectory={activeProfile?.configDirectory ?? null}
-              />
+              <>
+                <ChatInstructions
+                  definitionId={thread.definitionId}
+                  workingDirectory={thread.workingDirectory}
+                  configDirectory={activeProfile?.configDirectory ?? null}
+                />
+                <ChatMcpServers
+                  definitionId={thread.definitionId}
+                  workingDirectory={thread.workingDirectory}
+                  configDirectory={activeProfile?.configDirectory ?? null}
+                />
+              </>
             )}
           </div>
         )}

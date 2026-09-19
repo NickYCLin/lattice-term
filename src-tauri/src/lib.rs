@@ -23,6 +23,7 @@ pub mod linux_webkit;
 mod local_files;
 pub mod local_terminal;
 pub mod mcp_desktop;
+pub mod mcp_inventory;
 pub mod mcp_screen;
 pub mod metrics;
 pub mod notification_sound;
@@ -2195,6 +2196,23 @@ async fn git_changes_commit(working_directory: String, message: String) -> Resul
     blocking(move || crate::git_changes::commit(&working_directory, &message)).await
 }
 
+/// The MCP servers a chat CLI would load for this conversation.
+#[tauri::command]
+async fn agent_mcp_servers(
+    definition_id: String,
+    working_directory: Option<String>,
+    config_directory: Option<String>,
+) -> Result<Vec<crate::mcp_inventory::McpServerInfo>, String> {
+    blocking(move || {
+        crate::mcp_inventory::inspect(
+            &definition_id,
+            working_directory.as_deref(),
+            config_directory.as_deref(),
+        )
+    })
+    .await
+}
+
 /// The instruction files a chat CLI would read for this conversation.
 #[tauri::command]
 async fn agent_instruction_files(
@@ -4336,6 +4354,7 @@ pub fn run() {
             git_changes_stage,
             git_changes_unstage,
             git_changes_commit,
+            agent_mcp_servers,
             agent_shared_rules_save,
             agent_plan_snapshot,
             agent_plan_save,

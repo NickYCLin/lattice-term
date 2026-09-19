@@ -1595,3 +1595,42 @@ button.chat-chip:hover {
     border-bottom: 1px solid var(--line);
   }
 }
+
+.chat-mcp {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-mcp li {
+  display: grid;
+  gap: var(--space-1, 0.25rem);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.chat-mcp li.is-disabled {
+  opacity: 0.65;
+}
+
+.chat-mcp__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chat-mcp__target,
+.chat-mcp__command code {
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
+.chat-mcp__command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 0.25rem);
+}
