@@ -2795,3 +2795,7 @@
 .connection-card__go {
   pointer-events: auto;
 }
+
+.sound-system-notification {
+  margin: var(--space-3) 0;
+}

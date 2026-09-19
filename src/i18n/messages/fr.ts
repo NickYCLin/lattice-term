@@ -418,6 +418,8 @@ export const messages: Messages = {
   "settings.notifications.session": "Achèvement de la session",
   "settings.notifications.chat": "Fin de la réponse au clavardage",
   "settings.notifications.volume": "Volume sonore",
+  "settings.notifications.system": "Notification système quand une réponse de chat est terminée",
+  "settings.notifications.systemHint": "Uniquement quand LatticeTerm est en arrière-plan ; affiche le nom de la conversation et le début de la réponse. Sous Linux, un clic ouvre la conversation ; sous macOS et Windows, il ramène LatticeTerm au premier plan.",
   "settings.notifications.muted": "Le volume est zéro. Les notifications et les prévisualisations sont muettes; les badges visuels restent visibles.",
   "settings.notifications.libraryHint": "Prévisualiser les sons ci-dessous, puis choisir un repère pour les sessions et les conversations ci-dessus.",
   "settings.notifications.group.soft": "Doux",

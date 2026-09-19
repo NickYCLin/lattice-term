@@ -38,6 +38,8 @@ export interface Preferences {
   checkUpdatesOnLaunch: boolean;
   agentCompletionSound: NotificationSoundChoice;
   chatCompletionSound: NotificationSoundChoice;
+  /** A system notification when a reply finishes while the window is in the background. */
+  chatCompletionNotification: boolean;
   notificationVolume: number;
 }
 
@@ -54,6 +56,7 @@ export const defaultPreferences: Preferences = {
   checkUpdatesOnLaunch: true,
   agentCompletionSound: "bloom",
   chatCompletionSound: "bloom",
+  chatCompletionNotification: true,
   notificationVolume: 60,
 };
 
@@ -104,6 +107,7 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     checkUpdatesOnLaunch: stored.checkUpdatesOnLaunch !== false,
     agentCompletionSound: normalizeNotificationSound(stored.agentCompletionSound),
     chatCompletionSound: normalizeNotificationSound(stored.chatCompletionSound ?? stored.agentCompletionSound),
+    chatCompletionNotification: stored.chatCompletionNotification !== false,
     notificationVolume: normalizeNotificationVolume(stored.notificationVolume),
   };
 }

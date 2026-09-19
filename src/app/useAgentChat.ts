@@ -18,6 +18,7 @@ import {
   appendSteeredInput,
   beginTurn,
   branchThread,
+  completionNotificationText,
   effortForTurn,
   createThread,
   decideApproval,
@@ -167,12 +168,18 @@ export interface AgentChatApi {
   toggleFolder: (folderId: string) => void;
 }
 
-export function useAgentChat(completionSound: NotificationSoundChoice = "off", completionVolume = 60): AgentChatApi {
+export function useAgentChat(
+  completionSound: NotificationSoundChoice = "off",
+  completionVolume = 60,
+  completionNotification = false,
+): AgentChatApi {
   const completionTracker = useRef(new ChatCompletionTracker());
   const soundRef = useRef(completionSound);
   soundRef.current = completionSound;
   const volumeRef = useRef(completionVolume);
   volumeRef.current = completionVolume;
+  const notifyRef = useRef(completionNotification);
+  notifyRef.current = completionNotification;
   const [threads, setThreads] = useState<ChatThread[]>(() =>
     typeof localStorage === "undefined" ? [] : loadStoredThreads(localStorage),
   );
@@ -242,6 +249,13 @@ export function useAgentChat(completionSound: NotificationSoundChoice = "off", c
         const envelope = event.payload;
         if (completionTracker.current.accept(envelope)) {
           void playNotificationSound(soundRef.current, volumeRef.current);
+          const thread = threadsRef.current.find((entry) => entry.id === envelope.threadId);
+          const notification = thread && notifyRef.current ? completionNotificationText(thread) : null;
+          // Only while the window is in the background: in front, the reply
+          // is already on screen.
+          if (notification && typeof document !== "undefined" && !document.hasFocus()) {
+            void invoke("chat_notify", { threadId: thread!.id, ...notification }).catch(() => {});
+          }
         }
         changeThreads((current) =>
           current.map((thread) =>

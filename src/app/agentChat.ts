@@ -972,3 +972,13 @@ export function formatTokens(count: number): string {
   if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0)}k`;
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
+
+/** What a finished reply's system notification says: the thread and the reply's start. */
+export function completionNotificationText(thread: Pick<ChatThread, "title" | "items">): { title: string; body: string } {
+  const reply = [...thread.items].reverse().find((item) => item.type === "text");
+  const body = reply && reply.type === "text" ? reply.text.replace(/\s+/g, " ").trim() : "";
+  return {
+    title: thread.title.trim() || "LatticeTerm",
+    body: body.length > 180 ? `${body.slice(0, 179)}…` : body || "✓",
+  };
+}

@@ -479,6 +479,8 @@ export const zhTW = {
   "settings.notifications.session": "工作階段完成",
   "settings.notifications.chat": "對話回覆完成",
   "settings.notifications.volume": "提示音音量",
+  "settings.notifications.system": "對話回覆完成時顯示系統通知",
+  "settings.notifications.systemHint": "只在 LatticeTerm 不在前景時出現，內容是對話名稱和回覆開頭。Linux 上點通知會直接回到那個對話；macOS 與 Windows 會把 LatticeTerm 帶到前景。",
   "settings.notifications.muted": "音量為 0，所有提示音與試聽皆已靜音；視覺通知仍會顯示。",
   "settings.notifications.libraryHint": "點選下方音效即可試聽；在上方分別指定工作階段與對話使用的提示音。",
   "settings.notifications.group.soft": "柔和",

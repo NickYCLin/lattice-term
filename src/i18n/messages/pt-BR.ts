@@ -418,6 +418,8 @@ export const messages: Messages = {
   "settings.notifications.session": "Completação da sessão",
   "settings.notifications.chat": "Completação da resposta de bate- papo",
   "settings.notifications.volume": "Volume de som",
+  "settings.notifications.system": "Mostrar notificação do sistema quando uma resposta do chat terminar",
+  "settings.notifications.systemHint": "Só quando o LatticeTerm está em segundo plano; mostra o nome da conversa e o início da resposta. No Linux, clicar abre a conversa; no macOS e no Windows traz o LatticeTerm para a frente.",
   "settings.notifications.muted": "O volume é zero. As notificações e antevisões são silenciadas; os crachás visuais permanecem visíveis.",
   "settings.notifications.libraryHint": "Visualize os sons abaixo e, em seguida, escolha uma dica para sessões e bate-papos acima.",
   "settings.notifications.group.soft": "Suave",

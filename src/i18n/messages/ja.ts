@@ -418,6 +418,8 @@ export const messages: Messages = {
   "settings.notifications.session": "セッション完了",
   "settings.notifications.chat": "チャット返信完了",
   "settings.notifications.volume": "音量",
+  "settings.notifications.system": "チャットの返信が完了したらシステム通知を表示",
+  "settings.notifications.systemHint": "LatticeTerm が背面にあるときだけ表示し、会話名と返信の冒頭を示します。Linux では通知をクリックするとその会話を開きます。macOS と Windows では LatticeTerm を前面に出します。",
   "settings.notifications.muted": "ボリュームはゼロです。通知とプレビューはミュートされます。ビジュアルバッジは表示されません。",
   "settings.notifications.libraryHint": "下の音をプレビューし、上記のセッションとチャットのキューを選択します。",
   "settings.notifications.group.soft": "柔らかい音",

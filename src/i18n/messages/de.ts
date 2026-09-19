@@ -418,6 +418,8 @@ export const messages: Messages = {
   "settings.notifications.session": "Abschluss der Sitzungen",
   "settings.notifications.chat": "Chat antwortung beendet",
   "settings.notifications.volume": "Tonvolumen",
+  "settings.notifications.system": "Systembenachrichtigung, wenn eine Chat-Antwort fertig ist",
+  "settings.notifications.systemHint": "Nur wenn LatticeTerm im Hintergrund ist; zeigt Gesprächsname und Antwortanfang. Unter Linux öffnet ein Klick das Gespräch, unter macOS und Windows holt er LatticeTerm nach vorn.",
   "settings.notifications.muted": "Volume ist null. Meldungen und Vorschauen sind mutiert; visuelle Abzeichen bleiben sichtbar.",
   "settings.notifications.libraryHint": "Vorschau der Sounds unten, dann wählen Sie ein Cue für Sitzungen und Chats oben.",
   "settings.notifications.group.soft": "Sanft",

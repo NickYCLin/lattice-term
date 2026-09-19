@@ -39,6 +39,7 @@ import { findTheme, themeCatalog } from "./app/themes";
 import { useViewMotion } from "./app/useViewMotion";
 import { useRuntimeSummary } from "./app/useRuntimeSummary";
 import { APP_VERSION } from "./app/version";
+import { hasDesktopBackend } from "./app/nativeRuntime";
 import { useStorageStatus } from "./app/useStorageStatus";
 import { useAgentSessions } from "./app/useAgentSessions";
 import { useAgentActivity } from "./app/useAgentActivity";
@@ -315,6 +316,31 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   // keeps firing while another view is open) but loads lazily, so its code
   // stays out of the entry bundle.
   const [chatRuntime, setChatRuntime] = useState<ChatRuntimeApi | null>(null);
+  const chatRuntimeRef = useRef(chatRuntime);
+  chatRuntimeRef.current = chatRuntime;
+  // A clicked reply notification brings the window forward (the desktop
+  // does that) and asks for its conversation; open it.
+  useEffect(() => {
+    if (!hasDesktopBackend()) return;
+    let stop: (() => void) | null = null;
+    let disposed = false;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<string>("chat-notification-open", ({ payload }) => {
+          setView("chat");
+          chatRuntimeRef.current?.chat.setActiveThreadId(payload);
+        }),
+      )
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mobileResourceSidebarOpen, setMobileResourceSidebarOpen] =
     useState(false);
@@ -1073,7 +1099,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               />
             )}
             <Suspense fallback={null}>
-              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} onChange={setChatRuntime} />
+              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} completionNotification={preferences.chatCompletionNotification} onChange={setChatRuntime} />
             </Suspense>
             {view === "chat" && chatRuntime && (
               <ChatView

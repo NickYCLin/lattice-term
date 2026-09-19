@@ -56,6 +56,18 @@ export function NotificationSoundPanel({ preferences, onChange }: {
           </div>
         ))}
       </div>
+      <label className="checkbox sound-system-notification">
+        <input
+          type="checkbox"
+          checked={preferences.chatCompletionNotification}
+          onChange={(e) => onChange({ chatCompletionNotification: e.target.checked })}
+        />
+        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span>
+          <strong>{t("settings.notifications.system")}</strong>
+          <small className="field__optional">{t("settings.notifications.systemHint")}</small>
+        </span>
+      </label>
       <div className="sound-volume">
         <label htmlFor="notification-volume">{t("settings.notifications.volume")}</label>
         <input id="notification-volume" type="range" min="0" max="100" step="1"

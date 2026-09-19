@@ -437,6 +437,8 @@ export const messages: Messages = {
   "settings.notifications.session": "工作阶段完成",
   "settings.notifications.chat": "对话回复完成",
   "settings.notifications.volume": "提示音音量",
+  "settings.notifications.system": "对话回复完成时显示系统通知",
+  "settings.notifications.systemHint": "只在 LatticeTerm 不在前台时出现，内容是对话名称和回复开头。Linux 上点通知会直接回到那个对话；macOS 与 Windows 会把 LatticeTerm 带到前台。",
   "settings.notifications.muted": "音量为 0，所有提示音与试听皆已静音；视觉通知仍会显示。",
   "settings.notifications.libraryHint": "点击下方音效即可试听；在上方分别指定工作阶段与对话使用的提示音。",
   "settings.notifications.group.soft": "柔和",

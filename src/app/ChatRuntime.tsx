@@ -25,6 +25,7 @@ export function ChatRuntime({
   locale,
   completionSound = "off",
   completionVolume = 60,
+  completionNotification = false,
   onChange,
   remoteHost,
 }: {
@@ -32,9 +33,10 @@ export function ChatRuntime({
   remoteHost?: RemoteHostStatus | null;
   completionSound?: NotificationSoundChoice;
   completionVolume?: number;
+  completionNotification?: boolean;
   onChange: (api: ChatRuntimeApi) => void;
 }) {
-  const chat = useAgentChat(completionSound, completionVolume);
+  const chat = useAgentChat(completionSound, completionVolume, completionNotification);
   useRemoteChatHost(chat, remoteHost ?? null);
   const automations = useAgentAutomations(chat, locale);
   useEffect(() => {

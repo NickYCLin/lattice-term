@@ -418,6 +418,8 @@ export const messages: Messages = {
   "settings.notifications.session": "세션 완료",
   "settings.notifications.chat": "채팅 응답 완료",
   "settings.notifications.volume": "음향 볼륨",
+  "settings.notifications.system": "채팅 답변이 끝나면 시스템 알림 표시",
+  "settings.notifications.systemHint": "LatticeTerm이 백그라운드에 있을 때만 나타나며 대화 이름과 답변 앞부분을 보여 줍니다. Linux에서는 알림을 클릭하면 그 대화를 열고, macOS와 Windows에서는 LatticeTerm을 앞으로 가져옵니다.",
   "settings.notifications.muted": "볼륨은 0입니다. 알림 및 미리보기는 뮤트; 시각적 배지가 눈에 남아 있습니다.",
   "settings.notifications.libraryHint": "아래 소리를 미리보기, 다음 세션과 채팅에 대한 큐를 선택합니다.",
   "settings.notifications.group.soft": "부드러운 소리",

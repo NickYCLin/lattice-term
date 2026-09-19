@@ -492,6 +492,8 @@ export const en: Messages = {
   "settings.notifications.session": "Session completion",
   "settings.notifications.chat": "Chat reply completion",
   "settings.notifications.volume": "Sound volume",
+  "settings.notifications.system": "Show a system notification when a chat reply finishes",
+  "settings.notifications.systemHint": "Only while LatticeTerm is in the background; it shows the conversation name and the start of the reply. On Linux, clicking it opens that conversation; on macOS and Windows it brings LatticeTerm to the front.",
   "settings.notifications.muted": "Volume is zero. Notifications and previews are muted; visual badges remain visible.",
   "settings.notifications.libraryHint": "Preview the sounds below, then choose a cue for sessions and chats above.",
   "settings.notifications.group.soft": "Soft",

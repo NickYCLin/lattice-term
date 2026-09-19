@@ -68,6 +68,12 @@ apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
+# Already in the tree through the Secret Service keyring; used directly to
+# send chat notifications with a click action.
+zbus = "5"
+
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }

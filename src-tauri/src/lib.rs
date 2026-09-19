@@ -13,6 +13,7 @@ mod chat_attachments;
 pub mod clipboard;
 pub mod cliproxy;
 pub mod credentials;
+pub mod desktop_notification;
 pub mod domain;
 mod durable_file;
 pub mod file_exports;
@@ -2196,6 +2197,21 @@ async fn git_changes_commit(working_directory: String, message: String) -> Resul
     blocking(move || crate::git_changes::commit(&working_directory, &message)).await
 }
 
+/// Shows a system notification for a chat reply; clicking it (where the
+/// system reports clicks) brings the window back to that conversation.
+#[tauri::command]
+fn chat_notify(
+    app: AppHandle,
+    thread_id: String,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    if thread_id.is_empty() || thread_id.len() > 128 {
+        return Err("Invalid conversation.".to_string());
+    }
+    crate::desktop_notification::show(&app, &thread_id, &title, &body)
+}
+
 /// The MCP servers a chat CLI would load for this conversation.
 #[tauri::command]
 async fn agent_mcp_servers(
@@ -4180,6 +4196,8 @@ pub fn run() {
     // Opens web links the user clicks (search sources) in the default
     // browser; the capability limits it to http(s) URLs.
     let builder = builder.plugin(tauri_plugin_opener::init());
+    #[cfg(any(target_os = "macos", windows))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     // Auto-update and relaunch are desktop concerns; mobile installs come
@@ -4355,6 +4373,7 @@ pub fn run() {
             git_changes_unstage,
             git_changes_commit,
             agent_mcp_servers,
+            chat_notify,
             agent_shared_rules_save,
             agent_plan_snapshot,
             agent_plan_save,
