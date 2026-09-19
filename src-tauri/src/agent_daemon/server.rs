@@ -1331,6 +1331,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::Fleet { .. } => audit::Action::RemoteFleet,
         Op::ListDirectory { .. } => audit::Action::RemoteList,
         Op::Exec { .. } => audit::Action::RemoteExec,
+        Op::ExecCommand { .. } => audit::Action::RemoteCommand,
         Op::Transfer {
             direction: TransferDirection::Upload,
             ..

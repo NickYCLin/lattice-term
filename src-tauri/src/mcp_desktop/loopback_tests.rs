@@ -803,3 +803,130 @@ async fn actual_ssh_metrics_timeout_closes_only_its_dedicated_channel() {
     })
     .await;
 }
+
+async fn waiting(service: &Arc<DesktopService>) -> Vec<PendingCommandView> {
+    loop {
+        let pending = service.pending_commands();
+        if !pending.is_empty() {
+            return pending;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_proposed_command_reaches_the_host_only_after_a_person_accepts_it() {
+    bounded(async {
+        let peer = Peer::start().await;
+        let ssh = Arc::new(SshRegistry::new());
+        let outcome = crate::ssh::connect(
+            Arc::new(Sink::default()),
+            Arc::clone(&ssh),
+            Some(peer.known.clone()),
+            peer.request(),
+        )
+        .await;
+        let ConnectOutcome::Connected { session_id } = outcome else {
+            panic!("trusted test SSH session did not connect")
+        };
+        let service = Arc::new(DesktopService::new(
+            Arc::clone(&ssh),
+            Arc::new(SftpRegistry::new()),
+        ));
+        let grant = service
+            .grant(GrantRequest {
+                fleet: None,
+                session_id: session_id.clone(),
+                backend: Backend::Ssh,
+                label: "Isolated SSH".into(),
+                scopes: Scopes {
+                    command: true,
+                    ..Default::default()
+                },
+                roots: vec![],
+                exec_plans: vec![],
+            })
+            .await
+            .unwrap();
+        let propose = |request_id: &str| DesktopOperation::ExecCommand {
+            target_id: grant.id.clone(),
+            command: "result".into(),
+            request_id: request_id.into(),
+        };
+        // A line the approval card could not show honestly never gets that far.
+        assert!(service
+            .execute(
+                "client",
+                DesktopOperation::ExecCommand {
+                    target_id: grant.id.clone(),
+                    command: "result\nrm -rf /".into(),
+                    request_id: "smuggled".into(),
+                }
+            )
+            .await
+            .is_err());
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 0);
+
+        let refused = service.execute("client", propose("c1")).await.unwrap();
+        assert_eq!(refused["state"], "running");
+        let pending = waiting(&service).await;
+        assert_eq!(pending[0].command, "result");
+        assert_eq!(pending[0].target_label, "Isolated SSH");
+        assert_eq!(pending[0].client, "client");
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 0);
+        service.decide_command(&pending[0].operation_id, CommandDecision::Deny);
+        let operation_id = refused["operationId"].as_str().unwrap().to_string();
+        let declined = loop {
+            match service
+                .execute(
+                    "client",
+                    DesktopOperation::OperationStatus {
+                        target_id: grant.id.clone(),
+                        operation_id: operation_id.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(value) if value["state"] == "running" => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                other => break other,
+            }
+        };
+        assert_eq!(declined.unwrap_err().code, "not_authorized");
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 0);
+        assert!(service.pending_commands().is_empty());
+
+        let accepted = service.execute("client", propose("c2")).await.unwrap();
+        let pending = waiting(&service).await;
+        service.decide_command(&pending[0].operation_id, CommandDecision::Approve);
+        let result = poll(
+            &service,
+            &grant.id,
+            accepted["operationId"].as_str().unwrap(),
+        )
+        .await;
+        assert_eq!(result["stdout"], "stdout: checked\n");
+        assert_eq!(result["exitStatus"], 7);
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 1);
+        assert!(service.pending_commands().is_empty());
+
+        // Withdrawing the grant ends a proposal that is still on screen.
+        let orphan = service.execute("client", propose("c3")).await.unwrap();
+        waiting(&service).await;
+        service.revoke(&grant.id).unwrap();
+        assert!(service
+            .execute(
+                "client",
+                DesktopOperation::OperationStatus {
+                    target_id: grant.id.clone(),
+                    operation_id: orphan["operationId"].as_str().unwrap().into(),
+                }
+            )
+            .await
+            .is_err());
+        assert_eq!(peer.execs.load(Ordering::Relaxed), 1);
+        crate::ssh::disconnect(&ssh, &session_id).await.unwrap();
+    })
+    .await;
+}

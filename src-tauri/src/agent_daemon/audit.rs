@@ -26,6 +26,8 @@ pub enum Action {
     RemoteMetrics,
     RemoteList,
     RemoteExec,
+    /// A command the model wrote, which a person accepted one call at a time.
+    RemoteCommand,
     RemoteUpload,
     RemoteDownload,
     RemoteCancel,

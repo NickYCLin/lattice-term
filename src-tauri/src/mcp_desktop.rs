@@ -34,6 +34,15 @@ const MAX_GRANTS: usize = 64;
 const MAX_OPERATIONS: usize = 256;
 const OPERATION_RETENTION: Duration = Duration::from_secs(15 * 60);
 const MAX_CALLS: usize = 8;
+/// How long a proposed command waits for a person. Nobody answering is a
+/// refusal: the command never reaches the host.
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Enough to see every waiting card at once, few enough that a client
+/// cannot bury a real request under a pile of its own.
+const MAX_PENDING_APPROVALS: usize = 8;
+const MAX_COMMAND_BYTES: usize = 4096;
+/// One minute on its own channel, the same ceiling a saved plan may ask for.
+const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +68,9 @@ pub enum Scope {
     Metrics,
     List,
     Exec,
+    /// A command the model wrote itself. Every call waits for the person at
+    /// the desktop; the grant alone never runs anything.
+    Command,
     Upload,
     Download,
     /// One still picture of the shared screen, on request. Never a stream,
@@ -80,6 +92,8 @@ pub struct Scopes {
     pub list: bool,
     #[serde(default)]
     pub exec: bool,
+    #[serde(default)]
+    pub command: bool,
     #[serde(default)]
     pub upload: bool,
     #[serde(default)]
@@ -104,6 +118,7 @@ impl Scopes {
             Scope::Metrics => self.metrics,
             Scope::List => self.list,
             Scope::Exec => self.exec,
+            Scope::Command => self.command,
             Scope::Upload => self.upload,
             Scope::Download => self.download,
             Scope::Screen => self.screen,
@@ -212,6 +227,11 @@ pub enum DesktopOperation {
         plan_id: String,
         request_id: String,
     },
+    ExecCommand {
+        target_id: String,
+        command: String,
+        request_id: String,
+    },
     Transfer {
         target_id: String,
         root_id: String,
@@ -241,6 +261,7 @@ impl DesktopOperation {
             | Self::ScreenInput { target_id, .. }
             | Self::ListDirectory { target_id, .. }
             | Self::Exec { target_id, .. }
+            | Self::ExecCommand { target_id, .. }
             | Self::Transfer { target_id, .. }
             | Self::Cancel { target_id, .. }
             | Self::OperationStatus { target_id, .. } => Some(target_id),
@@ -255,6 +276,7 @@ impl DesktopOperation {
             Self::ScreenInput { .. } => Some(Scope::Input),
             Self::ListDirectory { .. } => Some(Scope::List),
             Self::Exec { .. } => Some(Scope::Exec),
+            Self::ExecCommand { .. } => Some(Scope::Command),
             Self::Transfer {
                 direction: TransferDirection::Upload,
                 ..
@@ -273,6 +295,7 @@ impl DesktopOperation {
             Self::Fleet { action, .. } => action.request_id(),
             Self::ScreenInput { request_id, .. }
             | Self::Exec { request_id, .. }
+            | Self::ExecCommand { request_id, .. }
             | Self::Transfer { request_id, .. }
             | Self::Cancel { request_id, .. } => Some(request_id),
             _ => None,
@@ -341,6 +364,51 @@ struct Grant {
     revoked: watch::Sender<bool>,
 }
 
+/// A command waiting for the person at the desktop, as the window shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PendingCommandView {
+    pub operation_id: String,
+    pub target_id: String,
+    pub target_label: String,
+    pub client: String,
+    pub command: String,
+    pub timeout_ms: u32,
+    pub expires_in_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CommandDecision {
+    Approve,
+    Deny,
+}
+
+struct PendingApproval {
+    target_id: String,
+    target_label: String,
+    client: String,
+    command: String,
+    requested_at: Instant,
+    decision: watch::Sender<Option<CommandDecision>>,
+}
+
+impl PendingApproval {
+    fn view(&self, operation_id: &str) -> PendingCommandView {
+        PendingCommandView {
+            operation_id: operation_id.to_string(),
+            target_id: self.target_id.clone(),
+            target_label: self.target_label.clone(),
+            client: self.client.clone(),
+            command: self.command.clone(),
+            timeout_ms: AD_HOC_TIMEOUT_MS,
+            expires_in_ms: APPROVAL_TIMEOUT
+                .saturating_sub(self.requested_at.elapsed())
+                .as_millis() as u64,
+        }
+    }
+}
+
 struct OperationRecord {
     id: String,
     client: String,
@@ -367,6 +435,8 @@ struct ScreenReceipt {
 struct State {
     grants: HashMap<String, Arc<Grant>>,
     operations: HashMap<String, OperationRecord>,
+    /// Commands a client proposed, still waiting for a person.
+    approvals: HashMap<String, PendingApproval>,
     /// When each target last handed over a picture.
     captures: HashMap<String, Instant>,
     screen_receipts: HashMap<(String, String), ScreenReceipt>,
@@ -381,6 +451,9 @@ pub struct DesktopService {
     screens: Arc<crate::mcp_screen::ScreenFrames>,
     state: Arc<Mutex<State>>,
     calls: Arc<Semaphore>,
+    /// Bumped whenever the waiting list changes, so the window can redraw
+    /// without polling.
+    approvals: watch::Sender<u64>,
 }
 
 impl DesktopService {
@@ -396,6 +469,7 @@ impl DesktopService {
             screens: Arc::new(crate::mcp_screen::ScreenFrames::default()),
             state: Arc::new(Mutex::new(State::default())),
             calls: Arc::new(Semaphore::new(MAX_CALLS)),
+            approvals: watch::channel(0).0,
         }
     }
 
@@ -709,7 +783,9 @@ impl DesktopService {
         };
         if matches!(
             operation,
-            DesktopOperation::Exec { .. } | DesktopOperation::Transfer { .. }
+            DesktopOperation::Exec { .. }
+                | DesktopOperation::ExecCommand { .. }
+                | DesktopOperation::Transfer { .. }
         ) {
             let mut lease = lease.ok_or_else(ServiceError::invalid)?;
             let permit = match Arc::clone(&self.calls).try_acquire_owned() {
@@ -785,6 +861,9 @@ impl DesktopService {
                 if !grant.plans.iter().any(|plan| plan.id == *plan_id) {
                     return Err(ServiceError::denied());
                 }
+            }
+            DesktopOperation::ExecCommand { command, .. } => {
+                valid_command(command)?;
             }
             DesktopOperation::ListDirectory { root_id, path, .. } => {
                 if !grant.roots.iter().any(|root| root.id == *root_id) {
@@ -909,6 +988,38 @@ impl DesktopService {
                     )
                     .await
                 }
+                DesktopOperation::ExecCommand { command, .. } => {
+                    let lease = lease.ok_or_else(ServiceError::invalid)?;
+                    // Ask first. A refused or unanswered proposal never opens
+                    // a channel, so nothing reaches the host.
+                    self.await_approval(
+                        client,
+                        grant,
+                        command,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await?;
+                    let handle = self
+                        .ssh
+                        .session_handle(&grant.session_id)
+                        .ok_or_else(ServiceError::unavailable)?;
+                    let plan = ExecPlan {
+                        id: "command".to_string(),
+                        label: "command".to_string(),
+                        command: command.clone(),
+                        timeout_ms: AD_HOC_TIMEOUT_MS,
+                    };
+                    ssh_jobs::execute(
+                        handle,
+                        &plan,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await
+                }
                 DesktopOperation::Transfer {
                     root_id,
                     direction,
@@ -940,8 +1051,12 @@ impl DesktopService {
                 _ => Err(ServiceError::invalid()),
             }
         };
-        // Exec closes its dedicated channel itself, preserving partial output.
-        if matches!(operation, DesktopOperation::Exec { .. }) {
+        // Exec closes its dedicated channel itself, preserving partial output,
+        // and a proposed command may legitimately wait for a person first.
+        if matches!(
+            operation,
+            DesktopOperation::Exec { .. } | DesktopOperation::ExecCommand { .. }
+        ) {
             return work.await;
         }
         tokio::select! {
@@ -950,6 +1065,109 @@ impl DesktopService {
             _ = cancelled(&mut cancel), if lease.is_some() => Err(ServiceError::new("unknown_outcome", "Cancellation requested; a remote write may already have taken effect.")),
             result = tokio::time::timeout(Duration::from_secs(if lease.is_some() { 60 } else { 10 }), work) => result.map_err(|_| ServiceError::new(if lease.is_some() { "unknown_outcome" } else { "timed_out" }, "The operation deadline elapsed; check its status before retrying."))?,
         }
+    }
+
+    /// The commands waiting for a person right now, newest last.
+    pub fn pending_commands(&self) -> Vec<PendingCommandView> {
+        let Ok(mut state) = self.state.lock() else {
+            return Vec::new();
+        };
+        state
+            .approvals
+            .retain(|_, pending| pending.requested_at.elapsed() < APPROVAL_TIMEOUT);
+        let mut views: Vec<_> = state
+            .approvals
+            .iter()
+            .map(|(id, pending)| pending.view(id))
+            .collect();
+        views.sort_by_key(|view| std::cmp::Reverse(view.expires_in_ms));
+        views
+    }
+
+    /// Records what the person chose. An unknown or already answered
+    /// proposal is not an error the window needs to explain.
+    pub fn decide_command(&self, operation_id: &str, decision: CommandDecision) {
+        if let Ok(state) = self.state.lock() {
+            if let Some(pending) = state.approvals.get(operation_id) {
+                pending.decision.send_replace(Some(decision));
+            }
+        }
+        self.notify_approvals();
+    }
+
+    /// Changes to the waiting list, for a window that wants to react rather
+    /// than poll.
+    pub fn approvals_watch(&self) -> watch::Receiver<u64> {
+        self.approvals.subscribe()
+    }
+
+    fn notify_approvals(&self) {
+        self.approvals.send_modify(|version| *version += 1);
+    }
+
+    /// Waits for the person at the desktop to accept this exact command.
+    ///
+    /// Revocation, cancellation and silence all end the wait without running
+    /// anything: only an explicit acceptance continues.
+    async fn await_approval(
+        &self,
+        client: &str,
+        grant: &Grant,
+        command: &str,
+        operation_id: &str,
+        mut revoked: watch::Receiver<bool>,
+        mut cancel: watch::Receiver<bool>,
+    ) -> Result<(), ServiceError> {
+        let mut decided = {
+            let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
+            state
+                .approvals
+                .retain(|_, pending| pending.requested_at.elapsed() < APPROVAL_TIMEOUT);
+            if state.approvals.len() >= MAX_PENDING_APPROVALS {
+                return Err(ServiceError::new(
+                    "busy",
+                    "Too many commands are already waiting for the user's decision.",
+                ));
+            }
+            let decision = watch::channel(None);
+            state.approvals.insert(
+                operation_id.to_string(),
+                PendingApproval {
+                    target_id: grant.view.id.clone(),
+                    target_label: grant.view.label.clone(),
+                    client: client.to_string(),
+                    command: command.to_string(),
+                    requested_at: Instant::now(),
+                    decision: decision.0,
+                },
+            );
+            decision.1
+        };
+        self.notify_approvals();
+        let outcome = tokio::select! {
+            biased;
+            _ = cancelled(&mut revoked) => Err(ServiceError::denied()),
+            _ = cancelled(&mut cancel) => Err(ServiceError::new(
+                "not_authorized",
+                "The proposed command was cancelled before anyone approved it.",
+            )),
+            decision = decision(&mut decided) => match decision {
+                CommandDecision::Approve => Ok(()),
+                CommandDecision::Deny => Err(ServiceError::new(
+                    "not_authorized",
+                    "The user declined this command in LatticeTerm.",
+                )),
+            },
+            _ = tokio::time::sleep(APPROVAL_TIMEOUT) => Err(ServiceError::new(
+                "needs_user_action",
+                "Nobody approved this command in LatticeTerm in time; it was not run.",
+            )),
+        };
+        if let Ok(mut state) = self.state.lock() {
+            state.approvals.remove(operation_id);
+        }
+        self.notify_approvals();
+        outcome
     }
 
     fn reserve(
@@ -1122,6 +1340,31 @@ async fn cancelled(receiver: &mut watch::Receiver<bool>) {
     // A dropped sender means its owner is gone, not permission to continue.
 }
 
+async fn decision(receiver: &mut watch::Receiver<Option<CommandDecision>>) -> CommandDecision {
+    if let Some(decision) = *receiver.borrow() {
+        return decision;
+    }
+    while receiver.changed().await.is_ok() {
+        if let Some(decision) = *receiver.borrow() {
+            return decision;
+        }
+    }
+    // A dropped sender is the desktop going away, never an acceptance.
+    CommandDecision::Deny
+}
+
+/// A proposed command is one shell line, not a file: it has to fit on the
+/// approval card a person reads before it runs.
+fn valid_command(command: &str) -> Result<(), ServiceError> {
+    if command.trim().is_empty()
+        || command.len() > MAX_COMMAND_BYTES
+        || command.chars().any(char::is_control)
+    {
+        return Err(ServiceError::invalid());
+    }
+    Ok(())
+}
+
 fn valid_id(id: &str) -> Result<(), ServiceError> {
     if id.is_empty()
         || id.len() > 128
@@ -1154,6 +1397,7 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
             || request.scopes.metrics
             || request.scopes.list
             || request.scopes.exec
+            || request.scopes.command
             || request.scopes.upload
             || request.scopes.download
             || !request.exec_plans.is_empty()
@@ -1170,7 +1414,10 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
             || request.scopes.download
             || !request.roots.is_empty()))
         || (request.backend == Backend::Sftp
-            && (request.scopes.metrics || request.scopes.exec || !request.exec_plans.is_empty()))
+            && (request.scopes.metrics
+                || request.scopes.exec
+                || request.scopes.command
+                || !request.exec_plans.is_empty()))
     {
         return Err(ServiceError::invalid());
     }

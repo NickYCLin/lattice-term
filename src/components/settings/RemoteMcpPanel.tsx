@@ -15,9 +15,9 @@ import type { ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
-type Scope = "metrics" | "list" | "exec" | "upload" | "download" | "screen" | "input" | "fleetObserve" | "fleetRead" | "fleetControl" | "fleetLaunch";
+type Scope = "metrics" | "list" | "exec" | "command" | "upload" | "download" | "screen" | "input" | "fleetObserve" | "fleetRead" | "fleetControl" | "fleetLaunch";
 type Scopes = Record<Scope, boolean>;
-const scopesOff: Scopes = { metrics: false, list: false, exec: false, upload: false, download: false, screen: false, input: false, fleetObserve: false, fleetRead: false, fleetControl: false, fleetLaunch: false };
+const scopesOff: Scopes = { metrics: false, list: false, exec: false, command: false, upload: false, download: false, screen: false, input: false, fleetObserve: false, fleetRead: false, fleetControl: false, fleetLaunch: false };
 type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
 const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
 export interface McpConnectionSession { sessionId: string; profileId: string; host: string; backend: Backend; fleet?: boolean; screen?: boolean }
@@ -188,7 +188,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
                 : scope === "screen" || scope === "input" ? true
                 : scope.startsWith("fleet") ? selected?.backend !== "ssh"
                 : scopes.fleetObserve ? true
-                : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec"
+                : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec" || scope === "command"
                 : scope === "list" || scope === "upload" || scope === "download"}
                 onChange={(e) => {
                   const enabled = e.target.checked;
@@ -222,6 +222,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
               <input className="input" value={value} maxLength={4096} autoComplete="off" onChange={(e) => { update(e.target.value); setAcknowledged(false); }} />
             </label>)}
           </fieldset>}
+          {scopes.command && <p className="setting__description">{t("settings.mcpRemote.commandScopeHint")}</p>}
           {scopes.input && <p className="setting__description">{t("settings.mcpRemote.inputHint")}</p>}
           {scopes.screen && <p className="setting__description">{t("settings.mcpRemote.screenHint")}</p>}
           {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">

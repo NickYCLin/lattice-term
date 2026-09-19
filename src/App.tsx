@@ -72,6 +72,7 @@ import type { Command } from "./components/overlays/CommandPalette";
 import { ConfirmDialog } from "./components/overlays/ConfirmDialog";
 import { DesktopBackendRequiredDialog } from "./components/overlays/DesktopBackendRequiredDialog";
 import { UpdatePrompt } from "./components/overlays/UpdatePrompt";
+import { RemoteCommandApproval } from "./components/overlays/RemoteCommandApproval";
 import { useAppUpdater } from "./app/useAppUpdater";
 import {
   agentFreshLaunchArguments,
@@ -1421,6 +1422,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           onDismiss={() => setUpdatePromptDismissed(true)}
         />
       )}
+
+      <RemoteCommandApproval />
       </Suspense>
     </div>
   );

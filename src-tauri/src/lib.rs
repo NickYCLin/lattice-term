@@ -83,7 +83,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use zeroize::Zeroizing;
 
 type AppStorage = Mutex<FileStorage>;
@@ -558,6 +558,32 @@ async fn mcp_remote_revoke(
             .await?;
     }
     Ok(targets)
+}
+
+#[tauri::command]
+fn mcp_remote_pending_commands(
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Vec<mcp_desktop::PendingCommandView> {
+    service.pending_commands()
+}
+
+/// The window's answer to one proposed command. Refusing is always safe:
+/// a proposal that nobody accepts never opens a channel.
+#[tauri::command]
+fn mcp_remote_command_decide(
+    operation_id: String,
+    approve: bool,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Vec<mcp_desktop::PendingCommandView> {
+    service.decide_command(
+        &operation_id,
+        if approve {
+            mcp_desktop::CommandDecision::Approve
+        } else {
+            mcp_desktop::CommandDecision::Deny
+        },
+    );
+    service.pending_commands()
 }
 
 const MAX_CLIPBOARD_IMAGE_EDGE: u32 = 16_384;
@@ -3976,6 +4002,20 @@ pub fn run() {
                     app.state::<Arc<mcp_screen::ScreenFrames>>().inner().clone(),
                 ),
             ));
+            // The approval card has to appear wherever the user is, so the
+            // waiting list is pushed rather than polled.
+            let approvals = app
+                .state::<Arc<mcp_desktop::DesktopService>>()
+                .inner()
+                .clone();
+            let approvals_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut changes = approvals.approvals_watch();
+                while changes.changed().await.is_ok() {
+                    let _ =
+                        approvals_app.emit("mcp://command-approvals", approvals.pending_commands());
+                }
+            });
             app.manage(Arc::new(TunnelRegistry::new()));
             app.manage(Arc::new(SensitiveClipboard::default()));
             let agent_registry = AgentRegistry::with_local_reporter_and_mcp(
@@ -4001,6 +4041,8 @@ pub fn run() {
             local_file_read_text,
             runtime_summary,
             mcp_remote_targets,
+            mcp_remote_pending_commands,
+            mcp_remote_command_decide,
             mcp_screen_sessions,
             mcp_saved_connection_connect,
             mcp_remote_grant,
