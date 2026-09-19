@@ -674,6 +674,9 @@ fn observer_summary(summary: AgentSessionSummary) -> AgentSessionSummary {
         state_source: summary.state_source,
         token_usage: summary.token_usage,
         queued_prompts: summary.queued_prompts,
+        // Which local session another one follows is the user's own
+        // orchestration, not something an observer needs to act.
+        waits_for: None,
         sandboxed: summary.sandboxed,
         detached: summary.detached,
         profile_config_path: None,
@@ -1197,6 +1200,15 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         Request::ClearQueue { session_id } => {
             agent::clear_queue(sink, registry, &session_id).map(|dropped| json!(dropped))
         }
+        Request::SetQueueDependency {
+            session_id,
+            waits_for,
+        } => registry
+            .set_queue_dependency(&session_id, waits_for.as_deref())
+            .map(|()| Value::Null),
+        Request::SetMaxActiveSessions { limit } => registry
+            .set_max_active_sessions(limit)
+            .map(|()| Value::Null),
         Request::Broadcast { session_ids, data } => {
             let outcomes = agent::broadcast(sink, registry, &session_ids, &data)?;
             to_value(&outcomes)

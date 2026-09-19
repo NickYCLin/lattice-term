@@ -12,7 +12,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -46,6 +46,11 @@ const MAX_BROADCAST_TARGETS: usize = 32;
 /// planned sequence of steps, shallow enough that a queue built by accident
 /// cannot keep feeding a CLI long after the user stopped watching.
 const MAX_QUEUED_PROMPTS: usize = 16;
+
+/// Fleet pacing is off until the user asks for it: with no limit stored,
+/// queued prompts keep the behaviour they had before sessions could hold
+/// each other back.
+const UNLIMITED_ACTIVE_SESSIONS: usize = 0;
 pub const MAX_AGENT_SESSIONS: usize = 32;
 pub const MAX_SAVED_AGENT_PLANS: usize = 32;
 const MAX_OUTPUT_SNAPSHOT_BYTES: usize = 256 * 1024;
@@ -353,6 +358,10 @@ pub struct AgentSessionSummary {
     /// Prompts waiting for this session to finish its current turn.
     #[serde(default)]
     pub queued_prompts: usize,
+    /// Another session whose turn must end before this one's queue moves.
+    /// `None` means only this session's own turn gates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<String>,
     /// The CLI's own session id, when its output announced one — the value
     /// native resume takes. Never guessed: absent until actually seen.
     pub captured_session_id: Option<String>,
@@ -1913,6 +1922,9 @@ fn agent_session_limit_reached(session_count: usize) -> bool {
 pub struct AgentRegistry {
     sessions: Mutex<HashMap<String, Arc<AgentSessionEntry>>>,
     counter: AtomicU64,
+    /// How many sessions may be working before queued prompts wait their
+    /// turn. `UNLIMITED_ACTIVE_SESSIONS` keeps every queue independent.
+    max_active_sessions: AtomicUsize,
     reporter: Option<ReporterEndpoint>,
     /// Process-only access to this installation's explicitly granted MCP
     /// tools. Tests and embedders without an app data directory leave it off.
@@ -2471,6 +2483,90 @@ impl AgentRegistry {
         summaries
     }
 
+    /// How many sessions may work at once before queued prompts wait.
+    /// `None` means no limit, which is how a fresh registry starts.
+    pub fn max_active_sessions(&self) -> Option<usize> {
+        match self.max_active_sessions.load(Ordering::Acquire) {
+            UNLIMITED_ACTIVE_SESSIONS => None,
+            limit => Some(limit),
+        }
+    }
+
+    /// Sets the limit. Lowering it never interrupts work already running: it
+    /// only holds back prompts that have not been delivered yet.
+    pub fn set_max_active_sessions(&self, limit: Option<usize>) -> Result<(), String> {
+        let stored = match limit {
+            None => UNLIMITED_ACTIVE_SESSIONS,
+            Some(limit) if (1..=MAX_AGENT_SESSIONS).contains(&limit) => limit,
+            Some(_) => {
+                return Err(format!(
+                    "The active session limit must be between 1 and {MAX_AGENT_SESSIONS}."
+                ))
+            }
+        };
+        self.max_active_sessions.store(stored, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn queue_dependency(&self, session_id: &str) -> Option<String> {
+        self.session_summary(session_id)?.waits_for
+    }
+
+    /// Makes this session's queue wait for another session's turn to end.
+    ///
+    /// Only a CLI that reports completion officially may be waited on, and a
+    /// chain may not close into a cycle: both would leave prompts waiting for
+    /// an event that can never arrive.
+    pub fn set_queue_dependency(
+        &self,
+        session_id: &str,
+        waits_for: Option<&str>,
+    ) -> Result<(), String> {
+        let entry = self.get(session_id)?;
+        let dependency = match waits_for.map(str::trim).filter(|id| !id.is_empty()) {
+            None => None,
+            Some(dependency) => {
+                if dependency == session_id {
+                    return Err("A session cannot wait for itself.".to_string());
+                }
+                let target = self.get(dependency)?;
+                if !target.integrated_completion.load(Ordering::Acquire) {
+                    return Err(
+                        "This CLI does not report when it finishes, so nothing could release the waiting session. Choose a session with an official completion hook."
+                            .to_string(),
+                    );
+                }
+                if self.dependency_reaches(dependency, session_id) {
+                    return Err("That would make the two sessions wait for each other.".to_string());
+                }
+                Some(dependency.to_string())
+            }
+        };
+        entry
+            .summary
+            .lock()
+            .map_err(|error| error.to_string())?
+            .waits_for = dependency;
+        Ok(())
+    }
+
+    /// Whether following `from`'s chain of dependencies arrives at `target`.
+    /// The walk is bounded by the session limit, so a chain that was already
+    /// broken cannot spin here.
+    fn dependency_reaches(&self, from: &str, target: &str) -> bool {
+        let mut current = from.to_string();
+        for _ in 0..MAX_AGENT_SESSIONS {
+            let Some(next) = self.queue_dependency(&current) else {
+                return false;
+            };
+            if next == target {
+                return true;
+            }
+            current = next;
+        }
+        false
+    }
+
     /// Renames a CLI group's tab without changing any CLI's own name. The new
     /// label flows into the next hydration snapshot so it survives a reload.
     pub fn rename(&self, session_id: &str, label: &str) -> Result<AgentSessionSummary, String> {
@@ -2745,7 +2841,7 @@ fn handle_report_connection(mut stream: TcpStream, registry: &AgentRegistry, sin
                 // integration event funnels through here, and nothing
                 // heuristic does.
                 if releases_queued_prompt(state, AgentStateSource::Integration) {
-                    deliver_next_queued(sink, registry, &message.session_id);
+                    deliver_next_queued_and_waiting(sink, registry, &message.session_id);
                 }
             }
             if let Some(native_session_id) = captured {
@@ -6318,6 +6414,7 @@ pub fn launch_with_replay(
         process_id,
         token_usage: None,
         queued_prompts: 0,
+        waits_for: None,
         // A session launched as a native resume already knows its id; a
         // fresh announcement in the output still overwrites it.
         captured_session_id: request.resume_session_id.clone(),
@@ -6993,6 +7090,69 @@ fn releases_queued_prompt(state: AgentLifecycle, source: AgentStateSource) -> bo
         && matches!(state, AgentLifecycle::Done | AgentLifecycle::Idle)
 }
 
+/// Why a queued prompt stays put even though its own session is free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueHold {
+    /// The session this one follows has not finished its turn.
+    Dependency,
+    /// As many sessions as the user allows are already working.
+    ActiveLimit,
+}
+
+/// Whether anything outside this session keeps its queue waiting.
+///
+/// Both holds are about delivery only: work already running is never
+/// interrupted, and a session with no queue is unaffected.
+fn queue_hold(registry: &AgentRegistry, session_id: &str) -> Option<QueueHold> {
+    if let Some(dependency) = registry.queue_dependency(session_id) {
+        // A dependency that is already gone has no turn left to finish, so
+        // the chain moves on instead of waiting for a report that the ended
+        // session can no longer make.
+        if let Some(summary) = registry.session_summary(&dependency) {
+            if !releases_queued_prompt(summary.state, summary.state_source) {
+                return Some(QueueHold::Dependency);
+            }
+        }
+    }
+    let limit = registry.max_active_sessions()?;
+    // A heuristic `Working` counts too: this limit protects the machine, and
+    // holding a prompt back is the recoverable side. The silent-working
+    // watchdog eventually clears a guess that no integration confirmed.
+    let working = registry
+        .list()
+        .into_iter()
+        .filter(|summary| {
+            summary.session_id != session_id && summary.state == AgentLifecycle::Working
+        })
+        .count();
+    (working >= limit).then_some(QueueHold::ActiveLimit)
+}
+
+/// A finished turn can free more than its own queue: the sessions chained
+/// after it, and any session that was only waiting for a working slot.
+fn deliver_next_queued_and_waiting(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+) {
+    deliver_next_queued(sink, registry, session_id);
+    deliver_waiting_sessions(sink, registry, session_id);
+}
+
+/// Gives every other waiting session one chance to move. Each delivery
+/// rechecks the gate itself, so a slot freed here is never handed out twice.
+fn deliver_waiting_sessions(sink: &dyn AgentSink, registry: &AgentRegistry, except: &str) {
+    let waiting: Vec<String> = registry
+        .list()
+        .into_iter()
+        .filter(|summary| summary.session_id != except && summary.queued_prompts > 0)
+        .map(|summary| summary.session_id)
+        .collect();
+    for session_id in waiting {
+        deliver_next_queued(sink, registry, &session_id);
+    }
+}
+
 /// Records how many prompts are still waiting, so the interface can show it.
 fn store_queue_depth(registry: &AgentRegistry, session_id: &str, depth: usize) {
     let Ok(entry) = registry.get(session_id) else {
@@ -7087,6 +7247,7 @@ fn enqueue_locked(
         && !input.desktop_busy()
         && !input.startup_seed_pending
         && releases_queued_prompt(state, source)
+        && queue_hold(registry, session_id).is_none()
     {
         if !prompt_grant_matches(&entry, mcp_grant_epoch) {
             return Err(MCP_NOT_CONTROLLED.to_string());
@@ -7182,6 +7343,11 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
         .map(|summary| releases_queued_prompt(summary.state, summary.state_source))
         .unwrap_or(false);
     if input.desktop_busy() || input.startup_seed_pending || !ready {
+        return;
+    }
+    // A fleet chain or the active-session limit keeps this prompt queued.
+    // Whichever session frees the hold delivers here again.
+    if queue_hold(registry, session_id).is_some() {
         return;
     }
     let next = {
@@ -7587,6 +7753,9 @@ fn disconnect_locked(
     terminate_agent_entry(entry)?;
     if registry.remove(session_id).is_some() {
         sink.closed(session_id, "Stopped by user");
+        // Sessions chained after this one would otherwise wait for a turn
+        // that can no longer end, and its working slot is free now.
+        deliver_waiting_sessions(sink, registry, session_id);
     }
     Ok(())
 }
@@ -13293,6 +13462,216 @@ notify = ["notify.exe", "turn-ended"]"#,
         for session in sessions {
             disconnect(sink.as_ref(), &registry, &session.session_id).unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    fn mark_integrated(registry: &Arc<AgentRegistry>, session_id: &str) {
+        registry
+            .get(session_id)
+            .unwrap()
+            .integrated_completion
+            .store(true, Ordering::Release);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_chained_session_waits_for_the_one_it_follows() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let lead = launch_cat(&sink, &registry, "Chain lead");
+        let follower = launch_cat(&sink, &registry, "Chain follower");
+        mark_integrated(&registry, &lead.session_id);
+        registry
+            .set_queue_dependency(&follower.session_id, Some(&lead.session_id))
+            .unwrap();
+        registry.update_state(
+            &lead.session_id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        // The follower is free itself; only the chain holds it back.
+        registry.update_state(
+            &follower.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                &follower.session_id,
+                &encode(b"chained-prompt\n")
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!received_within(
+            &collector,
+            &follower.session_id,
+            "chained-prompt",
+            Duration::from_millis(300)
+        ));
+
+        registry.update_state(
+            &lead.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+        deliver_next_queued_and_waiting(sink.as_ref(), &registry, &lead.session_id);
+        assert!(received_within(
+            &collector,
+            &follower.session_id,
+            "chained-prompt",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_chain_refuses_a_guess_itself_and_a_cycle() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let first = launch_cat(&sink, &registry, "Chain first");
+        let second = launch_cat(&sink, &registry, "Chain second");
+
+        // Nothing official reports this CLI finishing, so a dependent would
+        // wait for an event that never arrives.
+        assert!(registry
+            .set_queue_dependency(&second.session_id, Some(&first.session_id))
+            .is_err());
+
+        mark_integrated(&registry, &first.session_id);
+        mark_integrated(&registry, &second.session_id);
+        assert!(registry
+            .set_queue_dependency(&first.session_id, Some(&first.session_id))
+            .is_err());
+        registry
+            .set_queue_dependency(&second.session_id, Some(&first.session_id))
+            .unwrap();
+        assert!(registry
+            .set_queue_dependency(&first.session_id, Some(&second.session_id))
+            .is_err());
+        assert_eq!(
+            registry.queue_dependency(&second.session_id).as_deref(),
+            Some(first.session_id.as_str())
+        );
+
+        registry
+            .set_queue_dependency(&second.session_id, None)
+            .unwrap();
+        assert!(registry.queue_dependency(&second.session_id).is_none());
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_closed_session_releases_the_sessions_chained_after_it() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let lead = launch_cat(&sink, &registry, "Closing lead");
+        let follower = launch_cat(&sink, &registry, "Closing follower");
+        mark_integrated(&registry, &lead.session_id);
+        registry
+            .set_queue_dependency(&follower.session_id, Some(&lead.session_id))
+            .unwrap();
+        registry.update_state(
+            &lead.session_id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        registry.update_state(
+            &follower.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+        enqueue(
+            sink.as_ref(),
+            &registry,
+            &follower.session_id,
+            &encode(b"orphan-prompt\n"),
+        )
+        .unwrap();
+
+        disconnect(sink.as_ref(), &registry, &lead.session_id).unwrap();
+
+        assert!(received_within(
+            &collector,
+            &follower.session_id,
+            "orphan-prompt",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_active_session_limit_holds_a_prompt_until_a_slot_frees() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let busy = launch_cat(&sink, &registry, "Limit busy");
+        let waiting = launch_cat(&sink, &registry, "Limit waiting");
+        registry.set_max_active_sessions(Some(1)).unwrap();
+        registry.update_state(
+            &busy.session_id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        registry.update_state(
+            &waiting.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                &waiting.session_id,
+                &encode(b"limited-prompt\n")
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!received_within(
+            &collector,
+            &waiting.session_id,
+            "limited-prompt",
+            Duration::from_millis(300)
+        ));
+
+        registry.update_state(
+            &busy.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+        deliver_next_queued_and_waiting(sink.as_ref(), &registry, &busy.session_id);
+        assert!(received_within(
+            &collector,
+            &waiting.session_id,
+            "limited-prompt",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[test]
+    fn the_active_session_limit_only_accepts_a_usable_number() {
+        let registry = AgentRegistry::new();
+        assert!(registry.max_active_sessions().is_none());
+        assert!(registry.set_max_active_sessions(Some(0)).is_err());
+        assert!(registry
+            .set_max_active_sessions(Some(MAX_AGENT_SESSIONS + 1))
+            .is_err());
+        registry.set_max_active_sessions(Some(2)).unwrap();
+        assert_eq!(registry.max_active_sessions(), Some(2));
+        registry.set_max_active_sessions(None).unwrap();
+        assert!(registry.max_active_sessions().is_none());
     }
 
     #[cfg(unix)]

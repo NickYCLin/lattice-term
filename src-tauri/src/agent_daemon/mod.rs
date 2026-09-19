@@ -450,6 +450,13 @@ pub enum Request {
     ClearQueue {
         session_id: String,
     },
+    SetQueueDependency {
+        session_id: String,
+        waits_for: Option<String>,
+    },
+    SetMaxActiveSessions {
+        limit: Option<usize>,
+    },
     Broadcast {
         session_ids: Vec<String>,
         data: String,
