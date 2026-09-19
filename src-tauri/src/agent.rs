@@ -3594,6 +3594,54 @@ fn write_copilot_reporter_plugin() -> Result<CopilotReporterPlugin, String> {
     Ok(CopilotReporterPlugin { directory })
 }
 
+/// Aider runs `--notifications-command` through the system shell when a
+/// reply is ready and it waits for the user. The same bell also rings before
+/// a yes/no confirmation, which cannot be told apart from an ordinary prompt,
+/// so it reports "needs attention" rather than "done": a queued prompt must
+/// never be typed into a confirmation question.
+#[cfg(windows)]
+const AIDER_REPORTER_COMMAND: &str =
+    r#""%LATTICETERM_AGENT_REPORTER%" agent-report needs-attention"#;
+#[cfg(not(windows))]
+const AIDER_REPORTER_COMMAND: &str =
+    r#""$LATTICETERM_AGENT_REPORTER" agent-report needs-attention"#;
+
+/// Adds Aider's documented notification command so a finished reply reports
+/// itself. A user who already chose notification behaviour, on the command
+/// line, in the environment or in an Aider config file, keeps it: this is a
+/// status signal, not worth overriding their own setup.
+fn aider_reporter_arguments(
+    mut arguments: Vec<String>,
+    config_files: &[PathBuf],
+    environment_set: bool,
+) -> (Vec<String>, bool) {
+    let chosen_on_command_line = arguments.iter().any(|argument| {
+        let name = argument.split('=').next().unwrap_or(argument);
+        matches!(
+            name,
+            "--notifications" | "--no-notifications" | "--notifications-command"
+        )
+    });
+    let chosen_in_config = config_files.iter().any(|path| {
+        std::fs::read_to_string(path).is_ok_and(|text| {
+            text.lines()
+                .any(|line| line.trim_start().starts_with("notifications"))
+        })
+    });
+    if chosen_on_command_line || chosen_in_config || environment_set {
+        return (arguments, false);
+    }
+    arguments.splice(
+        0..0,
+        [
+            "--notifications".to_string(),
+            "--notifications-command".to_string(),
+            AIDER_REPORTER_COMMAND.to_string(),
+        ],
+    );
+    (arguments, true)
+}
+
 fn copilot_reporter_arguments(
     mut arguments: Vec<String>,
     plugin: &CopilotReporterPlugin,
@@ -6379,6 +6427,18 @@ pub fn launch_with_replay(
             .flatten()
             .map(AgentIntegrationSettings::OpenCode);
         integrated_completion = integration_settings.is_some();
+    } else if definition_id == "aider" && reporter.is_some() {
+        // Aider has no hook system, but its notification command runs when a
+        // reply is ready. Heuristics stay on until the first report arrives.
+        let config_files: Vec<PathBuf> = user_home_directory()
+            .map(|home| home.join(".aider.conf.yml"))
+            .into_iter()
+            .chain(std::iter::once(working_directory.join(".aider.conf.yml")))
+            .collect();
+        let environment_set = ["AIDER_NOTIFICATIONS", "AIDER_NOTIFICATIONS_COMMAND"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some());
+        arguments = aider_reporter_arguments(arguments, &config_files, environment_set).0;
     } else if definition_id == "copilot" && reporter.is_some() {
         // Copilot's repeatable --plugin-dir flag mounts lifecycle hooks only
         // for this child process while preserving the user's home, login,
@@ -9605,6 +9665,38 @@ model = "gpt-5.3-codex"
             npm_shim_entry("\"%_prog%\" \"%dp0%\\cli.js\" %*\r\n", dir.path()),
             Some(script.canonicalize().unwrap())
         );
+    }
+
+    #[test]
+    fn aider_reports_turn_ends_unless_notifications_are_already_chosen() {
+        let (arguments, added) =
+            aider_reporter_arguments(vec!["--model".into(), "sonnet".into()], &[], false);
+        assert!(added);
+        assert_eq!(
+            &arguments[..3],
+            [
+                "--notifications",
+                "--notifications-command",
+                AIDER_REPORTER_COMMAND
+            ]
+        );
+        assert_eq!(&arguments[3..], ["--model", "sonnet"]);
+
+        for own in [
+            "--no-notifications",
+            "--notifications-command=notify-send x",
+        ] {
+            let (arguments, added) = aider_reporter_arguments(vec![own.into()], &[], false);
+            assert!(!added, "{own}");
+            assert_eq!(arguments, [own]);
+        }
+        assert!(!aider_reporter_arguments(Vec::new(), &[], true).1);
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join(".aider.conf.yml");
+        std::fs::write(&config, "model: sonnet\nnotifications: true\n").unwrap();
+        assert!(!aider_reporter_arguments(Vec::new(), std::slice::from_ref(&config), false).1);
+        std::fs::write(&config, "model: sonnet\n").unwrap();
+        assert!(aider_reporter_arguments(Vec::new(), &[config], false).1);
     }
 
     #[test]
