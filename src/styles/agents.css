@@ -1084,3 +1084,21 @@
   color: var(--text-muted);
   margin-inline-start: auto;
 }
+
+.agents-pacing__limit {
+  flex: 0 1 14rem;
+  min-width: 10rem;
+}
+
+.agent-session-row__main .agents-pacing__follow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  min-width: 0;
+  font-size: var(--text-2xs);
+}
+
+.agent-session-row__main .agents-pacing__follow .select {
+  min-width: 0;
+  max-width: 14rem;
+}

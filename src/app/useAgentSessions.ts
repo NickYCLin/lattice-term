@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadActiveSessionLimit, saveActiveSessionLimit } from "./agentPacing";
 import {
   createSessionClosedNotice,
   reconcileSessionSnapshot,
@@ -113,6 +114,8 @@ export interface AgentSessionSummary {
   tokenUsage: AgentTokenUsage | null;
   /** Prompts waiting for this session to finish its current turn. */
   queuedPrompts: number;
+  /** Another session whose turn must end before this one's queue moves. */
+  waitsFor?: string | null;
   /** The CLI's own session id, once its output announced one. */
   capturedSessionId: string | null;
   /** Runs inside the file-scope sandbox. */
@@ -655,6 +658,11 @@ export interface AgentApi {
   enqueue: (sessionId: string, prompt: string) => Promise<number>;
   /** Drops everything still waiting, resolving with how many went. */
   clearQueue: (sessionId: string) => Promise<number>;
+  /** Makes a session's queue wait for another's turn to end; null unlinks. */
+  setQueueDependency: (sessionId: string, waitsFor: string | null) => Promise<void>;
+  /** How many agents may work at once before queued prompts wait; null is no limit. */
+  maxActiveSessions: number | null;
+  setMaxActiveSessions: (limit: number | null) => Promise<void>;
   resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
   disconnect: (sessionId: string) => Promise<void>;
   clearLastClosed: () => void;
@@ -670,6 +678,9 @@ export interface AgentApi {
 
 export function useAgentSessions(): AgentApi {
   const [mode, setMode] = useState<AgentBackendMode>("loading");
+  const [maxActiveSessions, setMaxActiveSessionsState] = useState<number | null>(
+    loadActiveSessionLimit,
+  );
   const [error, setError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<AgentDefinition[]>(FALLBACK_CATALOG);
   const [defaultWorkingDirectory, setDefaultWorkingDirectory] = useState("");
@@ -1353,6 +1364,39 @@ export function useAgentSessions(): AgentApi {
     return invoke<number>("agent_clear_queue", { sessionId });
   }, []);
 
+  const setQueueDependency = useCallback(
+    async (sessionId: string, waitsFor: string | null) => {
+      const { invoke } = await core();
+      await invoke("agent_set_queue_dependency", { sessionId, waitsFor });
+      setSessions((current) =>
+        current.map((session) =>
+          session.sessionId === sessionId ? { ...session, waitsFor } : session,
+        ),
+      );
+    },
+    [],
+  );
+
+  const setMaxActiveSessions = useCallback(async (limit: number | null) => {
+    const { invoke } = await core();
+    await invoke("agent_set_max_active_sessions", { limit });
+    saveActiveSessionLimit(limit);
+    setMaxActiveSessionsState(limit);
+  }, []);
+
+  // The backend forgets the limit when the app quits; hand the remembered
+  // one back once it can take it.
+  const appliedStoredLimit = useRef(false);
+  useEffect(() => {
+    if (mode !== "ready" || appliedStoredLimit.current) return;
+    appliedStoredLimit.current = true;
+    const stored = loadActiveSessionLimit();
+    if (stored === null) return;
+    void core()
+      .then(({ invoke }) => invoke("agent_set_max_active_sessions", { limit: stored }))
+      .catch(() => setMaxActiveSessionsState(null));
+  }, [mode]);
+
   const broadcast = useCallback(async (sessionIds: string[], prompt: string) => {
     const payload = buildAgentBroadcastPayload(prompt);
     if (!payload) throw new Error("A broadcast prompt is required.");
@@ -1474,6 +1518,9 @@ export function useAgentSessions(): AgentApi {
     broadcast,
     enqueue,
     clearQueue,
+    setQueueDependency,
+    maxActiveSessions,
+    setMaxActiveSessions,
     resize,
     disconnect,
     clearLastClosed,

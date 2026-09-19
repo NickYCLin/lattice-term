@@ -1203,12 +1203,11 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         Request::SetQueueDependency {
             session_id,
             waits_for,
-        } => registry
-            .set_queue_dependency(&session_id, waits_for.as_deref())
+        } => agent::set_queue_dependency(sink, registry, &session_id, waits_for.as_deref())
             .map(|()| Value::Null),
-        Request::SetMaxActiveSessions { limit } => registry
-            .set_max_active_sessions(limit)
-            .map(|()| Value::Null),
+        Request::SetMaxActiveSessions { limit } => {
+            agent::set_max_active_sessions(sink, registry, limit).map(|()| Value::Null)
+        }
         Request::Broadcast { session_ids, data } => {
             let outcomes = agent::broadcast(sink, registry, &session_ids, &data)?;
             to_value(&outcomes)

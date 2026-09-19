@@ -7153,6 +7153,32 @@ fn deliver_waiting_sessions(sink: &dyn AgentSink, registry: &AgentRegistry, exce
     }
 }
 
+/// Changes which session this one's queue follows. Dropping or moving a
+/// dependency can free prompts that were only waiting on the old one, so
+/// they get a chance to move right away instead of at the next turn end.
+pub fn set_queue_dependency(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    waits_for: Option<&str>,
+) -> Result<(), String> {
+    registry.set_queue_dependency(session_id, waits_for)?;
+    deliver_next_queued(sink, registry, session_id);
+    Ok(())
+}
+
+/// Changes the active-session limit. Raising or removing it can free every
+/// session that was waiting for a slot.
+pub fn set_max_active_sessions(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    limit: Option<usize>,
+) -> Result<(), String> {
+    registry.set_max_active_sessions(limit)?;
+    deliver_waiting_sessions(sink, registry, "");
+    Ok(())
+}
+
 /// Records how many prompts are still waiting, so the interface can show it.
 fn store_queue_depth(registry: &AgentRegistry, session_id: &str, depth: usize) {
     let Ok(entry) = registry.get(session_id) else {
@@ -13655,6 +13681,44 @@ notify = ["notify.exe", "turn-ended"]"#,
             &collector,
             &waiting.session_id,
             "limited-prompt",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lifting_the_limit_releases_a_held_prompt_at_once() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let busy = launch_cat(&sink, &registry, "Lift busy");
+        let waiting = launch_cat(&sink, &registry, "Lift waiting");
+        set_max_active_sessions(sink.as_ref(), &registry, Some(1)).unwrap();
+        registry.update_state(
+            &busy.session_id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        registry.update_state(
+            &waiting.session_id,
+            AgentLifecycle::Done,
+            AgentStateSource::Integration,
+        );
+        enqueue(
+            sink.as_ref(),
+            &registry,
+            &waiting.session_id,
+            &encode(b"lifted-prompt\n"),
+        )
+        .unwrap();
+
+        // The busy session is still working; only the user's change frees it.
+        set_max_active_sessions(sink.as_ref(), &registry, None).unwrap();
+        assert!(received_within(
+            &collector,
+            &waiting.session_id,
+            "lifted-prompt",
             Duration::from_secs(3)
         ));
         registry.stop_all();

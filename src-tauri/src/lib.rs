@@ -1123,6 +1123,69 @@ async fn agent_clear_queue(
     }
 }
 
+/// Makes one agent's queue wait for another's turn to end, or clears that
+/// link. Both sessions have to live in the same place: a background session
+/// can only follow another background session.
+#[tauri::command]
+async fn agent_set_queue_dependency(
+    app: AppHandle,
+    session_id: String,
+    waits_for: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<(), String> {
+    let owned_by_daemon = crate::agent_daemon::owns(&session_id);
+    if let Some(dependency) = waits_for.as_deref() {
+        if crate::agent_daemon::owns(dependency) != owned_by_daemon {
+            return Err(
+                "A background session and a window session cannot wait for each other.".to_string(),
+            );
+        }
+    }
+    if owned_by_daemon {
+        daemon
+            .request(
+                false,
+                crate::agent_daemon::Request::SetQueueDependency {
+                    session_id,
+                    waits_for,
+                },
+            )
+            .await
+            .map(|_| ())
+    } else {
+        crate::agent::set_queue_dependency(
+            &crate::agent::EventSink(app),
+            registry.inner(),
+            &session_id,
+            waits_for.as_deref(),
+        )
+    }
+}
+
+/// Sets how many agents may work at once before queued prompts wait. The
+/// window's own registry keeps the value and hands it to the background
+/// service whenever it connects; a service that is not running needs nothing.
+#[tauri::command]
+async fn agent_set_max_active_sessions(
+    app: AppHandle,
+    limit: Option<usize>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<(), String> {
+    crate::agent::set_max_active_sessions(&crate::agent::EventSink(app), registry.inner(), limit)?;
+    match daemon
+        .request(
+            false,
+            crate::agent_daemon::Request::SetMaxActiveSessions { limit },
+        )
+        .await
+    {
+        Err(error) if error != crate::agent_daemon::client::DAEMON_GONE => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// Creates (or finds) LatticeTerm's own configuration directory for one
 /// account profile and returns its path.
 #[tauri::command]
@@ -4078,6 +4141,8 @@ pub fn run() {
             agent_broadcast,
             agent_enqueue,
             agent_clear_queue,
+            agent_set_queue_dependency,
+            agent_set_max_active_sessions,
             agent_chat_supported,
             agent_chat_local_history,
             agent_chat_local_history_read,

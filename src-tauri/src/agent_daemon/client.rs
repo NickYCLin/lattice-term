@@ -26,7 +26,7 @@ use tokio::sync::{mpsc, oneshot};
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(8);
-const DAEMON_GONE: &str = "The background service is no longer running.";
+pub(crate) const DAEMON_GONE: &str = "The background service is no longer running.";
 
 pub struct DaemonClient {
     app: AppHandle,
@@ -186,6 +186,18 @@ impl DaemonClient {
             .store(reply.desktop_bridge_protocol, Ordering::Relaxed);
         if let Ok(mut sessions) = connection.sessions.lock() {
             sessions.extend(reply.sessions.into_iter().map(|summary| summary.session_id));
+        }
+        // The window keeps the active-session limit; a service started (or
+        // restarted) after the user chose one should pace the same way. One
+        // too old to know the request simply keeps running unpaced.
+        if let Some(limit) = self
+            .app
+            .try_state::<Arc<crate::agent::AgentRegistry>>()
+            .and_then(|registry| registry.max_active_sessions())
+        {
+            let _ = connection
+                .request(Request::SetMaxActiveSessions { limit: Some(limit) })
+                .await;
         }
         if reply.desktop_bridge_protocol == super::desktop_bridge::PROTOCOL {
             let weak = Arc::downgrade(&connection);

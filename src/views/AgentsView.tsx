@@ -44,6 +44,10 @@ import {
   TrashIcon,
   TransferIcon,
 } from "../components/icons";
+import {
+  ACTIVE_SESSION_LIMIT_CHOICES,
+  queueDependencyCandidates,
+} from "../app/agentPacing";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 
@@ -226,6 +230,7 @@ export function AgentsView({
   // that is already free still takes it straight away.
   const [queueWhenBusy, setQueueWhenBusy] = useState(false);
   const [pendingBroadcast, setPendingBroadcast] = useState<string[] | null>(null);
+  const [pacingError, setPacingError] = useState<string | null>(null);
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastNotice, setBroadcastNotice] = useState<{
     delivered: number;
@@ -1493,7 +1498,36 @@ export function AgentsView({
             <span className="eyebrow">{t("agents.running.eyebrow")}</span>
             <h3>{t("agents.running.title")}</h3>
           </div>
+          <label className="field agents-pacing__limit">
+            <span className="field__label">{t("agents.pacing.limit")}</span>
+            <select
+              className="select"
+              value={agents.maxActiveSessions ?? ""}
+              disabled={agents.mode !== "ready"}
+              onChange={(event) => {
+                const raw = event.currentTarget.value;
+                setPacingError(null);
+                agents
+                  .setMaxActiveSessions(raw ? Number(raw) : null)
+                  .catch((reason: unknown) => setPacingError(String(reason)));
+              }}
+            >
+              {ACTIVE_SESSION_LIMIT_CHOICES.map((choice) => (
+                <option key={choice ?? "none"} value={choice ?? ""}>
+                  {choice === null
+                    ? t("agents.pacing.unlimited")
+                    : t("agents.pacing.count", { count: choice })}
+                </option>
+              ))}
+            </select>
+            <small className="field__optional">{t("agents.pacing.hint")}</small>
+          </label>
         </div>
+        {pacingError && (
+          <Callout tone="danger" title={t("agents.pacing.errorTitle")}>
+            <span className="mono agents-broadcast__error">{pacingError}</span>
+          </Callout>
+        )}
         {agents.sessions.length === 0 ? (
           <p className="agents-running__empty">{t("agents.running.empty")}</p>
         ) : (
@@ -1523,6 +1557,36 @@ export function AgentsView({
                     )}
                   </strong>
                   <span className="mono">{displayPath(session.workingDirectory)}</span>
+                  {(() => {
+                    const candidates = queueDependencyCandidates(
+                      agents.sessions,
+                      session.sessionId,
+                    );
+                    if (candidates.length === 0 && !session.waitsFor) return null;
+                    return (
+                      <label className="field agents-pacing__follow">
+                        <span className="field__label">{t("agents.pacing.waitsFor")}</span>
+                        <select
+                          className="select"
+                          value={session.waitsFor ?? ""}
+                          onChange={(event) => {
+                            const target = event.currentTarget.value || null;
+                            setPacingError(null);
+                            agents
+                              .setQueueDependency(session.sessionId, target)
+                              .catch((reason: unknown) => setPacingError(String(reason)));
+                          }}
+                        >
+                          <option value="">{t("agents.pacing.none")}</option>
+                          {candidates.map((candidate) => (
+                            <option key={candidate.sessionId} value={candidate.sessionId}>
+                              {candidate.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })()}
                   {session.detached && (
                     <label className="checkbox agents-mcp__toggle">
                       <input
