@@ -86,10 +86,23 @@ async fn execute(
     let payload = match shell {
         CommandShell::Cmd => {
             use std::io::Write;
+            let scripts = super::scripts::directory();
+            // Leftovers from a host that died mid-run are cleared once per
+            // process, before this one adds its own.
+            static SWEPT: std::sync::Once = std::sync::Once::new();
+            SWEPT.call_once(|| {
+                super::scripts::sweep(
+                    &scripts,
+                    std::time::SystemTime::now(),
+                    super::scripts::STALE_AFTER,
+                );
+            });
+            std::fs::create_dir_all(&scripts)
+                .map_err(|_| "Cannot create the owned command script folder.")?;
             let mut file = tempfile::Builder::new()
-                .prefix("lattice-command-")
-                .suffix(".cmd")
-                .tempfile()
+                .prefix(super::scripts::PREFIX)
+                .suffix(super::scripts::SUFFIX)
+                .tempfile_in(&scripts)
                 .map_err(|_| "Cannot create the owned command script.")?;
             write!(
                 file,

@@ -144,6 +144,7 @@ async fn send(outgoing: &mpsc::Sender<RemoteMessage>, event: CommandEvent) -> bo
     )
 }
 
+mod scripts;
 #[cfg(windows)]
 mod windows;
 
