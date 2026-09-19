@@ -1102,6 +1102,29 @@ async fn agent_enqueue(
     }
 }
 
+/// Whether the background service starts by itself when the user logs in.
+#[tauri::command]
+async fn agent_daemon_autostart_enabled() -> bool {
+    tauri::async_runtime::spawn_blocking(crate::agent_daemon::autostart::enabled)
+        .await
+        .unwrap_or(false)
+}
+
+/// Adds or removes the login entry that starts the background service, so
+/// schedules keep running after a reboot without opening the window first.
+#[tauri::command]
+async fn agent_daemon_set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent_daemon::autostart::set(&data_dir, enabled)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Drops every prompt still waiting for this agent, reporting how many went.
 #[tauri::command]
 async fn agent_clear_queue(
@@ -4037,6 +4060,12 @@ pub fn run() {
             // write-through rename. Retry only our recognisable, unreachable
             // tombstones before opening any application stores.
             let _ = crate::durable_file::cleanup_private_tombstones(&dir);
+            // A login entry the user turned on follows the executable if the
+            // app moved or updated; it is never created here.
+            {
+                let dir = dir.clone();
+                std::thread::spawn(move || crate::agent_daemon::autostart::refresh(&dir));
+            }
             // The credential router and the encrypted vault live in the same
             // directory as the rest of the app's data.
             crate::credentials::initialize(dir.clone());
@@ -4143,6 +4172,8 @@ pub fn run() {
             agent_clear_queue,
             agent_set_queue_dependency,
             agent_set_max_active_sessions,
+            agent_daemon_autostart_enabled,
+            agent_daemon_set_autostart,
             agent_chat_supported,
             agent_chat_local_history,
             agent_chat_local_history_read,

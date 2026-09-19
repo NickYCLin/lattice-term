@@ -20,6 +20,7 @@
 
 pub mod audit;
 pub mod automations;
+pub mod autostart;
 pub mod client;
 mod desktop_bridge;
 pub mod mcp;

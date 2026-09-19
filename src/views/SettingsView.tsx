@@ -31,6 +31,7 @@ import { EncryptedBackupPanel } from "../components/settings/EncryptedBackupPane
 import { ChangelogPanel } from "../components/settings/ChangelogPanel";
 import { PrivacyNotice } from "../components/settings/PrivacyNotice";
 import { RemoteMcpPanel } from "../components/settings/RemoteMcpPanel";
+import { BackgroundServicePanel } from "../components/settings/BackgroundServicePanel";
 import { CliProxyApiPanel } from "../components/settings/CliProxyApiPanel";
 import {
   clearSensitiveClipboard,
@@ -725,6 +726,7 @@ export function SettingsView({
       </section>
 
       {usesAppleUpdates && <PrivacyNotice />}
+      {!usesAppleUpdates && <BackgroundServicePanel available={desktopBackendAvailable} />}
       {!usesAppleUpdates && <RemoteMcpPanel available={desktopBackendAvailable} />}
       {!usesAppleUpdates && <CliProxyApiPanel available={desktopBackendAvailable} />}
 
