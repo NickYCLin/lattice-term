@@ -813,7 +813,7 @@ export const messages: Messages = {
   "agents.cwd.placeholder": "예를 들면 /home/me/project",
   "agents.cwd.hint": "이 폴더에서 시작하여 CLI의 권한에 따라 파일을 읽거나 변경할 수 있습니다.",
   "agents.sandbox": "샌드박스: 작업 디렉터리만 변경 가능",
-  "agents.sandbox.hint": "bubblewrap으로 실행하며 쓰기만 제한합니다. 작업 디렉터리, 이 도구 자체의 로그인 및 상태 디렉터리, /tmp를 제외한 전체 파일 시스템은 읽기 전용입니다. hooks/MCP 설정 파일은 읽기 전용으로 유지됩니다. 읽기와 네트워크는 제한되지 않으며 홈 디렉터리도 볼 수 있습니다. bwrap이 동작하는 Linux에서만 사용할 수 있습니다.",
+  "agents.sandbox.hint": "쓰기만 제한합니다. 파일 시스템 전체가 읽기 전용이고 작업 디렉터리, 이 도구의 로그인·상태 디렉터리, 임시 디렉터리만 쓸 수 있습니다(hooks/MCP 설정 파일은 계속 읽기 전용). Linux는 bubblewrap, macOS는 기본 제공 sandbox-exec를 사용하며 macOS에서는 ~/Library/Caches와 로그인 키체인도 허용합니다. 읽기와 네트워크는 제한되지 않아 홈 디렉터리를 볼 수 있습니다. Windows는 아직 지원하지 않습니다.",
   "agents.sandbox.badge": "샌드박스",
   "agents.detached": "백그라운드에서 계속 실행(LatticeTerm을 닫아도 실행 유지)",
   "agents.detached.hint": "세션은 LatticeTerm 백그라운드 서비스로 넘어갑니다. 창을 닫아도 계속 실행되며, 다음에 창을 열면 세션에 다시 연결하고 최신 출력을 표시합니다. 세션을 종료하려면 해당 탭에서 중지하거나 백그라운드 서비스 전체를 종료하세요.",

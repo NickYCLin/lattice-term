@@ -4321,9 +4321,11 @@ fn safe_account_label(value: &str) -> Option<String> {
         .then(|| value.to_string())
 }
 
-/// The sandbox tool this machine offers, if any. Only bubblewrap is
-/// supported: it is unprivileged, ubiquitous on Linux, and its bind-mount
-/// model maps directly onto "this directory may change, nothing else may".
+/// The sandbox tool this machine offers, if any: bubblewrap on Linux, whose
+/// bind-mount model maps directly onto "this directory may change, nothing
+/// else may", and the system's Seatbelt (`sandbox-exec`) on macOS, which
+/// expresses the same rule as a write policy. Windows has no unprivileged
+/// equivalent that leaves the user's files untouched, so it offers none.
 ///
 /// Finding the binary is not enough: a kernel or AppArmor policy that
 /// forbids unprivileged user namespaces makes every launch fail with
@@ -4334,6 +4336,18 @@ pub fn sandbox_tool() -> Option<PathBuf> {
     static PROBED: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     PROBED
         .get_or_init(|| {
+            if cfg!(target_os = "macos") {
+                let tool = PathBuf::from("/usr/bin/sandbox-exec");
+                let works = std::process::Command::new(&tool)
+                    .args(["-p", "(version 1)(allow default)", "/usr/bin/true"])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|status| status.success())
+                    .unwrap_or(false);
+                return works.then_some(tool);
+            }
             if !cfg!(target_os = "linux") {
                 return None;
             }
@@ -4583,6 +4597,105 @@ pub fn sandbox_arguments(
     args.push(working_directory.as_os_str().to_os_string());
     args.push("--".into());
     args
+}
+
+/// Extra places a macOS CLI writes besides its own dot-directory: caches
+/// and the login keychain its credentials live in.
+const SEATBELT_HOME_WRITABLE: [&str; 2] = ["Library/Caches", "Library/Keychains"];
+
+/// The Seatbelt policy for one sandboxed launch on macOS. Reading stays
+/// open and network stays shared, as with bubblewrap; writing is denied
+/// everywhere except the paths passed in as `W<n>` parameters, and the
+/// `R<n>` paths (the CLI's policy files) are denied again afterwards, since
+/// in a Seatbelt profile the last matching rule wins. Paths are parameters,
+/// never spliced into the profile text.
+fn seatbelt_profile(writable: usize, readonly: usize) -> String {
+    let mut profile = String::from(
+        "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  \
+         (literal \"/dev/null\") (literal \"/dev/zero\") (literal \"/dev/dtracehelper\")\n  \
+         (regex #\"^/dev/tty\") (regex #\"^/dev/fd/\") (literal \"/dev/ptmx\")\n  \
+         (subpath \"/private/tmp\") (subpath \"/private/var/folders\")",
+    );
+    for index in 0..writable {
+        profile.push_str(&format!("\n  (subpath (param \"W{index}\"))"));
+    }
+    profile.push_str(")\n");
+    if readonly > 0 {
+        profile.push_str("(deny file-write*");
+        for index in 0..readonly {
+            profile.push_str(&format!(" (subpath (param \"R{index}\"))"));
+        }
+        profile.push_str(")\n");
+    }
+    profile
+}
+
+/// `sandbox-exec` arguments (everything before the program) confining one
+/// CLI launch the way [`sandbox_arguments`] does with bubblewrap. Seatbelt
+/// matches resolved paths, so every path is canonicalised; a writable path
+/// that does not exist is left out, and a policy path that cannot be
+/// resolved makes the launch fail rather than run unprotected.
+pub fn seatbelt_arguments(
+    working_directory: &Path,
+    definition_id: &str,
+    home: Option<&Path>,
+    extra_writable: &[&Path],
+) -> Result<Vec<OsString>, String> {
+    let mut writable: Vec<PathBuf> = Vec::new();
+    let mut add = |path: PathBuf| {
+        if let Ok(resolved) = path.canonicalize() {
+            if !writable.contains(&resolved) {
+                writable.push(resolved);
+            }
+        }
+    };
+    add(working_directory.to_path_buf());
+    if let Some(home) = home {
+        for relative in sandbox_home_writable_paths(definition_id)
+            .into_iter()
+            .chain(SEATBELT_HOME_WRITABLE)
+        {
+            add(home.join(relative));
+        }
+    }
+    for path in extra_writable {
+        add(path.to_path_buf());
+    }
+    let mut readonly: Vec<PathBuf> = Vec::new();
+    let policy_paths = home
+        .into_iter()
+        .flat_map(|home| {
+            sandbox_home_readonly_paths(definition_id)
+                .into_iter()
+                .map(move |relative| home.join(relative))
+        })
+        .chain(
+            extra_writable
+                .iter()
+                .flat_map(|root| sandbox_profile_readonly_paths(definition_id, root)),
+        );
+    for path in policy_paths {
+        let resolved = path.canonicalize().map_err(|error| {
+            format!(
+                "Cannot protect {} inside the sandbox: {error}",
+                path.display()
+            )
+        })?;
+        readonly.push(resolved);
+    }
+    let mut args: Vec<OsString> = vec![
+        "-p".into(),
+        seatbelt_profile(writable.len(), readonly.len()).into(),
+    ];
+    for (prefix, paths) in [("W", &writable), ("R", &readonly)] {
+        for (index, path) in paths.iter().enumerate() {
+            let mut define = OsString::from(format!("{prefix}{index}="));
+            define.push(path.as_os_str());
+            args.push("-D".into());
+            args.push(define);
+        }
+    }
+    Ok(args)
 }
 
 fn user_home_directory() -> Option<PathBuf> {
@@ -6220,11 +6333,14 @@ pub fn launch_with_replay(
     let (mut program, mut prefix_args) = launch_parts(&executable);
     if request.sandbox {
         let Some(bwrap) = sandbox_tool() else {
-            return Err(
+            return Err(if cfg!(target_os = "macos") {
+                "Sandboxed launch needs the system sandbox-exec, which this Mac refused to run."
+                    .to_string()
+            } else {
                 "Sandboxed launch needs bubblewrap (bwrap) and permission to create user \
                  namespaces; this machine has neither or blocks them."
-                    .to_string(),
-            );
+                    .to_string()
+            });
         };
         let home = user_home_directory();
         if let Some(home) = home.as_deref() {
@@ -6257,13 +6373,17 @@ pub fn launch_with_replay(
             prepare_sandbox_profile(&definition_id, root)
                 .map_err(|error| format!("Cannot protect the account profile policy: {error}"))?;
         }
-        let mut wrapped = sandbox_arguments(
-            &working_directory,
-            &definition_id,
-            home.as_deref(),
-            &extra,
-            &|path| path.exists(),
-        );
+        let mut wrapped = if cfg!(target_os = "macos") {
+            seatbelt_arguments(&working_directory, &definition_id, home.as_deref(), &extra)?
+        } else {
+            sandbox_arguments(
+                &working_directory,
+                &definition_id,
+                home.as_deref(),
+                &extra,
+                &|path| path.exists(),
+            )
+        };
         wrapped.push(program);
         wrapped.extend(prefix_args);
         program = bwrap.into_os_string();
@@ -9328,6 +9448,79 @@ model = "gpt-5.3-codex"
                 0o700
             );
         }
+    }
+
+    #[test]
+    fn seatbelt_arguments_pass_every_path_as_a_parameter() {
+        let home = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        prepare_sandbox_state("codex", home.path()).unwrap();
+        let args = seatbelt_arguments(work.path(), "codex", Some(home.path()), &[]).unwrap();
+        let text: Vec<String> = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(text[0], "-p");
+        let profile = &text[1];
+        assert!(profile.contains("(deny file-write*)"));
+        // No path is ever spliced into the policy itself.
+        assert!(!profile.contains(&*work.path().to_string_lossy()));
+        let work_real = work.path().canonicalize().unwrap();
+        assert!(text.contains(&format!("W0={}", work_real.display())));
+        let codex = home.path().join(".codex").canonicalize().unwrap();
+        assert!(text
+            .iter()
+            .any(|arg| arg == &format!("W1={}", codex.display())
+                || arg.ends_with(&format!("={}", codex.display()))));
+        let policy = home
+            .path()
+            .join(".codex/config.toml")
+            .canonicalize()
+            .unwrap();
+        assert!(text
+            .iter()
+            .any(|arg| arg.starts_with('R') && arg.ends_with(&*policy.to_string_lossy())));
+        assert!(profile.contains("(subpath (param \"R0\"))"));
+    }
+
+    #[test]
+    fn seatbelt_refuses_to_run_without_its_policy_files() {
+        let home = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        // Not prepared: the policy files do not exist, so they could not be
+        // protected, and the launch must not go ahead.
+        assert!(seatbelt_arguments(work.path(), "codex", Some(home.path()), &[]).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_lets_a_cli_write_only_where_it_may() {
+        let tool = sandbox_tool().expect("sandbox-exec is available on macOS");
+        let home = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+        let work = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+        let outside = tempfile::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
+        prepare_sandbox_state("codex", home.path()).unwrap();
+        let mut command = std::process::Command::new(tool);
+        command.args(seatbelt_arguments(work.path(), "codex", Some(home.path()), &[]).unwrap());
+        command.args([
+            "/bin/sh",
+            "-c",
+            "echo in > \"$1/in.txt\"; echo state > \"$2/.codex/state.txt\"; \
+             echo out > \"$3/out.txt\" 2>/dev/null; echo policy >> \"$2/.codex/config.toml\" 2>/dev/null; true",
+            "sh",
+        ]);
+        command
+            .arg(work.path())
+            .arg(home.path())
+            .arg(outside.path());
+        assert!(command.status().unwrap().success());
+        assert!(work.path().join("in.txt").exists());
+        assert!(home.path().join(".codex/state.txt").exists());
+        assert!(!outside.path().join("out.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(home.path().join(".codex/config.toml")).unwrap(),
+            ""
+        );
     }
 
     #[test]

@@ -939,7 +939,7 @@ export const en: Messages = {
   "agents.cwd.hint":
     "The agent starts in this folder and may read or change its files according to the CLI's permissions.",
   "agents.sandbox": "Sandbox: only the working directory may change",
-  "agents.sandbox.hint": "Launch through bubblewrap: writes only — the whole filesystem is read-only except the working directory, this tool's own login and state directories and /tmp (its hooks/MCP config files stay read-only). Reads and network are not confined; it can still see your home directory. Offered only on Linux where bwrap works.",
+  "agents.sandbox.hint": "Confines writes only: the whole filesystem is read-only except the working directory, this tool's own login and state directories and the temp directory (its hooks/MCP config files stay read-only). Linux uses bubblewrap; macOS uses the built-in sandbox-exec and also allows ~/Library/Caches and the login keychain. Reads and network are not confined; it can still see your home directory. Not available on Windows yet.",
   "agents.sandbox.badge": "Sandbox",
   "agents.detached": "Keep in the background (keeps running after LatticeTerm closes)",
   "agents.detached.hint": "The session is handed to LatticeTerm's background service: it keeps running when the window closes, and the next window attaches to it again and replays the latest output. Stop it from its tab, or end the whole background service, when you really want it gone.",

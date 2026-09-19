@@ -813,7 +813,7 @@ export const messages: Messages = {
   "agents.cwd.placeholder": "Zum Beispiel /home/me/project",
   "agents.cwd.hint": "Der Agent startet in diesem Ordner und kann seine Dateien nach den Berechtigungen des CLI lesen oder ändern.",
   "agents.sandbox": "Sandbox: nur das Arbeitsverzeichnis kann ändern",
-  "agents.sandbox.hint": "Startet über bubblewrap und beschränkt nur Schreibzugriffe: Das Dateisystem ist schreibgeschützt, außer dem Arbeitsverzeichnis, den eigenen Anmelde- und Zustandsverzeichnissen des Werkzeugs sowie /tmp. Die hooks/MCP-Konfigurationsdateien bleiben schreibgeschützt. Lese- und Netzwerkzugriffe sind nicht eingeschränkt; das Home-Verzeichnis bleibt sichtbar. Nur unter Linux mit funktionierendem bwrap verfügbar.",
+  "agents.sandbox.hint": "Beschränkt nur Schreibzugriffe: Das ganze Dateisystem ist schreibgeschützt außer dem Arbeitsverzeichnis, den Anmelde- und Statusordnern dieses Werkzeugs und dem Temp-Ordner (Hooks/MCP-Konfiguration bleiben schreibgeschützt). Linux nutzt bubblewrap, macOS das eingebaute sandbox-exec und erlaubt dort zusätzlich ~/Library/Caches und den Anmeldeschlüsselbund. Lesen und Netzwerk sind nicht eingeschränkt; das Home-Verzeichnis bleibt sichtbar. Unter Windows noch nicht verfügbar.",
   "agents.sandbox.badge": "Sandkasten",
   "agents.detached": "Halten Sie im Hintergrund (Schritte, die nach LatticeTerm laufen, schließen)",
   "agents.detached.hint": "Die Sitzung wird an LatticeTerms Hintergrunddienst übergeben: es läuft weiter, wenn das Fenster schließt, und das nächste Fenster legt sich wieder an und wiederholt die neueste Ausgabe. Stoppen Sie es von seiner Registerkarte, oder beenden Sie den gesamten Hintergrundservice, wenn Sie wirklich wollen, dass es weg ist.",

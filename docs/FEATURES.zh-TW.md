@@ -14,7 +14,7 @@
 | 發行與更新 | **可用** | Windows x64、Linux x64／arm64、macOS Intel／Apple Silicon 安裝檔、更新簽章、Release PR 與應用程式內更新已自動化。 |
 | Android | **預覽** | 共用的純 Rust SSH／SFTP／Tunnel／Vault 核心與行動介面可建置；需要桌面 sidecar 的 RDP、VNC 與 Agent Fleet 不提供。 |
 | iOS | **已上架** | iPhone／iPad 可從 [App Store](https://apps.apple.com/app/latticeterm/id6808952335) 下載；目前商店版本為 2.0.0（2026-09-12 查核）。商店版與主分支的新功能可能不同，開發與驗證紀錄見 [iOS 發布流程](IOS_RELEASE.zh-TW.md)。 |
-| 進階 Agent 與行動能力 | **部分完成** | 排程任務、接續執行與同時執行上限、提示佇列，Linux 的 bubblewrap 檔案範圍沙箱，跨程序背景服務（勾選「留在背景」的工作階段在關閉 LatticeTerm 後繼續執行、下次開啟自動接回），以及讓外部 AI 透過 MCP 查看、提示與啟動分享的背景工作階段已完成；SSH MCP 遠端 Fleet 已支援 Windows／Linux／macOS 工作區授權與多 PTY；遠端 panes、macOS／Windows 的沙箱仍待完成。 |
+| 進階 Agent 與行動能力 | **部分完成** | 排程任務、接續執行與同時執行上限、提示佇列，Linux 的 bubblewrap 與 macOS 的 Seatbelt 檔案範圍沙箱，跨程序背景服務（勾選「留在背景」的工作階段在關閉 LatticeTerm 後繼續執行、下次開啟自動接回），以及讓外部 AI 透過 MCP 查看、提示與啟動分享的背景工作階段已完成；SSH MCP 遠端 Fleet 已支援 Windows／Linux／macOS 工作區授權與多 PTY；遠端 panes 與 Windows 的沙箱仍待完成。 |
 
 ## 主要特色
 
@@ -35,7 +35,7 @@
 - **排程任務**：對話頁的「排程」分頁做法參考 Codex 的 Automations：寫一段指示、選 CLI、專案與時間（每天／每週固定時刻，或每隔一段時間），LatticeTerm 開著時就會準時用對話模式跑一輪，每次執行都開一個新對話，結果以未讀標記出現在對話清單裡等你看；可立即執行、暫停、編輯、刪除，並保留最近 20 次執行紀錄。LatticeTerm 關著時由背景服務準時執行，結果在下次開啟時以未讀對話出現（背景服務沒在跑時才會在下次開啟補跑一次）；無人值守不提供「每次詢問」權限，預設唯讀。
 - **MCP Server**：外部 AI 工具可查看在 Agent Fleet 頁明確分享的背景工作階段。第一次分享只開放工作階段資訊、狀態與狀態等待；另勾「允許 MCP 讀取內容」才可增量讀取終端輸出與內容片段。控制權獨立授權，取消內容讀取不會取消狀態分享或控制權。允許啟動保存項目時，產生的工作階段會自動分享、允許讀取內容並可控，介面會明示。舊背景服務不支援內容分權時不開放新分享，保留舊分享的原有權限與撤銷操作，不自動中斷 CLI。另外在設定頁可把 RDP／VNC／Lattice Remote 的畫面分享給 MCP，讓它每兩秒取一張目前畫面——鍵盤滑鼠另外授權並需新鮮、單次使用的畫面憑據；沒有串流，斷線重連即失效。另可獨立授權 SSH 上的 Windows／Linux／macOS 遠端 Fleet 工作區，按 Agent ID 分別讀取、啟動與控制背景 PTY。設定片段、工具與相容性邊界見 [MCP Server](MCP.zh-TW.md)。
   派送需要 CLI 官方就緒回報，會避開使用者編輯中的提示；撤權保留使用者自己的排隊工作。request ID 防並行重送，慢 client 的等待與輸出有界。最近 256 筆操作紀錄可安全保存在本機，跨背景服務重啟還原；寫入失敗會明示，不清空原檔。設定頁可逐項開放既有 SSH 的 Linux 資訊／指定指令，以及 SFTP 核准目錄的清單／上下載；權限預設關閉，不代登入或接受主機金鑰。沒有官方 hook 的 CLI 需手動操作；遠端畫面工具尚未實作。
-- **Agent 沙箱（Linux）**：裝有 bubblewrap 的機器上，啟動 CLI 時可勾選「沙箱：只能改工作目錄」——整個檔案系統唯讀，只有工作目錄、該工具自己的登入與狀態目錄和 /tmp 可寫，PID 隔離、網路照常；選項會跟著工作區項目保存與還原，清單上有「沙箱」標記。沒有 bwrap、或系統禁止非特權 user namespace（Ubuntu 24.04 起預設如此，需為 bwrap 啟用發行版提供的 AppArmor 設定檔）時不提供這個選項，也不會假裝有隔離。
+- **Agent 沙箱（Linux、macOS）**：macOS 改用系統內建的 `sandbox-exec`（Seatbelt），規則相同：拒絕所有寫入，再放行工作目錄、該工具的狀態目錄、暫存目錄、`~/Library/Caches` 與登入鑰匙圈，最後再次拒絕 hooks／MCP 設定檔；路徑一律以參數帶入，不拼進規則文字，macOS 沒有 PID 隔離。Linux 部分：裝有 bubblewrap 的機器上，啟動 CLI 時可勾選「沙箱：只能改工作目錄」——整個檔案系統唯讀，只有工作目錄、該工具自己的登入與狀態目錄和 /tmp 可寫，PID 隔離、網路照常；選項會跟著工作區項目保存與還原，清單上有「沙箱」標記。沒有 bwrap、或系統禁止非特權 user namespace（Ubuntu 24.04 起預設如此，需為 bwrap 啟用發行版提供的 AppArmor 設定檔）時不提供這個選項，也不會假裝有隔離。
 - **可靠的 Agent 狀態**：Codex、Claude Code、Gemini CLI、OpenCode、GitHub Copilot CLI、Hermes Agent 與 Qwen Code 會以各自官方 lifecycle hook／plugin event 明確回報工作中、完成或等待權限；Claude 與 Qwen 尚有背景工作或排程時不會誤標完成，OpenCode、Copilot 與 Hermes 的子 Agent 結束也不會被當成主工作階段完成。Gemini、OpenCode、Copilot、Hermes 與 Qwen 的整合只套用在該次 LatticeTerm 工作階段，不改使用者設定；若主機已有不可安全合併的程序級設定、專案停用所有 hooks、無法辨識 Hermes 安裝結構，或 CLI 以 pure／safe／bare mode 啟動，就保留原設定並使用保守 heuristic。其他尚未整合 hook 的工具只使用保守的終端提示 heuristic：看到提示列重新開啟 bracketed paste 之後，還要再安靜兩秒才標成完成，因為 TUI 重繪也會送同一個控制碼；期間有輸出就從最新輸出重新計時。狀態不會憑空猜測：只有使用者實際送出打好的提示才算開始工作，單獨按 Enter 接受資料夾信任對話框或清空提示都不會標成執行中；整合始終沒有回報且終端連續 10 分鐘無輸出時，會退回「閒置」而不是謊稱「完成」。
 - **SSH 連線**：以純 Rust 的 russh 實作，可使用密碼或本機 OpenSSH 私鑰建立終端機工作階段。主機金鑰未經確認不會連線，金鑰變更會直接擋下；密碼預設只用於當次連線，使用者可在驗證成功後明確保存到目前選定的認證後端，私鑰內容與密語不會保存至連線設定。執行中的 SSH 分頁可一鍵「開啟檔案總管」，以同一台主機、同一組認證開啟 SFTP 圖形化檔案瀏覽（已保存密碼免再輸入）。
 - **SSH Tunnel**：可建立本機、遠端與 SOCKS5 動態轉送，顯示即時狀態與連線數；動態代理若未設定驗證只允許綁定 loopback，遠端轉送則依 SSH 伺服器的 GatewayPorts 政策生效。
@@ -69,7 +69,7 @@
 
 1. **Lattice Remote 連線範圍**：鍵盤／滑鼠遠端控制已可用（由分享端明確授權）；免帳戶數字裝置 ID、自架 Relay（`docs/RELAY_SERVER.zh-TW.md`）、裝置金鑰釘選（TOFU）與固定配對碼無人值守已可用；接著加入 NAT 直連穿透。連線清單先保存在本機，帳戶只作為日後跨裝置同步與團隊權限的選配層。
 2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH 與 [Relay Fleet](RELAY_FLEET.zh-TW.md) 已提供 MCP 工作區與遠端多 PTY 操作；Relay 尚待外部主機與安裝版驗收，桌面遠端 panes 尚未提供。
-3. **Agent 編排與隔離**：補齊其他工具的 hook 與 token／cost 可觀測事件；排程、佇列、接續執行與同時執行上限已完成，Linux 檔案範圍沙箱已完成，接著是 macOS／Windows 的對應隔離與網路／資源限制。
+3. **Agent 編排與隔離**：補齊其他工具的 hook 與 token／cost 可觀測事件；排程、佇列、接續執行與同時執行上限已完成，Linux 與 macOS 的檔案範圍沙箱已完成，接著是 Windows 的對應隔離與網路／資源限制。
 4. **平台完整度**：設計安全的 Windows npm shim adapter、持續強化 Android 發行流程，並持續驗證 iOS 商店更新與實機操作。
 5. **正式發行信任**：自動更新包已有 Tauri 簽章；Windows Authenticode 與 Apple Developer ID／notarization 仍需發行者憑證。
 

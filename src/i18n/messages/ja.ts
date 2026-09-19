@@ -813,7 +813,7 @@ export const messages: Messages = {
   "agents.cwd.placeholder": "例えば/home/me/project",
   "agents.cwd.hint": "このフォルダからエージェントが起動し、CLI の許可に従ってファイルを読み込みまたは変更することができます。",
   "agents.sandbox": "サンドボックス：作業ディレクトリのみ変更可能",
-  "agents.sandbox.hint": "bubblewrap 経由で起動します。制限するのは書き込みのみです。作業ディレクトリ、このツール自身のログイン情報と状態のディレクトリ、/tmp 以外は読み取り専用です。hooks と MCP の設定ファイルは読み取り専用のままです。読み取りやネットワークは制限されず、ホームディレクトリも見えます。bwrap が動作する Linux でのみ利用できます。",
+  "agents.sandbox.hint": "書き込みのみを制限します。ファイルシステム全体を読み取り専用にし、作業ディレクトリ、このツール自身のログイン・状態ディレクトリ、一時ディレクトリだけ書き込めます（hooks／MCP 設定ファイルは読み取り専用のまま）。Linux は bubblewrap、macOS は標準の sandbox-exec を使い、macOS では ~/Library/Caches とログインキーチェーンも許可します。読み取りとネットワークは制限されず、ホームディレクトリは見えます。Windows はまだ対応していません。",
   "agents.sandbox.badge": "サンドボックス",
   "agents.detached": "バックグラウンドで継続（LatticeTerm を閉じても実行を続ける）",
   "agents.detached.hint": "セッションは LatticeTerm のバックグラウンドサービスに引き継がれます。ウィンドウを閉じても実行が続き、次に開いたウィンドウで再接続して最新の出力を表示します。終了するには、セッションのタブで停止するか、バックグラウンドサービス全体を終了してください。",

@@ -61,6 +61,7 @@ jobs:
           npm run build:sidecars
           cargo check --manifest-path src-tauri/Cargo.toml --all-targets
           cargo test --manifest-path src-tauri/Cargo.toml --lib app_menu
+          cargo test --manifest-path src-tauri/Cargo.toml --lib seatbelt
 
   # Linux validates the full desktop source; macOS separately checks native
   # text-file safety and the desktop quit route. Release packages are built

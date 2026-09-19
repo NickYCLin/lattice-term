@@ -909,7 +909,7 @@ export const zhTW = {
   "agents.cwd.placeholder": "例如 /home/me/project",
   "agents.cwd.hint": "Agent 會從這個資料夾啟動，並能依自身權限讀寫其中的檔案。",
   "agents.sandbox": "沙箱：只能改工作目錄",
-  "agents.sandbox.hint": "以 bubblewrap 啟動：只限制寫入——整個檔案系統唯讀，只有工作目錄、這個工具自己的登入與狀態目錄和 /tmp 可寫（工具的 hooks／MCP 設定檔仍唯讀）。讀取與網路不受限，它看得到你的家目錄。只在 Linux 且 bwrap 可用時提供。",
+  "agents.sandbox.hint": "只限制寫入：整個檔案系統唯讀，只有工作目錄、這個工具自己的登入與狀態目錄和暫存目錄可寫（工具的 hooks／MCP 設定檔仍唯讀）。Linux 用 bubblewrap，macOS 用系統內建的 sandbox-exec，macOS 另外開放 ~/Library/Caches 與登入鑰匙圈。讀取與網路不受限，它看得到你的家目錄。Windows 目前沒有對應機制。",
   "agents.sandbox.badge": "沙箱",
   "agents.detached": "留在背景（關閉 LatticeTerm 後繼續執行）",
   "agents.detached.hint": "這個工作階段交給 LatticeTerm 的背景服務持有：關掉視窗它照跑，下次開啟自動接回並重播最近的輸出。要真的結束就在分頁按停止，或結束整個背景服務。",

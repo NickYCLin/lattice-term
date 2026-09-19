@@ -813,7 +813,7 @@ export const messages: Messages = {
   "agents.cwd.placeholder": "Por exemplo /home/me/project",
   "agents.cwd.hint": "O agente inicia nesta pasta e pode ler ou alterar seus arquivos de acordo com as permissões do CLI.",
   "agents.sandbox": "Sandbox: apenas o diretório de trabalho pode ser alterado",
-  "agents.sandbox.hint": "Inicia pelo bubblewrap e limita apenas a gravação: todo o sistema de arquivos fica somente leitura, exceto o diretório de trabalho, os diretórios de login e estado da própria ferramenta e /tmp. Os arquivos de configuração hooks/MCP continuam somente leitura. Leituras e rede não são restritas; o diretório pessoal continua visível. Disponível apenas no Linux quando o bwrap funciona.",
+  "agents.sandbox.hint": "Limita só as gravações: todo o sistema de arquivos fica somente leitura, exceto a pasta de trabalho, as pastas de login e estado desta ferramenta e a pasta temporária (os arquivos de hooks/MCP continuam somente leitura). No Linux usa bubblewrap; no macOS usa o sandbox-exec nativo e também libera ~/Library/Caches e o chaveiro de login. Leitura e rede não são limitadas; ela vê sua pasta pessoal. Ainda não disponível no Windows.",
   "agents.sandbox.badge": "Caixa de areia",
   "agents.detached": "Mantenha- se em segundo plano (mantém- se em execução após o encerramento do LatticeTerm)",
   "agents.detached.hint": "A sessão é entregue ao serviço de fundo do LatticeTerm: continua a correr quando a janela se fecha, e a próxima janela liga- se a ela de novo e repete a última saída. Pare- a da sua página, ou termine todo o serviço de fundo, quando realmente quiser que ela desapareça.",
