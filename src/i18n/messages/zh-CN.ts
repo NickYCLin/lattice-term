@@ -1376,6 +1376,7 @@ export const messages: Messages = {
   "chat.mcp.title": "MCP 服务器",
   "chat.mcp.hint": "这个助理配置里的 MCP 服务器，也就是它在对话中可以调用的外部工具。这里只显示，环境变量与标头只列名称、不显示内容；新增、移除或登录请用下面的命令。",
   "chat.mcp.none": "没有配置任何 MCP 服务器。",
+  "chat.mcp.claudeConnectors": "在 claude.ai 账号里连接的连接器（例如 Google Drive、Notion）由账号带进来，不在配置文件里，所以不会列在这里；在终端执行 claude mcp list 可以看到全部。",
   "chat.mcp.scope.user": "用户",
   "chat.mcp.scope.project": "项目",
   "chat.mcp.scope.local": "这个项目（个人）",

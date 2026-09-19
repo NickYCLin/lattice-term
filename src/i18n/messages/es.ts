@@ -1357,6 +1357,7 @@ export const messages: Messages = {
   "chat.mcp.title": "Servidores MCP",
   "chat.mcp.hint": "Servidores MCP de la configuración propia de este asistente: las herramientas externas que puede llamar en la conversación. Solo lectura; las variables de entorno y los encabezados se muestran por nombre, nunca por valor. Agrega, quita o inicia sesión con los comandos de abajo.",
   "chat.mcp.none": "No hay servidores MCP configurados.",
+  "chat.mcp.claudeConnectors": "Los conectores de tu cuenta de claude.ai (como Google Drive o Notion) vienen con la cuenta, no de un archivo de configuración, así que no aparecen aquí. Ejecuta claude mcp list en una terminal para verlos todos.",
   "chat.mcp.scope.user": "Usuario",
   "chat.mcp.scope.project": "Proyecto",
   "chat.mcp.scope.local": "Este proyecto (personal)",

@@ -1461,6 +1461,7 @@ export const zhTW = {
   "chat.mcp.title": "MCP 伺服器",
   "chat.mcp.hint": "這個助理設定檔裡的 MCP 伺服器，也就是它在對話中可以呼叫的外部工具。這裡只顯示，環境變數與標頭只列名稱、不顯示內容；新增、移除或登入請用下面的指令。",
   "chat.mcp.none": "沒有設定任何 MCP 伺服器。",
+  "chat.mcp.claudeConnectors": "在 claude.ai 帳號裡連接的連接器（例如 Google Drive、Notion）由帳號帶進來，不在設定檔裡，所以不會列在這裡；在終端機執行 claude mcp list 可以看到全部。",
   "chat.mcp.scope.user": "使用者",
   "chat.mcp.scope.project": "專案",
   "chat.mcp.scope.local": "這個專案（個人）",

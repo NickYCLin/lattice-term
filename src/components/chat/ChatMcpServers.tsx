@@ -123,6 +123,7 @@ export function ChatMcpServers({
       <p className="chat-settings__hint">{t("chat.mcp.hint")}</p>
       {error && <p className="field__error">{error}</p>}
       {servers && servers.length === 0 && <p className="chat-settings__hint">{t("chat.mcp.none")}</p>}
+      {definitionId === "claude" && <p className="chat-settings__hint">{t("chat.mcp.claudeConnectors")}</p>}
       <ul className="chat-mcp">
         {servers?.map((server) => {
           const commands = mcpCommands(definitionId, server);

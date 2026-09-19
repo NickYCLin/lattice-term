@@ -1357,6 +1357,7 @@ export const messages: Messages = {
   "chat.mcp.title": "MCP 서버",
   "chat.mcp.hint": "이 어시스턴트 설정에 있는 MCP 서버, 즉 대화 중 호출할 수 있는 외부 도구입니다. 보기 전용이며 환경 변수와 헤더는 이름만 보이고 값은 표시하지 않습니다. 추가, 삭제, 로그인은 아래 명령을 사용하세요.",
   "chat.mcp.none": "설정된 MCP 서버가 없습니다.",
+  "chat.mcp.claudeConnectors": "claude.ai 계정에 연결한 커넥터(Google Drive, Notion 등)는 설정 파일이 아니라 계정에서 불러오므로 여기에 표시되지 않습니다. 전체 목록은 터미널에서 claude mcp list 를 실행하세요.",
   "chat.mcp.scope.user": "사용자",
   "chat.mcp.scope.project": "프로젝트",
   "chat.mcp.scope.local": "이 프로젝트(개인)",
