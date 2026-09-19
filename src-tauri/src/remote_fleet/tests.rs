@@ -226,3 +226,19 @@ async fn fleet_rejects_missing_daemon_relative_roots_and_revoked_grants() {
         .await
         .is_err());
 }
+
+#[test]
+fn a_blank_workspace_means_the_home_folder_but_never_the_root() {
+    let data = tempfile::tempdir().unwrap();
+    let paths = crate::agent_daemon::DaemonPaths::new(data.path());
+    let grant = |directory: &str| HostGrant {
+        directory: directory.into(),
+        read: true,
+        control: false,
+        launch: false,
+    };
+    let access = Access::new(paths.clone(), &grant("   ")).unwrap();
+    let home = dirs::home_dir().unwrap().canonicalize().unwrap();
+    assert_eq!(std::path::Path::new(access.directory()), home.as_path());
+    assert!(Access::new(paths, &grant("/")).is_err());
+}

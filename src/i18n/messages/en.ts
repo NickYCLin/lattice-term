@@ -2127,6 +2127,8 @@ export const en: Messages = {
   "remote.fleet.allow": "Share an Agent Fleet workspace",
   "remote.fleet.active": "Fleet workspace sharing is active. Stop sharing to revoke it; re-enabling requires a new grant.",
   "remote.fleet.directory": "Workspace directory on this host",
+  "remote.fleet.directoryPlaceholder": "Blank = your whole home folder",
+  "remote.fleet.sharedDirectory": "Sharing: {directory}",
   "remote.fleet.hint": "Allow paired viewers to inspect one workspace through MCP. Reading output, controlling sessions and launching saved plans need separate grants below, plus the background service's MCP permissions. Terminal sharing and saved pairing passwords do not grant Fleet access. Stop sharing to revoke access; already accepted tasks keep running. The directory is a routing boundary, not an OS sandbox.",
   "remote.fleet.clientHint": "Uses the workspace explicitly shared by the Remote host. The host selects the directory; no remote executable or path is sent. Its MCP session and launch permissions still apply. Reconnects require a new local grant. This is MCP orchestration; remote Fleet panes are not included.",
   "remote.cli.allow": "Share and control CLI sessions",

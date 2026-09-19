@@ -30,7 +30,18 @@ pub struct Access {
 }
 impl Access {
     pub fn new(paths: DaemonPaths, grant: &HostGrant) -> Result<Arc<Self>, String> {
-        let directory = &grant.directory;
+        // Left blank, the workspace is the user's home folder: every project
+        // under it, but still a named folder and never the filesystem root.
+        let home;
+        let directory = if grant.directory.trim().is_empty() {
+            home = dirs::home_dir()
+                .ok_or("Cannot find the home folder; enter a workspace directory.")?
+                .to_string_lossy()
+                .into_owned();
+            &home
+        } else {
+            &grant.directory
+        };
         #[cfg(windows)]
         if !crate::mcp_desktop::valid_windows_workspace_path(directory) {
             return Err("Choose a local workspace directory.".into());
@@ -69,6 +80,10 @@ impl Access {
             },
             revoked: watch::channel(false).0,
         }))
+    }
+    /// The folder actually shared, after a blank entry became the home folder.
+    pub fn directory(&self) -> &str {
+        &self.directory
     }
     pub fn revoke(&self) {
         self.revoked.send_replace(true);

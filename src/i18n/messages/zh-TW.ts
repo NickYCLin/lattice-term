@@ -2038,6 +2038,8 @@ export const zhTW = {
   "remote.fleet.allow": "分享 Agent Fleet 工作區",
   "remote.fleet.active": "Fleet 工作區分享中。停止分享即可撤權，再次啟用須重新授權。",
   "remote.fleet.directory": "此主機的工作區目錄",
+  "remote.fleet.directoryPlaceholder": "留空＝整個家目錄",
+  "remote.fleet.sharedDirectory": "實際分享：{directory}",
   "remote.fleet.hint": "允許已配對的控制端透過 MCP 查看一個工作區。讀取輸出、控制工作階段與啟動儲存項目須分別勾選，也須通過背景服務的 MCP 權限。終端分享與已儲存的配對密碼不會授予 Fleet 權限。停止分享即撤權，已接受的任務仍會繼續。目錄限制用於選擇工作區，不是作業系統沙箱。",
   "remote.fleet.clientHint": "使用 Remote 主機明確分享的工作區。目錄由被控端選定，不傳送遠端執行檔或路徑，仍須通過主機的 MCP 工作階段與啟動權限。重新連線後須重新授權。此處提供 MCP 編排，尚不包含遠端 Fleet 分割面板。",
   "remote.cli.allow": "分享 CLI 並允許操作",

@@ -20,6 +20,8 @@ export interface RemoteHostStatus {
   chat?: boolean;
   cli?: boolean;
   fleet?: boolean;
+  /** The Fleet folder actually shared; a blank entry means the home folder. */
+  fleetDirectory?: string;
   fileRoot?: string;
   state: "waiting" | "pairing" | "streaming" | "reconnecting";
   peer?: string;

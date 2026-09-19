@@ -84,6 +84,9 @@ pub struct RemoteHostStatus {
     pub chat: bool,
     pub cli: bool,
     pub fleet: bool,
+    /// The Fleet workspace folder as resolved, so a blank entry shows what it meant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fleet_directory: Option<String>,
     pub file_root: Option<String>,
     pub state: &'static str,
     pub peer: Option<String>,
@@ -683,6 +686,7 @@ async fn start_inner(
             crate::remote_fleet::Access::new(app.state::<crate::AppDaemon>().paths().clone(), grant)
         })
         .transpose()?;
+    let fleet_directory = fleet.as_ref().map(|access| access.directory().to_string());
     let chat = if request.allow_chat || request.allow_cli || fleet.is_some() {
         Some(
             crate::remote_chat_host::Bridge::start(
@@ -815,6 +819,7 @@ async fn start_inner(
         chat: request.allow_chat,
         cli: request.allow_cli,
         fleet: request.fleet.is_some(),
+        fleet_directory,
         file_root,
         state: "waiting",
         peer: None,
@@ -1164,6 +1169,7 @@ mod tests {
                 chat: false,
                 cli: false,
                 fleet: false,
+                fleet_directory: None,
                 file_root: None,
                 state: "waiting",
                 peer: None,
@@ -1358,6 +1364,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            fleet_directory: None,
             file_root: None,
             state: "waiting",
             peer: None,
