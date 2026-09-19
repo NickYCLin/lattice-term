@@ -1680,3 +1680,57 @@ button.chat-diff__line.is-commentable:focus-visible {
   margin: 2px var(--space-2) 4px 2.5rem;
   font-family: var(--font-ui);
 }
+
+.chat-skills {
+  position: relative;
+}
+
+.chat-skills__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: 20;
+  display: grid;
+  gap: var(--space-2);
+  width: min(24rem, 80vw);
+  max-height: 20rem;
+  padding: var(--space-2);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-solid);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+}
+
+.chat-skills__menu ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-skills__menu li button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-skills__menu li button:hover,
+.chat-skills__menu li button:focus-visible {
+  background: var(--surface-hover);
+}
+
+.chat-skills__menu small {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}

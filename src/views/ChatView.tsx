@@ -64,6 +64,7 @@ import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
+import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -1126,6 +1127,13 @@ function ThreadPane({
                 <FileIcon />
                 {t("chat.attachment.files")}
               </button>
+              <ChatSkillPicker
+                definitionId={thread.definitionId}
+                workingDirectory={thread.workingDirectory}
+                profileConfigPath={activeProfile?.configDirectory ?? null}
+                disabled={steering}
+                onPick={(text) => setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`))}
+              />
               <button type="button" className="button button--ghost button--sm"
                 onClick={() => void pasteImage()} disabled={steering || pastingImage}
                 title={t("chat.attachment.pasteHint")}>{t(pastingImage ? "chat.attachment.pasting" : "chat.attachment.paste")}</button>
