@@ -100,11 +100,19 @@ fn repository_root(directory: &str) -> Result<PathBuf, String> {
 fn checked_path(path: &str) -> Result<&str, String> {
     let bad = path.is_empty()
         || path.starts_with('-')
+        || path.starts_with('\\')
         || path.contains('\0')
         || Path::new(path).is_absolute()
         || Path::new(path)
             .components()
-            .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)));
+            // On Windows `\\x` or `/x` is not "absolute" (no drive) but still
+            // starts at the drive root, outside the repository.
+            .any(|part| {
+                matches!(
+                    part,
+                    Component::ParentDir | Component::Prefix(_) | Component::RootDir
+                )
+            });
     if bad {
         Err(format!("Refusing an unexpected path: {path}"))
     } else {
@@ -360,7 +368,13 @@ mod tests {
     fn unsafe_paths_and_folders_are_refused() {
         let dir = repo();
         let root = dir.path().to_str().unwrap();
-        for bad in ["--output=/tmp/x", "../outside", "/etc/passwd", ""] {
+        for bad in [
+            "--output=/tmp/x",
+            "../outside",
+            "/etc/passwd",
+            "\\Windows\\win.ini",
+            "",
+        ] {
             assert!(stage(root, &[bad.to_string()]).is_err(), "{bad}");
             assert!(diff(root, bad, false).is_err(), "{bad}");
         }
