@@ -63,6 +63,27 @@ describe("encrypted backup local storage", () => {
     expect(storage.values.get("unrelated.site.token")).toBe('"keep"');
   });
 
+  it("carries scheduled chats in both directions", () => {
+    const schedules = '[{"id":"daily-report"}]';
+    const source = memoryStorage({ "latticeterm.agentAutomations.v1": schedules });
+    const collected = collectBackupLocalStorage(source.adapter, defaultPreferences);
+    expect(collected["latticeterm.agentAutomations.v1"]).toBe(schedules);
+
+    const target = memoryStorage({ "latticeterm.agentAutomations.v1": "[]" });
+    applyRestoredLocalStorage(target.adapter, collected);
+    expect(target.values.get("latticeterm.agentAutomations.v1")).toBe(schedules);
+  });
+
+  it("keeps this machine's schedules when an older backup has none", () => {
+    const storage = memoryStorage({
+      "latticeterm.agentAutomations.v1": '[{"id":"mine"}]',
+    });
+    applyRestoredLocalStorage(storage.adapter, {
+      "latticeterm.preferences.v2": JSON.stringify(defaultPreferences),
+    });
+    expect(storage.values.get("latticeterm.agentAutomations.v1")).toBe('[{"id":"mine"}]');
+  });
+
   it("refuses backend responses containing non-allowlisted keys", () => {
     const storage = memoryStorage();
     expect(() =>

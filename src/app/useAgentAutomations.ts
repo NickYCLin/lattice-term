@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AUTOMATIONS_RESTORED_EVENT,
   beginAutomationRun,
   createAutomation,
   dueAutomations,
@@ -76,6 +77,15 @@ export function useAgentAutomations(chat: AgentChatApi, locale: string): AgentAu
     if (typeof localStorage === "undefined") return;
     saveStoredAutomations(localStorage, automations);
   }, [automations]);
+
+  // A backup restore rewrites the stored list underneath this hook; take it
+  // in before the next save would put the old list back.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    const reload = () => setAutomations(loadStoredAutomations(localStorage));
+    window.addEventListener(AUTOMATIONS_RESTORED_EVENT, reload);
+    return () => window.removeEventListener(AUTOMATIONS_RESTORED_EVENT, reload);
+  }, []);
 
   const start = useCallback(
     (automation: Automation, scheduled: boolean) => {

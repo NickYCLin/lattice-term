@@ -52,10 +52,12 @@ const ROLLBACK_APP_FILES: [&str; 5] = [
     "credential_backend.json",
 ];
 
-pub const LOCAL_STORAGE_KEYS: [&str; 3] = [
+pub const LOCAL_STORAGE_KEYS: [&str; 4] = [
     "latticeterm.preferences.v2",
     "latticeterm.tunnels.v1",
     "latticeterm.authPrefs.v1",
+    // Scheduled chats: the user's own task text and timing, no credentials.
+    "latticeterm.agentAutomations.v1",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

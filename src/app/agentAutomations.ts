@@ -474,7 +474,11 @@ export function closeStaleRuns(automation: Automation): Automation {
   };
 }
 
-const STORAGE_KEY = "latticeterm.agentAutomations.v1";
+export const AUTOMATIONS_STORAGE_KEY = "latticeterm.agentAutomations.v1";
+const STORAGE_KEY = AUTOMATIONS_STORAGE_KEY;
+
+/** Fired after a backup restore rewrote the stored list, so the live one reloads. */
+export const AUTOMATIONS_RESTORED_EVENT = "latticeterm:automations-restored";
 
 function isSchedule(value: unknown): value is AutomationSchedule {
   if (!value || typeof value !== "object") return false;

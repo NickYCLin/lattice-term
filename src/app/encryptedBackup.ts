@@ -3,13 +3,21 @@ import {
   type Preferences,
 } from "./preferences";
 import { exportTextFile, type FileExportResult } from "./fileExport";
+import { AUTOMATIONS_RESTORED_EVENT, AUTOMATIONS_STORAGE_KEY } from "./agentAutomations";
 
 export const BACKUP_EXTENSION = ".latticeterm-backup";
 export const BACKUP_LOCAL_STORAGE_KEYS = [
   "latticeterm.preferences.v2",
   "latticeterm.tunnels.v1",
   "latticeterm.authPrefs.v1",
+  "latticeterm.agentAutomations.v1",
 ] as const;
+
+/**
+ * Settings that older backups could not contain. A backup without one says
+ * nothing about it, so restoring keeps what this machine already has.
+ */
+const KEPT_WHEN_ABSENT: readonly string[] = [AUTOMATIONS_STORAGE_KEY];
 
 const PREFERENCES_KEY = BACKUP_LOCAL_STORAGE_KEYS[0];
 const MAX_BACKUP_FILE_BYTES = 28 * 1024 * 1024;
@@ -90,7 +98,9 @@ export function applyRestoredLocalStorage(
       storage.setItem(key, value);
     }
     for (const key of BACKUP_LOCAL_STORAGE_KEYS) {
-      if (restored[key] === undefined) storage.removeItem(key);
+      if (restored[key] === undefined && !KEPT_WHEN_ABSENT.includes(key)) {
+        storage.removeItem(key);
+      }
     }
   } catch (reason) {
     try {
@@ -106,6 +116,13 @@ export function applyRestoredLocalStorage(
     throw reason;
   }
 
+  if (
+    restored[AUTOMATIONS_STORAGE_KEY] !== undefined &&
+    typeof window !== "undefined" &&
+    typeof window.dispatchEvent === "function"
+  ) {
+    window.dispatchEvent(new Event(AUTOMATIONS_RESTORED_EVENT));
+  }
   return restoredPreferences;
 }
 
