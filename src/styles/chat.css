@@ -1781,3 +1781,21 @@ button.chat-diff__line.is-commentable:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.chat-chip--ok {
+  color: var(--ok);
+}
+
+.chat-chip--danger {
+  color: var(--danger);
+}
+
+.chat-card__output--diff {
+  padding-inline: 0;
+  white-space: pre;
+}
+
+.chat-card__output--diff .chat-diff__line {
+  display: block;
+  padding-inline: var(--space-3);
+}

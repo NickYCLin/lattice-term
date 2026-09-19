@@ -1419,6 +1419,7 @@ export const zhTW = {
   "chat.stop": "停止",
   "chat.running": "回覆中…",
   "chat.reasoning": "思考過程",
+  "chat.tool.exitCode": "結束碼 {code}",
   "chat.images": "回覆裡提到的圖片",
   "chat.images.enlarge": "放大",
   "chat.images.shrink": "縮小",

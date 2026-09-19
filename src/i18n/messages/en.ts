@@ -1485,6 +1485,7 @@ export const en: Messages = {
   "chat.stop": "Stop",
   "chat.running": "Replying…",
   "chat.reasoning": "Reasoning",
+  "chat.tool.exitCode": "exit {code}",
   "chat.images": "Images mentioned in the reply",
   "chat.images.enlarge": "Enlarge",
   "chat.images.shrink": "Shrink",

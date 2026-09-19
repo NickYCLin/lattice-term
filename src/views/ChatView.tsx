@@ -24,6 +24,7 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteC
 import {
   defaultPermission,
   effortChoices,
+  looksLikeDiff,
   formatTokens,
   permissionsFor,
   threadIsFresh,
@@ -71,6 +72,7 @@ import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
 import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
 import { webSources } from "../app/chatWebSources";
+import { diffLineKind } from "../app/gitChanges";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
@@ -1269,11 +1271,34 @@ function ChatItemView({
               <code className="chat-card__summary" title={item.summary}>
                 {item.summary}
               </code>
+              {item.meta?.exitCode !== undefined && (
+                <span className={`chat-chip chat-chip--${item.meta.exitCode === 0 ? "ok" : "danger"}`}>
+                  {t("chat.tool.exitCode", { code: item.meta.exitCode })}
+                </span>
+              )}
+              {item.meta?.durationMs !== undefined && (
+                <span className="chat-chip">
+                  {t("chat.turn.duration", {
+                    seconds: new Intl.NumberFormat(tag, { maximumFractionDigits: 1 }).format(item.meta.durationMs / 1000),
+                  })}
+                </span>
+              )}
               <span className="chat-card__state">
                 {!item.done ? t("chat.tool.running") : item.isError ? t("chat.tool.failed") : ""}
               </span>
             </summary>
-            {item.output && <pre className="chat-card__output">{item.output}</pre>}
+            {item.output && looksLikeDiff(item.output) ? (
+              <pre className="chat-card__output chat-card__output--diff">
+                {item.output.split("\n").map((line, index) => (
+                  <span key={index} className={`chat-diff__line is-${diffLineKind(line)}`}>
+                    {line}
+                    {"\n"}
+                  </span>
+                ))}
+              </pre>
+            ) : (
+              item.output && <pre className="chat-card__output">{item.output}</pre>
+            )}
           </details>
           {item.done && !item.isError && (
             <ChatWebSources sources={webSources(item.name, item.output)} />

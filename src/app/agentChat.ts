@@ -110,6 +110,18 @@ export interface ChatUsage {
   reasoningTokens: number;
 }
 
+export interface ToolMeta {
+  exitCode?: number;
+  durationMs?: number;
+}
+
+/** Whether tool output is a unified diff worth colouring line by line. */
+export function looksLikeDiff(output: string | null): boolean {
+  if (!output) return false;
+  const lines = output.split("\n", 40);
+  return lines.some((line) => line.startsWith("@@ ")) && lines.some((line) => /^(\+\+\+|---) /.test(line));
+}
+
 export type ChatEvent =
   | { kind: "started"; nativeSessionId: string | null; model: string | null }
   | { kind: "textDelta"; itemId: string; delta: string }
@@ -123,6 +135,7 @@ export type ChatEvent =
       summary: string | null;
       output: string;
       isError: boolean;
+      meta?: ToolMeta;
     }
   | { kind: "notice"; message: string }
   | {
@@ -167,6 +180,8 @@ export type ChatItem =
       output: string | null;
       isError: boolean;
       done: boolean;
+      /** What the CLI reported about a command beyond its output. */
+      meta?: ToolMeta;
       assistantDefinitionId?: ChatDefinitionId;
     }
   | { type: "notice"; id: string; text: string }
@@ -731,6 +746,7 @@ export function applyChatEvent(
           output: event.output,
           isError: event.isError,
           done: true,
+          ...(event.meta ? { meta: event.meta } : {}),
           assistantDefinitionId: thread.definitionId,
         })),
         updatedAt: now,

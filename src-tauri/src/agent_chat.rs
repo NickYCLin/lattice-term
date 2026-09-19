@@ -171,6 +171,15 @@ pub struct ChatUsage {
 
 /// One step of a turn, in the shape the interface renders. Item ids are
 /// stable within a turn so a later event can update the card it started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -206,6 +215,9 @@ pub enum ChatEvent {
         summary: Option<String>,
         output: String,
         is_error: bool,
+        /// What the CLI reported about a command beyond its output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        meta: Option<ToolMeta>,
     },
     /// Something worth showing that does not end the turn.
     Notice {
@@ -1850,6 +1862,65 @@ struct TurnState {
     pending_writes: Vec<String>,
     /// Tracks whether text deltas/messages were seen so result response doesn't duplicate.
     had_assistant_text: bool,
+    /// Claude: the change an Edit/MultiEdit/Write call makes, as a diff,
+    /// shown in place of its terse result once the tool succeeds.
+    edit_diffs: HashMap<String, String>,
+}
+
+const MAX_EDIT_DIFF_BYTES: usize = 64 * 1024;
+const MAX_WRITE_PREVIEW_LINES: usize = 200;
+
+/// A unified-style diff of what a Claude file tool is about to change, built
+/// from its own input. It shows the replaced and inserted text, not line
+/// numbers, which the tool input does not carry.
+fn claude_edit_diff(name: &str, input: &Value) -> Option<String> {
+    let path = str_field(input, "file_path")?.trim_start_matches('/');
+    let mut out = format!("--- a/{path}\n+++ b/{path}\n");
+    let mut hunk = |old: &str, new: &str| {
+        out.push_str("@@ edit @@\n");
+        for line in old.lines() {
+            out.push('-');
+            out.push_str(line);
+            out.push('\n');
+        }
+        for line in new.lines() {
+            out.push('+');
+            out.push_str(line);
+            out.push('\n');
+        }
+    };
+    match name {
+        "Edit" => hunk(
+            str_field(input, "old_string").unwrap_or_default(),
+            str_field(input, "new_string")?,
+        ),
+        "MultiEdit" => {
+            for edit in input.get("edits")?.as_array()? {
+                hunk(
+                    str_field(edit, "old_string").unwrap_or_default(),
+                    str_field(edit, "new_string").unwrap_or_default(),
+                );
+            }
+        }
+        "Write" => {
+            let content = str_field(input, "content")?;
+            let lines: Vec<&str> = content.lines().collect();
+            out.push_str(&format!("@@ -0,0 +1,{} @@\n", lines.len()));
+            for line in lines.iter().take(MAX_WRITE_PREVIEW_LINES) {
+                out.push('+');
+                out.push_str(line);
+                out.push('\n');
+            }
+            if lines.len() > MAX_WRITE_PREVIEW_LINES {
+                out.push_str(&format!(
+                    " … {} more lines\n",
+                    lines.len() - MAX_WRITE_PREVIEW_LINES
+                ));
+            }
+        }
+        _ => return None,
+    }
+    Some(truncate(&out, MAX_EDIT_DIFF_BYTES))
 }
 
 fn parse_line(dialect: Dialect, state: &mut TurnState, line: &str) -> Vec<ChatEvent> {
@@ -1948,6 +2019,13 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                     Some("tool_use") => {
                         let name = str_field(block, "name").unwrap_or("tool").to_string();
                         let input = block.get("input").cloned().unwrap_or(Value::Null);
+                        if let (Some(id), Some(diff)) =
+                            (str_field(block, "id"), claude_edit_diff(&name, &input))
+                        {
+                            if state.edit_diffs.len() < 64 {
+                                state.edit_diffs.insert(id.to_string(), diff);
+                            }
+                        }
                         events.push(ChatEvent::ToolStarted {
                             item_id: str_field(block, "id")
                                 .map(str::to_string)
@@ -1974,15 +2052,22 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                 let Some(item_id) = str_field(&block, "tool_use_id") else {
                     continue;
                 };
+                let is_error = block
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let diff = state.edit_diffs.remove(item_id);
+                let output = match diff {
+                    Some(diff) if !is_error => diff,
+                    _ => content_text(block.get("content")),
+                };
                 events.push(ChatEvent::ToolFinished {
                     item_id: item_id.to_string(),
                     name: None,
                     summary: None,
-                    output: bounded_output(&content_text(block.get("content"))),
-                    is_error: block
-                        .get("is_error")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
+                    output: bounded_output(&output),
+                    is_error,
+                    meta: None,
                 });
             }
         }
@@ -2166,12 +2251,18 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                         .get("exitCode")
                         .and_then(Value::as_i64)
                         .is_some_and(|code| code != 0);
+                let exit_code = item.get("exitCode").and_then(Value::as_i64);
+                let duration_ms = item.get("durationMs").and_then(Value::as_u64);
                 events.push(ChatEvent::ToolFinished {
                     item_id,
                     name: Some("command".to_string()),
                     summary: Some(truncate(&summary, 200)),
                     output: bounded_output(str_field(item, "aggregatedOutput").unwrap_or_default()),
                     is_error: failed,
+                    meta: (exit_code.is_some() || duration_ms.is_some()).then_some(ToolMeta {
+                        exit_code,
+                        duration_ms,
+                    }),
                 });
             } else {
                 events.push(started("command", summary));
@@ -2195,13 +2286,41 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                 })
                 .unwrap_or_default();
             let summary = changes.join(", ");
+            let listed = changes.join("\n");
+            // Each change carries its own unified diff; the card shows it
+            // coloured, so the reader sees what changed and not only where.
+            let diffs = item
+                .get("changes")
+                .and_then(Value::as_array)
+                .map(|changes| {
+                    changes
+                        .iter()
+                        .filter_map(|change| {
+                            let diff = str_field(change, "diff")?.trim_end();
+                            if diff.is_empty() {
+                                return None;
+                            }
+                            let path = str_field(change, "path")
+                                .unwrap_or_default()
+                                .trim_start_matches('/');
+                            Some(if diff.starts_with("---") || diff.starts_with("diff ") {
+                                diff.to_string()
+                            } else {
+                                format!("--- a/{path}\n+++ b/{path}\n{diff}")
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
             if completed {
                 events.push(ChatEvent::ToolFinished {
                     item_id,
                     name: Some("file_change".to_string()),
                     summary: Some(truncate(&summary, 200)),
-                    output: bounded_output(&changes.join("\n")),
+                    output: bounded_output(if diffs.is_empty() { &listed } else { &diffs }),
                     is_error: matches!(str_field(item, "status"), Some("failed" | "declined")),
+                    meta: None,
                 });
             } else {
                 events.push(started("file_change", summary));
@@ -2231,6 +2350,7 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                     summary: Some(truncate(&summary, 200)),
                     output: bounded_output(&output),
                     is_error: failed,
+                    meta: None,
                 });
             } else {
                 events.push(started("mcp", summary));
@@ -2251,6 +2371,7 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                     summary: Some(truncate(&summary, 200)),
                     output: bounded_output(output),
                     is_error: false,
+                    meta: None,
                 });
             } else {
                 events.push(started("web_search", summary));
@@ -2319,6 +2440,7 @@ fn parse_gemini(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                 output: bounded_output(&output),
                 is_error: str_field(value, "status") == Some("error")
                     || value.get("error").is_some_and(|error| !error.is_null()),
+                meta: None,
             });
         }
         Some("error") => {
@@ -2452,6 +2574,7 @@ fn parse_antigravity(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                             summary: None,
                             output: bounded_output(&output),
                             is_error: false,
+                            meta: None,
                         });
                     }
                 }
@@ -2772,6 +2895,7 @@ mod tests {
                     summary: None,
                     output: "total 0".into(),
                     is_error: false,
+                    meta: None,
                 },
             ]
         );
@@ -3162,6 +3286,38 @@ mod tests {
     }
 
     #[test]
+    fn codex_commands_and_file_changes_keep_their_structure() {
+        let command = serde_json::json!({
+            "type": "commandExecution", "id": "c1", "command": "cargo test",
+            "aggregatedOutput": "ok", "exitCode": 101, "durationMs": 2300, "status": "completed"
+        });
+        match codex_v2_item_events(&command, true).as_slice() {
+            [ChatEvent::ToolFinished { meta, is_error, .. }] => {
+                assert!(*is_error);
+                assert_eq!(
+                    meta,
+                    &Some(ToolMeta {
+                        exit_code: Some(101),
+                        duration_ms: Some(2300)
+                    })
+                );
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+        let change = serde_json::json!({
+            "type": "fileChange", "id": "f1", "status": "completed",
+            "changes": [{"path": "src/a.rs", "kind": "update", "diff": "@@ -1 +1 @@\n-old\n+new\n"}]
+        });
+        match codex_v2_item_events(&change, true).as_slice() {
+            [ChatEvent::ToolFinished { output, .. }] => {
+                assert!(output.starts_with("--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@"));
+                assert!(output.contains("+new"));
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+    }
+
+    #[test]
     fn codex_web_search_keeps_the_page_it_opened() {
         let item = serde_json::json!({
             "type": "webSearch",
@@ -3181,6 +3337,33 @@ mod tests {
             [ChatEvent::ToolFinished { output, .. }] => assert!(output.is_empty()),
             other => panic!("unexpected events {other:?}"),
         }
+    }
+
+    #[test]
+    fn claude_file_edits_show_the_change_instead_of_the_terse_result() {
+        let raw = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"/w/a.rs","old_string":"let x = 1;","new_string":"let x = 2;"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"The file /w/a.rs has been updated."}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"/w/b.rs","old_string":"a","new_string":"b"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"String not found"}]}}"#,
+        ]
+        .join("\n");
+        let (_, events) = lines(Dialect::Claude, &raw);
+        let outputs: Vec<(&str, bool)> = events
+            .iter()
+            .filter_map(|event| match event {
+                ChatEvent::ToolFinished {
+                    output, is_error, ..
+                } => Some((output.as_str(), *is_error)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs[0]
+            .0
+            .starts_with("--- a/w/a.rs\n+++ b/w/a.rs\n@@ edit @@\n-let x = 1;\n+let x = 2;"));
+        // A failed edit keeps the CLI's own explanation.
+        assert_eq!(outputs[1], ("String not found", true));
     }
 
     #[test]
@@ -3224,6 +3407,7 @@ mod tests {
                 summary: None,
                 output: "hello".to_string(),
                 is_error: false,
+                meta: None,
             }
         );
         assert_eq!(
@@ -3347,6 +3531,7 @@ mod tests {
                 summary: None,
                 output: "Cargo.toml\nsrc/".to_string(),
                 is_error: false,
+                meta: None,
             }
         );
         assert_eq!(

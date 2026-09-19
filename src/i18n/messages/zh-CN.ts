@@ -1334,6 +1334,7 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "回复中…",
   "chat.reasoning": "思考过程",
+  "chat.tool.exitCode": "退出码 {code}",
   "chat.images": "回复里提到的图片",
   "chat.images.enlarge": "放大",
   "chat.images.shrink": "缩小",

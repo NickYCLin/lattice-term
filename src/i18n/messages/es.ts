@@ -1315,6 +1315,7 @@ export const messages: Messages = {
   "chat.stop": "Detener",
   "chat.running": "Respondiendo...",
   "chat.reasoning": "Razonamiento",
+  "chat.tool.exitCode": "código de salida {code}",
   "chat.images": "Imágenes mencionadas en la respuesta",
   "chat.images.enlarge": "Ampliar",
   "chat.images.shrink": "Reducir",

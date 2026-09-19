@@ -1315,6 +1315,7 @@ export const messages: Messages = {
   "chat.stop": "중지",
   "chat.running": "댓글 ...",
   "chat.reasoning": "추론",
+  "chat.tool.exitCode": "종료 코드 {code}",
   "chat.images": "답변에 언급된 이미지",
   "chat.images.enlarge": "크게 보기",
   "chat.images.shrink": "작게 보기",
