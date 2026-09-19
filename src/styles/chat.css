@@ -1833,3 +1833,67 @@ button.chat-diff__line.is-commentable:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.chat-delegations {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 var(--space-4) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.chat-delegations__form {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: start;
+}
+
+.chat-delegations__form > .checkbox,
+.chat-delegations__form > .chat-card__actions {
+  grid-column: 1 / -1;
+}
+
+.chat-delegations__list {
+  display: grid;
+  gap: var(--space-1, 0.25rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-delegations__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-xs);
+}
+
+.chat-delegations__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-delegations__state.is-running {
+  color: var(--accent);
+}
+
+.chat-delegations__state.is-done {
+  color: var(--ok);
+}
+
+.chat-delegations__state.is-failed {
+  color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .chat-delegations__form {
+    grid-template-columns: 1fr;
+  }
+}

@@ -68,6 +68,7 @@ import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
+import { ChatDelegations } from "../components/chat/ChatDelegations";
 import { chatProjects, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
@@ -78,6 +79,7 @@ import { diffLineKind } from "../app/gitChanges";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
+  AgentIcon,
   ArchiveFileIcon,
   ChatIcon,
   CodeFileIcon,
@@ -633,6 +635,7 @@ function ThreadPane({
   const [settingsOpen, setSettingsOpen] = useState(fresh);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [delegating, setDelegating] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
@@ -886,6 +889,18 @@ function ThreadPane({
             >
               {settingsOpen ? t("chat.settings.hide") : t("chat.settings")}
             </button>}
+            {!thread.archived && (
+              <button
+                type="button"
+                className={`button button--ghost button--sm${delegating ? " is-active" : ""}`}
+                onClick={() => setDelegating((current) => !current)}
+                aria-pressed={delegating}
+                aria-label={t("chat.delegate.title")}
+                title={t("chat.delegate.title")}
+              >
+                <AgentIcon />
+              </button>
+            )}
             {!thread.archived && thread.workingDirectory && (
               <button
                 type="button"
@@ -1109,6 +1124,17 @@ function ThreadPane({
         </div>
       </div>
 
+      {!thread.archived && (
+        <ChatDelegations
+          thread={thread}
+          chat={chat}
+          assistants={definitions.map((definition) => definition.id as ChatDefinitionId)}
+          cliLabel={cliLabel}
+          composing={delegating}
+          onCloseComposer={() => setDelegating(false)}
+          onInsert={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
+        />
+      )}
       {changesOpen && !thread.archived && thread.workingDirectory && (
         <ChatChangesPanel
           workingDirectory={thread.workingDirectory}

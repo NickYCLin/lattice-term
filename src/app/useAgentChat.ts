@@ -18,6 +18,10 @@ import {
   appendSteeredInput,
   beginTurn,
   branchThread,
+  threadTitle,
+  defaultPermission,
+  permissionsFor,
+  handoffTranscript,
   supportsBrowser,
   completionNotificationText,
   effortForTurn,
@@ -144,6 +148,17 @@ export interface AgentChatApi {
    * `throughItemId`, and opens it. `suffix` marks its title as a branch.
    */
   branchThread: (id: string, throughItemId: string, suffix: string) => ChatThread | null;
+  /**
+   * Hands a subtask to an assistant as its own conversation in the same
+   * folder and starts it at once; the parent keeps working. With context,
+   * the subtask gets the parent's messages as untrusted reference.
+   */
+  delegate: (
+    parentId: string,
+    definitionId: ChatDefinitionId,
+    prompt: string,
+    withContext: boolean,
+  ) => ChatThread | null;
   send: (
     id: string,
     prompt: string,
@@ -644,6 +659,33 @@ export function useAgentChat(
     }
   }, [threads, send, changeThreads]);
 
+  const delegate = useCallback(
+    (parentId: string, definitionId: ChatDefinitionId, prompt: string, withContext: boolean) => {
+      const parent = threadsRef.current.find((thread) => thread.id === parentId);
+      const task = prompt.trim();
+      if (!parent || !task) return null;
+      const transcript = withContext ? handoffTranscript(parent.items, parent.definitionId) : "";
+      const child: ChatThread = {
+        ...createThread({
+          definitionId,
+          workingDirectory: parent.workingDirectory,
+          permission: permissionsFor(definitionId).includes(parent.permission)
+            ? parent.permission
+            : defaultPermission(definitionId),
+          model: "",
+          title: threadTitle(`↳ ${task}`),
+          accountProfileId: parent.definitionId === definitionId ? parent.accountProfileId : null,
+        }),
+        delegatedFrom: parent.id,
+        handoff: transcript ? { sourceDefinitionId: parent.definitionId, transcript } : null,
+      };
+      changeThreads((current) => [child, ...current]);
+      void send(child.id, task);
+      return child;
+    },
+    [changeThreads, send],
+  );
+
   return useMemo(
     () => ({
       threads,
@@ -662,6 +704,7 @@ export function useAgentChat(
       removeThread: remove,
       shelveThread: shelve,
       branchThread: branch,
+      delegate,
       send,
       steer,
       enqueue,
@@ -692,6 +735,7 @@ export function useAgentChat(
       remove,
       shelve,
       branch,
+      delegate,
       send,
       steer,
       enqueue,

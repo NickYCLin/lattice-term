@@ -229,6 +229,8 @@ export interface ChatThread {
    * normal, resumable conversation; it only leaves the main list.
    */
   shelvedAt?: number | null;
+  /** The conversation that handed this one a subtask, if any. */
+  delegatedFrom?: string | null;
   id: string;
   definitionId: ChatDefinitionId;
   /** First message, shortened; what the thread list shows. */
@@ -928,6 +930,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
         typeof thread.shelvedAt === "number" && Number.isFinite(thread.shelvedAt)
           ? thread.shelvedAt
           : null,
+      delegatedFrom: typeof thread.delegatedFrom === "string" ? thread.delegatedFrom : null,
       model: typeof thread.model === "string" ? thread.model : "",
       effort: typeof thread.effort === "string" && /^[a-z]{1,16}$/.test(thread.effort) ? thread.effort : null,
       nativeSessionId:
@@ -1002,4 +1005,28 @@ export function completionNotificationText(thread: Pick<ChatThread, "title" | "i
     title: thread.title.trim() || "LatticeTerm",
     body: body.length > 180 ? `${body.slice(0, 179)}…` : body || "✓",
   };
+}
+
+export type DelegationState = "running" | "done" | "failed" | "waiting";
+
+/** How a subtask stands, read from the subtask conversation itself. */
+export function delegationState(thread: Pick<ChatThread, "runningTurnId" | "items">): DelegationState {
+  if (thread.runningTurnId) return "running";
+  const end = [...thread.items].reverse().find((item) => item.type === "turnEnd");
+  if (!end) return "waiting";
+  return end.type === "turnEnd" && end.error ? "failed" : "done";
+}
+
+/** The subtask's final answer, for bringing back into the conversation that asked. */
+export function delegationResult(thread: Pick<ChatThread, "items" | "title">, maxChars = 12_000): string {
+  const reply = [...thread.items].reverse().find((item) => item.type === "text");
+  const text = reply && reply.type === "text" ? reply.text.trim() : "";
+  const body = text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  return body ? `<subtask-result title="${thread.title.replace(/"/g, "'")}">\n${body}\n</subtask-result>` : "";
+}
+
+/** The first thing the subtask was asked, which a retry sends again. */
+export function delegationPrompt(thread: Pick<ChatThread, "items">): string {
+  const first = thread.items.find((item) => item.type === "user");
+  return first && first.type === "user" ? first.text : "";
 }
