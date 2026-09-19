@@ -4,6 +4,63 @@
 
 ---
 
+## [2026.9.20](https://github.com/NickYCLin/lattice-term/compare/v2026.9.19...v2026.9.20) (2026-09-19)
+
+
+### 🚀 新增功能
+
+* **agents:** 「留在背景」會記住上次的選擇 ([de2c5f2](https://github.com/NickYCLin/lattice-term/commit/de2c5f2cc9d5c7ce19d4112c348784f8833ab34f))
+* **agents:** Aider 工作階段用官方通知指令回報狀態 ([0710cbc](https://github.com/NickYCLin/lattice-term/commit/0710cbce2c1301aa95a2bd819a0a85ab635f280c))
+* **agents:** Claude 與 Codex 工作階段顯示累計 token ([4350180](https://github.com/NickYCLin/lattice-term/commit/4350180148ee841e3819325abe6e155952b2a98b))
+* **agents:** Fleet 佇列可以等別的工作階段做完 ([e107da2](https://github.com/NickYCLin/lattice-term/commit/e107da23b98a18f8477ad556a500e59b6d1b6959))
+* **agents:** Fleet 頁可以並排看遠端工作區的 Agent ([96391c2](https://github.com/NickYCLin/lattice-term/commit/96391c2c647ed30a0dc4db74acec259da1af4e79))
+* **agents:** macOS 也能用沙箱啟動 CLI ([36f54de](https://github.com/NickYCLin/lattice-term/commit/36f54def9aded039b7ec42e7ef03f69361c4cdcb))
+* **agents:** 執行中的 Agent 可以設等待對象與同時上限 ([82530e5](https://github.com/NickYCLin/lattice-term/commit/82530e5d31504b1ede397cdcea4aa6250b8a175f))
+* **agents:** 背景服務可以在登入時自己啟動 ([d1fe9b3](https://github.com/NickYCLin/lattice-term/commit/d1fe9b33116e6342d165cdd0c3235a4f27787f8b))
+* **backup:** 加密備份一併帶上排程對話 ([1b6b949](https://github.com/NickYCLin/lattice-term/commit/1b6b9490e6b44b45c7fd484e0042729460d69209))
+* **chat:** Claude 對話也能開瀏覽器工具 ([d098170](https://github.com/NickYCLin/lattice-term/commit/d09817071ce15226a332e823d01ba0349aeaeec7))
+* **chat:** diff 的每一行都可以留言給 AI ([7660299](https://github.com/NickYCLin/lattice-term/commit/76602995f443c318e5e14143800ff0396e95fefd))
+* **chat:** macOS 與 Windows 點通知回來也會打開那個對話 ([88d03c6](https://github.com/NickYCLin/lattice-term/commit/88d03c698950dfe2c6bb7d4d4784b6d656dd45ef))
+* **chat:** MCP 伺服器要求填資料或開網頁時可以直接回應 ([2bff315](https://github.com/NickYCLin/lattice-term/commit/2bff31558b9ffa823906bcc1f86dfd7d5cb9a041))
+* **chat:** 側欄多了「專案」分頁，依資料夾找對話 ([9e9c407](https://github.com/NickYCLin/lattice-term/commit/9e9c407c5ed31d29fb8c462d095ebf32dfacde20))
+* **chat:** 回覆完成時跳系統通知，點了回到那個對話 ([169d0ad](https://github.com/NickYCLin/lattice-term/commit/169d0ad702aa8e1837b2d65f518d1bd10f051d90))
+* **chat:** 回覆提到的圖片直接在對話裡顯示縮圖 ([f4ef817](https://github.com/NickYCLin/lattice-term/commit/f4ef8171bd33bbb72f0a450d973d5efc7f8b4b42))
+* **chat:** 在專案裡開新對話沿用這個專案的設定 ([4daf04d](https://github.com/NickYCLin/lattice-term/commit/4daf04d94f5b085a946b685b97428068d8e8bac0))
+* **chat:** 在對話設定裡直接改使用者層的指示檔 ([012a00e](https://github.com/NickYCLin/lattice-term/commit/012a00e7eb5c260fd54d66a2f8889b69bd1fe9a5))
+* **chat:** 在檔案管理員複製的檔案可以直接貼成附件 ([239b252](https://github.com/NickYCLin/lattice-term/commit/239b252da578d0803063505c49b8bb41d62d04c1))
+* **chat:** 在輸入框直接挑 skill 附到訊息 ([8a007e6](https://github.com/NickYCLin/lattice-term/commit/8a007e6c39f1a61a59a39e41b53b40558221a941))
+* **chat:** 子任務做完會在原對話留一張卡片 ([d218874](https://github.com/NickYCLin/lattice-term/commit/d218874866196127b7794d016799e10a5aefa805))
+* **chat:** 對話可以從任一則訊息分支，也可以封存 ([05d7a31](https://github.com/NickYCLin/lattice-term/commit/05d7a31445b8e68bf43823311e93982aca131fbd))
+* **chat:** 對話可以選推理深度 ([05e9f1f](https://github.com/NickYCLin/lattice-term/commit/05e9f1f889b17cea958d8524f88c5af2c12f4356))
+* **chat:** 對話裡可以把子任務委派給其他助理 ([0b75dfd](https://github.com/NickYCLin/lattice-term/commit/0b75dfde07f368bb5217d103e7c55603d1396c60))
+* **chat:** 對話裡可以看 diff、暫存和 commit ([377c137](https://github.com/NickYCLin/lattice-term/commit/377c137cd01cd623bb80eec42f88515eb13305d8))
+* **chat:** 對話裡可以開終端機面板 ([98766ec](https://github.com/NickYCLin/lattice-term/commit/98766ec130acdce3a6d551df16bd1823df20655e))
+* **chat:** 對話設定可以看到 AI 會載入的 MCP 伺服器 ([55fe4b9](https://github.com/NickYCLin/lattice-term/commit/55fe4b9b42c48fa16d18330fa6d4ea0b8236184d))
+* **chat:** 對話設定裡可以看到 AI 會讀的指示檔 ([5d385a0](https://github.com/NickYCLin/lattice-term/commit/5d385a0a5e423fc25b0b085bf9852579f03ea3a1))
+* **chat:** 工具卡片顯示結束碼、耗時與著色的 diff ([58a4890](https://github.com/NickYCLin/lattice-term/commit/58a4890e3bf4bd38d5f0b2562bd4d8c01dd9fe69))
+* **chat:** 看得到 Claude 為這個專案記下的自動記憶 ([c68b84e](https://github.com/NickYCLin/lattice-term/commit/c68b84e9f5a74424d0a49adf2ced9b42494a546e))
+* **chat:** 網頁搜尋的工具卡片列出來源連結 ([b1029a9](https://github.com/NickYCLin/lattice-term/commit/b1029a966fbce7a4a44155c71c4170f16841a547))
+* **chat:** 說明 claude.ai 連接器不會列在 MCP 清單 ([2749f33](https://github.com/NickYCLin/lattice-term/commit/2749f33198251023629811d4c95f6e19ff97c219))
+* **chat:** 讀檔與搜尋工具的卡片直接標出行數、結果數 ([d09c65f](https://github.com/NickYCLin/lattice-term/commit/d09c65fd53952aa42a8e22d4e506e1d875a2d4cc))
+* **mcp:** AI 可提出臨時指令並逐筆核准 ([7e79d77](https://github.com/NickYCLin/lattice-term/commit/7e79d7703acb7c58b2d646ccdd391da8686ea372))
+* **mcp:** 核准指令時可選一段時間內不再問 ([7f6b69f](https://github.com/NickYCLin/lattice-term/commit/7f6b69f5b28f34b009e9584203ef8b6ef3f62960))
+* **mcp:** 權限改成只選「只能看」或「完全開放」 ([71c2e58](https://github.com/NickYCLin/lattice-term/commit/71c2e58527ada738710936310a2be917cacd1bde))
+* **remote:** Fleet 工作區目錄留空就是整個家目錄 ([b337595](https://github.com/NickYCLin/lattice-term/commit/b3375956d3d843f5679a7277c17a326f579d05b3))
+
+
+### 🛠️ 問題修正
+
+* **agents:** Windows 上的 npm shim 改為直接啟動 node ([a36a3db](https://github.com/NickYCLin/lattice-term/commit/a36a3db2f5a5de84356acd138a9d4aeecfc24a89))
+* **chat:** iOS 建置不再因為通知的視窗操作失敗 ([f4ca06c](https://github.com/NickYCLin/lattice-term/commit/f4ca06cb07564d604cf3fe4b7230aeb10bf659e8))
+* **chat:** 變更面板擋下 Windows 上從磁碟根目錄開始的路徑 ([1236426](https://github.com/NickYCLin/lattice-term/commit/1236426c6af6ba256772fdf8e9c09dccfbe4193d))
+* **remote:** 主機當掉留下的 cmd 暫存腳本會被清掉 ([0ee34e4](https://github.com/NickYCLin/lattice-term/commit/0ee34e4f1d4df5ea04dd6e7188a310c69313a528))
+* **sidebar:** 側欄資料夾存檔壞掉時可以備份後重新儲存 ([19927d3](https://github.com/NickYCLin/lattice-term/commit/19927d3888412037fd388a46bf562ead06d22e85))
+
+
+### 🎨 介面與視覺調整
+
+* **rust:** 修掉 CI clippy 擋下的三處寫法 ([d830952](https://github.com/NickYCLin/lattice-term/commit/d83095210e0e33ba601308256474664dbeb2e9a5))
+
 ## [2026.9.19](https://github.com/NickYCLin/lattice-term/compare/v2026.9.18...v2026.9.19) (2026-09-18)
 
 
