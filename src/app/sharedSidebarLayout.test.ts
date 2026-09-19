@@ -8,7 +8,8 @@ import {
 } from "./sessionSidebarLayout";
 import {
   migrateSidebarLayouts, readSharedSidebarLayout, reconcileSharedSessionLayout,
-  SHARED_SIDEBAR_LAYOUT_KEY, subscribeSharedSidebarLayout, updateSharedSidebarLayout,
+  resetUnreadableSharedSidebar, SHARED_SIDEBAR_LAYOUT_KEY, sharedSidebarStorageUnreadable,
+  subscribeSharedSidebarLayout, updateSharedSidebarLayout,
 } from "./sharedSidebarLayout";
 
 const thread = createThread({ definitionId: "claude", workingDirectory: "/fixture", permission: "ask", model: "" }, "one", 1);
@@ -155,5 +156,35 @@ describe("shared sidebar folders", () => {
       Array.from({ length: 1025 }, (_, index) => [`thread:${index}`, { parentId: null, order: 0 }]),
     ) }));
     expect(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)).toBe(durable);
+  });
+
+  it("keeps the unreadable text aside and saves again after a reset", () => {
+    updateSharedSidebarLayout(current => createSessionSidebarFolder(current, { id: "folder:kept", name: "保留" }, null));
+    stored.set(SHARED_SIDEBAR_LAYOUT_KEY, "{broken");
+    expect(sharedSidebarStorageUnreadable()).toBe(true);
+    const notify = vi.fn();
+    const stop = subscribeSharedSidebarLayout(notify);
+
+    const backupKey = resetUnreadableSharedSidebar(new Date("2026-09-19T00:00:00.000Z"));
+
+    expect(backupKey).toBe(`${SHARED_SIDEBAR_LAYOUT_KEY}.unreadable.2026-09-19T00:00:00.000Z`);
+    expect(stored.get(backupKey!)).toBe("{broken");
+    expect(sharedSidebarStorageUnreadable()).toBe(false);
+    expect(JSON.parse(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)!).folders[0].name).toBe("保留");
+    expect(notify).toHaveBeenCalled();
+    updateSharedSidebarLayout(current => renameSessionSidebarFolder(current, "folder:kept", "可存"));
+    expect(JSON.parse(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)!).folders[0].name).toBe("可存");
+    stop();
+  });
+
+  it("leaves the stored text alone when the copy cannot be written", () => {
+    stored.set(SHARED_SIDEBAR_LAYOUT_KEY, "{broken");
+    expect(sharedSidebarStorageUnreadable()).toBe(true);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: () => { throw new Error("quota"); },
+    });
+    expect(() => resetUnreadableSharedSidebar()).toThrow("quota");
+    expect(stored.get(SHARED_SIDEBAR_LAYOUT_KEY)).toBe("{broken");
   });
 });

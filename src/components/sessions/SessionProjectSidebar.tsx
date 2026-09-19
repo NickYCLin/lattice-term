@@ -45,6 +45,7 @@ import {
 } from "../icons";
 import { handleMenuNavigation } from "../overlays/menuNavigation";
 import { useModalFocus } from "../overlays/modalFocus";
+import { SidebarStorageNotice } from "./SidebarStorageNotice";
 
 export type SessionSidebarKind =
   | "agent"
@@ -1047,6 +1048,7 @@ export function SessionProjectSidebar({
           </div>
         )}
       </div>
+      <SidebarStorageNotice />
       <div
         className={`session-tree${draggedNodeId ? " is-dragging" : ""}`}
         role="list"

@@ -95,6 +95,42 @@ export function subscribeSharedSidebarLayout(notify: () => void) {
     if (typeof window !== "undefined") window.removeEventListener?.("storage", notify);
   };
 }
+/** Prefix for copies of unreadable sidebar storage kept before a reset. */
+export const SHARED_SIDEBAR_UNREADABLE_PREFIX = `${SHARED_SIDEBAR_LAYOUT_KEY}.unreadable.`;
+
+/** True while the stored tree cannot be read, so edits live only in memory. */
+export function sharedSidebarStorageUnreadable(): boolean {
+  readSharedSidebarLayout();
+  return !readable;
+}
+
+/**
+ * Lets the user out of a stored tree that cannot be read: the unreadable
+ * text is copied aside under a dated key first, then the tree currently on
+ * screen becomes the stored one. Nothing is dropped, and if the copy cannot
+ * be written the stored text is left exactly as it was.
+ */
+export function resetUnreadableSharedSidebar(now: Date = new Date()): string | null {
+  if (typeof localStorage === "undefined") throw new Error("Sidebar storage unavailable");
+  const raw = localStorage.getItem(SHARED_SIDEBAR_LAYOUT_KEY);
+  let backupKey: string | null = null;
+  if (raw !== null) {
+    backupKey = `${SHARED_SIDEBAR_UNREADABLE_PREFIX}${now.toISOString()}`;
+    localStorage.setItem(backupKey, raw);
+  }
+  const serialized = JSON.stringify(snapshot);
+  localStorage.setItem(SHARED_SIDEBAR_LAYOUT_KEY, serialized);
+  signature = serialized;
+  readable = true;
+  pendingWrite = false;
+  listeners.forEach(notify => notify());
+  return backupKey;
+}
+
+export function useSharedSidebarStorageUnreadable() {
+  return useSyncExternalStore(subscribeSharedSidebarLayout, sharedSidebarStorageUnreadable, sharedSidebarStorageUnreadable);
+}
+
 export function useSharedSidebarLayout() {
   return [useSyncExternalStore(subscribeSharedSidebarLayout, readSharedSidebarLayout, readSharedSidebarLayout), updateSharedSidebarLayout] as const;
 }

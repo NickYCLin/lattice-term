@@ -60,6 +60,7 @@ import { AccountModelField } from "../components/agents/AccountModelField";
 import { findCliProxy } from "../app/cliProxyApi";
 import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
+import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   ChatIcon,
@@ -284,6 +285,7 @@ export function ChatView({
         )}
         {mode === "threads" ? (
           <div className="chat-threads__list">
+            <SidebarStorageNotice />
             <ChatThreadTree
               layout={sidebarLayout}
               threads={chat.threads}
