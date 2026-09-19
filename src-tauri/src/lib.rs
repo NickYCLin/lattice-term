@@ -16,6 +16,7 @@ pub mod credentials;
 pub mod domain;
 mod durable_file;
 pub mod file_exports;
+pub mod git_changes;
 pub mod hostkeys;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
@@ -2155,6 +2156,45 @@ fn local_terminal_close(
     terminals.close(&terminal_id)
 }
 
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn git_changes_status(
+    working_directory: String,
+) -> Result<crate::git_changes::GitStatus, String> {
+    blocking(move || crate::git_changes::status(&working_directory)).await
+}
+
+#[tauri::command]
+async fn git_changes_diff(
+    working_directory: String,
+    path: String,
+    staged: bool,
+) -> Result<crate::git_changes::GitDiff, String> {
+    blocking(move || crate::git_changes::diff(&working_directory, &path, staged)).await
+}
+
+#[tauri::command]
+async fn git_changes_stage(working_directory: String, paths: Vec<String>) -> Result<(), String> {
+    blocking(move || crate::git_changes::stage(&working_directory, &paths)).await
+}
+
+#[tauri::command]
+async fn git_changes_unstage(working_directory: String, paths: Vec<String>) -> Result<(), String> {
+    blocking(move || crate::git_changes::unstage(&working_directory, &paths)).await
+}
+
+#[tauri::command]
+async fn git_changes_commit(working_directory: String, message: String) -> Result<String, String> {
+    blocking(move || crate::git_changes::commit(&working_directory, &message)).await
+}
+
 /// The instruction files a chat CLI would read for this conversation.
 #[tauri::command]
 async fn agent_instruction_files(
@@ -4291,6 +4331,11 @@ pub fn run() {
             local_terminal_write,
             local_terminal_resize,
             local_terminal_close,
+            git_changes_status,
+            git_changes_diff,
+            git_changes_stage,
+            git_changes_unstage,
+            git_changes_commit,
             agent_shared_rules_save,
             agent_plan_snapshot,
             agent_plan_save,

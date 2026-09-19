@@ -64,6 +64,7 @@ import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
+import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
 import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
 import { webSources } from "../app/chatWebSources";
@@ -72,6 +73,7 @@ import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   ArchiveFileIcon,
   ChatIcon,
+  CodeFileIcon,
   TerminalIcon,
   CloseIcon,
   DuplicateIcon,
@@ -549,6 +551,7 @@ function ThreadPane({
   const fresh = threadIsFresh(thread);
   const [settingsOpen, setSettingsOpen] = useState(fresh);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
@@ -794,6 +797,18 @@ function ThreadPane({
             >
               {settingsOpen ? t("chat.settings.hide") : t("chat.settings")}
             </button>}
+            {!thread.archived && thread.workingDirectory && (
+              <button
+                type="button"
+                className={`button button--ghost button--sm${changesOpen ? " is-active" : ""}`}
+                onClick={() => setChangesOpen((current) => !current)}
+                aria-pressed={changesOpen}
+                aria-label={t("chat.changes")}
+                title={t("chat.changes")}
+              >
+                <CodeFileIcon />
+              </button>
+            )}
             {!thread.archived && (
               <button
                 type="button"
@@ -997,6 +1012,14 @@ function ThreadPane({
         </div>
       </div>
 
+      {changesOpen && !thread.archived && thread.workingDirectory && (
+        <ChatChangesPanel
+          workingDirectory={thread.workingDirectory}
+          busy={running}
+          onQuote={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
+          onClose={() => setChangesOpen(false)}
+        />
+      )}
       {terminalOpen && !thread.archived && (
         <ChatTerminalPanel
           workingDirectory={thread.workingDirectory}
