@@ -37,6 +37,7 @@ const daemonStatus = vi.hoisted(() => ({
 }));
 vi.mock("../app/useAgentDaemon", () => ({
   EMPTY_DAEMON_STATUS: { running: false, sessions: 0, shared: [], mcp: null },
+  mcpAccessOf: (entry?: { control?: boolean }) => (!entry ? "off" : entry.control ? "full" : "view"),
   useAgentDaemon: () => ({
     status: daemonStatus.current,
     refresh: vi.fn(),
@@ -99,11 +100,10 @@ describe("AgentsView", () => {
     expect(markup).toContain("已分享 1 個工作階段");
     expect(markup).toContain("claude mcp add latticeterm -- /opt/lattice-term mcp --data-dir &#x27;/data dir&#x27;");
     expect(markup).toContain("[mcp_servers.latticeterm]");
-    // One toggle: the desktop-owned session has no observer path.
-    expect(markup.match(/<span>分享給 MCP<\/span>/g)).toHaveLength(1);
-    expect(markup).toContain("checked=\"\"");
-    // A shared session offers the control grant and shows who acted on it.
-    expect(markup).toContain("允許 MCP 送指示與停止");
+    // One choice: the desktop-owned session has no observer path.
+    expect(markup.match(/<span class="field__label">MCP 權限<\/span>/g)).toHaveLength(1);
+    expect(markup).toMatch(/<option value="full" selected="">完全開放/);
+    // A shared session shows who acted on it.
     expect(markup).toContain("MCP 可控");
     expect(markup).toContain("MCP：Claude Code 2.1 送出了指示（剛剛）");
     // Launching is a separate, off-by-default switch.
@@ -124,7 +124,7 @@ describe("AgentsView", () => {
         sessions: [fakeSession({ sessionId: "agent-bg-session-1", detached: true })],
       }),
     );
-    expect(markup).toContain("允許 MCP 送指示與停止");
+    expect(markup).toMatch(/<option value="view" selected="">只能看/);
     expect(markup).not.toContain("MCP 可控");
     expect(markup).not.toContain("MCP：");
   });
@@ -140,7 +140,7 @@ describe("AgentsView", () => {
     expect(markup).toContain("背景服務版本較舊，目前無法使用 MCP");
     expect(markup).toContain("existing CLI");
     expect(markup).toContain("系統不會自動中斷 CLI");
-    expect(markup).toMatch(/<input type="checkbox" disabled=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
+    expect(markup).toMatch(/<select class="select" disabled="">/);
   });
 
   it("shows metadata and content separately from control", () => {
@@ -153,7 +153,6 @@ describe("AgentsView", () => {
     expect(markup).toContain("MCP 狀態分享");
     expect(markup).toContain("MCP 可控");
     expect(markup).not.toContain("MCP 可讀內容");
-    expect(markup).toMatch(/<input type="checkbox"\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>允許 MCP 讀取內容<\/span>/);
     expect(markup).toContain("自動分享、允許讀取內容，並允許送指示與停止");
   });
 
@@ -170,9 +169,9 @@ describe("AgentsView", () => {
     expect(markup).toContain("背景服務尚不支援分開授權內容讀取");
     expect(markup).toContain("MCP 可讀內容");
     expect(markup).not.toContain("MCP 狀態分享");
-    expect(markup).toMatch(/<input type="checkbox" checked=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
-    expect(markup).toMatch(/<input type="checkbox" disabled=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>分享給 MCP<\/span>/);
-    expect(markup).toMatch(/<input type="checkbox" disabled="" checked=""\/><span class="checkbox__box" aria-hidden="true">✓<\/span><span>允許 MCP 讀取內容<\/span>/);
+    // The shared session can still be changed or unshared; the other cannot start sharing.
+    expect(markup.match(/<select class="select"><option value="off"/g)).toHaveLength(1);
+    expect(markup.match(/<select class="select" disabled=""><option value="off"/g)).toHaveLength(1);
   });
 
   it("offers the account picker with the signed-in default and a named account", () => {

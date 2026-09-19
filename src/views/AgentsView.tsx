@@ -31,7 +31,7 @@ import { AgentSkillsPanel } from "../components/agents/AgentSkillsPanel";
 import { SharedAgentRulesPanel } from "../components/agents/SharedAgentRulesPanel";
 import { Callout } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
-import { useAgentDaemon } from "../app/useAgentDaemon";
+import { mcpAccessOf, useAgentDaemon, type McpAccess } from "../app/useAgentDaemon";
 import { claudeCodeCommand, codexToml, mcpServersJson } from "../app/agentMcpConfig";
 import {
   AgentIcon,
@@ -152,17 +152,19 @@ export function AgentsView({
         error: reason instanceof Error ? reason.message : String(reason),
       }),
     );
-  const toggleMcpShare = (sessionId: string, shared: boolean) => {
+  // One choice per session: not shared, read-only, or read plus control.
+  const setMcpAccess = (sessionId: string, access: McpAccess) => {
     setMcpNotice(null);
-    void daemon.share(sessionId, shared, false).catch(reportMcpFailure);
-  };
-  const toggleMcpOutput = (sessionId: string, readOutput: boolean) => {
-    setMcpNotice(null);
-    void daemon.share(sessionId, true, readOutput).catch(reportMcpFailure);
-  };
-  const toggleMcpControl = (sessionId: string, control: boolean) => {
-    setMcpNotice(null);
-    void daemon.control(sessionId, control).catch(reportMcpFailure);
+    const current = sharedWithMcp.get(sessionId);
+    const steps = async () => {
+      if (access === "off") {
+        await daemon.share(sessionId, false);
+        return;
+      }
+      await daemon.share(sessionId, true, true);
+      if (access === "full" || current?.control) await daemon.control(sessionId, access === "full");
+    };
+    void steps().catch(reportMcpFailure);
   };
   const [mcpLaunchBusy, setMcpLaunchBusy] = useState(false);
   const toggleMcpLaunch = (enabled: boolean) => {
@@ -1610,48 +1612,21 @@ export function AgentsView({
                     );
                   })()}
                   {session.detached && (
-                    <label className="checkbox agents-mcp__toggle">
-                      <input
-                        type="checkbox"
-                        checked={sharedWithMcp.has(session.sessionId)}
-                        disabled={!sharedWithMcp.has(session.sessionId)
-                          && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes)}
+                    <label className="field agents-mcp__toggle">
+                      <span className="field__label">{t("agents.mcp.access")}</span>
+                      <select
+                        className="select"
+                        value={mcpAccessOf(sharedWithMcp.get(session.sessionId))}
+                        disabled={daemon.status.mcpNeedsRestart
+                          || (!sharedWithMcp.has(session.sessionId) && !daemon.status.mcpOutputScopes)}
                         onChange={(event) =>
-                          toggleMcpShare(session.sessionId, event.currentTarget.checked)
+                          setMcpAccess(session.sessionId, event.currentTarget.value as McpAccess)
                         }
-                      />
-                      <span className="checkbox__box" aria-hidden="true">
-                        ✓
-                      </span>
-                      <span>{t("agents.mcp.share")}</span>
-                    </label>
-                  )}
-                  {session.detached && sharedWithMcp.has(session.sessionId) && (
-                    <label className="checkbox agents-mcp__toggle">
-                      <input
-                        type="checkbox"
-                        checked={!daemon.status.mcpOutputScopes || sharedWithMcp.get(session.sessionId)?.readOutput !== false}
-                        disabled={daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes}
-                        onChange={(event) => toggleMcpOutput(session.sessionId, event.currentTarget.checked)}
-                      />
-                      <span className="checkbox__box" aria-hidden="true">✓</span>
-                      <span>{t("agents.mcp.output")}</span>
-                    </label>
-                  )}
-                  {session.detached && sharedWithMcp.has(session.sessionId) && (
-                    <label className="checkbox agents-mcp__toggle">
-                      <input
-                        type="checkbox"
-                        checked={sharedWithMcp.get(session.sessionId)?.control === true}
-                        disabled={daemon.status.mcpNeedsRestart}
-                        onChange={(event) =>
-                          toggleMcpControl(session.sessionId, event.currentTarget.checked)
-                        }
-                      />
-                      <span className="checkbox__box" aria-hidden="true">
-                        ✓
-                      </span>
-                      <span>{t("agents.mcp.control")}</span>
+                      >
+                        <option value="off">{t("agents.mcp.access.off")}</option>
+                        <option value="view">{t("agents.mcp.access.view")}</option>
+                        <option value="full">{t("agents.mcp.access.full")}</option>
+                      </select>
                     </label>
                   )}
                   {(() => {

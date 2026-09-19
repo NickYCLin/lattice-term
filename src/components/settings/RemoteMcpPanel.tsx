@@ -15,10 +15,7 @@ import type { ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
 import "./RemoteMcpPanel.css";
 
-type Scope = "metrics" | "list" | "exec" | "command" | "upload" | "download" | "screen" | "input" | "fleetObserve" | "fleetRead" | "fleetControl" | "fleetLaunch";
-type Scopes = Record<Scope, boolean>;
-const scopesOff: Scopes = { metrics: false, list: false, exec: false, command: false, upload: false, download: false, screen: false, input: false, fleetObserve: false, fleetRead: false, fleetControl: false, fleetLaunch: false };
-type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
+import { remoteScopesOff as scopesOff, scopesForLevel, type RemoteBackend as Backend, type RemoteLevel, type RemoteScope as Scope, type RemoteScopes as Scopes } from "../../app/mcpRemoteLevels";
 const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
 export interface McpConnectionSession { sessionId: string; profileId: string; host: string; backend: Backend; fleet?: boolean; screen?: boolean }
 
@@ -50,14 +47,26 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [remoteRoot, setRemoteRoot] = useState("");
   const [localRoot, setLocalRoot] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
+  const [level, setLevel] = useState<RemoteLevel>("full");
+  const [savedProfileLabel, setSavedProfileLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selected = sessions.find((session) => session.sessionId === sessionId);
   const savedProfile = profiles.find((profile) => profile.id === savedProfileId);
   const offlineProfiles = savedProfilesNotConnected(profiles, sessions);
   const isScreen = !!selected && selected.screen !== false && screenBackends.includes(selected.backend);
-  const fileScope = scopes.list || scopes.upload || scopes.download;
+  const isSftp = selected?.backend === "sftp";
+  const fileScope = isSftp;
   const transferScope = scopes.upload || scopes.download;
+  const levelGrants = selected ? scopesForLevel(selected, level) : [];
+
+  useEffect(() => {
+    if (!isSftp || localRoot) return;
+    void import("@tauri-apps/api/path")
+      .then(({ downloadDir }) => downloadDir())
+      .then((directory) => setLocalRoot((current) => current || directory))
+      .catch(() => {});
+  }, [isSftp, localRoot]);
 
   const refresh = useCallback(async () => {
     if (!available) return;
@@ -104,6 +113,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       setSessionId(connected.sessionId);
       setSavedProfileId("");
       if (!label.trim()) setLabel(savedProfile.name);
+      setSavedProfileLabel(savedProfile.name);
     } catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };
@@ -121,6 +131,23 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       } }));
       setScopes({ ...scopesOff }); setAcknowledged(false); setPlans([]);
       setCommand(""); setCommandLabel(""); setTimeoutSeconds(DEFAULT_EXEC_TIMEOUT_SECONDS);
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+  const grantLevel = async () => {
+    if (!selected || busy) return;
+    setBusy(true); setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const name = (savedProfileLabel || selected.host).trim().slice(0, 128) || selected.backend.toUpperCase();
+      for (const levelScopes of levelGrants) {
+        setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
+          sessionId, backend: selected.backend, label: name, scopes: levelScopes,
+          fleet: levelScopes.fleetObserve ? { platform: "unix", executable: "", dataDirectory: "", directory: "shared" } : null,
+          execPlans: [],
+          roots: isSftp ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot.trim(), localPath: levelScopes.upload || levelScopes.download ? localRoot.trim() : null }] : [],
+        } }));
+      }
     } catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };
@@ -149,7 +176,8 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   };
   const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
     && (!scopes.fleetObserve || selected.backend === "remote" || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => fleetPlatform === "windows" ? /^[A-Za-z]:[\\/].+/.test(path) : path.startsWith("/") && path.length > 1))
-    && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!fileScope || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
+    && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!(scopes.list || transferScope) || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
+  const canGrantLevel = !!selected && levelGrants.length > 0 && (!isSftp || (!!remoteRoot.trim() && !!localRoot.trim()));
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
@@ -171,12 +199,13 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
         <button type="button" className="button button--danger" disabled={busy} onClick={() => void revoke(target.id)}>{t("settings.mcpRemote.revoke")}</button>
       </div>)}
       {!available ? <p>{t("settings.mcpRemote.desktopOnly")}</p> : sessions.length === 0 && profiles.length === 0 ? <p>{t("settings.mcpRemote.connectFirst")}</p> :
-        <form className="mcp-remote__form" onSubmit={(event) => { event.preventDefault(); if (canGrant) void grant(); }}>
+        <form className="mcp-remote__form" onSubmit={(event) => { event.preventDefault(); if (canGrantLevel) void grantLevel(); }}>
           <label className="field"><span className="field__label">{t("settings.mcpRemote.connection")}</span>
             <select className="input" value={savedProfileId ? `saved:${savedProfileId}` : sessionId} disabled={busy} onChange={(e) => {
               const value = e.target.value;
               if (value.startsWith("saved:")) { setSavedProfileId(value.slice(6)); setSessionId(""); }
               else { setSessionId(value); setSavedProfileId(""); }
+              setSavedProfileLabel("");
               setScopes({ ...scopesOff }); setAcknowledged(false);
             }}>
               <option value="">{t("settings.mcpRemote.choose")}</option>
@@ -189,6 +218,20 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
             <p className="setting__description">{t("settings.mcpRemote.savedHint")}</p>
             <button type="button" className="button" disabled={busy} onClick={() => void connectSaved()}>{t("settings.mcpRemote.connectSaved")}</button>
           </div>}
+          {selected && <fieldset disabled={busy} className="mcp-remote__level"><legend>{t("settings.mcpRemote.level")}</legend>
+            {(["view", "full"] as const).map((choice) => <label key={choice}>
+              <input type="radio" name="mcp-remote-level" checked={level === choice} onChange={() => setLevel(choice)} /> {t(`settings.mcpRemote.level.${choice}`)}
+            </label>)}
+            <p className="setting__description">{t(`settings.mcpRemote.level.${selected.backend}.${level}`)}</p>
+          </fieldset>}
+          {selected && levelGrants.length === 0 && <p>{t("settings.mcpRemote.level.nothing")}</p>}
+          {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.remoteRoot")}</span>
+            <input className="input mono" value={remoteRoot} disabled={busy} onChange={(e) => { setRemoteRoot(e.target.value); setAcknowledged(false); }} />
+            <span className="setting__description">{t("settings.mcpRemote.pathHint")}</span></label>}
+          {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.localRoot")}</span>
+            <input className="input mono" value={localRoot} disabled={busy} onChange={(e) => { setLocalRoot(e.target.value); setAcknowledged(false); }} /></label>}
+          <div><button type="submit" className="button button--primary" disabled={busy || !canGrantLevel}>{t("settings.mcpRemote.grantLevel")}</button></div>
+          {selected && <details className="mcp-remote__advanced"><summary>{t("settings.mcpRemote.advanced")}</summary>
           <label className="field"><span className="field__label">{t("settings.mcpRemote.label")}</span>
             <input className="input" value={label} maxLength={128} disabled={busy} onChange={(e) => setLabel(e.target.value)} autoComplete="off" /></label>
           <fieldset disabled={busy || !selected} className="mcp-remote__scopes"><legend>{t("settings.mcpRemote.scopes")}</legend>
@@ -262,13 +305,9 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
                 {t("settings.mcpRemote.addCommand")}</button></div>
             </>}
           </fieldset>}
-          {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.remoteRoot")}</span>
-            <input className="input mono" value={remoteRoot} disabled={busy} onChange={(e) => { setRemoteRoot(e.target.value); setAcknowledged(false); }} />
-            <span className="setting__description">{t("settings.mcpRemote.pathHint")}</span></label>}
-          {transferScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.localRoot")}</span>
-            <input className="input mono" value={localRoot} disabled={busy} onChange={(e) => { setLocalRoot(e.target.value); setAcknowledged(false); }} /></label>}
           <label><input type="checkbox" checked={acknowledged} disabled={busy} onChange={(e) => setAcknowledged(e.target.checked)} /> {t("settings.mcpRemote.acknowledge")}</label>
-          <div><button type="submit" className="button button--primary" disabled={busy || !canGrant}>{t("settings.mcpRemote.grant")}</button></div>
+          <div><button type="button" className="button" disabled={busy || !canGrant} onClick={() => void grant()}>{t("settings.mcpRemote.grant")}</button></div>
+          </details>}
         </form>}
     </div>
   </section>;

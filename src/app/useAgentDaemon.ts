@@ -153,3 +153,11 @@ export function useAgentDaemon(sessionsHint: number): {
 function normalizeSharedSession(entry: AgentSharedSession): AgentSharedSession {
   return { ...entry, readOutput: entry.readOutput ?? true };
 }
+
+/** What an MCP client may do with one shared session, as the window offers it. */
+export type McpAccess = "off" | "view" | "full";
+
+export function mcpAccessOf(entry: AgentSharedSession | undefined): McpAccess {
+  if (!entry) return "off";
+  return entry.control ? "full" : "view";
+}
