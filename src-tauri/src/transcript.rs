@@ -2440,3 +2440,195 @@ mod tests {
         );
     }
 }
+
+/// Cumulative token usage a CLI recorded in its own transcript. Only read
+/// for a session whose id was captured, so it never counts another
+/// conversation that shares the folder.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TranscriptUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub api_calls: u64,
+}
+
+fn u64_at(value: &Value, key: &str) -> u64 {
+    value.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
+/// Claude writes one row per content block of a reply, each repeating that
+/// reply's usage; the message id keeps each reply counted once.
+fn claude_usage(path: &Path) -> Option<TranscriptUsage> {
+    let mut replies: std::collections::HashMap<String, TranscriptUsage> = Default::default();
+    visit_transcript_rows(path, |row| {
+        if row.get("type").and_then(Value::as_str) != Some("assistant") {
+            return;
+        }
+        let Some(message) = row.get("message") else {
+            return;
+        };
+        let (Some(id), Some(usage)) = (
+            message.get("id").and_then(Value::as_str),
+            message.get("usage"),
+        ) else {
+            return;
+        };
+        replies.insert(
+            id.to_string(),
+            TranscriptUsage {
+                input_tokens: u64_at(usage, "input_tokens"),
+                output_tokens: u64_at(usage, "output_tokens"),
+                cache_read_tokens: u64_at(usage, "cache_read_input_tokens"),
+                cache_write_tokens: u64_at(usage, "cache_creation_input_tokens"),
+                reasoning_tokens: usage
+                    .get("output_tokens_details")
+                    .map(|details| u64_at(details, "thinking_tokens"))
+                    .unwrap_or(0),
+                api_calls: 1,
+            },
+        );
+    })?;
+    if replies.is_empty() {
+        return None;
+    }
+    Some(
+        replies
+            .values()
+            .fold(TranscriptUsage::default(), |sum, reply| TranscriptUsage {
+                input_tokens: sum.input_tokens.saturating_add(reply.input_tokens),
+                output_tokens: sum.output_tokens.saturating_add(reply.output_tokens),
+                cache_read_tokens: sum
+                    .cache_read_tokens
+                    .saturating_add(reply.cache_read_tokens),
+                cache_write_tokens: sum
+                    .cache_write_tokens
+                    .saturating_add(reply.cache_write_tokens),
+                reasoning_tokens: sum.reasoning_tokens.saturating_add(reply.reasoning_tokens),
+                api_calls: sum.api_calls.saturating_add(1),
+            }),
+    )
+}
+
+/// Codex keeps a running total in its `token_count` events; the last one is
+/// the session so far. Its input count includes the cached part.
+fn codex_usage(path: &Path) -> Option<TranscriptUsage> {
+    let mut last = None;
+    let mut calls = 0u64;
+    visit_transcript_rows(path, |row| {
+        let payload = row.get("payload").unwrap_or(row);
+        if payload.get("type").and_then(Value::as_str) != Some("token_count") {
+            return;
+        }
+        let Some(total) = payload
+            .get("info")
+            .and_then(|info| info.get("total_token_usage"))
+        else {
+            return;
+        };
+        calls = calls.saturating_add(1);
+        let input = u64_at(total, "input_tokens");
+        let cached = u64_at(total, "cached_input_tokens");
+        last = Some(TranscriptUsage {
+            input_tokens: input.saturating_sub(cached),
+            output_tokens: u64_at(total, "output_tokens"),
+            cache_read_tokens: cached,
+            cache_write_tokens: u64_at(total, "cache_write_input_tokens"),
+            reasoning_tokens: u64_at(total, "reasoning_output_tokens"),
+            api_calls: calls,
+        });
+    })?;
+    last
+}
+
+pub fn session_usage(
+    kind: TranscriptKind,
+    working_directory: &str,
+    captured_session_id: &str,
+) -> Option<TranscriptUsage> {
+    if captured_session_id.is_empty() {
+        return None;
+    }
+    match kind {
+        TranscriptKind::Claude => claude_usage(&locate_claude(
+            working_directory,
+            Some(captured_session_id),
+        )?),
+        TranscriptKind::Codex => {
+            codex_usage(&locate_codex(working_directory, Some(captured_session_id))?)
+        }
+        TranscriptKind::Gemini | TranscriptKind::Antigravity => None,
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    /// Reads a real transcript: `LATTICETERM_USAGE_DIR=<cwd>
+    /// LATTICETERM_USAGE_SESSION=<id> cargo test --lib real_claude_usage -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_claude_usage() {
+        let directory = std::env::var("LATTICETERM_USAGE_DIR").unwrap();
+        let session = std::env::var("LATTICETERM_USAGE_SESSION").unwrap();
+        let usage = session_usage(TranscriptKind::Claude, &directory, &session).expect("usage");
+        println!("{usage:?}");
+        assert!(usage.api_calls > 0 && usage.output_tokens > 0);
+    }
+
+    #[test]
+    fn claude_counts_each_reply_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let reply = |id: &str, input: u64| {
+            serde_json::json!({"type": "assistant", "message": {"id": id, "usage": {
+                "input_tokens": input, "output_tokens": 10, "cache_read_input_tokens": 100,
+                "cache_creation_input_tokens": 50, "output_tokens_details": {"thinking_tokens": 4}}}})
+            .to_string()
+        };
+        let rows = [
+            serde_json::json!({"type": "user", "message": {"content": "hi"}}).to_string(),
+            reply("a", 2),
+            reply("a", 2),
+            reply("b", 3),
+        ];
+        std::fs::write(&path, rows.join("\n")).unwrap();
+        assert_eq!(
+            claude_usage(&path),
+            Some(TranscriptUsage {
+                input_tokens: 5,
+                output_tokens: 20,
+                cache_read_tokens: 200,
+                cache_write_tokens: 100,
+                reasoning_tokens: 8,
+                api_calls: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn codex_takes_the_last_running_total_and_splits_cached_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        let count = |input: u64, cached: u64| {
+            serde_json::json!({"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {
+                "input_tokens": input, "cached_input_tokens": cached, "output_tokens": 7,
+                "reasoning_output_tokens": 3, "total_tokens": input + 7}}}})
+            .to_string()
+        };
+        let rows = [
+            count(100, 40),
+            serde_json::json!({"type": "event_msg", "payload": {"type": "token_count", "info": null}}).to_string(),
+            count(300, 200),
+        ];
+        std::fs::write(&path, rows.join("\n")).unwrap();
+        let usage = codex_usage(&path).unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.cache_read_tokens, 200);
+        assert_eq!(usage.reasoning_tokens, 3);
+        assert_eq!(usage.api_calls, 2);
+        assert_eq!(session_usage(TranscriptKind::Codex, "/work", ""), None);
+    }
+}

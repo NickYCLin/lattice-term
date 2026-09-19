@@ -2404,6 +2404,52 @@ impl AgentRegistry {
         Ok(Some(usage.clone()))
     }
 
+    /// Claude Code and Codex record every reply's usage in their own
+    /// transcript. After a turn officially ends, the running total there
+    /// replaces this session's figure. Skipped when an account profile keeps
+    /// the transcripts elsewhere or no session id was captured yet, so another
+    /// conversation's file is never counted.
+    fn refresh_transcript_usage(&self, session_id: &str) -> Option<AgentTokenUsage> {
+        let entry = self.get(session_id).ok()?;
+        let (kind, directory, captured) = {
+            let summary = entry.summary.lock().ok()?;
+            if summary.profile_config_path.is_some() {
+                return None;
+            }
+            let kind = match summary.definition_id.as_str() {
+                "claude" => crate::transcript::TranscriptKind::Claude,
+                "codex" => crate::transcript::TranscriptKind::Codex,
+                _ => return None,
+            };
+            (
+                kind,
+                summary.working_directory.clone(),
+                summary.captured_session_id.clone()?,
+            )
+        };
+        let totals = crate::transcript::session_usage(kind, &directory, &captured)?;
+        let cap = |value: u64| value.min(MAX_SERIALIZED_USAGE_VALUE);
+        let usage = AgentTokenUsage {
+            input_tokens: cap(totals.input_tokens),
+            output_tokens: cap(totals.output_tokens),
+            cache_read_tokens: cap(totals.cache_read_tokens),
+            cache_write_tokens: cap(totals.cache_write_tokens),
+            reasoning_tokens: cap(totals.reasoning_tokens),
+            total_tokens: cap(totals
+                .input_tokens
+                .saturating_add(totals.output_tokens)
+                .saturating_add(totals.cache_read_tokens)
+                .saturating_add(totals.cache_write_tokens)),
+            api_calls: cap(totals.api_calls),
+        };
+        let mut summary = entry.summary.lock().ok()?;
+        if summary.token_usage.as_ref() == Some(&usage) {
+            return None;
+        }
+        summary.token_usage = Some(usage.clone());
+        Some(usage)
+    }
+
     fn update_copilot_event(
         &self,
         session_id: &str,
@@ -2846,6 +2892,11 @@ fn handle_report_connection(mut stream: TcpStream, registry: &AgentRegistry, sin
             }
             if let Some(native_session_id) = captured {
                 sink.captured(&message.session_id, &native_session_id);
+            }
+            if state == AgentLifecycle::Done {
+                if let Some(usage) = registry.refresh_transcript_usage(&message.session_id) {
+                    sink.usage(&message.session_id, &usage);
+                }
             }
             true
         }
