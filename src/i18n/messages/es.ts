@@ -1315,6 +1315,8 @@ export const messages: Messages = {
   "chat.stop": "Detener",
   "chat.running": "Respondiendo...",
   "chat.reasoning": "Razonamiento",
+  "chat.tool.lines": "{count} líneas",
+  "chat.tool.results": "{count} resultados",
   "chat.delegate.noteDone": "Subtarea «{title}» terminada",
   "chat.delegate.noteFailed": "Subtarea «{title}» fallida",
   "chat.delegate.noteGone": "(subtarea eliminada)",

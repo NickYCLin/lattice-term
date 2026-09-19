@@ -1315,6 +1315,8 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "返信...",
   "chat.reasoning": "推論",
+  "chat.tool.lines": "{count} 行",
+  "chat.tool.results": "{count} 件",
   "chat.delegate.noteDone": "サブタスク「{title}」が完了しました",
   "chat.delegate.noteFailed": "サブタスク「{title}」が失敗しました",
   "chat.delegate.noteGone": "（削除されたサブタスク）",

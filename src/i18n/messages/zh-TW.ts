@@ -1419,6 +1419,8 @@ export const zhTW = {
   "chat.stop": "停止",
   "chat.running": "回覆中…",
   "chat.reasoning": "思考過程",
+  "chat.tool.lines": "{count} 行",
+  "chat.tool.results": "{count} 筆結果",
   "chat.delegate.noteDone": "子任務「{title}」完成了",
   "chat.delegate.noteFailed": "子任務「{title}」失敗了",
   "chat.delegate.noteGone": "（已刪除的子任務）",

@@ -1485,6 +1485,8 @@ export const en: Messages = {
   "chat.stop": "Stop",
   "chat.running": "Replying…",
   "chat.reasoning": "Reasoning",
+  "chat.tool.lines": "{count} lines",
+  "chat.tool.results": "{count} results",
   "chat.delegate.noteDone": "Subtask “{title}” finished",
   "chat.delegate.noteFailed": "Subtask “{title}” failed",
   "chat.delegate.noteGone": "(deleted subtask)",

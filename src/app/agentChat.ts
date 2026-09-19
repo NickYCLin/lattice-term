@@ -115,6 +115,26 @@ export function supportsBrowser(definitionId: ChatDefinitionId): boolean {
   return definitionId === "codex" || definitionId === "claude";
 }
 
+/**
+ * A one-glance count for tools whose output is a list: lines read, or
+ * matches and files found. Null for everything else.
+ */
+export function toolOutputCount(
+  name: string,
+  output: string | null,
+): { kind: "lines" | "results"; count: number } | null {
+  if (!output) return null;
+  const lines = output.split("\n").filter((line) => line.trim() !== "");
+  if (lines.length === 0) return null;
+  if (["Read", "read_file", "read_many_files", "view"].includes(name)) return { kind: "lines", count: lines.length };
+  if (["Grep", "Glob", "LS", "search_file_content", "glob", "list_directory", "grep", "find"].includes(name)) {
+    // Claude says "No files found" rather than returning nothing.
+    if (lines.length === 1 && /^no (files|matches) found/i.test(lines[0])) return { kind: "results", count: 0 };
+    return { kind: "results", count: lines.length };
+  }
+  return null;
+}
+
 export interface ToolMeta {
   exitCode?: number;
   durationMs?: number;

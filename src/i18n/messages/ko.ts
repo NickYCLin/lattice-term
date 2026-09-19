@@ -1315,6 +1315,8 @@ export const messages: Messages = {
   "chat.stop": "중지",
   "chat.running": "댓글 ...",
   "chat.reasoning": "추론",
+  "chat.tool.lines": "{count}줄",
+  "chat.tool.results": "결과 {count}개",
   "chat.delegate.noteDone": "하위 작업 「{title}」 완료",
   "chat.delegate.noteFailed": "하위 작업 「{title}」 실패",
   "chat.delegate.noteGone": "(삭제된 하위 작업)",

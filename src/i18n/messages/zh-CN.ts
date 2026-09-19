@@ -1334,6 +1334,8 @@ export const messages: Messages = {
   "chat.stop": "停止",
   "chat.running": "回复中…",
   "chat.reasoning": "思考过程",
+  "chat.tool.lines": "{count} 行",
+  "chat.tool.results": "{count} 条结果",
   "chat.delegate.noteDone": "子任务“{title}”完成了",
   "chat.delegate.noteFailed": "子任务“{title}”失败了",
   "chat.delegate.noteGone": "（已删除的子任务）",

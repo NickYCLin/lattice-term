@@ -24,6 +24,7 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteC
 import {
   defaultPermission,
   effortChoices,
+  toolOutputCount,
   delegationResult,
   supportsBrowser,
   looksLikeDiff,
@@ -1401,6 +1402,14 @@ function ChatItemView({
               <code className="chat-card__summary" title={item.summary}>
                 {item.summary}
               </code>
+              {(() => {
+                const counted = item.done && !item.isError ? toolOutputCount(item.name, item.output) : null;
+                return counted ? (
+                  <span className="chat-chip">
+                    {t(counted.kind === "lines" ? "chat.tool.lines" : "chat.tool.results", { count: counted.count })}
+                  </span>
+                ) : null;
+              })()}
               {item.meta?.exitCode !== undefined && (
                 <span className={`chat-chip chat-chip--${item.meta.exitCode === 0 ? "ok" : "danger"}`}>
                   {t("chat.tool.exitCode", { code: item.meta.exitCode })}

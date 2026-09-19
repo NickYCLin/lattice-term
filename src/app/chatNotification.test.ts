@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completionNotificationText, looksLikeDiff } from "./agentChat";
+import { completionNotificationText, looksLikeDiff, toolOutputCount } from "./agentChat";
 
 describe("reply notification text", () => {
   it("uses the thread title and the start of the last reply", () => {
@@ -27,6 +27,16 @@ describe("tool output shape", () => {
     expect(looksLikeDiff("update src/a.rs")).toBe(false);
     expect(looksLikeDiff("@@ something @@ without headers")).toBe(false);
     expect(looksLikeDiff(null)).toBe(false);
+  });
+});
+
+describe("tool output counts", () => {
+  it("counts lines read and results found, and nothing for other tools", () => {
+    expect(toolOutputCount("Read", "     1→a\n     2→b\n")).toEqual({ kind: "lines", count: 2 });
+    expect(toolOutputCount("Grep", "src/a.ts\nsrc/b.ts")).toEqual({ kind: "results", count: 2 });
+    expect(toolOutputCount("Glob", "No files found")).toEqual({ kind: "results", count: 0 });
+    expect(toolOutputCount("Bash", "x\ny")).toBeNull();
+    expect(toolOutputCount("Read", "")).toBeNull();
   });
 });
 
