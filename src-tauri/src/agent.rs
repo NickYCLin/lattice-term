@@ -5239,6 +5239,17 @@ pub(crate) fn launch_parts(executable: &Path) -> (OsString, Vec<OsString>) {
     if !is_script {
         return (executable, Vec::new());
     }
+    // An npm shim only runs `node <script> %*`. Running that directly keeps
+    // every argument away from cmd.exe's own parsing, where `&`, `|` or `%`
+    // in an argument would otherwise be read as batch syntax.
+    let shim = PathBuf::from(&executable);
+    if let (Some(directory), Ok(contents)) = (shim.parent(), std::fs::read_to_string(&shim)) {
+        if let Some(entry) = npm_shim_entry(&contents, directory) {
+            if let Some(node) = node_for_npm_shim(directory) {
+                return (plain_windows_path(&node), vec![plain_windows_path(&entry)]);
+            }
+        }
+    }
     let comspec = std::env::var_os("ComSpec").unwrap_or_else(|| OsString::from("cmd.exe"));
     (
         comspec,
@@ -5398,6 +5409,82 @@ pub(crate) fn node_runtime_path_for_script(executable: &Path) -> Option<OsString
     inherit_process_environment(&mut command);
     configure_node_runtime_for_script(&mut command, executable);
     command.get_env("PATH").map(OsStr::to_os_string)
+}
+
+/// The JavaScript entry point of an npm `cmd-shim` wrapper, when the shim
+/// is exactly the shape npm writes: its launch line runs `"%_prog%"` on one
+/// quoted `%dp0%`-relative script followed by nothing but `%*`. Anything
+/// else (pnpm, yarn, hand-written batch files) is not recognised, and the
+/// entry point must resolve to a script inside the shim's own folder.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn npm_shim_entry(contents: &str, shim_directory: &Path) -> Option<PathBuf> {
+    let line = contents
+        .lines()
+        .map(str::trim)
+        .rfind(|line| line.contains("\"%_prog%\""))?;
+    let after = line.split_once("\"%_prog%\"")?.1.trim_start();
+    let quoted = after.strip_prefix('"')?;
+    let (script, rest) = quoted.split_once('"')?;
+    if rest.trim() != "%*" {
+        return None;
+    }
+    let relative = script
+        .strip_prefix("%dp0%\\")
+        .or_else(|| script.strip_prefix("%~dp0\\"))?;
+    if relative.is_empty()
+        || relative.contains(['%', '!', '^', '&', '|', '<', '>', '"'])
+        || relative.split(['\\', '/']).any(|part| part == "..")
+    {
+        return None;
+    }
+    let is_js = Path::new(relative)
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| {
+            ["js", "cjs", "mjs"]
+                .iter()
+                .any(|js| extension.eq_ignore_ascii_case(js))
+        });
+    if !is_js {
+        return None;
+    }
+    let mut path = shim_directory.to_path_buf();
+    for part in relative.split(['\\', '/']).filter(|part| !part.is_empty()) {
+        path.push(part);
+    }
+    let root = shim_directory.canonicalize().ok()?;
+    let resolved = path.canonicalize().ok()?;
+    (resolved.starts_with(&root) && resolved.is_file()).then_some(resolved)
+}
+
+/// `node.exe` for an npm shim: the one beside the shim (what the shim itself
+/// prefers), then the standard Node.js install locations, then PATH.
+#[cfg(windows)]
+fn node_for_npm_shim(shim_directory: &Path) -> Option<PathBuf> {
+    let mut candidates = vec![shim_directory.join("node.exe")];
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(variable) {
+            candidates.push(PathBuf::from(root).join("nodejs").join("node.exe"));
+        }
+    }
+    if let Some(root) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(
+            PathBuf::from(root)
+                .join("Programs")
+                .join("nodejs")
+                .join("node.exe"),
+        );
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            find_executable("node").filter(|path| {
+                path.extension()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+            })
+        })
 }
 
 #[cfg(not(windows))]
@@ -9324,6 +9411,31 @@ model = "gpt-5.3-codex"
 
     #[cfg(windows)]
     #[test]
+    fn npm_shims_launch_node_directly_without_the_command_processor() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("faux-npm-agent.cmd");
+        std::fs::write(&shim, NPM_SHIM).unwrap();
+        let script = dir
+            .path()
+            .join("node_modules")
+            .join("@anthropic-ai")
+            .join("claude-code")
+            .join("cli.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "").unwrap();
+        // The shim prefers the node.exe beside it, as npm writes it.
+        std::fs::write(dir.path().join("node.exe"), "").unwrap();
+
+        let (program, prefix) = launch_parts(&shim);
+        let program = program.to_string_lossy().to_ascii_lowercase();
+        assert!(program.ends_with("node.exe"), "{program}");
+        assert!(!program.contains("cmd"));
+        assert_eq!(prefix.len(), 1);
+        assert!(prefix[0].to_string_lossy().ends_with("cli.js"));
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn detects_and_wraps_windows_script_shims() {
         // npm/pnpm global installs land as .cmd shims (e.g. claude.cmd).
         let dir = tempfile::tempdir().unwrap();
@@ -9448,6 +9560,51 @@ model = "gpt-5.3-codex"
                 0o700
             );
         }
+    }
+
+    const NPM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n";
+
+    #[test]
+    fn npm_shims_resolve_to_their_script_inside_the_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir
+            .path()
+            .join("node_modules/@anthropic-ai/claude-code/cli.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "#!/usr/bin/env node\n").unwrap();
+        assert_eq!(
+            npm_shim_entry(NPM_SHIM, dir.path()),
+            Some(script.canonicalize().unwrap())
+        );
+        // A missing script is not guessed.
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(npm_shim_entry(NPM_SHIM, empty.path()), None);
+    }
+
+    #[test]
+    fn anything_but_a_plain_npm_shim_keeps_the_command_processor() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("cli.js");
+        std::fs::write(&script, "").unwrap();
+        for contents in [
+            // Something runs after the script.
+            "\"%_prog%\" \"%dp0%\\cli.js\" %* & calc.exe\r\n",
+            // The script path climbs out of the install.
+            "\"%_prog%\" \"%dp0%\\..\\cli.js\" %*\r\n",
+            // Batch expansion inside the path.
+            "\"%_prog%\" \"%dp0%\\%EVIL%.js\" %*\r\n",
+            // Not a JavaScript entry point.
+            "\"%_prog%\" \"%dp0%\\cli.exe\" %*\r\n",
+            // pnpm/yarn style or a hand-written batch file.
+            "@\"%~dp0\\node.exe\" \"%~dp0\\cli.js\" %*\r\n",
+            "@echo off\r\n",
+        ] {
+            assert_eq!(npm_shim_entry(contents, dir.path()), None, "{contents}");
+        }
+        assert_eq!(
+            npm_shim_entry("\"%_prog%\" \"%dp0%\\cli.js\" %*\r\n", dir.path()),
+            Some(script.canonicalize().unwrap())
+        );
     }
 
     #[test]

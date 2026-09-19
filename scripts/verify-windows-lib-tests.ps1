@@ -249,7 +249,8 @@ try {
     foreach ($filter in @("codex_input_profile", "codex_mcp_submit", "startup_seed",
             "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
             "remote_host::", "remote_commands::", "remote_chat_host::", "notification_sound::",
-            "durable_file::", "backup::", "credentials::", "vault::")) {
+            "durable_file::", "backup::", "credentials::", "vault::",
+            "npm_shim", "git_changes::", "chat_images::", "mcp_inventory::")) {
         $check = [ordered]@{ filter = $filter; passed = $false }
         $report.tests += $check
         $all = @(Get-TestNames (Invoke-NativeChecked $testCopy @($filter, "--list", "--format", "terse")))

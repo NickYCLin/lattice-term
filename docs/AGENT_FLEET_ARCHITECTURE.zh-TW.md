@@ -168,7 +168,7 @@ Codex 背景連線也會核對帳號目錄與原生對話 ID，不符合就重�
 - 安全啟動工作區使用獨立的版本化 JSON；v4 可無損讀取 v1／v2／v3，並保存工作區名稱、共用啟動指示、項目順序、CLI 類型、標籤、可執行檔、明確參數、工作目錄與選填備註。原生 Session ID 或標題只在使用者明確保存續接項目時寫入；備註為選填的純文字（最多 200 bytes、去除前後空白、拒絕控制字元）。共用啟動指示最多 8 KiB，留空即停用。密碼、Token、API Key、Passphrase、Secret 參數會被拒絕；讀不到或版本不相容的原檔會先移到復原檔，不會直接覆寫。
 - 除使用者明確保存的共用啟動指示外，不把單次提示、輸入歷史、程序 ID、Reporter 權杖或模型憑證寫入工作區 JSON。重新 attach 用的每個 Agent 最近 256 KiB 輸出尾端在正常關閉時會以裝置金鑰加密保存，金鑰只留在 OS 安全儲存區；安全儲存區不可用時維持只存在該桌面程序記憶體。
 - Reporter 只監聽 loopback，訊息限制 4 KiB 且有讀寫逾時；每個工作階段使用獨立高熵權杖。權杖會存在該 CLI 的環境中，因此相同作業系統使用者權限的程序仍屬於信任邊界，但即使權杖外洩也只能變更該工作階段的顯示狀態與有界用量數字。
-- Windows 偵測與啟動涵蓋 `.exe`／`.com`，以及 npm／pnpm／yarn 全域安裝常見的 `.cmd`／`.bat` shim（例如 `claude.cmd`）。因為 Windows 無法直接 `CreateProcess` 批次檔，`.cmd`／`.bat` 會自動透過 `cmd /c` 啟動，並先去掉 `canonicalize` 產生的 `\\?\` 前綴以免 cmd 無法解析。
+- Windows 偵測與啟動涵蓋 `.exe`／`.com`，以及 npm／pnpm／yarn 全域安裝常見的 `.cmd`／`.bat` shim（例如 `claude.cmd`）。因為 Windows 無法直接 `CreateProcess` 批次檔，`.cmd`／`.bat` 原本一律透過 `cmd /d /c` 啟動。npm 產生的標準 shim（最後一行正好是 `"%_prog%" "%dp0%\…\*.js" %*`）現在改為直接以 `node.exe <入口 .js>` 啟動，完全不經 cmd，參數裡的 `&`、`|`、`%` 等不會被當成批次語法；入口檔必須在 shim 所在資料夾內、副檔名為 .js／.cjs／.mjs，`node.exe` 依序找 shim 旁、Program Files 與 LocalAppData 的 Node.js 安裝，最後才看 PATH。認不出的格式（pnpm、yarn、手寫批次檔）或找不到 node 時照舊走 `cmd /d /c`，並先去掉 `canonicalize` 產生的 `\\?\` 前綴以免 cmd 無法解析。
 
 ## 完成度矩陣
 

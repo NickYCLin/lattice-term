@@ -70,7 +70,7 @@
 1. **Lattice Remote 連線範圍**：鍵盤／滑鼠遠端控制已可用（由分享端明確授權）；免帳戶數字裝置 ID、自架 Relay（`docs/RELAY_SERVER.zh-TW.md`）、裝置金鑰釘選（TOFU）與固定配對碼無人值守已可用；接著加入 NAT 直連穿透。連線清單先保存在本機，帳戶只作為日後跨裝置同步與團隊權限的選配層。
 2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH 與 [Relay Fleet](RELAY_FLEET.zh-TW.md) 已提供 MCP 工作區與遠端多 PTY 操作；Relay 尚待外部主機與安裝版驗收，桌面遠端 panes 尚未提供。
 3. **Agent 編排與隔離**：補齊其他工具的 hook 與 token／cost 可觀測事件；排程、佇列、接續執行與同時執行上限已完成，Linux 與 macOS 的檔案範圍沙箱已完成，接著是 Windows 的對應隔離與網路／資源限制。
-4. **平台完整度**：設計安全的 Windows npm shim adapter、持續強化 Android 發行流程，並持續驗證 iOS 商店更新與實機操作。
+4. **平台完整度**：Windows npm shim 已改為直接啟動 node（pnpm／yarn shim 仍走 cmd）、持續強化 Android 發行流程，並持續驗證 iOS 商店更新與實機操作。
 5. **正式發行信任**：自動更新包已有 Tauri 簽章；Windows Authenticode 與 Apple Developer ID／notarization 仍需發行者憑證。
 
 ## 鍵盤快捷鍵
