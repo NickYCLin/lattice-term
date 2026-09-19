@@ -215,7 +215,7 @@ pub fn diff(directory: &str, path: &str, staged: bool) -> Result<GitDiff, String
     }
     let output = run(command)?;
     // `--no-index` exits 1 whenever the files differ, which they always do.
-    if !output.status.success() && !(untracked && output.status.code() == Some(1)) {
+    if !(output.status.success() || untracked && output.status.code() == Some(1)) {
         return Err(failure(&output));
     }
     Ok(bounded(&output.stdout))

@@ -93,10 +93,10 @@ fn supported_schema(schema: &Value) -> bool {
 fn supported_field(field: &Value) -> bool {
     match field["type"].as_str() {
         Some("string") => {
-            let format_ok = field.get("format").map_or(true, |format| {
-                format.as_str().is_some_and(|f| STRING_FORMATS.contains(&f))
-            });
-            let enum_ok = field.get("enum").map_or(true, |values| {
+            let format_ok = field
+                .get("format")
+                .is_none_or(|format| format.as_str().is_some_and(|f| STRING_FORMATS.contains(&f)));
+            let enum_ok = field.get("enum").is_none_or(|values| {
                 values.as_array().is_some_and(|values| {
                     !values.is_empty()
                         && values.len() <= MAX_ENUM_VALUES
