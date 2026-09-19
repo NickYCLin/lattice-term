@@ -30,6 +30,22 @@ pub struct InstructionFile {
     pub bytes: u64,
     pub content: String,
     pub truncated: bool,
+    /// Fingerprint of the whole file (or "missing"); a save must name it.
+    pub revision: String,
+    /// Whether the window may edit this file here: user-level files only,
+    /// and only when all of it was shown.
+    pub editable: bool,
+}
+
+fn revision_of(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    match std::fs::read(path) {
+        Ok(bytes) => Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        Err(_) => "missing".to_string(),
+    }
 }
 
 /// `(scope, path)` pairs in the order the CLI documents loading them.
@@ -142,6 +158,8 @@ pub fn inspect(
         let (exists, bytes, content, truncated) = read_bounded(&path);
         InstructionFile {
             scope,
+            revision: revision_of(&path),
+            editable: scope == InstructionScope::User && !truncated,
             path: path.display().to_string(),
             exists,
             bytes,
@@ -150,6 +168,62 @@ pub fn inspect(
         }
     })
     .collect())
+}
+
+const MAX_SAVED_BYTES: usize = 64 * 1024;
+
+/// Saves one user-level instruction file the window showed. The path must
+/// be one this CLI reads at user level, and the file must still be what
+/// was shown; the new text replaces it atomically, keeping its permissions.
+pub fn save(
+    definition_id: &str,
+    config_directory: Option<&str>,
+    path: &str,
+    content: &str,
+    expected_revision: &str,
+) -> Result<(), String> {
+    if content.len() > MAX_SAVED_BYTES {
+        return Err("Instructions are limited to 64 KiB here.".to_string());
+    }
+    let allowed = inspect(definition_id, None, config_directory)?
+        .into_iter()
+        .find(|file| file.scope == InstructionScope::User && file.path == path)
+        .ok_or_else(|| {
+            "Only this assistant's own user instruction files can be edited here.".to_string()
+        })?;
+    if !allowed.editable {
+        return Err("This file is too large to edit here safely.".to_string());
+    }
+    let target = PathBuf::from(&allowed.path);
+    if revision_of(&target) != expected_revision {
+        return Err("The file changed outside LatticeTerm. Reload it before saving.".to_string());
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+        if !metadata.is_file() {
+            return Err("The instruction file is not a regular file.".to_string());
+        }
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| "The instruction file has no folder.".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+    {
+        use std::io::Write;
+        let normalized = content.replace("\r\n", "\n");
+        temporary
+            .write_all(normalized.as_bytes())
+            .and_then(|()| temporary.as_file().sync_all())
+            .map_err(|error| error.to_string())?;
+    }
+    if let Ok(metadata) = std::fs::metadata(&target) {
+        let _ = std::fs::set_permissions(temporary.path(), metadata.permissions());
+    }
+    temporary
+        .persist(&target)
+        .map_err(|error| format!("Cannot save the instructions: {}", error.error))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -233,5 +307,31 @@ mod tests {
         assert_eq!(project[1].content, "# Rules\n");
         assert!(!files[0].exists);
         assert!(inspect("codex", Some("relative/dir"), None).is_err());
+    }
+
+    #[test]
+    fn user_instructions_save_only_where_they_were_read_and_unchanged() {
+        let profile = tempfile::tempdir().unwrap();
+        let root = profile.path().to_str().unwrap();
+        let listed = inspect("claude", None, Some(root)).unwrap();
+        let user = listed
+            .iter()
+            .find(|f| f.scope == InstructionScope::User)
+            .unwrap();
+        assert!(user.editable && !user.exists);
+        save("claude", Some(root), &user.path, "# Mine\n", &user.revision).unwrap();
+        assert_eq!(std::fs::read_to_string(&user.path).unwrap(), "# Mine\n");
+        // The old revision no longer matches: a stale window cannot overwrite.
+        assert!(save("claude", Some(root), &user.path, "# Old\n", &user.revision).is_err());
+        // Paths outside what this CLI reads are refused.
+        let elsewhere = profile.path().join("other.md");
+        assert!(save(
+            "claude",
+            Some(root),
+            elsewhere.to_str().unwrap(),
+            "x",
+            "missing"
+        )
+        .is_err());
     }
 }

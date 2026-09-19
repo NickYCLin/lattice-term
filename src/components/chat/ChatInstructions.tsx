@@ -12,6 +12,67 @@ export interface InstructionFile {
   bytes: number;
   content: string;
   truncated: boolean;
+  revision: string;
+  editable: boolean;
+}
+
+/** Edits one user-level instruction file in place, guarded by its revision. */
+function InstructionEditor({
+  file,
+  definitionId,
+  configDirectory,
+  onDone,
+}: {
+  file: InstructionFile;
+  definitionId: ChatDefinitionId;
+  configDirectory: string | null;
+  onDone: (saved: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const [text, setText] = useState(file.content);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  return (
+    <form
+      className="chat-instructions__editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setSaving(true);
+        setError("");
+        void import("@tauri-apps/api/core")
+          .then(({ invoke }) =>
+            invoke("agent_instruction_save", {
+              definitionId,
+              configDirectory,
+              path: file.path,
+              content: text,
+              expectedRevision: file.revision,
+            }),
+          )
+          .then(() => onDone(true))
+          .catch((reason: unknown) => setError(String(reason)))
+          .finally(() => setSaving(false));
+      }}
+    >
+      <textarea
+        className="input"
+        rows={10}
+        value={text}
+        maxLength={65536}
+        onChange={(event) => setText(event.target.value)}
+        disabled={saving}
+      />
+      {error && <p className="field__error">{error}</p>}
+      <div className="chat-card__actions">
+        <button type="submit" className="button button--primary button--sm" disabled={saving}>
+          {t("chat.instructions.save")}
+        </button>
+        <button type="button" className="button button--ghost button--sm" onClick={() => onDone(false)}>
+          {t("common.cancel")}
+        </button>
+      </div>
+    </form>
+  );
 }
 
 /**
@@ -33,6 +94,7 @@ export function ChatInstructions({
   const [files, setFiles] = useState<InstructionFile[] | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [editing, setEditing] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasDesktopBackend()) return;
@@ -78,7 +140,26 @@ export function ChatInstructions({
               {displayPath(file.path)}
             </code>
           </summary>
-          <pre className="chat-card__output">{file.content}</pre>
+          {editing === file.path ? (
+            <InstructionEditor
+              file={file}
+              definitionId={definitionId}
+              configDirectory={configDirectory}
+              onDone={(saved) => {
+                setEditing(null);
+                if (saved) setRevision((current) => current + 1);
+              }}
+            />
+          ) : (
+            <>
+              <pre className="chat-card__output">{file.content}</pre>
+              {file.editable && (
+                <button type="button" className="button button--ghost button--sm" onClick={() => setEditing(file.path)}>
+                  {t("chat.instructions.edit")}
+                </button>
+              )}
+            </>
+          )}
           {file.truncated && (
             <p className="chat-settings__hint">
               {t("chat.instructions.truncated", { kib: Math.ceil(file.bytes / 1024) })}
@@ -99,6 +180,32 @@ export function ChatInstructions({
           ))}
         </p>
       )}
+      {missing
+        .filter((file) => file.editable)
+        .map((file) =>
+          editing === file.path ? (
+            <InstructionEditor
+              key={file.path}
+              file={file}
+              definitionId={definitionId}
+              configDirectory={configDirectory}
+              onDone={(saved) => {
+                setEditing(null);
+                if (saved) setRevision((current) => current + 1);
+              }}
+            />
+          ) : (
+            <button
+              key={file.path}
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={() => setEditing(file.path)}
+              title={file.path}
+            >
+              {t("chat.instructions.create", { path: displayPath(file.path) })}
+            </button>
+          ),
+        )}
       <button
         type="button"
         className="button button--ghost button--sm"

@@ -2279,6 +2279,27 @@ async fn agent_mcp_servers(
     .await
 }
 
+/// Saves one user-level instruction file shown in a conversation.
+#[tauri::command]
+async fn agent_instruction_save(
+    definition_id: String,
+    config_directory: Option<String>,
+    path: String,
+    content: String,
+    expected_revision: String,
+) -> Result<(), String> {
+    blocking(move || {
+        crate::agent_instructions::save(
+            &definition_id,
+            config_directory.as_deref(),
+            &path,
+            &content,
+            &expected_revision,
+        )
+    })
+    .await
+}
+
 /// The instruction files a chat CLI would read for this conversation.
 #[tauri::command]
 async fn agent_instruction_files(
@@ -4416,6 +4437,7 @@ pub fn run() {
             agent_automations_take_runs,
             agent_shared_rules_inspect,
             agent_instruction_files,
+            agent_instruction_save,
             local_terminal_open,
             local_terminal_write,
             local_terminal_resize,
