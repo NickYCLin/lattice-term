@@ -18,6 +18,7 @@ import {
   appendSteeredInput,
   beginTurn,
   branchThread,
+  supportsBrowser,
   completionNotificationText,
   effortForTurn,
   createThread,
@@ -417,7 +418,7 @@ export function useAgentChat(
             : thread.effort ?? null;
         return {
           ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
-          browserEnabled: next.definitionId === "codex" && (patch.browserEnabled ?? next.browserEnabled) === true,
+          browserEnabled: supportsBrowser(next.definitionId) && (patch.browserEnabled ?? next.browserEnabled) === true,
           permission: patch.permission ?? next.permission,
           effort,
         };
@@ -521,7 +522,7 @@ export function useAgentChat(
           turnId,
           definitionId: thread.definitionId,
           workingDirectory: thread.workingDirectory,
-          browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
+          browserEnabled: supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
           prompt: promptForTurn(thread, visiblePrompt),
           permission: thread.permission,
           model: thread.model.trim() || null,

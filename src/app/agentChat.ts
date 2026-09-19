@@ -110,6 +110,11 @@ export interface ChatUsage {
   reasoningTokens: number;
 }
 
+/** Assistants that can drive the isolated browser tool in chat. */
+export function supportsBrowser(definitionId: ChatDefinitionId): boolean {
+  return definitionId === "codex" || definitionId === "claude";
+}
+
 export interface ToolMeta {
   exitCode?: number;
   durationMs?: number;
@@ -551,7 +556,7 @@ export function createThread(
     id,
     provider: settings.definitionId === "codex" ? settings.provider : undefined,
     proxyId: settings.definitionId === "codex" && settings.provider ? settings.proxyId : undefined,
-    browserEnabled: settings.definitionId === "codex" && settings.browserEnabled === true,
+    browserEnabled: supportsBrowser(settings.definitionId) && settings.browserEnabled === true,
     definitionId: settings.definitionId,
     title: settings.title ?? "",
     automationId: settings.automationId ?? null,
@@ -912,7 +917,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
             typeof (item as { output?: unknown }).output === "string"),
       ),
       title: typeof thread.title === "string" ? thread.title : "",
-      browserEnabled: thread.definitionId === "codex" && thread.browserEnabled === true,
+      browserEnabled: supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
       provider: thread.definitionId === "codex" && thread.provider === "cliproxyapi" ? "cliproxyapi" : undefined,
       proxyId:
         thread.definitionId === "codex" && thread.provider === "cliproxyapi" && typeof thread.proxyId === "string" && validCliProxyId(thread.proxyId)

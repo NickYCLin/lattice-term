@@ -1308,8 +1308,8 @@ fn send_with_retry<S: ChatSink>(
         validate_id(&request.turn_id, "turn id")?;
         let dialect = Dialect::from_definition(&request.definition_id)
             .ok_or_else(|| "This CLI has no chat mode.".to_string())?;
-        if request.browser_enabled && dialect != Dialect::Codex {
-            return Err("Browser control currently requires Codex.".to_string());
+        if request.browser_enabled && !matches!(dialect, Dialect::Codex | Dialect::Claude) {
+            return Err("Browser control currently requires Codex or Claude Code.".to_string());
         }
         let interactive = request.permission == ChatPermission::Ask;
         // Claude asks through its stream-json control protocol and Codex
@@ -1412,6 +1412,9 @@ fn send_with_retry<S: ChatSink>(
         if let Some(effort) = effort {
             // Only Claude reaches this point with an effort (validated above).
             command.args(["--effort", effort]);
+        }
+        if request.browser_enabled && dialect == Dialect::Claude {
+            command.args(browser::claude_arguments());
         }
         command.current_dir(&working_directory);
 

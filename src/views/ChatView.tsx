@@ -24,6 +24,7 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteC
 import {
   defaultPermission,
   effortChoices,
+  supportsBrowser,
   looksLikeDiff,
   formatTokens,
   permissionsFor,
@@ -941,7 +942,7 @@ function ThreadPane({
                 ))}
               </select>
             </label>
-            {thread.definitionId === "codex" && (
+            {supportsBrowser(thread.definitionId) && (
               <label className="checkbox chat-settings__browser">
                 <input type="checkbox" checked={thread.browserEnabled === true} disabled={settingsLocked}
                   onChange={(event) => chat.updateThread(thread.id, { browserEnabled: event.target.checked })} />
