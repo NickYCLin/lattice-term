@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_chat;
 pub mod agent_daemon;
 pub mod agent_history;
+pub mod agent_instructions;
 mod agent_mcp;
 pub mod agent_plans;
 mod agent_process;
@@ -2096,6 +2097,24 @@ struct AgentDaemonStatus {
     shared: Vec<crate::agent_daemon::SharedSession>,
     history: Option<crate::agent_daemon::audit::Snapshot>,
     mcp: crate::agent_daemon::mcp::McpLaunch,
+}
+
+/// The instruction files a chat CLI would read for this conversation.
+#[tauri::command]
+async fn agent_instruction_files(
+    definition_id: String,
+    working_directory: Option<String>,
+    config_directory: Option<String>,
+) -> Result<Vec<crate::agent_instructions::InstructionFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent_instructions::inspect(
+            &definition_id,
+            working_directory.as_deref(),
+            config_directory.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -4210,6 +4229,7 @@ pub fn run() {
             agent_automations_state,
             agent_automations_take_runs,
             agent_shared_rules_inspect,
+            agent_instruction_files,
             agent_shared_rules_save,
             agent_plan_snapshot,
             agent_plan_save,

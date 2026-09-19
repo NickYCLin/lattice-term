@@ -1357,3 +1357,30 @@ button.chat-chip:hover {
   right: auto;
   left: 0;
 }
+
+.chat-instructions {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.chat-instructions > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-instructions__file .chat-card__output {
+  max-height: 16rem;
+}
+
+.chat-instructions__missing code {
+  margin-right: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.chat-instructions__edit > summary {
+  cursor: pointer;
+}

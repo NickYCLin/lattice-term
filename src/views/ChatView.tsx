@@ -61,6 +61,7 @@ import { findCliProxy } from "../app/cliProxyApi";
 import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
 import { ChatWebSources } from "../components/chat/ChatWebSources";
+import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
 import { webSources } from "../app/chatWebSources";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
@@ -878,6 +879,15 @@ function ThreadPane({
               {t(permissionHintKey[thread.permission])}
               {profileCapable(thread.definitionId) ? ` ${t("chat.accountProfile.hint")}` : ""}
             </p>
+            {(thread.definitionId === "claude" ||
+              thread.definitionId === "codex" ||
+              thread.definitionId === "gemini") && (
+              <ChatInstructions
+                definitionId={thread.definitionId}
+                workingDirectory={thread.workingDirectory}
+                configDirectory={activeProfile?.configDirectory ?? null}
+              />
+            )}
           </div>
         )}
         {thread.permission === "full" && !thread.archived && (
