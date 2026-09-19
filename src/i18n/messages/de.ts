@@ -818,7 +818,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "Beschränkt nur Schreibzugriffe: Das ganze Dateisystem ist schreibgeschützt außer dem Arbeitsverzeichnis, den Anmelde- und Statusordnern dieses Werkzeugs und dem Temp-Ordner (Hooks/MCP-Konfiguration bleiben schreibgeschützt). Linux nutzt bubblewrap, macOS das eingebaute sandbox-exec und erlaubt dort zusätzlich ~/Library/Caches und den Anmeldeschlüsselbund. Lesen und Netzwerk sind nicht eingeschränkt; das Home-Verzeichnis bleibt sichtbar. Unter Windows noch nicht verfügbar.",
   "agents.sandbox.badge": "Sandkasten",
   "agents.detached": "Halten Sie im Hintergrund (Schritte, die nach LatticeTerm laufen, schließen)",
-  "agents.detached.hint": "Die Sitzung wird an LatticeTerms Hintergrunddienst übergeben: es läuft weiter, wenn das Fenster schließt, und das nächste Fenster legt sich wieder an und wiederholt die neueste Ausgabe. Stoppen Sie es von seiner Registerkarte, oder beenden Sie den gesamten Hintergrundservice, wenn Sie wirklich wollen, dass es weg ist.",
+  "agents.detached.hint": "Die Sitzung wird an LatticeTerms Hintergrunddienst übergeben: es läuft weiter, wenn das Fenster schließt, und das nächste Fenster legt sich wieder an und wiederholt die neueste Ausgabe. Stoppen Sie es von seiner Registerkarte, oder beenden Sie den gesamten Hintergrundservice, wenn Sie wirklich wollen, dass es weg ist. Diese Wahl wird für die nächsten Sitzungen übernommen.",
   "agents.detached.badge": "Hintergrund",
   "agents.daemon.running": "Hintergrund-Service läuft: {count} Sitzung(en) wird weiter nach LatticeTerm schließt.",
   "agents.daemon.stop": "Ende Hintergrundservice",

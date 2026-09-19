@@ -94,6 +94,8 @@ function accountKey(definition: AgentDefinition): MessageKey {
   }
 }
 
+const DETACHED_DEFAULT_KEY = "latticeterm.agentDetachedDefault.v1";
+
 export function AgentsView({
   agents,
   remote,
@@ -119,7 +121,24 @@ export function AgentsView({
   const [workingDirectory, setWorkingDirectory] = useState("");
   const [launchNote, setLaunchNote] = useState("");
   const [sandbox, setSandbox] = useState(false);
-  const [detached, setDetached] = useState(false);
+  // The last choice sticks, so someone who wants every CLI to survive
+  // closing the window ticks it once instead of on every launch.
+  const [detached, setDetachedState] = useState(() => {
+    try {
+      return localStorage.getItem(DETACHED_DEFAULT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setDetached = (value: boolean) => {
+    setDetachedState(value);
+    try {
+      if (value) localStorage.setItem(DETACHED_DEFAULT_KEY, "1");
+      else localStorage.removeItem(DETACHED_DEFAULT_KEY);
+    } catch {
+      // Remembering the choice is a convenience only.
+    }
+  };
   const daemon = useAgentDaemon(agents.sessions.length);
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);

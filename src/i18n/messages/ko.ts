@@ -818,7 +818,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "쓰기만 제한합니다. 파일 시스템 전체가 읽기 전용이고 작업 디렉터리, 이 도구의 로그인·상태 디렉터리, 임시 디렉터리만 쓸 수 있습니다(hooks/MCP 설정 파일은 계속 읽기 전용). Linux는 bubblewrap, macOS는 기본 제공 sandbox-exec를 사용하며 macOS에서는 ~/Library/Caches와 로그인 키체인도 허용합니다. 읽기와 네트워크는 제한되지 않아 홈 디렉터리를 볼 수 있습니다. Windows는 아직 지원하지 않습니다.",
   "agents.sandbox.badge": "샌드박스",
   "agents.detached": "백그라운드에서 계속 실행(LatticeTerm을 닫아도 실행 유지)",
-  "agents.detached.hint": "세션은 LatticeTerm 백그라운드 서비스로 넘어갑니다. 창을 닫아도 계속 실행되며, 다음에 창을 열면 세션에 다시 연결하고 최신 출력을 표시합니다. 세션을 종료하려면 해당 탭에서 중지하거나 백그라운드 서비스 전체를 종료하세요.",
+  "agents.detached.hint": "세션은 LatticeTerm 백그라운드 서비스로 넘어갑니다. 창을 닫아도 계속 실행되며, 다음에 창을 열면 세션에 다시 연결하고 최신 출력을 표시합니다. 세션을 종료하려면 해당 탭에서 중지하거나 백그라운드 서비스 전체를 종료하세요. 이 선택은 기억되어 다음에 여는 세션에도 적용됩니다.",
   "agents.detached.badge": "백그라운드",
   "agents.daemon.running": "배경 서비스 실행 : {count} 세션 (s)는 LatticeTerm 닫기 후 계속됩니다.",
   "agents.daemon.stop": "끝 배경 서비스",

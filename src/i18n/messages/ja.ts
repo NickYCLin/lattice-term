@@ -818,7 +818,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "書き込みのみを制限します。ファイルシステム全体を読み取り専用にし、作業ディレクトリ、このツール自身のログイン・状態ディレクトリ、一時ディレクトリだけ書き込めます（hooks／MCP 設定ファイルは読み取り専用のまま）。Linux は bubblewrap、macOS は標準の sandbox-exec を使い、macOS では ~/Library/Caches とログインキーチェーンも許可します。読み取りとネットワークは制限されず、ホームディレクトリは見えます。Windows はまだ対応していません。",
   "agents.sandbox.badge": "サンドボックス",
   "agents.detached": "バックグラウンドで継続（LatticeTerm を閉じても実行を続ける）",
-  "agents.detached.hint": "セッションは LatticeTerm のバックグラウンドサービスに引き継がれます。ウィンドウを閉じても実行が続き、次に開いたウィンドウで再接続して最新の出力を表示します。終了するには、セッションのタブで停止するか、バックグラウンドサービス全体を終了してください。",
+  "agents.detached.hint": "セッションは LatticeTerm のバックグラウンドサービスに引き継がれます。ウィンドウを閉じても実行が続き、次に開いたウィンドウで再接続して最新の出力を表示します。終了するには、セッションのタブで停止するか、バックグラウンドサービス全体を終了してください。この選択は記憶され、次に開くセッションにも使われます。",
   "agents.detached.badge": "バックグラウンド",
   "agents.daemon.running": "背景サービスの実行:{count} セッション(s) は、LatticeTerm の終了後に継続します。",
   "agents.daemon.stop": "エンド バックグラウンド サービス",

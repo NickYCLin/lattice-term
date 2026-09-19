@@ -837,7 +837,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "只限制写入：整个文件系统只读，只有工作目录、这个工具自己的登录与状态目录和临时目录可写（工具的 hooks／MCP 配置文件仍只读）。Linux 用 bubblewrap，macOS 用系统自带的 sandbox-exec，macOS 另外开放 ~/Library/Caches 与登录钥匙串。读取与网络不受限，它看得到你的主目录。Windows 目前没有对应机制。",
   "agents.sandbox.badge": "沙箱",
   "agents.detached": "留在背景（关闭 LatticeTerm 后继续运行）",
-  "agents.detached.hint": "这个工作阶段交给 LatticeTerm 的背景服务持有：关掉窗口它照跑，下次打开自动接回并重播最近的输出。要真的结束就在分页按停止，或结束整个背景服务。",
+  "agents.detached.hint": "这个工作阶段交给 LatticeTerm 的背景服务持有：关掉窗口它照跑，下次打开自动接回并重播最近的输出。要真的结束就在分页按停止，或结束整个背景服务。这个选择会记住，之后新开的会话沿用。",
   "agents.detached.badge": "背景",
   "agents.daemon.running": "背景服务运行中：{count} 个工作阶段在关闭 LatticeTerm 后仍会继续。",
   "agents.daemon.stop": "结束背景服务",

@@ -818,7 +818,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "Limita só as gravações: todo o sistema de arquivos fica somente leitura, exceto a pasta de trabalho, as pastas de login e estado desta ferramenta e a pasta temporária (os arquivos de hooks/MCP continuam somente leitura). No Linux usa bubblewrap; no macOS usa o sandbox-exec nativo e também libera ~/Library/Caches e o chaveiro de login. Leitura e rede não são limitadas; ela vê sua pasta pessoal. Ainda não disponível no Windows.",
   "agents.sandbox.badge": "Caixa de areia",
   "agents.detached": "Mantenha- se em segundo plano (mantém- se em execução após o encerramento do LatticeTerm)",
-  "agents.detached.hint": "A sessão é entregue ao serviço de fundo do LatticeTerm: continua a correr quando a janela se fecha, e a próxima janela liga- se a ela de novo e repete a última saída. Pare- a da sua página, ou termine todo o serviço de fundo, quando realmente quiser que ela desapareça.",
+  "agents.detached.hint": "A sessão é entregue ao serviço de fundo do LatticeTerm: continua a correr quando a janela se fecha, e a próxima janela liga- se a ela de novo e repete a última saída. Pare- a da sua página, ou termine todo o serviço de fundo, quando realmente quiser que ela desapareça. Esta escolha fica salva para as próximas sessões.",
   "agents.detached.badge": "Segundo plano",
   "agents.daemon.running": "Serviço de background em execução: {count} session(s) continuará indo após o fechamento do LatticeTerm.",
   "agents.daemon.stop": "Serviço de fundo final",

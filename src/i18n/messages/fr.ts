@@ -818,7 +818,7 @@ export const messages: Messages = {
   "agents.sandbox.hint": "Ne limite que les écritures : tout le système de fichiers est en lecture seule sauf le dossier de travail, les dossiers de connexion et d’état de cet outil et le dossier temporaire (ses fichiers hooks/MCP restent en lecture seule). Linux utilise bubblewrap ; macOS utilise sandbox-exec intégré et autorise aussi ~/Library/Caches et le trousseau de session. Lecture et réseau ne sont pas limités ; il voit votre dossier personnel. Pas encore disponible sous Windows.",
   "agents.sandbox.badge": "Boîte à sable",
   "agents.detached": "Conserver en arrière-plan (toujours en cours d'exécution après la fermeture de LatticeTerm)",
-  "agents.detached.hint": "La session est remise au service d'arrière-plan de LatticeTerm : elle continue à fonctionner lorsque la fenêtre se ferme, et la fenêtre suivante s'y attache à nouveau et rejoue la dernière sortie. Arrêtez-la de son onglet, ou terminez l'ensemble du service d'arrière-plan, lorsque vous voulez vraiment qu'elle parte.",
+  "agents.detached.hint": "La session est remise au service d'arrière-plan de LatticeTerm : elle continue à fonctionner lorsque la fenêtre se ferme, et la fenêtre suivante s'y attache à nouveau et rejoue la dernière sortie. Arrêtez-la de son onglet, ou terminez l'ensemble du service d'arrière-plan, lorsque vous voulez vraiment qu'elle parte. Ce choix est mémorisé pour les prochaines sessions.",
   "agents.detached.badge": "Arrière-plan",
   "agents.daemon.running": "Service d'arrière-plan en cours d'exécution: {count} session(s) continuera à aller après LatticeTerm ferme.",
   "agents.daemon.stop": "Service d'arrière-plan final",

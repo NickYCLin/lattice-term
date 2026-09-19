@@ -914,7 +914,7 @@ export const zhTW = {
   "agents.sandbox.hint": "只限制寫入：整個檔案系統唯讀，只有工作目錄、這個工具自己的登入與狀態目錄和暫存目錄可寫（工具的 hooks／MCP 設定檔仍唯讀）。Linux 用 bubblewrap，macOS 用系統內建的 sandbox-exec，macOS 另外開放 ~/Library/Caches 與登入鑰匙圈。讀取與網路不受限，它看得到你的家目錄。Windows 目前沒有對應機制。",
   "agents.sandbox.badge": "沙箱",
   "agents.detached": "留在背景（關閉 LatticeTerm 後繼續執行）",
-  "agents.detached.hint": "這個工作階段交給 LatticeTerm 的背景服務持有：關掉視窗它照跑，下次開啟自動接回並重播最近的輸出。要真的結束就在分頁按停止，或結束整個背景服務。",
+  "agents.detached.hint": "這個工作階段交給 LatticeTerm 的背景服務持有：關掉視窗它照跑，下次開啟自動接回並重播最近的輸出。要真的結束就在分頁按停止，或結束整個背景服務。這個選擇會記住，之後新開的工作階段沿用。",
   "agents.detached.badge": "背景",
   "agents.daemon.running": "背景服務執行中：{count} 個工作階段在關閉 LatticeTerm 後仍會繼續。",
   "agents.daemon.stop": "結束背景服務",

@@ -944,7 +944,7 @@ export const en: Messages = {
   "agents.sandbox.hint": "Confines writes only: the whole filesystem is read-only except the working directory, this tool's own login and state directories and the temp directory (its hooks/MCP config files stay read-only). Linux uses bubblewrap; macOS uses the built-in sandbox-exec and also allows ~/Library/Caches and the login keychain. Reads and network are not confined; it can still see your home directory. Not available on Windows yet.",
   "agents.sandbox.badge": "Sandbox",
   "agents.detached": "Keep in the background (keeps running after LatticeTerm closes)",
-  "agents.detached.hint": "The session is handed to LatticeTerm's background service: it keeps running when the window closes, and the next window attaches to it again and replays the latest output. Stop it from its tab, or end the whole background service, when you really want it gone.",
+  "agents.detached.hint": "The session is handed to LatticeTerm's background service: it keeps running when the window closes, and the next window attaches to it again and replays the latest output. Stop it from its tab, or end the whole background service, when you really want it gone. This choice is remembered for the next sessions you start.",
   "agents.detached.badge": "Background",
   "agents.daemon.running": "Background service running: {count} session(s) will keep going after LatticeTerm closes.",
   "agents.daemon.stop": "End background service",
