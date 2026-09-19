@@ -62,3 +62,37 @@ export function diffQuote(path: string, diff: string, maxChars = 12_000): string
   const body = diff.length > maxChars ? `${diff.slice(0, maxChars)}\n…` : diff;
   return `\`${path}\`:\n\n\`\`\`diff\n${body.replace(/```/g, "``​`")}\n\`\`\``;
 }
+
+/** A note the user left on one line of a diff, to send to the assistant. */
+export interface DiffComment {
+  path: string;
+  /** The hunk header the line belongs to, so the assistant can find it. */
+  hunk: string;
+  line: string;
+  text: string;
+}
+
+export function nearestHunk(lines: readonly string[], index: number): string {
+  for (let current = index; current >= 0; current -= 1) {
+    if (lines[current]?.startsWith("@@")) return lines[current];
+  }
+  return "";
+}
+
+/** One message carrying every note, grouped by file in the order written. */
+export function commentsMessage(comments: readonly DiffComment[]): string {
+  const byFile = new Map<string, DiffComment[]>();
+  for (const comment of comments) {
+    byFile.set(comment.path, [...(byFile.get(comment.path) ?? []), comment]);
+  }
+  return [...byFile.entries()]
+    .map(([path, notes]) =>
+      [
+        `\`${path}\`:`,
+        ...notes.map((note) =>
+          [`${note.hunk ? `${note.hunk}\n` : ""}> ${note.line.replace(/\n/g, " ")}`, "", note.text.trim()].join("\n"),
+        ),
+      ].join("\n\n"),
+    )
+    .join("\n\n---\n\n");
+}

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  commentsMessage,
   diffLineKind,
   diffQuote,
+  nearestHunk,
+  type DiffComment,
   gitCommit,
   gitDiff,
   gitStage,
@@ -44,6 +47,9 @@ export function ChatChangesPanel({
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState("");
+  const [comments, setComments] = useState<(DiffComment & { staged: boolean; index: number })[]>([]);
+  const [commenting, setCommenting] = useState<number | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
 
   const refresh = useCallback(async () => {
     setError("");
@@ -75,6 +81,7 @@ export function ChatChangesPanel({
   }, [busy, refresh]);
 
   useEffect(() => {
+    setCommenting(null);
     if (!selected) {
       setDiff(null);
       return;
@@ -148,6 +155,18 @@ export function ChatChangesPanel({
           {status?.branch ?? ""}
           {status ? ` · ${t("chat.changes.count", { count: status.files.length })}` : ""}
         </code>
+        {comments.length > 0 && (
+          <button
+            type="button"
+            className="button button--secondary button--sm"
+            onClick={() => {
+              onQuote(commentsMessage(comments));
+              setComments([]);
+            }}
+          >
+            {t("chat.changes.sendComments", { count: comments.length })}
+          </button>
+        )}
         <button
           type="button"
           className="button button--ghost button--sm"
@@ -239,16 +258,87 @@ export function ChatChangesPanel({
                   {t("chat.changes.quote")}
                 </button>
               </div>
-              <pre className="chat-diff">
+              <div className="chat-diff" role="list">
                 {diff.text
-                  ? diff.text.split("\n").map((line, index) => (
-                      <span key={index} className={`chat-diff__line is-${diffLineKind(line)}`}>
-                        {line}
-                        {"\n"}
-                      </span>
-                    ))
+                  ? (() => {
+                      const lines = diff.text.split("\n");
+                      return lines.map((line, index) => {
+                        const kind = diffLineKind(line);
+                        const notes = comments.filter(
+                          (comment) =>
+                            comment.path === selected.path && comment.staged === selected.staged && comment.index === index,
+                        );
+                        return (
+                          <div key={index} role="listitem">
+                            {kind === "meta" || kind === "hunk" ? (
+                              <span className={`chat-diff__line is-${kind}`}>{line}</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`chat-diff__line is-${kind} is-commentable`}
+                                title={t("chat.changes.comment")}
+                                onClick={() => {
+                                  setCommenting(index);
+                                  setCommentDraft("");
+                                }}
+                              >
+                                {line || " "}
+                              </button>
+                            )}
+                            {notes.map((note) => (
+                              <p key={note.text} className="chat-diff__note">
+                                {note.text}
+                                <button
+                                  type="button"
+                                  className="button button--ghost button--sm"
+                                  onClick={() => setComments((current) => current.filter((entry) => entry !== note))}
+                                >
+                                  {t("chat.changes.removeComment")}
+                                </button>
+                              </p>
+                            ))}
+                            {commenting === index && (
+                              <form
+                                className="chat-diff__compose"
+                                onSubmit={(event) => {
+                                  event.preventDefault();
+                                  if (!commentDraft.trim()) return;
+                                  setComments((current) => [
+                                    ...current,
+                                    {
+                                      path: selected.path,
+                                      staged: selected.staged,
+                                      index,
+                                      hunk: nearestHunk(lines, index),
+                                      line,
+                                      text: commentDraft.trim(),
+                                    },
+                                  ]);
+                                  setCommenting(null);
+                                }}
+                              >
+                                <textarea
+                                  className="input"
+                                  rows={2}
+                                  autoFocus
+                                  value={commentDraft}
+                                  placeholder={t("chat.changes.commentPlaceholder")}
+                                  onChange={(event) => setCommentDraft(event.target.value)}
+                                />
+                                <button type="submit" className="button button--primary button--sm" disabled={!commentDraft.trim()}>
+                                  {t("chat.changes.addComment")}
+                                </button>
+                                <button type="button" className="button button--ghost button--sm" onClick={() => setCommenting(null)}>
+                                  {t("common.cancel")}
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                        );
+                      });
+                    })()
                   : t("chat.changes.noDiff")}
-              </pre>
+              </div>
               {diff.truncated && <p className="chat-settings__hint">{t("chat.changes.truncated")}</p>}
             </>
           ) : (

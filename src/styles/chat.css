@@ -1634,3 +1634,49 @@ button.chat-chip:hover {
   align-items: center;
   gap: var(--space-1, 0.25rem);
 }
+
+button.chat-diff__line {
+  width: 100%;
+  border: 0;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+button.chat-diff__line.is-add {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+button.chat-diff__line.is-remove {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+button.chat-diff__line.is-commentable:hover,
+button.chat-diff__line.is-commentable:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: -1px;
+}
+
+.chat-diff__note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 2px var(--space-2) 4px 2.5rem;
+  padding: var(--space-1, 0.25rem) var(--space-2);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-raised);
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+
+.chat-diff__compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: var(--space-2);
+  margin: 2px var(--space-2) 4px 2.5rem;
+  font-family: var(--font-ui);
+}
