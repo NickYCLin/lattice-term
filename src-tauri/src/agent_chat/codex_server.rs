@@ -1496,7 +1496,8 @@ mod tests {
                     },
                 )) => {
                     eprintln!("approval {name}: {summary}");
-                    let answer = (name == "mcp_form").then_some(r#"{"color":"teal"}"#);
+                    let answer = (name == "mcp_form")
+                        .then_some(r#"{"color":"teal","labels":["bug","docs"]}"#);
                     kinds.push(name);
                     tauri::async_runtime::block_on(respond(
                         &servers,
@@ -1522,6 +1523,10 @@ mod tests {
             "no form was asked: {kinds:?}"
         );
         assert!(text.contains("teal"), "reply was {text:?}");
+        assert!(
+            text.contains("bug,docs"),
+            "the chosen labels are missing: {text:?}"
+        );
         assert!(servers.close("e2e-elicit"));
     }
 

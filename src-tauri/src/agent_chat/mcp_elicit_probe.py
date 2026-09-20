@@ -27,12 +27,17 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": "elicit-1", "method": "elicitation/create", "params": {
             "message": "What is your favorite color?",
             "requestedSchema": {"type": "object",
-                "properties": {"color": {"type": "string", "title": "Color"}},
+                "properties": {
+                    "color": {"type": "string", "title": "Color"},
+                    "labels": {"type": "array", "title": "Labels",
+                               "items": {"type": "string", "enum": ["bug", "chore", "docs"]}},
+                },
                 "required": ["color"]}}})
     elif msg.get("id") == "elicit-1" and pending_call is not None:
         result = msg.get("result", {})
         if result.get("action") == "accept":
-            text = "User said: " + str(result.get("content", {}).get("color"))
+            content = result.get("content", {})
+            text = "User said: {} {}".format(content.get("color"), ",".join(content.get("labels", [])))
         else:
             text = "User declined: " + json.dumps(result)
         send({"jsonrpc": "2.0", "id": pending_call, "result": {"content": [{"type": "text", "text": text}]}})
