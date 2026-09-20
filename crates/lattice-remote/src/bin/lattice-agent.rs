@@ -2944,17 +2944,19 @@ async fn run_relay(options: &Options) -> String {
             .await
             .map_err(|error| error.to_string())?;
             match timeout(Duration::from_secs(10), read_server_message(&mut read_half)).await {
-                Ok(Ok(RelayServerMessage::Registered)) => Ok((read_half, write_half, None)),
+                Ok(Ok(RelayServerMessage::Registered { protocol })) => {
+                    Ok((read_half, write_half, protocol, None))
+                }
                 Ok(Ok(RelayServerMessage::Error { code, detail })) => {
-                    Ok((read_half, write_half, Some((code, detail))))
+                    Ok((read_half, write_half, 0, Some((code, detail))))
                 }
                 _ => Err("The relay did not answer the registration.".to_string()),
             }
         }
         .await;
 
-        let (mut read_half, mut write_half) = match connected {
-            Ok((_, _, Some((code, detail)))) => {
+        let (mut read_half, mut write_half, relay_protocol) = match connected {
+            Ok((_, _, _, Some((code, detail)))) => {
                 emit_event(
                     options.json,
                     &AgentEvent::Failed {
@@ -2964,7 +2966,7 @@ async fn run_relay(options: &Options) -> String {
                 );
                 return format!("The relay refused this device ({code}): {detail}");
             }
-            Ok((read_half, write_half, None)) => (read_half, write_half),
+            Ok((read_half, write_half, protocol, None)) => (read_half, write_half, protocol),
             Err(detail) => {
                 if !announced {
                     emit_event(
@@ -3062,9 +3064,12 @@ async fn run_relay(options: &Options) -> String {
             match event {
                 RelayLoopEvent::Control(Some(RelayServerMessage::Invite { channel_id })) => {
                     if sessions.len() >= MAX_CONCURRENT_SESSIONS {
-                        // The relay's bounded join timer turns an unanswered
-                        // invite into a busy result without disturbing any
-                        // viewer that is already connected.
+                        // Saying no now spares the viewer the join timer. An
+                        // older relay cannot read a decline, and its timer
+                        // still turns the unanswered invite into "busy".
+                        if relay_protocol >= 1 {
+                            let _ = control_tx.try_send(RelayClientMessage::Decline { channel_id });
+                        }
                         continue;
                     }
                     sessions.spawn_local(run_relay_session(

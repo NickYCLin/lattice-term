@@ -525,6 +525,10 @@ async fn run_agent_control(
                             break false;
                         }
                     }
+                    Ok(Ok(RelayClientMessage::Decline { channel_id })) => {
+                        // Dropping the waiting viewer's sender answers it now.
+                        drop(state.take_pending_join(&channel_id, &device_id));
+                    }
                     Ok(Ok(_)) | Ok(Err(_)) | Err(_) => break false,
                 }
             }
@@ -632,7 +636,19 @@ async fn run_dial(
 
     let mut agent_stream = match timeout(JOIN_WAIT_LIMIT, channel_rx).await {
         Ok(Ok(agent_stream)) => agent_stream,
-        Ok(Err(_)) | Err(_) => {
+        // A dropped sender means the device turned this invite down, which it
+        // can only do quickly; waiting out the timer says the same with less
+        // certainty, so both stay "busy".
+        Ok(Err(_)) => {
+            send_error(
+                &mut stream,
+                "busy",
+                "That device already has as many viewers as it can serve.",
+            )
+            .await;
+            return;
+        }
+        Err(_) => {
             send_error(
                 &mut stream,
                 "busy",
@@ -783,9 +799,14 @@ async fn run_connection(
                     return;
                 }
             }
-            if write_server_message(&mut stream, &RelayServerMessage::Registered)
-                .await
-                .is_err()
+            if write_server_message(
+                &mut stream,
+                &RelayServerMessage::Registered {
+                    protocol: crate::relay::RELAY_PROTOCOL,
+                },
+            )
+            .await
+            .is_err()
             {
                 return;
             }
@@ -828,6 +849,15 @@ async fn run_connection(
                     send_error(&mut stream, "expired", "That invite is no longer waiting.").await;
                 }
             }
+        }
+        // A decline belongs to a registered control connection, not a fresh one.
+        RelayClientMessage::Decline { .. } => {
+            send_error(
+                &mut stream,
+                "invalidRequest",
+                "Register this device before answering invites.",
+            )
+            .await;
         }
         RelayClientMessage::Ping => {
             let _ = write_server_message(&mut stream, &RelayServerMessage::Pong).await;
@@ -963,7 +993,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             read_server_message(&mut control).await.unwrap(),
-            RelayServerMessage::Registered
+            RelayServerMessage::Registered {
+                protocol: crate::relay::RELAY_PROTOCOL
+            }
         );
         control
     }
@@ -1096,7 +1128,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             read_server_message(&mut control).await.unwrap(),
-            RelayServerMessage::Registered
+            RelayServerMessage::Registered {
+                protocol: crate::relay::RELAY_PROTOCOL
+            }
         );
 
         let session_endpoint = endpoint.clone();
@@ -1324,6 +1358,58 @@ mod tests {
 
         drop(joined);
         assert!(state.try_reserve_connection().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_declined_invite_answers_the_viewer_without_waiting_for_the_timer() {
+        let (address, state) = start_relay().await;
+        let identity = DeviceIdentity::generate().unwrap();
+        let mut control = Transport::connect(&address.to_string()).await.unwrap();
+        write_client_message(
+            &mut control,
+            &RelayClientMessage::Register {
+                device_id: identity.device_id.clone(),
+                auth_token: identity.auth_token.clone(),
+                agent_name: "Busy host".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            read_server_message(&mut control).await.unwrap(),
+            RelayServerMessage::Registered { protocol } if protocol >= 1
+        ));
+
+        let viewer_endpoint = address.to_string();
+        let device_id = identity.device_id.clone();
+        let viewer = tokio::spawn(async move {
+            let mut stream = Transport::connect(&viewer_endpoint).await.unwrap();
+            write_client_message(&mut stream, &RelayClientMessage::Dial { device_id })
+                .await
+                .unwrap();
+            read_server_message(&mut stream).await.unwrap()
+        });
+
+        let RelayServerMessage::Invite { channel_id } =
+            read_server_message(&mut control).await.unwrap()
+        else {
+            panic!("expected an invite");
+        };
+        write_client_message(&mut control, &RelayClientMessage::Decline { channel_id })
+            .await
+            .unwrap();
+
+        // JOIN_WAIT_LIMIT is twelve seconds; a decline must not need it.
+        let answer = timeout(Duration::from_secs(3), viewer)
+            .await
+            .expect("the viewer hears back at once")
+            .expect("the viewer task finished");
+        assert!(matches!(
+            answer,
+            RelayServerMessage::Error { ref code, .. } if code == "busy"
+        ));
+        // The refused channel must not keep its dial slot.
+        assert_eq!(state.dials.lock().unwrap().joins.len(), 0);
     }
 
     #[tokio::test(start_paused = true)]

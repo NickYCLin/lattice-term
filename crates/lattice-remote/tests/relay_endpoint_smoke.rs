@@ -46,7 +46,9 @@ async fn deployed_endpoint_links_a_noise_encrypted_session() {
             .await
             .expect("the relay did not confirm registration in time")
             .expect("the relay dropped the registration"),
-        RelayServerMessage::Registered
+        RelayServerMessage::Registered {
+            protocol: lattice_remote::relay::RELAY_PROTOCOL
+        }
     );
     println!("registered temporary device on {endpoint}");
 

@@ -52,6 +52,10 @@ impl From<crate::RemoteError> for RelayError {
     }
 }
 
+/// What this build's relay understands. An agent only uses the newer
+/// messages when the relay announced at least the level that added them.
+pub const RELAY_PROTOCOL: u32 = 1;
+
 /// Messages a client (agent or viewer) sends to the relay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -77,6 +81,11 @@ pub enum RelayClientMessage {
     Dial {
         device_id: String,
     },
+    /// An agent that cannot take another session says so at once, so the
+    /// viewer hears "busy" instead of waiting out the join timer.
+    Decline {
+        channel_id: String,
+    },
     Ping,
 }
 
@@ -88,7 +97,12 @@ pub enum RelayClientMessage {
     rename_all_fields = "camelCase"
 )]
 pub enum RelayServerMessage {
-    Registered,
+    Registered {
+        /// What this relay understands beyond the original messages. Zero is
+        /// a relay old enough not to send the field at all.
+        #[serde(default)]
+        protocol: u32,
+    },
     /// Sent on an agent's register connection when a viewer dials it.
     Invite {
         channel_id: String,
