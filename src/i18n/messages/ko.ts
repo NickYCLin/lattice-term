@@ -1573,7 +1573,6 @@ export const messages: Messages = {
   "remote.connect.codeHint": "case-sensitive password 또는 생성된 토큰을 입력하십시오. 둘 다 암호 페어링 지원이 필요합니다. 호스트가 업데이트되지 않은 경우 호환성 모드를 활성화하십시오.",
   "remote.connect.relayCodeHint": "고정된 암호는 케이스 과민합니다. 오래된 토큰 호스트을 위한 겸용성 형태. 오래된 8 손가락 부호는 또한 이 컴퓨터에 기존하는 장치 신뢰를 요구합니다. 실패한 쌍이 결코 뒤 자동적으로 떨어지지 않습니다.",
   "remote.connect.relayCodeInvalid": "6-64 ASCII 문자, 숫자 또는 기호를 공백없이 사용하십시오. 레거시 모드는 신뢰할 수있는 장치 용 32-character hexadecimal 토큰 또는 8 자리에 허용합니다.",
-  "remote.connect.legacyPairing": "레거시 페어링 호환성 (tokens; 신뢰할 수있는 장치 만 8 자리)",
   "remote.connect.legacyUntrusted": "이 컴퓨터는 이 레거시 장치에 대한 신뢰할 수있는 열쇠가 없습니다, 그래서 8 자리 코드는 정체성을 설정할 수 없습니다. 이전에 그것을 페어링 한 컴퓨터에서 연결하십시오. 신뢰할 수있는 레코드가 유효하지 않으면 호스트를 한 번 업데이트하고 새로운 토큰과 쌍을 업데이트하십시오.",
   "remote.connect.identityChanged": "이 장치 ID는 이전에 신뢰할 수 있는 한 키에서 다른 키를 선물했습니다. 연결이 중지되었습니다. 호스트가 재건축되었거나 그 정체성을 변경했는지 확인하십시오. 이 체크를 우회하기 위해 신뢰 기록을 삭제하지 마십시오.",
   "remote.connect.relayMovedTitle": "릴레이는 대답하지 않았다.",

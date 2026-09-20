@@ -1573,7 +1573,6 @@ export const messages: Messages = {
   "remote.connect.codeHint": "Introduzca la contraseña sensible al caso o token generada. Ambos extremos necesitan soporte de pago de contraseñas; active el modo de compatibilidad si el host no ha sido actualizado.",
   "remote.connect.relayCodeHint": "Las contraseñas fijas son sensibles a los casos. Modo de compatibilidad para un antiguo host token. Los códigos antiguos de ocho dígitos también requieren la confianza del dispositivo existente en este equipo.",
   "remote.connect.relayCodeInvalid": "Usar letras, dígitos o símbolos ASCII 6-64 sin espacios. El modo Legacy acepta un token hexadecimal de 32 caracteres o ocho dígitos para un dispositivo de confianza.",
-  "remote.connect.legacyPairing": "Compatibilidad de emparejamiento Legacy (tokens; ocho dígitos solamente para dispositivos de confianza)",
   "remote.connect.legacyUntrusted": "Este ordenador no tiene clave de confianza para este dispositivo legado, por lo que un código de ocho dígitos no puede establecer su identidad. Conéctese desde un ordenador que previamente se emparejó con él. Si no hay registro de confianza disponible, actualice el host una vez y pare con un nuevo token.",
   "remote.connect.identityChanged": "Este ID de dispositivo presentó una clave diferente de la que anteriormente confiaba. La conexión se detuvo. Compruebe si el host fue reconstruido o su identidad cambiado; no eliminar el registro de confianza para evitar este cheque.",
   "remote.connect.relayMovedTitle": "El relé no respondió",

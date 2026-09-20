@@ -1592,7 +1592,6 @@ export const messages: Messages = {
   "remote.connect.codeHint": "输入固定配对密码（区分大小写），或粘贴分享端产生的长码。两端需支持新版密码配对；若主机尚未更新，请勾选旧版兼容模式。",
   "remote.connect.relayCodeHint": "固定密码区分大小写。连旧版长码主机时请勾选兼容模式；旧八位数码另需这台电脑已有设备信任纪录。新配对失败不会自动改用旧方式。",
   "remote.connect.relayCodeInvalid": "请输入 6～64 个半角英文、数字或特殊符号，不含空白；旧版模式只接受 32 位十六进位长码或已信任设备的八位数码。",
-  "remote.connect.legacyPairing": "旧版配对码兼容模式（长码；八位数限已信任设备）",
   "remote.connect.legacyUntrusted": "这台电脑没有此旧版设备的信任纪录，无法使用八位数码确认身分。请用曾成功配对的电脑连接；若没有信任纪录，须先更新远程主机一次，再用新配对码创建信任。",
   "remote.connect.identityChanged": "这个设备 ID 的密钥与先前信任的纪录不同，已停止连接。请先确认远程主机是否重建或更换身分；不要删除信任纪录来略过检查。",
   "remote.connect.relayMovedTitle": "中继服务器连不上",

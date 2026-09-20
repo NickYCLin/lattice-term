@@ -1688,7 +1688,6 @@ export const zhTW = {
   "remote.connect.codeHint": "輸入固定配對密碼（區分大小寫），或貼上分享端產生的長碼。兩端需支援新版密碼配對；若主機尚未更新，請勾選舊版相容模式。",
   "remote.connect.relayCodeHint": "固定密碼區分大小寫。連舊版長碼主機時請勾選相容模式；舊八位數碼另需這台電腦已有裝置信任紀錄。新配對失敗不會自動改用舊方式。",
   "remote.connect.relayCodeInvalid": "請輸入 6～64 個半形英文、數字或特殊符號，不含空白；舊版模式只接受 32 位十六進位長碼或已信任裝置的八位數碼。",
-  "remote.connect.legacyPairing": "舊版配對碼相容模式（長碼；八位數限已信任裝置）",
   "remote.connect.legacyUntrusted": "這台電腦沒有此舊版裝置的信任紀錄，無法使用八位數碼確認身分。請用曾成功配對的電腦連線；若沒有信任紀錄，須先更新遠端主機一次，再用新配對碼建立信任。",
   "remote.connect.identityChanged": "這個裝置 ID 的金鑰與先前信任的紀錄不同，已停止連線。請先確認遠端主機是否重建或更換身分；不要刪除信任紀錄來略過檢查。",
   "remote.connect.relayMovedTitle": "中繼伺服器連不上",

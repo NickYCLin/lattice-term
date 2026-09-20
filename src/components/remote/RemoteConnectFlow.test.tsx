@@ -57,11 +57,10 @@ function render(relay: boolean) {
 }
 
 describe("RemoteConnectFlow", () => {
-  it("keeps legacy pairing explicitly opt-in for old hosts", () => {
+  it("no longer offers the legacy pairing mode", () => {
     const markup = render(true);
-    expect(markup).toContain("舊版配對碼相容模式");
+    expect(markup).not.toContain("舊版配對碼相容模式");
     expect(markup).toContain("區分大小寫");
-    expect(markup).not.toContain("checked=\"\"");
   });
   it("offers secure storage only for a saved relay device", () => {
     credential.state = {

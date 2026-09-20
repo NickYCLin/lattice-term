@@ -1573,7 +1573,6 @@ export const messages: Messages = {
   "remote.connect.codeHint": "Geben Sie das case-sensitive Passwort ein oder erzeugen Sie Token. Beide Enden benötigen passwort-pairing-Unterstützung; ermöglichen Kompatibilitätsmodus, wenn der Host nicht aktualisiert wurde.",
   "remote.connect.relayCodeHint": "Feste Passwörter sind case-sensitive. Aktivieren Sie den Kompatibilitätsmodus für einen alten Token-Host. Alte achtstellige Codes erfordern auch ein bestehendes Gerät Vertrauen auf diesem Computer.",
   "remote.connect.relayCodeInvalid": "Verwenden Sie 6-64 ASCII Buchstaben, Ziffern oder Symbole ohne Leerzeichen. Legacy-Modus akzeptiert ein 32-Kennzeichen Hexadezimal-Token oder acht Ziffern für ein vertrauenswürdiges Gerät.",
-  "remote.connect.legacyPairing": "Vermächtnispaarungskompatibilität (Token; acht Ziffern nur für vertrauenswürdige Geräte)",
   "remote.connect.legacyUntrusted": "Dieser Computer hat keinen vertrauenswürdigen Schlüssel für dieses Vermächtnisgerät, so dass ein achtstelliger Code seine Identität nicht ermitteln kann. Verbinden Sie von einem Computer, der zuvor mit ihm gepaart wurde.",
   "remote.connect.identityChanged": "Diese Geräte-ID präsentierte einen anderen Schlüssel von der zuvor vertrauenswürdigen. Die Verbindung wurde gestoppt. Überprüfen Sie, ob der Host wieder aufgebaut wurde oder seine Identität geändert wurde; löschen Sie den Trust-Record nicht, um diese Überprüfung zu umgehen.",
   "remote.connect.relayMovedTitle": "Das Relais antwortete nicht",

@@ -9,6 +9,7 @@ import {
   isRelayProfile,
   type ConnectionProfile,
 } from "../../domain/connection";
+import { shouldConnectWithoutAsking } from "../../app/remoteAutoConnect";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import {
@@ -40,7 +41,6 @@ export function RemoteConnectFlow({
   const [pairingCode, setPairingCode] = useState("");
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
-  const [legacyPairing, setLegacyPairing] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
   const [relayAddress, setRelayAddress] = useState(profile.relayAddress ?? "");
   // A quick tunnel hands out a new hostname every restart, so a saved address
@@ -82,10 +82,37 @@ export function RemoteConnectFlow({
     if (relayUnreachable) relayRef.current?.focus();
   }, [relayUnreachable]);
 
-  const normalizedToken = normalizeViewerPairingToken(pairingCode, relay, legacyPairing);
+  const normalizedToken = normalizeViewerPairingToken(pairingCode, relay);
+
+  // A host whose code is already saved has nothing left to ask, so the dialog
+  // connects by itself. One attempt only: after a failure the person decides.
+  const autoConnected = useRef(false);
+  useEffect(() => {
+    if (
+      !shouldConnectWithoutAsking({
+        relay,
+        credentialMode: savedCredential.state.mode,
+        useSavedPairingCode,
+        busy,
+        failed: problem !== null,
+        relayUnreachable,
+        alreadyTried: autoConnected.current,
+      })
+    ) {
+      return;
+    }
+    autoConnected.current = true;
+    void connect();
+    // connect is stable for this dialog's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relay, busy, problem, relayUnreachable, useSavedPairingCode, savedCredential.state.mode]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await connect();
+  }
+
+  async function connect() {
     if (!useSavedPairingCode && !normalizedToken) {
       setProblem(t(relay ? "remote.connect.relayCodeInvalid" : "remote.connect.codeInvalid"));
       return;
@@ -99,7 +126,7 @@ export function RemoteConnectFlow({
       port: profile.port,
       pairingCode: useSavedPairingCode ? "" : normalizedToken!,
       useSavedPairingCode,
-      legacyPairing,
+      legacyPairing: false,
       rememberPairingCode:
         relay && !useSavedPairingCode && rememberPairingCode,
       // A remembered device has no address of its own; the relay finds it by
@@ -295,13 +322,6 @@ export function RemoteConnectFlow({
               <p id="remote-pairing-code-hint" className="field__optional">{t(relay ? "remote.connect.relayCodeHint" : "remote.connect.codeHint")}</p>
             </div>
           )}
-
-          <label className="checkbox">
-            <input type="checkbox" checked={legacyPairing} disabled={busy}
-              onChange={(event) => setLegacyPairing(event.currentTarget.checked)} />
-            <span className="checkbox__box" aria-hidden="true"><CheckIcon size={11} /></span>
-            {t("remote.connect.legacyPairing")}
-          </label>
 
           {relay &&
             !useSavedPairingCode &&
