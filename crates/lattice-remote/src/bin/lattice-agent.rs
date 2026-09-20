@@ -74,6 +74,16 @@ const MAX_UPLOAD_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_SESSION_UPLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 static NEXT_UPLOAD_TARGET_RESERVATION: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_UPLOAD_TARGETS: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+/// Who is driving the one physical pointer and keyboard, and when they last
+/// did. Several viewers may be connected; letting them interleave events
+/// turns a drag into a tug of war, so the one who moved first keeps the floor
+/// until they pause.
+static INPUT_FLOOR: OnceLock<Mutex<Option<(u64, Instant)>>> = OnceLock::new();
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+/// A pause this long hands the floor to whoever acts next. Long enough to
+/// cover the gap between a drag and a click, short enough that taking turns
+/// feels immediate.
+const INPUT_FLOOR_HOLD: Duration = Duration::from_millis(1500);
 // Preserve every key transition while bounding the amount of work an
 // authorised but abusive viewer can queue ahead of the OS input backend.
 const SCREEN_INPUT_QUEUE_CAPACITY: usize = 256;
@@ -435,7 +445,40 @@ fn capture_jpeg(monitor: &Monitor) -> Result<Capture, String> {
 /// Runs the OS input backend on its own thread. `enigo::Enigo` is not portable
 /// across async await points, so it lives here and consumes decoded inputs off
 /// a channel. Returns when the channel closes (viewer gone), releasing keys.
+/// Whether this session may drive the pointer and keyboard right now. The
+/// floor is free when nobody holds it or its holder has paused; releasing
+/// held keys always passes, so a session that loses the floor never leaves
+/// something stuck down.
+fn may_inject(session: u64, input: &lattice_remote::RemoteInput) -> bool {
+    if matches!(input, lattice_remote::RemoteInput::ReleaseAll) {
+        return true;
+    }
+    let floor = INPUT_FLOOR.get_or_init(|| Mutex::new(None));
+    let Ok(mut held) = floor.lock() else {
+        return true;
+    };
+    match *held {
+        Some((holder, since)) if holder != session && since.elapsed() < INPUT_FLOOR_HOLD => false,
+        _ => {
+            *held = Some((session, Instant::now()));
+            true
+        }
+    }
+}
+
+/// Lets the next viewer act at once instead of waiting out the pause.
+fn release_input_floor(session: u64) {
+    if let Some(floor) = INPUT_FLOOR.get() {
+        if let Ok(mut held) = floor.lock() {
+            if matches!(*held, Some((holder, _)) if holder == session) {
+                *held = None;
+            }
+        }
+    }
+}
+
 fn spawn_input_thread(
+    session: u64,
     stream_width: u32,
     stream_height: u32,
     display_width: u32,
@@ -454,9 +497,13 @@ fn spawn_input_thread(
                 }
             };
         while let Some(input) = inputs.blocking_recv() {
+            if !may_inject(session, &input) {
+                continue;
+            }
             let _ = injector.apply(input);
         }
         injector.release_all();
+        release_input_floor(session);
     })
 }
 
@@ -2240,6 +2287,7 @@ where
     let (input_tx, input_thread) = if allow_input {
         let (tx, rx) = bounded_input_channel(SCREEN_INPUT_QUEUE_CAPACITY);
         let handle = spawn_input_thread(
+            NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             capture.stream_width,
             capture.stream_height,
             capture.display_width,
@@ -4598,6 +4646,23 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(read_pairing_code_file_zeroizing(&path).is_err());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn one_viewer_keeps_the_pointer_until_they_pause() {
+        use lattice_remote::RemoteInput;
+        let move_event = RemoteInput::MouseMove { x: 10, y: 10 };
+        // Whoever acts first holds the floor; the other is ignored meanwhile.
+        assert!(may_inject(101, &move_event));
+        assert!(!may_inject(102, &move_event));
+        assert!(may_inject(101, &move_event));
+        // Releasing held keys always lands, so nothing stays pressed.
+        assert!(may_inject(102, &RemoteInput::ReleaseAll));
+        // Leaving hands the floor over at once.
+        release_input_floor(101);
+        assert!(may_inject(102, &move_event));
+        assert!(!may_inject(101, &move_event));
+        release_input_floor(102);
     }
 
     #[test]
