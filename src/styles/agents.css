@@ -1092,17 +1092,39 @@
   min-width: 10rem;
 }
 
-.agent-session-row__main .agents-pacing__follow {
+/* The per-session choices read as one line of settings under the name, not
+   as stacked form fields in the middle of the row. */
+.agent-session-row__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+}
+
+.agent-session-row__controls:empty {
+  display: none;
+}
+
+.agent-session-row__controls > label {
   display: flex;
   align-items: center;
-  gap: var(--space-2, 0.5rem);
+  gap: var(--space-2);
   min-width: 0;
   font-size: var(--text-2xs);
 }
 
-.agent-session-row__main .agents-pacing__follow .select {
+.agent-session-row__controls .field__label {
+  flex: none;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.agent-session-row__controls .select {
   min-width: 0;
-  max-width: 14rem;
+  max-width: 13rem;
+  padding-block: var(--space-1);
+  font-size: var(--text-2xs);
 }
 
 

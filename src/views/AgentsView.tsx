@@ -1581,6 +1581,7 @@ export function AgentsView({
                     )}
                   </strong>
                   <span className="mono">{displayPath(session.workingDirectory)}</span>
+                  <div className="agent-session-row__controls">
                   {(() => {
                     const candidates = queueDependencyCandidates(
                       agents.sessions,
@@ -1588,7 +1589,7 @@ export function AgentsView({
                     );
                     if (candidates.length === 0 && !session.waitsFor) return null;
                     return (
-                      <label className="field agents-pacing__follow">
+                      <label className="agents-pacing__follow">
                         <span className="field__label">{t("agents.pacing.waitsFor")}</span>
                         <select
                           className="select"
@@ -1612,7 +1613,7 @@ export function AgentsView({
                     );
                   })()}
                   {session.detached && (
-                    <label className="field agents-mcp__toggle">
+                    <label className="agents-mcp__toggle">
                       <span className="field__label">{t("agents.mcp.access")}</span>
                       <select
                         className="select"
@@ -1629,6 +1630,7 @@ export function AgentsView({
                       </select>
                     </label>
                   )}
+                  </div>
                   {(() => {
                     const entry = sharedWithMcp.get(session.sessionId);
                     const activity = entry ? describeMcpActivity(entry) : null;
