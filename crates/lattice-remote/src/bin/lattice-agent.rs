@@ -3205,6 +3205,7 @@ async fn main() {
         let (stream, peer) = match timeout(remaining, listener.accept()).await {
             Ok(Ok((stream, peer))) => {
                 let _ = stream.set_nodelay(true);
+                lattice_remote::transport::set_keepalive(&stream);
                 (stream, peer)
             }
             Ok(Err(error)) => {

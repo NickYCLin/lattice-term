@@ -10,6 +10,7 @@ use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{ready, Context, Poll};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::error::ProtocolError;
@@ -29,6 +30,18 @@ fn websocket_config() -> WebSocketConfig {
         .max_write_buffer_size(MAX_WEBSOCKET_WRITE_BUFFER_BYTES)
         .max_message_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
+}
+
+/// Probes a quiet connection so a peer that vanished without closing its
+/// socket becomes a read or write error instead of an endless wait. Best
+/// effort: a platform that refuses the option keeps the plain socket.
+pub fn set_keepalive(stream: &TcpStream) {
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10));
+    #[cfg(not(any(target_os = "windows", target_os = "openbsd")))]
+    let keepalive = keepalive.with_retries(3);
+    let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&keepalive);
 }
 
 /// A byte stream that carries relay control messages and encrypted sessions.
@@ -60,6 +73,7 @@ impl Transport {
         } else {
             let stream = TcpStream::connect(endpoint).await?;
             stream.set_nodelay(true)?;
+            set_keepalive(&stream);
             Ok(Self::Tcp(stream))
         }
     }
@@ -67,6 +81,7 @@ impl Transport {
     /// Completes the server side of a WebSocket upgrade from HTTPS ingress.
     pub async fn accept_websocket(stream: TcpStream) -> io::Result<Self> {
         stream.set_nodelay(true)?;
+        set_keepalive(&stream);
         let socket = accept_async_with_config(stream, Some(websocket_config()))
             .await
             .map_err(handshake_error)?;
@@ -88,6 +103,7 @@ impl Transport {
         header_name: &str,
     ) -> io::Result<(Self, Option<String>)> {
         stream.set_nodelay(true)?;
+        set_keepalive(&stream);
         let captured = Arc::new(Mutex::new(None));
         let sink = Arc::clone(&captured);
         let wanted = header_name.to_owned();

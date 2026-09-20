@@ -1124,6 +1124,7 @@ pub async fn connect(
                     tokio::net::TcpStream::connect((request.hostname.as_str(), request.port))
                         .await?;
                 stream.set_nodelay(true)?;
+                lattice_remote::transport::set_keepalive(&stream);
                 SecureConnection::initiate_for_device(
                     lattice_remote::Transport::from(stream),
                     &pairing_code,

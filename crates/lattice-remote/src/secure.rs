@@ -137,6 +137,7 @@ impl SecureConnection<crate::Transport> {
         normalize_pairing_code(pairing_code)?;
         let stream = TcpStream::connect((host, port)).await?;
         stream.set_nodelay(true)?;
+        crate::transport::set_keepalive(&stream);
         Self::initiate(crate::Transport::from(stream), pairing_code).await
     }
 }

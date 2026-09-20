@@ -46,6 +46,9 @@ enigo = { version = "0.6", optional = true }
 # desktop app already uses for local CLIs.
 portable-pty = { version = "0.9", optional = true }
 libc = "0.2"
+# Half-open TCP has to become a real error instead of a socket that waits
+# forever, so every connection carries keepalive probes.
+socket2 = "0.6"
 
 [dev-dependencies]
 # Paused-clock tests keep heartbeat and idle-timeout checks instant.

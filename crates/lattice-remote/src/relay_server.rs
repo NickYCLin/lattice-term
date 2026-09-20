@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
@@ -33,6 +33,12 @@ const CONTROL_IDLE_LIMIT: Duration = Duration::from_secs(90);
 const CONTROL_WRITE_LIMIT: Duration = Duration::from_secs(5);
 /// How long a dialing viewer waits for the agent to join the channel.
 const JOIN_WAIT_LIMIT: Duration = Duration::from_secs(12);
+/// A linked channel that carries nothing in either direction for this long is
+/// closed. Both LatticeTerm ends heartbeat every 15 seconds, so silence this
+/// deep means one side is gone without having closed its socket, and its two
+/// connection slots would otherwise be held for as long as the relay runs.
+const LINK_IDLE_LIMIT: Duration = Duration::from_secs(180);
+const LINK_BUFFER_BYTES: usize = 16 * 1024;
 /// How long a brand-new connection has to say what it wants.
 const FIRST_MESSAGE_LIMIT: Duration = Duration::from_secs(10);
 /// New connections allowed per client IP inside the rate window. Generous
@@ -653,12 +659,66 @@ async fn run_dial(
     }
 
     println!("Linked a viewer at {client} with device {device_id}.");
-    match tokio::io::copy_bidirectional(&mut stream, &mut agent_stream.transport).await {
+    match link_until_idle(&mut stream, &mut agent_stream.transport, LINK_IDLE_LIMIT).await {
         Ok((to_agent, to_viewer)) => println!(
             "Channel for device {device_id} closed ({to_agent} bytes in, {to_viewer} bytes out)."
         ),
         Err(error) => println!("Channel for device {device_id} ended: {error}."),
     }
+}
+
+/// Copies both ways at once until either side closes or fails, or one side
+/// goes quiet for `idle`. Both LatticeTerm ends heartbeat inside the session,
+/// so silence that deep means the peer is gone without having closed its
+/// socket, and the channel would otherwise hold its two connection slots for
+/// as long as the relay runs. Returns the bytes carried each way.
+async fn link_until_idle<A, B>(
+    viewer: &mut A,
+    agent: &mut B,
+    idle: Duration,
+) -> std::io::Result<(u64, u64)>
+where
+    A: AsyncRead + AsyncWrite + Unpin,
+    B: AsyncRead + AsyncWrite + Unpin,
+{
+    let (mut viewer_read, mut viewer_write) = tokio::io::split(viewer);
+    let (mut agent_read, mut agent_write) = tokio::io::split(agent);
+    // Both directions run together: one of them blocking on a write must
+    // never stop the other from being read.
+    tokio::try_join!(
+        copy_until_idle(&mut viewer_read, &mut agent_write, idle),
+        copy_until_idle(&mut agent_read, &mut viewer_write, idle),
+    )
+}
+
+async fn copy_until_idle<R, W>(from: &mut R, to: &mut W, idle: Duration) -> std::io::Result<u64>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buffer = vec![0u8; LINK_BUFFER_BYTES];
+    let mut carried = 0u64;
+    loop {
+        let count = idle_error(timeout(idle, from.read(&mut buffer)).await)??;
+        if count == 0 {
+            let _ = to.shutdown().await;
+            return Ok(carried);
+        }
+        to.write_all(&buffer[..count]).await?;
+        // A WebSocket carrier only puts a frame on the wire when it is
+        // flushed; without this the handshake would sit in the sink.
+        to.flush().await?;
+        carried += count as u64;
+    }
+}
+
+fn idle_error<T>(result: Result<T, tokio::time::error::Elapsed>) -> std::io::Result<T> {
+    result.map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "neither side sent anything before the idle limit",
+        )
+    })
 }
 
 async fn run_connection(
@@ -859,6 +919,7 @@ async fn negotiate_carrier(
     forwarded_ip_header: Option<&str>,
 ) -> Result<(Transport, Option<String>), std::io::Error> {
     stream.set_nodelay(true)?;
+    crate::transport::set_keepalive(&stream);
     let mut first = [0_u8; 1];
     if stream.peek(&mut first).await? == 1 && first[0] == 0 {
         // Native TCP has no handshake to carry a forwarded address.
@@ -1263,6 +1324,32 @@ mod tests {
 
         drop(joined);
         assert!(state.try_reserve_connection().is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_linked_channel_carries_both_ways_and_closes_when_nothing_moves() {
+        let (mut viewer, mut viewer_peer) = tokio::io::duplex(4096);
+        let (mut agent, mut agent_peer) = tokio::io::duplex(4096);
+        let link = tokio::spawn(async move {
+            link_until_idle(&mut viewer, &mut agent, Duration::from_secs(30)).await
+        });
+
+        viewer_peer.write_all(b"to the agent").await.unwrap();
+        let mut seen = [0u8; 12];
+        agent_peer.read_exact(&mut seen).await.unwrap();
+        assert_eq!(&seen, b"to the agent");
+        agent_peer.write_all(b"and back").await.unwrap();
+        let mut answer = [0u8; 8];
+        viewer_peer.read_exact(&mut answer).await.unwrap();
+        assert_eq!(&answer, b"and back");
+
+        // Neither side says anything again: the channel must not be held.
+        let ended = timeout(Duration::from_secs(120), link)
+            .await
+            .expect("an idle channel closes itself")
+            .expect("the link task finished");
+        let error = ended.expect_err("an idle channel ends with the idle reason");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
     }
 
     #[test]
