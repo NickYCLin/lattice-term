@@ -101,7 +101,12 @@ impl DaemonClient {
                 return Ok(connection);
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err("The background service did not start in time.".to_string());
+                let mut message = "The background service did not start in time.".to_string();
+                if let Some(reason) = daemon_log_failure(&self.paths) {
+                    message.push(' ');
+                    message.push_str(&reason);
+                }
+                return Err(message);
             }
         }
     }
@@ -514,6 +519,35 @@ async fn reader_loop<R: AsyncBufReadExt + Unpin>(
     connection.lost(&app);
 }
 
+/// The daemon writes why it gave up to its own log, and the window has no
+/// other way to see it. The last line that is not the start banner is worth
+/// showing: the log holds no prompts, output or tokens by contract.
+fn daemon_log_failure(paths: &DaemonPaths) -> Option<String> {
+    let text = std::fs::read_to_string(paths.data_dir.join(super::LOG_FILE)).ok()?;
+    last_failure_line(&text)
+}
+
+fn last_failure_line(log: &str) -> Option<String> {
+    let line = log
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.ends_with("daemon starting"))?;
+    // Every line starts with a timestamp the person does not need.
+    let text = line
+        .split_once(' ')
+        .map(|(stamp, rest)| {
+            if stamp.chars().all(|c| c.is_ascii_digit()) {
+                rest
+            } else {
+                line
+            }
+        })
+        .unwrap_or(line);
+    let text: String = text.chars().take(200).collect();
+    (!text.is_empty()).then_some(text)
+}
+
 /// Starts `lattice-term agent-daemon` detached from this process: its own
 /// session on Unix, no console and no job on Windows. Nothing is inherited
 /// but the environment; the log file catches what it has to say.
@@ -573,6 +607,25 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
         })
         .map_err(|error| format!("Cannot watch the background service: {error}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::last_failure_line;
+
+    #[test]
+    fn the_last_line_that_is_not_the_banner_explains_the_failure() {
+        let log = "1789874821 Lattice Agent daemon starting\n1789874821 Cannot listen for the desktop: path must be shorter than SUN_LEN\n";
+        assert_eq!(
+            last_failure_line(log).as_deref(),
+            Some("Cannot listen for the desktop: path must be shorter than SUN_LEN"),
+        );
+        assert_eq!(
+            last_failure_line("1789874821 Lattice Agent daemon starting\n"),
+            None
+        );
+        assert_eq!(last_failure_line(""), None);
+    }
 }
 
 #[cfg(test)]
