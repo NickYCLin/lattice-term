@@ -491,7 +491,8 @@ async fn stop_and_wait<T>(stop: watch::Sender<bool>, task: tokio::task::JoinHand
 
 /// Whether this machine will accept injected pointer and key events at all.
 /// macOS refuses until the app holds Accessibility permission, and a headless
-/// Linux session has no display to drive. Checked once per screen session.
+/// Linux session has no display to drive. Checked once, before sharing is
+/// announced, so nobody is told a screen is controllable when it is not.
 fn control_is_available() -> bool {
     match lattice_remote::host_input::control_available() {
         Ok(()) => true,
@@ -2196,9 +2197,6 @@ where
 
     let shared_files = file_root.map(SharedFiles::open).transpose()?.map(Arc::new);
     let (mut reader, mut writer_half) = connection.split();
-    // Telling the viewer it may control a machine that will refuse every
-    // event is worse than sharing read-only: it looks like the clicks worked.
-    let allow_input = allow_input && control_is_available();
 
     send_remote_message(
         &mut writer_half,
@@ -3140,7 +3138,7 @@ async fn run_relay(options: &Options) -> String {
 #[tokio::main]
 async fn main() {
     let requested_json = env::args().any(|argument| argument == "--json");
-    let options = match parse_options() {
+    let mut options = match parse_options() {
         Ok(options) => options,
         Err(error) => {
             emit_event(
@@ -3156,6 +3154,15 @@ async fn main() {
             std::process::exit(2);
         }
     };
+
+    // A screen share that cannot inject input is read-only, and saying so
+    // once here keeps the Ready event, the window's badge and every session
+    // telling the same story. Terminal mode types into its own PTY, so it
+    // needs nothing from the OS input layer.
+    if options.allow_input && !options.terminal && !control_is_available() {
+        options.allow_input = false;
+    }
+    let options = options;
 
     if options.relay.is_some() {
         let stop_reason = tokio::task::LocalSet::new()
