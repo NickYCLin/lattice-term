@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { createThread, delegationPrompt, delegationResult, delegationState, noteDelegationFinished } from "./agentChat";
+import {
+  createThread,
+  delegationPrompt,
+  delegationResult,
+  delegationState,
+  loadStoredThreads,
+  noteDelegationFinished,
+  saveStoredThreads,
+} from "./agentChat";
 
 const turnEnd = (error: string | null) => ({
   type: "turnEnd" as const,
@@ -44,3 +52,56 @@ describe("subtask notes", () => {
   });
 });
 
+
+describe("a subtask that runs on another machine", () => {
+  const remote = {
+    targetId: "target-1",
+    targetLabel: "工作站",
+    planId: "plan-1",
+    sessionId: "agent-9",
+    cursor: 128,
+  };
+
+  it("is stored and read back whole, and forgotten when incomplete", () => {
+    const storage = new Map<string, string>();
+    const store: Storage = {
+      get length() { return storage.size; },
+      clear: () => storage.clear(),
+      key: (index) => [...storage.keys()][index] ?? null,
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => { storage.set(key, value); },
+      removeItem: (key) => { storage.delete(key); },
+    };
+    const thread = { ...createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "" }), remote };
+    saveStoredThreads(store, [thread]);
+    expect(loadStoredThreads(store)[0].remote).toEqual(remote);
+
+    for (const broken of [{ ...remote, sessionId: "" }, { ...remote, planId: undefined }, "not an object"]) {
+      saveStoredThreads(store, [{ ...thread, remote: broken as never }]);
+      expect(loadStoredThreads(store)[0].remote).toBeNull();
+    }
+  });
+
+  it("reports its state and result the same way a local subtask does", () => {
+    const child = {
+      ...createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "" }),
+      title: "↳ 跑測試",
+      remote,
+      runningTurnId: "turn-1",
+      items: [{ type: "user" as const, id: "u1", text: "跑測試", at: 0 }],
+    };
+    expect(delegationState(child)).toBe("running");
+
+    const finished = {
+      ...child,
+      runningTurnId: null,
+      items: [
+        ...child.items,
+        { type: "text" as const, id: "t1", text: "全部通過" },
+        { type: "turnEnd" as const, id: "turn-1", usage: null, costUsd: null, durationMs: null, error: null },
+      ],
+    };
+    expect(delegationState(finished)).toBe("done");
+    expect(delegationResult(finished)).toContain("全部通過");
+  });
+});

@@ -253,6 +253,12 @@ export interface ChatThread {
   shelvedAt?: number | null;
   /** The conversation that handed this one a subtask, if any. */
   delegatedFrom?: string | null;
+  /**
+   * A subtask that runs on another machine's Agent Fleet instead of here.
+   * The conversation is a local mirror: its items come from reading that
+   * session's output, and nothing is ever started on this computer.
+   */
+  remote?: RemoteDelegation | null;
   id: string;
   definitionId: ChatDefinitionId;
   /** First message, shortened; what the thread list shows. */
@@ -953,6 +959,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           ? thread.shelvedAt
           : null,
       delegatedFrom: typeof thread.delegatedFrom === "string" ? thread.delegatedFrom : null,
+      remote: storedRemoteDelegation(thread.remote),
       model: typeof thread.model === "string" ? thread.model : "",
       effort: typeof thread.effort === "string" && /^[a-z]{1,16}$/.test(thread.effort) ? thread.effort : null,
       nativeSessionId:
@@ -1026,6 +1033,35 @@ export function completionNotificationText(thread: Pick<ChatThread, "title" | "i
   return {
     title: thread.title.trim() || "LatticeTerm",
     body: body.length > 180 ? `${body.slice(0, 179)}…` : body || "✓",
+  };
+}
+
+/** Where a subtask runs when it does not run on this computer. */
+export interface RemoteDelegation {
+  /** The authorized connection carrying the remote Fleet workspace. */
+  targetId: string;
+  /** How that machine is named in the connection list. */
+  targetLabel: string;
+  /** The saved launch item that started it; a retry starts the same one. */
+  planId: string;
+  sessionId: string;
+  /** How far this conversation has read that session's output. */
+  cursor: number;
+}
+
+/** A remote subtask as it comes back from storage; anything else is dropped. */
+function storedRemoteDelegation(value: unknown): RemoteDelegation | null {
+  if (!value || typeof value !== "object") return null;
+  const remote = value as Partial<RemoteDelegation>;
+  const text = (field: unknown) => (typeof field === "string" && field ? field : "");
+  const [targetId, planId, sessionId] = [remote.targetId, remote.planId, remote.sessionId].map(text);
+  if (!targetId || !planId || !sessionId) return null;
+  return {
+    targetId,
+    targetLabel: text(remote.targetLabel) || targetId,
+    planId,
+    sessionId,
+    cursor: typeof remote.cursor === "number" && remote.cursor >= 0 ? remote.cursor : 0,
   };
 }
 

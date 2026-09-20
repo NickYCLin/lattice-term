@@ -32,7 +32,8 @@ export type FleetAction =
   | { kind: "readOutput"; sessionId: string; cursor: number; maxBytes?: number }
   | { kind: "launch"; planId: string; requestId: string }
   | { kind: "send"; sessionId: string; text: string; mode: "queue" | "now"; requestId: string }
-  | { kind: "cancel"; sessionId: string; scope: "turn" | "session"; requestId: string };
+  | { kind: "cancel"; sessionId: string; scope: "turn" | "session"; requestId: string }
+  | { kind: "waitState"; sessionId: string; timeoutMs?: number };
 
 async function run(targetId: string, action: FleetAction): Promise<Record<string, unknown>> {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -75,8 +76,28 @@ export const sendFleetPrompt = (targetId: string, sessionId: string, text: strin
 export const cancelFleetTurn = (targetId: string, sessionId: string) =>
   run(targetId, { kind: "cancel", sessionId, scope: "turn", requestId: crypto.randomUUID() });
 
-export const launchFleetPlan = (targetId: string, planId: string) =>
-  run(targetId, { kind: "launch", planId, requestId: crypto.randomUUID() });
+/** Starts a saved item and reports the session it became. */
+export async function launchFleetPlan(
+  targetId: string,
+  planId: string,
+): Promise<{ session: FleetSession | null; duplicate: boolean }> {
+  const result = await run(targetId, { kind: "launch", planId, requestId: crypto.randomUUID() });
+  const session = result.session && typeof result.session === "object" ? (result.session as FleetSession) : null;
+  return { session, duplicate: result.duplicate === true };
+}
+
+/** Waits for a remote session to change state, or says it did not. */
+export async function waitFleetState(
+  targetId: string,
+  sessionId: string,
+  timeoutMs = 5000,
+): Promise<{ state: string; closed: boolean }> {
+  const result = await run(targetId, { kind: "waitState", sessionId, timeoutMs });
+  return {
+    state: typeof result.state === "string" ? result.state : "",
+    closed: result.outcome === "closed" || result.outcome === "revoked",
+  };
+}
 
 /** Keeps the tail of a growing log without letting it take unbounded memory. */
 export function appendBounded(current: string, next: string, limit = 200_000): string {

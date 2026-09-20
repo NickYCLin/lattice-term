@@ -173,6 +173,7 @@ export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi
     shelveThread: vi.fn(),
     branchThread: vi.fn(() => null),
     delegate: vi.fn(() => null),
+    delegateRemote: vi.fn(async () => null),
     send: vi.fn(async () => {}),
     enqueue: vi.fn(),
     steer: vi.fn(async () => {}),

@@ -49,6 +49,13 @@ import {
   type NativeHistoryMessage,
 } from "./agentChat";
 import { hasDesktopBackend } from "./nativeRuntime";
+import {
+  cancelFleetTurn,
+  launchFleetPlan,
+  readFleetOutput,
+  sendFleetPrompt,
+  waitFleetState,
+} from "./remoteFleet";
 import { useSharedSidebarLayout } from "./sharedSidebarLayout";
 import {
   chatFolderNodeId,
@@ -160,6 +167,17 @@ export interface AgentChatApi {
     prompt: string,
     withContext: boolean,
   ) => ChatThread | null;
+  /**
+   * The same, on another machine's Agent Fleet: a saved launch item there is
+   * started and given the task, and the conversation here mirrors its output.
+   */
+  delegateRemote: (
+    parentId: string,
+    target: { id: string; label: string },
+    planId: string,
+    prompt: string,
+    withContext: boolean,
+  ) => Promise<ChatThread | null>;
   send: (
     id: string,
     prompt: string,
@@ -497,8 +515,9 @@ export function useAgentChat(
   const remove = useCallback((id: string) => {
     completionTracker.current.cancel(id);
     // A Codex thread keeps a server alive between turns; closing the thread
-    // must end it whether or not a turn is running.
-    if (hasDesktopBackend()) {
+    // must end it whether or not a turn is running. A mirror of a subtask on
+    // another machine has no local thread to close.
+    if (hasDesktopBackend() && !threadsRef.current.find(thread => thread.id === id)?.remote) {
       core()
         .then(({ invoke }) => invoke("agent_chat_close", { threadId: id }))
         .catch(() => {});
@@ -664,6 +683,12 @@ export function useAgentChat(
   const stopTurn = useCallback(async (id: string, expectedTurnId?: string) => {
     completionTracker.current.cancel(id);
     changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: true } : thread));
+    // A subtask on another machine has nothing running here to stop.
+    const remote = threadsRef.current.find(thread => thread.id === id)?.remote;
+    if (remote) {
+      await cancelFleetTurn(remote.targetId, remote.sessionId);
+      return;
+    }
     const { invoke } = await core();
     await invoke<boolean>("agent_chat_stop", { threadId: id, expectedTurnId: expectedTurnId ?? null });
   }, []);
@@ -723,6 +748,124 @@ export function useAgentChat(
     [changeThreads, send],
   );
 
+  /**
+   * Hands a subtask to another machine's Agent Fleet. The conversation here
+   * is a mirror: a saved item is started over there, the task is sent to it,
+   * and its output is read back. Nothing runs on this computer.
+   */
+  const delegateRemote = useCallback(
+    async (
+      parentId: string,
+      target: { id: string; label: string },
+      planId: string,
+      prompt: string,
+      withContext: boolean,
+    ) => {
+      const parent = threadsRef.current.find((thread) => thread.id === parentId);
+      const task = prompt.trim();
+      if (!parent || !task) return null;
+      const { session } = await launchFleetPlan(target.id, planId);
+      if (!session?.sessionId) throw new Error("The other machine did not start the saved item.");
+      const transcript = withContext ? handoffTranscript(parent.items, parent.definitionId) : "";
+      const text = transcript ? `${transcript}\n\n${task}` : task;
+      const child: ChatThread = {
+        ...createThread({
+          definitionId: (session.definitionId as ChatDefinitionId) ?? parent.definitionId,
+          workingDirectory: "",
+          permission: defaultPermission(parent.definitionId),
+          model: "",
+          title: threadTitle(`↳ ${task}`),
+          accountProfileId: null,
+        }),
+        delegatedFrom: parent.id,
+        remote: {
+          targetId: target.id,
+          targetLabel: target.label,
+          planId,
+          sessionId: session.sessionId,
+          cursor: 0,
+        },
+        items: [{ type: "user", id: crypto.randomUUID(), text: task, at: Date.now() }],
+        runningTurnId: crypto.randomUUID(),
+      };
+      changeThreads((current) => [child, ...current]);
+      await sendFleetPrompt(target.id, session.sessionId, text);
+      return child;
+    },
+    [changeThreads],
+  );
+
+  // One reader per open remote subtask: it streams the session's output into
+  // the mirror and, when that machine reports the work is over, ends the turn
+  // exactly as a local subtask would so the note and bring-back work.
+  useEffect(() => {
+    const running = threads.filter((thread) => thread.remote && thread.runningTurnId);
+    if (running.length === 0) return;
+    let stopped = false;
+    const readers = running.map(async (thread) => {
+      const remote = thread.remote!;
+      while (!stopped) {
+        const { state, closed } = await waitFleetState(remote.targetId, remote.sessionId).catch(() => ({
+          state: "",
+          closed: true,
+        }));
+        if (stopped) return;
+        let cursor = remote.cursor;
+        let text = "";
+        for (let page = 0; page < 8; page += 1) {
+          const chunk = await readFleetOutput(remote.targetId, remote.sessionId, cursor).catch(() => null);
+          if (!chunk) break;
+          text += chunk.text;
+          cursor = chunk.nextCursor;
+          if (!chunk.hasMore) break;
+        }
+        const finished = closed || state === "done" || state === "needsAttention";
+        changeThreads((current) =>
+          current.map((entry) => {
+            if (entry.id !== thread.id || !entry.remote) return entry;
+            const items = text
+              ? [...entry.items, { type: "text" as const, id: crypto.randomUUID(), text }]
+              : entry.items;
+            if (!finished) return { ...entry, items, remote: { ...entry.remote, cursor } };
+            const turnId = entry.runningTurnId ?? crypto.randomUUID();
+            return {
+              ...entry,
+              items: [
+                ...items,
+                {
+                  type: "turnEnd" as const,
+                  id: turnId,
+                  usage: null,
+                  costUsd: null,
+                  durationMs: null,
+                  error: closed && state !== "done" ? "The other machine ended the session." : null,
+                },
+              ],
+              runningTurnId: null,
+              remote: { ...entry.remote, cursor },
+            };
+          }),
+        );
+        if (finished) {
+          const turnId = thread.runningTurnId ?? crypto.randomUUID();
+          changeThreads((current) =>
+            current.map((entry) =>
+              entry.id === thread.delegatedFrom
+                ? { ...noteDelegationFinished(entry, thread.id, turnId, closed && state !== "done"), unread: true }
+                : entry,
+            ),
+          );
+          return;
+        }
+      }
+    });
+    return () => {
+      stopped = true;
+      void Promise.allSettled(readers);
+    };
+    // Only the set of open remote subtasks matters, not every keystroke.
+  }, [threads.map((thread) => (thread.remote && thread.runningTurnId ? thread.id : "")).join(), changeThreads]);
+
   return useMemo(
     () => ({
       threads,
@@ -742,6 +885,7 @@ export function useAgentChat(
       shelveThread: shelve,
       branchThread: branch,
       delegate,
+      delegateRemote,
       send,
       steer,
       enqueue,
@@ -773,6 +917,7 @@ export function useAgentChat(
       shelve,
       branch,
       delegate,
+      delegateRemote,
       send,
       steer,
       enqueue,
