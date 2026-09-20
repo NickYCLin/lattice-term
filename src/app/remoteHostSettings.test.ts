@@ -14,8 +14,8 @@ it("does not persist or restore Fleet authority with a saved pairing password", 
   saveRemoteHostSettings(storage, { ...defaults, mode: "relay", useSavedPairingCode: true, fleet: { directory: "/fixture/project", read: true, control: true, launch: true } });
   expect([...values.values()].join("")).not.toContain("fleet");
   expect([...values.values()].join("")).not.toContain("/fixture/project");
-  expect(loadRemoteHostSettings(storage).fleet).toBeUndefined();
+  expect(loadRemoteHostSettings(storage).fleet).toBeNull();
   expect(loadRemoteHostSettings(storage).useSavedPairingCode).toBe(true);
   storage.setItem("latticeterm.remote.hostSettings.v1", JSON.stringify({ ...defaults, fleet: { directory: "/fixture/project", control: true } }));
-  expect(loadRemoteHostSettings(storage).fleet).toBeUndefined();
+  expect(loadRemoteHostSettings(storage).fleet).toBeNull();
 });

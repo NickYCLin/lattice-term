@@ -101,6 +101,9 @@ describe("automatic Remote standby", () => {
       allowChat: true,
       allowCli: true,
       allowInput: true,
+      // Turning one grant off is what has to survive: the saved answer wins
+      // over the wide-open default a never-configured share starts from.
+      allowFiles: false,
       pairingCode: "secret-not-to-store",
       rememberPairingCode: true,
     };

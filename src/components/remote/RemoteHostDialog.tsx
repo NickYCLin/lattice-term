@@ -66,11 +66,11 @@ export function RemoteHostDialog({
   const [fps, setFps] = useState(settings.fps);
   const [allowInput, setAllowInput] = useState(settings.allowInput === true);
   const [allowCli, setAllowCli] = useState(settings.allowCli === true);
-  const [allowFleet, setAllowFleet] = useState(false);
-  const [fleetDirectory, setFleetDirectory] = useState("");
-  const [fleetRead, setFleetRead] = useState(false);
-  const [fleetControl, setFleetControl] = useState(false);
-  const [fleetLaunch, setFleetLaunch] = useState(false);
+  const [allowFleet, setAllowFleet] = useState(!!settings.fleet);
+  const [fleetDirectory, setFleetDirectory] = useState(settings.fleet?.directory ?? "");
+  const [fleetRead, setFleetRead] = useState(settings.fleet?.read === true);
+  const [fleetControl, setFleetControl] = useState(settings.fleet?.control === true);
+  const [fleetLaunch, setFleetLaunch] = useState(settings.fleet?.launch === true);
   const [allowChat, setAllowChat] = useState(settings.allowChat === true);
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);

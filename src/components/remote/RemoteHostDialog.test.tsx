@@ -119,15 +119,16 @@ describe("remote host dialog", () => {
     expect(markup).not.toContain('id="remote-host-relay"');
   });
 
-  it("offers independent commands only on Windows and keeps all execution grants off", () => {
+  it("offers independent commands only on Windows and starts a new share fully open", () => {
     const windows = render(null, null, "windows").markup;
     expect(windows).toContain("允許 cmd／PowerShell 指令");
     expect(windows).toContain("不受分享資料夾範圍限制");
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
-    expect(checkboxes).toHaveLength(6);
     expect(windows).toContain("分享 Agent Fleet 工作區");
     expect(windows).toContain("分享 CLI 並允許操作");
-    expect(checkboxes.every(input => !input.includes("checked"))).toBe(true);
+    // A share nobody configured opens everything; "only look" turns it back.
+    expect(checkboxes.every(input => input.includes("checked"))).toBe(true);
+    expect(windows).toMatch(/<input type="radio" name="remote-host-level" checked=""\/>完全開放/);
     expect(render(null, null, "linux").markup).not.toContain("允許 cmd／PowerShell 指令");
   });
 
