@@ -51,6 +51,9 @@ chacha20poly1305 = "0.11.0"
 tempfile = "3.27.0"
 dirs = "7"
 png = "0.18.1"
+# Screen frames arrive as JPEG; comparing a coarse picture of one to the next
+# is how an input receipt tells a blinking caret from a different screen.
+zune-jpeg = "0.5"
 if-addrs = "0.15"
 tauri-plugin-opener = "2"
 

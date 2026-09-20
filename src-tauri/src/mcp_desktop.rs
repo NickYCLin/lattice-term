@@ -441,8 +441,76 @@ struct ScreenReceipt {
     width: u32,
     height: u32,
     digest: String,
+    /// A coarse grey picture of the frame. A screen with a blinking caret or
+    /// a ticking clock never hashes the same twice, so exact bytes alone
+    /// would make input impossible; this still tells that screen from a
+    /// different one.
+    signature: Option<Vec<u8>>,
     issued: Instant,
     source: ScreenKey,
+}
+
+/// Cells per side of the signature. Each cell of a 1280x720 screen covers
+/// about 53x30 pixels: a caret barely moves one, a new window moves most.
+const SIGNATURE_CELLS: usize = 24;
+/// Averaged over the whole picture, this much change is still the same
+/// screen: a caret or a clock digit lands far below it.
+const SIGNATURE_MEAN_TOLERANCE: u32 = 3;
+/// And no more than this many cells may change sharply, so a small but
+/// decisive change — a dialog opening over the pointer — is still refused.
+const SIGNATURE_CHANGED_CELLS: usize = SIGNATURE_CELLS * SIGNATURE_CELLS / 32;
+const SIGNATURE_CELL_TOLERANCE: u8 = 32;
+
+/// Averages a JPEG frame into `SIGNATURE_CELLS` squared grey cells. `None`
+/// when the frame cannot be read, which falls back to exact bytes.
+fn screen_signature(bytes: &[u8]) -> Option<Vec<u8>> {
+    let options = zune_jpeg::zune_core::options::DecoderOptions::default()
+        .jpeg_set_out_colorspace(zune_jpeg::zune_core::colorspace::ColorSpace::Luma);
+    let mut decoder =
+        zune_jpeg::JpegDecoder::new_with_options(std::io::Cursor::new(bytes), options);
+    let pixels = decoder.decode().ok()?;
+    let (width, height) = decoder.dimensions()?;
+    if width == 0 || height == 0 || pixels.len() < width * height {
+        return None;
+    }
+    let mut cells = vec![0u8; SIGNATURE_CELLS * SIGNATURE_CELLS];
+    for (index, cell) in cells.iter_mut().enumerate() {
+        let (cell_x, cell_y) = (index % SIGNATURE_CELLS, index / SIGNATURE_CELLS);
+        let x0 = cell_x * width / SIGNATURE_CELLS;
+        let x1 = ((cell_x + 1) * width / SIGNATURE_CELLS)
+            .max(x0 + 1)
+            .min(width);
+        let y0 = cell_y * height / SIGNATURE_CELLS;
+        let y1 = ((cell_y + 1) * height / SIGNATURE_CELLS)
+            .max(y0 + 1)
+            .min(height);
+        let mut total = 0u64;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                total += u64::from(pixels[y * width + x]);
+            }
+        }
+        let count = ((x1 - x0) * (y1 - y0)) as u64;
+        *cell = (total / count.max(1)) as u8;
+    }
+    Some(cells)
+}
+
+/// Whether two signatures show the same screen.
+fn same_screen(seen: &[u8], now: &[u8]) -> bool {
+    if seen.len() != now.len() || seen.is_empty() {
+        return false;
+    }
+    let mut total = 0u32;
+    let mut changed = 0usize;
+    for (before, after) in seen.iter().zip(now) {
+        let difference = before.abs_diff(*after);
+        total += u32::from(difference);
+        if difference > SIGNATURE_CELL_TOLERANCE {
+            changed += 1;
+        }
+    }
+    total / seen.len() as u32 <= SIGNATURE_MEAN_TOLERANCE && changed <= SIGNATURE_CHANGED_CELLS
 }
 
 #[derive(Default)]
@@ -1645,10 +1713,14 @@ impl DesktopService {
         let frame = self.screens.latest(&receipt.source).map_err(|_| {
             ServiceError::new("not_ready", "The screen is unavailable; capture again.")
         })?;
-        if frame.width != receipt.width
-            || frame.height != receipt.height
-            || sha256(&frame.bytes) != receipt.digest
-        {
+        let same_picture = frame.width == receipt.width
+            && frame.height == receipt.height
+            && (sha256(&frame.bytes) == receipt.digest
+                || matches!(
+                    (&receipt.signature, screen_signature(&frame.bytes)),
+                    (Some(seen), Some(now)) if same_screen(seen, &now)
+                ));
+        if !same_picture {
             return Err(ServiceError::new(
                 "not_ready",
                 "The screen changed since capture; inspect a new capture before sending input.",
@@ -1694,6 +1766,7 @@ impl DesktopService {
                 width: frame.width,
                 height: frame.height,
                 digest: sha256(&frame.bytes),
+                signature: screen_signature(&frame.bytes),
                 issued: Instant::now(),
                 source: self.screen_key(grant).ok_or_else(ServiceError::invalid)?,
             };
@@ -1775,6 +1848,45 @@ fn metrics_view(metrics: crate::metrics::HostMetricsPayload) -> Value {
         "swap": metrics.swap.map(memory),
         "disks": disks,
     })
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::{same_screen, screen_signature, SIGNATURE_CELLS};
+
+    const SCREEN: &[u8] = include_bytes!("mcp_desktop/testdata/screen.jpg");
+    const CARET: &[u8] = include_bytes!("mcp_desktop/testdata/screen-caret.jpg");
+    const OTHER: &[u8] = include_bytes!("mcp_desktop/testdata/screen-other.jpg");
+
+    #[test]
+    fn a_blinking_caret_is_the_same_screen_and_another_window_is_not() {
+        let screen = screen_signature(SCREEN).expect("the fixture decodes");
+        assert_eq!(screen.len(), SIGNATURE_CELLS * SIGNATURE_CELLS);
+        let caret = screen_signature(CARET).expect("the fixture decodes");
+        let other = screen_signature(OTHER).expect("the fixture decodes");
+
+        assert!(same_screen(&screen, &screen));
+        assert!(
+            same_screen(&screen, &caret),
+            "a caret must not invalidate an observation"
+        );
+        assert!(!same_screen(&screen, &other));
+    }
+
+    #[test]
+    fn a_broken_frame_has_no_signature_and_never_matches() {
+        assert_eq!(screen_signature(b"not a jpeg"), None);
+        let screen = screen_signature(SCREEN).unwrap();
+        assert!(!same_screen(&screen, &[]));
+        assert!(!same_screen(&[], &[]));
+        // A sharp change over part of the screen is refused even when the
+        // average stays low.
+        let mut patch = screen.clone();
+        for cell in patch.iter_mut().take(SIGNATURE_CELLS * SIGNATURE_CELLS / 8) {
+            *cell = cell.wrapping_add(200);
+        }
+        assert!(!same_screen(&screen, &patch));
+    }
 }
 
 #[cfg(test)]
