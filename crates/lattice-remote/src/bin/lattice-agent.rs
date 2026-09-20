@@ -42,8 +42,9 @@ const RELAY_RECONNECT_CAP: Duration = Duration::from_secs(60);
 // Screen capture and input injection are deliberately local tasks because
 // their OS handles are not Send. Bounding the set keeps one shared machine
 // from multiplying capture, PTY, and file work without limit; the bound is
-// what a small team needs at once, not a one-at-a-time rule.
-const MAX_CONCURRENT_RELAY_SESSIONS: usize = 8;
+// what a small team needs at once, not a one-at-a-time rule. Relayed and
+// direct connections share the same ceiling.
+const MAX_CONCURRENT_SESSIONS: usize = 8;
 const REMOTE_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 // A session with nothing to say still proves it is alive this often. Without
 // it an idle terminal session never writes, so a viewer that vanished without
@@ -176,8 +177,9 @@ Usage: lattice-agent [--bind ADDRESS:PORT] [--relay HOST[:PORT]|WSS_URL] [--iden
                      [--file-root PATH] [--allow-commands] [--terminal] [--json]\n\n\
 Direct mode (default): the safe default listens on 127.0.0.1 only. To receive\n\
 a LAN connection, pass the machine's LAN address explicitly, for example\n\
---bind 192.168.1.20:44900. The agent accepts one successfully paired\n\
-connection, streams the primary display over an encrypted channel, then exits.\n\n\
+--bind 192.168.1.20:44900. The agent accepts pairings for five minutes and\n\
+streams the primary display to each paired viewer over its own encrypted\n\
+channel, then exits once the code expires and the last session has ended.\n\n\
 Relay mode: --relay connects outward to a lattice-relay server and registers\n\
 this machine's permanent nine-digit device ID (kept in --identity, default\n\
 under the user data folder). A viewer then reaches this machine by ID alone;\n\
@@ -3052,7 +3054,7 @@ async fn run_relay(options: &Options) -> String {
             };
             match event {
                 RelayLoopEvent::Control(Some(RelayServerMessage::Invite { channel_id })) => {
-                    if sessions.len() >= MAX_CONCURRENT_RELAY_SESSIONS {
+                    if sessions.len() >= MAX_CONCURRENT_SESSIONS {
                         // The relay's bounded join timer turns an unanswered
                         // invite into a busy result without disturbing any
                         // viewer that is already connected.
@@ -3192,12 +3194,52 @@ async fn main() {
         println!("Lattice Remote is ready ({mode})");
         println!("Address: {listening_address}");
         println!("Pairing code: {}", formatted_code.as_str());
-        println!("The code is valid for one successful connection and is not saved.");
+        println!(
+            "The code lasts five minutes, is not saved, and several viewers may pair with it."
+        );
     }
 
+    // Sessions carry capture and input handles that are not Send, so they run
+    // on a LocalSet exactly like relayed ones. Several viewers may pair with
+    // the same code while it lasts; the Agent stops once it expires and the
+    // last of them has finished.
+    let stop_reason = tokio::task::LocalSet::new()
+        .run_until(run_direct(&options, listener))
+        .await;
+    emit_event(
+        options.json,
+        &AgentEvent::Stopped {
+            reason: stop_reason.clone(),
+        },
+    );
+    if !options.json {
+        eprintln!("{stop_reason}");
+    }
+}
+
+/// Serves direct connections until the pairing code expires, then waits for
+/// the sessions still running. The code lasts five minutes and is not saved,
+/// and several viewers may use it in that window.
+async fn run_direct(options: &Options, listener: TcpListener) -> String {
     let expires_at = Instant::now() + PAIRING_LIFETIME;
     let mut failed_pairings = 0_u32;
-    let stop_reason = loop {
+    let mut sessions: JoinSet<()> = JoinSet::new();
+    let reason = loop {
+        // Finished sessions must not count against the limit.
+        while sessions.try_join_next().is_some() {}
+        if sessions.len() >= MAX_CONCURRENT_SESSIONS {
+            let remaining = expires_at.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break "Pairing code expired after five minutes.".to_string();
+            }
+            // Wait for a slot rather than refusing a viewer outright.
+            tokio::select! {
+                _ = sessions.join_next() => continue,
+                _ = sleep(remaining) => {
+                    break "Pairing code expired after five minutes.".to_string()
+                }
+            }
+        }
         let remaining = expires_at.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break "Pairing code expired after five minutes.".to_string();
@@ -3225,7 +3267,7 @@ async fn main() {
         if !options.json {
             eprintln!("Pairing request from {peer}");
         }
-        let permit = match reserve_pairing(&options) {
+        let permit = match reserve_pairing(options) {
             Ok(permit) => permit,
             Err(detail) => break detail,
         };
@@ -3271,43 +3313,45 @@ async fn main() {
             };
             println!("Paired with {peer}. Starting encrypted {stream_kind} stream.");
         }
-        let outcome = if options.terminal {
-            serve_terminal(
-                secure,
-                options.allow_input,
-                options.allow_commands,
-                options.file_root.clone(),
-                Arc::clone(&options.file_job_permits),
-                Arc::clone(&options.command_permits),
-            )
-            .await
-        } else {
-            serve(
-                secure,
-                options.fps,
-                options.allow_input,
-                options.allow_commands,
-                options.file_root.clone(),
-                Arc::clone(&options.file_job_permits),
-                Arc::clone(&options.command_permits),
-            )
-            .await
-        };
-        break match outcome {
-            Ok(()) => "Remote session completed.".to_string(),
-            Err(error) => format!("Session ended: {error}"),
-        };
+        let session_options = options.clone();
+        sessions.spawn_local(async move {
+            let outcome = if session_options.terminal {
+                serve_terminal(
+                    secure,
+                    session_options.allow_input,
+                    session_options.allow_commands,
+                    session_options.file_root.clone(),
+                    Arc::clone(&session_options.file_job_permits),
+                    Arc::clone(&session_options.command_permits),
+                )
+                .await
+            } else {
+                serve(
+                    secure,
+                    session_options.fps,
+                    session_options.allow_input,
+                    session_options.allow_commands,
+                    session_options.file_root.clone(),
+                    Arc::clone(&session_options.file_job_permits),
+                    Arc::clone(&session_options.command_permits),
+                )
+                .await
+            };
+            emit_event(
+                session_options.json,
+                &AgentEvent::SessionEnded {
+                    reason: match outcome {
+                        Ok(()) => "Remote session completed.".to_string(),
+                        Err(error) => format!("Session ended: {error}"),
+                    },
+                },
+            );
+        });
     };
-
-    emit_event(
-        options.json,
-        &AgentEvent::Stopped {
-            reason: stop_reason.clone(),
-        },
-    );
-    if !options.json {
-        eprintln!("{stop_reason}");
-    }
+    // Whatever stopped new pairings, the viewers already connected keep their
+    // sessions until they end on their own.
+    while sessions.join_next().await.is_some() {}
+    reason
 }
 
 #[cfg(test)]
