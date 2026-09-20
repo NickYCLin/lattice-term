@@ -135,6 +135,18 @@ describe("remote host dialog", () => {
     expect(render(null, null, "linux").markup).not.toContain("允許 cmd／PowerShell 指令");
   });
 
+  it("shows what a fully open share hands over without expanding anything", () => {
+    // These sit outside the collapsed "custom" section on purpose: taking the
+    // default must not hide which folder is shared or what control means.
+    const { markup } = render(null);
+    const beforeDetails = markup.slice(0, markup.indexOf("<details"));
+    const afterDetails = markup.slice(markup.indexOf("</details>"));
+    expect(beforeDetails).toContain("完全開放");
+    for (const shown of ["這會把控制權交出去", "這會開放檔案讀寫", "檔案分享根目錄"]) {
+      expect(afterDetails).toContain(shown);
+    }
+  });
+
   it("hides the relay identity while direct sharing is selected", () => {
     // The nine-digit ID only means anything to a relay, and reading it creates
     // an identity file holding a registration token and a Noise private key.
