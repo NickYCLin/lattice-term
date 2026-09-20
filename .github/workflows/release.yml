@@ -93,6 +93,8 @@ jobs:
       - name: Normalize the generated release files
         if: steps.release.outputs.prs_created == 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git pull --ff-only origin "${{ steps.release-pr.outputs.result }}"
           npm run release:normalize-changelog
@@ -107,6 +109,22 @@ jobs:
           git add -- CHANGELOG.md src-tauri/Cargo.lock
           git commit -m "chore(版本): 正規化版本檔案"
           git push origin "HEAD:${{ steps.release-pr.outputs.result }}"
+          # The release candidate is chosen by reading the PR head back, and
+          # that read can still return the commit this one replaced. Wait for
+          # the push to be the answer, or the candidate verifies a tree whose
+          # version files were never normalized.
+          pushed=$(git rev-parse HEAD)
+          branch="${{ steps.release-pr.outputs.result }}"
+          for attempt in $(seq 1 30); do
+            head=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${branch}" --jq '.[0].head.sha // ""')
+            if [ "$head" = "$pushed" ]; then
+              echo "The Release PR now points at the normalized commit."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The Release PR still reports '${head}' instead of ${pushed}." >&2
+          exit 1
 
       - name: Return to the main snapshot for the release decision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
