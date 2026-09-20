@@ -106,6 +106,18 @@ fn supported_field(field: &Value) -> bool {
             format_ok && enum_ok
         }
         Some("number" | "integer" | "boolean") => true,
+        // A list of choices from a fixed set: every value is still one of the
+        // strings the server named, so accepting it hands over nothing the
+        // person did not see.
+        Some("array") => {
+            let items = &field["items"];
+            items["type"] == "string"
+                && items["enum"].as_array().is_some_and(|values| {
+                    !values.is_empty()
+                        && values.len() <= MAX_ENUM_VALUES
+                        && values.iter().all(Value::is_string)
+                })
+        }
         _ => false,
     }
 }
@@ -202,6 +214,28 @@ fn check_value(name: &str, field: &Value, value: &Value) -> Result<(), String> {
         }
         Some("boolean") if value.is_boolean() => Ok(()),
         Some("boolean") => Err(format!("{label} must be yes or no.")),
+        Some("array") => {
+            let chosen = value
+                .as_array()
+                .ok_or_else(|| format!("{label} must be a list of choices."))?;
+            let allowed = field["items"]["enum"]
+                .as_array()
+                .ok_or_else(|| format!("{label} cannot be answered here."))?;
+            if chosen.iter().any(|pick| !allowed.contains(pick)) {
+                return Err(format!("{label} must be one of the listed choices."));
+            }
+            let mut seen = std::collections::HashSet::new();
+            if !chosen.iter().all(|pick| seen.insert(pick.to_string())) {
+                return Err(format!("{label} lists the same choice twice."));
+            }
+            let count = chosen.len() as u64;
+            if field["minItems"].as_u64().is_some_and(|min| count < min)
+                || field["maxItems"].as_u64().is_some_and(|max| count > max)
+            {
+                return Err(format!("{label} needs a different number of choices."));
+            }
+            Ok(())
+        }
         _ => Err(format!("{label} cannot be answered here.")),
     }
 }
@@ -221,11 +255,52 @@ mod tests {
                     "repo": {"type": "string", "title": "Repository", "maxLength": 100},
                     "branch": {"type": "string", "enum": ["main", "dev"]},
                     "depth": {"type": "integer", "minimum": 1, "maximum": 50},
-                    "force": {"type": "boolean"}
+                    "force": {"type": "boolean"},
+                    "labels": {
+                        "type": "array",
+                        "title": "Labels",
+                        "items": {"type": "string", "enum": ["bug", "chore", "docs"]},
+                        "maxItems": 2
+                    }
                 },
                 "required": ["repo"]
             }
         })
+    }
+
+    #[test]
+    fn a_list_of_choices_accepts_only_what_the_server_listed() {
+        let schema = &form()["requestedSchema"];
+        assert_eq!(kind(&form()), Kind::Form);
+        let accepted = checked_content(
+            schema,
+            &json!({"repo": "lattice", "labels": ["bug", "docs"]}),
+        )
+        .expect("two listed labels are fine");
+        assert_eq!(accepted["labels"], json!(["bug", "docs"]));
+        assert!(checked_content(schema, &json!({"repo": "lattice", "labels": []})).is_ok());
+        for wrong in [
+            json!({"repo": "lattice", "labels": ["bug", "release"]}),
+            json!({"repo": "lattice", "labels": ["bug", "bug"]}),
+            json!({"repo": "lattice", "labels": ["bug", "docs", "chore"]}),
+            json!({"repo": "lattice", "labels": "bug"}),
+        ] {
+            assert!(
+                checked_content(schema, &wrong).is_err(),
+                "must refuse {wrong}"
+            );
+        }
+        // A list of anything else stays declinable rather than guessable.
+        assert_eq!(
+            kind(&json!({
+                "mode": "form",
+                "requestedSchema": {
+                    "type": "object",
+                    "properties": {"files": {"type": "array", "items": {"type": "string"}}}
+                }
+            })),
+            Kind::Unsupported
+        );
     }
 
     #[test]

@@ -19,7 +19,60 @@ const form = JSON.stringify({
   },
 });
 
+const multi = JSON.stringify({
+  mode: "form",
+  serverName: "github",
+  message: "Which labels?",
+  requestedSchema: {
+    type: "object",
+    properties: {
+      labels: {
+        type: "array",
+        title: "Labels",
+        items: { type: "string", enum: ["bug", "chore"], enumNames: ["Bug", "Chore"] },
+        maxItems: 1,
+      },
+    },
+  },
+});
+
 describe("MCP elicitation", () => {
+  it("draws a list of choices as checkboxes and answers with an array", () => {
+    const request = parseElicitation(multi)!;
+    const field = request.fields[0];
+    expect([field.kind, field.maxItems]).toEqual(["choices", 1]);
+    expect(field.choices.map((choice) => choice.label)).toEqual(["Bug", "Chore"]);
+
+    expect(elicitationAnswer(request.fields, { labels: JSON.stringify(["bug"]) })).toEqual({
+      content: { labels: ["bug"] },
+    });
+    // Nothing chosen is still an answer while the field is optional.
+    expect(elicitationAnswer(request.fields, { labels: "[]" })).toEqual({ content: { labels: [] } });
+    // More than the server allows must not be submittable.
+    expect(elicitationAnswer(request.fields, { labels: JSON.stringify(["bug", "chore"]) })).toEqual({
+      invalid: "labels",
+    });
+
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="zh-TW">
+        <McpElicitation request={request} onAnswer={async () => {}} />
+      </I18nProvider>,
+    );
+    expect(markup.match(/type="checkbox"/g)).toHaveLength(2);
+    expect(markup).toContain("Bug");
+  });
+
+  it("leaves a list of free text declinable", () => {
+    expect(
+      parseElicitation(
+        JSON.stringify({
+          mode: "form",
+          requestedSchema: { type: "object", properties: { files: { type: "array", items: { type: "string" } } } },
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("reads a form into typed fields", () => {
     const request = parseElicitation(form)!;
     expect(request.serverName).toBe("github");

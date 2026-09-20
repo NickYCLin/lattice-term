@@ -8,7 +8,7 @@ import { useI18n } from "../../i18n/context";
  * again; this only draws the fields and keeps the values typed.
  */
 
-type FieldKind = "string" | "number" | "integer" | "boolean";
+type FieldKind = "string" | "number" | "integer" | "boolean" | "choices";
 
 export interface ElicitationField {
   name: string;
@@ -19,6 +19,9 @@ export interface ElicitationField {
   choices: { value: string; label: string }[];
   format: string | null;
   defaultValue: unknown;
+  /** Multi-select only, straight from the schema. */
+  minItems: number | null;
+  maxItems: number | null;
 }
 
 export interface ElicitationRequest {
@@ -65,12 +68,25 @@ export function parseElicitation(input: string): ElicitationRequest | null {
   const fields: ElicitationField[] = [];
   for (const [name, raw] of Object.entries(properties)) {
     const field = object(raw);
-    const kind = field?.type;
-    if (!field || (kind !== "string" && kind !== "number" && kind !== "integer" && kind !== "boolean")) {
-      return null;
-    }
-    const values = Array.isArray(field.enum) ? field.enum.filter((v): v is string => typeof v === "string") : [];
-    const names = Array.isArray(field.enumNames) ? field.enumNames : [];
+    const rawKind = field?.type;
+    // A list of choices from a fixed set is the one array shape the desktop
+    // can check again, so it is the one the window draws.
+    const items = rawKind === "array" ? object(field?.items) : null;
+    const kind: FieldKind | null =
+      rawKind === "string" || rawKind === "number" || rawKind === "integer" || rawKind === "boolean"
+        ? rawKind
+        : items?.type === "string" && Array.isArray(items.enum)
+          ? "choices"
+          : null;
+    if (!field || !kind) return null;
+    const source = kind === "choices" ? (items as Record<string, unknown>) : field;
+    const values = Array.isArray(source.enum)
+      ? source.enum.filter((v): v is string => typeof v === "string")
+      : [];
+    if (kind === "choices" && values.length === 0) return null;
+    const names = Array.isArray(source.enumNames) ? source.enumNames : [];
+    const count = (key: string) =>
+      typeof field[key] === "number" && Number.isInteger(field[key]) ? (field[key] as number) : null;
     fields.push({
       name,
       kind,
@@ -83,6 +99,8 @@ export function parseElicitation(input: string): ElicitationRequest | null {
       })),
       format: typeof field.format === "string" ? field.format : null,
       defaultValue: field.default,
+      minItems: kind === "choices" ? count("minItems") : null,
+      maxItems: kind === "choices" ? count("maxItems") : null,
     });
   }
   return fields.length ? { mode: "form", serverName, message, url: null, fields } : null;
@@ -94,6 +112,12 @@ function initialDraft(fields: ElicitationField[]): Record<string, string> {
     fields.map((field) => {
       const value = field.defaultValue;
       if (field.kind === "boolean") return [field.name, value === true ? "true" : "false"];
+      if (field.kind === "choices") {
+        const picked = Array.isArray(value)
+          ? value.filter((entry): entry is string => typeof entry === "string")
+          : [];
+        return [field.name, JSON.stringify(picked.filter((entry) => field.choices.some((c) => c.value === entry)))];
+      }
       return [field.name, typeof value === "string" || typeof value === "number" ? String(value) : ""];
     }),
   );
@@ -113,6 +137,14 @@ export function elicitationAnswer(
       content[field.name] = draft[field.name] === "true";
       continue;
     }
+    if (field.kind === "choices") {
+      const picked = decodeChoices(draft[field.name]);
+      if (field.required && picked.length === 0) return { invalid: field.name };
+      if (field.minItems !== null && picked.length < field.minItems) return { invalid: field.name };
+      if (field.maxItems !== null && picked.length > field.maxItems) return { invalid: field.name };
+      content[field.name] = picked;
+      continue;
+    }
     if (!text) {
       if (field.required) return { invalid: field.name };
       continue;
@@ -128,6 +160,17 @@ export function elicitationAnswer(
     content[field.name] = number;
   }
   return { content };
+}
+
+/** The picks a multi-select draft holds; anything unreadable counts as none. */
+export function decodeChoices(draft: string | undefined): string[] {
+  if (!draft) return [];
+  try {
+    const parsed = JSON.parse(draft);
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 const inputType = (field: ElicitationField) =>
@@ -239,6 +282,29 @@ export function McpElicitation({
                 setDraft((current) => ({ ...current, [field.name]: String(event.target.checked) }))
               }
             />
+          ) : field.kind === "choices" ? (
+            <span className="chat-elicitation__choices">
+              {field.choices.map((choice) => {
+                const picked = decodeChoices(draft[field.name]);
+                return (
+                  <label key={choice.value} className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(choice.value)}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setDraft((current) => {
+                          const chosen = decodeChoices(current[field.name]).filter((entry) => entry !== choice.value);
+                          if (event.target.checked) chosen.push(choice.value);
+                          return { ...current, [field.name]: JSON.stringify(chosen) };
+                        })
+                      }
+                    />
+                    {choice.label}
+                  </label>
+                );
+              })}
+            </span>
           ) : field.choices.length > 0 ? (
             <select
               className="select"

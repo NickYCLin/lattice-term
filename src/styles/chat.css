@@ -1280,6 +1280,19 @@ button.chat-chip:hover {
   font-size: var(--text-2xs);
 }
 
+.chat-elicitation__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.chat-elicitation__choices .checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 400;
+}
+
 .chat-elicitation__url {
   display: grid;
   gap: var(--space-1, 0.25rem);
