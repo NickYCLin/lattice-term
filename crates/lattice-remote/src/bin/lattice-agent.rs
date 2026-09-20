@@ -9,9 +9,9 @@ use lattice_remote::{
     host_files::{HostUpload, SharedFiles, UploadFinishOutcome},
     host_input::InputInjector,
     host_text::{self, HostTextUpload, TextSaveOutcome},
-    normalize_pairing_code, FrameFormat, RemoteFileRequest, RemoteFileResponse, RemoteHello,
-    RemoteMessage, SecureConnection, SecureWriter, Transport, DEFAULT_PORT, FILE_CHUNK_SIZE,
-    MAX_FILE_ERROR_BYTES, MAX_TEXT_FILE_BYTES, PROTOCOL_VERSION,
+    normalize_pairing_code, FrameFormat, RemoteError, RemoteFileRequest, RemoteFileResponse,
+    RemoteHello, RemoteMessage, SecureConnection, SecureReader, SecureWriter, Transport,
+    DEFAULT_PORT, FILE_CHUNK_SIZE, MAX_FILE_ERROR_BYTES, MAX_TEXT_FILE_BYTES, PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -45,6 +45,18 @@ const RELAY_RECONNECT_CAP: Duration = Duration::from_secs(60);
 // what a small team needs at once, not a one-at-a-time rule.
 const MAX_CONCURRENT_RELAY_SESSIONS: usize = 8;
 const REMOTE_SEND_TIMEOUT: Duration = Duration::from_secs(10);
+// A session with nothing to say still proves it is alive this often. Without
+// it an idle terminal session never writes, so a viewer that vanished without
+// closing its socket would hold its slot, its PTY and the relay's carrier for
+// as long as the Agent runs.
+const SESSION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+// Four missed heartbeats end the session. The deadline is armed only once the
+// viewer has sent one itself, so a viewer too old to send them is never cut
+// off for being quiet.
+const SESSION_IDLE_LIMIT: Duration = Duration::from_secs(60);
+// Answering an invite starts with reaching the relay again; the rest of the
+// handshake is already bounded the same way.
+const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_INPUT_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 // File work is authorised by the viewer, but still untrusted. Keep blocking
 // pool demand bounded across the Agent lifetime and descriptors bounded per
@@ -466,6 +478,48 @@ async fn abort_and_wait<T>(task: tokio::task::JoinHandle<T>) {
 async fn stop_and_wait<T>(stop: watch::Sender<bool>, task: tokio::task::JoinHandle<T>) {
     stop.send_replace(true);
     let _ = task.await;
+}
+
+/// Keeps a heartbeat on the outgoing queue for as long as the session lives.
+/// A full queue already proves the link is moving, so a skipped beat is fine.
+fn spawn_session_heartbeat(outgoing: mpsc::Sender<RemoteMessage>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            sleep(SESSION_HEARTBEAT_INTERVAL).await;
+            match outgoing.try_send(RemoteMessage::KeepAlive) {
+                Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => {}
+                Err(mpsc::error::TrySendError::Closed(_)) => break,
+            }
+        }
+    })
+}
+
+/// How long a quiet viewer may stay. `None` waits forever, which is what a
+/// viewer that never heartbeats gets: it has no way to prove it is still there.
+fn session_idle_limit(peer_heartbeats: bool) -> Option<Duration> {
+    peer_heartbeats.then_some(SESSION_IDLE_LIMIT)
+}
+
+/// Reads the next message, giving up once the viewer has gone quiet for longer
+/// than its own heartbeats allow. `peer_heartbeats` stays false for a viewer
+/// that never sends one, and then the read waits as it always did.
+async fn receive_before_idle<S>(
+    reader: &mut SecureReader<S>,
+    peer_heartbeats: bool,
+) -> Result<RemoteMessage, RemoteError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    let Some(limit) = session_idle_limit(peer_heartbeats) else {
+        return reader.receive().await;
+    };
+    match timeout(limit, reader.receive()).await {
+        Ok(result) => result,
+        Err(_) => Err(RemoteError::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "The viewer stopped answering.",
+        ))),
+    }
 }
 
 async fn send_remote_message<S>(
@@ -2185,14 +2239,16 @@ where
     let mut command_failed_rx = command_handler.subscribe_failures();
     let (receiver_stop_tx, mut receiver_stop_rx) = watch::channel(false);
     let chat_outgoing = outgoing.clone();
+    let heartbeat = spawn_session_heartbeat(outgoing.clone());
     let receiver = tokio::spawn(async move {
+        let mut peer_heartbeats = false;
         loop {
             let message = tokio::select! {
                 biased;
                 _ = receiver_stop_rx.changed() => break,
                 _ = file_failed_rx.changed() => break,
                 _ = command_failed_rx.changed() => break,
-                message = reader.receive() => message,
+                message = receive_before_idle(&mut reader, peer_heartbeats) => message,
             };
             match message {
                 Ok(RemoteMessage::Input(input)) => {
@@ -2245,6 +2301,8 @@ where
                     }
                 }
                 Ok(RemoteMessage::Close(_)) | Err(_) => break,
+                // A viewer that heartbeats may be held to the idle deadline.
+                Ok(RemoteMessage::KeepAlive) => peer_heartbeats = true,
                 Ok(_) => {}
             }
         }
@@ -2292,6 +2350,7 @@ where
     // Cooperatively stop and await the receiver so its bounded file shutdown
     // and input-sender drop run even when capture or the writer failed first.
     stop_and_wait(receiver_stop_tx, receiver).await;
+    heartbeat.abort();
     drop(outgoing);
     abort_and_wait(writer).await;
     if let Some(handle) = input_thread {
@@ -2574,13 +2633,15 @@ where
         FileRequestHandler::new(shared_files, outgoing.clone(), file_job_permits);
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
     let mut command_failed_rx = command_handler.subscribe_failures();
+    let heartbeat = spawn_session_heartbeat(outgoing.clone());
+    let mut peer_heartbeats = false;
     loop {
         let message = tokio::select! {
             biased;
             _ = pump_ended_rx.changed() => break,
             _ = file_failed_rx.changed() => break,
                 _ = command_failed_rx.changed() => break,
-            message = reader.receive() => message,
+            message = receive_before_idle(&mut reader, peer_heartbeats) => message,
         };
         match message {
             Ok(RemoteMessage::TerminalInput { bytes }) => {
@@ -2643,9 +2704,12 @@ where
                 }
             }
             Ok(RemoteMessage::Close(_)) | Err(_) => break,
+            // A viewer that heartbeats may be held to the idle deadline.
+            Ok(RemoteMessage::KeepAlive) => peer_heartbeats = true,
             Ok(_) => {}
         }
     }
+    heartbeat.abort();
 
     command_handler.shutdown().await;
     file_handler.shutdown().await;
@@ -2686,9 +2750,14 @@ async fn run_relay_session(
     identity: DeviceIdentity,
     options: Options,
 ) -> SessionOutcome {
-    let mut stream = match Transport::connect(&relay_endpoint).await {
-        Ok(stream) => stream,
-        Err(error) => return SessionOutcome::Failed(format!("Could not reach the relay: {error}")),
+    // Reaching the relay has to be bounded too: a dial that never completes
+    // would hold one of the Agent's session slots for as long as it runs.
+    let mut stream = match timeout(RELAY_DIAL_TIMEOUT, Transport::connect(&relay_endpoint)).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(error)) => {
+            return SessionOutcome::Failed(format!("Could not reach the relay: {error}"))
+        }
+        Err(_) => return SessionOutcome::Failed("Could not reach the relay in time.".to_string()),
     };
     if write_client_message(
         &mut stream,
@@ -4441,5 +4510,31 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(read_pairing_code_file_zeroizing(&path).is_err());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn only_a_viewer_that_heartbeats_can_be_dropped_for_being_quiet() {
+        assert_eq!(session_idle_limit(true), Some(SESSION_IDLE_LIMIT));
+        assert_eq!(session_idle_limit(false), None);
+        assert!(SESSION_IDLE_LIMIT >= SESSION_HEARTBEAT_INTERVAL * 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_session_heartbeat_keeps_beating_and_stops_with_the_session() {
+        let (tx, mut rx) = mpsc::channel::<RemoteMessage>(4);
+        let heartbeat = spawn_session_heartbeat(tx.clone());
+        tokio::time::sleep(SESSION_HEARTBEAT_INTERVAL * 2 + Duration::from_secs(1)).await;
+        assert!(matches!(rx.try_recv(), Ok(RemoteMessage::KeepAlive)));
+        assert!(matches!(rx.try_recv(), Ok(RemoteMessage::KeepAlive)));
+        // A queue nobody drains must not pile up beats or end the session.
+        for _ in 0..4 {
+            let _ = tx.try_send(RemoteMessage::KeepAlive);
+        }
+        tokio::time::sleep(SESSION_HEARTBEAT_INTERVAL * 2).await;
+        assert!(!heartbeat.is_finished());
+        drop(tx);
+        drop(rx);
+        tokio::time::sleep(SESSION_HEARTBEAT_INTERVAL * 2).await;
+        assert!(heartbeat.is_finished());
     }
 }

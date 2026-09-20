@@ -47,6 +47,10 @@ enigo = { version = "0.6", optional = true }
 portable-pty = { version = "0.9", optional = true }
 libc = "0.2"
 
+[dev-dependencies]
+# Paused-clock tests keep heartbeat and idle-timeout checks instant.
+tokio = { version = "1.53.1", features = ["test-util"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 

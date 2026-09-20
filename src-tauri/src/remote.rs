@@ -37,6 +37,15 @@ static NEXT_RESERVATION: AtomicU64 = AtomicU64::new(1);
 const MAX_REMOTE_SESSIONS: usize = 32;
 const REMOTE_TERMINAL_TAIL_BYTES: usize = 256 * 1024;
 const REMOTE_CLOSE_SEND_TIMEOUT: Duration = Duration::from_millis(250);
+// A session that has nothing to send still proves it is alive this often, and
+// gives up on a host that has gone quiet for four beats. Without both, a host
+// that vanished without closing its socket would hold this session, its slot
+// and the relay's carrier until the person disconnects by hand.
+const REMOTE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const REMOTE_IDLE_LIMIT: Duration = Duration::from_secs(60);
+// A half-open socket must fail the writer instead of parking it forever: the
+// supervisor watches the writer and the reader to retire the session.
+const REMOTE_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -769,6 +778,26 @@ fn remote_task_reason(
 /// Owns both encrypted halves and gives every shutdown path exactly one place
 /// that aborts and awaits them. `JoinHandle` completion is sticky, so a writer
 /// failure wakes this supervisor even when the reader has no incoming bytes.
+/// Keeps a heartbeat on the outbound queue while the session lives. A full
+/// queue already proves the link is moving, so a skipped beat is fine.
+fn spawn_remote_heartbeat(outbound: mpsc::Sender<RemoteMessage>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(REMOTE_HEARTBEAT_INTERVAL).await;
+            match outbound.try_send(RemoteMessage::KeepAlive) {
+                Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => {}
+                Err(mpsc::error::TrySendError::Closed(_)) => break,
+            }
+        }
+    })
+}
+
+/// How long a quiet host may stay. `None` waits forever, which is what a host
+/// that never heartbeats gets: it has no way to prove it is still there.
+fn remote_idle_limit(host_heartbeats: bool) -> Option<Duration> {
+    host_heartbeats.then_some(REMOTE_IDLE_LIMIT)
+}
+
 async fn supervise_remote_tasks(
     mut reader: JoinHandle<String>,
     mut writer: JoinHandle<String>,
@@ -1170,11 +1199,16 @@ pub async fn connect(
             let Some(message) = outbound_rx.recv().await else {
                 break "The local remote writer was closed.".to_string();
             };
-            if let Err(error) = writer_half.send(&message).await {
-                break format!("The remote writer failed: {error}");
+            match timeout(REMOTE_WRITE_TIMEOUT, writer_half.send(&message)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => break format!("The remote writer failed: {error}"),
+                Err(_) => break "The remote writer timed out.".to_string(),
             }
         }
     });
+    // A full queue already proves the link is moving, so a skipped beat is
+    // fine; a closed one means the session is already going away.
+    let heartbeat = spawn_remote_heartbeat(outbound.clone());
     let files = session.file_transfer.then(|| {
         Arc::new(RemoteFilesClient::new(
             session.session_id.clone(),
@@ -1193,10 +1227,20 @@ pub async fn connect(
             return "The remote reader was cancelled before registration.".to_string();
         }
         let mut assembler = FrameAssembler::new();
+        // The deadline is armed only once the host has sent a heartbeat, so a
+        // host too old to send them is never cut off for being quiet.
+        let mut host_heartbeats = false;
         loop {
-            match reader.receive().await {
+            let received = match remote_idle_limit(host_heartbeats) {
+                Some(limit) => match timeout(limit, reader.receive()).await {
+                    Ok(result) => result,
+                    Err(_) => break "The host stopped answering.".to_string(),
+                },
+                None => reader.receive().await,
+            };
+            match received {
                 Ok(RemoteMessage::Close(reason)) => break reason,
-                Ok(RemoteMessage::KeepAlive) => {}
+                Ok(RemoteMessage::KeepAlive) => host_heartbeats = true,
                 Ok(message @ RemoteMessage::FrameStart(_))
                 | Ok(message @ RemoteMessage::FrameChunk { .. }) => match assembler.push(message) {
                     Ok(Some(frame)) => {
@@ -1288,7 +1332,9 @@ pub async fn connect(
     let supervisor_app = app.clone();
     let (shutdown, shutdown_receiver) = oneshot::channel();
     let supervisor = tokio::spawn(async move {
-        let Some(reason) = supervise_remote_tasks(reader, writer, shutdown_receiver).await else {
+        let outcome = supervise_remote_tasks(reader, writer, shutdown_receiver).await;
+        heartbeat.abort();
+        let Some(reason) = outcome else {
             return;
         };
 
@@ -2384,6 +2430,38 @@ mod tests {
         .expect("writer completion is a natural stop");
         assert_eq!(reason, "writer stopped first");
         assert!(reader_dropped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn only_a_host_that_heartbeats_can_be_dropped_for_being_quiet() {
+        assert_eq!(remote_idle_limit(true), Some(REMOTE_IDLE_LIMIT));
+        assert_eq!(remote_idle_limit(false), None);
+        assert!(REMOTE_IDLE_LIMIT >= REMOTE_HEARTBEAT_INTERVAL * 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_session_heartbeat_keeps_beating_and_stops_with_the_session() {
+        let (outbound, mut outbound_rx) = mpsc::channel::<RemoteMessage>(4);
+        let heartbeat = spawn_remote_heartbeat(outbound.clone());
+        tokio::time::sleep(REMOTE_HEARTBEAT_INTERVAL * 2 + Duration::from_secs(1)).await;
+        assert!(matches!(
+            outbound_rx.try_recv(),
+            Ok(RemoteMessage::KeepAlive)
+        ));
+        assert!(matches!(
+            outbound_rx.try_recv(),
+            Ok(RemoteMessage::KeepAlive)
+        ));
+        // A queue nobody drains must not end the session or pile up beats.
+        for _ in 0..4 {
+            let _ = outbound.try_send(RemoteMessage::KeepAlive);
+        }
+        tokio::time::sleep(REMOTE_HEARTBEAT_INTERVAL * 2).await;
+        assert!(!heartbeat.is_finished());
+        drop(outbound);
+        drop(outbound_rx);
+        tokio::time::sleep(REMOTE_HEARTBEAT_INTERVAL * 2).await;
+        assert!(heartbeat.is_finished());
     }
 
     #[tokio::test]
