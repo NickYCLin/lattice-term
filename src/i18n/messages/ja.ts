@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "ストッキング...",
   "remote.host.keepRunning": "バックグラウンドで共有し続ける",
   "remote.host.allowInput": "相手にこのデバイスの操作を許可する",
+  "remote.host.level.viewHint": "相手は画面を見るだけです。操作もファイルも CLI・Fleet・会話もありません。",
+  "remote.host.level.fullHint": "ペアリング後、相手はキーボードとマウスの操作、この端末の CLI と Fleet の利用、会話の閲覧、下で指定したフォルダのファイルの閲覧と送受信ができます。",
   "remote.host.allowInputHint": "ペアリング後、相手がこのコンピューターのマウスとキーボードを操作できます。閲覧のみにする場合はチェックを外してください。",
   "remote.host.allowInputWarnTitle": "相手に操作権限を渡します",
   "remote.host.allowFiles": "相手にファイルの閲覧と転送を許可する",

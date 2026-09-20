@@ -1766,6 +1766,8 @@ export const zhTW = {
   "remote.host.stopping": "正在停止…",
   "remote.host.keepRunning": "在背景繼續分享",
   "remote.host.allowInput": "允許對方操控這台裝置",
+  "remote.host.level.viewHint": "對方只能看畫面，不能操作，也拿不到檔案、CLI、Fleet 或對話。",
+  "remote.host.level.fullHint": "對方配對成功後可以操作鍵盤滑鼠、使用這台的 CLI 與 Fleet、看對話，也能瀏覽與傳送下面指定目錄的檔案。",
   "remote.host.allowInputHint": "配對成功後，對方可以控制這台電腦的滑鼠與鍵盤；不勾就只能觀看。",
   "remote.host.allowInputWarnTitle": "這會把控制權交出去",
   "remote.host.allowInputWarnBody": "開放操控後，成功配對的檢視端能操作你的桌面。請只提供配對資訊給信任的人；可在設定中撤銷操控權限。",

@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "Parar...",
   "remote.host.keepRunning": "Sigue compartiendo en segundo plano",
   "remote.host.allowInput": "Permitir que el usuario controle este dispositivo",
+  "remote.host.level.viewHint": "La otra parte solo ve la pantalla: sin control, sin archivos, sin CLI, Fleet ni conversaciones.",
+  "remote.host.level.fullHint": "Tras emparejar, la otra parte puede usar el teclado y el ratón, las CLI y Fleet de este equipo, leer conversaciones y explorar y transferir archivos en la carpeta indicada abajo.",
   "remote.host.allowInputHint": "Tras el emparejamiento, el usuario podrá manejar el ratón y el teclado de este equipo. Deja la casilla desmarcada para permitir solo la visualización.",
   "remote.host.allowInputWarnTitle": "Estas manos sobre control",
   "remote.host.allowFiles": "Permitir explorar y transferir archivos",

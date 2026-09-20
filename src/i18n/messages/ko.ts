@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "멈춤",
   "remote.host.keepRunning": "배경에 공유하기",
   "remote.host.allowInput": "상대방이 이 장치를 제어하도록 허용",
+  "remote.host.level.viewHint": "상대는 화면만 봅니다. 조작, 파일, CLI, Fleet, 대화는 제공되지 않습니다.",
+  "remote.host.level.fullHint": "페어링 후 상대는 키보드와 마우스를 조작하고, 이 컴퓨터의 CLI와 Fleet을 사용하며, 대화를 보고, 아래에 지정한 폴더의 파일을 보고 주고받을 수 있습니다.",
   "remote.host.allowInputHint": "페어링 후 상대방이 이 컴퓨터의 마우스와 키보드를 조작할 수 있습니다. 보기만 허용하려면 선택하지 마세요.",
   "remote.host.allowInputWarnTitle": "상대방에게 제어 권한을 부여합니다",
   "remote.host.allowFiles": "상대방의 파일 탐색 및 전송 허용",

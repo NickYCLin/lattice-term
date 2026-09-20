@@ -1671,6 +1671,8 @@ export const messages: Messages = {
   "remote.host.stopping": "正在停止…",
   "remote.host.keepRunning": "在背景继续分享",
   "remote.host.allowInput": "允许对方操控这台设备",
+  "remote.host.level.viewHint": "对方只能看画面，不能操作，也拿不到文件、CLI、Fleet 或对话。",
+  "remote.host.level.fullHint": "对方配对成功后可以操作键盘鼠标、使用这台的 CLI 与 Fleet、看对话，也能浏览与传送下面指定目录的文件。",
   "remote.host.allowInputHint": "配对成功后，对方可以控制这台电脑的鼠标与键盘；不勾就只能观看。",
   "remote.host.allowInputWarnTitle": "这会把控制权交出去",
   "remote.host.allowFiles": "允许对方浏览与发送文件",

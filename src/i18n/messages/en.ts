@@ -1843,6 +1843,8 @@ export const en: Messages = {
   "remote.host.stopping": "Stopping…",
   "remote.host.keepRunning": "Keep sharing in background",
   "remote.host.allowInput": "Let the viewer control this device",
+  "remote.host.level.viewHint": "The other side only sees the screen: no input, no files, no CLI, Fleet or conversations.",
+  "remote.host.level.fullHint": "Once paired, the other side can use the keyboard and mouse, this machine's CLIs and Fleet, read conversations, and browse and transfer files in the folder named below.",
   "remote.host.allowInputHint":
     "Once paired, the viewer can drive this computer's mouse and keyboard. Leave unchecked for view-only.",
   "remote.host.allowInputWarnTitle": "This hands over control",

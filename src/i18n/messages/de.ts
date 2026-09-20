@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "Aufhören...",
   "remote.host.keepRunning": "Teilen im Hintergrund",
   "remote.host.allowInput": "Steuerung dieses Geräts durch den Benutzer erlauben",
+  "remote.host.level.viewHint": "Die Gegenseite sieht nur den Bildschirm: keine Eingabe, keine Dateien, kein CLI, kein Fleet, keine Unterhaltungen.",
+  "remote.host.level.fullHint": "Nach dem Koppeln kann die Gegenseite Tastatur und Maus benutzen, die CLIs und Fleet dieses Rechners nutzen, Unterhaltungen lesen sowie Dateien im unten genannten Ordner durchsuchen und übertragen.",
   "remote.host.allowInputHint": "Nach der Kopplung kann der Benutzer Maus und Tastatur dieses Computers bedienen. Lassen Sie das Kontrollkästchen deaktiviert, um nur die Ansicht zu erlauben.",
   "remote.host.allowInputWarnTitle": "Diese Hände über die Kontrolle",
   "remote.host.allowFiles": "Durchsuchen und Übertragen von Dateien erlauben",

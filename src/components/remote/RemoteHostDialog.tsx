@@ -75,6 +75,22 @@ export function RemoteHostDialog({
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
   const [fileRoot, setFileRoot] = useState(settings.fileRoot);
+  const windowsCommands = platform === "windows";
+  const shared = [allowInput, allowCli, allowFleet, allowChat, allowFiles, ...(windowsCommands ? [allowCommands] : [])];
+  const level = shared.every(Boolean) ? "full" : shared.every((on) => !on) ? "view" : "custom";
+  // One choice sets every switch below; the details stay for anything finer.
+  const applyLevel = (next: "view" | "full") => {
+    const on = next === "full";
+    setAllowInput(on);
+    setAllowCli(on);
+    setAllowChat(on);
+    setAllowFiles(on);
+    setAllowCommands(on);
+    setAllowFleet(on);
+    setFleetRead(on);
+    setFleetControl(on);
+    setFleetLaunch(on);
+  };
   const [submitting, setBusy] = useState(false);
   const busy = submitting || host.configuring === true || removingCredential;
   const usingSavedPairingCode =
@@ -767,6 +783,24 @@ export function RemoteHostDialog({
                 />
               </div>
 
+              <fieldset disabled={busy} className="remote-host-level">
+                <legend>{t("settings.mcpRemote.level")}</legend>
+                {(["view", "full"] as const).map((choice) => (
+                  <label key={choice}>
+                    <input
+                      type="radio"
+                      name="remote-host-level"
+                      checked={level === choice}
+                      onChange={() => applyLevel(choice)}
+                    />
+                    {t(`settings.mcpRemote.level.${choice}`)}
+                  </label>
+                ))}
+                <p className="muted">{t(level === "view" ? "remote.host.level.viewHint" : "remote.host.level.fullHint")}</p>
+              </fieldset>
+
+              <details className="remote-host-advanced" open={level === "custom"}>
+                <summary>{t("settings.mcpRemote.advanced")}</summary>
               <label className="remote-host-toggle">
                 <input
                   type="checkbox"
@@ -841,6 +875,7 @@ export function RemoteHostDialog({
                   </Callout>
                 </>
               )}
+              </details>
             </form>
           )}
         </div>

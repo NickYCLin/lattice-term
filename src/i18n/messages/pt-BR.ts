@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "Parar...",
   "remote.host.keepRunning": "Continuar a partilhar em segundo plano",
   "remote.host.allowInput": "Permitir que o usuário controle este dispositivo",
+  "remote.host.level.viewHint": "O outro lado só vê a tela: sem controle, sem arquivos, sem CLI, Fleet ou conversas.",
+  "remote.host.level.fullHint": "Depois de parear, o outro lado pode usar teclado e mouse, as CLIs e o Fleet desta máquina, ler conversas e navegar e transferir arquivos na pasta indicada abaixo.",
   "remote.host.allowInputHint": "Após o pareamento, o usuário poderá controlar o mouse e o teclado deste computador. Deixe a opção desmarcada para permitir apenas visualização.",
   "remote.host.allowInputWarnTitle": "Esta mão sobre o controle",
   "remote.host.allowFiles": "Permitir a navegação e transferência de arquivos",

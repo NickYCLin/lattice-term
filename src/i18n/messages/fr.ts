@@ -1652,6 +1652,8 @@ export const messages: Messages = {
   "remote.host.stopping": "Arrêter...",
   "remote.host.keepRunning": "Continuer à partager en arrière-plan",
   "remote.host.allowInput": "Autoriser l’utilisateur à contrôler cet appareil",
+  "remote.host.level.viewHint": "L’autre côté ne voit que l’écran : pas de contrôle, pas de fichiers, pas de CLI, de Fleet ni de conversations.",
+  "remote.host.level.fullHint": "Une fois appairé, l’autre côté peut utiliser le clavier et la souris, les CLI et Fleet de cette machine, lire les conversations et parcourir et transférer les fichiers du dossier indiqué ci-dessous.",
   "remote.host.allowInputHint": "Après l’appairage, l’utilisateur peut contrôler la souris et le clavier de cet ordinateur. Laissez cette option décochée pour autoriser uniquement la visualisation.",
   "remote.host.allowInputWarnTitle": "Ces mains sur le contrôle",
   "remote.host.allowFiles": "Autoriser la consultation et le transfert de fichiers",
