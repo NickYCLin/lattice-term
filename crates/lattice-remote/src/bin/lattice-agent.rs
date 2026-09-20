@@ -41,8 +41,9 @@ const RELAY_PING_INTERVAL: Duration = Duration::from_secs(25);
 const RELAY_RECONNECT_CAP: Duration = Duration::from_secs(60);
 // Screen capture and input injection are deliberately local tasks because
 // their OS handles are not Send. Bounding the set keeps one shared machine
-// from multiplying capture, PTY, and file work without limit.
-const MAX_CONCURRENT_RELAY_SESSIONS: usize = 4;
+// from multiplying capture, PTY, and file work without limit; the bound is
+// what a small team needs at once, not a one-at-a-time rule.
+const MAX_CONCURRENT_RELAY_SESSIONS: usize = 8;
 const REMOTE_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_INPUT_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(10);
 // File work is authorised by the viewer, but still untrusted. Keep blocking
