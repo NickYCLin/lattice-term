@@ -272,7 +272,7 @@ it("opens permissions without immediately submitting the newly rendered save act
     expect(host.start).not.toHaveBeenCalled();
     expect(props(find("BUTTON", "儲存設定")!).type).toBe("submit");
     await act(async () => { await props(find("FORM")!).onSubmit!({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }); });
-    expect(host.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ allowChat: true, allowCli: true, allowInput: true, allowCommands: true }));
+    expect(host.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ allowChat: true, allowCli: true, allowInput: true, allowCommands: false }));
     expect(find("FORM")).toBeUndefined();
   } finally { await act(async () => { root.unmount(); }); }
 });

@@ -75,9 +75,15 @@ export function RemoteHostDialog({
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
   const [fileRoot, setFileRoot] = useState(settings.fileRoot);
-  const windowsCommands = platform === "windows";
-  const shared = [allowInput, allowCli, allowFleet, allowChat, allowFiles, ...(windowsCommands ? [allowCommands] : [])];
-  const level = shared.every(Boolean) ? "full" : shared.every((on) => !on) ? "view" : "custom";
+  // Running commands reaches past the shared folder, so it stays a separate
+  // Windows-only switch: "everything" does not silently include it, and it
+  // does not keep the level reading as a custom mix either.
+  const shared = [allowInput, allowCli, allowFleet, allowChat, allowFiles];
+  const level = shared.every(Boolean)
+    ? "full"
+    : shared.every((on) => !on) && !allowCommands
+      ? "view"
+      : "custom";
   // One choice sets every switch below; the details stay for anything finer.
   const applyLevel = (next: "view" | "full") => {
     const on = next === "full";
@@ -85,11 +91,11 @@ export function RemoteHostDialog({
     setAllowCli(on);
     setAllowChat(on);
     setAllowFiles(on);
-    setAllowCommands(on);
     setAllowFleet(on);
     setFleetRead(on);
     setFleetControl(on);
     setFleetLaunch(on);
+    if (!on) setAllowCommands(false);
   };
   const [submitting, setBusy] = useState(false);
   const busy = submitting || host.configuring === true || removingCredential;

@@ -1755,9 +1755,8 @@ export const en: Messages = {
   "remote.connect.rememberCode": "Save the pairing code to {provider} after pairing succeeds",
   "remote.connect.removeSavedCode": "Delete saved pairing code",
   "remote.connect.code": "Agent pairing code",
-  "remote.connect.codeHint":
-    "Enter the case-sensitive password or generated token. Both ends need password-pairing support; enable compatibility mode if the host has not been updated.",
-  "remote.connect.relayCodeHint": "Fixed passwords are case-sensitive. Enable compatibility mode for an old token host. Old eight-digit codes also require existing device trust on this computer. Failed pairing never falls back automatically.",
+  "remote.connect.codeHint": "Enter the case-sensitive password or generated token. Both ends need password-pairing support.",
+  "remote.connect.relayCodeHint": "Fixed passwords are case-sensitive. Failed pairing never falls back automatically.",
   "remote.connect.relayCodeInvalid": "Use 6-64 ASCII letters, digits or symbols without spaces. Legacy mode accepts a 32-character hexadecimal token or eight digits for a trusted device.",
   "remote.connect.legacyUntrusted": "This computer has no trusted key for this legacy device, so an eight-digit code cannot establish its identity. Connect from a computer that previously paired with it. If no trusted record is available, update the host once and pair with a new token.",
   "remote.connect.identityChanged": "This device ID presented a different key from the one previously trusted. The connection was stopped. Check whether the host was rebuilt or its identity changed; do not delete the trust record to bypass this check.",

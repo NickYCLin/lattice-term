@@ -126,8 +126,11 @@ describe("remote host dialog", () => {
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
     expect(windows).toContain("分享 Agent Fleet 工作區");
     expect(windows).toContain("分享 CLI 並允許操作");
-    // A share nobody configured opens everything; "only look" turns it back.
-    expect(checkboxes.every(input => input.includes("checked"))).toBe(true);
+    // A share nobody configured opens everything but running commands, which
+    // reaches past the shared folder and stays a deliberate extra step.
+    const unchecked = checkboxes.filter(input => !input.includes("checked"));
+    expect(unchecked).toHaveLength(1);
+    expect(windows).toContain("允許 cmd／PowerShell 指令");
     expect(windows).toMatch(/<input type="radio" name="remote-host-level" checked=""\/>完全開放/);
     expect(render(null, null, "linux").markup).not.toContain("允許 cmd／PowerShell 指令");
   });

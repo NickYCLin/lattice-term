@@ -7,7 +7,10 @@ export function loadRemoteHostSettings(storage: Storage): RemoteHostStartRequest
   // way the product is meant to be used; the pairing code is what keeps it
   // private. Picking "only look" or single items is remembered from then on,
   // and a configuration saved earlier is read as it was written.
-  const defaults: RemoteHostStartRequest = { bindAddress: "", port: 44900, fps: 5, allowInput: true, allowFiles: true, allowCommands: true, allowChat: true, allowCli: true, fleet: { directory: "", read: true, control: true, launch: true }, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "", useSavedPairingCode: false, rememberPairingCode: false };
+  // cmd and PowerShell sharing only exists on a Windows host; asking for it
+  // anywhere else is refused outright, which would stop sharing from starting
+  // at all. The dialog offers the switch only on Windows for the same reason.
+  const defaults: RemoteHostStartRequest = { bindAddress: "", port: 44900, fps: 5, allowInput: true, allowFiles: true, allowCommands: false, allowChat: true, allowCli: true, fleet: { directory: "", read: true, control: true, launch: true }, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "", useSavedPairingCode: false, rememberPairingCode: false };
   try {
     const value = JSON.parse(storage.getItem(KEY) ?? "null") as Partial<RemoteHostStartRequest> | null;
     if (!value || typeof value !== "object") return defaults;
