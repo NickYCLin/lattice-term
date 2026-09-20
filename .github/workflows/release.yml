@@ -211,14 +211,19 @@ jobs:
         include:
           - name: Linux amd64
             platform: ubuntu-22.04
+            assets: "*_amd64.* *.x86_64.rpm*"
           - name: Linux arm64
             platform: ubuntu-22.04-arm
+            assets: "*_arm64.* *_aarch64.AppImage* *.aarch64.rpm*"
           - name: Windows amd64
             platform: windows-latest
+            assets: "*_x64-setup.exe*"
           - name: macOS arm64
             platform: macos-latest
+            assets: "*_aarch64.dmg *_aarch64.app.tar.gz*"
           - name: macOS Intel
             platform: macos-15-intel
+            assets: "*_x64.dmg *_x64.app.tar.gz*"
 
     runs-on: ${{ matrix.platform }}
 
@@ -275,6 +280,30 @@ jobs:
           fi
           echo "Updater signing key is present."
 
+      # An upload that fails halfway leaves its finished assets behind, and the
+      # next attempt refuses them as duplicates ("already_exists"), which is
+      # what stalled 2026.9.20. Clearing this platform's assets first makes a
+      # rerun or a resumed release start from a clean slate.
+      - name: Clear this platform's earlier assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          ASSET_PATTERNS: ${{ matrix.assets }}
+        run: |
+          set -euo pipefail
+          existing=$(gh release view "$TAG_NAME" --json assets --jq '.assets[].name' || true)
+          for pattern in $ASSET_PATTERNS; do
+            for name in $existing; do
+              case "$name" in
+                $pattern)
+                  echo "Removing leftover $name"
+                  gh release delete-asset "$TAG_NAME" "$name" --yes
+                  ;;
+              esac
+            done
+          done
+
       - name: Build and upload signed installers
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
@@ -291,7 +320,9 @@ jobs:
           prerelease: false
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
-          retryAttempts: 2
+          # A retry re-uploads everything, including what already landed, so
+          # let the job fail and let the cleanup above make the rerun clean.
+          retryAttempts: 0
 
   # The Android APK is built and attached independently: it must never block the
   # desktop release from going live, and it self-skips until the signing secrets
