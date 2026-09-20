@@ -300,6 +300,12 @@ mod tests {
             }
         }
     }
+    // A shared runner starting PowerShell for the first time, with the image's
+    // real-time scanner in front of a brand new script, can take far longer
+    // than a desktop does. Tests that check what a command returns give it
+    // room; the one that checks the timeout itself keeps its own short budget.
+    const TEST_COMMAND_BUDGET: u16 = 90;
+
     fn request(
         id: u32,
         shell: CommandShell,
@@ -329,7 +335,7 @@ mod tests {
             let _ = std::fs::remove_file(&count);
             let (tx, mut rx) = mpsc::channel(32);
             let mut commands = Commands::new(true, tx, Arc::new(Semaphore::new(1)));
-            let request = request(1, shell, command, temp.path(), 15);
+            let request = request(1, shell, command, temp.path(), TEST_COMMAND_BUDGET);
             assert!(commands.handle(request.clone()).await);
             assert!(commands.handle(request.clone()).await);
             let (end, code, out, err) = result(&mut rx).await;
@@ -369,7 +375,7 @@ mod tests {
                     CommandShell::PowerShell,
                     "[Console]::Write(('x' * 600000))",
                     temp.path(),
-                    15
+                    TEST_COMMAND_BUDGET
                 ))
                 .await
         );
