@@ -253,7 +253,11 @@ def check_simulators(args, runtime, devices, reader):
             simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
             stage = "install"
             print(f"{label}: 開機完成，安裝 App", flush=True)
-            simctl("install", device_id, args.app.resolve(), timeout=120)
+            # A shared runner installing onto a device that just finished
+            # booting has taken longer than two minutes; the install itself is
+            # not what this smoke test measures, so give it the same room as
+            # the launch below.
+            simctl("install", device_id, args.app.resolve(), timeout=300)
             stage = "launch"
             print(f"{label}: 安裝完成，等待啟動指令", flush=True)
             # CoreSimulatorBridge reports a 300-second launch/boot retry
