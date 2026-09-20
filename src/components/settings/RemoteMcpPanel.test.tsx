@@ -21,13 +21,15 @@ describe("remote MCP permissions", () => {
     expect(offline.map((profile) => profile.protocol)).toEqual(["sftp", "rdp", "vnc", "lattice"]);
   });
 
-  it.each(["zh-TW", "en"] as const)("explains opt-in and revocation boundaries in %s", (locale) => {
+  it.each(["zh-TW", "en"] as const)("says what an AI reaches and how to take it back in %s", (locale) => {
     const html = renderToStaticMarkup(<I18nProvider locale={locale}><RemoteMcpPanel available /></I18nProvider>);
     expect(html).not.toContain("settings.mcpRemote.");
-    expect(html).toContain(locale === "zh-TW" ? "預設全部關閉" : "Off by default");
-    expect(html).toContain(locale === "zh-TW" ? "安全儲存區開啟已儲存的連線" : "open a saved connection through secure storage");
-    expect(html).toContain(locale === "zh-TW" ? "操作範圍" : "scope grant");
+    // Nothing to fill in: the panel reports what is open and how to stop it.
+    expect(html).toContain(locale === "zh-TW" ? "不需要逐項授權" : "Nothing is granted item by item");
+    expect(html).toContain(locale === "zh-TW" ? "每次仍會跳出來等你同意" : "still waits for you, every time");
+    expect(html).toContain(locale === "zh-TW" ? "目前沒有連線" : "No connection is open");
     expect(html).not.toContain("<form");
+    expect(html).not.toContain("<select");
   });
   it("does not offer browser-only grants", () => {
     const html = renderToStaticMarkup(<I18nProvider locale="en"><RemoteMcpPanel available={false} /></I18nProvider>);

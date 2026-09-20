@@ -47,7 +47,7 @@ const MAX_QUIET_MINUTES: u32 = 120;
 /// One minute on its own channel, the same ceiling a saved plan may ask for.
 const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum Backend {
     Ssh,
@@ -514,6 +514,15 @@ fn same_screen(seen: &[u8], now: &[u8]) -> bool {
     total / seen.len() as u32 <= SIGNATURE_MEAN_TOLERANCE && changed <= SIGNATURE_CHANGED_CELLS
 }
 
+/// After the person uses the remote window themselves, MCP input stays out of
+/// the way this long. The screen is still readable; only the pointer and keys
+/// wait, so the two never fight over one cursor.
+const TAKEOVER_PAUSE: Duration = Duration::from_secs(30);
+/// Revoking a connection by hand keeps it out of MCP's reach this long. Every
+/// live connection is otherwise offered automatically, so without a pause the
+/// next call would simply hand it back.
+const REVOKE_PAUSE: Duration = Duration::from_secs(10 * 60);
+
 #[derive(Default)]
 struct State {
     grants: HashMap<String, Arc<Grant>>,
@@ -523,6 +532,17 @@ struct State {
     /// When each target last handed over a picture.
     captures: HashMap<String, Instant>,
     screen_receipts: HashMap<(String, String), ScreenReceipt>,
+    /// Connections the person put out of MCP's reach for a while, by taking
+    /// the pointer back or by revoking. Keyed by the live connection itself,
+    /// so reconnecting does not clear it.
+    paused: HashMap<(Backend, String), Paused>,
+}
+
+#[derive(Clone, Copy)]
+struct Paused {
+    until: Instant,
+    /// A takeover only pauses the pointer and keys; the screen stays readable.
+    input_only: bool,
 }
 
 pub struct DesktopService {
@@ -719,6 +739,13 @@ impl DesktopService {
     pub fn revoke(&self, target_id: &str) -> Result<(), ServiceError> {
         let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
         if let Some(grant) = state.grants.remove(target_id) {
+            state.paused.insert(
+                (grant.view.backend, grant.session_id.clone()),
+                Paused {
+                    until: Instant::now() + REVOKE_PAUSE,
+                    input_only: false,
+                },
+            );
             grant.revoked.send_replace(true);
             self.stop_retaining(&state, &grant);
         }
@@ -766,7 +793,19 @@ impl DesktopService {
 
     /// A real user input is an explicit takeover. Read-only grants survive;
     /// any grant that included input needs a fresh user authorization.
+    /// The person moved the pointer or typed in the remote window themselves.
+    /// Their input wins: MCP input pauses, and the automatic grant that keeps
+    /// every connection available comes back without it until they stop.
     pub fn take_over_screen(&self, backend: Backend, session_id: &str) -> bool {
+        if let Ok(mut state) = self.state.lock() {
+            state.paused.insert(
+                (backend, session_id.to_string()),
+                Paused {
+                    until: Instant::now() + TAKEOVER_PAUSE,
+                    input_only: true,
+                },
+            );
+        }
         let ids: Vec<_> = self
             .state
             .lock()
@@ -823,6 +862,183 @@ impl DesktopService {
         views
     }
 
+    /// Gives every live connection a grant, so a session that has just been
+    /// opened — or reopened, which changes its identity — is usable at once.
+    async fn grant_live_connections(&self) {
+        let screens = self.screens_present();
+        for (backend, session_id, label, scopes, fleet) in screens {
+            self.ensure_grant(backend, session_id, label, scopes, fleet, Vec::new())
+                .await;
+        }
+        for session in self.ssh.list() {
+            self.ensure_grant(
+                Backend::Ssh,
+                session.session_id,
+                session.host,
+                Scopes {
+                    metrics: true,
+                    // Commands the model writes still wait for the person at
+                    // the desktop, one card per call.
+                    command: true,
+                    ..Scopes::default()
+                },
+                None,
+                Vec::new(),
+            )
+            .await;
+        }
+        for session in self.sftp.list() {
+            let Some(root) = self.sftp_home(&session.session_id).await else {
+                continue;
+            };
+            self.ensure_grant(
+                Backend::Sftp,
+                session.session_id,
+                session.host,
+                Scopes {
+                    list: true,
+                    upload: true,
+                    download: true,
+                    ..Scopes::default()
+                },
+                None,
+                vec![root],
+            )
+            .await;
+        }
+    }
+
+    /// The screens and Fleet workspaces on offer, already split the way a
+    /// grant must be: a screen and a Fleet workspace never share one.
+    #[allow(clippy::type_complexity)]
+    fn screens_present(&self) -> Vec<(Backend, String, String, Scopes, Option<FleetWorkspace>)> {
+        let mut found = Vec::new();
+        let screen_scopes = |controllable: bool| Scopes {
+            screen: true,
+            input: controllable,
+            ..Scopes::default()
+        };
+        for session in self.rdp.list() {
+            let controllable = self.rdp.screen_controllable(&session.session_id);
+            found.push((
+                Backend::Rdp,
+                session.session_id,
+                session.host,
+                screen_scopes(controllable),
+                None,
+            ));
+        }
+        for session in self.vnc.list() {
+            let controllable = self.vnc.screen_controllable(&session.session_id);
+            found.push((
+                Backend::Vnc,
+                session.session_id,
+                session.host,
+                screen_scopes(controllable),
+                None,
+            ));
+        }
+        for session in self.remote.list() {
+            if !session.terminal {
+                let controllable = self.remote.screen_controllable(&session.session_id);
+                found.push((
+                    Backend::Remote,
+                    session.session_id.clone(),
+                    session.host.clone(),
+                    screen_scopes(controllable),
+                    None,
+                ));
+            }
+            if session.fleet {
+                found.push((
+                    Backend::Remote,
+                    session.session_id,
+                    session.host,
+                    Scopes {
+                        fleet_observe: true,
+                        fleet_read: true,
+                        fleet_control: true,
+                        fleet_launch: true,
+                        ..Scopes::default()
+                    },
+                    Some(FleetWorkspace {
+                        platform: FleetPlatform::Unix,
+                        executable: String::new(),
+                        data_directory: String::new(),
+                        directory: "shared".to_string(),
+                    }),
+                ));
+            }
+        }
+        found
+    }
+
+    /// The folder an SFTP session starts in, which is the account's own home.
+    async fn sftp_home(&self, session_id: &str) -> Option<RootRequest> {
+        let session = self.sftp.session(session_id).ok()?;
+        let home = session.canonicalize(".").await.ok()?;
+        Some(RootRequest {
+            id: "files".to_string(),
+            label: home.clone(),
+            remote_path: home,
+            local_path: dirs::download_dir()
+                .or_else(dirs::home_dir)
+                .map(|path| path.to_string_lossy().into_owned()),
+        })
+    }
+
+    /// Grants this connection unless a live grant for it already exists.
+    async fn ensure_grant(
+        &self,
+        backend: Backend,
+        session_id: String,
+        label: String,
+        mut scopes: Scopes,
+        fleet: Option<FleetWorkspace>,
+        roots: Vec<RootRequest>,
+    ) {
+        let wanted_fleet = fleet.is_some();
+        // The lock never spans the grant itself, which talks to the session.
+        let known = {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            state
+                .paused
+                .retain(|_, paused| paused.until > Instant::now());
+            match state.paused.get(&(backend, session_id.clone())) {
+                Some(paused) if paused.input_only => scopes.input = false,
+                Some(_) => return,
+                None => {}
+            }
+            // Compared against the live identity rather than `connected`,
+            // which retires a stale grant as a side effect and would turn a
+            // reconnection into a refusal before the caller ever sees it.
+            let live = self.identity(backend, &session_id);
+            state.grants.values().any(|grant| {
+                grant.session_id == session_id
+                    && grant.view.backend == backend
+                    && grant.fleet.is_some() == wanted_fleet
+                    && grant.view.scopes.input == scopes.input
+                    && live.is_some_and(|identity| identity == grant.identity)
+            })
+        };
+        if known {
+            return;
+        }
+        let _ = self
+            .grant(GrantRequest {
+                session_id,
+                backend,
+                label,
+                scopes,
+                exec_plans: Vec::new(),
+                roots,
+                fleet,
+            })
+            .await;
+    }
+
     fn authorized(&self, operation: &DesktopOperation) -> Result<Arc<Grant>, ServiceError> {
         let id = operation.target_id().ok_or_else(ServiceError::invalid)?;
         let state = self.state.lock().map_err(|_| ServiceError::failed())?;
@@ -848,6 +1064,9 @@ impl DesktopService {
         if client.is_empty() || client.len() > 512 || client.chars().any(char::is_control) {
             return Err(ServiceError::invalid());
         }
+        // Every connection the person opened is available to MCP: they chose
+        // the machine, and asking again per connection only added a step.
+        self.grant_live_connections().await;
         if matches!(operation, DesktopOperation::ListConnections) {
             return Ok(json!({ "connections": self.targets(), "desktopRequired": true }));
         }

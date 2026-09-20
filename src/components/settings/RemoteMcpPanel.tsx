@@ -1,90 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  addExecPlan,
-  clampExecTimeout,
-  execPlanRequests,
-  DEFAULT_EXEC_TIMEOUT_SECONDS,
-  MAX_EXEC_PLANS,
-  MAX_EXEC_TIMEOUT_SECONDS,
-  MIN_EXEC_TIMEOUT_SECONDS,
-  removeExecPlan,
-  type RemoteExecPlan,
-} from "../../app/remoteExecPlans";
-import { loadAuthPref } from "../../app/authPreferences";
 import type { ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
+import { remoteScopesOff, type RemoteScope, type RemoteScopes } from "../../app/mcpRemoteScopes";
 import "./RemoteMcpPanel.css";
 
-import { remoteScopesOff as scopesOff, scopesForLevel, type RemoteBackend as Backend, type RemoteLevel, type RemoteScope as Scope, type RemoteScopes as Scopes } from "../../app/mcpRemoteLevels";
-const screenBackends: Backend[] = ["rdp", "vnc", "remote"];
+type Backend = "ssh" | "sftp" | "rdp" | "vnc" | "remote";
 export interface McpConnectionSession { sessionId: string; profileId: string; host: string; backend: Backend; fleet?: boolean; screen?: boolean }
 
 export function savedProfilesNotConnected(profiles: ConnectionProfile[], sessions: McpConnectionSession[]): ConnectionProfile[] {
   return profiles.filter((profile) => !sessions.some((session) => session.profileId === profile.id));
 }
 
-interface Target { id: string; label: string; backend: string; scopes: Scopes; connected: boolean }
+interface Target { id: string; label: string; backend: string; scopes: RemoteScopes; connected: boolean }
 interface QuietWindow { targetId: string; secondsLeft: number }
 
+/**
+ * What an external AI tool can reach right now. Every connection the person
+ * opens is offered automatically, so this only reports; taking one back means
+ * disconnecting it, or using the remote window yourself to pause input.
+ */
 export function RemoteMcpPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
-  const [sessions, setSessions] = useState<McpConnectionSession[]>([]);
-  const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
   const [quiet, setQuiet] = useState<QuietWindow[]>([]);
-  const [sessionId, setSessionId] = useState("");
-  const [savedProfileId, setSavedProfileId] = useState("");
-  const [label, setLabel] = useState("");
-  const [scopes, setScopes] = useState<Scopes>({ ...scopesOff });
-  const [plans, setPlans] = useState<RemoteExecPlan[]>([]);
-  const [command, setCommand] = useState("");
-  const [commandLabel, setCommandLabel] = useState("");
-  const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_EXEC_TIMEOUT_SECONDS);
-  const [fleetPlatform, setFleetPlatform] = useState<"unix" | "windows">("unix");
-  const [fleetExecutable, setFleetExecutable] = useState("");
-  const [fleetDataDirectory, setFleetDataDirectory] = useState("");
-  const [fleetDirectory, setFleetDirectory] = useState("");
-  const [remoteRoot, setRemoteRoot] = useState("");
-  const [localRoot, setLocalRoot] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [level, setLevel] = useState<RemoteLevel>("full");
-  const [savedProfileLabel, setSavedProfileLabel] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const selected = sessions.find((session) => session.sessionId === sessionId);
-  const savedProfile = profiles.find((profile) => profile.id === savedProfileId);
-  const offlineProfiles = savedProfilesNotConnected(profiles, sessions);
-  const isScreen = !!selected && selected.screen !== false && screenBackends.includes(selected.backend);
-  const isSftp = selected?.backend === "sftp";
-  const fileScope = isSftp;
-  const transferScope = scopes.upload || scopes.download;
-  const levelGrants = selected ? scopesForLevel(selected, level) : [];
-
-  useEffect(() => {
-    if (!isSftp || localRoot) return;
-    void import("@tauri-apps/api/path")
-      .then(({ downloadDir }) => downloadDir())
-      .then((directory) => setLocalRoot((current) => current || directory))
-      .catch(() => {});
-  }, [isSftp, localRoot]);
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [ssh, sftp, screens, saved, next, quietWindows] = await Promise.all([
-      invoke<Omit<McpConnectionSession, "backend">[]>("ssh_sessions"),
-      invoke<Omit<McpConnectionSession, "backend">[]>("sftp_sessions"),
-      invoke<McpConnectionSession[]>("mcp_screen_sessions"),
-      invoke<ConnectionProfile[]>("list_connection_profiles"),
+    const [next, quietWindows] = await Promise.all([
       invoke<Target[]>("mcp_remote_targets"),
       invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
     ]);
-    setSessions([
-      ...ssh.map((s) => ({ ...s, backend: "ssh" as const })),
-      ...sftp.map((s) => ({ ...s, backend: "sftp" as const })),
-      ...screens,
-    ]);
-    setProfiles(saved);
     setTargets(next);
     setQuiet(quietWindows);
   }, [available]);
@@ -97,87 +45,20 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     return () => clearInterval(timer);
   }, [available, refresh, t]);
 
-  const connectSaved = async () => {
-    if (!savedProfile || busy) return;
-    setBusy(true); setError("");
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const auth = savedProfile.protocol === "ssh" ? loadAuthPref(savedProfile.id) : null;
-      const connected = await invoke<McpConnectionSession>("mcp_saved_connection_connect", { request: {
-        profileId: savedProfile.id,
-        sshPrivateKeyPath: auth?.method === "privateKey" ? auth.keyPath : null,
-      } });
-      await refresh();
-      setSessions((current) => current.some((item) => item.sessionId === connected.sessionId)
-        ? current : [...current, connected]);
-      setSessionId(connected.sessionId);
-      setSavedProfileId("");
-      if (!label.trim()) setLabel(savedProfile.name);
-      setSavedProfileLabel(savedProfile.name);
-    } catch (reason) { setError(String(reason)); }
-    finally { setBusy(false); }
-  };
-
-  const grant = async () => {
-    if (!selected || busy) return;
-    setBusy(true); setError("");
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
-        sessionId, backend: selected.backend, label: label.trim(), scopes,
-        fleet: scopes.fleetObserve ? (selected.backend === "remote" ? { platform: fleetPlatform, executable: "", dataDirectory: "", directory: "shared" } : { platform: fleetPlatform, executable: fleetExecutable, dataDirectory: fleetDataDirectory, directory: fleetDirectory }) : null,
-        execPlans: scopes.exec ? execPlanRequests(plans) : [],
-        roots: fileScope ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot, localPath: transferScope ? localRoot : null }] : [],
-      } }));
-      setScopes({ ...scopesOff }); setAcknowledged(false); setPlans([]);
-      setCommand(""); setCommandLabel(""); setTimeoutSeconds(DEFAULT_EXEC_TIMEOUT_SECONDS);
-    } catch (reason) { setError(String(reason)); }
-    finally { setBusy(false); }
-  };
-  const grantLevel = async () => {
-    if (!selected || busy) return;
-    setBusy(true); setError("");
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const name = (savedProfileLabel || selected.host).trim().slice(0, 128) || selected.backend.toUpperCase();
-      for (const levelScopes of levelGrants) {
-        setTargets(await invoke<Target[]>("mcp_remote_grant", { request: {
-          sessionId, backend: selected.backend, label: name, scopes: levelScopes,
-          fleet: levelScopes.fleetObserve ? { platform: "unix", executable: "", dataDirectory: "", directory: "shared" } : null,
-          execPlans: [],
-          roots: isSftp ? [{ id: "files", label: t("settings.mcpRemote.root"), remotePath: remoteRoot.trim(), localPath: levelScopes.upload || levelScopes.download ? localRoot.trim() : null }] : [],
-        } }));
-      }
-    } catch (reason) { setError(String(reason)); }
-    finally { setBusy(false); }
-  };
-  const revoke = async (targetId: string) => {
-    setBusy(true); setError("");
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      setTargets(await invoke<Target[]>("mcp_remote_revoke", { targetId }));
-    } catch (reason) { setError(String(reason)); await refresh().catch(() => {}); }
-    finally { setBusy(false); }
-  };
   const stopQuiet = async (targetId: string) => {
     const { invoke } = await import("@tauri-apps/api/core");
     setQuiet(await invoke<QuietWindow[]>("mcp_remote_quiet_clear", { targetId }));
   };
-  const addPlan = () => {
-    const next = addExecPlan(plans, { label: commandLabel, command, timeoutSeconds });
-    if (next === plans) return;
-    setPlans(next);
-    setCommand(""); setCommandLabel(""); setTimeoutSeconds(DEFAULT_EXEC_TIMEOUT_SECONDS);
-    setAcknowledged(false);
+
+  const pause = async (targetId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setTargets(await invoke<Target[]>("mcp_remote_revoke", { targetId }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
   };
-  const removePlan = (id: string) => {
-    setPlans((current) => removeExecPlan(current, id));
-    setAcknowledged(false);
-  };
-  const canGrant = !!selected && !!label.trim() && Object.values(scopes).some(Boolean) && acknowledged
-    && (!scopes.fleetObserve || selected.backend === "remote" || [fleetExecutable, fleetDataDirectory, fleetDirectory].every((path) => fleetPlatform === "windows" ? /^[A-Za-z]:[\\/].+/.test(path) : path.startsWith("/") && path.length > 1))
-    && (!scopes.input || scopes.screen) && (!scopes.exec || plans.length > 0) && (!(scopes.list || transferScope) || !!remoteRoot.trim()) && (!transferScope || !!localRoot.trim());
-  const canGrantLevel = !!selected && levelGrants.length > 0 && (!isSftp || (!!remoteRoot.trim() && !!localRoot.trim()));
 
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
@@ -185,130 +66,21 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     <div className="mcp-remote__body">
       <p>{t("settings.mcpRemote.boundary")}</p>
       {error && <p role="alert">{error}</p>}
-      {targets.map((target) => <div className="setting" key={target.id}>
-        <div className="setting__text"><strong>{target.label}</strong>
-          <p className="mono">{target.id}</p>
-          <p>{(Object.keys(scopesOff) as Scope[]).filter((scope) => target.scopes[scope]).map((scope) => t(`settings.mcpRemote.scope.${scope}`)).join(" · ")}</p>
-          {!target.connected && <p>{t("settings.mcpRemote.offline")}</p>}
-          {quiet.filter((window) => window.targetId === target.id).map((window) => <p key={window.targetId}>
-            {t("settings.mcpRemote.quietActive", { minutes: Math.max(1, Math.ceil(window.secondsLeft / 60)) })}
-            <button type="button" className="button button--ghost" disabled={busy} onClick={() => void stopQuiet(target.id)}>
-              {t("settings.mcpRemote.quietClear")}</button>
-          </p>)}
-        </div>
-        <button type="button" className="button button--danger" disabled={busy} onClick={() => void revoke(target.id)}>{t("settings.mcpRemote.revoke")}</button>
-      </div>)}
-      {!available ? <p>{t("settings.mcpRemote.desktopOnly")}</p> : sessions.length === 0 && profiles.length === 0 ? <p>{t("settings.mcpRemote.connectFirst")}</p> :
-        <form className="mcp-remote__form" onSubmit={(event) => { event.preventDefault(); if (canGrantLevel) void grantLevel(); }}>
-          <label className="field"><span className="field__label">{t("settings.mcpRemote.connection")}</span>
-            <select className="input" value={savedProfileId ? `saved:${savedProfileId}` : sessionId} disabled={busy} onChange={(e) => {
-              const value = e.target.value;
-              if (value.startsWith("saved:")) { setSavedProfileId(value.slice(6)); setSessionId(""); }
-              else { setSessionId(value); setSavedProfileId(""); }
-              setSavedProfileLabel("");
-              setScopes({ ...scopesOff }); setAcknowledged(false);
-            }}>
-              <option value="">{t("settings.mcpRemote.choose")}</option>
-              {sessions.map((s) => <option key={s.sessionId} value={s.sessionId}>{s.backend.toUpperCase()} · {s.host}</option>)}
-              {offlineProfiles.map((profile) => <option key={profile.id} value={`saved:${profile.id}`}>
-                {(profile.protocol === "lattice" ? "REMOTE" : profile.protocol.toUpperCase())} · {profile.name} · {t("settings.mcpRemote.saved")}
-              </option>)}
-            </select></label>
-          {savedProfile && <div>
-            <p className="setting__description">{t("settings.mcpRemote.savedHint")}</p>
-            <button type="button" className="button" disabled={busy} onClick={() => void connectSaved()}>{t("settings.mcpRemote.connectSaved")}</button>
-          </div>}
-          {selected && <fieldset disabled={busy} className="mcp-remote__level"><legend>{t("settings.mcpRemote.level")}</legend>
-            {(["view", "full"] as const).map((choice) => <label key={choice}>
-              <input type="radio" name="mcp-remote-level" checked={level === choice} onChange={() => setLevel(choice)} /> {t(`settings.mcpRemote.level.${choice}`)}
-            </label>)}
-            <p className="setting__description">{t(`settings.mcpRemote.level.${selected.backend}.${level}`)}</p>
-          </fieldset>}
-          {selected && levelGrants.length === 0 && <p>{t("settings.mcpRemote.level.nothing")}</p>}
-          {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.remoteRoot")}</span>
-            <input className="input mono" value={remoteRoot} disabled={busy} onChange={(e) => { setRemoteRoot(e.target.value); setAcknowledged(false); }} />
-            <span className="setting__description">{t("settings.mcpRemote.pathHint")}</span></label>}
-          {fileScope && <label className="field"><span className="field__label">{t("settings.mcpRemote.localRoot")}</span>
-            <input className="input mono" value={localRoot} disabled={busy} onChange={(e) => { setLocalRoot(e.target.value); setAcknowledged(false); }} /></label>}
-          <div><button type="submit" className="button button--primary" disabled={busy || !canGrantLevel}>{t("settings.mcpRemote.grantLevel")}</button></div>
-          {selected && <details className="mcp-remote__advanced"><summary>{t("settings.mcpRemote.advanced")}</summary>
-          <label className="field"><span className="field__label">{t("settings.mcpRemote.label")}</span>
-            <input className="input" value={label} maxLength={128} disabled={busy} onChange={(e) => setLabel(e.target.value)} autoComplete="off" /></label>
-          <fieldset disabled={busy || !selected} className="mcp-remote__scopes"><legend>{t("settings.mcpRemote.scopes")}</legend>
-            {(Object.keys(scopesOff) as Scope[]).map((scope) => <label key={scope}>
-              <input type="checkbox" checked={scopes[scope]} disabled={
-                selected?.backend === "remote" && scope.startsWith("fleet") ? selected.fleet !== true
-                : scopes.fleetObserve && !scope.startsWith("fleet") ? true
-                : selected?.backend === "remote" ? !isScreen || (scope !== "screen" && scope !== "input")
-                : isScreen ? scope !== "screen" && scope !== "input"
-                : scope === "screen" || scope === "input" ? true
-                : scope.startsWith("fleet") ? selected?.backend !== "ssh"
-                : scopes.fleetObserve ? true
-                : selected?.backend === "sftp" ? scope === "metrics" || scope === "exec" || scope === "command"
-                : scope === "list" || scope === "upload" || scope === "download"}
-                onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setScopes((current) => {
-                    if (scope.startsWith("fleet")) {
-                      if (scope === "fleetObserve" && !enabled) return { ...scopesOff };
-                      return { ...scopesOff, fleetObserve: true, fleetRead: current.fleetRead, fleetControl: current.fleetControl, fleetLaunch: current.fleetLaunch, [scope]: enabled };
-                    }
-                    return { ...current, [scope]: enabled, ...(scope === "input" && enabled ? { screen: true } : {}), ...(scope === "screen" && !enabled ? { input: false } : {}) };
-                  });
-                  setAcknowledged(false);
-                }} /> {t(`settings.mcpRemote.scope.${scope}`)}
-            </label>)}
-          </fieldset>
-          {scopes.fleetObserve && selected?.backend === "remote" && <p>{t("remote.fleet.clientHint")}</p>}
-          {scopes.fleetObserve && selected?.backend === "ssh" && <fieldset disabled={busy} className="mcp-remote__plans">
-            <legend>{t("settings.mcpRemote.fleetTitle")}</legend>
-            <p className="setting__description">{t("settings.mcpRemote.fleetHint")}</p>
-            <label className="field"><span className="field__label">{t("settings.mcpRemote.fleetPlatform")}</span>
-              <select className="input" value={fleetPlatform} onChange={(e) => { setFleetPlatform(e.target.value as "unix" | "windows"); setAcknowledged(false); }}>
-                <option value="unix">Linux / macOS</option><option value="windows">Windows</option>
-              </select>
-            </label>
-            {fleetPlatform === "windows" && <p className="setting__description">{t("settings.mcpRemote.fleetWindowsHint")}</p>}
-            {([
-              ["fleetExecutable", fleetExecutable, setFleetExecutable],
-              ["fleetDataDirectory", fleetDataDirectory, setFleetDataDirectory],
-              ["fleetDirectory", fleetDirectory, setFleetDirectory],
-            ] as const).map(([key, value, update]) => <label className="field" key={key}>
-              <span className="field__label">{t(`settings.mcpRemote.${key}`)}</span>
-              <input className="input" value={value} maxLength={4096} autoComplete="off" onChange={(e) => { update(e.target.value); setAcknowledged(false); }} />
-            </label>)}
-          </fieldset>}
-          {scopes.command && <p className="setting__description">{t("settings.mcpRemote.commandScopeHint")}</p>}
-          {scopes.input && <p className="setting__description">{t("settings.mcpRemote.inputHint")}</p>}
-          {scopes.screen && <p className="setting__description">{t("settings.mcpRemote.screenHint")}</p>}
-          {scopes.exec && <fieldset disabled={busy} className="mcp-remote__plans">
-            <legend>{t("settings.mcpRemote.command")}</legend>
-            <span className="setting__description">{t("settings.mcpRemote.commandHint")}</span>
-            {plans.length > 0 && <ul className="mcp-remote__plan-list">
-              {plans.map((plan) => <li key={plan.id}>
-                <div><strong>{plan.label}</strong> <span className="mono">{plan.id}</span>
-                  <span> · {t("settings.mcpRemote.timeoutValue", { seconds: plan.timeoutSeconds })}</span>
-                  <p className="mono">{plan.command}</p></div>
-                <button type="button" className="button button--ghost" onClick={() => removePlan(plan.id)}>
-                  {t("settings.mcpRemote.removeCommand")}</button>
-              </li>)}
-            </ul>}
-            {plans.length >= MAX_EXEC_PLANS ? <p>{t("settings.mcpRemote.commandLimit", { count: MAX_EXEC_PLANS })}</p> : <>
-              <label className="field"><span className="field__label">{t("settings.mcpRemote.commandLabel")}</span>
-                <input className="input" value={commandLabel} maxLength={128} onChange={(e) => setCommandLabel(e.target.value)} autoComplete="off" /></label>
-              <label className="field"><span className="field__label">{t("settings.mcpRemote.commandText")}</span>
-                <textarea className="input mono" value={command} maxLength={8192} rows={3} onChange={(e) => setCommand(e.target.value)} /></label>
-              <label className="field"><span className="field__label">{t("settings.mcpRemote.timeout")}</span>
-                <input className="input" type="number" min={MIN_EXEC_TIMEOUT_SECONDS} max={MAX_EXEC_TIMEOUT_SECONDS}
-                  value={timeoutSeconds} onChange={(e) => setTimeoutSeconds(clampExecTimeout(Number(e.target.value)))} /></label>
-              <div><button type="button" className="button" disabled={!command.trim() || !commandLabel.trim()} onClick={addPlan}>
-                {t("settings.mcpRemote.addCommand")}</button></div>
-            </>}
-          </fieldset>}
-          <label><input type="checkbox" checked={acknowledged} disabled={busy} onChange={(e) => setAcknowledged(e.target.checked)} /> {t("settings.mcpRemote.acknowledge")}</label>
-          <div><button type="button" className="button" disabled={busy || !canGrant} onClick={() => void grant()}>{t("settings.mcpRemote.grant")}</button></div>
-          </details>}
-        </form>}
+      {!available ? <p>{t("settings.mcpRemote.desktopOnly")}</p>
+        : targets.length === 0 ? <p>{t("settings.mcpRemote.none")}</p>
+          : targets.map((target) => <div className="setting" key={target.id}>
+            <div className="setting__text"><strong>{target.label}</strong>
+              <p className="mono">{target.id}</p>
+              <p>{(Object.keys(remoteScopesOff) as RemoteScope[]).filter((scope) => target.scopes[scope]).map((scope) => t(`settings.mcpRemote.scope.${scope}`)).join(" · ")}</p>
+              {!target.connected && <p>{t("settings.mcpRemote.offline")}</p>}
+              {quiet.filter((window) => window.targetId === target.id).map((window) => <p key={window.targetId}>
+                {t("settings.mcpRemote.quietActive", { minutes: Math.max(1, Math.ceil(window.secondsLeft / 60)) })}
+                <button type="button" className="button button--ghost" disabled={busy} onClick={() => void stopQuiet(target.id)}>
+                  {t("settings.mcpRemote.quietClear")}</button>
+              </p>)}
+            </div>
+            <button type="button" className="button button--danger" disabled={busy} onClick={() => void pause(target.id)}>{t("settings.mcpRemote.pause")}</button>
+          </div>)}
     </div>
   </section>;
 }
