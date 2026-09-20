@@ -445,6 +445,9 @@ async fn spawn_agent(
                 pairing_code_input = Some(code);
             }
             command.arg("--bind").arg(address.to_string());
+            // Sharing from the window is meant to stay open for whoever the
+            // person gives the code to, the way relay sharing already does.
+            command.arg("--multi");
         }
         AgentTarget::Relay {
             address,

@@ -103,6 +103,9 @@ struct Options {
     relay: Option<String>,
     identity_file: Option<PathBuf>,
     terminal: bool,
+    /// Direct mode only: keep accepting viewers while the pairing code lasts
+    /// instead of serving one and exiting.
+    multi: bool,
     /// Shared by every relay session so blocked filesystem calls cannot
     /// accumulate across reconnects.
     file_job_permits: Arc<Semaphore>,
@@ -174,12 +177,13 @@ fn help() -> &'static str {
 Usage: lattice-agent [--bind ADDRESS:PORT] [--relay HOST[:PORT]|WSS_URL] [--identity FILE]\n\
                      [--pair-code CODE|--pair-code-file FILE|--pair-code-stdin]\n\
                      [--fps 1-10] [--allow-input]\n\
-                     [--file-root PATH] [--allow-commands] [--terminal] [--json]\n\n\
+                     [--file-root PATH] [--allow-commands] [--terminal]\n\
+                     [--multi] [--json]\n\n\
 Direct mode (default): the safe default listens on 127.0.0.1 only. To receive\n\
 a LAN connection, pass the machine's LAN address explicitly, for example\n\
---bind 192.168.1.20:44900. The agent accepts pairings for five minutes and\n\
-streams the primary display to each paired viewer over its own encrypted\n\
-channel, then exits once the code expires and the last session has ended.\n\n\
+--bind 192.168.1.20:44900. The agent serves one paired viewer and exits;\n\
+--multi keeps it accepting viewers, each with its own encrypted channel,\n\
+until the five-minute code expires and the last session has ended.\n\n\
 Relay mode: --relay connects outward to a lattice-relay server and registers\n\
 this machine's permanent nine-digit device ID (kept in --identity, default\n\
 under the user data folder). A viewer then reaches this machine by ID alone;\n\
@@ -262,6 +266,7 @@ fn parse_options() -> Result<Options, String> {
     let mut relay = None;
     let mut identity_file = None;
     let mut terminal = false;
+    let mut multi = false;
     let mut arguments = env::args().skip(1);
 
     while let Some(argument) = arguments.next() {
@@ -326,6 +331,7 @@ fn parse_options() -> Result<Options, String> {
                 allow_commands = true;
             }
             "--terminal" => terminal = true,
+            "--multi" => multi = true,
             "--file-root" => {
                 let path = PathBuf::from(
                     arguments
@@ -358,6 +364,7 @@ fn parse_options() -> Result<Options, String> {
         relay,
         identity_file,
         terminal,
+        multi,
         file_job_permits: Arc::new(Semaphore::new(FILE_JOB_LIMIT)),
         command_permits: Arc::new(Semaphore::new(2)),
     })
@@ -3217,9 +3224,9 @@ async fn main() {
     }
 }
 
-/// Serves direct connections until the pairing code expires, then waits for
-/// the sessions still running. The code lasts five minutes and is not saved,
-/// and several viewers may use it in that window.
+/// Serves direct connections. By default one paired viewer is served and the
+/// Agent stops; with `--multi` the code keeps accepting viewers until it
+/// expires, and the Agent then waits for the sessions still running.
 async fn run_direct(options: &Options, listener: TcpListener) -> String {
     let expires_at = Instant::now() + PAIRING_LIFETIME;
     let mut failed_pairings = 0_u32;
@@ -3347,6 +3354,11 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
                 },
             );
         });
+        if !options.multi {
+            // One viewer is the default: serve it, then stop listening.
+            while sessions.join_next().await.is_some() {}
+            break "Remote session completed.".to_string();
+        }
     };
     // Whatever stopped new pairings, the viewers already connected keep their
     // sessions until they end on their own.
