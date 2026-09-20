@@ -3217,7 +3217,9 @@ async fn main() {
                 .map(|path| path.display().to_string()),
             device_id: None,
             relay: None,
-            persistent: false,
+            // With --multi the same code keeps letting viewers in until it
+            // expires, so the window must go on showing it.
+            persistent: options.multi,
         },
     );
     if !options.json {
@@ -3349,6 +3351,7 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
             println!("Paired with {peer}. Starting encrypted {stream_kind} stream.");
         }
         let session_options = options.clone();
+        let (ended_tx, ended_rx) = tokio::sync::oneshot::channel();
         sessions.spawn_local(async move {
             let outcome = if session_options.terminal {
                 serve_terminal(
@@ -3372,20 +3375,20 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
                 )
                 .await
             };
-            emit_event(
-                session_options.json,
-                &AgentEvent::SessionEnded {
-                    reason: match outcome {
-                        Ok(()) => "Remote session completed.".to_string(),
-                        Err(error) => format!("Session ended: {error}"),
-                    },
-                },
-            );
+            let reason = match outcome {
+                Ok(()) => "Remote session completed.".to_string(),
+                Err(error) => format!("Session ended: {error}"),
+            };
+            let _ = ended_tx.send(reason.clone());
+            emit_event(session_options.json, &AgentEvent::SessionEnded { reason });
         });
         if !options.multi {
-            // One viewer is the default: serve it, then stop listening.
+            // One viewer is the default: serve it, then stop listening, and
+            // stop for the reason that session actually ended with.
             while sessions.join_next().await.is_some() {}
-            break "Remote session completed.".to_string();
+            break ended_rx
+                .await
+                .unwrap_or_else(|_| "Remote session completed.".to_string());
         }
     };
     // Whatever stopped new pairings, the viewers already connected keep their

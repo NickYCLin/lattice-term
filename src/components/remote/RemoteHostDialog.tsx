@@ -831,12 +831,6 @@ export function RemoteHostDialog({
                 <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />
                 <span><strong>{t("remote.commands.allow")}</strong><small>{t("remote.commands.allowHint")}</small></span>
               </label>}
-              {allowInput && (
-                <Callout tone="warn" title={t("remote.host.allowInputWarnTitle")}>
-                  {t("remote.host.allowInputWarnBody")}
-                </Callout>
-              )}
-
               <label className="remote-host-toggle">
                 <input
                   type="checkbox"
@@ -849,6 +843,16 @@ export function RemoteHostDialog({
                   <small>{t("remote.host.allowFilesHint")}</small>
                 </span>
               </label>
+              </details>
+
+              {/* What is being handed over, and where from, belongs next to
+                  the choice itself: a collapsed section would hide the folder
+                  and the warnings from anyone who takes the default. */}
+              {allowInput && (
+                <Callout tone="warn" title={t("remote.host.allowInputWarnTitle")}>
+                  {t("remote.host.allowInputWarnBody")}
+                </Callout>
+              )}
 
               {allowFiles && (
                 <>
@@ -875,7 +879,6 @@ export function RemoteHostDialog({
                   </Callout>
                 </>
               )}
-              </details>
             </form>
           )}
         </div>

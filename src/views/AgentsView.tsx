@@ -1618,8 +1618,10 @@ export function AgentsView({
                       <select
                         className="select"
                         value={mcpAccessOf(sharedWithMcp.get(session.sessionId))}
-                        disabled={daemon.status.mcpNeedsRestart
-                          || (!sharedWithMcp.has(session.sessionId) && !daemon.status.mcpOutputScopes)}
+                        // An old background service cannot take new shares,
+                        // but an existing one must stay revocable.
+                        disabled={!sharedWithMcp.has(session.sessionId)
+                          && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes)}
                         onChange={(event) =>
                           setMcpAccess(session.sessionId, event.currentTarget.value as McpAccess)
                         }

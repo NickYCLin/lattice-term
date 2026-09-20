@@ -699,15 +699,24 @@ where
 {
     let (mut viewer_read, mut viewer_write) = tokio::io::split(viewer);
     let (mut agent_read, mut agent_write) = tokio::io::split(agent);
+    // One clock for the channel, not one per direction: a viewer that only
+    // watches sends nothing for minutes, and cutting it off while frames are
+    // still flowing the other way would end a working session.
+    let activity = std::sync::Mutex::new(tokio::time::Instant::now());
     // Both directions run together: one of them blocking on a write must
     // never stop the other from being read.
     tokio::try_join!(
-        copy_until_idle(&mut viewer_read, &mut agent_write, idle),
-        copy_until_idle(&mut agent_read, &mut viewer_write, idle),
+        copy_until_idle(&mut viewer_read, &mut agent_write, idle, &activity),
+        copy_until_idle(&mut agent_read, &mut viewer_write, idle, &activity),
     )
 }
 
-async fn copy_until_idle<R, W>(from: &mut R, to: &mut W, idle: Duration) -> std::io::Result<u64>
+async fn copy_until_idle<R, W>(
+    from: &mut R,
+    to: &mut W,
+    idle: Duration,
+    activity: &std::sync::Mutex<tokio::time::Instant>,
+) -> std::io::Result<u64>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -715,7 +724,21 @@ where
     let mut buffer = vec![0u8; LINK_BUFFER_BYTES];
     let mut carried = 0u64;
     loop {
-        let count = idle_error(timeout(idle, from.read(&mut buffer)).await)??;
+        let count = match timeout(idle, from.read(&mut buffer)).await {
+            Ok(result) => result?,
+            Err(_) => {
+                // Silence here is only the end of the channel when the other
+                // direction has been silent just as long.
+                let last = activity
+                    .lock()
+                    .map(|at| *at)
+                    .unwrap_or_else(|_| tokio::time::Instant::now());
+                if last.elapsed() < idle {
+                    continue;
+                }
+                return Err(idle_error());
+            }
+        };
         if count == 0 {
             let _ = to.shutdown().await;
             return Ok(carried);
@@ -724,17 +747,18 @@ where
         // A WebSocket carrier only puts a frame on the wire when it is
         // flushed; without this the handshake would sit in the sink.
         to.flush().await?;
+        if let Ok(mut at) = activity.lock() {
+            *at = tokio::time::Instant::now();
+        }
         carried += count as u64;
     }
 }
 
-fn idle_error<T>(result: Result<T, tokio::time::error::Elapsed>) -> std::io::Result<T> {
-    result.map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "neither side sent anything before the idle limit",
-        )
-    })
+fn idle_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "neither side sent anything before the idle limit",
+    )
 }
 
 async fn run_connection(
@@ -1413,6 +1437,33 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn one_quiet_direction_does_not_end_a_channel_that_is_still_carrying() {
+        let (mut viewer, mut viewer_peer) = tokio::io::duplex(4096);
+        let (mut agent, mut agent_peer) = tokio::io::duplex(4096);
+        let link = tokio::spawn(async move {
+            link_until_idle(&mut viewer, &mut agent, Duration::from_secs(30)).await
+        });
+
+        // The viewer only watches: frames flow one way for well past the
+        // limit, and the channel must survive it.
+        for _ in 0..6 {
+            agent_peer.write_all(b"frame").await.unwrap();
+            let mut seen = [0u8; 5];
+            viewer_peer.read_exact(&mut seen).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(20)).await;
+        }
+        assert!(!link.is_finished());
+
+        // Once both sides go quiet, the idle limit still applies.
+        let error = timeout(Duration::from_secs(240), link)
+            .await
+            .expect("an idle channel closes itself")
+            .expect("the link task finished")
+            .expect_err("an idle channel ends with the idle reason");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_linked_channel_carries_both_ways_and_closes_when_nothing_moves() {
         let (mut viewer, mut viewer_peer) = tokio::io::duplex(4096);
         let (mut agent, mut agent_peer) = tokio::io::duplex(4096);
@@ -1430,7 +1481,7 @@ mod tests {
         assert_eq!(&answer, b"and back");
 
         // Neither side says anything again: the channel must not be held.
-        let ended = timeout(Duration::from_secs(120), link)
+        let ended = timeout(Duration::from_secs(240), link)
             .await
             .expect("an idle channel closes itself")
             .expect("the link task finished");

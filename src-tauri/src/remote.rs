@@ -775,9 +775,6 @@ fn remote_task_reason(
     }
 }
 
-/// Owns both encrypted halves and gives every shutdown path exactly one place
-/// that aborts and awaits them. `JoinHandle` completion is sticky, so a writer
-/// failure wakes this supervisor even when the reader has no incoming bytes.
 /// Keeps a heartbeat on the outbound queue while the session lives. A full
 /// queue already proves the link is moving, so a skipped beat is fine.
 fn spawn_remote_heartbeat(outbound: mpsc::Sender<RemoteMessage>) -> JoinHandle<()> {
@@ -798,6 +795,9 @@ fn remote_idle_limit(host_heartbeats: bool) -> Option<Duration> {
     host_heartbeats.then_some(REMOTE_IDLE_LIMIT)
 }
 
+/// Owns both encrypted halves and gives every shutdown path exactly one place
+/// that aborts and awaits them. `JoinHandle` completion is sticky, so a writer
+/// failure wakes this supervisor even when the reader has no incoming bytes.
 async fn supervise_remote_tasks(
     mut reader: JoinHandle<String>,
     mut writer: JoinHandle<String>,

@@ -456,9 +456,10 @@ const SIGNATURE_CELLS: usize = 24;
 /// Averaged over the whole picture, this much change is still the same
 /// screen: a caret or a clock digit lands far below it.
 const SIGNATURE_MEAN_TOLERANCE: u32 = 3;
-/// And no more than this many cells may change sharply, so a small but
-/// decisive change — a dialog opening over the pointer — is still refused.
-const SIGNATURE_CHANGED_CELLS: usize = SIGNATURE_CELLS * SIGNATURE_CELLS / 32;
+/// And only this many cells may change sharply. A caret or a clock digit
+/// moves one; a notification banner or a small dialog covers several times
+/// that, and must still be refused even though the average stays low.
+const SIGNATURE_CHANGED_CELLS: usize = 4;
 const SIGNATURE_CELL_TOLERANCE: u8 = 32;
 
 /// Averages a JPEG frame into `SIGNATURE_CELLS` squared grey cells. `None`
@@ -1879,13 +1880,18 @@ mod signature_tests {
         let screen = screen_signature(SCREEN).unwrap();
         assert!(!same_screen(&screen, &[]));
         assert!(!same_screen(&[], &[]));
-        // A sharp change over part of the screen is refused even when the
-        // average stays low.
-        let mut patch = screen.clone();
-        for cell in patch.iter_mut().take(SIGNATURE_CELLS * SIGNATURE_CELLS / 8) {
-            *cell = cell.wrapping_add(200);
+        // A small but decisive change — a banner or dialog over a fraction of
+        // the screen — is refused even though the average stays low.
+        for cells in [5, SIGNATURE_CELLS * SIGNATURE_CELLS / 8] {
+            let mut patch = screen.clone();
+            for cell in patch.iter_mut().take(cells) {
+                *cell = cell.wrapping_add(200);
+            }
+            assert!(
+                !same_screen(&screen, &patch),
+                "{cells} changed cells passed"
+            );
         }
-        assert!(!same_screen(&screen, &patch));
     }
 }
 

@@ -92,6 +92,7 @@ impl DaemonClient {
             return Ok(connection);
         }
         let mut guard = self.connection.lock().await;
+        let log_was = daemon_log_length(&self.paths);
         spawn_daemon(&self.paths)?;
         let deadline = tokio::time::Instant::now() + START_TIMEOUT;
         loop {
@@ -102,7 +103,7 @@ impl DaemonClient {
             }
             if tokio::time::Instant::now() >= deadline {
                 let mut message = "The background service did not start in time.".to_string();
-                if let Some(reason) = daemon_log_failure(&self.paths) {
+                if let Some(reason) = daemon_log_failure(&self.paths, log_was) {
                     message.push(' ');
                     message.push_str(&reason);
                 }
@@ -520,11 +521,20 @@ async fn reader_loop<R: AsyncBufReadExt + Unpin>(
 }
 
 /// The daemon writes why it gave up to its own log, and the window has no
-/// other way to see it. The last line that is not the start banner is worth
-/// showing: the log holds no prompts, output or tokens by contract.
-fn daemon_log_failure(paths: &DaemonPaths) -> Option<String> {
+/// other way to see it. Only what this attempt appended counts: the log is
+/// kept across runs, and last week's fixed problem must not be reported as
+/// today's. The log holds no prompts, output or tokens by contract.
+fn daemon_log_failure(paths: &DaemonPaths, from: u64) -> Option<String> {
     let text = std::fs::read_to_string(paths.data_dir.join(super::LOG_FILE)).ok()?;
-    last_failure_line(&text)
+    let start = usize::try_from(from).unwrap_or(0).min(text.len());
+    last_failure_line(text.get(start..)?)
+}
+
+/// How long the daemon's log already is, so only newer lines are read back.
+fn daemon_log_length(paths: &DaemonPaths) -> u64 {
+    std::fs::metadata(paths.data_dir.join(super::LOG_FILE))
+        .map(|log| log.len())
+        .unwrap_or(0)
 }
 
 fn last_failure_line(log: &str) -> Option<String> {
