@@ -20,6 +20,17 @@ pub struct InputInjector {
     pressed_keys: Vec<Key>,
 }
 
+/// Whether this machine will actually let a program move the pointer and
+/// press keys. macOS refuses until the app holds Accessibility permission,
+/// and a headless Linux session has nothing to drive at all. Answering this
+/// before a session starts is what keeps a viewer from being told its input
+/// was delivered when nothing could receive it.
+pub fn control_available() -> Result<(), String> {
+    Enigo::new(&Settings::default())
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 impl InputInjector {
     /// `stream_*` is the size the agent advertised in its Hello; `display_*`
     /// is the real captured display. Their ratio maps a click back to a pixel.
@@ -30,9 +41,12 @@ impl InputInjector {
         _display_height: u32,
     ) -> Result<Self, String> {
         let enigo = Enigo::new(&Settings::default()).map_err(|error| error.to_string())?;
-        // Windows normalizes absolute pointer input using GetSystemMetrics.
-        // Those dimensions may be DPI-virtualized; captured pixels are physical.
-        #[cfg(windows)]
+        // Absolute pointer input is not in captured pixels on either of these
+        // platforms: Windows normalizes it with GetSystemMetrics, which may be
+        // DPI-virtualized, and macOS places the pointer in points while a
+        // Retina capture is twice that in each direction. Ask the input layer
+        // what it expects instead of trusting the picture's size.
+        #[cfg(any(windows, target_os = "macos"))]
         let (display_width, display_height) = {
             let (width, height) = enigo.main_display().map_err(|error| error.to_string())?;
             if width <= 0 || height <= 0 {
@@ -40,7 +54,7 @@ impl InputInjector {
             }
             (width as u32, height as u32)
         };
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let (display_width, display_height) = (_display_width, _display_height);
         Ok(Self {
             enigo,

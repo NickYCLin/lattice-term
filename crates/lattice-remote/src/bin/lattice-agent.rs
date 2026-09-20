@@ -489,6 +489,19 @@ async fn stop_and_wait<T>(stop: watch::Sender<bool>, task: tokio::task::JoinHand
     let _ = task.await;
 }
 
+/// Whether this machine will accept injected pointer and key events at all.
+/// macOS refuses until the app holds Accessibility permission, and a headless
+/// Linux session has no display to drive. Checked once per screen session.
+fn control_is_available() -> bool {
+    match lattice_remote::host_input::control_available() {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("Sharing read-only: this machine will not accept input ({error})");
+            false
+        }
+    }
+}
+
 /// Keeps a heartbeat on the outgoing queue for as long as the session lives.
 /// A full queue already proves the link is moving, so a skipped beat is fine.
 fn spawn_session_heartbeat(outgoing: mpsc::Sender<RemoteMessage>) -> tokio::task::JoinHandle<()> {
@@ -2183,6 +2196,9 @@ where
 
     let shared_files = file_root.map(SharedFiles::open).transpose()?.map(Arc::new);
     let (mut reader, mut writer_half) = connection.split();
+    // Telling the viewer it may control a machine that will refuse every
+    // event is worse than sharing read-only: it looks like the clicks worked.
+    let allow_input = allow_input && control_is_available();
 
     send_remote_message(
         &mut writer_half,
