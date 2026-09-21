@@ -79,6 +79,7 @@ export function useAgentDaemon(sessionsHint: number): {
   status: AgentDaemonStatus;
   refresh: () => Promise<void>;
   stop: () => Promise<boolean>;
+  start: () => Promise<boolean>;
   share: (sessionId: string, shared: boolean, readOutput?: boolean) => Promise<void>;
   control: (sessionId: string, control: boolean) => Promise<void>;
 } {
@@ -121,6 +122,16 @@ export function useAgentDaemon(sessionsHint: number): {
     return stopped;
   }, [refresh]);
 
+  // Starting is asked for directly here, rather than only happening as a
+  // side effect of detaching a session or saving a schedule.
+  const start = useCallback(async () => {
+    if (!hasDesktopBackend()) return false;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const started = await invoke<boolean>("agent_daemon_start");
+    await refresh();
+    return started;
+  }, [refresh]);
+
   // Sharing and control live in the background service, so the answer is
   // its list.
   const share = useCallback(async (sessionId: string, shared: boolean, readOutput = false) => {
@@ -147,7 +158,7 @@ export function useAgentDaemon(sessionsHint: number): {
     setStatus((current) => ({ ...current, shared: next.map(normalizeSharedSession) }));
   }, []);
 
-  return { status, refresh, stop, share, control };
+  return { status, refresh, stop, start, share, control };
 }
 
 function normalizeSharedSession(entry: AgentSharedSession): AgentSharedSession {

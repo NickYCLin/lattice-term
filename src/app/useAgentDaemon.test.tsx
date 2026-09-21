@@ -58,6 +58,9 @@ async function mount(backend: Backend): Promise<() => Api> {
     if (command === "agent_daemon_status") {
       return { running: true, mcpNeedsRestart: false, sessions: 1, mcp: null, ...structuredClone(backend) };
     }
+    if (command === "agent_daemon_start") {
+      return true;
+    }
     if (command === "agent_mcp_share") {
       const sessionId = args?.sessionId as string;
       const current = backend.shared.find((entry) => entry.sessionId === sessionId);
@@ -136,6 +139,18 @@ describe("MCP content permission negotiation", () => {
     await act(async () => { await current().share("agent-bg-session-1", false); });
     expect(invoke).toHaveBeenCalledWith("agent_mcp_share", { sessionId: "agent-bg-session-1", shared: false });
     expect(current().status.shared).toEqual([]);
+    expect(invoke.mock.calls.some(([command]) => command === "agent_daemon_stop")).toBe(false);
+  });
+
+  it("starts the background service on request and re-reads its state", async () => {
+    const current = await mount({ mcpOutputScopes: true, shared: [] });
+    invoke.mockClear();
+    await act(async () => { await current().start(); });
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual([
+      "agent_daemon_start",
+      "agent_daemon_status",
+    ]);
+    // Asking it to start never ends anything that is already running.
     expect(invoke.mock.calls.some(([command]) => command === "agent_daemon_stop")).toBe(false);
   });
 });

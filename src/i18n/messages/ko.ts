@@ -821,6 +821,8 @@ export const messages: Messages = {
   "agents.detached.hint": "세션은 LatticeTerm 백그라운드 서비스로 넘어갑니다. 창을 닫아도 계속 실행되며, 다음에 창을 열면 세션에 다시 연결하고 최신 출력을 표시합니다. 세션을 종료하려면 해당 탭에서 중지하거나 백그라운드 서비스 전체를 종료하세요. 이 선택은 기억되어 다음에 여는 세션에도 적용됩니다.",
   "agents.detached.badge": "백그라운드",
   "agents.daemon.running": "배경 서비스 실행 : {count} 세션 (s)는 LatticeTerm 닫기 후 계속됩니다.",
+  "agents.daemon.stopped": "배경 서비스가 실행 중이 아닙니다. LatticeTerm을 닫으면 아무것도 남지 않고 외부 AI도 연결할 수 없습니다.",
+  "agents.daemon.start": "배경 서비스 시작",
   "agents.daemon.stop": "끝 배경 서비스",
   "agents.daemon.stopConfirm.title": "끝 배경 서비스",
   "agents.daemon.stopConfirm.body": "{count} 백그라운드 세션(s)가 끝났습니다. CLI를 실행하면 undone이 될 수 없습니다.",

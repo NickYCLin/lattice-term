@@ -821,6 +821,8 @@ export const messages: Messages = {
   "agents.detached.hint": "La sesión se entrega al servicio de fondo de LatticeTerm: sigue funcionando cuando la ventana cierra, y la siguiente ventana se adhiere a ella de nuevo y vuelve a reproducir la última salida. Basta de su ficha, o termina todo el servicio de fondo, cuando realmente desea que se haya ido. Esta elección se recuerda para las próximas sesiones.",
   "agents.detached.badge": "Segundo plano",
   "agents.daemon.running": "Servicio de antecedentes: {count} sesión(s) seguirá después de que LatticeTerm cierre.",
+  "agents.daemon.stopped": "El servicio en segundo plano no está en marcha: nada sigue vivo al cerrar LatticeTerm y ninguna IA externa puede conectarse.",
+  "agents.daemon.start": "Iniciar el servicio en segundo plano",
   "agents.daemon.stop": "Servicio de formación final",
   "agents.daemon.stopConfirm.title": "Servicio de formación final",
   "agents.daemon.stopConfirm.body": "El {count} sesiones de fondo (s) terminan con ella; se detienen los CLI que ejecutan y esto no puede ser deshecho.",

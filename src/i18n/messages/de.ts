@@ -821,6 +821,8 @@ export const messages: Messages = {
   "agents.detached.hint": "Die Sitzung wird an LatticeTerms Hintergrunddienst übergeben: es läuft weiter, wenn das Fenster schließt, und das nächste Fenster legt sich wieder an und wiederholt die neueste Ausgabe. Stoppen Sie es von seiner Registerkarte, oder beenden Sie den gesamten Hintergrundservice, wenn Sie wirklich wollen, dass es weg ist. Diese Wahl wird für die nächsten Sitzungen übernommen.",
   "agents.detached.badge": "Hintergrund",
   "agents.daemon.running": "Hintergrund-Service läuft: {count} Sitzung(en) wird weiter nach LatticeTerm schließt.",
+  "agents.daemon.stopped": "Der Hintergrunddienst läuft nicht. Nach dem Schließen von LatticeTerm bleibt nichts bestehen, und keine externe KI erreicht ihn.",
+  "agents.daemon.start": "Hintergrunddienst starten",
   "agents.daemon.stop": "Ende Hintergrundservice",
   "agents.daemon.stopConfirm.title": "Ende Hintergrundservice",
   "agents.daemon.stopConfirm.body": "Die {count} Hintergrundsitzung(en) enden damit; laufende CLIs werden gestoppt und dies kann nicht rückgängig gemacht werden.",

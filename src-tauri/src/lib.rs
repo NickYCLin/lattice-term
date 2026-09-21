@@ -2127,6 +2127,15 @@ async fn agent_daemon_stop(daemon: State<'_, AppDaemon>) -> Result<bool, String>
     }
 }
 
+/// Starts the background service because the person asked for it, rather
+/// than as a side effect of detaching a session or saving a schedule.
+/// Already running is success, so the button is safe to press twice.
+#[tauri::command]
+async fn agent_daemon_start(daemon: State<'_, AppDaemon>) -> Result<bool, String> {
+    daemon.ensure().await?;
+    Ok(daemon.is_running().await)
+}
+
 /// Hands the window's automation list to the background service, starting
 /// it when anything is enabled, and returns the service's runtime marks.
 #[tauri::command]
@@ -4473,6 +4482,7 @@ pub fn run() {
             agent_output_snapshots,
             agent_daemon_status,
             agent_daemon_stop,
+            agent_daemon_start,
             agent_mcp_share,
             agent_mcp_control,
             agent_mcp_plans_sync,

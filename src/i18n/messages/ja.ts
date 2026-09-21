@@ -821,6 +821,8 @@ export const messages: Messages = {
   "agents.detached.hint": "セッションは LatticeTerm のバックグラウンドサービスに引き継がれます。ウィンドウを閉じても実行が続き、次に開いたウィンドウで再接続して最新の出力を表示します。終了するには、セッションのタブで停止するか、バックグラウンドサービス全体を終了してください。この選択は記憶され、次に開くセッションにも使われます。",
   "agents.detached.badge": "バックグラウンド",
   "agents.daemon.running": "背景サービスの実行:{count} セッション(s) は、LatticeTerm の終了後に継続します。",
+  "agents.daemon.stopped": "バックグラウンドサービスは動いていません。LatticeTerm を閉じると何も残らず、外部の AI も接続できません。",
+  "agents.daemon.start": "バックグラウンド サービスを開始",
   "agents.daemon.stop": "エンド バックグラウンド サービス",
   "agents.daemon.stopConfirm.title": "エンド バックグラウンド サービス",
   "agents.daemon.stopConfirm.body": "{count} の背景セッションはそれで終了します。CLI の実行は停止され、これは元に戻すことができません。",

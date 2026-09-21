@@ -141,6 +141,7 @@ export function AgentsView({
   };
   const daemon = useAgentDaemon(agents.sessions.length);
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
+  const [daemonStarting, setDaemonStarting] = useState(false);
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);
   const sharedWithMcp = useMemo(
     () => new Map(daemon.status.shared.map((entry) => [entry.sessionId, entry])),
@@ -781,9 +782,13 @@ export function AgentsView({
             <span className="agents-field-hint">{t("agents.detached.hint")}</span>
           </span>
         </label>
-        {daemon.status.running && (
-          <p className="agents-daemon" role="status">
-            <span>{t("agents.daemon.running", { count: daemon.status.sessions })}</span>
+        <p className="agents-daemon" role="status">
+          <span>
+            {daemon.status.running
+              ? t("agents.daemon.running", { count: daemon.status.sessions })
+              : t("agents.daemon.stopped")}
+          </span>
+          {daemon.status.running ? (
             <button
               type="button"
               className="button button--ghost button--sm"
@@ -791,8 +796,23 @@ export function AgentsView({
             >
               {t("agents.daemon.stop")}
             </button>
-          </p>
-        )}
+          ) : (
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              disabled={daemonStarting}
+              onClick={() => {
+                setDaemonStarting(true);
+                void daemon
+                  .start()
+                  .catch(() => {})
+                  .finally(() => setDaemonStarting(false));
+              }}
+            >
+              {t("agents.daemon.start")}
+            </button>
+          )}
+        </p>
         {daemon.status.mcpNeedsRestart && (
           <p className="agents-field-hint agents-mcp__error" role="status">
             {t("agents.mcp.needsRestart")}

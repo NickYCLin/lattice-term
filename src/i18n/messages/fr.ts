@@ -821,6 +821,8 @@ export const messages: Messages = {
   "agents.detached.hint": "La session est remise au service d'arrière-plan de LatticeTerm : elle continue à fonctionner lorsque la fenêtre se ferme, et la fenêtre suivante s'y attache à nouveau et rejoue la dernière sortie. Arrêtez-la de son onglet, ou terminez l'ensemble du service d'arrière-plan, lorsque vous voulez vraiment qu'elle parte. Ce choix est mémorisé pour les prochaines sessions.",
   "agents.detached.badge": "Arrière-plan",
   "agents.daemon.running": "Service d'arrière-plan en cours d'exécution: {count} session(s) continuera à aller après LatticeTerm ferme.",
+  "agents.daemon.stopped": "Le service d’arrière-plan n’est pas lancé : rien ne survit à la fermeture de LatticeTerm et aucune IA externe ne peut s’y connecter.",
+  "agents.daemon.start": "Démarrer le service d’arrière-plan",
   "agents.daemon.stop": "Service d'arrière-plan final",
   "agents.daemon.stopConfirm.title": "Service d'arrière-plan final",
   "agents.daemon.stopConfirm.body": "La (les) session(s) d'arrière-plan {count} se termine(s) avec elle; l'exécution des CLI est arrêtée et cela ne peut pas être annulé.",

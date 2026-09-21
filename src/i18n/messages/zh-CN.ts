@@ -840,6 +840,8 @@ export const messages: Messages = {
   "agents.detached.hint": "这个工作阶段交给 LatticeTerm 的背景服务持有：关掉窗口它照跑，下次打开自动接回并重播最近的输出。要真的结束就在分页按停止，或结束整个背景服务。这个选择会记住，之后新开的会话沿用。",
   "agents.detached.badge": "背景",
   "agents.daemon.running": "背景服务运行中：{count} 个工作阶段在关闭 LatticeTerm 后仍会继续。",
+  "agents.daemon.stopped": "背景服务没在跑，关掉 LatticeTerm 后不会有东西留在背景，外部 AI 也连不上。",
+  "agents.daemon.start": "启动背景服务",
   "agents.daemon.stop": "结束背景服务",
   "agents.daemon.stopConfirm.title": "结束背景服务",
   "agents.daemon.stopConfirm.body": "背景里的 {count} 个工作阶段会一起结束，正在跑的 CLI 会被停掉，无法复原。",

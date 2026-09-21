@@ -917,6 +917,8 @@ export const zhTW = {
   "agents.detached.hint": "這個工作階段交給 LatticeTerm 的背景服務持有：關掉視窗它照跑，下次開啟自動接回並重播最近的輸出。要真的結束就在分頁按停止，或結束整個背景服務。這個選擇會記住，之後新開的工作階段沿用。",
   "agents.detached.badge": "背景",
   "agents.daemon.running": "背景服務執行中：{count} 個工作階段在關閉 LatticeTerm 後仍會繼續。",
+  "agents.daemon.stopped": "背景服務沒在跑，關掉 LatticeTerm 後不會有東西留在背景，外部 AI 也連不上。",
+  "agents.daemon.start": "啟動背景服務",
   "agents.daemon.stop": "結束背景服務",
   "agents.daemon.stopConfirm.title": "結束背景服務",
   "agents.daemon.stopConfirm.body": "背景裡的 {count} 個工作階段會一起結束，正在跑的 CLI 會被停掉，無法復原。",

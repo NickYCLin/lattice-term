@@ -947,6 +947,8 @@ export const en: Messages = {
   "agents.detached.hint": "The session is handed to LatticeTerm's background service: it keeps running when the window closes, and the next window attaches to it again and replays the latest output. Stop it from its tab, or end the whole background service, when you really want it gone. This choice is remembered for the next sessions you start.",
   "agents.detached.badge": "Background",
   "agents.daemon.running": "Background service running: {count} session(s) will keep going after LatticeTerm closes.",
+  "agents.daemon.stopped": "The background service is not running, so nothing stays alive after LatticeTerm closes and no external AI can reach it.",
+  "agents.daemon.start": "Start background service",
   "agents.daemon.stop": "End background service",
   "agents.daemon.stopConfirm.title": "End background service",
   "agents.daemon.stopConfirm.body": "The {count} background session(s) end with it; running CLIs are stopped and this cannot be undone.",

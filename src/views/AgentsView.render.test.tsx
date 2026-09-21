@@ -240,4 +240,22 @@ describe("AgentsView", () => {
     expect(render(fakeAgentApi(), { sandboxAvailable: true })).toContain("bubblewrap");
     expect(render(fakeAgentApi(), { sandboxAvailable: false })).not.toContain("bubblewrap");
   });
+
+  // A service you can only ever stop leaves no way back once it is down.
+  it("says the background service is down and offers to start it", () => {
+    const markup = render(fakeAgentApi());
+    expect(markup).toContain("背景服務沒在跑");
+    expect(markup).toContain("啟動背景服務");
+    expect(markup).not.toContain("結束背景服務");
+  });
+
+  it("swaps the notice for the running count and the stop button", () => {
+    daemonStatus.current = {
+      running: true, mcpNeedsRestart: false, mcpOutputScopes: true, sessions: 2, shared: [], mcp: null,
+    };
+    const markup = render(fakeAgentApi());
+    expect(markup).toContain("背景服務執行中：2 個工作階段");
+    expect(markup).toContain("結束背景服務");
+    expect(markup).not.toContain("啟動背景服務");
+  });
 });
