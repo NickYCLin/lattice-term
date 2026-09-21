@@ -88,7 +88,14 @@ export function PtyTerminal({
         const size = `${terminal.cols}x${terminal.rows}`;
         if (size === reportedSize) return;
         reportedSize = size;
-        void ioRef.current.resize(terminal.cols, terminal.rows).catch(() => {});
+        void ioRef.current
+          .resize(terminal.cols, terminal.rows)
+          .catch(() => {
+          // The far side kept its old size. Forget this one so the next fit
+          // reports again, instead of leaving a full-screen CLI painting
+          // against a width and height the terminal no longer has.
+          if (reportedSize === size) reportedSize = "";
+        });
       } catch {
         // A pane with no layout yet is measured once it becomes visible.
       }

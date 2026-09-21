@@ -104,7 +104,12 @@ export function TerminalPane({
         reportedSize = size;
         void sshRef.current
           .resize(sessionId, terminal.cols, terminal.rows)
-          .catch(() => {});
+          .catch(() => {
+          // The far side kept its old size. Forget this one so the next fit
+          // reports again, instead of leaving a full-screen CLI painting
+          // against a width and height the terminal no longer has.
+          if (reportedSize === size) reportedSize = "";
+        });
       } catch {
         // A pane with no layout yet is measured once it becomes visible.
       }
