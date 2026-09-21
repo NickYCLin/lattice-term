@@ -329,9 +329,63 @@ const FALLBACK_CATALOG: AgentDefinition[] = FALLBACK_CATALOG_SOURCE.map(
 );
 
 const MAX_PENDING_OUTPUT = 256 * 1024;
+const MAX_AGENT_OUTPUT_TAIL = 16 * 1024;
 export const MAX_AGENT_BROADCAST_TARGETS = 32;
 export const MAX_SAVED_AGENT_PLANS = 32;
 export const CLAUDE_SAFE_MODE_STARTUP_WINDOW_MS = 15_000;
+
+function visibleTerminalText(output: string): string {
+  return output
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
+}
+
+/**
+ * Codex's npm updater replaces the executable and then exits successfully so
+ * the next process can load the new binary. Relaunch only after both signals
+ * agree; terminal text alone is untrusted and must never create a process.
+ */
+export function codexUpdateRestartRequest(
+  request: AgentLaunchRequest,
+  session: AgentSessionSummary,
+  closedReason: string,
+  outputTail: string,
+  alreadyRetried = false,
+): AgentLaunchRequest | null {
+  const visibleOutput = visibleTerminalText(outputTail);
+  if (
+    alreadyRetried ||
+    request.definitionId !== "codex" ||
+    session.definitionId !== "codex" ||
+    !/\bcode:\s*0(?:,|\s*})/i.test(closedReason) ||
+    !visibleOutput.includes("Updating Codex via") ||
+    !visibleOutput.includes("@openai/codex") ||
+    !visibleOutput.includes(
+      "Update ran successfully! Please restart Codex.",
+    )
+  ) {
+    return null;
+  }
+
+  const resumeSessionId = session.capturedSessionId ?? request.resumeSessionId;
+  return {
+    ...request,
+    label: session.label,
+    executable: session.executable,
+    groupId: session.groupId,
+    resumeSessionId,
+    // A captured conversation already contains any startup handoff. A startup
+    // update without one still needs the original seed on its fresh process.
+    seedInput: resumeSessionId ? null : request.seedInput,
+    restoreExistingSession: resumeSessionId
+      ? true
+      : request.restoreExistingSession,
+    profileConfigPath:
+      session.profileConfigPath ?? request.profileConfigPath,
+    sandbox: session.sandboxed ?? request.sandbox,
+    detached: session.detached ?? request.detached,
+  };
+}
 
 function claudeCustomizationsAreAlreadyDisabled(
   launchArguments: string[],
@@ -702,9 +756,12 @@ export function useAgentSessions(): AgentApi {
   const pendingOutput = useRef(new Map<string, Uint8Array[]>());
   const pendingBytes = useRef(new Map<string, number>());
   const outputOffsets = useRef(new Map<string, number>());
+  const outputTails = useRef(new Map<string, string>());
   const sessionsRef = useRef(sessions);
   const intentionalDisconnects = useRef(new Set<string>());
   const launchRaceGuard = useRef(new AgentLaunchRaceGuard());
+  const launchRequests = useRef(new Map<string, AgentLaunchRequest>());
+  const codexUpdateRetryRequests = useRef(new WeakSet<AgentLaunchRequest>());
   const claudeStartupFallbacks = useRef(
     new Map<string, ClaudeStartupFallbackCandidate>(),
   );
@@ -793,6 +850,13 @@ export function useAgentSessions(): AgentApi {
       const fresh = bytes.subarray(Math.max(0, cursor - offset));
       if (fresh.length === 0) return;
       outputOffsets.current.set(sessionId, endOffset);
+      const outputTail = `${outputTails.current.get(sessionId) ?? ""}${
+        new TextDecoder().decode(fresh)
+      }`;
+      outputTails.current.set(
+        sessionId,
+        outputTail.slice(-MAX_AGENT_OUTPUT_TAIL),
+      );
 
       const handlers = dataHandlers.current.get(sessionId);
       if (handlers?.size) {
@@ -839,7 +903,22 @@ export function useAgentSessions(): AgentApi {
           );
           const fallbackCandidate = claudeStartupFallbacks.current.get(sessionId);
           claudeStartupFallbacks.current.delete(sessionId);
+          const launchCandidate = launchRequests.current.get(sessionId);
+          launchRequests.current.delete(sessionId);
           const pendingLaunch = launchRaceGuard.current.hasPendingAttempt();
+          const codexRestart =
+            !intentional && knownSession && launchCandidate
+              ? codexUpdateRestartRequest(
+                  launchCandidate,
+                  knownSession,
+                  event.payload.reason,
+                  outputTails.current.get(sessionId) ?? "",
+                  codexUpdateRetryRequests.current.has(launchCandidate),
+                )
+              : null;
+          if (knownSession || !pendingLaunch) {
+            outputTails.current.delete(sessionId);
+          }
           if (!intentional && !knownSession && !pendingLaunch) {
             setLastClosed(
               createSessionClosedNotice(
@@ -878,6 +957,29 @@ export function useAgentSessions(): AgentApi {
             sessionsRef.current = next;
             return next;
           });
+          if (codexRestart) {
+            const relaunch = launchRef.current;
+            if (relaunch) {
+              codexUpdateRetryRequests.current.add(codexRestart);
+              void relaunch(codexRestart)
+                .then(() => {
+                  setSessions((current) => {
+                    const next = current.filter(
+                      (session) => session.sessionId !== sessionId,
+                    );
+                    sessionsRef.current = next;
+                    return next;
+                  });
+                })
+                .catch((reason) => {
+                  setError(
+                    `Codex 更新後重新啟動失敗：${
+                      reason instanceof Error ? reason.message : String(reason)
+                    }`,
+                  );
+                });
+            }
+          }
           outputDuringHydration.delete(sessionId);
           if (intentional || (!knownSession && !pendingLaunch)) {
             pendingOutput.current.delete(sessionId);
@@ -1177,6 +1279,28 @@ export function useAgentSessions(): AgentApi {
         if (fallback) {
           return (await launchRef.current?.(fallback)) ?? closedSession;
         }
+        const codexRestart = codexUpdateRestartRequest(
+          request,
+          settledSession,
+          closedReason,
+          outputTails.current.get(session.sessionId) ?? "",
+          codexUpdateRetryRequests.current.has(request),
+        );
+        outputTails.current.delete(session.sessionId);
+        if (codexRestart) {
+          codexUpdateRetryRequests.current.add(codexRestart);
+          const restarted = await launchRef.current?.(codexRestart);
+          if (restarted) {
+            setSessions((current) => {
+              const next = current.filter(
+                (entry) => entry.sessionId !== session.sessionId,
+              );
+              sessionsRef.current = next;
+              return next;
+            });
+            return restarted;
+          }
+        }
         return closedSession;
       }
       setSessions((current) => {
@@ -1187,6 +1311,7 @@ export function useAgentSessions(): AgentApi {
         sessionsRef.current = next;
         return next;
       });
+      launchRequests.current.set(session.sessionId, request);
       if (
         request.definitionId === "claude" &&
         !claudeCustomizationsAreAlreadyDisabled(request.arguments)
@@ -1435,6 +1560,8 @@ export function useAgentSessions(): AgentApi {
       pendingOutput.current.delete(sessionId);
       pendingBytes.current.delete(sessionId);
       outputOffsets.current.delete(sessionId);
+      outputTails.current.delete(sessionId);
+      launchRequests.current.delete(sessionId);
       dataHandlers.current.delete(sessionId);
       closeHandlers.current.delete(sessionId);
       return;

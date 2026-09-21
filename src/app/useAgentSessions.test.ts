@@ -9,6 +9,7 @@ import {
   agentCatalogForDisplay,
   buildAgentBroadcastPayload,
   claudeSafeModeFallbackRequest,
+  codexUpdateRestartRequest,
   decodeAgentPayload,
   encodeAgentPayload,
   markAgentSessionClosed,
@@ -118,6 +119,143 @@ describe("agent session transport", () => {
         "Process exited: ExitStatus { code: 0, signal: None }",
         1_000,
         1_500,
+      ),
+    ).toBeNull();
+  });
+
+  it("restarts Codex once after its updater exits successfully", () => {
+    const request = {
+      definitionId: "codex",
+      label: "OpenAI Codex",
+      executable: "codex",
+      arguments: ["--model", "gpt-5.6-sol"],
+      resumeSessionId: null,
+      seedInput: "continue this task",
+      profileConfigPath: "C:/profiles/work",
+      sandbox: true,
+      detached: false,
+      workingDirectory: "D:/project/demo",
+      cols: 120,
+      rows: 30,
+    };
+    const session = {
+      sessionId: "agent-codex",
+      groupId: "project-codex",
+      groupLabel: "Project",
+      definitionId: "codex",
+      profileConfigPath: "C:/profiles/work",
+      label: "OpenAI Codex",
+      model: "gpt-5.6-sol",
+      executable: "C:/Users/nicklin/AppData/Roaming/npm/codex.cmd",
+      launchArguments: request.arguments,
+      workingDirectory: request.workingDirectory,
+      state: "idle" as const,
+      stateSource: "heuristic" as const,
+      processId: 42,
+      tokenUsage: null,
+      queuedPrompts: 0,
+      capturedSessionId: "native-codex-session",
+      sandboxed: true,
+      detached: false,
+    };
+
+    expect(
+      codexUpdateRestartRequest(
+        request,
+        session,
+        "Process exited: ExitStatus { code: 0, signal: None }",
+        "Updating Codex via `npm install -g @openai/codex`...\r\n" +
+          "\x1b[32mUpdate ran successfully! Please restart Codex.\x1b[0m",
+      ),
+    ).toMatchObject({
+      groupId: "project-codex",
+      resumeSessionId: "native-codex-session",
+      seedInput: null,
+      restoreExistingSession: true,
+      profileConfigPath: "C:/profiles/work",
+      sandbox: true,
+    });
+    expect(
+      codexUpdateRestartRequest(
+        request,
+        { ...session, capturedSessionId: null },
+        "Process exited: ExitStatus { code: 0, signal: None }",
+        "Updating Codex via `npm install -g @openai/codex`...\n" +
+          "Update ran successfully! Please restart Codex.",
+      ),
+    ).toMatchObject({
+      resumeSessionId: null,
+      seedInput: "continue this task",
+      restoreExistingSession: undefined,
+    });
+  });
+
+  it("does not trust updater text without a successful first Codex exit", () => {
+    const request = {
+      definitionId: "codex",
+      label: "OpenAI Codex",
+      executable: "codex",
+      arguments: [],
+      resumeSessionId: null,
+      workingDirectory: "D:/project/demo",
+      cols: 120,
+      rows: 30,
+    };
+    const session = {
+      sessionId: "agent-codex",
+      groupId: "agent-codex",
+      groupLabel: "OpenAI Codex",
+      definitionId: "codex",
+      label: "OpenAI Codex",
+      model: null,
+      executable: "codex",
+      launchArguments: [],
+      workingDirectory: request.workingDirectory,
+      state: "idle" as const,
+      stateSource: "heuristic" as const,
+      processId: 42,
+      tokenUsage: null,
+      queuedPrompts: 0,
+      capturedSessionId: null,
+    };
+    const output =
+      "Updating Codex via `npm install -g @openai/codex`...\n" +
+      "Update ran successfully! Please restart Codex.";
+
+    expect(
+      codexUpdateRestartRequest(
+        request,
+        session,
+        "Process exited: ExitStatus { code: 1, signal: None }",
+        output,
+      ),
+    ).toBeNull();
+    expect(
+      codexUpdateRestartRequest(request, session, "Process exited: code 0", output),
+    ).toBeNull();
+    expect(
+      codexUpdateRestartRequest(
+        request,
+        session,
+        "Process exited: ExitStatus { code: 0, signal: None }",
+        "Update ran successfully! Please restart Codex.",
+      ),
+    ).toBeNull();
+    expect(
+      codexUpdateRestartRequest(
+        request,
+        session,
+        "Process exited: ExitStatus { code: 0, signal: None }",
+        output,
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      codexUpdateRestartRequest(
+        { ...request, definitionId: "claude" },
+        { ...session, definitionId: "claude" },
+        "Process exited: ExitStatus { code: 0, signal: None }",
+        output,
       ),
     ).toBeNull();
   });
