@@ -254,3 +254,21 @@ CLI 使用 `read-only`、`--ask-for-approval never`，不改寫使用者設定�
 外部 SSH 主機、macOS 遠端程序、安裝版 GUI、RDP／Lattice Remote
 鍵鼠及 Relay Fleet 不屬於本次驗證範圍。工作區限制是 MCP 路由
 與啟動目錄的範圍檢查，不是遠端帳號的 OS 沙箱。
+
+## 2026-09-21 連線簿與背景服務啟動：尚未實機驗收
+
+`list_saved_connections`（`a534606`）與 Agent 頁的背景服務啟動入口
+（`00e18f0`）目前只有自動測試與 CI 覆蓋。Linux CI 的 `Test Rust`、
+`Lint Rust` 與 macOS 遠端文字安全都通過；本機另外跑過 `cargo fmt
+--check`、`cargo check --all-targets`、`tsc --noEmit`、production
+build 與 160 檔 1074 項 Vitest。
+
+沒有做過的部分：安裝版 GUI 上的實際操作、設定頁「允許外部 AI 讀取
+連線簿」的勾選與取消、外部 CLI 真的呼叫 `list_saved_connections` 拿
+到名稱與已連線項目的 `targetId`、按下「啟動背景服務」後 daemon 確實
+起來，以及關閉開關後讀取立刻被拒。這些都要等 `2026.9.22` 發布並安裝
+之後才能驗，在那之前不得視為可用。
+
+開發機（Windows）的 Rust 測試執行檔在載入階段就以
+`STATUS_ENTRYPOINT_NOT_FOUND` 失敗，連 `--list` 都進不去，因此該平台
+的 `cargo test` 無法執行；這兩次改動的 Rust 測試只由 Linux CI 驗證。
