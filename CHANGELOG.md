@@ -4,6 +4,47 @@
 
 ---
 
+## [2026.9.21](https://github.com/NickYCLin/lattice-term/compare/v2026.9.20...v2026.9.21) (2026-09-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **remote:** 區網直連的配對碼在有效期間內可被多台控制端使用， 不再是一次性。需要單人獨占時請在碼過期前停止分享。
+
+### 🚀 新增功能
+
+* **chat:** MCP 表單支援從清單挑多個 ([04f3804](https://github.com/NickYCLin/lattice-term/commit/04f38045a59b32513cde688bb373c62647d63f89))
+* **chat:** 子任務可以交給另一台機器做 ([26db16e](https://github.com/NickYCLin/lattice-term/commit/26db16e4b679a1617a8ef705302d63ab7c494f92))
+* **daemon:** 背景服務起不來時說出實際原因 ([57913ca](https://github.com/NickYCLin/lattice-term/commit/57913cae046e129dd37c4b888cf2b0e6e6071572))
+* **mcp:** 連上的連線自動開放給 MCP，不用逐條授權 ([e5fa22a](https://github.com/NickYCLin/lattice-term/commit/e5fa22ada954802dfafff78fb24b235eb6769ca7))
+* **relay:** 人數滿了立刻回覆，不用等十二秒 ([ea3cfcd](https://github.com/NickYCLin/lattice-term/commit/ea3cfcd80e58fa600e0eccacd20167aa403aeae4))
+* **remote:** 中繼同時連線人數提高到八人 ([a626230](https://github.com/NickYCLin/lattice-term/commit/a626230281cda6351a05217583714ff6c600b130))
+* **remote:** 分享權限先選開放程度再談細項 ([a804807](https://github.com/NickYCLin/lattice-term/commit/a804807c8f191234d1d46bc102dfebe1e312756b))
+* **remote:** 區網直連也能多人同時連 ([57a4a99](https://github.com/NickYCLin/lattice-term/commit/57a4a991c5f87ab338d3242768d3aa8755b5b4cc))
+* **remote:** 多人同時操作時先動的人握住控制權 ([60ed972](https://github.com/NickYCLin/lattice-term/commit/60ed9724f37981e8c22c751f7921c00f7365e7e7))
+* **remote:** 存過配對碼的主機直接連上去 ([6532cd4](https://github.com/NickYCLin/lattice-term/commit/6532cd4a2545f14bd8f71cd60f33489150ac7bab))
+* **remote:** 新分享預設就是完全開放 ([16bb6e3](https://github.com/NickYCLin/lattice-term/commit/16bb6e347322710809daeb6dbcf3020e50873413))
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 游標閃爍不再擋掉遠端輸入 ([5c85b1e](https://github.com/NickYCLin/lattice-term/commit/5c85b1e46d2e7bd6ada2cd5a8f1b704edd72470d))
+* **remote:** macOS 的點擊落在正確位置 ([db147ae](https://github.com/NickYCLin/lattice-term/commit/db147ae81eab223242288341277c5b205fd03bd2))
+* **remote:** 不能操控時分享端自己也顯示唯讀 ([890b1f2](https://github.com/NickYCLin/lattice-term/commit/890b1f21ab093c9ac3f070b78f42fe212b696040))
+* **remote:** 中繼與底層連線也會放掉消失的對方 ([da0ae9e](https://github.com/NickYCLin/lattice-term/commit/da0ae9e34f7c5cb4b07ebb00c1b1a4c176d5a9aa))
+* **remote:** 修掉程式碼審查找到的七個問題 ([f2087c6](https://github.com/NickYCLin/lattice-term/commit/f2087c620c0f3d76260d15e47002dbad1b59eab4))
+* **remote:** 區網多人改成明確開啟，CLI 預設不變 ([336c80b](https://github.com/NickYCLin/lattice-term/commit/336c80bfdc7b6230e8133fe1b550d81b653c7146))
+* **remote:** 對方消失時工作階段會自己結束 ([19ba4f8](https://github.com/NickYCLin/lattice-term/commit/19ba4f8c5dc0baf4184801123c7688eba838f75f))
+* **remote:** 非 Windows 的自動待命不再被指令權限擋下 ([c0862f4](https://github.com/NickYCLin/lattice-term/commit/c0862f452bf59f6d62c39d6ba82b0f8fad5b9fda))
+* **發布:** 上傳中斷後重跑不再撞到同名資產 ([a5fc9bf](https://github.com/NickYCLin/lattice-term/commit/a5fc9bfc01e9e56bc239bbd21746cb18ffe31941))
+* **發布:** 等 PR 指向正規化後的 commit 再挑候選 ([a98d794](https://github.com/NickYCLin/lattice-term/commit/a98d79499a15643de95ff6644bed9c8918a4654f))
+
+
+### 🎨 介面與視覺調整
+
+* **agents:** 工作階段的選項排成一行 ([2aedc6c](https://github.com/NickYCLin/lattice-term/commit/2aedc6cebff21a41fd0f70855e8ebd3f7d34337f))
+* **mcp:** 開放程度的兩個選項各佔一行 ([696971b](https://github.com/NickYCLin/lattice-term/commit/696971b487d8ae804e30fb34129080841c6c2890))
+
 ## [2026.9.20](https://github.com/NickYCLin/lattice-term/compare/v2026.9.19...v2026.9.20) (2026-09-19)
 
 
