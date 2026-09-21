@@ -1335,7 +1335,7 @@ fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, String> {
 fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Option<audit::Action> {
     use crate::mcp_desktop::{DesktopOperation as Op, TransferDirection};
     Some(match operation {
-        Op::ListConnections => return None,
+        Op::ListConnections | Op::ListSavedConnections => return None,
         Op::GetMetrics { .. } => audit::Action::RemoteMetrics,
         Op::CaptureScreen { .. } => audit::Action::RemoteScreen,
         Op::ScreenInput { .. } => audit::Action::RemoteInput,

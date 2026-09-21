@@ -871,6 +871,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "オン",
   "settings.backgroundService.off": "オフ",
   "settings.mcpRemote.boundary": "項目ごとの許可はありません。画面、キーボードとマウス、ファイル、ホスト情報は接続に付いてきます。AI が自分で書いたコマンドは毎回あなたの承認を待ちます。リモート画面をあなたが操作すると、AI のポインタとキーは 30 秒止まります。「10 分間停止」で 1 つの接続を戻せ、切断すればすべて終わります。",
+  "settings.mcpRemote.book": "外部 AI に接続帳の閲覧を許可",
+  "settings.mcpRemote.book.hint": "list_saved_connections は保存した各接続の名前、グループ、タグ、環境、プロトコルと、いま接続中かどうかを返します。ホスト、ポート、アカウント、資格情報は含みません。名前を読めても接続はできません。未接続の項目を開けるのは、ここにいるあなただけです。",
   "settings.mcpRemote.refreshFailed": "リモートの付与状況は利用できません。デスクトップのバックエンドを確認してください。",
   "settings.mcpRemote.plan": "承認されたコマンド",
   "settings.mcpRemote.root": "承認されたファイルディレクトリ",

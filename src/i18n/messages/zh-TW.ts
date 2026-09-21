@@ -967,6 +967,8 @@ export const zhTW = {
   "settings.backgroundService.on": "開啟",
   "settings.backgroundService.off": "關閉",
   "settings.mcpRemote.boundary": "不需要逐項授權。畫面、鍵鼠、檔案與主機資訊隨連線自動開放；AI 自己寫的指令每次仍會跳出來等你同意。你自己在遠端視窗動滑鼠或打字時，AI 的鍵鼠會暫停三十秒。按「暫停十分鐘」可把某條連線先收回，斷線則立即結束一切。",
+  "settings.mcpRemote.book": "允許外部 AI 讀取連線簿",
+  "settings.mcpRemote.book.hint": "外部 AI 可以用 list_saved_connections 看到每一筆儲存連線的名稱、群組、標籤、環境與協定，以及目前有沒有連線。不含主機、埠、帳號與任何憑證。讀到名稱不等於能連上：沒連線的項目仍然只有你能在這裡開啟。",
   "settings.mcpRemote.refreshFailed": "無法取得遠端授權狀態，請確認桌面後端可用。",
   "settings.mcpRemote.plan": "核准的指令",
   "settings.mcpRemote.root": "核准的檔案目錄",

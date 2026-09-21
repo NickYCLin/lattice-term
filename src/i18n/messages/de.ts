@@ -871,6 +871,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "Ein",
   "settings.backgroundService.off": "Aus",
   "settings.mcpRemote.boundary": "Nichts wird einzeln freigegeben. Bildschirm, Tastatur und Maus, Dateien und Hostdaten kommen mit der Verbindung; einen selbst geschriebenen Befehl bestätigst du jedes Mal. Nutzt du das Fernfenster selbst, pausieren Zeiger und Tasten der KI dreißig Sekunden. „Zehn Minuten pausieren“ nimmt eine Verbindung zurück, Trennen beendet alles sofort.",
+  "settings.mcpRemote.book": "Externer KI das Verbindungsbuch zeigen",
+  "settings.mcpRemote.book.hint": "list_saved_connections nennt Name, Gruppe, Tags, Umgebung und Protokoll jedes gespeicherten Eintrags und ob dafür gerade eine Sitzung offen ist. Nie Host, Port, Konto oder Zugangsdaten. Ein Name gewährt nichts: einen nicht verbundenen Eintrag öffnest weiterhin nur du, hier.",
   "settings.mcpRemote.refreshFailed": "Der Remote Grant-Status ist nicht verfügbar. Überprüfen Sie den Desktop-Backend.",
   "settings.mcpRemote.plan": "Genehmigter Befehl",
   "settings.mcpRemote.root": "Genehmigtes Dateiverzeichnis",

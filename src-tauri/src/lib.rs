@@ -24,6 +24,7 @@ pub mod hostkeys;
 pub mod linux_webkit;
 mod local_files;
 pub mod local_terminal;
+pub mod mcp_book;
 pub mod mcp_desktop;
 pub mod mcp_inventory;
 pub mod mcp_screen;
@@ -93,6 +94,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use zeroize::Zeroizing;
 
 type AppStorage = Mutex<FileStorage>;
+type AppConnectionBook = Mutex<crate::mcp_book::ConnectionBookSetting>;
 type AppAgentHistory = Mutex<AgentTerminalHistoryStore>;
 type AppDaemon = Arc<crate::agent_daemon::client::DaemonClient>;
 type AppAgentPlans = Mutex<FileAgentPlanStore>;
@@ -521,6 +523,44 @@ fn mcp_remote_targets(
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
 ) -> Vec<mcp_desktop::TargetView> {
     service.targets()
+}
+
+/// Reads the saved connection book straight from the profile store, so an
+/// entry added or renamed in the window is described as it stands now.
+struct DesktopConnectionBook(tauri::AppHandle);
+
+impl mcp_desktop::ConnectionBook for DesktopConnectionBook {
+    fn profiles(&self) -> Vec<domain::ConnectionProfile> {
+        self.0
+            .try_state::<AppStorage>()
+            .and_then(|storage| {
+                storage
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.list_profiles().ok())
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[tauri::command]
+fn mcp_connection_book_shared(setting: State<'_, AppConnectionBook>) -> Result<bool, String> {
+    Ok(setting.lock().map_err(|error| error.to_string())?.shared())
+}
+
+/// Turns the connection book on or off for external clients. The stored
+/// choice and the running service are updated together, and a failed write
+/// leaves the previous choice in force.
+#[tauri::command]
+fn mcp_connection_book_share(
+    shared: bool,
+    setting: State<'_, AppConnectionBook>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<bool, String> {
+    let mut guard = setting.lock().map_err(|error| error.to_string())?;
+    guard.set(shared)?;
+    service.share_connection_book(guard.shared());
+    Ok(guard.shared())
 }
 
 #[tauri::command]
@@ -4326,18 +4366,21 @@ pub fn run() {
             )));
             // Built last: it binds an MCP grant to the live session in each
             // of the registries it can share.
-            app.manage(Arc::new(
-                mcp_desktop::DesktopService::new(
-                    app.state::<Arc<SshRegistry>>().inner().clone(),
-                    app.state::<Arc<SftpRegistry>>().inner().clone(),
-                )
-                .with_screens(
-                    app.state::<Arc<RdpRegistry>>().inner().clone(),
-                    app.state::<Arc<VncRegistry>>().inner().clone(),
-                    app.state::<Arc<RemoteRegistry>>().inner().clone(),
-                    app.state::<Arc<mcp_screen::ScreenFrames>>().inner().clone(),
-                ),
-            ));
+            let book_setting = crate::mcp_book::ConnectionBookSetting::open(&dir);
+            let desktop_service = mcp_desktop::DesktopService::new(
+                app.state::<Arc<SshRegistry>>().inner().clone(),
+                app.state::<Arc<SftpRegistry>>().inner().clone(),
+            )
+            .with_screens(
+                app.state::<Arc<RdpRegistry>>().inner().clone(),
+                app.state::<Arc<VncRegistry>>().inner().clone(),
+                app.state::<Arc<RemoteRegistry>>().inner().clone(),
+                app.state::<Arc<mcp_screen::ScreenFrames>>().inner().clone(),
+            )
+            .with_connection_book(Arc::new(DesktopConnectionBook(app.handle().clone())));
+            desktop_service.share_connection_book(book_setting.shared());
+            app.manage(Mutex::new(book_setting));
+            app.manage(Arc::new(desktop_service));
             // The approval card has to appear wherever the user is, so the
             // waiting list is pushed rather than polled.
             let approvals = app
@@ -4377,6 +4420,8 @@ pub fn run() {
             local_file_read_text,
             runtime_summary,
             mcp_remote_targets,
+            mcp_connection_book_shared,
+            mcp_connection_book_share,
             remote_fleet_action,
             mcp_remote_pending_commands,
             mcp_remote_command_decide,

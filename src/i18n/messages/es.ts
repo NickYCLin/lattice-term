@@ -871,6 +871,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "Activado",
   "settings.backgroundService.off": "Desactivado",
   "settings.mcpRemote.boundary": "No se concede nada por partes. Pantalla, teclado y ratón, archivos e información del host vienen con la conexión; un comando que la IA escriba sigue esperando tu aprobación cada vez. Si usas la ventana remota, su puntero y teclado se pausan treinta segundos. «Pausar diez minutos» retira una conexión y desconectar termina todo al instante.",
+  "settings.mcpRemote.book": "Permitir que la IA externa lea la libreta de conexiones",
+  "settings.mcpRemote.book.hint": "list_saved_connections indica el nombre, el grupo, las etiquetas, el entorno y el protocolo de cada entrada guardada, y si ahora hay una sesión abierta. Nunca el host, el puerto, la cuenta ni ninguna credencial. Leer un nombre no concede nada: una entrada sin conexión solo puedes abrirla tú, aquí.",
   "settings.mcpRemote.refreshFailed": "No se puede consultar el estado de los permisos remotos. Comprueba el backend de escritorio.",
   "settings.mcpRemote.plan": "Comando aprobado",
   "settings.mcpRemote.root": "Directorio de archivos aprobado",

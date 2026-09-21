@@ -18,6 +18,7 @@ pub(crate) use fleet::valid_windows_workspace_path;
 pub use fleet::{FleetAction, FleetPlatform, FleetWorkspace};
 pub use screen_input::ScreenAction;
 
+use crate::domain::{ConnectionProfile, Environment, Protocol};
 use crate::mcp_screen::{ScreenBackend, ScreenKey};
 use crate::sftp::SftpRegistry;
 use crate::ssh::SshRegistry;
@@ -26,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{watch, Semaphore};
@@ -194,6 +196,39 @@ pub enum TransferDirection {
     Download,
 }
 
+/// The most entries the connection book will describe in one reply, so a
+/// large book cannot turn one call into an unbounded payload.
+const MAX_BOOK_ENTRIES: usize = 500;
+
+/// One entry of the connection book as an external client may see it.
+///
+/// Deliberately without hostname, account, port, device identity or relay
+/// address: naming the places this person works is enough to ask for one by
+/// name, and reaching any of them still needs a session they opened.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedConnectionView {
+    pub id: String,
+    pub name: String,
+    pub protocol: Protocol,
+    pub group: String,
+    pub tags: Vec<String>,
+    pub environment: Environment,
+    pub favorite: bool,
+    /// A session for this entry is open, so the remote tools can act on it.
+    pub connected: bool,
+    /// The grant to use while that session lasts; absent when not connected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+}
+
+/// Reads the saved connection book. The desktop implements this over its own
+/// profile storage; headless builds and tests leave it unset, which reports
+/// the book as unavailable rather than as an empty book.
+pub trait ConnectionBook: Send + Sync {
+    fn profiles(&self) -> Vec<ConnectionProfile>;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -203,6 +238,7 @@ pub enum TransferDirection {
 )]
 pub enum DesktopOperation {
     ListConnections,
+    ListSavedConnections,
     Fleet {
         target_id: String,
         action: FleetAction,
@@ -257,7 +293,7 @@ pub enum DesktopOperation {
 impl DesktopOperation {
     pub fn target_id(&self) -> Option<&str> {
         match self {
-            Self::ListConnections => None,
+            Self::ListConnections | Self::ListSavedConnections => None,
             Self::Fleet { target_id, .. }
             | Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
@@ -289,7 +325,10 @@ impl DesktopOperation {
                 ..
             } => Some(Scope::Download),
             // Cancellation/status require ownership of the original operation.
-            Self::ListConnections | Self::Cancel { .. } | Self::OperationStatus { .. } => None,
+            Self::ListConnections
+            | Self::ListSavedConnections
+            | Self::Cancel { .. }
+            | Self::OperationStatus { .. } => None,
         }
     }
 
@@ -557,6 +596,13 @@ pub struct DesktopService {
     /// Bumped whenever the waiting list changes, so the window can redraw
     /// without polling.
     approvals: watch::Sender<u64>,
+    /// The saved connection book, when the desktop offers one.
+    book: Option<Arc<dyn ConnectionBook>>,
+    /// Whether external clients may read that book. On by default, like the
+    /// connections the person opens: the book names places to work and
+    /// carries no host, account or credential. Turning it off is a choice
+    /// they make, and it takes effect at once.
+    book_shared: Arc<AtomicBool>,
 }
 
 impl DesktopService {
@@ -573,6 +619,8 @@ impl DesktopService {
             state: Arc::new(Mutex::new(State::default())),
             calls: Arc::new(Semaphore::new(MAX_CALLS)),
             approvals: watch::channel(0).0,
+            book: None,
+            book_shared: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -588,6 +636,94 @@ impl DesktopService {
         self.remote = remote;
         self.screens = screens;
         self
+    }
+
+    /// Names the connection book an external client may read once the person
+    /// allows it. Without this the book reports as unavailable, never empty.
+    pub fn with_connection_book(mut self, book: Arc<dyn ConnectionBook>) -> Self {
+        self.book = Some(book);
+        self
+    }
+
+    pub fn share_connection_book(&self, shared: bool) {
+        self.book_shared.store(shared, Ordering::Relaxed);
+    }
+
+    pub fn connection_book_shared(&self) -> bool {
+        self.book_shared.load(Ordering::Relaxed)
+    }
+
+    /// Every open session, paired with the book entry it was opened from.
+    fn live_profiles(&self) -> Vec<(String, Backend, String)> {
+        let mut live = Vec::new();
+        for session in self.ssh.list() {
+            live.push((session.profile_id, Backend::Ssh, session.session_id));
+        }
+        for session in self.sftp.list() {
+            live.push((session.profile_id, Backend::Sftp, session.session_id));
+        }
+        for session in self.rdp.list() {
+            live.push((session.profile_id, Backend::Rdp, session.session_id));
+        }
+        for session in self.vnc.list() {
+            live.push((session.profile_id, Backend::Vnc, session.session_id));
+        }
+        for session in self.remote.list() {
+            live.push((session.profile_id, Backend::Remote, session.session_id));
+        }
+        live
+    }
+
+    /// The connection book, reduced to what asking for a place by name needs,
+    /// plus the grant to use for the entries already open.
+    fn saved_connections(&self) -> Result<(Vec<SavedConnectionView>, bool), ServiceError> {
+        if !self.book_shared.load(Ordering::Relaxed) {
+            return Err(ServiceError::denied());
+        }
+        let Some(book) = self.book.as_ref() else {
+            return Err(ServiceError::unavailable());
+        };
+        let live = self.live_profiles();
+        let state = self.state.lock().map_err(|_| ServiceError::failed())?;
+        let mut profiles = book.profiles();
+        profiles.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let truncated = profiles.len() > MAX_BOOK_ENTRIES;
+        profiles.truncate(MAX_BOOK_ENTRIES);
+        let views = profiles
+            .into_iter()
+            .map(|profile| {
+                let target_id = live.iter().filter(|(id, _, _)| *id == profile.id).find_map(
+                    |(_, backend, session_id)| {
+                        state
+                            .grants
+                            .values()
+                            .find(|grant| {
+                                grant.view.backend == *backend
+                                    && grant.session_id == *session_id
+                                    && !*grant.revoked.borrow()
+                            })
+                            .map(|grant| grant.view.id.clone())
+                    },
+                );
+                let connected = live.iter().any(|(id, _, _)| *id == profile.id);
+                SavedConnectionView {
+                    id: profile.id,
+                    name: profile.name,
+                    protocol: profile.protocol,
+                    group: profile.group,
+                    tags: profile.tags,
+                    environment: profile.environment,
+                    favorite: profile.favorite,
+                    connected,
+                    target_id,
+                }
+            })
+            .collect();
+        Ok((views, truncated))
     }
 
     fn identity(&self, backend: Backend, session_id: &str) -> Option<usize> {
@@ -1070,6 +1206,10 @@ impl DesktopService {
         if matches!(operation, DesktopOperation::ListConnections) {
             return Ok(json!({ "connections": self.targets(), "desktopRequired": true }));
         }
+        if matches!(operation, DesktopOperation::ListSavedConnections) {
+            let (connections, truncated) = self.saved_connections()?;
+            return Ok(json!({ "connections": connections, "truncated": truncated }));
+        }
         let grant = self.authorized(&operation)?;
         self.preflight(client, &grant, &operation)?;
         if let DesktopOperation::OperationStatus { operation_id, .. } = &operation {
@@ -1197,7 +1337,9 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
             }
-            DesktopOperation::ListConnections | DesktopOperation::GetMetrics { .. } => {}
+            DesktopOperation::ListConnections
+            | DesktopOperation::ListSavedConnections
+            | DesktopOperation::GetMetrics { .. } => {}
         }
         Ok(())
     }
@@ -2116,6 +2258,76 @@ mod signature_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    struct FixedBook(Vec<ConnectionProfile>);
+
+    impl ConnectionBook for FixedBook {
+        fn profiles(&self) -> Vec<ConnectionProfile> {
+            self.0.clone()
+        }
+    }
+
+    fn book_entry(id: &str, name: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            id: id.into(),
+            name: name.into(),
+            protocol: Protocol::Ssh,
+            hostname: "hidden.example".into(),
+            username: "hidden-account".into(),
+            port: 2222,
+            environment: Environment::Production,
+            group: "deploy".into(),
+            tags: vec!["release".into()],
+            favorite: true,
+            device_id: None,
+            relay_address: None,
+        }
+    }
+
+    fn book_service(entries: Vec<ConnectionProfile>) -> DesktopService {
+        DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()))
+            .with_connection_book(Arc::new(FixedBook(entries)))
+    }
+
+    #[test]
+    fn the_connection_book_reads_by_default_and_closes_the_moment_it_is_turned_off() {
+        let service = book_service(vec![book_entry("a", "second"), book_entry("b", "first")]);
+        let (entries, truncated) = service.saved_connections().unwrap();
+        assert!(!truncated);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+        // Nothing is open, so nothing carries a grant to act through.
+        assert!(entries
+            .iter()
+            .all(|entry| !entry.connected && entry.target_id.is_none()));
+        // The book names places; it never carries the way in.
+        let listed = serde_json::to_string(&entries).unwrap();
+        assert!(!listed.contains("hidden.example"));
+        assert!(!listed.contains("hidden-account"));
+        assert!(!listed.contains("2222"));
+        service.share_connection_book(false);
+        assert_eq!(
+            service.saved_connections().unwrap_err().code,
+            "not_authorized"
+        );
+        service.share_connection_book(true);
+        assert!(service.saved_connections().is_ok());
+    }
+
+    #[test]
+    fn a_book_the_desktop_never_offered_reads_as_unavailable_not_empty() {
+        let service =
+            DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()));
+        service.share_connection_book(true);
+        assert_eq!(
+            service.saved_connections().unwrap_err().code,
+            "needs_user_action"
+        );
+    }
+
     #[test]
     fn revoking_one_of_two_grants_keeps_only_the_still_shared_screen() {
         use super::*;

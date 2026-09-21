@@ -23,18 +23,23 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
   const [targets, setTargets] = useState<Target[]>([]);
   const [quiet, setQuiet] = useState<QuietWindow[]>([]);
+  // On by default, so the box matches what the service already answers
+  // before the desktop has replied.
+  const [book, setBook] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [next, quietWindows] = await Promise.all([
+    const [next, quietWindows, bookShared] = await Promise.all([
       invoke<Target[]>("mcp_remote_targets"),
       invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
+      invoke<boolean>("mcp_connection_book_shared"),
     ]);
     setTargets(next);
     setQuiet(quietWindows);
+    setBook(bookShared === true);
   }, [available]);
 
   useEffect(() => {
@@ -48,6 +53,18 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const stopQuiet = async (targetId: string) => {
     const { invoke } = await import("@tauri-apps/api/core");
     setQuiet(await invoke<QuietWindow[]>("mcp_remote_quiet_clear", { targetId }));
+  };
+
+  // Naming the saved connections is its own choice, separate from what any
+  // open session already allows.
+  const shareBook = async (shared: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setBook(await invoke<boolean>("mcp_connection_book_share", { shared }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
   };
 
   const pause = async (targetId: string) => {
@@ -65,6 +82,13 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
       <p className="panel__hint">{t("settings.mcpRemote.hint")}</p></div></header>
     <div className="mcp-remote__body">
       <p>{t("settings.mcpRemote.boundary")}</p>
+      {available && <label className="checkbox mcp-remote__book">
+        <input type="checkbox" checked={book} disabled={busy}
+          onChange={(event) => void shareBook(event.currentTarget.checked)} />
+        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.book")}</strong>
+          <span>{t("settings.mcpRemote.book.hint")}</span></span>
+      </label>}
       {error && <p role="alert">{error}</p>}
       {!available ? <p>{t("settings.mcpRemote.desktopOnly")}</p>
         : targets.length === 0 ? <p>{t("settings.mcpRemote.none")}</p>

@@ -890,6 +890,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "开启",
   "settings.backgroundService.off": "关闭",
   "settings.mcpRemote.boundary": "不需要逐项授权。画面、键鼠、文件与主机信息随连接自动开放；AI 自己写的命令每次仍会弹出等你同意。你自己在远程窗口动鼠标或打字时，AI 的键鼠会暂停三十秒。按「暂停十分钟」可把某条连接先收回，断线则立即结束一切。",
+  "settings.mcpRemote.book": "允许外部 AI 读取连接簿",
+  "settings.mcpRemote.book.hint": "外部 AI 可以用 list_saved_connections 看到每一条已保存连接的名称、分组、标签、环境与协议，以及当前有没有连接。不含主机、端口、账号与任何凭据。读到名称不等于能连上：未连接的项目仍然只有你能在这里打开。",
   "settings.mcpRemote.refreshFailed": "无法取得远程授权状态，请确认桌面后端可用。",
   "settings.mcpRemote.plan": "核准的指令",
   "settings.mcpRemote.root": "核准的文件目录",

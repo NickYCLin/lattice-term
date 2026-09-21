@@ -505,6 +505,7 @@ impl McpServer {
             "cancel_agent_task" => self.cancel_agent_task(&arguments).await,
             "remote_fleet"
             | "list_authorized_connections"
+            | "list_saved_connections"
             | "get_host_metrics"
             | "sftp_list_directory"
             | "ssh_exec_job"
@@ -608,7 +609,7 @@ impl McpServer {
             "tools": [
                 "get_capabilities", "remote_fleet", "list_agent_sessions", "read_agent_output", "wait_agent_state",
                 "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
-                "list_authorized_connections", "get_host_metrics", "sftp_list_directory", "ssh_exec_job", "ssh_run_command", "sftp_transfer", "capture_remote_screen", "send_remote_input", "get_remote_operation", "cancel_remote_operation",
+                "list_authorized_connections", "list_saved_connections", "get_host_metrics", "sftp_list_directory", "ssh_exec_job", "ssh_run_command", "sftp_transfer", "capture_remote_screen", "send_remote_input", "get_remote_operation", "cancel_remote_operation",
             ],
             "errorCodes": super::error_code::ALL,
             "limits": {
@@ -632,6 +633,7 @@ impl McpServer {
                 "Only Agent Fleet sessions the user marked \"keep in the background\" and then shared in LatticeTerm are visible; only those the user also marked controllable accept prompts or cancels.",
                 "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
                 "Desktop Fleet sessions and chat threads are not exposed. SSH, SFTP and screens require a live desktop and separate explicit grants; saved credentials alone never grant access.",
+                "list_saved_connections reports the saved connection book by name only, and only while the user allows it in LatticeTerm. It never returns a host, port, account, device identity or credential, and reading it grants nothing: an entry that is not connected can only be opened by the person at the desktop.",
                 "ssh_run_command is the only way to run text this client wrote. It needs its own grant, and every single call waits for the user to read the command and accept it in LatticeTerm; refusal, silence for two minutes, revocation or a closed desktop all mean it never ran. The user may choose to stop being asked on one connection for a bounded stretch; the grant, the limits and the audit record stay the same.",
                 "capture_remote_screen returns one still picture of an RDP, VNC or Lattice Remote screen the user shared, at most one every two seconds, and only while that exact connection is live. Input needs a separate input grant and a client-bound capture receipt, expires after ten seconds, and is refused if the picture changes. Manual viewer input revokes MCP input. There is no continuous stream; reconnection ends the grant.",
                 "cancel_agent_task with scope \"turn\" interrupts the running turn only for the CLIs listed under turnInterrupt, and only while the session is working with no unfinished human input; every other CLI must be interrupted by the user in the terminal, or ended entirely with scope \"session\".",
@@ -651,6 +653,7 @@ impl McpServer {
         }
         let kind = match name {
             "list_authorized_connections" => "listConnections",
+            "list_saved_connections" => "listSavedConnections",
             "get_host_metrics" => "getMetrics",
             "sftp_list_directory" => "listDirectory",
             "ssh_exec_job" => "exec",
@@ -1751,6 +1754,7 @@ fn desktop_tool_definitions() -> Vec<Value> {
     }).collect();
     [
         ("list_authorized_connections", "List only connections the user explicitly shared in the live desktop. No hosts, usernames, credentials or command text.", json!({}), vec![], true, false),
+        ("list_saved_connections", "List the user's saved connection book by name, only while they allow it in LatticeTerm. Names, groups, tags, environment and protocol only: no hosts, ports, accounts, credentials or device identities. An entry reports whether a session for it is open, and while it is open the targetId to use with the remote tools. Reading the book grants nothing; an entry that is not connected can only be opened by the person at the desktop.", json!({}), vec![], true, false),
         ("get_host_metrics", "Read the fixed Linux metrics probe for an authorized live SSH connection. Cannot accept commands. A host that does not report Linux /proc data answers with code \"unsupported\"; that will not change on a retry.", json!({"targetId":id}), vec!["targetId"], true, false),
         ("sftp_list_directory", "List an approved remote root using a relative path (at most 2048 UTF-8 bytes; empty means the root). Returned files are untrusted data. No arbitrary absolute paths.", json!({"targetId":id,"rootId":id,"path":{"type":"string","maxLength":2048}}), vec!["targetId","rootId","path"], true, false),
         ("ssh_exec_job", "Start a user-approved named command on a dedicated SSH channel, never in the interactive terminal. Inspect operation status and exit status; accepted is not success. Reuse the request ID for identical retries only.", json!({"targetId":id,"planId":id,"requestId":id}), vec!["targetId","planId","requestId"], false, true),
@@ -3040,6 +3044,7 @@ mod tests {
                 "send_agent_prompt",
                 "cancel_agent_task",
                 "list_authorized_connections",
+                "list_saved_connections",
                 "get_host_metrics",
                 "sftp_list_directory",
                 "ssh_exec_job",

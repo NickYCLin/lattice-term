@@ -871,6 +871,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "켜기",
   "settings.backgroundService.off": "끄기",
   "settings.mcpRemote.boundary": "항목별 허용은 없습니다. 화면, 키보드와 마우스, 파일, 호스트 정보는 연결과 함께 제공됩니다. AI가 직접 쓴 명령은 매번 확인을 기다립니다. 원격 창을 직접 조작하면 AI의 포인터와 키가 30초 멈춥니다. \"10분 동안 중지\"로 한 연결을 거둘 수 있고, 연결을 끊으면 모두 끝납니다.",
+  "settings.mcpRemote.book": "외부 AI가 연결 목록을 읽도록 허용",
+  "settings.mcpRemote.book.hint": "list_saved_connections는 저장된 각 항목의 이름, 그룹, 태그, 환경, 프로토콜과 지금 연결되어 있는지를 알려 줍니다. 호스트, 포트, 계정, 자격 증명은 포함하지 않습니다. 이름을 읽어도 접근 권한은 생기지 않으며, 연결되지 않은 항목은 여기서 당신만 열 수 있습니다.",
   "settings.mcpRemote.refreshFailed": "원격 권한 상태를 확인할 수 없습니다. 데스크톱 백엔드를 확인하세요.",
   "settings.mcpRemote.plan": "승인된 명령",
   "settings.mcpRemote.root": "인증 파일 디렉토리",

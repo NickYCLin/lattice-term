@@ -36,4 +36,17 @@ describe("remote MCP permissions", () => {
     expect(html).toContain("Requires the desktop backend");
     expect(html).not.toContain("<button");
   });
+
+  it.each(["zh-TW", "en"] as const)("makes the connection book its own choice in %s", (locale) => {
+    const html = renderToStaticMarkup(<I18nProvider locale={locale}><RemoteMcpPanel available /></I18nProvider>);
+    expect(html).toContain(locale === "zh-TW" ? "允許外部 AI 讀取連線簿" : "Let external AI read the connection book");
+    // The book names places to work; the way into them is never part of it.
+    expect(html).toContain(locale === "zh-TW" ? "不含主機、埠、帳號與任何憑證" : "Never the host, port, account or any credential");
+    expect(html).toContain('type="checkbox"');
+  });
+
+  it("shows the connection book as readable by default", () => {
+    const html = renderToStaticMarkup(<I18nProvider locale="en"><RemoteMcpPanel available /></I18nProvider>);
+    expect(html).toContain('checked=""');
+  });
 });

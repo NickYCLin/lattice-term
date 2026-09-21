@@ -997,6 +997,8 @@ export const en: Messages = {
   "settings.backgroundService.on": "On",
   "settings.backgroundService.off": "Off",
   "settings.mcpRemote.boundary": "Nothing is granted item by item. Screens, keyboard and mouse, files and host information come with the connection; a command the AI writes itself still waits for you, every time. Using the remote window yourself pauses its pointer and keys for thirty seconds. \"Pause for ten minutes\" takes one connection back, and disconnecting ends everything at once.",
+  "settings.mcpRemote.book": "Let external AI read the connection book",
+  "settings.mcpRemote.book.hint": "list_saved_connections reports the name, group, tags, environment and protocol of each saved entry, and whether a session for it is open right now. Never the host, port, account or any credential. Reading a name grants nothing: an entry that is not connected can still only be opened by you, here.",
   "settings.mcpRemote.refreshFailed": "Remote grant status is unavailable. Check the desktop backend.",
   "settings.mcpRemote.plan": "Approved command",
   "settings.mcpRemote.root": "Approved file directory",

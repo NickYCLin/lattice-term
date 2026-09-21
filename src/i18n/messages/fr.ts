@@ -871,6 +871,8 @@ export const messages: Messages = {
   "settings.backgroundService.on": "Activé",
   "settings.backgroundService.off": "Désactivé",
   "settings.mcpRemote.boundary": "Rien ne s’accorde élément par élément. Écran, clavier et souris, fichiers et informations de l’hôte viennent avec la connexion ; une commande écrite par l’IA attend votre accord à chaque fois. Si vous utilisez la fenêtre distante, son pointeur et son clavier se suspendent trente secondes. « Suspendre dix minutes » retire une connexion, se déconnecter met fin à tout.",
+  "settings.mcpRemote.book": "Autoriser l’IA externe à lire le carnet de connexions",
+  "settings.mcpRemote.book.hint": "list_saved_connections donne le nom, le groupe, les étiquettes, l’environnement et le protocole de chaque entrée enregistrée, et si une session est ouverte pour elle. Jamais l’hôte, le port, le compte ni aucun identifiant. Lire un nom n’accorde rien : une entrée non connectée, vous seul pouvez l’ouvrir ici.",
   "settings.mcpRemote.refreshFailed": "L’état des autorisations distantes est indisponible. Vérifiez le service du bureau.",
   "settings.mcpRemote.plan": "Commande approuvée",
   "settings.mcpRemote.root": "Répertoire de fichiers approuvé",
