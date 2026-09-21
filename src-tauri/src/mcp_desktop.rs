@@ -2258,8 +2258,6 @@ mod signature_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     struct FixedBook(Vec<ConnectionProfile>);
 
     impl ConnectionBook for FixedBook {
