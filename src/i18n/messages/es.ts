@@ -785,7 +785,7 @@ export const messages: Messages = {
   "terminal.handoff.unsupported": "Esta conversación de CLI no puede ser exportada",
   "terminal.handoff.closed": "Esta sesión ha terminado, aún puedes abrir un nuevo CLI.",
   "terminal.handoff.exportFailedTitle": "No podía llevar la memoria actual",
-  "terminal.handoff.exportFailed": "La actual conversación CLI no ha sido guardada aún o no podría ser leída, por lo que no se ha abierto ningún nuevo CLI. Deje que la tarea actual termine e intente de nuevo, o apague “Llevar la memoria actual al nuevo CLI”.",
+  "terminal.handoff.exportFailed": "No se encontró ningún archivo de conversación de este CLI en el historial de esa cuenta, así que no se abrió ningún CLI nuevo. Una sesión recién iniciada, o una cuya cuenta o directorio de trabajo ha cambiado, puede no coincidir todavía. Esperar a que termine la tarea no cambia nada. Desmarca «Llevar la memoria actual al nuevo CLI» para abrir uno limpio, o añádelo desde el panel que tiene la conversación.",
   "terminal.handoff.anotherAssistant": "Otro ayudante de inteligencia",
   "terminal.handoff.filePointer": "Acabo de entregar este trabajo a usted de {source}. La conversación anterior completa está en este archivo: {path} Léalo primero para contexto, dime en dos o tres oraciones lo que entendiste, luego espera mi siguiente instrucción.",
   "terminal.handoff.frame": "A continuación está mi conversación anterior completa con otro asistente de IA. Léela para entender el contexto y continúa ayudándome. En breve te daré mi siguiente instrucción.\n\n===== inicio de la conversación anterior =====\n{transcript}\n===== fin de la conversación anterior =====",

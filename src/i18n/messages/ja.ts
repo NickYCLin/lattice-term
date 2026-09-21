@@ -785,7 +785,7 @@ export const messages: Messages = {
   "terminal.handoff.unsupported": "このCLIの会話はエクスポートできません",
   "terminal.handoff.closed": "このセッションは終了しました。まだ新しいCLIを開くことができます。",
   "terminal.handoff.exportFailedTitle": "現在のメモリを運ぶことができませんでした",
-  "terminal.handoff.exportFailed": "現在のCLIの会話はまだ保存されていないか、読み取れなかったので、新しいCLIは開いませんでした。現在のタスクが終了し、もう一度試してみましょう。または、「新しいCLIに現在のメモリを埋める」をオフにします。",
+  "terminal.handoff.exportFailed": "このアカウントの履歴に、この CLI の会話ファイルが見つからなかったため、新しい CLI は開きませんでした。開始直後のセッション、アカウントや作業ディレクトリを変更したセッションは、まだファイルと一致しないことがあります。現在の作業の完了を待っても解決しません。「現在の記憶を新しい CLI に引き継ぐ」のチェックを外して新規に開くか、その会話を持つペインから追加してください。",
   "terminal.handoff.anotherAssistant": "別のAIアシスタント",
   "terminal.handoff.filePointer": "私はちょうど{source}からあなたにこの仕事を渡す. 完全な以前の会話は、このファイルにある: {path} コンテキストのために最初にそれを読んで, あなたが理解した2つまたは3つの文章で私に教えてください, その後、私の次の指示を待ちます.",
   "terminal.handoff.frame": "以下は、別の AI アシスタントとの過去の会話全文です。文脈を理解したうえで引き継ぎ、引き続き手伝ってください。次の指示はまもなく伝えます。\n\n===== 過去の会話の開始 =====\n{transcript}\n===== 過去の会話の終了 =====",

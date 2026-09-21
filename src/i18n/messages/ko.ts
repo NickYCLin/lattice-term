@@ -785,7 +785,7 @@ export const messages: Messages = {
   "terminal.handoff.unsupported": "이 CLI의 대화는 수출할 수 없습니다.",
   "terminal.handoff.closed": "이 세션은 종료되었습니다. 새로운 CLI를 열 수 있습니다.",
   "terminal.handoff.exportFailedTitle": "현재 기억을 수행 할 수 없습니다",
-  "terminal.handoff.exportFailed": "현재 CLI 대화는 아직 저장되지 않았거나 읽을 수 없으므로 새로운 CLI가 열리지 않았습니다. 현재 작업이 완료되고 다시 시도하거나 \"새로운 CLI에 현재 메모리를 끄십시오.\"",
+  "terminal.handoff.exportFailed": "이 계정 기록에서 이 CLI의 대화 파일을 찾지 못해 새 CLI를 열지 않았습니다. 막 시작한 세션이나 계정 또는 작업 디렉터리가 바뀐 세션은 아직 파일과 맞지 않을 수 있습니다. 현재 작업이 끝나기를 기다려도 달라지지 않습니다. \"현재 기억을 새 CLI로 가져오기\"를 해제해 새로 열거나, 그 대화를 가진 창에서 추가하세요.",
   "terminal.handoff.anotherAssistant": "다른 AI 조수",
   "terminal.handoff.filePointer": "나는 단지 {source}에서 당신에게 이 작업을 수행. 전체 이전 대화는이 파일에 있습니다 : {path} 컨텍스트를 위해 먼저 읽고, 당신이 이해하는 것을 두 개 또는 세 문장에서 말해, 다음 내 다음 명령을 기다립니다.",
   "terminal.handoff.frame": "아래는 다른 AI 어시스턴트와 나눈 이전 대화의 전체 내용입니다. 맥락을 파악한 뒤 이어서 도와주세요. 곧 다음 지시를 드리겠습니다.\n\n===== 이전 대화 시작 =====\n{transcript}\n===== 이전 대화 끝 =====",

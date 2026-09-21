@@ -804,7 +804,7 @@ export const messages: Messages = {
   "terminal.handoff.unsupported": "目前这个 CLI 无法导出对话",
   "terminal.handoff.closed": "这个工作阶段已结束，仍可直接加开新的 CLI。",
   "terminal.handoff.exportFailedTitle": "无法带入目前记忆",
-  "terminal.handoff.exportFailed": "目前 CLI 的对话尚未写入或无法读取，因此没有打开新的 CLI。请让目前工作完成后再试一次，或取消「将目前记忆带到新 CLI」。",
+  "terminal.handoff.exportFailed": "在这个账号的记录目录里找不到这个 CLI 的对话文件，因此没有打开新的 CLI。刚开没多久、换过账号或改过工作目录的工作阶段，都可能还对不上文件；等目前工作跑完并不会改变这件事。可以取消「将目前记忆带到新 CLI」开一个干净的，或改从真正有那段对话的分页加开。",
   "terminal.handoff.anotherAssistant": "另一个 AI 助理",
   "terminal.handoff.filePointer": "我刚从 {source} 把工作交接给你。先前的完整对话已存在这个文件：{path}\n请先读完它掌握脉络，用两三句话告诉我你理解到哪里，然后等我下一个指示。",
   "terminal.handoff.frame": "以下是我和另一个 AI 助理先前的完整对话。请先读懂脉络，接着接手继续协助我，我马上会给你下一个指示。\n\n===== 先前对话开始 =====\n{transcript}\n===== 先前对话结束 =====",

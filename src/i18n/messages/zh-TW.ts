@@ -877,7 +877,7 @@ export const zhTW = {
   "terminal.handoff.closed": "這個工作階段已結束，仍可直接加開新的 CLI。",
   "terminal.handoff.exportFailedTitle": "無法帶入目前記憶",
   "terminal.handoff.exportFailed":
-    "目前 CLI 的對話尚未寫入或無法讀取，因此沒有開啟新的 CLI。請讓目前工作完成後再試一次，或取消「將目前記憶帶到新 CLI」。",
+    "在這個帳號的紀錄目錄裡找不到這個 CLI 的對話檔，因此沒有開啟新的 CLI。剛開沒多久、換過帳號或改過工作目錄的工作階段，都可能還對不上檔案；等目前工作跑完並不會改變這件事。可以取消「將目前記憶帶到新 CLI」開一個乾淨的，或改從真正有那段對話的分頁加開。",
   "terminal.handoff.anotherAssistant": "另一個 AI 助理",
   "terminal.handoff.filePointer":
     "我剛從 {source} 把工作交接給你。先前的完整對話已存在這個檔案：{path}\n請先讀完它掌握脈絡，用兩三句話告訴我你理解到哪裡，然後等我下一個指示。",

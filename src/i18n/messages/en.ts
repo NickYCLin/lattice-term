@@ -900,7 +900,7 @@ export const en: Messages = {
   "terminal.handoff.closed": "This session has ended. You can still open a new CLI.",
   "terminal.handoff.exportFailedTitle": "Could not carry the current memory",
   "terminal.handoff.exportFailed":
-    "The current CLI conversation has not been saved yet or could not be read, so no new CLI was opened. Let the current task finish and try again, or turn off “Bring current memory to the new CLI.”",
+    "No conversation file for this CLI was found under its account history, so no new CLI was opened. A session that has just started, or one whose account or working directory has changed, may not match a file yet. Waiting for the current task to finish does not help. Clear “Carry current memory into the new CLI” to open a clean one, or add the CLI from the pane that holds the conversation.",
   "terminal.handoff.anotherAssistant": "another AI assistant",
   "terminal.handoff.filePointer":
     "I just handed this work over to you from {source}. The full earlier conversation is in this file: {path}\nRead it first for context, tell me in two or three sentences what you understood, then wait for my next instruction.",
