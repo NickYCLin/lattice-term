@@ -562,6 +562,69 @@ pub fn account_profile_status(definition_id: &str, directory: &Path) -> AgentAcc
     info
 }
 
+/// Removal that copes with Windows refusing a delete for a read-only file or
+/// for a handle an antivirus scanner, indexer or a CLI that has just exited is
+/// still holding. Everything else is reported to the caller unchanged.
+fn remove_directory_tree(directory: &Path) -> std::io::Result<()> {
+    const ATTEMPTS: u32 = 5;
+    let mut cleared_read_only = false;
+    let mut last = None;
+    for attempt in 0..ATTEMPTS {
+        match std::fs::remove_dir_all(directory) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                let denied = error.kind() == std::io::ErrorKind::PermissionDenied;
+                last = Some(error);
+                if attempt + 1 == ATTEMPTS {
+                    break;
+                }
+                if denied && !cleared_read_only {
+                    cleared_read_only = true;
+                    clear_read_only_tree(directory);
+                    continue;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(
+                    80 * u64::from(attempt + 1),
+                ));
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        std::io::Error::other("the account profile directory could not be removed")
+    }))
+}
+
+/// Drops the read-only attribute across a tree so one protected file cannot
+/// block the whole removal. Unix permissions are left alone: widening them on
+/// a directory holding a login token is not worth the retry.
+#[cfg(windows)]
+fn clear_read_only_tree(directory: &Path) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            clear_read_only_tree(&path);
+        }
+        let mut permissions = metadata.permissions();
+        if permissions.readonly() {
+            // Windows only, and only to clear the attribute that refuses the
+            // delete; the entry is removed immediately afterwards.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = std::fs::set_permissions(&path, permissions);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn clear_read_only_tree(_directory: &Path) {}
+
 /// Removes a profile directory LatticeTerm created itself, login data
 /// included. Only the fixed `agent-profiles/<cli>/<id>` shape is accepted so
 /// a stored path can never point the removal anywhere else.
@@ -586,9 +649,17 @@ pub fn remove_account_profile_directory(
         .join(definition_id)
         .join(profile_id);
     match std::fs::symlink_metadata(&directory) {
-        Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(&directory)
+        Ok(metadata) if metadata.is_dir() => remove_directory_tree(&directory)
             .map(|_| true)
-            .map_err(|error| format!("Cannot remove the account profile directory: {error}")),
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    format!(
+                        "Cannot remove the account profile directory because it is still in use. Close the CLI signed in with this account, then try again: {error}"
+                    )
+                } else {
+                    format!("Cannot remove the account profile directory: {error}")
+                }
+            }),
         Ok(_) => Err("The account profile path is not a directory.".to_string()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(format!(
@@ -8218,6 +8289,20 @@ mod tests {
         assert!(remove_account_profile_directory(data.path(), "codex", "../x").is_err());
         assert!(remove_account_profile_directory(data.path(), "gemini", "abc").is_err());
         assert!(data.path().join("agent-profiles").join("codex").is_dir());
+    }
+
+    #[test]
+    fn removing_a_profile_directory_survives_a_read_only_login_file() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let created = account_profile_directory(data.path(), "claude", "read-only").unwrap();
+        let auth = created.join(".claude.json");
+        std::fs::write(&auth, "{}").unwrap();
+        let mut permissions = std::fs::metadata(&auth).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&auth, permissions).unwrap();
+
+        assert!(remove_account_profile_directory(data.path(), "claude", "read-only").unwrap());
+        assert!(!created.exists());
     }
 
     #[test]
