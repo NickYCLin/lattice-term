@@ -4,6 +4,22 @@
 
 ---
 
+## [2026.9.22](https://github.com/NickYCLin/lattice-term/compare/v2026.9.21...v2026.9.22) (2026-09-21)
+
+
+### 🚀 新增功能
+
+* **agent:** Codex 自我更新後自動接回工作階段 ([4c8c2e3](https://github.com/NickYCLin/lattice-term/commit/4c8c2e3a6f229f6b4d4febd2dd10e4d25170ae93))
+* **mcp:** 讓外部 AI 讀得到連線簿 ([a534606](https://github.com/NickYCLin/lattice-term/commit/a5346060c139e4b7656dfa81a7e86cd44d2f14b6))
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 移除測試模組重複的 glob 匯入 ([11ed84d](https://github.com/NickYCLin/lattice-term/commit/11ed84dec1a361914952ee23f5710c32a37191e8))
+* **交接:** 修正帶入記憶失敗時的誤導說明 ([ed10f78](https://github.com/NickYCLin/lattice-term/commit/ed10f786e3fe66ec63f26a928423bd46a54e47a9))
+* 修正移除帳號被拒與終端尺寸不同步 ([#255](https://github.com/NickYCLin/lattice-term/issues/255)) ([0dcc32b](https://github.com/NickYCLin/lattice-term/commit/0dcc32b4a8770bf686035cdd6b1add0a99f0198e))
+* **背景服務:** 補上啟動入口與停止時的狀態 ([00e18f0](https://github.com/NickYCLin/lattice-term/commit/00e18f01be4d2b2e792de1f625d49d0a4cf7c7dc))
+
 ## [2026.9.21](https://github.com/NickYCLin/lattice-term/compare/v2026.9.20...v2026.9.21) (2026-09-21)
 
 
