@@ -89,6 +89,8 @@ Release PR 會一起更新：
 
 ## 簽章與失敗處理
 
+- 桌面安裝包建置失敗且發布尚未執行時，`Recover failed release builds` 等待一分鐘後，自動重跑原 Release run 的失敗工作與相依工作；最多執行三次（原始一次、重試兩次）。已成功的平台不重建，候選 SHA 與版號不變，仍須通過原本的更新清單檢查才能發布。這可恢復下載 NSIS 等工具時的暫時性 HTTP 500，不保證外部服務永遠可用。
+- 自動重跑只接受本儲存庫 `main` 的排程或手動 Release；不重跑 PR、push、人工取消、候選驗證、合併或發布階段的失敗。每次會重新讀取 run 狀態，避免延遲事件重複啟動已被人工重跑的工作；三次仍失敗會留下 warning，保留原始失敗紀錄供排查。每日排程仍可依下述草稿恢復流程再試。
 - GitHub Actions 必須保存 `TAURI_SIGNING_PRIVATE_KEY` 與 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。缺少私鑰時發布會直接失敗，避免產生客戶端拒絕的未簽章更新包。
 - Tauri updater 簽章用來驗證更新內容，與 Windows Authenticode 或 Apple Developer ID／notarization 是不同層次。目前自動化保證 updater 簽章；正式對外散佈前仍應補齊各作業系統的發行者憑證。
 - 某個平台失敗時，草稿 Release 不公開；下次排程會辨識目前 manifest 版本的草稿，重新驗證原 tag SHA 並重跑同版本安裝包，不另建版本。合併 PR 後、建立 tag 前中斷時，也會從尚未標記完成的 Release PR 找回合併 SHA 再驗證。仍可手動重跑失敗 job 加速復原。
