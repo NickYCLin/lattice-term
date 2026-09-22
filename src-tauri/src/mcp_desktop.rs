@@ -1000,7 +1000,7 @@ impl DesktopService {
 
     /// Gives every live connection a grant, so a session that has just been
     /// opened — or reopened, which changes its identity — is usable at once.
-    async fn grant_live_connections(&self) {
+    pub(crate) async fn grant_live_connections(&self) {
         let screens = self.screens_present();
         for (backend, session_id, label, scopes, fleet) in screens {
             self.ensure_grant(backend, session_id, label, scopes, fleet, Vec::new())

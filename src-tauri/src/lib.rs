@@ -2983,6 +2983,7 @@ async fn ssh_connect(
         }
     };
 
+    let notify_handle = app.clone();
     let outcome = crate::ssh::connect(
         Arc::new(EventSink(app)),
         Arc::clone(registry.inner()),
@@ -2990,6 +2991,9 @@ async fn ssh_connect(
         request,
     )
     .await;
+    if matches!(outcome, ConnectOutcome::Connected { .. }) {
+        notify_mcp_sessions_changed(&notify_handle);
+    }
 
     if let (ConnectOutcome::Connected { session_id }, Some(password)) =
         (&outcome, password_to_store)
@@ -3036,10 +3040,13 @@ async fn ssh_resize(
 
 #[tauri::command]
 async fn ssh_disconnect(
+    app: AppHandle,
     session_id: String,
     registry: State<'_, Arc<SshRegistry>>,
 ) -> Result<(), String> {
-    crate::ssh::disconnect(registry.inner(), &session_id).await
+    let result = crate::ssh::disconnect(registry.inner(), &session_id).await;
+    notify_mcp_sessions_changed(&app);
+    result
 }
 
 #[tauri::command]
@@ -3612,6 +3619,29 @@ fn notify_mcp_screen_takeover(
     tauri::async_runtime::spawn(async move {
         let sync = app.state::<McpRemoteSync>();
         let _guard = sync.0.lock().await;
+        if let Some(connection) = app.state::<AppDaemon>().attached().await {
+            let _ = connection
+                .request(agent_daemon::Request::DesktopGrants {
+                    targets: service.targets(),
+                })
+                .await;
+        }
+    });
+}
+
+/// 觀察端看到的連線清單來自背景服務快取的授權，而桌面端的自動授權只在收到
+/// 遠端呼叫時才重新整理。少了這一步，剛開好的 SSH 工作階段不會出現在快取
+/// 裡，帶目標的呼叫又會因為找不到目標而被擋下，等於永遠連不上。
+fn notify_mcp_sessions_changed(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let service = app
+            .state::<Arc<mcp_desktop::DesktopService>>()
+            .inner()
+            .clone();
+        let sync = app.state::<McpRemoteSync>();
+        let _guard = sync.0.lock().await;
+        service.grant_live_connections().await;
         if let Some(connection) = app.state::<AppDaemon>().attached().await {
             let _ = connection
                 .request(agent_daemon::Request::DesktopGrants {
