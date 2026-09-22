@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.9.23](https://github.com/NickYCLin/lattice-term/compare/v2026.9.22...v2026.9.23) (2026-09-22)
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 開好的 SSH 工作階段推送授權給背景服務 ([dfc0f80](https://github.com/NickYCLin/lattice-term/commit/dfc0f80744c646552efc8b25d1bfd0575f3b6fca))
+* **發版:** 自動重跑失敗的桌面打包工作 ([cb3f258](https://github.com/NickYCLin/lattice-term/commit/cb3f2581fb04247a2ec523b44a19a0ab3fc90bf6))
+
 ## [2026.9.22](https://github.com/NickYCLin/lattice-term/compare/v2026.9.21...v2026.9.22) (2026-09-21)
 
 
