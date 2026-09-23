@@ -1388,9 +1388,10 @@ fn agent_chat_supported() -> Vec<String> {
 #[tauri::command]
 async fn agent_chat_local_history(
     profiles: Vec<crate::transcript::HistoryProfile>,
+    all: Option<bool>,
 ) -> Result<Vec<crate::transcript::LocalConversation>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::list_local_conversations(&profiles)
+        crate::transcript::list_local_conversations_with_limit(&profiles, all.unwrap_or(false))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1731,9 +1732,34 @@ async fn agent_paste_clipboard_image(
     .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?
 }
 
-/// Reads a running CLI's own conversation into plain, role-labelled text so it
-/// can be handed to another CLI as an opening brief. `None` when the CLI's
-/// history format is unsupported or nothing was found.
+/// Reads structured messages from this session's exact native conversation.
+#[tauri::command]
+async fn agent_session_conversation(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Vec<crate::transcript::LocalConversationMessage>, String> {
+    let summary = if crate::agent_daemon::owns(&session_id) {
+        daemon.session_summary(&session_id).await
+    } else {
+        registry.session_summary(&session_id)
+    }
+    .ok_or("The session is no longer available.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transcript::read_session_conversation(
+            &summary.definition_id,
+            &summary.working_directory,
+            summary.captured_session_id.as_deref(),
+            summary
+                .profile_config_path
+                .as_deref()
+                .map(std::path::Path::new),
+        )
+    })
+    .await
+    .map_err(|error| format!("Conversation read did not complete: {error}"))?
+}
+
 #[tauri::command]
 async fn agent_export_transcript(
     session_id: String,
@@ -4559,6 +4585,7 @@ pub fn run() {
             agent_chat_paste_files,
             chat_image_preview,
             agent_export_transcript,
+            agent_session_conversation,
             agent_import_memory_handoff,
             agent_write_handoff_file,
             agent_resize,

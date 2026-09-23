@@ -44,6 +44,23 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("renders an existing workspace session in Chat without creating another conversation", () => {
+    const agents = fakeAgentApi({ sessions: [fakeSession({ sessionId: "shared", groupLabel: "Shared project" })] });
+    const chat = fakeChatApi();
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="zh-TW">
+        <ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()}
+          workspaceSessionId="shared" onSelectWorkspaceSession={() => {}}
+          onOpenSession={() => {}} />
+      </I18nProvider>,
+    );
+    expect(markup).toContain("Shared project");
+    expect(markup).toContain("與工作階段頁共用同一個 CLI");
+    expect(markup).toContain("傳送訊息到這個工作階段");
+    expect(markup).toContain('aria-current="true"');
+    expect(agents.launch).not.toHaveBeenCalled();
+    expect(chat.importNativeConversation).not.toHaveBeenCalled();
+  });
   it("offers external Codex and Claude conversations in Chat", () => {
     expect(render(fakeChatApi(), undefined, () => {})).toContain("外部對話");
   });

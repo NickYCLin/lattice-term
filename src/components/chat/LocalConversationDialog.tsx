@@ -7,28 +7,24 @@ import { useChatAccountProfiles } from "../../app/useChatAccountProfiles";
 import { useI18n } from "../../i18n/context";
 import { CloseIcon } from "../icons";
 import { useModalFocus } from "../overlays/modalFocus";
+import { conversationSession, localConversationLaunchIntents, type LocalConversation } from "../../app/localConversationSessions";
+import type { useAutomaticLocalConversations } from "../../app/useAutomaticLocalConversations";
 
-interface Conversation {
-  definitionId: "codex" | "claude";
-  profileId: string | null;
-  nativeSessionId: string;
-  workingDirectory: string;
-  resumable: boolean;
-  title: string;
-  updatedAt: number;
-}
+type Conversation = LocalConversation;
 
 interface Message {
   role: "user" | "assistant";
   text: string;
 }
 
-export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onOpenSession }: {
+export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onOpenSession, onOpenSessionChat, automatic }: {
   agents: AgentApi;
   chat: AgentChatApi | null;
   onClose: () => void;
   onOpenChat: () => void;
   onOpenSession: (sessionId: string) => void;
+  onOpenSessionChat?: (sessionId: string) => void;
+  automatic?: ReturnType<typeof useAutomaticLocalConversations>;
 }) {
   const { t } = useI18n();
   const profiles = useChatAccountProfiles();
@@ -87,6 +83,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   }
 
   function openChat() {
+    if (onOpenSessionChat) { void openSession(true); return; }
     if (!selected || !selected.resumable || !chat || busy || error) return;
     chat.importNativeConversation({
       definitionId: selected.definitionId,
@@ -131,8 +128,11 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
     onClose();
   }
 
-  async function openSession() {
-    if (!selected || !selected.resumable || busy || error) return;
+  async function openSession(inChat = false) {
+    if (!selected || !selected.resumable || busy || error || automatic?.busy) return;
+    const open = inChat && onOpenSessionChat ? onOpenSessionChat : onOpenSession;
+    const existing = conversationSession(selected, profiles, agents.sessions);
+    if (existing) { open(existing.sessionId); onClose(); return; }
     const installed = agents.catalog.find((entry) => entry.id === selected.definitionId && entry.installed);
     if (!installed) return;
     setBusy(true);
@@ -142,9 +142,12 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
       const profile = profiles.find((entry) =>
         entry.id === selected.profileId && entry.definitionId === selected.definitionId);
       if (selected.profileId && !profile) throw new Error(t("history.profileMissing"));
+      const intent = localConversationLaunchIntents([selected], profiles, agents.catalog, [], [])[0];
+      if (!intent) throw new Error(t("history.profileMissing"));
       const launched = await agents.launch({
         definitionId: selected.definitionId,
-        label: selected.title,
+        label: intent.groupLabel,
+        groupId: intent.groupKey,
         executable: "",
         arguments: [],
         resumeSessionId: selected.nativeSessionId,
@@ -154,7 +157,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
         cols: 120,
         rows: 32,
       });
-      onOpenSession(launched.sessionId);
+      open(launched.sessionId);
       onClose();
     } catch (reason) {
       setError(String(reason));
@@ -177,6 +180,14 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
             aria-label={t("common.close")} disabled={launching} onClick={onClose}><CloseIcon size={14} /></button>
         </header>
         <p className="dialog__body">{t("history.intro")}</p>
+        {automatic && <div className="dialog__body">
+          <label><input type="checkbox" checked={automatic.enabled} disabled={launching}
+            onChange={event => automatic.setAutoOpen(event.target.checked)} />{" "}
+            {t("history.autoOpen")}</label>
+          <p>{t("history.autoOpenHint")}</p>
+          {automatic.busy && <p role="status">{t("history.autoOpening")}</p>}
+          {automatic.error && <p role="alert">{automatic.error}</p>}
+        </div>}
         <label className="dialog__body">{t("history.importExport")}{" "}
           <input type="file" accept=".json,application/json" disabled={launching} onChange={(event) => void importFile(event.currentTarget.files?.[0])} />
         </label>
@@ -234,9 +245,9 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
         <div className="dialog__actions">
           <button type="button" className="button button--ghost" disabled={launching} onClick={onClose}>{t("common.close")}</button>
           <button type="button" className="button button--ghost" onClick={() => void openSession()}
-            disabled={!selected?.resumable || !installed || busy || Boolean(error)}>{t("history.openSession")}</button>
+            disabled={!selected?.resumable || !installed || busy || automatic?.busy || Boolean(error)}>{t("history.openSession")}</button>
           <button type="button" className="button button--primary" onClick={selectedArchive || selectedStoredId ? openArchive : openChat}
-            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || busy)) || !chat || Boolean(error)}>
+            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || busy || automatic?.busy)) || !chat || Boolean(error)}>
             {selectedStoredId ? t("history.viewArchive") : selectedArchive ? t("history.importArchive") : t("history.openChat")}
           </button>
         </div>

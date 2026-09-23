@@ -92,6 +92,7 @@ import {
   type WorkspaceSessionSnapshot,
 } from "./app/workspaceSessionPersistence";
 import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
+import { useAutomaticLocalConversations } from "./app/useAutomaticLocalConversations";
 import { loadAuthPref } from "./app/authPreferences";
 import {
   playNotificationSound,
@@ -406,10 +407,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     active: mobileDesktopDialogOpen,
   });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [chatWorkspaceSessionId, setChatWorkspaceSessionId] = useState<string | null>(null);
   const [terminalMounted, setTerminalMounted] = useState(false);
-  const storedSessionSnapshotRef = useRef(
-    loadWorkspaceSessionSnapshot(window.localStorage),
-  );
+  const [initialWorkspaceSnapshot] = useState(() => loadWorkspaceSessionSnapshot(window.localStorage));
+  const storedSessionSnapshotRef = useRef(initialWorkspaceSnapshot);
   const restoredWorkspaceSessions = useMemo(
     () => storedSessionSnapshotRef.current?.sessions ?? [],
     [],
@@ -435,7 +436,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setUnrestoredWorkspaceSessions([...sessions]);
   }
 
-  async function retryWorkspaceSession(saved: SavedAgentSession) {
+  async function retryWorkspaceSession(saved: SavedAgentSession, activate = true) {
     if (retryingWorkspaceRef.current || !sessionRestoreComplete) return;
     retryingWorkspaceRef.current = true;
     setRetryingWorkspace(true);
@@ -453,7 +454,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       if (launched.closedReason) throw new Error("Session did not start");
       // A label failure must not make a successfully started CLI retryable.
       replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
-      setActiveSessionId(launched.sessionId);
+      if (activate) setActiveSessionId(launched.sessionId);
       try { await agents.rename(launched.sessionId, saved.groupLabel); } catch { /* keep the live CLI */ }
     } catch {
       setWorkspaceRecoveryError(true);
@@ -468,6 +469,27 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       unrestoredSessionsRef.current, snapshot, agents.sessions));
     setWorkspaceRecoveryError(false);
   }
+
+  function queueLocalConversations(entries: readonly SavedAgentSession[]) {
+    if (entries.length === 0) return;
+    const pending = [...unrestoredSessionsRef.current, ...entries];
+    // Reject overflow before saving: the normal bounded writer must not drop
+    // any of the conversations promised by a bulk import.
+    if (pending.length + agents.sessions.length + ssh.sessions.length > 1024) {
+      throw new Error("The workspace cannot hold more than 1024 sessions.");
+    }
+    saveWorkspaceSessionSnapshot(window.localStorage, preserveUnrestoredWorkspaceSessions(
+      snapshotLiveWorkspaceSessions(agents.sessions, ssh.sessions, activeSessionId),
+      pending, storedSessionSnapshotRef.current?.active ?? null,
+    ));
+    replacePendingWorkspace(pending);
+    setTerminalMounted(true);
+  }
+
+  const automaticConversations = useAutomaticLocalConversations(
+    agents, sessionRestoreComplete, unrestoredWorkspaceSessions,
+    queueLocalConversations, saved => retryWorkspaceSession(saved, false),
+  );
 
   function removeLocalProject(path: string) {
     localProjects.remove(path);
@@ -548,7 +570,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 rows: 32,
               });
               restoredAgents.push(launched);
-              if (attemptedContinuation && launched.closedReason) {
+              if (attemptedContinuation && launched.closedReason && !saved.groupKey.startsWith("native:")) {
                 // A provider can reject an expired native conversation id.
                 // Its latest-conversation flag can fail in the same way when
                 // the project has no compatible history. Keep the diagnostic
@@ -1195,6 +1217,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 agents={agents}
                 chat={chatRuntime.chat}
                 onBrowseHistory={() => setHistoryOpen(true)}
+                workspaceSessionId={chatWorkspaceSessionId}
+                onSelectWorkspaceSession={setChatWorkspaceSessionId}
                 automations={chatRuntime.automations}
                 theme={activeTheme}
                 onOpenSession={(sessionId) => {
@@ -1378,8 +1402,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         <LocalConversationDialog
           agents={agents}
           chat={chatRuntime?.chat ?? null}
+          automatic={automaticConversations}
           onClose={() => setHistoryOpen(false)}
-          onOpenChat={() => setView("chat")}
+          onOpenChat={() => { setChatWorkspaceSessionId(null); setView("chat"); }}
+          onOpenSessionChat={(sessionId) => {
+            setChatWorkspaceSessionId(sessionId);
+            setView("chat");
+          }}
           onOpenSession={(sessionId) => {
             setActiveSessionId(sessionId);
             setView("terminal");

@@ -35,6 +35,7 @@ export function ChatThreadTree({
   layout,
   threads,
   activeThreadId,
+  activeSessionId,
   renderThread,
   workspace,
   onSelectThread,
@@ -50,6 +51,7 @@ export function ChatThreadTree({
   layout: SessionSidebarLayout;
   threads: readonly ChatThread[];
   activeThreadId: string | null;
+  activeSessionId?: string | null;
   renderThread: (thread: ChatThread, active: boolean) => React.ReactNode;
   workspace?: ChatSidebarWorkspace;
   onSelectThread: (threadId: string) => void;
@@ -317,7 +319,8 @@ export function ChatThreadTree({
               }}
             >
               <div
-                className={`chat-session is-${row.session.status}`}
+                className={`chat-session is-${row.session.status}${activeSessionId === row.session.sessionId ? " is-active" : ""}`}
+                aria-current={activeSessionId === row.session.sessionId ? "true" : undefined}
                 role="button"
                 tabIndex={0}
                 title={row.session.label}

@@ -1,5 +1,6 @@
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
+import { SessionConversationPane } from "../components/chat/SessionConversationPane";
 /**
  * Chat mode: talk to a local agent CLI in a message thread.
  *
@@ -126,6 +127,8 @@ export function ChatView({
   onOpenSession,
   onBrowseHistory,
   theme = "dark",
+  workspaceSessionId = null,
+  onSelectWorkspaceSession,
 }: {
   agents: AgentApi;
   chat: AgentChatApi;
@@ -133,9 +136,22 @@ export function ChatView({
   onOpenSession: (sessionId: string) => void;
   onBrowseHistory?: () => void;
   theme?: ThemeId;
+  workspaceSessionId?: string | null;
+  onSelectWorkspaceSession?: (id: string | null) => void;
 }) {
   const { t, tag } = useI18n();
   const [pendingDelete, setPendingDelete] = useState<ChatThread | null>(null);
+  const [localSessionId, setLocalSessionId] = useState<string | null>(null);
+  const selectedSessionId = onSelectWorkspaceSession ? workspaceSessionId : localSessionId;
+  function setSelectedSessionId(id: string | null) {
+    setLocalSessionId(id);
+    onSelectWorkspaceSession?.(id);
+  }
+  const selectedSession = agents.sessions.find(session => session.sessionId === selectedSessionId);
+  function selectThread(id: string | null) {
+    setSelectedSessionId(null);
+    chat.setActiveThreadId(id);
+  }
   const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
   // A project picked in the projects tab narrows the conversation list to it.
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
@@ -199,6 +215,7 @@ export function ChatView({
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
 
   function startThread(workingDirectory = "") {
+    setSelectedSessionId(null);
     // Keep the assistant choice; selecting a project is optional for each chat.
     // Inside a project, its own latest conversation is the better guide:
     // projects tend to keep one assistant, model and permission.
@@ -239,7 +256,7 @@ export function ChatView({
 
   function openThread(threadId: string) {
     setMode("threads");
-    chat.setActiveThreadId(threadId);
+    selectThread(threadId);
   }
 
   const previous = chat.threads[0];
@@ -374,9 +391,10 @@ export function ChatView({
               layout={sidebarLayout}
               threads={listedThreads}
               workspace={workspace}
-              activeThreadId={chat.activeThreadId}
-              onSelectThread={(id) => chat.setActiveThreadId(id)}
-              onOpenSession={onOpenSession}
+              activeThreadId={selectedSessionId ? null : chat.activeThreadId}
+              activeSessionId={selectedSessionId}
+              onSelectThread={selectThread}
+              onOpenSession={setSelectedSessionId}
               onRemoveThread={setPendingDelete}
               onShelveThread={(thread) => chat.shelveThread(thread.id, true)}
               onToggleFolder={chat.toggleFolder}
@@ -392,7 +410,7 @@ export function ChatView({
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      chat.setActiveThreadId(thread.id);
+                      selectThread(thread.id);
                     }
                   }}
                 >
@@ -428,7 +446,7 @@ export function ChatView({
                       <button
                         type="button"
                         className={`chat-thread${thread.id === chat.activeThreadId ? " is-active" : ""}`}
-                        onClick={() => chat.setActiveThreadId(thread.id)}
+                        onClick={() => selectThread(thread.id)}
                       >
                         <span className="chat-thread__title">{thread.title || t("chat.untitled")}</span>
                       </button>
@@ -553,6 +571,12 @@ export function ChatView({
               {t("desktopBackend.required.body")}
             </Callout>
           </div>
+        ) : selectedSession ? (
+          <SessionConversationPane key={selectedSession.sessionId} session={selectedSession}
+            agents={agents} onOpenTerminal={() => onOpenSession(selectedSession.sessionId)} />
+        ) : selectedSessionId ? (
+          <EmptyState icon={<ChatIcon />} title={t("sessionChat.closed")}
+            description={t("sessionChat.chooseAnother")} />
         ) : installed.length === 0 && agents.mode === "ready" && !active?.archived ? (
           <EmptyState
             icon={<ChatIcon />}

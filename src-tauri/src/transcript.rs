@@ -961,6 +961,7 @@ fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
             continue;
         }
         let text = content.map(content_text).unwrap_or_default();
+        let text = visible_user_text(&text);
         if let Some(first) = text.lines().map(str::trim).find(|line| !line.is_empty()) {
             return Some(first.chars().take(80).collect());
         }
@@ -968,12 +969,35 @@ fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
     None
 }
 
+/// Runtime context arrives in user-role records too. It is not a conversation
+/// title or a message typed by the person. Keep actual text after a context block.
+fn visible_user_text(mut text: &str) -> &str {
+    loop {
+        text = text.trim();
+        let closing = if text.starts_with("# AGENTS.md instructions for ") {
+            Some("</INSTRUCTIONS>")
+        } else if text.starts_with("<environment_context>") {
+            Some("</environment_context>")
+        } else if text.starts_with("<recommended_plugins>") {
+            Some("</recommended_plugins>")
+        } else {
+            None
+        };
+        let Some(closing) = closing else { return text };
+        let Some((_, rest)) = text.split_once(closing) else {
+            return "";
+        };
+        text = rest;
+    }
+}
+
 fn scan_local_conversations(
     kind: TranscriptKind,
     root: &Path,
     profile_id: Option<&str>,
     result: &mut Vec<(LocalConversation, PathBuf)>,
-) {
+    all: bool,
+) -> Result<(), String> {
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0;
     while let Some((dir, depth)) = stack.pop() {
@@ -983,7 +1007,14 @@ fn scan_local_conversations(
         for entry in entries.flatten() {
             visited += 1;
             if visited > HISTORY_MAX_ENTRIES {
-                return;
+                return if all {
+                    Err(
+                        "Local history exceeds the scan limit; no conversations were opened."
+                            .into(),
+                    )
+                } else {
+                    Ok(())
+                };
             }
             let Ok(file_type) = entry.file_type() else {
                 continue;
@@ -1048,16 +1079,30 @@ fn scan_local_conversations(
             ));
             // Keep a bounded newest-first working set even when several
             // accounts have very large histories.
-            if result.len() >= 2_000 {
+            if all && result.len() > 1024 {
+                return Err(
+                    "More than 1024 local conversations were found; use individual selection."
+                        .into(),
+                );
+            }
+            if !all && result.len() >= 2_000 {
                 result.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
                 result.truncate(1_000);
             }
         }
     }
+    Ok(())
 }
 
 pub fn list_local_conversations(
     profiles: &[HistoryProfile],
+) -> Result<Vec<LocalConversation>, String> {
+    list_local_conversations_with_limit(profiles, false)
+}
+
+pub fn list_local_conversations_with_limit(
+    profiles: &[HistoryProfile],
+    all: bool,
 ) -> Result<Vec<LocalConversation>, String> {
     if profiles.len() > HISTORY_MAX_PROFILES {
         return Err("Too many account profiles.".into());
@@ -1066,7 +1111,7 @@ pub fn list_local_conversations(
     if scan_default_history_roots() {
         for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
             if let Some(root) = history_root(kind, None) {
-                scan_local_conversations(kind, &root, None, &mut entries);
+                scan_local_conversations(kind, &root, None, &mut entries, all)?;
             }
         }
     }
@@ -1082,7 +1127,7 @@ pub fn list_local_conversations(
             return Err("Account profile directory must be absolute.".into());
         }
         if let Some(root) = history_root(kind, Some(path)) {
-            scan_local_conversations(kind, &root, Some(&profile.profile_id), &mut entries);
+            scan_local_conversations(kind, &root, Some(&profile.profile_id), &mut entries, all)?;
         }
     }
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
@@ -1101,7 +1146,7 @@ pub fn list_local_conversations(
         conversation.title =
             history_preview(&path, kind).unwrap_or_else(|| conversation.native_session_id.clone());
         selected.push(conversation);
-        if selected.len() == HISTORY_MAX_RESULTS {
+        if !all && selected.len() == HISTORY_MAX_RESULTS {
             break;
         }
     }
@@ -1144,9 +1189,44 @@ pub fn read_local_conversation(
         _ => None,
     }
     .ok_or("The local conversation is no longer available.")?;
+    read_conversation_messages(&path, kind)
+}
+
+/// Reads only the exact native conversation owned by this running session.
+/// Never substitute another conversation from the same working directory.
+pub fn read_session_conversation(
+    definition_id: &str,
+    working_directory: &str,
+    session_id: Option<&str>,
+    profile_directory: Option<&Path>,
+) -> Result<Vec<LocalConversationMessage>, String> {
+    let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let kind = TranscriptKind::from_definition(definition_id)
+        .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
+        .ok_or("This CLI does not support conversation view.")?;
+    if profile_directory.is_some_and(|path| !path.is_absolute() || !path.is_dir()) {
+        return Err("The account directory is unavailable.".into());
+    }
+    let root = history_root(kind, profile_directory)
+        .ok_or("The conversation directory is unavailable.")?;
+    let path = match kind {
+        TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id)),
+        TranscriptKind::Claude => locate_claude_in(&root, working_directory, Some(session_id)),
+        _ => None,
+    }
+    .ok_or("The session conversation is not available yet.")?;
+    read_conversation_messages(&path, kind)
+}
+
+fn read_conversation_messages(
+    path: &Path,
+    kind: TranscriptKind,
+) -> Result<Vec<LocalConversationMessage>, String> {
     let mut messages = Vec::new();
     let mut bytes = 0;
-    visit_transcript_rows(&path, |value| {
+    visit_transcript_rows(path, |value| {
         let (role, content) = match kind {
             TranscriptKind::Codex => {
                 let Some(payload) = value.get("payload") else {
@@ -1170,6 +1250,11 @@ pub fn read_local_conversation(
             return;
         }
         let text = content.map(content_text).unwrap_or_default();
+        let text = if role == Some("user") {
+            visible_user_text(&text).to_string()
+        } else {
+            text
+        };
         if text.is_empty() {
             return;
         }
@@ -1459,7 +1544,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let path =
             write_handoff_file(data.path(), "OpenAI Codex", "user: hi\nassistant: hello").unwrap();
-        assert!(path.starts_with(data.path().join("handoffs")));
+        assert!(path.starts_with(fs::canonicalize(data.path().join("handoffs")).unwrap()));
         assert!(path
             .file_name()
             .unwrap()
@@ -1645,6 +1730,96 @@ mod tests {
         assert_eq!(messages[1].text, "Hello");
         assert!(
             read_local_conversation("codex", "desktop", Some("claude-account"), &profiles).is_err()
+        );
+    }
+
+    #[test]
+    fn session_conversation_uses_exact_account_and_skips_runtime_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let account = directory.path().join("account");
+        let path = account.join("sessions/rollout-exact.jsonl");
+        write_codex_rollout(
+            &path,
+            "exact",
+            directory.path(),
+            serde_json::json!("cli"),
+            "codex_cli_rs",
+            10,
+        );
+        let metadata = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        let mut rows = vec![metadata];
+        for text in [
+            "# AGENTS.md instructions for /work\n<INSTRUCTIONS>rules</INSTRUCTIONS>",
+            "<environment_context>machine</environment_context>",
+            "<recommended_plugins>plugins</recommended_plugins>",
+            "<environment_context>machine</environment_context>\n修正重開機遺失的工作區",
+        ] {
+            rows.push(
+                serde_json::json!({"type":"response_item","payload":{
+                    "type":"message","role":"user","content":[{"type":"input_text","text":text}]
+                }})
+                .to_string(),
+            );
+        }
+        fs::write(&path, rows.join("\n")).unwrap();
+        assert_eq!(
+            history_preview(&path, TranscriptKind::Codex).as_deref(),
+            Some("修正重開機遺失的工作區")
+        );
+        let messages =
+            read_session_conversation("codex", "/work", Some("exact"), Some(&account)).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].text, "修正重開機遺失的工作區");
+        assert!(
+            read_session_conversation("codex", "/work", Some("missing"), Some(&account)).is_err()
+        );
+        assert!(
+            read_session_conversation("codex", "/work", None, Some(&account))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(read_session_conversation(
+            "codex",
+            "/work",
+            Some("exact"),
+            Some(&directory.path().join("other-account"))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn bulk_history_does_not_silently_stop_at_the_preview_limit() {
+        ONLY_PROFILE_HISTORY.with(|flag| flag.set(true));
+        let directory = tempfile::tempdir().unwrap();
+        for index in 0..105 {
+            let id = format!("session-{index}");
+            write_codex_rollout(
+                &directory
+                    .path()
+                    .join(format!("sessions/rollout-{id}.jsonl")),
+                &id,
+                directory.path(),
+                serde_json::json!("cli"),
+                "codex_cli_rs",
+                index,
+            );
+        }
+        let profiles = [HistoryProfile {
+            definition_id: "codex".into(),
+            profile_id: "account".into(),
+            config_directory: directory.path().to_string_lossy().into_owned(),
+        }];
+        assert_eq!(list_local_conversations(&profiles).unwrap().len(), 100);
+        assert_eq!(
+            list_local_conversations_with_limit(&profiles, true)
+                .unwrap()
+                .len(),
+            105
         );
     }
 
@@ -1874,7 +2049,7 @@ mod tests {
             Some("gemini-session"),
         )
         .unwrap();
-        assert_eq!(located, session);
+        assert_eq!(located, fs::canonicalize(session).unwrap());
 
         let text = parse_gemini(&located, 5000).unwrap();
         assert!(text.contains("remember red panda"));
@@ -2097,7 +2272,7 @@ mod tests {
 
         assert_eq!(
             locate_codex_in(&root, target_cwd.to_str().unwrap(), None),
-            Some(target)
+            Some(fs::canonicalize(target).unwrap())
         );
     }
 
@@ -2128,7 +2303,7 @@ mod tests {
 
         assert_eq!(
             locate_codex_in(&root, current_cwd.to_str().unwrap(), Some("session-42"),),
-            Some(rollout)
+            Some(fs::canonicalize(rollout).unwrap())
         );
         assert_eq!(
             locate_codex_in(&root, current_cwd.to_str().unwrap(), Some("session"),),
@@ -2183,7 +2358,7 @@ mod tests {
 
         assert_eq!(
             locate_codex_in(&root, cwd.to_str().unwrap(), None),
-            Some(legacy)
+            Some(fs::canonicalize(legacy).unwrap())
         );
 
         let future_cli = root.join("2026/08/30/rollout-future-cli.jsonl");
@@ -2197,7 +2372,7 @@ mod tests {
         );
         assert_eq!(
             locate_codex_in(&root, cwd.to_str().unwrap(), None),
-            Some(future_cli)
+            Some(fs::canonicalize(future_cli).unwrap())
         );
     }
 
@@ -2277,7 +2452,7 @@ mod tests {
                 working_directory.to_str().unwrap(),
                 Some("session-42"),
             ),
-            Some(valid)
+            Some(fs::canonicalize(valid).unwrap())
         );
     }
 
@@ -2300,7 +2475,7 @@ mod tests {
 
         assert_eq!(
             locate_claude_in(&projects_root, target_cwd.to_str().unwrap(), None),
-            Some(target)
+            Some(fs::canonicalize(target).unwrap())
         );
     }
 
@@ -2338,7 +2513,7 @@ mod tests {
                 current_cwd.to_str().unwrap(),
                 Some("main-session"),
             ),
-            Some(main)
+            Some(fs::canonicalize(main).unwrap())
         );
         assert_eq!(
             locate_claude_in(
@@ -2410,7 +2585,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             locate_claude_in(&projects_root, cwd.to_str().unwrap(), Some("verified")),
-            Some(verified)
+            Some(fs::canonicalize(verified).unwrap())
         );
 
         let conflicting = project.join("conflicting.jsonl");
