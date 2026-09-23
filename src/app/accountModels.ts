@@ -114,15 +114,23 @@ export function accountModelOptions(
     }));
     // One entry per configured proxy; the picker already groups them under
     // the proxy's own heading, so the option names the proxy, not the CLI.
-    if (target.definitionId === "codex") {
+    if (target.definitionId === "codex" && (
+      target.accountProfileId === null ||
+      (selected?.provider === "cliproxyapi" &&
+        selected.accountProfileId === target.accountProfileId)
+    )) {
       for (const endpoint of proxies) {
+        // Keep an existing named-profile conversation selectable without
+        // multiplying every endpoint by every native login in new launchers.
+        if (target.accountProfileId !== null &&
+          endpoint.id !== (selected?.proxyId ?? CLI_PROXY_DEFAULT_ID)) continue;
         options.push({
           definitionId: "codex",
           accountProfileId: target.accountProfileId,
           model: "",
           provider: "cliproxyapi",
           proxyId: endpoint.id,
-          label: [target.showAccount || target.signedOut ? target.accountName : null, cliProxyLabel(endpoint)].filter(Boolean).join(" · "),
+          label: [cliProxyLabel(endpoint), target.accountProfileId !== null ? target.accountName : null].filter(Boolean).join(" · "),
           disabled: false,
         });
       }

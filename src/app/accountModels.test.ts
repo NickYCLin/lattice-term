@@ -61,22 +61,26 @@ describe("account-aware model choices", () => {
     expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: "b", model: "" }, [profile])).toThrow("missing-account");
   });
 
-  it("offers opt-in CLIProxyAPI models for every Codex identity", () => {
+  it("offers each proxy once and retains only the selected legacy account", () => {
     const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [profile], { b: status }, "Default");
     expect(accountModelOptions(targets, {}, labels).some((option) => option.provider)).toBe(false);
     const proxyOptions = accountModelOptions(targets, {}, labels, undefined, proxies).filter((option) => option.provider);
-    expect(proxyOptions).toHaveLength(4);
-    expect(proxyOptions.map((option) => option.accountProfileId)).toEqual([null, null, "b", "b"]);
-    expect(proxyOptions.map((option) => option.proxyId)).toEqual(["default", "7f3a91", "default", "7f3a91"]);
+    expect(proxyOptions).toHaveLength(2);
+    expect(proxyOptions.map((option) => option.accountProfileId)).toEqual([null, null]);
+    expect(proxyOptions.map((option) => option.proxyId)).toEqual(["default", "7f3a91"]);
+    expect(proxyOptions.map(option => option.label)).toEqual(["工作代理", "備援代理"]);
     expect(proxyOptions.every((option) => option.definitionId === "codex")).toBe(true);
-    const selection = { ...proxyOptions[2], model: "claude-sonnet-4-5" };
-    expect(accountModelKey(selection)).toBe(accountModelKey(proxyOptions[2]));
-    expect(accountModelKey(selection)).not.toBe(accountModelKey(proxyOptions[3]));
+    const selection = { ...proxyOptions[0], accountProfileId: "b", model: "claude-sonnet-4-5" };
+    const legacy = accountModelOptions(targets, {}, labels, selection, proxies).filter(option => option.provider);
+    expect(legacy).toHaveLength(3);
+    expect(accountModelKey(selection)).toBe(accountModelKey(legacy[2]));
+    expect(legacy[2].label).toBe("工作代理 · B 帳號");
+    expect(accountModelKey(selection)).not.toBe(accountModelKey(proxyOptions[1]));
     expect(accountModelLaunchSettings(selection, [profile], proxies)).toEqual({
       profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=latticeterm_cliproxyapi", "-c", 'model_providers.latticeterm_cliproxyapi.base_url="http://localhost:8317/v1"', "--model", "claude-sonnet-4-5"],
     });
     // A second proxy launches against its own address, under its own marker.
-    expect(accountModelLaunchSettings({ ...proxyOptions[3], model: "claude-sonnet-4-5" }, [profile], proxies).arguments)
+    expect(accountModelLaunchSettings({ ...proxyOptions[1], model: "claude-sonnet-4-5" }, [profile], proxies).arguments)
       .toEqual([...cliProxyLaunchArguments("https://proxy.example", "7f3a91"), "--model", "claude-sonnet-4-5"]);
     expect(() => accountModelLaunchSettings({ ...selection, proxyId: "removed" }, [profile], proxies)).toThrow("missing-proxy");
     expect(accountModelLaunchSettings({ ...selection, provider: undefined }, [profile]).arguments).toEqual(["--model", "claude-sonnet-4-5"]);
