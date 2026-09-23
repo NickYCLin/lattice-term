@@ -404,6 +404,7 @@ mod tests {
     }
 
     /// Answers one `/v1/models` request and reports the request head.
+    #[cfg(unix)]
     fn serve_models_once(body: &'static str) -> (String, std::thread::JoinHandle<String>) {
         use std::io::{BufRead as _, BufReader};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
