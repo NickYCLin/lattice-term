@@ -4,7 +4,7 @@ import type { SessionSummary as SshSessionSummary } from "./useSshSessions";
 
 export const WORKSPACE_SESSIONS_KEY = "latticeterm.workspaceSessions.v1";
 export const WORKSPACE_SESSIONS_RECOVERY_KEY = "latticeterm.workspaceSessions.recovery.v1";
-const MAX_RESTORABLE_SESSIONS = 64;
+export const MAX_RESTORABLE_SESSIONS = 1024;
 
 export interface SavedAgentSession {
   kind: "agent";
@@ -335,22 +335,14 @@ export function snapshotLiveWorkspaceSessions(
   ssh: readonly SshSessionSummary[],
   activeSessionId: string | null,
 ): WorkspaceSessionSnapshot {
-  // A CLI may finish before the user closes its tab. When its adapter captured
-  // the CLI's native conversation id, it is still safe to reopen with the
-  // provider's resume flow after an application restart. An automatic restore
-  // that exits must also remain recoverable: otherwise one provider-specific
-  // startup failure silently deletes that tab and its sidebar placement. The
-  // user can still remove it explicitly by closing the tab.
+  // Process exit is not a request to remove a workspace tab. Shutdown or a
+  // failed CLI can report any exit status, with or without a captured native
+  // conversation id. Keep its launch intent until the user closes the tab
+  // (disconnect removes it from the sessions collection).
   // Background processes survive a client detach, but not a machine restart.
   // Save their launch intent too; restoration matches each existing process
   // before deciding which saved entries still need launching.
-  const restorableAgents = agents.filter(
-    (session) =>
-      (!session.closedReason ||
-      session.restoreExistingSession === true ||
-      (session.capturedSessionId !== null &&
-        /\bcode:\s*0\b/.test(session.closedReason))),
-  );
+  const restorableAgents = agents;
   const activeAgent = restorableAgents.find(
     (session) => session.sessionId === activeSessionId,
   );

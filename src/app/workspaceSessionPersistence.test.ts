@@ -14,6 +14,7 @@ import {
   snapshotLiveWorkspaceSessions,
   WORKSPACE_SESSIONS_KEY,
   WORKSPACE_SESSIONS_RECOVERY_KEY,
+  MAX_RESTORABLE_SESSIONS,
   type StorageReaderWriter,
 } from "./workspaceSessionPersistence";
 
@@ -248,7 +249,7 @@ describe("workspace session persistence", () => {
     });
   });
 
-  it("does not save a failed native resume for another restart", () => {
+  it("preserves an abnormal exit and its native conversation until the tab is closed", () => {
     const snapshot = snapshotLiveWorkspaceSessions(
       [
         agent({
@@ -262,11 +263,13 @@ describe("workspace session persistence", () => {
       "agent-live-1",
     );
 
-    expect(snapshot.sessions).toEqual([]);
-    expect(snapshot.active).toBeNull();
+    expect(snapshot.sessions).toEqual([
+      expect.objectContaining({ resumeSessionId: "expired-native-chat" }),
+    ]);
+    expect(snapshot.active).not.toBeNull();
   });
 
-  it("does not reopen an exited CLI with no native conversation id", () => {
+  it("preserves an exited tab even before a native conversation id was captured", () => {
     const snapshot = snapshotLiveWorkspaceSessions(
       [
         agent({
@@ -280,8 +283,10 @@ describe("workspace session persistence", () => {
       "agent-live-1",
     );
 
-    expect(snapshot.sessions).toEqual([]);
-    expect(snapshot.active).toBeNull();
+    expect(snapshot.sessions).toEqual([
+      expect.objectContaining({ resumeSessionId: null, workingDirectory: "D:\\project\\LatticeTerm" }),
+    ]);
+    expect(snapshot.active).not.toBeNull();
   });
 
   it("keeps a failed automatic restore until the user closes its tab", () => {
@@ -311,6 +316,24 @@ describe("workspace session persistence", () => {
       groupKey: "project-group-1",
       definitionId: "codex",
     });
+  });
+
+  it("round-trips interrupted tabs and only removes explicitly closed tabs", () => {
+    const target = storage();
+    const interrupted = agent({
+      processId: null,
+      closedReason: "Process exited: ExitStatus { code: 3221225786, signal: None }",
+      capturedSessionId: null,
+    });
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([interrupted], [], interrupted.sessionId));
+    const restored = loadWorkspaceSessionSnapshot(target)!;
+    expect(restored.sessions).toHaveLength(1);
+    expect(savedAgentWorkingDirectories(restored.sessions)).toEqual(["D:\\project\\LatticeTerm"]);
+    expect(restored.active?.kind).toBe("agent");
+
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([], [], null));
+    expect(loadWorkspaceSessionSnapshot(target)?.sessions).toEqual([]);
+    expect(readWorkspaceRecoverySnapshots(target)[0].snapshot).toEqual(restored);
   });
 
   it("keeps sessions whose automatic restoration did not succeed", () => {
@@ -344,7 +367,7 @@ describe("workspace session persistence", () => {
     expect(
       sanitizeWorkspaceSessionSnapshot({
         version: 1,
-        sessions: Array.from({ length: 65 }, () => ({
+        sessions: Array.from({ length: MAX_RESTORABLE_SESSIONS + 1 }, () => ({
           kind: "ssh",
           profileId: "profile",
         })),
@@ -452,7 +475,7 @@ describe("workspace session persistence", () => {
         capturedSessionId: `native-${index}`,
       }),
     );
-    const unrestored = Array.from({ length: 40 }, (_, index) => ({
+    const unrestored = Array.from({ length: MAX_RESTORABLE_SESSIONS }, (_, index) => ({
       kind: "ssh" as const,
       profileId: `profile-${index}`,
     }));
@@ -463,7 +486,7 @@ describe("workspace session persistence", () => {
       null,
     );
 
-    expect(snapshot.sessions).toHaveLength(64);
+    expect(snapshot.sessions).toHaveLength(MAX_RESTORABLE_SESSIONS);
     // Sessions still open outrank entries that already failed to restore.
     expect(
       snapshot.sessions.filter((session) => session.kind === "agent"),
@@ -478,7 +501,7 @@ describe("workspace session persistence", () => {
   });
 
   it("drops an active pointer that did not survive the size limit", () => {
-    const agents = Array.from({ length: 70 }, (_, index) =>
+    const agents = Array.from({ length: MAX_RESTORABLE_SESSIONS + 1 }, (_, index) =>
       agent({
         sessionId: `agent-${index}`,
         groupId: `group-${index}`,
@@ -486,9 +509,9 @@ describe("workspace session persistence", () => {
       }),
     );
 
-    const snapshot = snapshotLiveWorkspaceSessions(agents, [], "agent-69");
+    const snapshot = snapshotLiveWorkspaceSessions(agents, [], `agent-${MAX_RESTORABLE_SESSIONS}`);
 
-    expect(snapshot.sessions).toHaveLength(64);
+    expect(snapshot.sessions).toHaveLength(MAX_RESTORABLE_SESSIONS);
     expect(snapshot.active).toBeNull();
     expect(sanitizeWorkspaceSessionSnapshot(snapshot)).toEqual(snapshot);
   });
