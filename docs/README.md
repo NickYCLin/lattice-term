@@ -21,6 +21,7 @@
 | RDP 與 VNC | `src/components/rdp/`、`src/components/vnc/` | `src-tauri/src/rdp.rs`、`vnc.rs`、`crates/lattice-rdp/`、`crates/lattice-vnc/` | [介面實作現況](UI_IMPLEMENTATION.zh-TW.md) |
 | 保管庫、認證資料、備份與本機儲存 | `src/components/vault/`、`src/components/settings/` | `src-tauri/src/vault.rs`、`backup.rs`、`storage.rs` | [儲存與安全決策](STORAGE_SECURITY_DECISION.zh-TW.md) |
 | 自動更新、版本與發行檔 | `src/app/useAppUpdater.ts`、`src/app/version.ts`、`src/views/SettingsView.tsx` | `src-tauri/tauri.conf.json`、`.github/workflows/release.yml` | [Release 自動化](RELEASE_AUTOMATION.zh-TW.md)、[更新紀錄](../CHANGELOG.md) |
+| 可選的 Jev 工作階段注意事項助手 | `src/components/agents/JevAdvisorPanel.tsx`、`src/app/useJevAdvisor.ts` | `src-tauri/src/jev.rs` | [申請、使用與驗證安排](JEV_ADVISOR.zh-TW.md) |
 | iOS 簽章、TestFlight 與 App Store 準備 | `src/components/settings/PrivacyNotice.tsx`、`web/` | `scripts/ios-release.mjs`、`scripts/verify-ios-app.py`、`src-tauri/gen/apple/` | [iOS 發布流程](IOS_RELEASE.zh-TW.md)、[商店文案與待補資料](IOS_APP_STORE_METADATA.zh-TW.md) |
 
 ## 技術輪廓

@@ -1144,6 +1144,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 mobile={onMobile}
                 workspace={workspace}
                 agentActivity={agentActivity}
+                agentSessions={agents.sessions}
                 onOpenAgentActivity={(groupId, sessionId) => {
                   agentActivity.markGroupRead(groupId);
                   if (!sessionId) return;

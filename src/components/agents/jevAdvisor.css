@@ -1,0 +1,12 @@
+.jev-advisor { display: grid; gap: 12px; padding: 18px; }
+.jev-advisor label { display: grid; gap: 6px; min-width: 0; }
+.jev-advisor input[type="password"], .jev-advisor select, .jev-advisor textarea {
+  width: 100%; min-width: 0; box-sizing: border-box;
+}
+.jev-advisor textarea.input { height: auto; min-height: 160px; resize: vertical; font-family: var(--font-mono, monospace); }
+.jev-advisor ol { list-style: decimal; padding-inline-start: 22px; display: grid; gap: 6px; margin: 8px 0; }
+.jev-advisor__controls { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.jev-advisor__controls > label { flex: 1; }
+.jev-advisor .jev-advisor__consent { display: flex; align-items: start; gap: 8px; }
+.jev-advisor__result { overflow-wrap: anywhere; }
+.jev-advisor blockquote { white-space: pre-wrap; margin: 8px 0; padding-inline-start: 12px; border-inline-start: 2px solid currentColor; }

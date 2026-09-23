@@ -21,6 +21,7 @@ mod durable_file;
 pub mod file_exports;
 pub mod git_changes;
 pub mod hostkeys;
+mod jev;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
 mod local_files;
@@ -1050,6 +1051,49 @@ fn agent_catalog() -> Vec<AgentDefinition> {
 #[tauri::command]
 async fn agent_check_updates() -> Result<Vec<agent_updates::CliUpdate>, String> {
     agent_updates::check().await
+}
+
+#[tauri::command]
+fn jev_enabled(service: State<'_, crate::jev::JevService>) -> Result<bool, String> {
+    service.enabled()
+}
+
+#[tauri::command]
+fn jev_configure(
+    key: Option<String>,
+    service: State<'_, crate::jev::JevService>,
+) -> Result<(), String> {
+    service.configure(key)
+}
+
+#[tauri::command]
+async fn jev_preview(
+    session_id: String,
+    service: State<'_, crate::jev::JevService>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<AgentOutputSnapshot, String> {
+    if !service.enabled()? {
+        return Err("jev.error.disabled".into());
+    }
+    let snapshots = if crate::agent_daemon::owns(&session_id) {
+        daemon.snapshots().await
+    } else {
+        registry.output_snapshots()
+    };
+    snapshots
+        .into_iter()
+        .find(|snapshot| snapshot.session_id == session_id)
+        .ok_or_else(|| "jev.error.session".into())
+}
+
+#[tauri::command]
+async fn jev_analyze(
+    text: String,
+    consent: bool,
+    service: State<'_, crate::jev::JevService>,
+) -> Result<crate::jev::Advice, String> {
+    service.analyze(text, consent).await
 }
 
 #[tauri::command]
@@ -4448,6 +4492,7 @@ pub fn run() {
             )
             .map_err(std::io::Error::other)?;
             app.manage(agent_registry);
+            app.manage(crate::jev::JevService::default());
             let data_dir = app.path().app_data_dir().map_err(std::io::Error::other)?;
             app.manage(Arc::new(crate::agent_daemon::client::DaemonClient::new(
                 app.handle().clone(),
@@ -4482,6 +4527,10 @@ pub fn run() {
             encrypted_backup_restore,
             agent_catalog,
             agent_check_updates,
+            jev_enabled,
+            jev_configure,
+            jev_preview,
+            jev_analyze,
             agent_default_working_directory,
             agent_launch,
             agent_send,

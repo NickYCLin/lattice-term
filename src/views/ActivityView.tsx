@@ -29,6 +29,8 @@ import {
   TrashIcon,
 } from "../components/icons";
 import { moveRadioGroupFocus } from "../components/overlays/radioNavigation";
+import { JevAdvisorPanel } from "../components/agents/JevAdvisorPanel";
+import type { AgentSessionSummary } from "../app/useAgentSessions";
 
 const agentFilterChoices: readonly AgentActivityFilter[] = [
   "all",
@@ -59,11 +61,13 @@ const agentFilterLabel: Record<AgentActivityFilter, MessageKey> = {
 export function ActivityView({
   workspace,
   agentActivity,
+  agentSessions = [],
   onOpenAgentActivity,
   mobile = false,
 }: {
   workspace: Workspace;
   agentActivity: AgentActivityApi;
+  agentSessions?: readonly AgentSessionSummary[];
   onOpenAgentActivity: (groupId: string, sessionId: string | null) => void;
   mobile?: boolean;
 }) {
@@ -210,6 +214,7 @@ export function ActivityView({
           </ul>
         )}
       </section>
+      <JevAdvisorPanel sessions={agentSessions} />
       </>}
 
       <section className="panel glass glass--sheen">
