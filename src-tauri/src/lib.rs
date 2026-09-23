@@ -6,6 +6,7 @@ pub mod agent_instructions;
 mod agent_mcp;
 pub mod agent_plans;
 mod agent_process;
+mod agent_updates;
 #[cfg(desktop)]
 pub mod app_menu;
 pub mod backup;
@@ -1044,6 +1045,11 @@ async fn encrypted_backup_restore(
 #[tauri::command]
 fn agent_catalog() -> Vec<AgentDefinition> {
     crate::agent::catalog()
+}
+
+#[tauri::command]
+async fn agent_check_updates() -> Result<Vec<agent_updates::CliUpdate>, String> {
+    agent_updates::check().await
 }
 
 #[tauri::command]
@@ -4475,6 +4481,7 @@ pub fn run() {
             encrypted_backup_export,
             encrypted_backup_restore,
             agent_catalog,
+            agent_check_updates,
             agent_default_working_directory,
             agent_launch,
             agent_send,

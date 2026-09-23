@@ -73,6 +73,8 @@ import type { Command } from "./components/overlays/CommandPalette";
 import { ConfirmDialog } from "./components/overlays/ConfirmDialog";
 import { DesktopBackendRequiredDialog } from "./components/overlays/DesktopBackendRequiredDialog";
 import { UpdatePrompt } from "./components/overlays/UpdatePrompt";
+import { CliUpdatePrompt } from "./components/overlays/CliUpdatePrompt";
+import { useCliUpdates } from "./app/useCliUpdates";
 import { RemoteCommandApproval } from "./components/overlays/RemoteCommandApproval";
 import { useAppUpdater } from "./app/useAppUpdater";
 import {
@@ -284,6 +286,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   // Auto-check for a newer release on launch (desktop only) and, when one is
   // found, surface it up front instead of leaving it buried in Settings.
   const updater = useAppUpdater(runtime.summary?.version);
+  const cliUpdates = useCliUpdates(
+    inAppUpdaterAvailable && !!runtime.summary && preferences.checkUpdatesOnLaunch && agents.mode === "ready",
+  );
   const [updatePromptDismissed, setUpdatePromptDismissed] = useState(false);
   const launchCheckedRef = useRef(false);
   const { checkForUpdates } = updater;
@@ -1456,6 +1461,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           updater={updater}
           onDismiss={() => setUpdatePromptDismissed(true)}
         />
+      )}
+
+      {!showUpdatePrompt && updater.status !== "checking" && cliUpdates.visible && (
+        <CliUpdatePrompt updates={cliUpdates} />
       )}
 
       <RemoteCommandApproval />

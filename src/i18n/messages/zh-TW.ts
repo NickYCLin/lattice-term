@@ -6,6 +6,16 @@
  */
 
 export const zhTW = {
+  "cliUpdates.title": "檢查外接 CLI 更新",
+  "cliUpdates.hint": "依本機偵測到的 CLI 比對公開穩定版。請先儲存工作，再依原本的安裝方式更新；完成後重新檢查，既有對話需重開 CLI 才會使用新版。",
+  "cliUpdates.available": "有新版本",
+  "cliUpdates.current": "無較新的穩定版",
+  "cliUpdates.manual": "此 CLI 需至官方網站確認更新",
+  "cliUpdates.error": "無法確認版本，請稍後重試或查看官方說明",
+  "cliUpdates.instructions": "官方更新說明",
+  "cliUpdates.checking": "檢查中…",
+  "cliUpdates.recheck": "重新檢查",
+  "cliUpdates.close": "稍後處理",
   "history.viewArchive": "在對話檢視唯讀副本",
   "history.directoryMissing": "原工作目錄已不存在；仍可閱讀紀錄，但要接續請先還原該資料夾。",
   "history.archive": "唯讀匯出檔",

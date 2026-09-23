@@ -5,6 +5,13 @@
 
 ## 完成度總覽
 
+開啟「啟動時檢查更新」時，桌面版也會檢查已安裝的 Codex、Claude Code、
+Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
+讀取本機版本，再與 npm 公開穩定版比對；找到更新或無法確認版本時顯示提示，
+可開啟官方更新說明並重新檢查。其他 CLI 標示為需手動確認，不會誤報為最新版。
+檢查不會執行安裝、關閉對話或修改帳號設定；請沿用原本的安裝方式更新，
+完成後重開 CLI 工作階段。預覽版與非標準版本字串目前需手動確認。
+
 | 範圍 | 狀態 | 現況與邊界 |
 | --- | --- | --- |
 | 桌面連線工作區 | **可用** | Windows、Linux 與 macOS 支援 SSH、SFTP、SSH Tunnel、Web RDP、VNC、主機資源與工作階段管理；SFTP 與新版 Lattice Remote（Linux／macOS 分享端）可線上編輯 1 MiB 以內的 UTF-8 純文字。 |

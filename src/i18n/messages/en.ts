@@ -9,6 +9,16 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "cliUpdates.title": "External CLI updates",
+  "cliUpdates.hint": "Compare detected local CLIs with public stable releases. Save your work and update using your original installation method, then check again. Restart existing CLI sessions to use the new version.",
+  "cliUpdates.available": "Update available",
+  "cliUpdates.current": "No newer stable release",
+  "cliUpdates.manual": "Check this CLI's official website for updates",
+  "cliUpdates.error": "Could not verify the version. Retry or see the official instructions.",
+  "cliUpdates.instructions": "Official update instructions",
+  "cliUpdates.checking": "Checking…",
+  "cliUpdates.recheck": "Check again",
+  "cliUpdates.close": "Later",
   "history.viewArchive": "View read-only copy in Chat",
   "history.directoryMissing": "The original working directory is gone. You can read this history, but restore that folder before continuing.",
   "history.archive": "Read-only export",
