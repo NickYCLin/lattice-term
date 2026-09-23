@@ -1016,7 +1016,7 @@ export const zhTW = {
   "agents.mcp.badge.metadata": "MCP 狀態分享",
   "agents.mcp.output.needsRestart": "背景服務尚不支援分開授權內容讀取，因此暫停新增分享。既有分享仍可讀取內容，也可取消分享；請先完成背景工作，再停止並重新啟動背景服務。系統不會自動中斷 CLI。",
   "agents.mcp.claude": "Claude Code（在終端機執行）",
-  "agents.mcp.codex": "Codex（加到 ~/.codex/config.toml）",
+  "agents.mcp.codex": "Codex（在終端機執行）",
   "agents.mcp.json": "Gemini CLI、Cursor 等（mcpServers JSON）",
   "agents.mcp.copy": "複製",
   "agents.mcp.copied": "已複製到剪貼簿。",

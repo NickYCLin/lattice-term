@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCodeCommand, codexToml, mcpServersJson, shellWord } from "./agentMcpConfig";
+import { claudeCodeCommand, codexCommand, mcpServersJson, shellWord } from "./agentMcpConfig";
 
 const launch = {
   command: "/opt/Lattice Term/lattice-term",
@@ -17,12 +17,9 @@ describe("agentMcpConfig", () => {
     expect(claudeCodeCommand(launch)).toBe(
       "claude mcp add latticeterm -- '/opt/Lattice Term/lattice-term' mcp --data-dir /home/me/.local/share/io.github.nickyclin.latticeterm",
     );
-    expect(codexToml(launch)).toBe(
-      [
-        "[mcp_servers.latticeterm]",
-        'command = "/opt/Lattice Term/lattice-term"',
-        'args = ["mcp", "--data-dir", "/home/me/.local/share/io.github.nickyclin.latticeterm"]',
-      ].join("\n"),
+    // Codex writes its own config entry, so nobody edits TOML by hand.
+    expect(codexCommand(launch)).toBe(
+      "codex mcp add latticeterm -- '/opt/Lattice Term/lattice-term' mcp --data-dir /home/me/.local/share/io.github.nickyclin.latticeterm",
     );
     expect(JSON.parse(mcpServersJson(launch))).toEqual({
       mcpServers: { latticeterm: { command: launch.command, args: launch.args } },

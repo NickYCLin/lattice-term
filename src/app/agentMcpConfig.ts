@@ -2,7 +2,7 @@
  * Client configuration for the LatticeTerm MCP server, rendered from the
  * launch line the backend reports (the executable of this very
  * installation and its data directory).  Each MCP client keeps its
- * servers in a different file, so the same command is shown three ways.
+ * servers in a different place, so the same command is shown three ways.
  */
 import type { AgentMcpLaunch } from "./useAgentDaemon";
 
@@ -21,14 +21,12 @@ export function claudeCodeCommand(launch: AgentMcpLaunch): string {
     .join(" ");
 }
 
-/** The `~/.codex/config.toml` block for Codex CLI. */
-export function codexToml(launch: AgentMcpLaunch): string {
-  const args = launch.args.map((arg) => JSON.stringify(arg)).join(", ");
-  return [
-    `[mcp_servers.${MCP_SERVER_NAME}]`,
-    `command = ${JSON.stringify(launch.command)}`,
-    `args = [${args}]`,
-  ].join("\n");
+/** The `codex mcp add` line for Codex CLI; it writes the same
+ * `[mcp_servers.latticeterm]` entry into `~/.codex/config.toml`. */
+export function codexCommand(launch: AgentMcpLaunch): string {
+  return ["codex", "mcp", "add", MCP_SERVER_NAME, "--", launch.command, ...launch.args]
+    .map(shellWord)
+    .join(" ");
 }
 
 /** The `mcpServers` JSON most other clients read (Gemini CLI, Cursor, Claude Desktop). */

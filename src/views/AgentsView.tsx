@@ -32,7 +32,7 @@ import { SharedAgentRulesPanel } from "../components/agents/SharedAgentRulesPane
 import { Callout } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { mcpAccessOf, useAgentDaemon, type McpAccess } from "../app/useAgentDaemon";
-import { claudeCodeCommand, codexToml, mcpServersJson } from "../app/agentMcpConfig";
+import { claudeCodeCommand, codexCommand, mcpServersJson } from "../app/agentMcpConfig";
 import {
   AgentIcon,
   ChevronDownIcon,
@@ -843,7 +843,7 @@ export function AgentsView({
               {(
                 [
                   ["agents.mcp.claude", claudeCodeCommand(daemon.status.mcp)],
-                  ["agents.mcp.codex", codexToml(daemon.status.mcp)],
+                  ["agents.mcp.codex", codexCommand(daemon.status.mcp)],
                   ["agents.mcp.json", mcpServersJson(daemon.status.mcp)],
                 ] as const
               ).map(([labelKey, snippet]) => (
