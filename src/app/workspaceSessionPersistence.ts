@@ -218,14 +218,19 @@ export function saveWorkspaceSessionSnapshot(
   // A damaged or newer-format snapshot is not an empty workspace. Preserve its
   // exact bytes before replacing it; storage failures must leave it untouched.
   const previous = storage.getItem(WORKSPACE_SESSIONS_KEY);
+  const next = JSON.stringify(snapshot);
+  if (previous === next) return;
   if (previous !== null) {
     let readable = false;
+    let hasSessions = false;
     try {
-      readable = sanitizeWorkspaceSessionSnapshot(JSON.parse(previous)) !== null;
+      const parsed = sanitizeWorkspaceSessionSnapshot(JSON.parse(previous));
+      readable = parsed !== null;
+      hasSessions = (parsed?.sessions.length ?? 0) > 0;
     } catch {
       // Keep malformed JSON available for manual recovery as well.
     }
-    if (!readable) {
+    if (!readable || hasSessions) {
       const rawCopies = storage.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY);
       const copies: unknown = rawCopies === null ? [] : JSON.parse(rawCopies);
       if (!Array.isArray(copies) || !copies.every(copy => typeof copy === "string")) {
@@ -240,7 +245,23 @@ export function saveWorkspaceSessionSnapshot(
   if (storage.getItem(WORKSPACE_SESSIONS_KEY) !== previous) {
     throw new Error("Workspace changed before save");
   }
-  storage.setItem(WORKSPACE_SESSIONS_KEY, JSON.stringify(snapshot));
+  storage.setItem(WORKSPACE_SESSIONS_KEY, next);
+}
+
+export function readWorkspaceRecoverySnapshots(storage: StorageReaderWriter): {
+  index: number;
+  snapshot: WorkspaceSessionSnapshot | null;
+}[] {
+  const raw = storage.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY);
+  if (raw === null) return [];
+  const copies: unknown = JSON.parse(raw);
+  if (!Array.isArray(copies) || !copies.every(copy => typeof copy === "string")) {
+    throw new Error("Workspace recovery storage is unreadable");
+  }
+  return copies.map((copy, index) => {
+    try { return { index, snapshot: sanitizeWorkspaceSessionSnapshot(JSON.parse(copy)) }; }
+    catch { return { index, snapshot: null }; }
+  }).reverse();
 }
 
 /**
@@ -394,6 +415,24 @@ export function missingSavedAgentSessions(
     available.splice(index, 1);
     return false;
   });
+}
+
+/** Merge a reviewed local backup without executing or dropping distinct tabs. */
+export function recoverLocalWorkspaceSessions(
+  pending: readonly SavedWorkspaceSession[],
+  backup: WorkspaceSessionSnapshot,
+  attached: readonly AgentSessionSummary[],
+): SavedWorkspaceSession[] {
+  const result = [...pending];
+  const unmatched = [...pending];
+  for (const entry of missingSavedAgentSessions(backup.sessions, attached)) {
+    const index = unmatched.findIndex(current => sameSavedSession(current, entry) &&
+      current.kind === "agent" && current.resumeSessionId === entry.resumeSessionId);
+    if (index >= 0) unmatched.splice(index, 1);
+    else result.push(entry);
+  }
+  if (result.length > MAX_RESTORABLE_SESSIONS) throw new Error("Too many recovery sessions");
+  return result;
 }
 
 export function agentFreshLaunchArguments(session: SavedAgentSession): string[] {

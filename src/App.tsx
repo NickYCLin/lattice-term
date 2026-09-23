@@ -82,11 +82,16 @@ import {
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
   missingSavedAgentSessions,
+  recoverLocalWorkspaceSessions,
+  savedAgentWorkingDirectories,
   preserveUnrestoredWorkspaceSessions,
   saveWorkspaceSessionSnapshot,
   snapshotLiveWorkspaceSessions,
   type SavedWorkspaceSession,
+  type SavedAgentSession,
+  type WorkspaceSessionSnapshot,
 } from "./app/workspaceSessionPersistence";
+import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
 import { loadAuthPref } from "./app/authPreferences";
 import {
   playNotificationSound,
@@ -415,6 +420,65 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const unrestoredSessionsRef = useRef<readonly SavedWorkspaceSession[]>([]);
   const restoreStartedRef = useRef(false);
   const [sessionRestoreComplete, setSessionRestoreComplete] = useState(false);
+  const localProjects = useLocalProjects([
+    ...savedAgentWorkingDirectories(sessionRestoreComplete
+      ? unrestoredWorkspaceSessions : restoredWorkspaceSessions),
+    ...agents.sessions.map(session => session.workingDirectory),
+  ]);
+  const retryingWorkspaceRef = useRef(false);
+  const [retryingWorkspace, setRetryingWorkspace] = useState(false);
+  const [workspaceRecoveryError, setWorkspaceRecoveryError] = useState(false);
+  const [workspacePersistenceError, setWorkspacePersistenceError] = useState(false);
+
+  function replacePendingWorkspace(sessions: readonly SavedWorkspaceSession[]) {
+    unrestoredSessionsRef.current = sessions;
+    setUnrestoredWorkspaceSessions([...sessions]);
+  }
+
+  async function retryWorkspaceSession(saved: SavedAgentSession) {
+    if (retryingWorkspaceRef.current || !sessionRestoreComplete) return;
+    retryingWorkspaceRef.current = true;
+    setRetryingWorkspace(true);
+    setWorkspaceRecoveryError(false);
+    try {
+      const launched = await agents.launch({
+        definitionId: saved.definitionId, label: saved.label,
+        executable: saved.executable, arguments: agentRestoreArguments(saved),
+        resumeSessionId: saved.resumeSessionId, groupId: saved.groupKey,
+        seedInput: null, restoreExistingSession: true,
+        profileConfigPath: saved.profileConfigPath ?? null,
+        sandbox: saved.sandbox === true, detached: saved.detached === true,
+        workingDirectory: saved.workingDirectory, cols: 120, rows: 32,
+      });
+      if (launched.closedReason) throw new Error("Session did not start");
+      // A label failure must not make a successfully started CLI retryable.
+      replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
+      setActiveSessionId(launched.sessionId);
+      try { await agents.rename(launched.sessionId, saved.groupLabel); } catch { /* keep the live CLI */ }
+    } catch {
+      setWorkspaceRecoveryError(true);
+    } finally {
+      retryingWorkspaceRef.current = false;
+      setRetryingWorkspace(false);
+    }
+  }
+
+  function recoverWorkspaceSnapshot(snapshot: WorkspaceSessionSnapshot) {
+    replacePendingWorkspace(recoverLocalWorkspaceSessions(
+      unrestoredSessionsRef.current, snapshot, agents.sessions));
+    setWorkspaceRecoveryError(false);
+  }
+
+  function removeLocalProject(path: string) {
+    localProjects.remove(path);
+    replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry =>
+      entry.kind !== "agent" ||
+      projectDirectoryKey(entry.workingDirectory) !== projectDirectoryKey(path)));
+  }
+
+  useEffect(() => {
+    if (localProjects.directories.length > 0) setTerminalMounted(true);
+  }, [localProjects.directories.length]);
 
   // Opening an Agent terminal is the equivalent of reading its Activity row.
   // Include unreadCount so a completion that arrives while this tab is already
@@ -639,15 +703,18 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           storedSessionSnapshotRef.current?.active ?? null,
         ),
       );
+      setWorkspacePersistenceError(false);
     } catch {
       // Session restoration is a convenience. A full WebView storage area
       // must never prevent a live terminal from continuing to work.
+      setWorkspacePersistenceError(true);
     }
   }, [
     activeSessionId,
     agents.sessions,
     sessionRestoreComplete,
     ssh.sessions,
+    unrestoredWorkspaceSessions,
   ]);
   const hasLiveSessions =
     agents.sessions.length > 0 ||
@@ -1097,6 +1164,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     sessionRestoreComplete={sessionRestoreComplete}
                     restoredWorkspaceSessions={restoredWorkspaceSessions}
                     unrestoredWorkspaceSessions={unrestoredWorkspaceSessions}
+                    localProjectDirectories={localProjects.directories}
+                    projectStorageError={localProjects.error || workspacePersistenceError}
+                    onRemoveLocalProject={removeLocalProject}
+                    onRetryWorkspaceSession={retryWorkspaceSession}
+                    onRecoverWorkspaceSnapshot={recoverWorkspaceSnapshot}
+                    retryingWorkspace={retryingWorkspace}
+                    workspaceRecoveryError={workspaceRecoveryError}
                   />
                 </div>
               </Suspense>

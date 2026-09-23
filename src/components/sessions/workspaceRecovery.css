@@ -1,0 +1,39 @@
+.workspace-recovery {
+  flex: none;
+  margin: 0 var(--space-4) var(--space-3);
+  max-height: 40vh;
+  overflow: auto;
+}
+.workspace-recovery summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.workspace-recovery p,
+.workspace-recovery h3 {
+  margin-block: var(--space-3);
+}
+.workspace-recovery > .button {
+  margin: var(--space-2) var(--space-2) var(--space-2) 0;
+}
+.workspace-recovery__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.workspace-recovery__row > .mono {
+  flex: 1;
+  min-width: 8rem;
+  overflow-wrap: anywhere;
+}
+.workspace-recovery__row > [role="group"] {
+  width: 100%;
+}
+.workspace-recovery__row > [role="group"] .button + .button {
+  margin-left: var(--space-2);
+}
+.workspace-recovery li {
+  overflow-wrap: anywhere;
+}

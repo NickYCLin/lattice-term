@@ -5,6 +5,8 @@ import {
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
   missingSavedAgentSessions,
+  recoverLocalWorkspaceSessions,
+  readWorkspaceRecoverySnapshots,
   preserveUnrestoredWorkspaceSessions,
   savedAgentWorkingDirectories,
   saveWorkspaceSessionSnapshot,
@@ -47,6 +49,21 @@ function agent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace session persistence", () => {
+  it("previews healthy backups and merges missing tabs without replacing live work", () => {
+    const target = storage();
+    const first = agent();
+    const second = agent({ sessionId: "second", capturedSessionId: "native-2" });
+    const backup = snapshotLiveWorkspaceSessions([first, second], [], null);
+    saveWorkspaceSessionSnapshot(target, backup);
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([], [], null));
+    expect(readWorkspaceRecoverySnapshots(target)[0].snapshot).toEqual(backup);
+    const pending = recoverLocalWorkspaceSessions([], backup, [first]);
+    expect(pending).toEqual([backup.sessions[1]]);
+    expect(recoverLocalWorkspaceSessions(pending, backup, [first])).toEqual(pending);
+    expect(recoverLocalWorkspaceSessions([], backup, [])).toHaveLength(2);
+    expect(loadWorkspaceSessionSnapshot(target)?.sessions).toEqual([]);
+  });
+
   it("preserves unreadable snapshots before replacement and never overwrites after a backup failure", () => {
     const target = storage();
     const live = snapshotLiveWorkspaceSessions([agent()], [], null);

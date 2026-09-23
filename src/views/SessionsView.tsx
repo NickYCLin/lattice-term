@@ -88,6 +88,7 @@ import {
 } from "../components/sessions/SessionProjectSidebar";
 import { AgentSessionRelocationDialog } from "../components/sessions/AgentSessionRelocationDialog";
 import { WorkspaceImportDialog } from "../components/sessions/WorkspaceImportDialog";
+import { WorkspaceRecoveryPanel, type WorkspaceRecoveryProps } from "../components/sessions/WorkspaceRecoveryPanel";
 import {
   AgentIcon,
   CloseIcon,
@@ -241,6 +242,7 @@ export function SessionsView({
   unrestoredWorkspaceSessions,
   mobile = false,
   visible = true,
+  ...recovery
 }: {
   agents: AgentApi;
   ssh: SshApi;
@@ -257,7 +259,7 @@ export function SessionsView({
   unrestoredWorkspaceSessions: readonly SavedWorkspaceSession[];
   mobile?: boolean;
   visible?: boolean;
-}) {
+} & WorkspaceRecoveryProps) {
   const { t, tag } = useI18n();
   const sessionTabsId = useId();
   const tokenNumber = useMemo(() => new Intl.NumberFormat(tag), [tag]);
@@ -771,6 +773,9 @@ export function SessionsView({
         agents.sessions.map((session) => session.sessionId),
         agents.disconnect,
       );
+      for (const path of recovery.localProjectDirectories ?? []) {
+        recovery.onRemoveLocalProject?.(path);
+      }
       if (
         agents.sessions.some((session) => session.sessionId === activeSessionId)
       ) {
@@ -1163,9 +1168,10 @@ export function SessionsView({
       : null;
   const sshHostMetrics = useSessionHostMetrics(activeSshSessionId);
   const projectMap = new Map<string, SessionProject>();
-  for (const workingDirectory of savedAgentWorkingDirectories(
-    unrestoredWorkspaceSessions,
-  )) {
+  for (const workingDirectory of [
+    ...(recovery.localProjectDirectories ?? []),
+    ...savedAgentWorkingDirectories(unrestoredWorkspaceSessions),
+  ]) {
     const id = localProjectId(workingDirectory);
     const isGeneralChat =
       !!homeDirectory &&
@@ -1658,6 +1664,8 @@ export function SessionsView({
     return (
       <div className="terminal-workspace">
         {workspaceFilePicker}
+        <WorkspaceRecoveryPanel {...recovery} pending={unrestoredWorkspaceSessions}
+          occupied={agents.sessions.map(session => session.workingDirectory)} ready={sessionRestoreComplete} />
         {closedCallout}
         {workspaceTransferCallout}
         {addCliErrorCallout}
@@ -1798,6 +1806,8 @@ export function SessionsView({
   return (
     <div className="terminal-workspace">
       {workspaceFilePicker}
+      <WorkspaceRecoveryPanel {...recovery} pending={unrestoredWorkspaceSessions}
+        occupied={agents.sessions.map(session => session.workingDirectory)} ready={sessionRestoreComplete} />
       {closedCallout}
       {workspaceTransferCallout}
       {addCliErrorCallout}
