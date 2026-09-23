@@ -4,6 +4,7 @@ import { localFileError, readSelectedText, type UploadFile } from "../app/localF
 /** Unified workspace for text terminals and graphical remote sessions. */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   useSharedSidebarLayout,
   reconcileSharedSessionLayout as reconcileSessionSidebarLayout,
@@ -436,6 +437,12 @@ export function SessionsView({
   useEffect(() => {
     if (launchingProjectCli) newProjectDialogRef.current?.focus();
   }, [launchingProjectCli]);
+
+  useModalFocus({
+    dialogRef: addCliDialogRef,
+    onEscape: () => setAddCliFor(null),
+    active: addCliFor !== null,
+  });
 
   useEffect(() => {
     if (!addCliFor) return;
@@ -2157,15 +2164,23 @@ export function SessionsView({
                           definition.transcriptSupported,
                       ) && !source?.closedReason;
                       const carry = canCarry && carryContext;
-                      return (
+                      return createPortal(
+                        <div className="scrim scrim--center" role="presentation">
                         <div
                           ref={addCliDialogRef}
                           id={`${sessionTabsId}-${groupIndex}-add-cli-dialog`}
                           className="cli-switch__menu"
                           role="dialog"
+                          aria-modal="true"
                           aria-label={t("terminal.addCli")}
                           tabIndex={-1}
                         >
+                          <header className="dialog__head">
+                            <h2 className="dialog__title">{t("terminal.addCli")}</h2>
+                            <button type="button" className="button button--ghost button--sm"
+                              onClick={() => setAddCliFor(null)}>{t("common.close")}</button>
+                          </header>
+                          <div className="cli-switch__menu-body">
                           {canCarry ? (
                             <>
                               <label className="cli-switch__carry">
@@ -2202,6 +2217,7 @@ export function SessionsView({
                               {t("terminal.addCli.none")}
                             </span>
                           )}
+                          </div>
                           <div className="cli-switch__menu-actions">
                             <button
                               type="button"
@@ -2211,6 +2227,8 @@ export function SessionsView({
                             >{t("terminal.projects.launch")}</button>
                           </div>
                         </div>
+                        </div>,
+                        document.body,
                       );
                     })()}
                 </div>
