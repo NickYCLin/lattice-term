@@ -81,6 +81,7 @@ import {
   agentFreshLaunchArguments,
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
+  missingSavedAgentSessions,
   preserveUnrestoredWorkspaceSessions,
   saveWorkspaceSessionSnapshot,
   snapshotLiveWorkspaceSessions,
@@ -452,12 +453,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         const restoredAgents = [...agents.sessions];
         const restoredSsh = [...ssh.sessions];
 
-        // Sessions the background service still holds re-attach by themselves;
-        // only the desktop-owned ones decide whether saved tabs need restoring.
-        if (snapshot && agents.sessions.every((session) => session.detached)) {
+        // Reattach what survived a client restart; reconstruct only the missing
+        // entries after a machine restart or a partially restored backend.
+        if (snapshot) {
           const renamedGroups = new Set<string>();
-          for (const saved of snapshot.sessions) {
-            if (saved.kind !== "agent") continue;
+          for (const saved of missingSavedAgentSessions(snapshot.sessions, agents.sessions)) {
             try {
               const freshArguments = agentFreshLaunchArguments(saved);
               const restoreArguments = agentRestoreArguments(saved);
@@ -478,6 +478,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 restoreExistingSession: true,
                 profileConfigPath: saved.profileConfigPath ?? null,
                 sandbox: saved.sandbox === true,
+                detached: saved.detached === true,
                 workingDirectory: saved.workingDirectory,
                 cols: 120,
                 rows: 32,
@@ -500,6 +501,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     restoreExistingSession: false,
                     profileConfigPath: saved.profileConfigPath ?? null,
                     sandbox: saved.sandbox === true,
+                    detached: saved.detached === true,
                     workingDirectory: saved.workingDirectory,
                     cols: 120,
                     rows: 32,

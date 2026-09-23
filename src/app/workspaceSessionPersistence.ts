@@ -3,6 +3,7 @@ import type { AgentSessionSummary } from "./useAgentSessions";
 import type { SessionSummary as SshSessionSummary } from "./useSshSessions";
 
 export const WORKSPACE_SESSIONS_KEY = "latticeterm.workspaceSessions.v1";
+export const WORKSPACE_SESSIONS_RECOVERY_KEY = "latticeterm.workspaceSessions.recovery.v1";
 const MAX_RESTORABLE_SESSIONS = 64;
 
 export interface SavedAgentSession {
@@ -19,6 +20,10 @@ export interface SavedAgentSession {
   profileConfigPath?: string;
   /** Relaunch inside the file-scope sandbox. */
   sandbox?: boolean;
+  /** Keep background ownership when reconstructing after a machine restart. */
+  detached?: boolean;
+  /** Runtime identity is only used for reattachment, never for native resume. */
+  lastSessionId?: string;
 }
 
 export interface SavedSshSession {
@@ -136,6 +141,9 @@ export function sanitizeWorkspaceSessionSnapshot(
       resumeSessionId,
       ...(profileConfigPath ? { profileConfigPath } : {}),
       ...(entry.sandbox === true ? { sandbox: true } : {}),
+      ...(entry.detached === true ? { detached: true } : {}),
+      ...(safeText(entry.lastSessionId, 256)
+        ? { lastSessionId: safeText(entry.lastSessionId, 256)! } : {}),
     });
   }
 
@@ -207,6 +215,31 @@ export function saveWorkspaceSessionSnapshot(
   storage: StorageReaderWriter,
   snapshot: WorkspaceSessionSnapshot,
 ) {
+  // A damaged or newer-format snapshot is not an empty workspace. Preserve its
+  // exact bytes before replacing it; storage failures must leave it untouched.
+  const previous = storage.getItem(WORKSPACE_SESSIONS_KEY);
+  if (previous !== null) {
+    let readable = false;
+    try {
+      readable = sanitizeWorkspaceSessionSnapshot(JSON.parse(previous)) !== null;
+    } catch {
+      // Keep malformed JSON available for manual recovery as well.
+    }
+    if (!readable) {
+      const rawCopies = storage.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY);
+      const copies: unknown = rawCopies === null ? [] : JSON.parse(rawCopies);
+      if (!Array.isArray(copies) || !copies.every(copy => typeof copy === "string")) {
+        throw new Error("Workspace recovery storage is unreadable");
+      }
+      storage.setItem(
+        WORKSPACE_SESSIONS_RECOVERY_KEY,
+        JSON.stringify([...copies.filter(copy => copy !== previous), previous].slice(-3)),
+      );
+    }
+  }
+  if (storage.getItem(WORKSPACE_SESSIONS_KEY) !== previous) {
+    throw new Error("Workspace changed before save");
+  }
   storage.setItem(WORKSPACE_SESSIONS_KEY, JSON.stringify(snapshot));
 }
 
@@ -287,11 +320,11 @@ export function snapshotLiveWorkspaceSessions(
   // that exits must also remain recoverable: otherwise one provider-specific
   // startup failure silently deletes that tab and its sidebar placement. The
   // user can still remove it explicitly by closing the tab.
-  // A detached session lives on in the background service and is attached
-  // again on the next start; saving it too would launch a duplicate.
+  // Background processes survive a client detach, but not a machine restart.
+  // Save their launch intent too; restoration matches each existing process
+  // before deciding which saved entries still need launching.
   const restorableAgents = agents.filter(
     (session) =>
-      !session.detached &&
       (!session.closedReason ||
       session.restoreExistingSession === true ||
       (session.capturedSessionId !== null &&
@@ -311,8 +344,10 @@ export function snapshotLiveWorkspaceSessions(
     launchArguments: session.launchArguments,
     workingDirectory: session.workingDirectory,
     resumeSessionId: session.capturedSessionId,
+    lastSessionId: session.sessionId,
     ...(session.profileConfigPath ? { profileConfigPath: session.profileConfigPath } : {}),
     ...(session.sandboxed ? { sandbox: true } : {}),
+    ...(session.detached ? { detached: true } : {}),
   }));
   const seenProfiles = new Set<string>();
   for (const session of ssh) {
@@ -333,6 +368,32 @@ export function snapshotLiveWorkspaceSessions(
       ? { kind: "ssh", profileId: activeSsh.profileId }
       : null;
   return boundedSnapshot(sessions, active);
+}
+
+/**
+ * Consume each attached session at most once. One surviving CLI must not
+ * suppress the rest of a project, another account, or another project.
+ */
+export function missingSavedAgentSessions(
+  saved: readonly SavedWorkspaceSession[],
+  attached: readonly AgentSessionSummary[],
+): SavedAgentSession[] {
+  const available = [...attached];
+  return saved.filter((entry): entry is SavedAgentSession => {
+    if (entry.kind !== "agent") return false;
+    const index = available.findIndex((session) =>
+      (session.groupId || session.sessionId) === entry.groupKey &&
+      session.definitionId === entry.definitionId &&
+      session.executable === entry.executable &&
+      session.workingDirectory === entry.workingDirectory &&
+      (session.profileConfigPath ?? null) === (entry.profileConfigPath ?? null) &&
+      (session.sessionId === entry.lastSessionId ||
+        !entry.resumeSessionId || session.capturedSessionId === entry.resumeSessionId),
+    );
+    if (index < 0) return true;
+    available.splice(index, 1);
+    return false;
+  });
 }
 
 export function agentFreshLaunchArguments(session: SavedAgentSession): string[] {

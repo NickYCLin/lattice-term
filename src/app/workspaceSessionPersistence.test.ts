@@ -4,12 +4,14 @@ import {
   agentFreshLaunchArguments,
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
+  missingSavedAgentSessions,
   preserveUnrestoredWorkspaceSessions,
   savedAgentWorkingDirectories,
   saveWorkspaceSessionSnapshot,
   sanitizeWorkspaceSessionSnapshot,
   snapshotLiveWorkspaceSessions,
   WORKSPACE_SESSIONS_KEY,
+  WORKSPACE_SESSIONS_RECOVERY_KEY,
   type StorageReaderWriter,
 } from "./workspaceSessionPersistence";
 
@@ -45,6 +47,83 @@ function agent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace session persistence", () => {
+  it("preserves unreadable snapshots before replacement and never overwrites after a backup failure", () => {
+    const target = storage();
+    const live = snapshotLiveWorkspaceSessions([agent()], [], null);
+    const damaged = '{"version":1,"sessions":[';
+    target.setItem(WORKSPACE_SESSIONS_KEY, damaged);
+    expect(loadWorkspaceSessionSnapshot(target)).toBeNull();
+    saveWorkspaceSessionSnapshot(target, live);
+    expect(JSON.parse(target.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY)!)).toEqual([damaged]);
+    expect(loadWorkspaceSessionSnapshot(target)).toEqual(live);
+    const newer = JSON.stringify({ version: 999, sessions: [] });
+    target.setItem(WORKSPACE_SESSIONS_KEY, newer);
+    expect(() => saveWorkspaceSessionSnapshot({
+      getItem: target.getItem,
+      setItem: () => { throw new Error("quota"); },
+    }, live)).toThrow("quota");
+    expect(target.getItem(WORKSPACE_SESSIONS_KEY)).toBe(newer);
+    saveWorkspaceSessionSnapshot(target, live);
+    expect(JSON.parse(target.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY)!)).toEqual([damaged, newer]);
+  });
+
+  it("retains three recovery copies and refuses to replace a concurrent writer", () => {
+    const target = storage();
+    const empty = snapshotLiveWorkspaceSessions([], [], null);
+    for (const raw of ["broken-1", "broken-2", "broken-3", "broken-4"]) {
+      target.setItem(WORKSPACE_SESSIONS_KEY, raw);
+      saveWorkspaceSessionSnapshot(target, empty);
+    }
+    expect(JSON.parse(target.getItem(WORKSPACE_SESSIONS_RECOVERY_KEY)!))
+      .toEqual(["broken-2", "broken-3", "broken-4"]);
+    let reads = 0;
+    expect(() => saveWorkspaceSessionSnapshot({
+      getItem: key => key === WORKSPACE_SESSIONS_KEY && ++reads === 2
+        ? "changed-by-another-window" : target.getItem(key),
+      setItem: target.setItem,
+    }, snapshotLiveWorkspaceSessions([agent()], [], null))).toThrow("changed before save");
+    expect(loadWorkspaceSessionSnapshot(target)).toEqual(empty);
+  });
+
+  it("restores background projects after reboot without duplicating reattached processes", () => {
+    const first = agent({ detached: true });
+    const second = agent({
+      sessionId: "background-2", groupId: "project-2",
+      workingDirectory: "D:\\project\\another", detached: true,
+    });
+    const target = storage();
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([first, second], [], first.sessionId));
+    const saved = loadWorkspaceSessionSnapshot(target)!;
+    expect(saved.sessions).toHaveLength(2);
+    expect(saved.sessions[0]).toMatchObject({ detached: true, lastSessionId: first.sessionId });
+    // Machine restart: no original process remains.
+    expect(missingSavedAgentSessions(saved.sessions, [])).toEqual(saved.sessions);
+    expect(savedAgentWorkingDirectories(saved.sessions)).toHaveLength(2);
+    // Client restart: attached processes already own those exact sessions.
+    expect(missingSavedAgentSessions(saved.sessions, [first, second])).toEqual([]);
+    // Partial recovery: one attached process must not hide the other project.
+    expect(missingSavedAgentSessions(saved.sessions, [first])).toEqual([saved.sessions[1]]);
+    // A native id may be learned after the snapshot was saved.
+    expect(missingSavedAgentSessions(saved.sessions, [
+      { ...first, capturedSessionId: "newly-reported-id" }, second,
+    ])).toEqual([]);
+  });
+
+  it("matches restored sessions individually across accounts and identical CLI tabs", () => {
+    const first = agent({ profileConfigPath: "/profiles/a" });
+    const second = agent({ sessionId: "second", profileConfigPath: "/profiles/b" });
+    const third = agent({ sessionId: "third", profileConfigPath: "/profiles/a", capturedSessionId: "native-third" });
+    const saved = snapshotLiveWorkspaceSessions([first, second, third], [], null);
+    expect(missingSavedAgentSessions(saved.sessions, [first])).toEqual(saved.sessions.slice(1));
+    // Older snapshots have no runtime identity; still consume matches one by one.
+    const legacy = saved.sessions.map(entry => {
+      if (entry.kind !== "agent") return entry;
+      const { lastSessionId: _, ...rest } = entry;
+      return { ...rest, resumeSessionId: null };
+    });
+    expect(missingSavedAgentSessions(legacy, [first])).toHaveLength(2);
+  });
+
   it("preserves both accounts, the selected account, and a failed account restore", () => {
     const a = agent({ profileConfigPath: "/profiles/a" });
     const b = agent({ sessionId: "b", profileConfigPath: "/profiles/b", capturedSessionId: "native-b" });
