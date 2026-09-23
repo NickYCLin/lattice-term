@@ -586,6 +586,18 @@ impl McpServer {
             "launchEnabled": launch_enabled,
             "launchablePlans": plans,
             "desktopBridgeAvailable": desktop_bridge,
+            "backgroundServiceVersion": connection.as_ref().and_then(|c| {
+                c.background_version.lock().ok().map(|v| v.clone()).filter(|v| !v.is_empty())
+            }),
+            // Tools this LatticeTerm offers but the running background
+            // service is too old to carry; restarting it brings them back.
+            // Tools this LatticeTerm offers but the running background
+            // service says it cannot carry; restarting it brings them back.
+            "toolsNeedingServiceRestart": tools_where(connection.as_ref(), Some(false)),
+            // A service from before the announced list may lack these; a call
+            // it cannot parse reports needs_user_action rather than failing
+            // as if the service had stopped.
+            "toolsUnconfirmedByService": tools_where(connection.as_ref(), None),
             "turnInterrupt": {
                 "supportedDefinitionIds": crate::agent::catalog()
                     .iter()
@@ -606,11 +618,7 @@ impl McpServer {
                 "humanInputInvalidatesProfile": true,
                 "terminalReplyException": "complete-strictly-recognized-status-reports-only",
             }],
-            "tools": [
-                "get_capabilities", "remote_fleet", "list_agent_sessions", "read_agent_output", "wait_agent_state",
-                "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
-                "list_authorized_connections", "list_saved_connections", "get_host_metrics", "sftp_list_directory", "ssh_exec_job", "ssh_run_command", "sftp_transfer", "capture_remote_screen", "send_remote_input", "get_remote_operation", "cancel_remote_operation",
-            ],
+            "tools": TOOL_NAMES,
             "errorCodes": super::error_code::ALL,
             "limits": {
                 "maxReadBytes": MAX_READ_BYTES,
@@ -651,21 +659,8 @@ impl McpServer {
                 "A remote workspace cannot delegate desktop or host tools".into(),
             ));
         }
-        let kind = match name {
-            "list_authorized_connections" => "listConnections",
-            "list_saved_connections" => "listSavedConnections",
-            "get_host_metrics" => "getMetrics",
-            "sftp_list_directory" => "listDirectory",
-            "ssh_exec_job" => "exec",
-            "ssh_run_command" => "execCommand",
-            "sftp_transfer" => "transfer",
-            "capture_remote_screen" => "captureScreen",
-            "send_remote_input" => "screenInput",
-            "remote_fleet" => "fleet",
-            "get_remote_operation" => "operationStatus",
-            "cancel_remote_operation" => "cancel",
-            _ => return Err(ToolError::Invalid("Unknown remote tool".into())),
-        };
+        let kind = desktop_tool_kind(name)
+            .ok_or_else(|| ToolError::Invalid("Unknown remote tool".into()))?;
         let mut value = arguments
             .as_object()
             .cloned()
@@ -688,10 +683,22 @@ impl McpServer {
                     .into(),
             ));
         }
-        connection
-            .request(Request::DesktopCall { operation })
-            .await
-            .map_err(ToolError::from)
+        let supported = connection.supports_operation(operation.kind());
+        if supported == Some(false) {
+            return Err(ToolError::Failed(BACKGROUND_SERVICE_OUTDATED.into()));
+        }
+        match connection.request(Request::DesktopCall { operation }).await {
+            // A service too old to parse the operation closes the connection
+            // instead of answering; that is not the service having stopped.
+            Err(message)
+                if supported.is_none()
+                    && message == DAEMON_NOT_RUNNING
+                    && !connection.alive.load(Ordering::Relaxed) =>
+            {
+                Err(ToolError::Failed(BACKGROUND_SERVICE_OUTDATED.into()))
+            }
+            other => other.map_err(ToolError::from),
+        }
     }
 
     async fn list_launch_plans(&self) -> Result<Value, ToolError> {
@@ -1053,6 +1060,69 @@ impl McpServer {
         }
     }
 }
+
+/// The desktop operation behind each remote tool.
+fn desktop_tool_kind(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "list_authorized_connections" => "listConnections",
+        "list_saved_connections" => "listSavedConnections",
+        "get_host_metrics" => "getMetrics",
+        "sftp_list_directory" => "listDirectory",
+        "ssh_exec_job" => "exec",
+        "ssh_run_command" => "execCommand",
+        "sftp_transfer" => "transfer",
+        "capture_remote_screen" => "captureScreen",
+        "send_remote_input" => "screenInput",
+        "remote_fleet" => "fleet",
+        "get_remote_operation" => "operationStatus",
+        "cancel_remote_operation" => "cancel",
+        _ => return None,
+    })
+}
+
+/// Remote tools whose operation support on this connection equals `wanted`.
+fn tools_where(connection: Option<&Arc<Connection>>, wanted: Option<bool>) -> Vec<&'static str> {
+    let Some(connection) = connection else {
+        return Vec::new();
+    };
+    TOOL_NAMES
+        .iter()
+        .filter(|name| {
+            desktop_tool_kind(name)
+                .is_some_and(|kind| connection.supports_operation(kind) == wanted)
+        })
+        .copied()
+        .collect()
+}
+
+const TOOL_NAMES: [&str; 20] = [
+    "get_capabilities",
+    "remote_fleet",
+    "list_agent_sessions",
+    "read_agent_output",
+    "wait_agent_state",
+    "list_launch_plans",
+    "launch_agent",
+    "send_agent_prompt",
+    "cancel_agent_task",
+    "list_authorized_connections",
+    "list_saved_connections",
+    "get_host_metrics",
+    "sftp_list_directory",
+    "ssh_exec_job",
+    "ssh_run_command",
+    "sftp_transfer",
+    "capture_remote_screen",
+    "send_remote_input",
+    "get_remote_operation",
+    "cancel_remote_operation",
+];
+
+/// A background service started before this LatticeTerm was installed keeps
+/// running across the upgrade and cannot parse newer operations; sending one
+/// would close the connection and look like the service had stopped.
+pub(crate) const BACKGROUND_SERVICE_OUTDATED: &str =
+    "The LatticeTerm background service is older than this LatticeTerm and does not support this tool yet. Ask the user to finish its background sessions, then stop and start the background service in LatticeTerm (Agent Fleet page). Other tools keep working meanwhile.";
 
 pub(crate) const DAEMON_NOT_RUNNING: &str =
     "The LatticeTerm background service is not running, so there is nothing to observe. Start a session with \"keep in the background\" in LatticeTerm and share it.";
@@ -1808,6 +1878,9 @@ struct DaemonEvent {
 struct Connection {
     workspace_scope: AtomicBool,
     desktop_bridge_protocol: AtomicU32,
+    /// Desktop operations the service can parse; `None` until it greets us.
+    desktop_operations: Mutex<Option<Vec<String>>>,
+    background_version: Mutex<String>,
     output_scopes: AtomicBool,
     output_reads: Mutex<HashMap<u64, (String, watch::Sender<bool>)>>,
     tx: mpsc::Sender<String>,
@@ -1855,6 +1928,22 @@ impl Drop for OutputRead {
 }
 
 impl Connection {
+    /// Whether the service can parse this desktop operation: `Some` when it
+    /// said so, or when bridge protocol 3 always had it; `None` when a
+    /// service from before the announced list may or may not know it.
+    fn supports_operation(&self, kind: &str) -> Option<bool> {
+        let operations = self.desktop_operations.lock().ok();
+        match operations
+            .as_ref()
+            .and_then(|operations| operations.as_ref())
+        {
+            Some(listed) if !listed.is_empty() => Some(listed.iter().any(|known| known == kind)),
+            _ => crate::mcp_desktop::DesktopOperation::PROTOCOL_3_KINDS
+                .contains(&kind)
+                .then_some(true),
+        }
+    }
+
     async fn open_scoped(
         paths: &DaemonPaths,
         client: Option<String>,
@@ -1906,6 +1995,12 @@ impl Connection {
         }
         self.desktop_bridge_protocol
             .store(reply.desktop_bridge_protocol, Ordering::Relaxed);
+        if let Ok(mut operations) = self.desktop_operations.lock() {
+            *operations = Some(reply.desktop_operations);
+        }
+        if let Ok(mut version) = self.background_version.lock() {
+            *version = reply.build_version;
+        }
         if scoped && !reply.mcp_workspace_scope {
             return Err("Workspace sharing requires an updated remote background service".into());
         }
@@ -1927,6 +2022,8 @@ impl Connection {
         let connection = Arc::new(Connection {
             workspace_scope: AtomicBool::new(false),
             desktop_bridge_protocol: AtomicU32::new(0),
+            desktop_operations: Mutex::new(None),
+            background_version: Mutex::new(String::new()),
             output_scopes: AtomicBool::new(false),
             output_reads: Mutex::new(HashMap::new()),
             tx,
@@ -2387,6 +2484,124 @@ mod tests {
         });
         assert!(result.unwrap_err().contains("refused the greeting"));
         connection.lost();
+    }
+
+    /// Greets as the running service would: `operations` is its announced
+    /// list, or `None` for a service from before the list existed.
+    async fn greeted(
+        operations: Option<&[&str]>,
+    ) -> (Arc<Connection>, BufReader<tokio::io::DuplexStream>) {
+        let (adapter, stream) = tokio::io::duplex(1 << 16);
+        let connection = Connection::from_stream(adapter);
+        let mut peer = BufReader::new(stream);
+        let (result, ()) = tokio::join!(connection.greet("test".into(), None), async {
+            let request = read_test_message(&mut peer).await;
+            let mut result = json!({
+                "protocol": OBSERVER_PROTOCOL_VERSION, "mcpProtocol": OBSERVER_PROTOCOL_VERSION,
+                "mcpOutputScopes": true, "mcpWorkspaceScope": true,
+                "desktopBridgeProtocol": super::super::desktop_bridge::PROTOCOL,
+                "sessions": [], "snapshots": [], "shared": [],
+            });
+            if let Some(operations) = operations {
+                result["desktopOperations"] = json!(operations);
+                result["buildVersion"] = json!("2026.9.30");
+            }
+            write_line(
+                peer.get_mut(),
+                &json!({"kind":"response","id":request["id"],"ok":true,"result":result}),
+            )
+            .await
+            .unwrap();
+        });
+        result.unwrap();
+        (connection, peer)
+    }
+
+    #[tokio::test]
+    async fn a_service_older_than_a_tool_says_so_instead_of_dropping_the_connection() {
+        // A service that announces its operations and lacks this one is
+        // never sent it: parsing would fail and close the connection.
+        let listed = crate::mcp_desktop::DesktopOperation::PROTOCOL_3_KINDS.to_vec();
+        let (connection, mut daemon) = greeted(Some(&listed)).await;
+        let (_dir, server) = connected_test_server(&connection).await;
+        let reply = server
+            .handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_saved_connections","arguments":{}}}))
+            .await
+            .unwrap();
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(
+            reply["result"]["structuredContent"]["code"],
+            "needs_user_action"
+        );
+        assert!(reply["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("older than this LatticeTerm"));
+        assert!(connection.alive.load(Ordering::Relaxed));
+
+        // Tools the service does know still reach it.
+        let listing = tokio::spawn({
+            let server = Arc::clone(&server);
+            async move {
+                server
+                    .handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_authorized_connections","arguments":{}}}))
+                    .await
+            }
+        });
+        let request = read_test_message(&mut daemon).await;
+        assert_eq!(request["body"]["type"], "desktopCall");
+        assert_eq!(request["body"]["operation"]["type"], "listConnections");
+        write_line(
+            daemon.get_mut(),
+            &json!({"kind":"response","id":request["id"],"ok":true,"result":{"connections":[]}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listing.await.unwrap().unwrap()["result"]["isError"], false);
+        connection.lost();
+    }
+
+    #[tokio::test]
+    async fn a_service_that_lists_its_operations_is_taken_at_its_word() {
+        let (connection, _daemon) =
+            greeted(Some(crate::mcp_desktop::DesktopOperation::KINDS)).await;
+        assert_eq!(
+            connection.supports_operation("listSavedConnections"),
+            Some(true)
+        );
+        assert_eq!(connection.supports_operation("execCommand"), Some(true));
+        // Before the list, only protocol 3's own operations are certain.
+        let (old, _daemon) = greeted(None).await;
+        assert_eq!(old.supports_operation("captureScreen"), Some(true));
+        assert_eq!(old.supports_operation("execCommand"), None);
+        assert_eq!(old.supports_operation("listSavedConnections"), None);
+        connection.lost();
+        old.lost();
+    }
+
+    #[tokio::test]
+    async fn an_unlisted_service_that_hangs_up_on_a_new_tool_is_called_outdated() {
+        // Services from 2026.9.19 on know execCommand without saying so, so
+        // newer operations are still sent to an unlisted service; one that
+        // hangs up instead of answering is reported as too old, not stopped.
+        let (connection, mut daemon) = greeted(None).await;
+        let (_dir, server) = connected_test_server(&connection).await;
+        let call = tokio::spawn({
+            let server = Arc::clone(&server);
+            async move {
+                server
+                    .handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_saved_connections","arguments":{}}}))
+                    .await
+            }
+        });
+        let request = read_test_message(&mut daemon).await;
+        assert_eq!(request["body"]["operation"]["type"], "listSavedConnections");
+        drop(daemon);
+        let reply = call.await.unwrap().unwrap();
+        assert_eq!(
+            reply["result"]["structuredContent"]["code"],
+            "needs_user_action"
+        );
     }
 
     #[tokio::test]

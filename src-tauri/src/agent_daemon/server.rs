@@ -363,6 +363,11 @@ where
             mcp_output_scopes: true,
             mcp_workspace_scope: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
+            desktop_operations: crate::mcp_desktop::DesktopOperation::KINDS
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect(),
+            build_version: env!("CARGO_PKG_VERSION").to_string(),
             sessions: detached_list(&context.registry),
             snapshots: context.registry.output_snapshots(),
             shared: context.sink.shared(),
@@ -375,6 +380,11 @@ where
             mcp_output_scopes: true,
             mcp_workspace_scope: true,
             desktop_bridge_protocol: super::desktop_bridge::PROTOCOL,
+            desktop_operations: crate::mcp_desktop::DesktopOperation::KINDS
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect(),
+            build_version: env!("CARGO_PKG_VERSION").to_string(),
             sessions: shared_list(&context),
             snapshots: Vec::new(),
             shared: Vec::new(),
