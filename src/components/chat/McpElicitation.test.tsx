@@ -37,6 +37,68 @@ const multi = JSON.stringify({
 });
 
 describe("MCP elicitation", () => {
+  it("shows the titles of titled choices and answers with the values behind them", () => {
+    const titled = JSON.stringify({
+      mode: "form",
+      serverName: "paint",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          color: {
+            type: "string",
+            title: "Color",
+            oneOf: [
+              { const: "#FF0000", title: "Red" },
+              { const: "#00FF00", title: "Green" },
+            ],
+            default: "#00FF00",
+          },
+          extras: {
+            type: "array",
+            items: { anyOf: [{ const: "#0000FF", title: "Blue" }, { const: "#FFFFFF" }] },
+          },
+          size: { type: "integer", enum: [1, 2] },
+        },
+        required: ["color"],
+      },
+    });
+    const request = parseElicitation(titled)!;
+    const [color, extras, size] = request.fields;
+    expect(color.choices).toEqual([
+      { value: "#FF0000", label: "Red" },
+      { value: "#00FF00", label: "Green" },
+    ]);
+    // An entry without a title falls back to its value.
+    expect([extras.kind, extras.choices.map((choice) => choice.label)]).toEqual(["choices", ["Blue", "#FFFFFF"]]);
+    // A numeric enum is still a plain number field, as before.
+    expect([size.kind, size.choices]).toEqual(["integer", []]);
+    expect(
+      elicitationAnswer(request.fields, { color: "#00FF00", extras: JSON.stringify(["#0000FF"]), size: "2" }),
+    ).toEqual({ content: { color: "#00FF00", extras: ["#0000FF"], size: 2 } });
+
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="zh-TW">
+        <McpElicitation request={request} onAnswer={async () => {}} />
+      </I18nProvider>,
+    );
+    expect(markup).toContain(">Green</option>");
+    expect(markup).toContain('value="#00FF00" selected=""');
+    expect(markup).toContain("Blue");
+  });
+
+  it("keeps choice lists it cannot check declinable only", () => {
+    for (const color of [
+      { type: "string", oneOf: [] },
+      { type: "string", oneOf: [{ const: 1, title: "One" }] },
+      { type: "string", oneOf: [{ const: "a", title: "A", pattern: ".*" }] },
+      { type: "string", enum: ["a", 2] },
+      { type: "array", items: { anyOf: [{ type: "string" }] } },
+    ]) {
+      const input = JSON.stringify({ mode: "form", requestedSchema: { type: "object", properties: { color } } });
+      expect(parseElicitation(input), JSON.stringify(color)).toBeNull();
+    }
+  });
+
   it("draws a list of choices as checkboxes and answers with an array", () => {
     const request = parseElicitation(multi)!;
     const field = request.fields[0];

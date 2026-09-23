@@ -96,14 +96,8 @@ fn supported_field(field: &Value) -> bool {
             let format_ok = field
                 .get("format")
                 .is_none_or(|format| format.as_str().is_some_and(|f| STRING_FORMATS.contains(&f)));
-            let enum_ok = field.get("enum").is_none_or(|values| {
-                values.as_array().is_some_and(|values| {
-                    !values.is_empty()
-                        && values.len() <= MAX_ENUM_VALUES
-                        && values.iter().all(Value::is_string)
-                })
-            });
-            format_ok && enum_ok
+            let has_choices = field.get("enum").is_some() || field.get("oneOf").is_some();
+            format_ok && (!has_choices || choice_values(field).is_some())
         }
         Some("number" | "integer" | "boolean") => true,
         // A list of choices from a fixed set: every value is still one of the
@@ -111,15 +105,41 @@ fn supported_field(field: &Value) -> bool {
         // person did not see.
         Some("array") => {
             let items = &field["items"];
-            items["type"] == "string"
-                && items["enum"].as_array().is_some_and(|values| {
-                    !values.is_empty()
-                        && values.len() <= MAX_ENUM_VALUES
-                        && values.iter().all(Value::is_string)
-                })
+            (items.get("type").is_none() || items["type"] == "string")
+                && choice_values(items).is_some()
         }
         _ => false,
     }
+}
+
+/// The values a choice field allows, in the spec's two spellings: a plain
+/// `enum`, or `oneOf` (single) / `anyOf` (multi) entries of `const` plus an
+/// optional `title` to show. Anything else in those lists makes the field
+/// unanswerable here rather than partly understood.
+fn choice_values(schema: &Value) -> Option<Vec<&Value>> {
+    let values: Vec<&Value> = if let Some(values) = schema.get("enum") {
+        let values = values.as_array()?;
+        if !values.iter().all(Value::is_string) {
+            return None;
+        }
+        values.iter().collect()
+    } else {
+        let entries = schema
+            .get("oneOf")
+            .or_else(|| schema.get("anyOf"))?
+            .as_array()?;
+        entries
+            .iter()
+            .map(|entry| {
+                let entry = entry.as_object()?;
+                let known = entry.keys().all(|key| key == "const" || key == "title");
+                let title_ok = entry.get("title").is_none_or(Value::is_string);
+                let value = entry.get("const").filter(|value| value.is_string())?;
+                (known && title_ok).then_some(value)
+            })
+            .collect::<Option<_>>()?
+    };
+    (!values.is_empty() && values.len() <= MAX_ENUM_VALUES).then_some(values)
 }
 
 /// The `result` for an elicitation answer. `answer` is the JSON object the
@@ -185,8 +205,8 @@ fn check_value(name: &str, field: &Value, value: &Value) -> Result<(), String> {
             if text.len() > MAX_STRING_BYTES {
                 return Err(format!("{label} is too long."));
             }
-            if let Some(values) = field["enum"].as_array() {
-                if !values.iter().any(|allowed| allowed == value) {
+            if let Some(values) = choice_values(field) {
+                if !values.contains(&value) {
                     return Err(format!("{label} must be one of the listed choices."));
                 }
             }
@@ -218,10 +238,9 @@ fn check_value(name: &str, field: &Value, value: &Value) -> Result<(), String> {
             let chosen = value
                 .as_array()
                 .ok_or_else(|| format!("{label} must be a list of choices."))?;
-            let allowed = field["items"]["enum"]
-                .as_array()
+            let allowed = choice_values(&field["items"])
                 .ok_or_else(|| format!("{label} cannot be answered here."))?;
-            if chosen.iter().any(|pick| !allowed.contains(pick)) {
+            if chosen.iter().any(|pick| !allowed.contains(&pick)) {
                 return Err(format!("{label} must be one of the listed choices."));
             }
             let mut seen = std::collections::HashSet::new();
@@ -301,6 +320,64 @@ mod tests {
             })),
             Kind::Unsupported
         );
+    }
+
+    #[test]
+    fn titled_choices_use_the_values_behind_the_titles() {
+        // The spec's titled enums: `oneOf` for one pick, `anyOf` for several.
+        let params = json!({
+            "mode": "form",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "color": {
+                        "type": "string",
+                        "oneOf": [
+                            {"const": "#FF0000", "title": "Red"},
+                            {"const": "#00FF00", "title": "Green"}
+                        ]
+                    },
+                    "extras": {
+                        "type": "array",
+                        "maxItems": 2,
+                        "items": {"anyOf": [
+                            {"const": "#FF0000", "title": "Red"},
+                            {"const": "#0000FF", "title": "Blue"}
+                        ]}
+                    }
+                },
+                "required": ["color"]
+            }
+        });
+        assert_eq!(kind(&params), Kind::Form);
+        assert_eq!(
+            result(
+                &params,
+                true,
+                Some(r##"{"color":"#00FF00","extras":["#0000FF"]}"##)
+            )
+            .unwrap()["content"],
+            json!({"color": "#00FF00", "extras": ["#0000FF"]})
+        );
+        // A title is what the person saw, not what the server asked for.
+        for wrong in [
+            r##"{"color":"Green"}"##,
+            r##"{"color":"#0000FF"}"##,
+            r##"{"color":"#FF0000","extras":["Blue"]}"##,
+        ] {
+            assert!(result(&params, true, Some(wrong)).is_err(), "{wrong}");
+        }
+        // Entries that are not plain labelled strings stay unsupported.
+        for field in [
+            json!({"type": "string", "oneOf": []}),
+            json!({"type": "string", "oneOf": [{"const": 1, "title": "One"}]}),
+            json!({"type": "string", "oneOf": [{"const": "a", "title": "A", "pattern": ".*"}]}),
+            json!({"type": "string", "oneOf": [{"title": "Missing value"}]}),
+            json!({"type": "array", "items": {"anyOf": [{"type": "string"}]}}),
+        ] {
+            let params = json!({"mode": "form", "requestedSchema": {"type": "object", "properties": {"x": field}}});
+            assert_eq!(kind(&params), Kind::Unsupported, "{params}");
+        }
     }
 
     #[test]
