@@ -79,6 +79,23 @@ describe("Fleet account model picker", () => {
     expect(html).not.toContain("gpt-5.6-sol");
   });
 
+  it("offers a retry next to a failed model list instead of sending the user to settings", () => {
+    const render = (models: Parameters<typeof AccountModelField>[0]["proxyModels"], onReload?: () => void) =>
+      renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model: "" }} allowCliProxyApi proxyModels={models} onReloadProxyModels={onReload} onChange={vi.fn()} /></I18nProvider>);
+
+    const failed = render({ default: { state: "unavailable", reason: "cliproxy.models.unreadable" } }, vi.fn());
+    expect(failed).toContain("重新詢問");
+    expect(failed).toContain('role="alert"');
+    // The failure never picks a model on the user's behalf.
+    expect(failed).toContain('placeholder="gpt-5.6-sol"');
+    // Nothing failed, so there is nothing to ask again.
+    expect(render({ default: { state: "ready", models: [{ id: "gpt-5.6-sol", ownedBy: null }] } }, vi.fn())).not.toContain("重新詢問");
+    // A caller that cannot reload keeps the error without a dead button.
+    const noHandler = render({ default: { state: "unavailable", reason: "cliproxy.models.unreadable" } });
+    expect(noHandler).toContain("回來的不是模型清單");
+    expect(noHandler).not.toContain("重新詢問");
+  });
+
   it("does not add the proxy ID field to the shared chat picker", () => {
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal]} value={normal} onChange={vi.fn()} /></I18nProvider>);
     expect(html).not.toContain("CLIProxyAPI 模型 ID");

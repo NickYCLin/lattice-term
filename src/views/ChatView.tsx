@@ -687,7 +687,7 @@ function ThreadPane({
   const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"));
   const accountModels = useAccountModels(modelTargets, settingsOpen);
   const cliProxySettings = useCliProxySettings();
-  const cliProxyModels = useCliProxyModelLists(cliProxySettings, settingsOpen).lists;
+  const { lists: cliProxyModels, reload: reloadCliProxyModels } = useCliProxyModelLists(cliProxySettings, settingsOpen);
   const modelOptions = accountModelOptions(modelTargets, accountModels, {
     defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
   }, thread, cliProxySettings.proxies);
@@ -992,6 +992,7 @@ function ThreadPane({
               disabled={settingsLocked}
               allowCliProxyApi
               proxyModels={cliProxyModels}
+              onReloadProxyModels={reloadCliProxyModels}
               onChange={({ definitionId, accountProfileId, model, provider, proxyId }) => {
                 if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model, provider, proxyId });
               }}

@@ -11,11 +11,12 @@ const MANUAL = "\u0000manual";
  * proxy may be down, or offering something newer than the list we last read,
  * and neither should stop a launch.
  */
-function CliProxyModel({ value, models, disabled, onChange }: {
+function CliProxyModel({ value, models, disabled, onChange, onReload }: {
   value: AccountModelSelection;
   models: CliProxyModelList;
   disabled?: boolean;
   onChange: (selection: AccountModelSelection) => void;
+  onReload?: () => void;
 }) {
   const { t } = useI18n();
   const listed = models.state === "ready" ? models.models : [];
@@ -40,7 +41,10 @@ function CliProxyModel({ value, models, disabled, onChange }: {
         <option value={MANUAL}>{t("terminal.proxy.manual")}</option>
       </select></label>}
     {models.state === "loading" && <span className="field__hint">{t("settings.cliProxy.modelsLoading")}</span>}
-    {models.state === "unavailable" && <span className="field__hint">{explain(models.reason)}</span>}
+    {models.state === "unavailable" && <span className="field__hint" role="alert">{explain(models.reason)}</span>}
+    {models.state === "unavailable" && onReload && <div>
+      <button type="button" className="button button--ghost button--sm" disabled={disabled} onClick={onReload}>
+        {t("settings.cliProxy.modelsReload")}</button></div>}
     {manual && <label className="field"><span className="field__label">{t("terminal.proxy.model")}</span>
       <input className="input" value={value.model} disabled={disabled} maxLength={256} autoComplete="off"
         spellCheck={false} placeholder="gpt-5.6-sol"
@@ -49,13 +53,16 @@ function CliProxyModel({ value, models, disabled, onChange }: {
   </>;
 }
 
-export function AccountModelField({ options, value, disabled, onChange, allowCliProxyApi = false, proxyModels = {} }: {
+export function AccountModelField({ options, value, disabled, onChange, allowCliProxyApi = false, proxyModels = {}, onReloadProxyModels }: {
   options: readonly AccountModelOption[];
   value: AccountModelSelection | null;
   disabled?: boolean;
   allowCliProxyApi?: boolean;
   /** One model list per configured proxy, keyed by its identifier. */
   proxyModels?: CliProxyModelLists;
+  /** Ask the proxies again after a failed read, so a launcher does not have to
+   * be closed and the settings page opened just to recover a model list. */
+  onReloadProxyModels?: () => void;
   onChange: (selection: AccountModelSelection) => void;
 }) {
   const { t } = useI18n();
@@ -83,6 +90,7 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
       {nativeOptions.map(renderOption)}
     </select>
     {allowCliProxyApi && value?.provider === "cliproxyapi" &&
-      <CliProxyModel value={value} models={listFor(value.proxyId)} disabled={disabled} onChange={onChange} />}
+      <CliProxyModel value={value} models={listFor(value.proxyId)} disabled={disabled} onChange={onChange}
+        onReload={onReloadProxyModels} />}
   </div>;
 }
