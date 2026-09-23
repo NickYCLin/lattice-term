@@ -8,6 +8,7 @@
 [完整功能與限制](FEATURES.zh-TW.md) · [本地開發與驗證](DEVELOPMENT.zh-TW.md) · [產品介紹參考](PRODUCT_PRESENTATION.zh-TW.md)
 
 工作區保存與重開機還原的設計對照見 [Herdr 研究筆記](HERDR_PERSISTENCE_REVIEW.zh-TW.md)。
+尚未實作的使用者需求見 [待實作清單](BACKLOG.zh-TW.md)。
 
 ## 從需求找程式碼
 
