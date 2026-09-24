@@ -1,14 +1,15 @@
-//! One long-lived `codex app-server` per chat thread.
+//! One `codex app-server` per chat thread, kept only while it is in use.
 //!
-//! Codex Desktop talks to the same engine over the same JSON-RPC, and keeps
-//! it running between turns: the thread stays loaded, so a follow-up is one
-//! `turn/start` away instead of a fresh process that has to initialize and
-//! resume the conversation from disk. This module does the same. The server
-//! is started on the first turn, given `thread/start` (or `thread/resume`
-//! for a conversation from an earlier session), and then serves every later
-//! turn until the thread is closed, the app exits, or it has sat idle for a
-//! while. Approvals travel as server requests on the same channel, whatever
-//! the permission mode: the mode only decides what Codex asks about.
+//! Codex Desktop talks to the same engine over the same JSON-RPC. The server
+//! is started when a turn is sent, given `thread/start` (or `thread/resume`
+//! for a conversation that already exists), and serves that turn and any
+//! follow-up sent soon after. A loaded thread holds Codex's single-writer
+//! lock, so a conversation shared with Codex Desktop stays locked there for
+//! as long as our server lives. After a minute with nothing in flight the
+//! server's stdin is closed so it exits on its own and releases the thread;
+//! a later turn resumes it again, at the cost of a slower start. Approvals
+//! travel as server requests on the same channel, whatever the permission
+//! mode: the mode only decides what Codex asks about.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,12 +25,16 @@ use super::{
     apply_profile_environment, bounded_output, codex_approval_line, codex_request_id,
     codex_v2_item_events, headless_command, kill_turn, read_bounded_line, stderr_tail, str_field,
     truncate, u64_field, ChatAttachment, ChatEvent, ChatPermission, ChatSink, ChatUsage, Dialect,
-    LineError, SharedStdin,
+    LineError,
 };
 
-/// A server with no turn in flight for this long is ended; the thread is
-/// resumed from Codex's own log if the person comes back.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// A server with no turn in flight for this long is ended, which frees the
+/// thread for Codex Desktop; it is resumed from Codex's own log if the
+/// conversation continues here.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a released server may take to exit on its own before it is
+/// killed, and how long a new turn waits for the old one to let go.
+const RELEASE_GRACE: Duration = Duration::from_secs(5);
 /// How long an interrupted turn may take to acknowledge before the server
 /// is killed outright.
 const INTERRUPT_GRACE: Duration = Duration::from_secs(5);
@@ -86,9 +91,12 @@ pub(super) struct CodexServer {
     thread_id: String,
     profile_config_directory: Option<PathBuf>,
     child: Mutex<Option<Child>>,
-    stdin: SharedStdin,
+    /// Taken, and so closed, when an idle server is released.
+    stdin: ServerStdin,
     state: Mutex<ServerState>,
 }
+
+type ServerStdin = Arc<tokio::sync::Mutex<Option<tokio::process::ChildStdin>>>;
 
 impl CodexServer {
     fn state(&self) -> MutexGuard<'_, ServerState> {
@@ -111,8 +119,57 @@ impl CodexServer {
         state.pending_steers.clear();
     }
 
+    fn running(&self) -> bool {
+        match self.child.lock() {
+            Ok(mut child) => child
+                .as_mut()
+                .is_some_and(|child| matches!(child.try_wait(), Ok(None))),
+            Err(_) => false,
+        }
+    }
+
+    /// Closes stdin so Codex finishes writing the thread and exits, which
+    /// frees the thread for Codex Desktop. A server that ignores the closed
+    /// pipe is killed after the grace period.
+    async fn release(self: &Arc<Self>) {
+        self.stdin.lock().await.take();
+        let server = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(RELEASE_GRACE).await;
+            if server.running() {
+                server.kill();
+            }
+        });
+    }
+
+    /// Releases the server once it has stayed idle for the whole timeout. A
+    /// turn sent in the meantime keeps it, and schedules its own release.
+    async fn release_after_idle(self: Arc<Self>) {
+        tokio::time::sleep(IDLE_TIMEOUT).await;
+        {
+            let mut state = self.state();
+            if state.exited || !is_idle(&state) || state.last_activity.elapsed() < IDLE_TIMEOUT {
+                return;
+            }
+            state.exited = true;
+        }
+        self.release().await;
+    }
+
+    /// Waits, briefly, until the process is gone, so a resume that follows
+    /// does not find the thread still locked by it.
+    async fn wait_exit(&self) {
+        let deadline = Instant::now() + RELEASE_GRACE;
+        while self.running() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     async fn write_line(&self, line: &str) -> Result<(), String> {
         let mut stdin = self.stdin.lock().await;
+        let stdin = stdin
+            .as_mut()
+            .ok_or_else(|| "The agent has already stopped.".to_string())?;
         stdin
             .write_all(line.as_bytes())
             .await
@@ -505,7 +562,14 @@ pub(super) async fn send_turn<S: ChatSink>(
             // The old server died; fall through and start a fresh one that
             // resumes the same thread.
             None => {
+                // A released server is already on its way out; let it finish
+                // writing the thread rather than cutting it short.
+                let released = server.state().exited;
+                if released {
+                    server.wait_exit().await;
+                }
                 servers.close(request.thread_id);
+                server.wait_exit().await;
             }
         }
     }
@@ -567,7 +631,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         profile_config_directory: request.profile_config_directory.map(Path::to_path_buf),
         thread_id: request.thread_id.to_string(),
         child: Mutex::new(Some(child)),
-        stdin: Arc::new(tokio::sync::Mutex::new(stdin)),
+        stdin: Arc::new(tokio::sync::Mutex::new(Some(stdin))),
         state: Mutex::new(ServerState {
             codex_thread_id: None,
             thread_ready: false,
@@ -621,6 +685,10 @@ pub(super) async fn send_turn<S: ChatSink>(
                 if reader_server.write_line(&reply).await.is_err() {
                     break;
                 }
+            }
+            if outcome.idle {
+                // Keep reading: stdout ends once a released Codex exits.
+                tauri::async_runtime::spawn(Arc::clone(&reader_server).release_after_idle());
             }
         }
         // The server is gone. A turn still in flight ends as an error with
@@ -681,6 +749,31 @@ pub(super) async fn send_turn<S: ChatSink>(
 struct LineOutcome {
     events: Vec<(String, ChatEvent)>,
     writes: Vec<String>,
+    /// Nothing is left for this server to do; its idle countdown starts.
+    idle: bool,
+}
+
+fn is_idle(state: &ServerState) -> bool {
+    state.thread_ready
+        && state.active.is_none()
+        && state.queued.is_none()
+        && state.pending_steers.is_empty()
+}
+
+fn mark_idle(state: &ServerState, out: &mut LineOutcome) {
+    if !state.exited && is_idle(state) {
+        out.idle = true;
+    }
+}
+
+/// Codex refuses to load a thread another process is writing. Say where
+/// it is open rather than passing on the internal lock wording.
+fn thread_open_error(message: String) -> String {
+    if message.contains("active writer") || message.contains("live local writer") {
+        "This conversation is open in another Codex app, such as Codex Desktop. Close it there, then send again.".to_string()
+    } else {
+        message
+    }
 }
 
 fn start_queued_turn(state: &mut ServerState, out: &mut LineOutcome, model: Option<String>) {
@@ -733,6 +826,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 Err("Codex did not confirm the expected turn. Check the conversation before sending again.".into())
             };
             let _ = pending.reply.send(result);
+            mark_idle(&state, &mut out);
             return out;
         }
         let Some(purpose) = state.pending_rpc.remove(&rpc_id) else {
@@ -778,8 +872,10 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                         }
                     }
                     (error, _) => {
-                        let message = error
-                            .unwrap_or_else(|| "The agent did not name its thread.".to_string());
+                        let message =
+                            thread_open_error(error.unwrap_or_else(|| {
+                                "The agent did not name its thread.".to_string()
+                            }));
                         state.queued = None;
                         if let Some(turn) = state.active.take() {
                             out.events.push((
@@ -1087,6 +1183,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                     },
                 ));
             }
+            mark_idle(&state, &mut out);
         }
         "error" => {
             let message = truncate(str_field(&params, "message").unwrap_or("error"), 2048);
@@ -1417,7 +1514,7 @@ mod tests {
         assert!(workdir.path().join("probe.txt").exists());
         let first = started.elapsed();
 
-        // Follow-up on the same server: no new process, thread already open.
+        // Follow-up within the idle minute: same server, thread already open.
         let started = Instant::now();
         run_turn(
             "t2",
@@ -1434,7 +1531,9 @@ mod tests {
         let second = started.elapsed();
         eprintln!("first turn {first:?}, follow-up {second:?}");
         assert!(
-            servers.get("e2e-codex").is_some(),
+            servers
+                .get("e2e-codex")
+                .is_some_and(|server| server.running()),
             "server must stay alive between turns"
         );
         assert!(servers.close("e2e-codex"));
@@ -1582,7 +1681,7 @@ mod tests {
             thread_id: "thread-1".into(),
             profile_config_directory: None,
             child: Mutex::new(None),
-            stdin: Arc::new(tokio::sync::Mutex::new(child_stdin)),
+            stdin: Arc::new(tokio::sync::Mutex::new(Some(child_stdin))),
             state: Mutex::new(state),
         }
     }
@@ -1703,12 +1802,14 @@ mod tests {
             r#"{"method":"turn/completed","params":{"turn":{"id":"native-turn","status":"completed"}}}"#,
         );
         assert_eq!(completed.events.len(), 1);
+        assert!(!completed.idle, "a steering receipt is still owed");
         let receipt = handle_line(
             &server,
             &serde_json::json!({"id":id,"result":{"turnId":"native-turn"}}),
         );
         assert!(receipt.events.is_empty());
         assert!(receipt.writes.is_empty());
+        assert!(receipt.idle);
         assert_eq!(rx.await.unwrap(), Ok(()));
         assert!(server.state().active.is_none());
         assert!(server.state().pending_steers.is_empty());
@@ -1879,7 +1980,8 @@ mod tests {
             .pending
             .contains_key("rpc-0"));
 
-        // Usage then completion finish the turn but keep the server.
+        // Usage then completion finish the turn; the server stays for a
+        // follow-up and only starts its idle countdown.
         feed(
             &server,
             r#"{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":4,"outputTokens":2,"reasoningOutputTokens":1,"cacheWriteInputTokens":0}}}}"#,
@@ -1907,10 +2009,20 @@ mod tests {
                 }
             )]
         );
+        assert!(out.idle);
         let state = server.state();
         assert!(state.active.is_none());
         assert!(!state.exited);
         assert_eq!(state.codex_thread_id.as_deref(), Some("01a0-thread"));
+    }
+
+    #[test]
+    fn a_thread_locked_by_another_app_says_where_it_is_open() {
+        let message = thread_open_error(
+            "thread 019a already has an active writer; close the other client".into(),
+        );
+        assert!(message.contains("Codex Desktop"), "{message}");
+        assert_eq!(thread_open_error("no such thread".into()), "no such thread");
     }
 
     #[tokio::test]
