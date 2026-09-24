@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sidecarBuildEnvironment } from "./sidecar-build-env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const release = process.argv.includes("--release");
@@ -24,7 +25,11 @@ const args = [
   join(root, "crates/lattice-vnc/Cargo.toml"),
 ];
 if (release) args.push("--release");
-execFileSync("cargo", args, { cwd: root, stdio: "inherit" });
+execFileSync("cargo", args, {
+  cwd: root,
+  env: sidecarBuildEnvironment(),
+  stdio: "inherit",
+});
 
 const extension = process.platform === "win32" ? ".exe" : "";
 const profile = release ? "release" : "debug";

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sidecarBuildEnvironment } from "./sidecar-build-env.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const release = process.argv.includes("--release");
@@ -18,7 +19,7 @@ if (!triple) {
   throw new Error(`Unsupported Lattice Remote target: ${process.platform}-${process.arch}`);
 }
 
-const environment = { ...process.env };
+const environment = sidecarBuildEnvironment();
 if (process.platform === "linux" && !environment.BINDGEN_EXTRA_CLANG_ARGS) {
   const gccInclude = execFileSync("gcc", ["-print-file-name=include"], {
     encoding: "utf8",
