@@ -35,3 +35,27 @@ it("honors startup settings, deduplicates checks and lets users dismiss failures
     vi.clearAllMocks();
   }
 });
+
+it("supports updating individual CLIs and update-all", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useCliUpdates>;
+  function Probe() {
+    api = useCliUpdates(false);
+    return null;
+  }
+  try {
+    await act(async () => { root.render(<StrictMode><Probe /></StrictMode>); });
+    invoke.mockResolvedValueOnce("ok").mockResolvedValueOnce([
+      { id: "codex", label: "Codex", currentVersion: "0.101.0", latestVersion: "0.101.0", status: "current", sourceUrl: "", updatable: true },
+    ]);
+    let success = false;
+    await act(async () => {
+      success = await api.updateCli("codex");
+    });
+    expect(success).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("agent_update_cli", { id: "codex" });
+  } finally {
+    await act(async () => { root.unmount(); });
+    vi.clearAllMocks();
+  }
+});

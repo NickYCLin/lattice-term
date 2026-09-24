@@ -1054,6 +1054,11 @@ async fn agent_check_updates() -> Result<Vec<agent_updates::CliUpdate>, String> 
 }
 
 #[tauri::command]
+async fn agent_update_cli(id: String) -> Result<String, String> {
+    agent_updates::update(&id).await
+}
+
+#[tauri::command]
 fn jev_enabled(service: State<'_, crate::jev::JevService>) -> Result<bool, String> {
     service.enabled()
 }
@@ -4553,6 +4558,7 @@ pub fn run() {
             encrypted_backup_restore,
             agent_catalog,
             agent_check_updates,
+            agent_update_cli,
             jev_enabled,
             jev_configure,
             jev_preview,

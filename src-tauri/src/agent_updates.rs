@@ -11,6 +11,7 @@ pub struct CliUpdate {
     latest_version: Option<String>,
     status: &'static str,
     source_url: String,
+    updatable: bool,
 }
 
 fn package(id: &str) -> Option<&'static str> {
@@ -77,6 +78,10 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
     for definition in catalog.into_iter().filter(|item| item.installed) {
         let client = client.clone();
         tasks.spawn(async move {
+            let updatable = crate::agent::install_definition(&definition.id)
+                .executable
+                .as_ref()
+                .is_some_and(|exe| crate::agent::find_executable(exe).is_some());
             let mut result = CliUpdate {
                 id: definition.id.clone(),
                 label: definition.label,
@@ -84,6 +89,7 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
                 latest_version: None,
                 status: "manual",
                 source_url: definition.install.source_url,
+                updatable,
             };
             let Some(package) = package(&definition.id) else {
                 return result;
@@ -131,6 +137,44 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
     Ok(results)
 }
 
+pub async fn update(id: &str) -> Result<String, String> {
+    let definition = crate::agent::install_definition(id);
+    let executable = definition
+        .executable
+        .as_deref()
+        .ok_or_else(|| "此 CLI 未提供直接更新指令，請參閱官方說明。".to_string())?;
+    let exe_path = crate::agent::find_executable(executable)
+        .ok_or_else(|| format!("找不到執行檔 {executable}，無法執行更新。"))?;
+    let (program, prefix_args) = crate::agent::launch_parts(&exe_path);
+    let mut command = tokio::process::Command::new(program);
+    command
+        .args(prefix_args)
+        .args(&definition.arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output = tokio::time::timeout(Duration::from_secs(180), command.output())
+        .await
+        .map_err(|_| "更新執行逾時，請檢查網路連線或稍後再試。".to_string())?
+        .map_err(|err| format!("無法啟動更新程序: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            format!("退出代碼: {:?}", output.status.code())
+        };
+        return Err(format!("更新失敗: {detail}"));
+    }
+    Ok(format!("{id} 更新成功"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +198,10 @@ mod tests {
         assert_eq!(package("codex"), Some("@openai/codex"));
         assert_eq!(package("droid"), None);
         assert_eq!(package("custom"), None);
+    }
+
+    #[tokio::test]
+    async fn update_rejects_unsupported_or_unknown_cli() {
+        assert!(update("unknown-cli").await.is_err());
     }
 }

@@ -5151,7 +5151,7 @@ fn official_script_install(
     direct_install("sh", &["-c", display_command], display_command, source_url)
 }
 
-fn install_definition(definition_id: &str) -> AgentInstallDefinition {
+pub(crate) fn install_definition(definition_id: &str) -> AgentInstallDefinition {
     match definition_id {
         "codex" => npm_install(
             "@openai/codex",
@@ -5327,7 +5327,7 @@ fn executable_extensions(command: &OsStr) -> Vec<OsString> {
     }
 }
 
-fn find_executable(command: &str) -> Option<PathBuf> {
+pub(crate) fn find_executable(command: &str) -> Option<PathBuf> {
     let command = OsStr::new(command.trim());
     if command.is_empty() {
         return None;
