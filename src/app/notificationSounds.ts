@@ -152,3 +152,32 @@ export function playNotificationSound(
   );
   return playback;
 }
+
+// A reopened app may learn about many finished tasks within seconds. One cue
+// already says "something finished"; repeating it for each task is noise.
+export const COMPLETION_SOUND_COALESCE_MS = 5000;
+let lastCompletionCueAt: number | null = null;
+
+/** Completion cue that plays once for a burst of completions. */
+export function playCompletionSound(
+  sound: NotificationSoundChoice,
+  volume = 60,
+  now = Date.now(),
+): Promise<NotificationPlaybackResult> {
+  if (
+    lastCompletionCueAt !== null &&
+    now >= lastCompletionCueAt &&
+    now - lastCompletionCueAt < COMPLETION_SOUND_COALESCE_MS
+  ) {
+    return Promise.resolve("disabled");
+  }
+  const playback = playNotificationSound(sound, volume);
+  if (normalizeNotificationVolume(volume) > 0 && notificationToneSequence(sound).length > 0) {
+    lastCompletionCueAt = now;
+  }
+  return playback;
+}
+
+export function resetCompletionSoundForTests(): void {
+  lastCompletionCueAt = null;
+}

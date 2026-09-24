@@ -95,7 +95,7 @@ import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
 import { useAutomaticLocalConversations } from "./app/useAutomaticLocalConversations";
 import { loadAuthPref } from "./app/authPreferences";
 import {
-  playNotificationSound,
+  playCompletionSound,
   prepareNotificationAudio,
 } from "./app/notificationSounds";
 import { anyAgentSessionJustCompleted } from "./app/sessionStatus";
@@ -262,7 +262,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     );
     const previous = previousCompletionStatesRef.current;
     if (anyAgentSessionJustCompleted(previous, agents.sessions)) {
-      void playNotificationSound(preferences.agentCompletionSound, preferences.notificationVolume);
+      void playCompletionSound(preferences.agentCompletionSound, preferences.notificationVolume);
     }
     previousCompletionStatesRef.current = current;
   }, [agents.mode, completionStates, preferences.agentCompletionSound, preferences.notificationVolume]);

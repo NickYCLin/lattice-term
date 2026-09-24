@@ -7,7 +7,7 @@ import type { AgentChatApi } from "./useAgentChat";
 const invoke = vi.fn(async (command: string, _args?: unknown) => command === "agent_chat_supported" ? ["codex"] : undefined);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: [string, unknown?]) => invoke(...args) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
-vi.mock("./notificationSounds", () => ({ playNotificationSound: async () => "disabled" }));
+vi.mock("./notificationSounds", () => ({ playCompletionSound: async () => "disabled" }));
 afterEach(() => vi.unstubAllGlobals());
 
 it("sends the saved address only for proxy turns and preserves the choice across settings edits", async () => {

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
 import { findCliProxy, loadCliProxySettings } from "./cliProxyApi";
 import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInputQueue";
-import { playNotificationSound, type NotificationSoundChoice } from "./notificationSounds";
+import { playCompletionSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
   applyChatEvent,
   appendSteeredInput,
@@ -305,7 +305,7 @@ export function useAgentChat(
       const unlisten = await listen<ChatEventEnvelope>(EVENT_CHAT, (event) => {
         const envelope = event.payload;
         if (completionTracker.current.accept(envelope)) {
-          void playNotificationSound(soundRef.current, volumeRef.current);
+          void playCompletionSound(soundRef.current, volumeRef.current);
           const thread = threadsRef.current.find((entry) => entry.id === envelope.threadId);
           const notification = thread && notifyRef.current ? completionNotificationText(thread) : null;
           // Only while the window is in the background: in front, the reply

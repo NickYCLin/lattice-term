@@ -3,12 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   notificationToneSequence,
   notificationSoundChoices,
+  playCompletionSound,
   playNotificationSound,
+  resetCompletionSoundForTests,
 } from "./notificationSounds";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 afterEach(() => {
+  resetCompletionSoundForTests();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -95,4 +98,28 @@ describe("notification sounds", () => {
     expect(starts).toHaveBeenCalledTimes(notificationToneSequence("glass").length + notificationToneSequence("pulse").length);
   });
 
+
+  it("plays one completion cue when many tasks finish together", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockResolvedValue(true);
+
+    const results = await Promise.all([
+      playCompletionSound("glass", 60, 10_000),
+      playCompletionSound("glass", 60, 10_100),
+      playCompletionSound("glass", 60, 14_900),
+    ]);
+    expect(results).toEqual(["native", "disabled", "disabled"]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    await expect(playCompletionSound("glass", 60, 15_000)).resolves.toBe("native");
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let a muted completion hide the next audible one", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockResolvedValue(true);
+
+    await expect(playCompletionSound("glass", 0, 10_000)).resolves.toBe("disabled");
+    await expect(playCompletionSound("glass", 60, 10_100)).resolves.toBe("native");
+  });
 });

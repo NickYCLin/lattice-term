@@ -13,7 +13,7 @@ import type { ChatEventEnvelope } from "./agentChat";
 
 let chatListener: ((event: { payload: ChatEventEnvelope }) => void) | null = null;
 const playSound = vi.fn(async () => "disabled");
-vi.mock("./notificationSounds", () => ({ playNotificationSound: (...args: unknown[]) => playSound(...(args as [])) }));
+vi.mock("./notificationSounds", () => ({ playCompletionSound: (...args: unknown[]) => playSound(...(args as [])) }));
 
 const invoke = vi.fn(async (command: string) => {
   if (command === "agent_chat_supported") return ["claude", "codex", "gemini"];
