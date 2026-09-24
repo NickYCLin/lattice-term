@@ -1,5 +1,7 @@
 # LatticeTerm MCP Server（Agent 協作與受控遠端操作）
 
+想直接接上使用、或要交給 AI 讀的操作步驟，請看 [Lattice MCP 操作說明書](MCP_GUIDE.zh-TW.md)。這份文件記錄設計、權限邊界與驗收細節。
+
 LatticeTerm 可以當成一個 [Model Context Protocol](https://modelcontextprotocol.io/) 伺服器，讓外部 AI 工具（Claude Code、Codex CLI、Gemini CLI、Cursor 等支援 MCP 的 client）查看你**明確分享**的 Agent Fleet 背景工作階段：列出工作階段資訊、狀態與等待狀態改變。終端輸出與內容片段需另外允許讀取；送指示、清佇列與結束工作階段需另外允許控制；啟動保存過的背景項目則由獨立開關授權。
 
 LatticeTerm 自己新開的 Codex 終端工作階段與對話，以及 Claude Code、Gemini

@@ -5,7 +5,7 @@
 第一次使用請先看 [試用步驟](FIRST_RUN.zh-TW.md) 或 [English quick start](../README.en.md#get-started)。
 對話頁的公開介面與待補功能見 [Codex Desktop 功能對照](CHAT_DESKTOP_PARITY.zh-TW.md)。
 
-[完整功能與限制](FEATURES.zh-TW.md) · [本地開發與驗證](DEVELOPMENT.zh-TW.md) · [產品介紹參考](PRODUCT_PRESENTATION.zh-TW.md)
+[完整功能與限制](FEATURES.zh-TW.md) · [Lattice MCP 操作說明書](MCP_GUIDE.zh-TW.md) · [本地開發與驗證](DEVELOPMENT.zh-TW.md) · [產品介紹參考](PRODUCT_PRESENTATION.zh-TW.md)
 
 工作區保存與重開機還原的設計對照見 [Herdr 研究筆記](HERDR_PERSISTENCE_REVIEW.zh-TW.md)。
 尚未實作的使用者需求見 [待實作清單](BACKLOG.zh-TW.md)。
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | 應用程式導覽、頁面切換與全域狀態 | `src/App.tsx`、`src/views/` | `src-tauri/src/lib.rs` | [介面實作現況](UI_IMPLEMENTATION.zh-TW.md) |
 | 本機 AI CLI、Agent Fleet、PTY 與狀態回報 | `src/views/AgentsView.tsx`、`src/app/useAgentSessions.ts`、`src/components/agents/` | `src-tauri/src/agent.rs`、`src-tauri/src/agent_plans.rs` | [Agent Fleet 架構](AGENT_FLEET_ARCHITECTURE.zh-TW.md) |
-| 讓外部 AI 透過 MCP 唯讀查看分享的背景工作階段 | `src/views/AgentsView.tsx`（分享開關與設定片段）、`src/app/agentMcpConfig.ts` | `src-tauri/src/agent_daemon/mcp.rs`、`agent_daemon/server.rs`（observer 角色） | [MCP Server](MCP.zh-TW.md) |
+| 讓外部 AI 透過 MCP 唯讀查看分享的背景工作階段 | `src/views/AgentsView.tsx`（分享開關與設定片段）、`src/app/agentMcpConfig.ts` | `src-tauri/src/agent_daemon/mcp.rs`、`agent_daemon/server.rs`（observer 角色） | [MCP 操作說明書](MCP_GUIDE.zh-TW.md)、[MCP Server](MCP.zh-TW.md) |
 | 對話模式（聊天視窗、逐項核准、排程任務、多帳號、對話資料夾） | `src/views/ChatView.tsx`、`src/components/chat/`、`src/app/agentChat.ts`、`agentAutomations.ts`、`chatAccountProfiles.ts`、`chatThreadLayout.ts` | `src-tauri/src/agent_chat.rs` | [Agent Fleet 架構](AGENT_FLEET_ARCHITECTURE.zh-TW.md#對話模式) |
 | 工作階段、專案與自訂資料夾 | `src/views/SessionsView.tsx`、`src/components/sessions/`、`src/app/sessionSidebarLayout.ts` | 各工作階段後端模組 | [介面設計摘要](UI_UX_DESIGN_BRIEF.zh-TW.md) |
 | SSH 終端、SFTP 與 Tunnel | `src/components/terminal/`、`src/components/sftp/`、`src/views/TunnelsView.tsx` | `src-tauri/src/ssh.rs`、`sftp.rs`、`sftp_transfers.rs`、`tunnel.rs` | [儲存與安全決策](STORAGE_SECURITY_DECISION.zh-TW.md) |
