@@ -29,6 +29,7 @@ function Icon({
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
+      style={{ flexShrink: 0, ...props.style }}
       {...props}
     >
       {children}

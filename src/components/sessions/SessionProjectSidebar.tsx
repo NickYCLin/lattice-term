@@ -137,6 +137,7 @@ export function SessionProjectSidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onRemoveProject,
   onToggleFolder,
   onRevealNode,
   onMove,
@@ -163,6 +164,7 @@ export function SessionProjectSidebar({
   onCreateFolder: (parentId: string | null) => void;
   onRenameFolder: (folder: SessionSidebarFolder) => void;
   onDeleteFolder: (folder: SessionSidebarFolder) => void;
+  onRemoveProject?: (project: SessionSidebarProjectItem) => void;
   onToggleFolder: (folderId: string) => void;
   onRevealNode: (nodeId: string) => void;
   onMove: (
@@ -693,22 +695,40 @@ export function SessionProjectSidebar({
             <FolderGlyph size={13} data-folder-state={expanded ? "open" : "closed"} />
             <span className="truncate">{project.label}</span>
           </button>
-          {project.workingDirectory && (
-            <button
-              type="button"
-              className="icon-button icon-button--sm"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                onLaunchProject(project.workingDirectory!);
-              }}
-              aria-label={t("terminal.projects.newSession")}
-              title={t("terminal.projects.newSession")}
-              data-tree-action="true"
-            >
-              <PlusIcon size={11} />
-            </button>
-          )}
+          <span className="session-tree__project-actions">
+            {project.workingDirectory && (
+              <button
+                type="button"
+                className="icon-button icon-button--sm"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLaunchProject(project.workingDirectory!);
+                }}
+                aria-label={t("terminal.projects.newSession")}
+                title={t("terminal.projects.newSession")}
+                data-tree-action="true"
+              >
+                <PlusIcon size={11} />
+              </button>
+            )}
+            {project.workingDirectory && onRemoveProject && (
+              <button
+                type="button"
+                className="icon-button icon-button--sm icon-button--danger session-tree__project-remove"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveProject(project);
+                }}
+                aria-label={t("terminal.projects.removeProject")}
+                title={t("terminal.projects.removeProject")}
+                data-tree-action="true"
+              >
+                <TrashIcon size={11} />
+              </button>
+            )}
+          </span>
           {children.length > 0 && (
             <button
               type="button"

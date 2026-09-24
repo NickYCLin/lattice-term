@@ -243,7 +243,7 @@ export function ChatThreadTree({
                       <ChevronRightIcon
                         className={`chat-folder__chevron${row.collapsed ? "" : " is-open"}`}
                       />
-                      <FolderIcon />
+                      <FolderIcon size={13} />
                       <span className="chat-folder__name">{row.name}</span>
                       {count > 0 && <span className="chat-folder__count">{count}</span>}
                     </button>

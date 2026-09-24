@@ -1677,6 +1677,13 @@
   font-weight: 650;
 }
 
+.session-tree__folder-select > svg,
+.session-tree__project-select > svg {
+  flex-shrink: 0;
+  min-width: 13px;
+  min-height: 13px;
+}
+
 /* Keep the disclosure control a fixed, compact column. Its focus ring must
  * not make a tree row's label area appear to grow or shrink while expanding. */
 .session-tree__branch-toggle {
@@ -1718,6 +1725,26 @@
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.session-tree__project-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-right: 0.125rem;
+}
+
+.session-tree__project-remove {
+  flex: 0 0 auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.session-tree__project:hover .session-tree__project-remove,
+.session-tree__project:focus-within .session-tree__project-remove {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-tree__session {

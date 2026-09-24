@@ -148,7 +148,7 @@ export interface AgentChatApi {
   /** Starts a new native conversation with another CLI and carries safe context. */
   handoffThread: (id: string, definitionId: ChatDefinitionId, model: string) => void;
   handoffThreadAccount: (id: string, accountProfileId: string | null) => void;
-  removeThread: (id: string) => void;
+  removeThread: (id: string, profileConfigPath?: string | null) => void;
   /** Moves a thread out of the main list, or back into it. */
   shelveThread: (id: string, shelved: boolean) => void;
   /**
@@ -512,14 +512,25 @@ export function useAgentChat(
     );
   }, []);
 
-  const remove = useCallback((id: string) => {
+  const remove = useCallback((id: string, profileConfigPath?: string | null) => {
     completionTracker.current.cancel(id);
+    const threadToDelete = threadsRef.current.find((thread) => thread.id === id);
     // A Codex thread keeps a server alive between turns; closing the thread
     // must end it whether or not a turn is running. A mirror of a subtask on
     // another machine has no local thread to close.
-    if (hasDesktopBackend() && !threadsRef.current.find(thread => thread.id === id)?.remote) {
+    if (hasDesktopBackend() && !threadToDelete?.remote) {
       core()
-        .then(({ invoke }) => invoke("agent_chat_close", { threadId: id }))
+        .then(async ({ invoke }) => {
+          await invoke("agent_chat_close", { threadId: id });
+          if (threadToDelete?.nativeSessionId && !threadToDelete.archived) {
+            await invoke("agent_chat_delete_native_conversation", {
+              definitionId: threadToDelete.definitionId,
+              nativeSessionId: threadToDelete.nativeSessionId,
+              profileConfigPath: profileConfigPath ?? null,
+              workingDirectory: threadToDelete.workingDirectory || null,
+            });
+          }
+        })
         .catch(() => {});
     }
     const remaining = threadsRef.current.filter((thread) => thread.id !== id);

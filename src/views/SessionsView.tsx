@@ -383,6 +383,8 @@ export function SessionsView({
   const [folderDraft, setFolderDraft] = useState("");
   const [pendingDeleteFolder, setPendingDeleteFolder] =
     useState<SessionSidebarFolder | null>(null);
+  const [pendingRemoveProject, setPendingRemoveProject] =
+    useState<SessionSidebarProjectItem | null>(null);
   const [pendingRemoveSession, setPendingRemoveSession] =
     useState<SessionRef | null>(null);
   const [removingSession, setRemovingSession] = useState(false);
@@ -1651,6 +1653,7 @@ export function SessionsView({
         )
       }
       onDeleteFolder={setPendingDeleteFolder}
+      onRemoveProject={setPendingRemoveProject}
       onToggleFolder={(folderId) =>
         updateSidebarLayout((layout) =>
           toggleSessionSidebarFolder(layout, folderId),
@@ -2398,6 +2401,32 @@ export function SessionsView({
               removeSessionSidebarFolder(layout, pendingDeleteFolder.id),
             );
             setPendingDeleteFolder(null);
+          }}
+        />
+      )}
+      {pendingRemoveProject && (
+        <ConfirmDialog
+          title={t("terminal.projects.removeProjectTitle", {
+            name: pendingRemoveProject.label,
+          })}
+          body={t("terminal.projects.removeProjectBody")}
+          confirmLabel={t("terminal.projects.removeProjectAction")}
+          cancelLabel={t("common.cancel")}
+          tone="danger"
+          onCancel={() => setPendingRemoveProject(null)}
+          onConfirm={() => {
+            if (pendingRemoveProject.workingDirectory) {
+              recovery.onRemoveLocalProject?.(pendingRemoveProject.workingDirectory);
+              updateSidebarLayout((layout) => ({
+                ...layout,
+                placements: Object.fromEntries(
+                  Object.entries(layout.placements).filter(
+                    ([id]) => id !== pendingRemoveProject.nodeId,
+                  ),
+                ),
+              }));
+            }
+            setPendingRemoveProject(null);
           }}
         />
       )}

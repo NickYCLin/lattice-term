@@ -626,7 +626,10 @@ export function ChatView({
           cancelLabel={t("common.cancel")}
           tone="danger"
           onConfirm={() => {
-            chat.removeThread(pendingDelete.id);
+            const profileConfigPath = pendingDelete.accountProfileId
+              ? accountProfiles.find((p) => p.id === pendingDelete.accountProfileId)?.configDirectory ?? null
+              : null;
+            chat.removeThread(pendingDelete.id, profileConfigPath);
             setPendingDelete(null);
           }}
           onCancel={() => setPendingDelete(null)}

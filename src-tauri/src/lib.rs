@@ -1477,6 +1477,24 @@ fn agent_chat_close(
     registry.close(&thread_id)
 }
 
+/// Permanently deletes a native CLI conversation from the CLI's storage (e.g. Codex or Claude),
+/// keeping external desktops and native CLI stores in sync.
+#[tauri::command]
+async fn agent_chat_delete_native_conversation(
+    definition_id: String,
+    native_session_id: String,
+    profile_config_path: Option<String>,
+    working_directory: Option<String>,
+) -> Result<(), String> {
+    crate::agent_chat::delete_native_conversation(
+        &definition_id,
+        &native_session_id,
+        profile_config_path.as_deref(),
+        working_directory.as_deref(),
+    )
+    .await
+}
+
 /// Allows or denies one tool call a chat turn is waiting on.
 #[tauri::command]
 async fn agent_chat_respond(
@@ -4583,6 +4601,7 @@ pub fn run() {
             agent_chat_steer,
             agent_chat_stop,
             agent_chat_close,
+            agent_chat_delete_native_conversation,
             agent_chat_respond,
             agent_chat_models,
             agent_chat_skills,

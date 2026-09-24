@@ -2815,6 +2815,157 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
+fn cleanup_codex_files(session_id: &str, profile_config_path: Option<&str>) {
+    let codex_home = profile_config_path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
+        .or_else(|| home_directory().map(|h| h.join(".codex")));
+
+    let Some(codex_dir) = codex_home else {
+        return;
+    };
+
+    // 1. Remove rollout session files in sessions/YYYY/MM/DD/rollout-*-<session_id>.jsonl
+    let sessions_dir = codex_dir.join("sessions");
+    if sessions_dir.is_dir() {
+        let suffix = format!("-{session_id}.jsonl");
+        let exact_suffix = format!("{session_id}.jsonl");
+        let mut dirs = vec![sessions_dir];
+        let mut searched = 0;
+        while let Some(current) = dirs.pop() {
+            if searched > 50_000 {
+                break;
+            }
+            if let Ok(entries) = fs::read_dir(current) {
+                for entry in entries.flatten() {
+                    searched += 1;
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs.push(path);
+                    } else if path.is_file() {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            if name.ends_with(&suffix) || name.ends_with(&exact_suffix) {
+                                let _ = fs::remove_file(&path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Remove entry from session_index.jsonl if present
+    let index_path = codex_dir.join("session_index.jsonl");
+    if index_path.is_file() {
+        if let Ok(content) = fs::read_to_string(&index_path) {
+            let mut modified = false;
+            let mut new_lines = Vec::new();
+            for line in content.lines() {
+                if line.contains(session_id) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
+                        if val.get("id").and_then(|v| v.as_str()) == Some(session_id) {
+                            modified = true;
+                            continue;
+                        }
+                    } else {
+                        modified = true;
+                        continue;
+                    }
+                }
+                new_lines.push(line);
+            }
+            if modified {
+                let mut out = new_lines.join("\n");
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                let tmp_path = codex_dir.join(format!(".session_index.tmp.{}", std::process::id()));
+                if fs::write(&tmp_path, out.as_bytes()).is_ok() {
+                    let _ = fs::rename(&tmp_path, &index_path);
+                }
+            }
+        }
+    }
+}
+
+fn cleanup_claude_files(session_id: &str, profile_config_path: Option<&str>) {
+    let claude_home = profile_config_path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
+        .or_else(|| home_directory().map(|h| h.join(".claude")));
+
+    let Some(claude_dir) = claude_home else {
+        return;
+    };
+
+    let projects_dir = claude_dir.join("projects");
+    if projects_dir.is_dir() {
+        let target_name = format!("{session_id}.jsonl");
+        if let Ok(entries) = fs::read_dir(projects_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let candidate = path.join(&target_name);
+                    if candidate.is_file() {
+                        let _ = fs::remove_file(candidate);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Permanently deletes a native CLI conversation from the CLI's own store
+/// (e.g. Codex or Claude), keeping external desktops and CLI histories in sync.
+pub async fn delete_native_conversation(
+    definition_id: &str,
+    native_session_id: &str,
+    profile_config_path: Option<&str>,
+    working_directory: Option<&str>,
+) -> Result<(), String> {
+    let session_id = native_session_id.trim();
+    if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_LEN {
+        return Err("Invalid native session id".to_string());
+    }
+    if !session_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Native session id contains invalid characters".to_string());
+    }
+
+    match definition_id {
+        "codex" => {
+            // 1. Invoke `codex delete --force <uuid>` to safely delete the thread in Codex's SQLite db and sessions
+            if let Some(executable) = crate::agent::catalog_executable("codex") {
+                let mut command = headless_command(&executable);
+                command.args(["delete", "--force", session_id]);
+                if let Some(profile_path) = profile_config_path {
+                    if !profile_path.trim().is_empty() {
+                        command.env("CODEX_HOME", profile_path);
+                    }
+                }
+                if let Some(cwd) = working_directory {
+                    if let Ok(path) = fs::canonicalize(cwd) {
+                        command.current_dir(path);
+                    }
+                }
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(15), command.status())
+                    .await;
+            }
+
+            // 2. Perform defensive cleanup of rollout files and session index
+            cleanup_codex_files(session_id, profile_config_path);
+            Ok(())
+        }
+        "claude" => {
+            cleanup_claude_files(session_id, profile_config_path);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2832,6 +2983,87 @@ mod tests {
         }
         fs::write(data.path().join("chat-workspaces/conflict"), "keep").unwrap();
         assert!(general_chat_directory(data.path(), "conflict").is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_native_conversation_rejects_invalid_ids() {
+        assert!(delete_native_conversation("codex", "", None, None)
+            .await
+            .is_err());
+        assert!(delete_native_conversation("codex", "   ", None, None)
+            .await
+            .is_err());
+        assert!(
+            delete_native_conversation("codex", "invalid id with spaces", None, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            delete_native_conversation("codex", "id;rm -rf /", None, None)
+                .await
+                .is_err()
+        );
+        let oversized = "a".repeat(129);
+        assert!(delete_native_conversation("codex", &oversized, None, None)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_native_conversation_cleans_up_codex_and_claude_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("codex");
+        let sessions_dir = codex_home.join("sessions/2026/09/24");
+        fs::create_dir_all(&sessions_dir).unwrap();
+        let session_file = sessions_dir.join("rollout-test-12345-abc-uuid.jsonl");
+        fs::write(&session_file, "content").unwrap();
+        assert!(session_file.exists());
+
+        let index_file = codex_home.join("session_index.jsonl");
+        fs::write(
+            &index_file,
+            "{\"id\":\"abc-uuid\",\"title\":\"Target\"}\n{\"id\":\"other-uuid\",\"title\":\"Keep\"}\n",
+        )
+        .unwrap();
+
+        let claude_home = temp.path().join("claude");
+        let project_dir = claude_home.join("projects/some-project");
+        fs::create_dir_all(&project_dir).unwrap();
+        let claude_session_file = project_dir.join("abc-uuid.jsonl");
+        fs::write(&claude_session_file, "content").unwrap();
+        assert!(claude_session_file.exists());
+
+        let res = delete_native_conversation(
+            "codex",
+            "abc-uuid",
+            Some(codex_home.to_str().unwrap()),
+            None,
+        )
+        .await;
+        assert!(res.is_ok());
+        assert!(!session_file.exists(), "rollout file should be removed");
+        let index_content = fs::read_to_string(&index_file).unwrap();
+        assert!(
+            !index_content.contains("abc-uuid"),
+            "index entry should be removed"
+        );
+        assert!(
+            index_content.contains("other-uuid"),
+            "other entries should remain"
+        );
+
+        let res_claude = delete_native_conversation(
+            "claude",
+            "abc-uuid",
+            Some(claude_home.to_str().unwrap()),
+            None,
+        )
+        .await;
+        assert!(res_claude.is_ok());
+        assert!(
+            !claude_session_file.exists(),
+            "claude session file should be removed"
+        );
     }
 
     #[cfg(unix)]
