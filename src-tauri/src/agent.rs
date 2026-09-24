@@ -927,6 +927,9 @@ struct AgentSessionEntry {
     queued_prompts: Mutex<VecDeque<QueuedPrompt>>,
     /// Keeps per-session integration files alive only as long as their PTY.
     _integration_settings: Option<AgentIntegrationSettings>,
+    /// The CLIProxyAPI model list Codex reads for `/model`, kept as long as
+    /// the process that was pointed at it.
+    _proxy_catalog: Option<crate::cliproxy::catalog::ModelCatalog>,
     /// Clipboard images may contain sensitive material. Keep their temporary
     /// paths tied to this PTY instead of leaking permanent files into /tmp.
     staged_images: Mutex<StagedAgentImages>,
@@ -6356,7 +6359,14 @@ fn find_model_name(definition_id: &str, text: &str) -> Option<String> {
                     .find("model =")
                     .map(|index| (index, "model =".len()))
             })
-            .or_else(|| lowered.find("model=").map(|index| (index, "model=".len())));
+            .or_else(|| lowered.find("model=").map(|index| (index, "model=".len())))
+            // Codex confirms a `/model` choice this way. A proxy model has no
+            // recognizable prefix, so this line is the only place it shows.
+            .or_else(|| {
+                lowered
+                    .find("model changed to ")
+                    .map(|index| (index, "model changed to ".len()))
+            });
         if let Some((index, marker_length)) = marker {
             if let Some(model) = clean_model_token(&line[index + marker_length..]) {
                 if definition_id == "claude" {
@@ -6449,17 +6459,34 @@ pub fn launch_with_replay(
     let launch_arguments = request.arguments.clone();
     let (definition_id, label, executable, mut arguments, working_directory) =
         resolve_launch(&request)?;
-    let proxy = if definition_id == "codex" {
+    let proxy_target = if definition_id == "codex" {
         crate::cliproxy::launch::base_from_arguments(&arguments)?
-            .map(|target| {
-                crate::cliproxy::launch::ProxyLaunch::load(&target.base_url, target.id.as_deref())
-            })
-            .transpose()?
     } else {
         None
     };
-    if let Some(proxy) = &proxy {
+    let proxy = proxy_target
+        .as_ref()
+        .map(|target| {
+            crate::cliproxy::launch::ProxyLaunch::load(&target.base_url, target.id.as_deref())
+        })
+        .transpose()?;
+    let mut proxy_catalog = None;
+    if let (Some(proxy), Some(target)) = (&proxy, &proxy_target) {
         arguments = proxy.configure_arguments(arguments);
+        // Without this, `/model` inside the session lists Codex's native
+        // models instead of the ones this proxy serves.
+        let (program, prefix) = launch_parts(&executable);
+        proxy_catalog = crate::cliproxy::catalog::prepare(
+            &program,
+            &prefix,
+            &target.base_url,
+            proxy.key(),
+            target.id.as_deref(),
+        );
+        if let Some(catalog) = &proxy_catalog {
+            let after_provider = proxy.arguments().len();
+            arguments.splice(after_provider..after_provider, catalog.arguments());
+        }
     }
     let profile_config_path =
         profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
@@ -6873,6 +6900,7 @@ pub fn launch_with_replay(
         reported_usage_requests: Mutex::new(ReportedUsageRequests::default()),
         queued_prompts: Mutex::new(VecDeque::new()),
         _integration_settings: integration_settings,
+        _proxy_catalog: proxy_catalog,
         staged_images: Mutex::new(StagedAgentImages::default()),
     });
     if let Err(error) = registry.insert(&summary, Arc::clone(&entry)) {
@@ -8519,6 +8547,16 @@ session id: 0199aa11-"
         assert_eq!(
             find_model_name("codex", "gpt-5.6-sol xhigh · ~/project").as_deref(),
             Some("gpt-5.6-sol")
+        );
+        // After `/model` in a CLIProxyAPI session the new choice is named
+        // only in the confirmation, below the stale startup header.
+        assert_eq!(
+            find_model_name(
+                "codex",
+                "│ model:     claude-opus-5   /model to change │\n• Model changed to gemini-3-pro medium"
+            )
+            .as_deref(),
+            Some("gemini-3-pro")
         );
         assert_eq!(
             find_model_name("claude", "Claude Sonnet 4.6 · API Usage Billing").as_deref(),

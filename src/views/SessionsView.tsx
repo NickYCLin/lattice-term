@@ -497,7 +497,8 @@ export function SessionsView({
   // The proxy is only asked while a launcher is open, and only when the
   // user has pointed Settings at one.
   const cliProxySettings = useCliProxySettings();
-  const cliProxyModels = useCliProxyModelLists(cliProxySettings, newProjectDirectory !== null || addCliFor !== null).lists;
+  const { lists: cliProxyModels, reload: reloadCliProxyModels } =
+    useCliProxyModelLists(cliProxySettings, newProjectDirectory !== null || addCliFor !== null);
   // A terminal may also be opened to log in, so signed-out accounts can launch
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
@@ -1111,6 +1112,7 @@ export function SessionsView({
             value={selectedProjectModel}
             allowCliProxyApi
             proxyModels={cliProxyModels}
+            onReloadProxyModels={reloadCliProxyModels}
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
@@ -2210,6 +2212,7 @@ export function SessionsView({
                             value={selectedAddModel}
                             allowCliProxyApi
                             proxyModels={cliProxyModels}
+                            onReloadProxyModels={reloadCliProxyModels}
                             onChange={setSelectedAddModel}
                           />
                           {installed.length === 0 && (

@@ -1049,7 +1049,7 @@ export const en: Messages = {
   "agents.mcp.badge.metadata": "MCP state sharing",
   "agents.mcp.output.needsRestart": "This background service cannot separate content access, so new sharing is disabled. Existing shares still allow content access and may be revoked. Finish background work before stopping and restarting the service; LatticeTerm will not interrupt CLIs automatically.",
   "agents.mcp.claude": "Claude Code (run in a terminal)",
-  "agents.mcp.codex": "Codex (add to ~/.codex/config.toml)",
+  "agents.mcp.codex": "Codex (run in a terminal)",
   "agents.mcp.json": "Gemini CLI, Cursor and others (mcpServers JSON)",
   "agents.mcp.copy": "Copy",
   "agents.mcp.copied": "Copied to the clipboard.",

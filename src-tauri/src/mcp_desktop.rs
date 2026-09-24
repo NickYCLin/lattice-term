@@ -291,6 +291,57 @@ pub enum DesktopOperation {
 }
 
 impl DesktopOperation {
+    /// Every operation this build understands, by its wire `type`. The
+    /// background service announces its own list when a client greets it,
+    /// because a service started before an upgrade closes the connection on
+    /// an operation it cannot parse.
+    pub const KINDS: &'static [&'static str] = &[
+        "listConnections",
+        "listSavedConnections",
+        "fleet",
+        "getMetrics",
+        "captureScreen",
+        "screenInput",
+        "listDirectory",
+        "exec",
+        "execCommand",
+        "transfer",
+        "cancel",
+        "operationStatus",
+    ];
+
+    /// What a service on bridge protocol 3 understood before it announced
+    /// its list. Operations added since then must be checked, not assumed.
+    pub const PROTOCOL_3_KINDS: &'static [&'static str] = &[
+        "listConnections",
+        "fleet",
+        "getMetrics",
+        "captureScreen",
+        "screenInput",
+        "listDirectory",
+        "exec",
+        "transfer",
+        "cancel",
+        "operationStatus",
+    ];
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::ListConnections => "listConnections",
+            Self::ListSavedConnections => "listSavedConnections",
+            Self::Fleet { .. } => "fleet",
+            Self::GetMetrics { .. } => "getMetrics",
+            Self::CaptureScreen { .. } => "captureScreen",
+            Self::ScreenInput { .. } => "screenInput",
+            Self::ListDirectory { .. } => "listDirectory",
+            Self::Exec { .. } => "exec",
+            Self::ExecCommand { .. } => "execCommand",
+            Self::Transfer { .. } => "transfer",
+            Self::Cancel { .. } => "cancel",
+            Self::OperationStatus { .. } => "operationStatus",
+        }
+    }
+
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::ListConnections | Self::ListSavedConnections => None,
@@ -2327,8 +2378,54 @@ mod tests {
     }
 
     #[test]
+    fn every_operation_kind_is_announced_and_matches_its_wire_tag() {
+        let samples = [
+            DesktopOperation::ListConnections,
+            DesktopOperation::ListSavedConnections,
+            DesktopOperation::GetMetrics {
+                target_id: "t".into(),
+            },
+            DesktopOperation::CaptureScreen {
+                target_id: "t".into(),
+            },
+            DesktopOperation::ListDirectory {
+                target_id: "t".into(),
+                root_id: "r".into(),
+                path: String::new(),
+            },
+            DesktopOperation::Exec {
+                target_id: "t".into(),
+                plan_id: "p".into(),
+                request_id: "q".into(),
+            },
+            DesktopOperation::ExecCommand {
+                target_id: "t".into(),
+                command: "c".into(),
+                request_id: "q".into(),
+            },
+            DesktopOperation::Cancel {
+                target_id: "t".into(),
+                operation_id: "o".into(),
+                request_id: "q".into(),
+            },
+            DesktopOperation::OperationStatus {
+                target_id: "t".into(),
+                operation_id: "o".into(),
+            },
+        ];
+        for operation in &samples {
+            let wire = serde_json::to_value(operation).unwrap();
+            assert_eq!(wire["type"], operation.kind());
+            assert!(DesktopOperation::KINDS.contains(&operation.kind()));
+        }
+        for kind in DesktopOperation::PROTOCOL_3_KINDS {
+            assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
+        }
+        assert_eq!(DesktopOperation::KINDS.len(), 12);
+    }
+
+    #[test]
     fn revoking_one_of_two_grants_keeps_only_the_still_shared_screen() {
-        use super::*;
         let service =
             DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()));
         let grant = |id: &str| {

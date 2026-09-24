@@ -55,6 +55,16 @@ MCP 觀察者使用獨立的背景服務協定 2；桌面仍用協定 1，以便
 不同協定讓它拒絕握手，不能先取得所有工作階段再由 adapter 過濾。
 桌面也會檢查握手中的 MCP 能力，不會把舊服務不認得的管理請求送出去。
 
+背景服務在更新後會繼續用舊版執行檔跑，直到你停止它。新版加入的遠端工具
+（例如 `list_saved_connections`）舊服務解析不了，收到會直接斷線。新版服務打招呼時
+會列出自己認得的操作，adapter 據此先擋下不支援的工具，回 `needs_user_action` 並說明
+要重啟背景服務，不把請求送過去。更早的服務沒有這份清單，adapter 只能照送；若服務
+因此斷線，也改回 `needs_user_action`，不再誤報成「背景服務沒在執行」。
+
+`get_capabilities` 的 `toolsNeedingServiceRestart` 列出服務明確不支援的工具，
+`toolsUnconfirmedByService` 列出舊服務無法確認的工具，`backgroundServiceVersion` 是
+服務版本（`null` 代表服務比這項檢查更早）。其他工具照常可用。
+
 若看到「背景服務版本較舊」，既有 CLI 仍可操作，但 MCP 分享、控制與啟動
 開關暫停使用。請先完成背景工作，再停止並重啟背景服務；更新不會自動
 終止工作階段。這是安全相容性限制，重開桌面視窗不等於重啟背景服務。
@@ -78,13 +88,14 @@ Claude Code：
 claude mcp add latticeterm -- /path/to/lattice-term mcp --data-dir ~/.local/share/io.github.nickyclin.latticeterm
 ```
 
-Codex CLI（`~/.codex/config.toml`）：
+Codex CLI：
 
-```toml
-[mcp_servers.latticeterm]
-command = "/path/to/lattice-term"
-args = ["mcp", "--data-dir", "/home/you/.local/share/io.github.nickyclin.latticeterm"]
+```bash
+codex mcp add latticeterm -- /path/to/lattice-term mcp --data-dir ~/.local/share/io.github.nickyclin.latticeterm
 ```
+
+這行會由 Codex 自己在 `~/.codex/config.toml` 寫入 `[mcp_servers.latticeterm]`，
+不必手動編輯設定檔。
 
 Gemini CLI、Cursor 等使用 `mcpServers` JSON 的工具：
 

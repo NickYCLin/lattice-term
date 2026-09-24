@@ -4,6 +4,31 @@
 
 ---
 
+## [2026.9.24](https://github.com/NickYCLin/lattice-term/compare/v2026.9.23...v2026.9.24) (2026-09-23)
+
+
+### 🚀 新增功能
+
+* **chat:** Claude 對話也能回答 MCP 伺服器的表單 ([254d5e0](https://github.com/NickYCLin/lattice-term/commit/254d5e0995dace6c535c12587db44364aebf94ef))
+* **chat:** MCP 表單支援帶標題的單選與多選 ([346e27b](https://github.com/NickYCLin/lattice-term/commit/346e27be60e2ffad4f000986f7f8eb96fb33f4dd))
+* **chat:** 讓對話頁與終端機共用工作階段 ([5860ff4](https://github.com/NickYCLin/lattice-term/commit/5860ff4c8df50290948742b48c9e9818cd4e0ee1))
+* **cliproxy:** 終端機的 /model 改列代理提供的模型 ([d01b123](https://github.com/NickYCLin/lattice-term/commit/d01b123e9c5e47a5c2ede4b21749bb9bdfe03de1))
+* **cli:** 啟動時檢查外接工具更新 ([a6e0fab](https://github.com/NickYCLin/lattice-term/commit/a6e0fab6a86fa1a1e93b312069fb3b2c25a57f20))
+* **jev:** 新增可選用的工作階段判讀 ([f0cebb1](https://github.com/NickYCLin/lattice-term/commit/f0cebb1adfb1b60220c037f01352a31f6a60a1a6))
+* **mcp:** Codex 也用一行指令接上 LatticeTerm ([5467a62](https://github.com/NickYCLin/lattice-term/commit/5467a62ba330afeaab371c8216517146d40be34e))
+* **workspace:** 獨立保存專案並提供復原入口 ([79863b5](https://github.com/NickYCLin/lattice-term/commit/79863b56d164acbe0719daacfcb24e71360eda90))
+
+
+### 🛠️ 問題修正
+
+* **cliproxy:** 代理模型清單讀不到時可就地重試 ([f1b2903](https://github.com/NickYCLin/lattice-term/commit/f1b2903fe08ea92f8ebe5bf180f095f6b0f039e3))
+* **mcp:** 背景服務太舊時明講要重啟，不再誤報沒在執行 ([573c748](https://github.com/NickYCLin/lattice-term/commit/573c74898d688ea9aea5833fcb8678235c488ab5))
+* **models:** 合併重複的代理模型入口 ([32ff8c1](https://github.com/NickYCLin/lattice-term/commit/32ff8c152cb59ae80f4e799586c5990cdfa5b69b))
+* **ui:** 說清楚 CLI 更新視窗的按鈕用途 ([8f31cf2](https://github.com/NickYCLin/lattice-term/commit/8f31cf236007a506cc49c1b52af02aff34825425))
+* **ui:** 避免加開 CLI 的按鈕遮住模型欄位 ([f5827c8](https://github.com/NickYCLin/lattice-term/commit/f5827c8850bbf71512fc46e736ca996d2ea586c9))
+* **workspace:** 保留已退出但尚未關閉的工作階段 ([310a39b](https://github.com/NickYCLin/lattice-term/commit/310a39bb1d3e05e4ffe0c8f19d86f0a9c22386b5))
+* **workspace:** 保留重開機後的背景專案紀錄 ([263d1b1](https://github.com/NickYCLin/lattice-term/commit/263d1b1486b0253693e2a8c6bd09fc62005de0d8))
+
 ## [2026.9.23](https://github.com/NickYCLin/lattice-term/compare/v2026.9.22...v2026.9.23) (2026-09-22)
 
 

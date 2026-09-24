@@ -37,6 +37,35 @@ const object = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
+/**
+ * A choice list in either spelling the protocol allows: a plain `enum`
+ * (optionally with the older `enumNames` labels), or `oneOf`／`anyOf`
+ * entries of `const` plus `title`. `null` means the list exists but is not
+ * one the desktop accepts, so the whole form stays declinable only.
+ */
+function choicesOf(source: Record<string, unknown>): { value: string; label: string }[] | null {
+  if ("enum" in source) {
+    if (!Array.isArray(source.enum) || !source.enum.every((value) => typeof value === "string")) return null;
+    const names = Array.isArray(source.enumNames) ? source.enumNames : [];
+    return (source.enum as string[]).map((value, index) => ({
+      value,
+      label: typeof names[index] === "string" && names[index] ? (names[index] as string) : value,
+    }));
+  }
+  const entries = source.oneOf ?? source.anyOf;
+  if (entries === undefined) return [];
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const choices: { value: string; label: string }[] = [];
+  for (const raw of entries) {
+    const entry = object(raw);
+    if (!entry || typeof entry.const !== "string") return null;
+    if (Object.keys(entry).some((key) => key !== "const" && key !== "title")) return null;
+    if (entry.title !== undefined && typeof entry.title !== "string") return null;
+    choices.push({ value: entry.const, label: entry.title || entry.const });
+  }
+  return choices;
+}
+
 export function parseElicitation(input: string): ElicitationRequest | null {
   let params: Record<string, unknown> | null;
   try {
@@ -75,16 +104,16 @@ export function parseElicitation(input: string): ElicitationRequest | null {
     const kind: FieldKind | null =
       rawKind === "string" || rawKind === "number" || rawKind === "integer" || rawKind === "boolean"
         ? rawKind
-        : items?.type === "string" && Array.isArray(items.enum)
+        : items && (items.type === undefined || items.type === "string") && choicesOf(items)?.length
           ? "choices"
           : null;
     if (!field || !kind) return null;
     const source = kind === "choices" ? (items as Record<string, unknown>) : field;
-    const values = Array.isArray(source.enum)
-      ? source.enum.filter((v): v is string => typeof v === "string")
-      : [];
-    if (kind === "choices" && values.length === 0) return null;
-    const names = Array.isArray(source.enumNames) ? source.enumNames : [];
+    const hasChoices = "enum" in source || "oneOf" in source || "anyOf" in source;
+    const choices = hasChoices && (kind === "string" || kind === "choices") ? choicesOf(source) : [];
+    // Choices the desktop would refuse must not be drawn as if they worked.
+    if (!choices || (hasChoices && kind === "string" && choices.length === 0)) return null;
+    if (kind === "choices" && choices.length === 0) return null;
     const count = (key: string) =>
       typeof field[key] === "number" && Number.isInteger(field[key]) ? (field[key] as number) : null;
     fields.push({
@@ -93,10 +122,7 @@ export function parseElicitation(input: string): ElicitationRequest | null {
       title: typeof field.title === "string" && field.title ? field.title : name,
       description: typeof field.description === "string" ? field.description : "",
       required: required.has(name),
-      choices: values.map((value, index) => ({
-        value,
-        label: typeof names[index] === "string" ? (names[index] as string) : value,
-      })),
+      choices,
       format: typeof field.format === "string" ? field.format : null,
       defaultValue: field.default,
       minItems: kind === "choices" ? count("minItems") : null,

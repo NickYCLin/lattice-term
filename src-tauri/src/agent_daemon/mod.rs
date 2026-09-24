@@ -160,6 +160,7 @@ pub fn failure_code(message: &str) -> &'static str {
         agent::MCP_SESSION_GONE | server::PLAN_NOT_AVAILABLE => code::NOT_FOUND,
         agent::MCP_DRAFT_RECOVERY_ERROR | server::UNKNOWN_OUTCOME => code::UNKNOWN_OUTCOME,
         mcp::DAEMON_NOT_RUNNING => code::DAEMON_UNAVAILABLE,
+        mcp::BACKGROUND_SERVICE_OUTDATED => code::NEEDS_USER_ACTION,
         _ => code::FAILED,
     }
 }
@@ -650,6 +651,13 @@ pub struct HelloReply {
     pub mcp_workspace_scope: bool,
     #[serde(default)]
     pub desktop_bridge_protocol: u32,
+    /// The desktop operations this service can parse. Empty on services that
+    /// predate the list; see `DesktopOperation::PROTOCOL_3_KINDS`.
+    #[serde(default)]
+    pub desktop_operations: Vec<String>,
+    /// The build the service runs, so a client can tell it is older.
+    #[serde(default)]
+    pub build_version: String,
     pub sessions: Vec<crate::agent::AgentSessionSummary>,
     pub snapshots: Vec<crate::agent::AgentOutputSnapshot>,
     /// Sessions the user shared with observers; empty for observers who

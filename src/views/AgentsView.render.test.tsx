@@ -99,7 +99,8 @@ describe("AgentsView", () => {
     expect(markup).toContain("分享給外部 AI（MCP）");
     expect(markup).toContain("已分享 1 個工作階段");
     expect(markup).toContain("claude mcp add latticeterm -- /opt/lattice-term mcp --data-dir &#x27;/data dir&#x27;");
-    expect(markup).toContain("[mcp_servers.latticeterm]");
+    expect(markup).toContain("codex mcp add latticeterm -- ");
+    expect(markup).not.toContain("[mcp_servers.latticeterm]");
     // One choice: the desktop-owned session has no observer path.
     expect(markup.match(/<span class="field__label">MCP 權限<\/span>/g)).toHaveLength(1);
     expect(markup).toMatch(/<option value="full" selected="">完全開放/);

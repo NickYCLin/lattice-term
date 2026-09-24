@@ -1771,6 +1771,61 @@ fn control_response_line(
     .to_string()
 }
 
+/// Marks a pending Claude elicitation, so its answer is checked against the
+/// server's schema instead of being echoed back as tool input.
+const CLAUDE_ELICITATION_MARKER: &str = "latticeterm_claude_elicitation";
+
+/// Claude's elicitation request in the parameter shape Codex uses, so both
+/// share one schema check and one card in the chat window.
+fn claude_elicitation_params(request: &Value) -> Value {
+    let mut params = serde_json::Map::new();
+    for (from, to) in [
+        ("mcp_server_name", "serverName"),
+        ("message", "message"),
+        ("mode", "mode"),
+        ("url", "url"),
+        ("elicitation_id", "elicitationId"),
+        ("requested_schema", "requestedSchema"),
+    ] {
+        if let Some(value) = request.get(from).filter(|value| !value.is_null()) {
+            params.insert(to.to_string(), value.clone());
+        }
+    }
+    Value::Object(params)
+}
+
+/// Who is asking matters as much as what: a form can come from any MCP
+/// server the CLI has configured.
+fn elicitation_summary(params: &Value) -> String {
+    let message = str_field(params, "message").unwrap_or_default();
+    truncate(
+        &match str_field(params, "serverName") {
+            Some(server) => format!("{server}: {message}"),
+            None => message.to_string(),
+        },
+        200,
+    )
+}
+
+/// The `control_response` carrying an elicitation result. MCP leaves
+/// `content` out unless something was accepted.
+fn elicitation_response_line(request_id: &str, mut result: Value) -> String {
+    if let Some(object) = result.as_object_mut() {
+        if object.get("content").is_some_and(Value::is_null) {
+            object.remove("content");
+        }
+    }
+    serde_json::json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": result,
+        },
+    })
+    .to_string()
+}
+
 /// Answers a pending approval on `thread_id`.
 pub async fn respond(
     registry: Arc<AgentChatRegistry>,
@@ -1807,8 +1862,7 @@ pub async fn respond_expected(
         )
         .await;
     }
-    let message = message.map(|text| truncate(text.trim(), 1024));
-    let (stdin, input) = {
+    let (stdin, line) = {
         let mut running = registry.lock();
         let turn = running
             .get_mut(thread_id)
@@ -1816,19 +1870,33 @@ pub async fn respond_expected(
         if expected_turn_id.is_some_and(|id| id != turn.turn_id) {
             return Err("The active turn changed.".into());
         }
-        let input = turn
-            .pending_inputs
-            .remove(request_id)
-            .ok_or_else(|| "This approval has already been answered.".to_string())?;
         let stdin = turn
             .stdin
             .clone()
             .ok_or_else(|| "This conversation is not waiting for an answer.".to_string())?;
-        (stdin, input)
-    };
-    let line = match input.get("latticeterm_rpc_id") {
-        Some(rpc_id) => codex_approval_line(rpc_id, allow),
-        None => control_response_line(request_id, allow, Some(input), message.as_deref()),
+        let pending = turn
+            .pending_inputs
+            .get(request_id)
+            .ok_or_else(|| "This approval has already been answered.".to_string())?;
+        let line = if let Some(params) = pending.get(CLAUDE_ELICITATION_MARKER) {
+            // A form answer is checked whole; an answer that breaks the
+            // schema leaves the question open so it can be corrected.
+            let result = elicitation::result(params, allow, message)?;
+            elicitation_response_line(request_id, result)
+        } else {
+            let message = message.map(|text| truncate(text.trim(), 1024));
+            match pending.get("latticeterm_rpc_id") {
+                Some(rpc_id) => codex_approval_line(rpc_id, allow),
+                None => control_response_line(
+                    request_id,
+                    allow,
+                    Some(pending.clone()),
+                    message.as_deref(),
+                ),
+            }
+        };
+        turn.pending_inputs.remove(request_id);
+        (stdin, line)
     };
     let mut stdin = stdin.lock().await;
     stdin
@@ -2081,6 +2149,23 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
             let Some(request_id) = str_field(value, "request_id") else {
                 return events;
             };
+            if str_field(request, "subtype") == Some("elicitation") {
+                let params = claude_elicitation_params(request);
+                events.push(ChatEvent::ApprovalRequested {
+                    request_id: request_id.to_string(),
+                    tool_use_id: None,
+                    name: elicitation::kind(&params).card_name().to_string(),
+                    summary: elicitation_summary(&params),
+                    input: bounded_output(
+                        &serde_json::to_string_pretty(&params).unwrap_or_default(),
+                    ),
+                });
+                state.pending_inputs.push((
+                    request_id.to_string(),
+                    serde_json::json!({ CLAUDE_ELICITATION_MARKER: params }),
+                ));
+                return events;
+            }
             if str_field(request, "subtype") != Some("can_use_tool") {
                 // Anything else the CLI asks for has no card here. Refusing
                 // it keeps the turn moving instead of waiting on us forever.
@@ -3275,6 +3360,82 @@ mod tests {
         assert_eq!(reply["response"]["subtype"], "error");
         assert_eq!(reply["response"]["request_id"], "req-9");
         assert!(state.pending_inputs.is_empty());
+    }
+
+    #[test]
+    fn a_claude_mcp_form_becomes_the_same_card_codex_forms_use() {
+        // The shape Claude Code 2.1 sends to an SDK host over stdio.
+        let mut state = TurnState::default();
+        let events = parse_line(
+            Dialect::Claude,
+            &mut state,
+            r##"{"type":"control_request","request_id":"req-e1","request":{"subtype":"elicitation","mcp_server_name":"github","message":"Which repository?","mode":"form","requested_schema":{"type":"object","properties":{"repo":{"type":"string"},"color":{"type":"string","oneOf":[{"const":"#f00","title":"Red"}]}},"required":["repo"]}}}"##,
+        );
+        let ChatEvent::ApprovalRequested {
+            request_id,
+            name,
+            summary,
+            input,
+            ..
+        } = &events[0]
+        else {
+            panic!("expected a card, got {events:?}");
+        };
+        assert_eq!(request_id, "req-e1");
+        assert_eq!(name, "mcp_form");
+        assert_eq!(summary, "github: Which repository?");
+        // The window reads the Codex spelling of the same fields.
+        let shown: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(shown["serverName"], "github");
+        assert_eq!(
+            shown["requestedSchema"]["required"],
+            serde_json::json!(["repo"])
+        );
+        assert!(state.pending_writes.is_empty());
+
+        let params = state.pending_inputs[0].1[CLAUDE_ELICITATION_MARKER].clone();
+        let accepted: Value = serde_json::from_str(&elicitation_response_line(
+            "req-e1",
+            elicitation::result(
+                &params,
+                true,
+                Some(r##"{"repo":"lattice","color":"#f00"}"##),
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(accepted["type"], "control_response");
+        assert_eq!(accepted["response"]["request_id"], "req-e1");
+        assert_eq!(
+            accepted["response"]["response"],
+            serde_json::json!({"action": "accept", "content": {"repo": "lattice", "color": "#f00"}})
+        );
+        let declined: Value = serde_json::from_str(&elicitation_response_line(
+            "req-e1",
+            elicitation::result(&params, false, None).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(
+            declined["response"]["response"],
+            serde_json::json!({"action": "decline"})
+        );
+        // An answer the schema does not allow is refused before it is sent.
+        assert!(elicitation::result(&params, true, Some(r#"{"color":"Red"}"#)).is_err());
+    }
+
+    #[test]
+    fn a_claude_url_request_opens_a_page_card() {
+        let mut state = TurnState::default();
+        let events = parse_line(
+            Dialect::Claude,
+            &mut state,
+            r#"{"type":"control_request","request_id":"req-u","request":{"subtype":"elicitation","mcp_server_name":"auth","message":"Sign in","mode":"url","url":"https://example.com/login","elicitation_id":"el-1"}}"#,
+        );
+        assert!(
+            matches!(&events[0], ChatEvent::ApprovalRequested { name, .. } if name == "mcp_url")
+        );
+        let params = &state.pending_inputs[0].1[CLAUDE_ELICITATION_MARKER];
+        assert_eq!(params["elicitationId"], "el-1");
     }
 
     #[test]
