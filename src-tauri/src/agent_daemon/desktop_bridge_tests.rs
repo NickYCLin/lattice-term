@@ -464,6 +464,38 @@ fn target_ids_cannot_smuggle_paths_into_persistent_audit_metadata() {
     assert!(bridge.owners.lock().unwrap().is_empty());
 }
 
+/// The book is the desktop's saved profiles, not the grants the daemon holds,
+/// so an empty grant list must not stand in for it.
+#[tokio::test]
+async fn the_saved_connection_book_is_read_from_the_desktop() {
+    let bridge = Arc::new(Bridge::default());
+    let sink = DaemonSink::default();
+    let missing = bridge
+        .call("observer fixture", DesktopOperation::ListSavedConnections)
+        .await
+        .unwrap_err();
+    assert!(missing.starts_with("needs_user_action"));
+
+    let (owner, sender, mut receiver) = desktop(&sink, &bridge);
+    bridge
+        .replace(owner, ClientRole::Desktop, sender, Vec::new())
+        .unwrap();
+    let task = call(&bridge, DesktopOperation::ListSavedConnections);
+    let id = match receive(&mut receiver).await {
+        Frame::Request {
+            id,
+            body: Request::DesktopInvoke { operation, .. },
+        } => {
+            assert!(matches!(operation, DesktopOperation::ListSavedConnections));
+            id
+        }
+        _ => panic!("the book request should reach the desktop"),
+    };
+    let book = json!({"connections": [{"name": "Synthetic"}], "truncated": false});
+    bridge.resolve(owner, ClientRole::Desktop, id, Ok(book.clone()));
+    assert_eq!(completed(task).await.unwrap(), book);
+}
+
 #[tokio::test]
 async fn disconnected_owners_cannot_restore_grants_or_deliver_late_replies() {
     let bridge = Arc::new(Bridge::default());

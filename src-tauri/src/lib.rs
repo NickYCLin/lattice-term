@@ -333,6 +333,7 @@ async fn mcp_saved_connection_connect(
                 ));
             }
             let outcome = sftp_connect(
+                app.clone(),
                 SftpConnectRequest {
                     profile_id: profile.id.clone(),
                     hostname: String::new(),
@@ -521,10 +522,13 @@ async fn remote_fleet_action(
 }
 
 #[tauri::command]
-fn mcp_remote_targets(
+async fn mcp_remote_targets(
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
-) -> Vec<mcp_desktop::TargetView> {
-    service.targets()
+) -> Result<Vec<mcp_desktop::TargetView>, String> {
+    // The panel reports what MCP can reach, so it counts connections opened
+    // since the last background refresh too.
+    service.grant_live_connections().await;
+    Ok(service.targets())
 }
 
 /// Reads the saved connection book straight from the profile store, so an
@@ -3182,6 +3186,7 @@ async fn sftp_attach_ssh(
 
 #[tauri::command]
 async fn sftp_connect(
+    app: AppHandle,
     mut request: SftpConnectRequest,
     storage: State<'_, AppStorage>,
     trust: State<'_, TrustState>,
@@ -3269,6 +3274,9 @@ async fn sftp_connect(
                 detail,
             });
         }
+    }
+    if matches!(outcome, SftpConnectOutcome::Connected { .. }) {
+        notify_mcp_sessions_changed(&app);
     }
     Ok(outcome)
 }
@@ -3520,11 +3528,12 @@ async fn sftp_disconnect(
 ) -> Result<(), String> {
     let cancel_result = crate::sftp_transfers::cancel_session(
         transfers.inner(),
-        &crate::sftp_transfers::EventSink(app),
+        &crate::sftp_transfers::EventSink(app.clone()),
         &session_id,
     )
     .await;
     let disconnect_result = crate::sftp::disconnect(registry.inner(), &session_id).await;
+    notify_mcp_sessions_changed(&app);
     match (cancel_result, disconnect_result) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(cancel_error), Ok(())) => Err(format!(
@@ -3678,6 +3687,9 @@ async fn remote_connect(
             });
         }
     }
+    if matches!(outcome, RemoteConnectOutcome::Connected { .. }) {
+        notify_mcp_sessions_changed(&app);
+    }
     Ok(outcome)
 }
 
@@ -3687,7 +3699,9 @@ async fn remote_disconnect(
     session_id: String,
     registry: State<'_, Arc<RemoteRegistry>>,
 ) -> Result<(), String> {
-    crate::remote::disconnect(&app, registry.inner(), &session_id).await
+    let result = crate::remote::disconnect(&app, registry.inner(), &session_id).await;
+    notify_mcp_sessions_changed(&app);
+    result
 }
 
 #[tauri::command]
@@ -4113,6 +4127,9 @@ async fn rdp_connect(
         }
     }
 
+    if matches!(outcome, RdpConnectOutcome::Connected { .. }) {
+        notify_mcp_sessions_changed(&app);
+    }
     Ok(outcome)
 }
 
@@ -4141,7 +4158,9 @@ async fn rdp_disconnect(
     session_id: String,
     registry: State<'_, Arc<RdpRegistry>>,
 ) -> Result<(), String> {
-    crate::rdp::disconnect(&app, registry.inner(), &session_id).await
+    let result = crate::rdp::disconnect(&app, registry.inner(), &session_id).await;
+    notify_mcp_sessions_changed(&app);
+    result
 }
 
 #[tauri::command]
@@ -4262,6 +4281,9 @@ async fn vnc_connect(
         }
     }
 
+    if matches!(outcome, VncConnectOutcome::Connected { .. }) {
+        notify_mcp_sessions_changed(&app);
+    }
     Ok(outcome)
 }
 
@@ -4290,7 +4312,9 @@ async fn vnc_disconnect(
     session_id: String,
     registry: State<'_, Arc<VncRegistry>>,
 ) -> Result<(), String> {
-    crate::vnc::disconnect(&app, registry.inner(), &session_id).await
+    let result = crate::vnc::disconnect(&app, registry.inner(), &session_id).await;
+    notify_mcp_sessions_changed(&app);
+    result
 }
 
 #[tauri::command]

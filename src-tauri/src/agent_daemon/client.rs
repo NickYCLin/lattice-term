@@ -225,8 +225,10 @@ impl DaemonClient {
                     if !connection.alive.load(Ordering::Relaxed) {
                         break;
                     }
-                    // Refresh connection health; this never restores grants
-                    // revoked on disconnect or registers saved credentials.
+                    // Every open connection is offered to MCP, whichever way
+                    // it was opened; a paused one stays paused, and saved
+                    // credentials are never used to open anything here.
+                    service.grant_live_connections().await;
                     if connection
                         .request(Request::DesktopGrants {
                             targets: service.targets(),

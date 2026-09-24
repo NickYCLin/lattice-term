@@ -40,7 +40,9 @@ fn reply_limit(operation: &DesktopOperation) -> usize {
 struct Pending {
     owner: u64,
     revision: u64,
-    target: String,
+    /// None for the saved connection book, which belongs to no grant and is
+    /// gated by the desktop's own sharing switch instead.
+    target: Option<String>,
     max_reply: usize,
     reply: oneshot::Sender<Result<Value, String>>,
 }
@@ -210,8 +212,11 @@ impl Bridge {
         };
         // Withdrawn grants cannot leak a response queued before revocation.
         let authorized = self.owners.lock().ok().is_some_and(|owners| {
-            owners.get(&owner).is_some_and(|o| {
-                o.revision == p.revision && o.targets.iter().any(|t| t.id == p.target)
+            owners.get(&owner).is_some_and(|o| match &p.target {
+                Some(target) => {
+                    o.revision == p.revision && o.targets.iter().any(|t| &t.id == target)
+                }
+                None => true,
             })
         });
         let outcome = if !authorized {
@@ -237,41 +242,62 @@ impl Bridge {
                 .owners
                 .lock()
                 .map_err(|_| "Remote grants unavailable")?;
-            let Some(target_id) = operation.target_id() else {
-                let result = json!({"connections": owners.values().filter(|o| !o.sender.is_disconnected()).flat_map(|o| o.targets.iter()).collect::<Vec<_>>() });
-                if result.to_string().len() > MAX_REPLY {
-                    return Err("Remote connection list exceeded its limit".into());
+            match operation.target_id() {
+                None => {
+                    if matches!(operation, DesktopOperation::ListSavedConnections) {
+                        // The book lives in the desktop's profile store, so ask
+                        // the desktop; the grant list here is a different answer.
+                        let (owner_id, owner) = owners
+                            .iter()
+                            .filter(|(_, owner)| !owner.sender.is_disconnected())
+                            .min_by_key(|(id, _)| **id)
+                            .ok_or(
+                                "needs_user_action: open LatticeTerm to read the connection book",
+                            )?;
+                        (*owner_id, owner.sender.clone(), None, owner.revision)
+                    } else {
+                        let result = json!({"connections": owners.values().filter(|o| !o.sender.is_disconnected()).flat_map(|o| o.targets.iter()).collect::<Vec<_>>() });
+                        if result.to_string().len() > MAX_REPLY {
+                            return Err("Remote connection list exceeded its limit".into());
+                        }
+                        return Ok(result);
+                    }
                 }
-                return Ok(result);
-            };
-            let (owner_id, owner) = owners
-                .iter()
-                .find(|(_, owner)| {
-                    !owner.sender.is_disconnected()
-                        && owner.targets.iter().any(|t| t.id == target_id)
-                })
-                .ok_or("needs_user_action: connect and explicitly grant access in LatticeTerm")?;
-            // Desktop executes the same scope check again against its own live grant.
-            let target = owner
-                .targets
-                .iter()
-                .find(|t| t.id == target_id)
-                .ok_or("Remote grant unavailable")?;
-            if operation
-                .required_scope()
-                .is_some_and(|scope| !target.scopes.allows(scope))
-            {
-                return Err("This remote operation is not authorized".into());
+                Some(target_id) => {
+                    let (owner_id, owner) = owners
+                        .iter()
+                        .find(|(_, owner)| {
+                            !owner.sender.is_disconnected()
+                                && owner.targets.iter().any(|t| t.id == target_id)
+                        })
+                        .ok_or(
+                            "needs_user_action: connect and explicitly grant access in LatticeTerm",
+                        )?;
+                    // Desktop executes the same scope check again against its own live grant.
+                    let target = owner
+                        .targets
+                        .iter()
+                        .find(|t| t.id == target_id)
+                        .ok_or("Remote grant unavailable")?;
+                    if operation
+                        .required_scope()
+                        .is_some_and(|scope| !target.scopes.allows(scope))
+                    {
+                        return Err("This remote operation is not authorized".into());
+                    }
+                    if !target.connected {
+                        return Err(
+                            "needs_user_action: the authorized connection is offline".into()
+                        );
+                    }
+                    (
+                        *owner_id,
+                        owner.sender.clone(),
+                        Some(target_id.to_string()),
+                        owner.revision,
+                    )
+                }
             }
-            if !target.connected {
-                return Err("needs_user_action: the authorized connection is offline".into());
-            }
-            (
-                *owner_id,
-                owner.sender.clone(),
-                target_id.to_string(),
-                owner.revision,
-            )
         };
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel();
