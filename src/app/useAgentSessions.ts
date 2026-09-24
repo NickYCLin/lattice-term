@@ -76,6 +76,12 @@ export interface AgentInstallDefinition {
   displayCommand: string;
   sourceUrl: string;
   available: boolean;
+  /** Runtime the installer needs, present only while it is missing. */
+  requirement?: AgentInstallRequirement | null;
+}
+
+export interface AgentInstallRequirement extends AgentInstallDefinition {
+  name: string;
 }
 
 export interface AgentTokenUsage {

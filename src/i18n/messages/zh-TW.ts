@@ -1257,6 +1257,8 @@ export const zhTW = {
   "agents.install.sessionLabel": "安裝 {name}",
   "agents.install.copySource": "複製安裝說明網址",
   "agents.install.sourceCopied": "網址已複製",
+  "agents.install.requirement": "需要先安裝 {name}，才能用這個指令安裝。",
+  "agents.install.requirementAction": "先安裝 {name}",
   "agents.install.confirm.title": "安裝 {name}？",
   "agents.install.confirm.body": "LatticeTerm 會開啟一個看得到完整輸出的終端，執行這條固定安裝指令：{command}。過程會從網路下載程式並寫入你的使用者環境；若安裝程式更新 PATH，可能要重開 LatticeTerm 才會生效。",
   "agents.install.confirm.action": "開啟安裝終端",

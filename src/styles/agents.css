@@ -527,6 +527,12 @@
   color: var(--text-subtle);
 }
 
+.agent-card .agent-card__install-requirement {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
 .agent-card__actions {
   grid-column: 1 / -1;
   display: flex;

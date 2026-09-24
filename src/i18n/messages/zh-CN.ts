@@ -1097,6 +1097,8 @@ export const messages: Messages = {
   "agents.install.sessionLabel": "安装 {name}",
   "agents.install.copySource": "拷贝安装说明网址",
   "agents.install.sourceCopied": "网址已拷贝",
+  "agents.install.requirement": "需要先安装 {name}，才能用这个命令安装。",
+  "agents.install.requirementAction": "先安装 {name}",
   "agents.install.confirm.title": "安装 {name}？",
   "agents.install.confirm.body": "LatticeTerm 会打开一个看得到完整输出的终端，运行这条固定安装指令：{command}。过程会从网络下载程序并写入你的用户环境；若安装程序更新 PATH，可能要重开 LatticeTerm 才会生效。",
   "agents.install.confirm.action": "打开安装终端",

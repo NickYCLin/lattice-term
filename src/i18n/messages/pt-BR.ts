@@ -1074,6 +1074,8 @@ export const messages: Messages = {
   "agents.install.sessionLabel": "Instalar {name}",
   "agents.install.copySource": "Copiar o URL do guia de instalação",
   "agents.install.sourceCopied": "URL copiado",
+  "agents.install.requirement": "É preciso instalar o {name} antes de executar este comando.",
+  "agents.install.requirementAction": "Instalar {name} primeiro",
   "agents.install.confirm.title": "Instalar {name}?",
   "agents.install.confirm.body": "O LatticeTerm abrirá um terminal visível e executará este comando de instalação fixo: {command}. Ele baixa o software e escreve para o seu ambiente de usuário. Se o instalador alterar PATH, reinicie o LatticeTerm antes de atualizar a detecção.",
   "agents.install.confirm.action": "Abrir o terminal do instalador",

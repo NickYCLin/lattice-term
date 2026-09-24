@@ -1078,6 +1078,8 @@ export const messages: Messages = {
   "agents.install.sessionLabel": "{name} をインストール",
   "agents.install.copySource": "インストールガイドURLをコピーする",
   "agents.install.sourceCopied": "コピーしたURL",
+  "agents.install.requirement": "このコマンドを実行するには、先に {name} をインストールしてください。",
+  "agents.install.requirementAction": "先に {name} をインストール",
   "agents.install.confirm.title": "{name} をインストールしますか?",
   "agents.install.confirm.body": "LatticeTerm は、可視端末を開き、この固定インストールコマンドを実行します: {command}。ソフトウェアをダウンロードし、ユーザーの環境に書き込みます。インストーラが PATH を変更した場合、LatticeTerm を再起動して、爽快な検出を実行します。",
   "agents.install.confirm.action": "開いたインストーラ ターミナル",

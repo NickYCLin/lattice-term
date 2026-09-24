@@ -4,6 +4,7 @@ import { AgentMcpHistory } from "../components/agents/AgentMcpHistory";
 import type {
   AgentApi,
   AgentDefinition,
+  AgentInstallDefinition,
   AgentLaunchPlan,
   AgentSessionSummary,
 } from "../app/useAgentSessions";
@@ -79,6 +80,12 @@ function stateTone(session: AgentSessionSummary): string {
   if (session.state === "needsAttention") return "tone-warn";
   if (session.state === "idle") return "tone-neutral";
   return "tone-ok";
+}
+
+interface PendingInstall {
+  id: string;
+  label: string;
+  install: AgentInstallDefinition;
 }
 
 function accountKey(definition: AgentDefinition): MessageKey {
@@ -208,7 +215,7 @@ export function AgentsView({
   const [accountProfileDefinition, setAccountProfileDefinition] = useState<AgentDefinition | null>(null);
   const [pendingProfileRemoval, setPendingProfileRemoval] = useState<ChatAccountProfile | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
-  const [pendingInstall, setPendingInstall] = useState<AgentDefinition | null>(null);
+  const [pendingInstall, setPendingInstall] = useState<PendingInstall | null>(null);
   const [copiedInstallSource, setCopiedInstallSource] = useState<string | null>(null);
   const copyTimerRef = useRef<number | null>(null);
   const copyRequestRef = useRef(0);
@@ -1084,8 +1091,40 @@ export function AgentsView({
                     {definition.install.displayCommand}
                   </code>
                 )}
+                {!definition.installed && definition.install.requirement && (
+                  <p className="agent-card__install-requirement" role="note">
+                    {t("agents.install.requirement", {
+                      name: definition.install.requirement.name,
+                    })}
+                  </p>
+                )}
               </div>
               <div className="agent-card__actions">
+                {!definition.installed &&
+                  definition.install.requirement?.executable &&
+                  definition.install.requirement.available && (
+                    <button
+                      type="button"
+                      className="button button--primary button--sm"
+                      disabled={installDisabled}
+                      onClick={() => {
+                        const requirement = definition.install.requirement;
+                        if (!requirement) return;
+                        setPendingInstall({
+                          id: definition.id,
+                          label: requirement.name,
+                          install: requirement,
+                        });
+                      }}
+                    >
+                      <TerminalIcon size={12} />
+                      {installing === definition.id
+                        ? t("agents.installing")
+                        : t("agents.install.requirementAction", {
+                            name: definition.install.requirement.name,
+                          })}
+                    </button>
+                  )}
                 {!definition.installed &&
                   (definition.install.executable && definition.install.available ? (
                     <button

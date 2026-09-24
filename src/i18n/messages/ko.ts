@@ -1074,6 +1074,8 @@ export const messages: Messages = {
   "agents.install.sessionLabel": "설치 {name}",
   "agents.install.copySource": "복사 설치 가이드 URL",
   "agents.install.sourceCopied": "URL 복사",
+  "agents.install.requirement": "이 명령을 실행하려면 먼저 {name}을(를) 설치해야 합니다.",
+  "agents.install.requirementAction": "{name} 먼저 설치",
   "agents.install.confirm.title": "설치 {name}?",
   "agents.install.confirm.body": "LatticeTerm은 눈에 보이는 맨끝을 열고 이 조정 임명 명령을 실행할 것입니다: {command}. 그것은 소프트웨어를 다운로드하고 당신의 사용자 환경에 쓰기. 설치가 PATH를 변경하는 경우에, 상쾌한 탐지의 앞에 LatticeTerm를 재시작하십시오.",
   "agents.install.confirm.action": "installer 맨끝을 여십시오",

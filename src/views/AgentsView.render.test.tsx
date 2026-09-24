@@ -209,6 +209,33 @@ describe("AgentsView", () => {
     expect(markup).not.toContain("啟動時使用的帳號");
   });
 
+  it("offers installing Node.js first when npm is missing", () => {
+    const markup = render(fakeAgentApi({
+      catalog: [fakeDefinition({
+        installed: false,
+        installedPath: null,
+        install: {
+          executable: "npm",
+          arguments: ["install", "-g", "@openai/codex"],
+          displayCommand: "npm install -g @openai/codex",
+          sourceUrl: "https://example.com/codex",
+          available: false,
+          requirement: {
+            name: "Node.js",
+            executable: "powershell.exe",
+            arguments: ["-Command", "install"],
+            displayCommand: "msiexec /i node-<LTS>.msi",
+            sourceUrl: "https://nodejs.org/en/download",
+            available: true,
+          },
+        },
+      })],
+    }));
+
+    expect(markup).toContain("需要先安裝 Node.js");
+    expect(markup).toContain("先安裝 Node.js");
+  });
+
   it("offers keeping a session in the background and badges one that is", () => {
     const markup = render(fakeAgentApi({
       sessions: [fakeSession({ detached: true, label: "夜間批次" })],

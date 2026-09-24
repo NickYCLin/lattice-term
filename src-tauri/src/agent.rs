@@ -278,6 +278,17 @@ pub struct AgentInstallDefinition {
     pub display_command: String,
     pub source_url: String,
     pub available: bool,
+    /// A runtime the installer itself needs, reported only while it is
+    /// missing (for example Node.js for an `npm install -g` recipe).
+    pub requirement: Option<Box<AgentInstallRequirement>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInstallRequirement {
+    pub name: String,
+    #[serde(flatten)]
+    pub install: AgentInstallDefinition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -5101,6 +5112,7 @@ fn direct_install(
         display_command: display_command.to_string(),
         source_url: source_url.to_string(),
         available: find_executable(executable).is_some(),
+        requirement: None,
     }
 }
 
@@ -5111,16 +5123,118 @@ fn manual_install(display_command: &str, source_url: &str) -> AgentInstallDefini
         display_command: display_command.to_string(),
         source_url: source_url.to_string(),
         available: false,
+        requirement: None,
     }
 }
 
 fn npm_install(package: &str, source_url: &str) -> AgentInstallDefinition {
-    direct_install(
-        "npm",
-        &["install", "-g", package],
-        &format!("npm install -g {package}"),
-        source_url,
-    )
+    let npm = find_npm();
+    AgentInstallDefinition {
+        // A resolved path keeps the recipe usable right after Node.js was
+        // installed, while this process still holds its old PATH.
+        executable: Some(
+            npm.as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "npm".to_string()),
+        ),
+        arguments: ["install", "-g", package]
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        display_command: format!("npm install -g {package}"),
+        source_url: source_url.to_string(),
+        available: npm.is_some(),
+        requirement: npm.is_none().then(|| Box::new(node_requirement())),
+    }
+}
+
+const NODE_DOWNLOAD_URL: &str = "https://nodejs.org/en/download";
+
+/// Installs the current Node.js LTS from the official nodejs.org MSI. The
+/// installer is only run after its SHA-256 matches the release's
+/// SHASUMS256.txt. The script avoids double quotes so it survives Windows
+/// command-line quoting unchanged.
+#[cfg(windows)]
+const NODE_LTS_INSTALL_SCRIPT: &str = concat!(
+    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; ",
+    "[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor 3072; ",
+    "$arch='x64'; if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $arch='arm64' }; ",
+    "$index=Invoke-RestMethod 'https://nodejs.org/dist/index.json'; ",
+    "$release=($index | Where-Object { $_.lts -and ($_.files -contains ('win-'+$arch+'-msi')) } | Select-Object -First 1).version; ",
+    "if (-not $release) { throw 'No Node.js LTS installer was found.' }; ",
+    "$name='node-'+$release+'-'+$arch+'.msi'; $base='https://nodejs.org/dist/'+$release+'/'; ",
+    "$msi=Join-Path $env:TEMP $name; ",
+    "Write-Host ('Downloading '+$base+$name); ",
+    "Invoke-WebRequest ($base+$name) -OutFile $msi -UseBasicParsing; ",
+    "$line=(Invoke-RestMethod ($base+'SHASUMS256.txt')) -split '\\r?\\n' | Where-Object { $_.EndsWith('  '+$name) } | Select-Object -First 1; ",
+    "if (-not $line -or ((Get-FileHash $msi -Algorithm SHA256).Hash -ne $line.Split(' ')[0])) { Remove-Item $msi -ErrorAction SilentlyContinue; throw 'The Node.js installer checksum does not match.' }; ",
+    "Write-Host 'SHA-256 verified. Installing Node.js...'; ",
+    "msiexec.exe /i $msi /passive /norestart | Out-Null; $code=$LASTEXITCODE; ",
+    "Remove-Item $msi -ErrorAction SilentlyContinue; ",
+    "if (@(0,3010) -notcontains $code) { throw ('The Node.js installer exited with code '+$code) }; ",
+    "Write-Host 'Node.js is installed. Return to LatticeTerm to install the CLI.'"
+);
+
+#[cfg(windows)]
+fn node_requirement() -> AgentInstallRequirement {
+    AgentInstallRequirement {
+        name: "Node.js".to_string(),
+        install: direct_install(
+            "powershell.exe",
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                NODE_LTS_INSTALL_SCRIPT,
+            ],
+            "msiexec /i node-<LTS>.msi  (nodejs.org, SHA-256 verified)",
+            NODE_DOWNLOAD_URL,
+        ),
+    }
+}
+
+#[cfg(not(windows))]
+fn node_requirement() -> AgentInstallRequirement {
+    AgentInstallRequirement {
+        name: "Node.js".to_string(),
+        install: manual_install(NODE_DOWNLOAD_URL, NODE_DOWNLOAD_URL),
+    }
+}
+
+fn find_npm() -> Option<PathBuf> {
+    find_executable("npm").or_else(|| find_npm_in(&well_known_node_directories()))
+}
+
+/// Standard Node.js install folders. The MSI adds them to PATH, but a
+/// running desktop process keeps the PATH it started with.
+#[cfg(windows)]
+fn well_known_node_directories() -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = std::env::var_os(variable) {
+            directories.push(PathBuf::from(root).join("nodejs"));
+        }
+    }
+    if let Some(root) = std::env::var_os("LOCALAPPDATA") {
+        directories.push(PathBuf::from(root).join("Programs").join("nodejs"));
+    }
+    directories
+}
+
+#[cfg(not(windows))]
+fn well_known_node_directories() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn find_npm_in(directories: &[PathBuf]) -> Option<PathBuf> {
+    directories.iter().find_map(|directory| {
+        let candidate = directory.join("npm.cmd");
+        is_executable(&candidate)
+            .then(|| plain_win32_path(candidate.canonicalize().unwrap_or(candidate)))
+    })
 }
 
 #[cfg(windows)]
@@ -9281,7 +9395,47 @@ model = "gpt-5.3-codex"
                     definition.id
                 );
             }
+            if let Some(requirement) = &definition.install.requirement {
+                assert!(!requirement.name.is_empty());
+                assert!(requirement.install.source_url.starts_with("https://"));
+                assert!(requirement.install.requirement.is_none());
+            }
         }
+    }
+
+    #[test]
+    fn a_missing_npm_asks_for_node_from_the_official_source() {
+        let requirement = node_requirement();
+        assert_eq!(requirement.name, "Node.js");
+        assert_eq!(
+            requirement.install.source_url,
+            "https://nodejs.org/en/download"
+        );
+        #[cfg(windows)]
+        {
+            let script = requirement.install.arguments.last().expect("script");
+            assert!(script.contains("https://nodejs.org/dist/index.json"));
+            assert!(script.contains("SHASUMS256.txt"));
+            assert!(script.contains("Get-FileHash"));
+            assert!(
+                !script.contains('"'),
+                "the script must survive argv quoting"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn finds_npm_in_a_node_folder_missing_from_the_process_path() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let empty = root.path().join("empty");
+        let node = root.path().join("nodejs");
+        std::fs::create_dir_all(&empty).expect("empty dir");
+        std::fs::create_dir_all(&node).expect("node dir");
+        assert!(find_npm_in(&[empty.clone(), node.clone()]).is_none());
+        std::fs::write(node.join("npm.cmd"), "@echo off").expect("npm shim");
+        let found = find_npm_in(&[empty, node]).expect("npm");
+        assert!(found.ends_with("npm.cmd"));
     }
 
     #[test]
