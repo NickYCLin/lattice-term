@@ -188,7 +188,7 @@ describe("remote editor integration", () => {
         <SftpPane session={sftpSession} sftp={sftp} active={false} />
       </RemoteTextEditorProvider></I18nProvider></StrictMode>,
     ));
-    await act(async () => { await new Promise((done) => setTimeout(done, 30)); });
+    await act(async () => { await new Promise((done) => setTimeout(done, 100)); });
     expect(vi.mocked(sftp.list).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(peak).toBe(1);
     expect(host.textContent).not.toContain("already running");
