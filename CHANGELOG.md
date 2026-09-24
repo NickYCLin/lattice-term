@@ -4,6 +4,23 @@
 
 ---
 
+## [2026.9.25](https://github.com/NickYCLin/lattice-term/compare/v2026.9.24...v2026.9.25) (2026-09-24)
+
+
+### 🚀 新增功能
+
+* **agents:** 沒有 npm 時可先從卡片安裝 Node.js ([df1a0c9](https://github.com/NickYCLin/lattice-term/commit/df1a0c91dcf5adedd09d9bba62e1a8c4c12c6032))
+* **cli:** 外接工具更新視窗支援直接更新 ([f94f626](https://github.com/NickYCLin/lattice-term/commit/f94f626cc1997b2832847a4ab35c46dab0098387))
+* **session:** 同步刪除原生對話、支援專案移除並統一資料夾圖示尺寸 ([6f1eb8a](https://github.com/NickYCLin/lattice-term/commit/6f1eb8af9f97e92fe1607ee0d6b6c006792c19d6))
+
+
+### 🛠️ 問題修正
+
+* **build:** Windows sidecar 改為靜態連結 VC runtime ([c518aac](https://github.com/NickYCLin/lattice-term/commit/c518aac26b52f31ea1bf13a6e97f43ea03201aa4))
+* **chat:** Codex 對話閒置一分鐘後釋放給 Codex Desktop ([9bbd744](https://github.com/NickYCLin/lattice-term/commit/9bbd7448b589849e0e91dfc103c85e76c91942d3))
+* **mcp:** 連線簿改由桌面回應並自動授權已開啟的連線 ([a5ab691](https://github.com/NickYCLin/lattice-term/commit/a5ab6919263ca8cd0152ef7ce6812cb976a8e802))
+* **notify:** 同時完成好幾個任務時只響一聲 ([192b1b0](https://github.com/NickYCLin/lattice-term/commit/192b1b052dcdd2dacdbba341a10b38c514e30013))
+
 ## [2026.9.24](https://github.com/NickYCLin/lattice-term/compare/v2026.9.23...v2026.9.24) (2026-09-23)
 
 
