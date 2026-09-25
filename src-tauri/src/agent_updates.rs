@@ -1,6 +1,10 @@
 //! Read-only CLI version checks. Never run an installer or a conversation.
 use serde::Serialize;
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +28,62 @@ fn package(id: &str) -> Option<&'static str> {
         "qwen" => "@qwen-code/qwen-code",
         _ => return None,
     })
+}
+
+// The CLI's own updater, used when it was not installed through npm (for
+// example Claude Code's native installer or a Homebrew/standalone build).
+// Running `npm install -g` over those fails with EEXIST or installs a second
+// copy that PATH never reaches.
+fn self_update_args(id: &str) -> Option<&'static [&'static str]> {
+    Some(match id {
+        "claude" | "codex" | "copilot" | "qwen" => &["update"],
+        "opencode" => &["upgrade"],
+        _ => return None,
+    })
+}
+
+fn installed_by_npm(path: &Path, package: &str) -> bool {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if resolved
+        .components()
+        .any(|part| part.as_os_str() == "node_modules")
+    {
+        return true;
+    }
+    // Windows npm shims (`codex.cmd`) sit next to the global node_modules.
+    resolved
+        .parent()
+        .is_some_and(|dir| dir.join("node_modules").join(package).is_dir())
+}
+
+/// Program and arguments that update this CLI the same way it was installed.
+fn update_command(id: &str, installed: Option<&Path>) -> Result<(PathBuf, Vec<String>), String> {
+    let definition = crate::agent::install_definition(id);
+    let npm = || -> Result<(PathBuf, Vec<String>), String> {
+        let executable = definition
+            .executable
+            .as_deref()
+            .ok_or_else(|| "此 CLI 未提供直接更新指令，請參閱官方說明。".to_string())?;
+        let path = crate::agent::find_executable(executable)
+            .ok_or_else(|| format!("找不到執行檔 {executable}，無法執行更新。"))?;
+        Ok((path, definition.arguments.clone()))
+    };
+    let (Some(path), Some(package)) = (installed, package(id)) else {
+        return npm();
+    };
+    if installed_by_npm(path, package) {
+        return npm();
+    }
+    match self_update_args(id) {
+        Some(args) => Ok((
+            path.to_path_buf(),
+            args.iter().map(|arg| arg.to_string()).collect(),
+        )),
+        None => Err(format!(
+            "這個 CLI 不是用 npm 安裝的，請用原本的安裝方式更新：{}",
+            definition.source_url
+        )),
+    }
 }
 
 // Accept only stable three-part versions. Preview/nightly builds must not be
@@ -78,10 +138,11 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
     for definition in catalog.into_iter().filter(|item| item.installed) {
         let client = client.clone();
         tasks.spawn(async move {
-            let updatable = crate::agent::install_definition(&definition.id)
-                .executable
-                .as_ref()
-                .is_some_and(|exe| crate::agent::find_executable(exe).is_some());
+            let updatable = update_command(
+                &definition.id,
+                definition.installed_path.as_deref().map(Path::new),
+            )
+            .is_ok();
             let mut result = CliUpdate {
                 id: definition.id.clone(),
                 label: definition.label,
@@ -138,18 +199,21 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
 }
 
 pub async fn update(id: &str) -> Result<String, String> {
-    let definition = crate::agent::install_definition(id);
-    let executable = definition
-        .executable
-        .as_deref()
-        .ok_or_else(|| "此 CLI 未提供直接更新指令，請參閱官方說明。".to_string())?;
-    let exe_path = crate::agent::find_executable(executable)
-        .ok_or_else(|| format!("找不到執行檔 {executable}，無法執行更新。"))?;
+    let owned_id = id.to_string();
+    let (exe_path, arguments) = tauri::async_runtime::spawn_blocking(move || {
+        let installed = crate::agent::catalog()
+            .into_iter()
+            .find(|item| item.id == owned_id)
+            .and_then(|item| item.installed_path);
+        update_command(&owned_id, installed.as_deref().map(Path::new))
+    })
+    .await
+    .map_err(|_| "無法檢查已安裝的 CLI。".to_string())??;
     let (program, prefix_args) = crate::agent::launch_parts(&exe_path);
     let mut command = tokio::process::Command::new(program);
     command
         .args(prefix_args)
-        .args(&definition.arguments)
+        .args(&arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -198,6 +262,45 @@ mod tests {
         assert_eq!(package("codex"), Some("@openai/codex"));
         assert_eq!(package("droid"), None);
         assert_eq!(package("custom"), None);
+    }
+
+    #[test]
+    fn native_installs_use_their_own_updater_instead_of_npm() {
+        let root = std::env::temp_dir().join(format!("lt-update-{}", std::process::id()));
+        let native = root
+            .join("share")
+            .join("claude")
+            .join("versions")
+            .join("2.1.0");
+        let npm_bin = root
+            .join("lib")
+            .join("node_modules")
+            .join("@openai")
+            .join("codex")
+            .join("bin");
+        let shim_dir = root.join("npm");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&npm_bin).unwrap();
+        std::fs::create_dir_all(shim_dir.join("node_modules").join("@openai").join("codex"))
+            .unwrap();
+        std::fs::write(&native, "").unwrap();
+        std::fs::write(npm_bin.join("codex.js"), "").unwrap();
+        std::fs::write(shim_dir.join("codex.cmd"), "").unwrap();
+
+        assert!(!installed_by_npm(&native, "@anthropic-ai/claude-code"));
+        assert!(installed_by_npm(&npm_bin.join("codex.js"), "@openai/codex"));
+        assert!(installed_by_npm(
+            &shim_dir.join("codex.cmd"),
+            "@openai/codex"
+        ));
+
+        let (program, args) = update_command("claude", Some(&native)).unwrap();
+        assert_eq!(program, native);
+        assert_eq!(args, ["update"]);
+        let error = update_command("gemini", Some(&native)).unwrap_err();
+        assert!(error.contains("npm"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]
