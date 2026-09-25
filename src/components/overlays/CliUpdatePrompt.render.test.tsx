@@ -12,7 +12,7 @@ it("distinguishes available, unknown and manually checked CLIs with direct updat
           { id: "claude", label: "Claude", currentVersion: null, latestVersion: null, status: "error", sourceUrl: "https://code.claude.com/docs" },
           { id: "cursor", label: "Cursor", currentVersion: null, latestVersion: null, status: "manual", sourceUrl: "https://cursor.com/docs" },
         ],
-        busy: true, updating: null, error: false, updateError: null, visible: true,
+        busy: true, updating: null, error: false, updateError: null, updated: [], visible: true,
         check: vi.fn(), dismiss: vi.fn(), updateCli: vi.fn(), updateAll: vi.fn(),
       }} />
     </I18nProvider>,

@@ -20,6 +20,7 @@ export function useCliUpdates(enabled: boolean) {
   const [items, setItems] = useState<CliUpdate[]>([]);
   const [error, setError] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [updated, setUpdated] = useState<string[]>([]);
 
   const check = useCallback(async () => {
     if (checking.current) return;
@@ -41,8 +42,12 @@ export function useCliUpdates(enabled: boolean) {
       if (updating !== null) return false;
       setUpdating(id);
       setUpdateError(null);
+      const label = items.find((item) => item.id === id)?.label ?? id;
       try {
         await invoke<string>("agent_update_cli", { id });
+        setUpdated((current) =>
+          current.includes(label) ? current : [...current, label],
+        );
         await check();
         return true;
       } catch (err) {
@@ -52,7 +57,7 @@ export function useCliUpdates(enabled: boolean) {
         setUpdating(null);
       }
     },
-    [check, updating],
+    [check, items, updating],
   );
 
   const updateAll = useCallback(async () => {
@@ -63,13 +68,28 @@ export function useCliUpdates(enabled: boolean) {
     if (targets.length === 0) return;
     setUpdating("all");
     setUpdateError(null);
+    // One failing CLI must not leave the rest un-updated or the list stale.
+    const failures: string[] = [];
+    const succeeded: string[] = [];
     try {
       for (const target of targets) {
-        await invoke<string>("agent_update_cli", { id: target.id });
+        try {
+          await invoke<string>("agent_update_cli", { id: target.id });
+          succeeded.push(target.label);
+        } catch (err) {
+          failures.push(
+            `${target.label}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
+      if (succeeded.length > 0) {
+        setUpdated((current) => [
+          ...current,
+          ...succeeded.filter((label) => !current.includes(label)),
+        ]);
+      }
+      if (failures.length > 0) setUpdateError(failures.join("\n"));
       await check();
-    } catch (err) {
-      setUpdateError(err instanceof Error ? err.message : String(err));
     } finally {
       setUpdating(null);
     }
@@ -87,12 +107,14 @@ export function useCliUpdates(enabled: boolean) {
     updating,
     error,
     updateError,
+    updated,
     check,
     updateCli,
     updateAll,
     visible:
       !dismissed &&
       (error ||
+        updated.length > 0 ||
         items.some(
           (item) => item.status === "available" || item.status === "error",
         )),

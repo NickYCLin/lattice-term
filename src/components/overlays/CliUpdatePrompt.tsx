@@ -9,7 +9,7 @@ export function CliUpdatePrompt({
 }: {
   updates: ReturnType<typeof useCliUpdates>;
 }) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const isUpdating = updates.updating !== null;
@@ -46,8 +46,15 @@ export function CliUpdatePrompt({
         <p className="dialog__body">{t("cliUpdates.hint")}</p>
         <div className="update-prompt__notes" aria-live="polite">
           {updates.error && <p role="alert">{t("cliUpdates.error")}</p>}
+          {updates.updated.length > 0 && (
+            <p role="status">
+              {t("cliUpdates.updated", {
+                names: updates.updated.join(/^(zh|ja)/.test(tag) ? "、" : ", "),
+              })}
+            </p>
+          )}
           {updates.updateError && (
-            <p role="alert" className="tone-danger">
+            <p role="alert" className="tone-danger" style={{ whiteSpace: "pre-line" }}>
               {updates.updateError}
             </p>
           )}

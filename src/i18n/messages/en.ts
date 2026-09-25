@@ -76,6 +76,7 @@ export const en: Messages = {
   "cliUpdates.update": "Update",
   "cliUpdates.updating": "Updating…",
   "cliUpdates.updateAll": "Update all",
+  "cliUpdates.updated": "Updated {names}. Restart open sessions to use the new version.",
   "cliUpdates.close": "Close",
   "sessionChat.shared": "Shares the same CLI with Sessions. Messages go to the existing conversation.",
   "sessionChat.terminal": "Open this session in Terminal",

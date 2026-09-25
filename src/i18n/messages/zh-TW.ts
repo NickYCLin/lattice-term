@@ -73,6 +73,7 @@ export const zhTW = {
   "cliUpdates.update": "更新",
   "cliUpdates.updating": "更新中…",
   "cliUpdates.updateAll": "全部更新",
+  "cliUpdates.updated": "已更新 {names}。已經開著的工作階段要重新啟動才會用到新版。",
   "cliUpdates.close": "關閉",
   "sessionChat.shared": "與工作階段頁共用同一個 CLI，訊息會送到原本的對話。",
   "sessionChat.terminal": "開啟這個工作階段的終端機",
