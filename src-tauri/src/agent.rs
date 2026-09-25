@@ -938,8 +938,6 @@ struct AgentSessionEntry {
     queued_prompts: Mutex<VecDeque<QueuedPrompt>>,
     /// Keeps per-session integration files alive only as long as their PTY.
     _integration_settings: Option<AgentIntegrationSettings>,
-    /// Gemini's update-check defaults, kept as long as the process reads them.
-    _gemini_update_defaults: Option<tempfile::NamedTempFile>,
     /// The CLIProxyAPI model list Codex reads for `/model`, kept as long as
     /// the process that was pointed at it.
     _proxy_catalog: Option<crate::cliproxy::catalog::ModelCatalog>,
@@ -3283,36 +3281,6 @@ fn self_update_disable_variable(definition_id: &str) -> Option<(&'static str, &'
         "copilot" => Some(("COPILOT_AUTO_UPDATE", "false")),
         _ => None,
     }
-}
-
-// Gemini has no environment switch for its update check. System defaults sit
-// just above the built-in schema, so user and workspace settings still win.
-fn gemini_update_defaults_value() -> serde_json::Value {
-    serde_json::json!({
-        "general": {
-            "enableAutoUpdate": false,
-            "enableAutoUpdateNotification": false
-        }
-    })
-}
-
-fn gemini_update_defaults_file() -> Result<Option<tempfile::NamedTempFile>, String> {
-    if std::env::var_os("GEMINI_CLI_SYSTEM_DEFAULTS_PATH").is_some() {
-        return Ok(None);
-    }
-    if default_gemini_system_settings_paths().is_some_and(|(_, defaults)| defaults.exists()) {
-        return Ok(None);
-    }
-    let mut file = tempfile::Builder::new()
-        .prefix("latticeterm-gemini-defaults-")
-        .suffix(".json")
-        .tempfile()
-        .map_err(|error| format!("Cannot create Gemini update defaults: {error}"))?;
-    serde_json::to_writer(&mut file, &gemini_update_defaults_value())
-        .map_err(|error| format!("Cannot write Gemini update defaults: {error}"))?;
-    file.flush()
-        .map_err(|error| format!("Cannot finish Gemini update defaults: {error}"))?;
-    Ok(Some(file))
 }
 
 fn codex_reporter_arguments(arguments: Vec<String>, reporter_executable: &Path) -> Vec<String> {
@@ -6886,14 +6854,6 @@ pub fn launch_with_replay(
             command.env(variable, value);
         }
     }
-    let gemini_update_defaults = if definition_id == "gemini" {
-        gemini_update_defaults_file().ok().flatten()
-    } else {
-        None
-    };
-    if let Some(file) = gemini_update_defaults.as_ref() {
-        command.env("GEMINI_CLI_SYSTEM_DEFAULTS_PATH", file.path());
-    }
     command.env_remove(crate::cliproxy::launch::KEY_ENV);
     if let Some(key) = proxy.as_ref().and_then(|proxy| proxy.key()) {
         command.env(crate::cliproxy::launch::KEY_ENV, key);
@@ -7093,7 +7053,6 @@ pub fn launch_with_replay(
         reported_usage_requests: Mutex::new(ReportedUsageRequests::default()),
         queued_prompts: Mutex::new(VecDeque::new()),
         _integration_settings: integration_settings,
-        _gemini_update_defaults: gemini_update_defaults,
         _proxy_catalog: proxy_catalog,
         staged_images: Mutex::new(StagedAgentImages::default()),
     });
@@ -10852,13 +10811,6 @@ notify = ["notify.exe", "turn-ended"]"#,
             Some(("COPILOT_AUTO_UPDATE", "false"))
         );
         assert_eq!(self_update_disable_variable("codex"), None);
-    }
-
-    #[test]
-    fn gemini_update_defaults_turn_off_the_check_and_the_prompt() {
-        let value = gemini_update_defaults_value();
-        assert_eq!(value["general"]["enableAutoUpdate"], false);
-        assert_eq!(value["general"]["enableAutoUpdateNotification"], false);
     }
 
     #[test]
