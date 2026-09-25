@@ -3250,6 +3250,37 @@ fn codex_reporter_arguments_with_forward(
     arguments
 }
 
+// LatticeTerm checks and updates every CLI once at app launch. Sessions it
+// starts must not repeat that work with their own startup update prompts or
+// background self-updates; an explicit user override still wins.
+fn codex_update_check_arguments(mut arguments: Vec<String>) -> Vec<String> {
+    let explicitly_overridden = arguments.windows(2).any(|pair| {
+        (pair[0] == "-c" || pair[0] == "--config")
+            && pair[1]
+                .trim_start()
+                .strip_prefix("check_for_update_on_startup")
+                .is_some_and(|value| value.trim_start().starts_with('='))
+    });
+    if !explicitly_overridden {
+        arguments.splice(
+            0..0,
+            [
+                "-c".to_string(),
+                "check_for_update_on_startup=false".to_string(),
+            ],
+        );
+    }
+    arguments
+}
+
+fn self_update_disable_variable(definition_id: &str) -> Option<&'static str> {
+    match definition_id {
+        "claude" => Some("DISABLE_AUTOUPDATER"),
+        "opencode" => Some("OPENCODE_DISABLE_AUTOUPDATE"),
+        _ => None,
+    }
+}
+
 fn codex_reporter_arguments(arguments: Vec<String>, reporter_executable: &Path) -> Vec<String> {
     codex_reporter_arguments_with_forward(
         arguments,
@@ -6628,6 +6659,7 @@ pub fn launch_with_replay(
         if let Some(mcp) = registry.mcp.as_ref() {
             arguments = crate::agent_mcp::prepend_codex_arguments(arguments, mcp);
         }
+        arguments = codex_update_check_arguments(arguments);
     } else if definition_id == "antigravity" {
         // Antigravity does not expose a new interactive conversation id on
         // stdout. Its process-scoped log does, so use an isolated temporary
@@ -6815,6 +6847,11 @@ pub fn launch_with_replay(
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("LATTICETERM_AGENT_SESSION", &session_id);
+    if let Some(variable) = self_update_disable_variable(&definition_id) {
+        if std::env::var_os(variable).is_none() {
+            command.env(variable, "1");
+        }
+    }
     command.env_remove(crate::cliproxy::launch::KEY_ENV);
     if let Some(key) = proxy.as_ref().and_then(|proxy| proxy.key()) {
         command.env(crate::cliproxy::launch::KEY_ENV, key);
@@ -10732,6 +10769,38 @@ notify = ["notify.exe", "turn-ended"]"#,
             ),
             arguments
         );
+    }
+
+    #[test]
+    fn codex_sessions_skip_the_startup_update_check() {
+        let arguments = codex_update_check_arguments(vec!["resume".to_string()]);
+        assert_eq!(
+            arguments,
+            ["-c", "check_for_update_on_startup=false", "resume"]
+        );
+        assert_eq!(codex_update_check_arguments(arguments.clone()), arguments);
+    }
+
+    #[test]
+    fn codex_update_check_respects_an_explicit_launch_override() {
+        let arguments = vec![
+            "--config".to_string(),
+            "check_for_update_on_startup = true".to_string(),
+        ];
+        assert_eq!(codex_update_check_arguments(arguments.clone()), arguments);
+    }
+
+    #[test]
+    fn self_updating_clis_are_told_not_to_update_themselves() {
+        assert_eq!(
+            self_update_disable_variable("claude"),
+            Some("DISABLE_AUTOUPDATER")
+        );
+        assert_eq!(
+            self_update_disable_variable("opencode"),
+            Some("OPENCODE_DISABLE_AUTOUPDATE")
+        );
+        assert_eq!(self_update_disable_variable("codex"), None);
     }
 
     #[test]
