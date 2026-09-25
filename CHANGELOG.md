@@ -4,6 +4,18 @@
 
 ---
 
+## [2026.9.26](https://github.com/NickYCLin/lattice-term/compare/v2026.9.25...v2026.9.26) (2026-09-25)
+
+
+### 🛠️ 問題修正
+
+* **agent:** Gemini、Qwen、Copilot 也不再自己檢查更新 ([c2aff6a](https://github.com/NickYCLin/lattice-term/commit/c2aff6a38a6520d5ede3c39ba21af0d44936a3a4))
+* **agent:** 不是用 npm 裝的 CLI 改用它自己的更新指令 ([11376c8](https://github.com/NickYCLin/lattice-term/commit/11376c846668c3defe892434a5bc825f0fcc62f8))
+* **agent:** 全部更新時一個 CLI 失敗不再中斷其他的 ([bea9868](https://github.com/NickYCLin/lattice-term/commit/bea9868e9130d179dd94cb212b0de6563987549d))
+* **agent:** 拿掉對 Gemini 沒有作用的更新預設檔 ([b67881b](https://github.com/NickYCLin/lattice-term/commit/b67881bd3ae9156c5af362628c10ce2e4dc6404d))
+* **agent:** 更新沒權限時直接告訴使用者要怎麼重跑 ([602a7ec](https://github.com/NickYCLin/lattice-term/commit/602a7eca1b5af51b0edfcbe4c4a554306c296d3c))
+* **agent:** 開好的工作階段不再自己檢查 CLI 更新 ([52058b4](https://github.com/NickYCLin/lattice-term/commit/52058b458d9b141e0045acee77269c38f2ec28a3))
+
 ## [2026.9.25](https://github.com/NickYCLin/lattice-term/compare/v2026.9.24...v2026.9.25) (2026-09-24)
 
 
