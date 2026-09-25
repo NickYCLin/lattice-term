@@ -198,6 +198,34 @@ pub async fn check() -> Result<Vec<CliUpdate>, String> {
     Ok(results)
 }
 
+fn program_display(path: &Path, arguments: &[String]) -> String {
+    let name = path
+        .file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    std::iter::once(name)
+        .chain(arguments.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// npm prints dozens of log lines on failure; keep the tail and, for the
+/// common permission error, say what to do instead of only what broke.
+fn failure_message(detail: &str, command: &str) -> String {
+    let lines: Vec<&str> = detail.lines().collect();
+    let tail = lines[lines.len().saturating_sub(8)..].join("\n");
+    if detail.contains("EACCES") || detail.contains("EPERM") {
+        let elevate = if cfg!(windows) {
+            "以系統管理員身分開啟終端機"
+        } else {
+            "在終端機用 sudo"
+        };
+        format!("更新失敗：沒有權限寫入安裝目錄。請{elevate}執行 {command}\n{tail}")
+    } else {
+        format!("更新失敗: {tail}")
+    }
+}
+
 pub async fn update(id: &str) -> Result<String, String> {
     let owned_id = id.to_string();
     let (exe_path, arguments) = tauri::async_runtime::spawn_blocking(move || {
@@ -234,7 +262,10 @@ pub async fn update(id: &str) -> Result<String, String> {
         } else {
             format!("退出代碼: {:?}", output.status.code())
         };
-        return Err(format!("更新失敗: {detail}"));
+        return Err(failure_message(
+            &detail,
+            &program_display(&exe_path, &arguments),
+        ));
     }
     Ok(format!("{id} 更新成功"))
 }
@@ -301,6 +332,27 @@ mod tests {
         assert!(error.contains("npm"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn permission_errors_say_how_to_retry_and_keep_only_the_tail() {
+        let log = (1..=20)
+            .map(|line| format!("npm error line {line}"))
+            .chain(["npm error code EACCES".to_string()])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = failure_message(&log, "npm install -g @openai/codex");
+        assert!(message.contains("npm install -g @openai/codex"));
+        assert!(message.contains("EACCES"));
+        assert!(!message.contains("line 1\n"));
+        assert_eq!(failure_message("boom", "codex update"), "更新失敗: boom");
+        assert_eq!(
+            program_display(
+                Path::new("/usr/bin/npm"),
+                &["install".into(), "-g".into(), "x".into()]
+            ),
+            "npm install -g x"
+        );
     }
 
     #[tokio::test]
