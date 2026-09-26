@@ -277,6 +277,33 @@ pub(super) fn command(config: &FleetWorkspace) -> String {
 fn unknown() -> ServiceError {
     ServiceError::new("unknown_outcome", "The remote workspace did not confirm the outcome. Inspect sessions and the original request ID; do not retry with a new ID.")
 }
+/// The host's own reason, so the person knows what to fix on that machine.
+/// It is untrusted text: control characters are dropped and length bounded.
+/// Only a write keeps the unknown outcome; a read that failed changed nothing.
+fn relay_failure(action: &FleetAction, reason: &str) -> ServiceError {
+    let reason: String = reason
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(240)
+        .collect();
+    let reason = reason.trim();
+    let reason = if reason.is_empty() {
+        "no reason given"
+    } else {
+        reason
+    };
+    if action.request_id().is_some() {
+        ServiceError::new(
+            "unknown_outcome",
+            &format!("The host did not confirm the Fleet operation (host reported: {reason}). Inspect sessions and the original request ID; do not retry with a new ID."),
+        )
+    } else {
+        ServiceError::new(
+            "needs_user_action",
+            &format!("The Remote host refused the Fleet request (host reported: {reason}). Fix this on the host, then retry."),
+        )
+    }
+}
 fn protocol_error() -> ServiceError {
     ServiceError::new(
         "unsupported",
@@ -517,9 +544,9 @@ pub(super) async fn execute_relay(
         },
     )
     .await
-    .map_err(|_| unknown())?;
-    if response.error.is_some() {
-        return Err(ServiceError::new("unknown_outcome", "The host did not confirm the Fleet operation. Check its workspace grants and session state before retrying."));
+    .map_err(|reason| relay_failure(action, &reason))?;
+    if let Some(reason) = response.error {
+        return Err(relay_failure(action, &reason));
     }
     let mut value = response.value;
     intersect_scopes(&mut value, scopes);
@@ -570,6 +597,30 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+    #[test]
+    fn relay_failures_keep_the_host_reason_and_only_writes_stay_unknown() {
+        let read = relay_failure(
+            &FleetAction::ListSessions {},
+            "Start an updated background service\u{7}\n and grant MCP access on the host.",
+        );
+        assert_eq!(read.code, "needs_user_action");
+        assert!(read
+            .message
+            .contains("Start an updated background service and grant MCP access on the host."));
+        let write = relay_failure(
+            &FleetAction::Cancel {
+                session_id: "daemon-1".into(),
+                scope: "turn".into(),
+                request_id: "cancel-1".into(),
+            },
+            &"x".repeat(5000),
+        );
+        assert_eq!(write.code, "unknown_outcome");
+        assert!(write.message.len() < 600);
+        assert!(relay_failure(&FleetAction::ListPlans {}, " ")
+            .message
+            .contains("no reason given"));
     }
     #[test]
     fn remote_permissions_are_intersected_with_the_local_workspace_grant() {

@@ -714,6 +714,11 @@ async fn an_observed_offline_grant_stays_revoked_when_the_same_live_handle_retur
 
         let replacement = service.grant(request.clone()).await.unwrap();
         assert_ne!(target.id, replacement.id);
+        // The retired grant is dropped rather than left as a dead duplicate.
+        let listed = service.targets();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, replacement.id);
+        assert!(listed[0].connected);
         let accepted = service
             .execute(
                 "client",

@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{watch, Semaphore};
 
 const MAX_GRANTS: usize = 64;
+const MAX_RETIRED: usize = 256;
 const MAX_OPERATIONS: usize = 256;
 const OPERATION_RETENTION: Duration = Duration::from_secs(15 * 60);
 const MAX_CALLS: usize = 8;
@@ -431,6 +432,14 @@ impl ServiceError {
         )
     }
 
+    /// The connection went offline or reconnected; its grant is gone.
+    pub(crate) fn reconnected() -> Self {
+        Self::new(
+            "needs_user_action",
+            "This connection went offline or reconnected. Call list_authorized_connections for its current targetId.",
+        )
+    }
+
     fn failed() -> Self {
         Self::new(
             "operation_failed",
@@ -626,6 +635,9 @@ struct State {
     /// the pointer back or by revoking. Keyed by the live connection itself,
     /// so reconnecting does not clear it.
     paused: HashMap<(Backend, String), Paused>,
+    /// Grants dropped after their connection went away, newest last, so a
+    /// client still holding one learns to list again instead of a refusal.
+    retired: std::collections::VecDeque<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -904,6 +916,27 @@ impl DesktopService {
             revoked: watch::channel(false).0,
         });
         let mut state = self.state.lock().map_err(|_| ServiceError::failed())?;
+        // Offline is terminal, so a retired grant can never serve again. Drop
+        // them here: otherwise every reconnection leaves one behind, the list
+        // fills with dead duplicates, and the cap eventually refuses the
+        // grant the live connection needs.
+        let retired: Vec<String> = state
+            .grants
+            .values()
+            .filter(|grant| !self.connected(grant))
+            .map(|grant| grant.view.id.clone())
+            .collect();
+        for id in retired {
+            if let Some(old) = state.grants.remove(&id) {
+                self.stop_retaining(&state, &old);
+            }
+            if state.retired.len() >= MAX_RETIRED {
+                state.retired.pop_front();
+            }
+            state.retired.push_back(id.clone());
+            state.captures.remove(&id);
+            state.screen_receipts.retain(|(target, _), _| *target != id);
+        }
         if state.grants.len() >= MAX_GRANTS {
             return Err(ServiceError::new(
                 "capacity",
@@ -1229,7 +1262,12 @@ impl DesktopService {
     fn authorized(&self, operation: &DesktopOperation) -> Result<Arc<Grant>, ServiceError> {
         let id = operation.target_id().ok_or_else(ServiceError::invalid)?;
         let state = self.state.lock().map_err(|_| ServiceError::failed())?;
-        let grant = state.grants.get(id).ok_or_else(ServiceError::denied)?;
+        let Some(grant) = state.grants.get(id) else {
+            if state.retired.iter().any(|retired| retired == id) {
+                return Err(ServiceError::reconnected());
+            }
+            return Err(ServiceError::denied());
+        };
         if *grant.revoked.borrow()
             || operation
                 .required_scope()

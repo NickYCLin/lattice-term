@@ -271,7 +271,7 @@ impl Bridge {
                                 && owner.targets.iter().any(|t| t.id == target_id)
                         })
                         .ok_or(
-                            "needs_user_action: connect and explicitly grant access in LatticeTerm",
+                            "needs_user_action: this targetId is not shared now. If the connection reconnected, call list_authorized_connections for its new targetId; otherwise connect it in LatticeTerm",
                         )?;
                     // Desktop executes the same scope check again against its own live grant.
                     let target = owner
@@ -287,7 +287,7 @@ impl Bridge {
                     }
                     if !target.connected {
                         return Err(
-                            "needs_user_action: the authorized connection is offline".into()
+                            "needs_user_action: the authorized connection is offline. Reconnect it in LatticeTerm, then call list_authorized_connections for its new targetId".into()
                         );
                     }
                     (
