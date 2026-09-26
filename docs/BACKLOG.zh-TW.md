@@ -54,5 +54,13 @@
 - `gemini-3-flash` 在代理端回 403「Verify your account to continue」，
   是代理背後的 Google 帳號需要重新驗證，不是 LatticeTerm 的問題；
   到 CLIProxyAPI 那邊重新登入該帳號即可。
-- 未涵蓋：終端機內用鍵盤操作 `/model` 選單的畫面，這次以安裝版產生的
-  模型清單檔與實際請求代替。
+- 2026-09-27 補做鍵盤操作驗收：在隔離的 `CODEX_HOME` 以 Codex 0.157.1
+  接本機模擬代理，模型清單由 LatticeTerm 同一段程式產生，啟動參數與
+  App 相同。終端機輸入 `/model` 後選單只列代理的 `gpt-5.5`、
+  `claude-sonnet-4-6`、`gemini-3-pro` 三個模型，沒有 Codex 原生清單；
+  用方向鍵選 `gemini-3-pro`、再按 Enter 選推理強度後，畫面顯示已切換，
+  下一則訊息送到代理的 `model` 欄位即為 `gemini-3-pro`，切換前則是
+  `claude-sonnet-4-6`。選擇只寫進 `latticeterm-cliproxyapi.config.toml`，
+  使用者的 `config.toml` 沒有出現預設模型。
+- 仍未涵蓋：在 LatticeTerm App 視窗內的終端機分頁操作，以及接真實
+  CLIProxyAPI 時的鍵盤操作；這兩項與上面驗證的是同一條啟動參數與清單。
