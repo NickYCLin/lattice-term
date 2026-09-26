@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.9.27](https://github.com/NickYCLin/lattice-term/compare/v2026.9.26...v2026.9.27) (2026-09-26)
+
+
+### 🛠️ 問題修正
+
+* **i18n:** 補齊七種語言缺少的介面翻譯 ([3ada2ac](https://github.com/NickYCLin/lattice-term/commit/3ada2ac7da2ec1b379d2e9fa805cbdcf29f443dc))
+* **mcp:** 顯示遠端 Fleet 被拒原因並清掉失效授權 ([2c34cea](https://github.com/NickYCLin/lattice-term/commit/2c34ceab2947e59e26920e0fa7df489203ae4192))
+
 ## [2026.9.26](https://github.com/NickYCLin/lattice-term/compare/v2026.9.25...v2026.9.26) (2026-09-25)
 
 
