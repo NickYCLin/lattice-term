@@ -694,6 +694,7 @@ export function useRemoteSessions(): RemoteApi {
   const connectRaceGuard = useRef(new SessionConnectRaceGuard());
   const eventReadiness = useRef(new SessionEventReadinessGate());
   const reconnectRequests = useRef(new Map<string, RemoteConnectRequest>());
+  const stoppedReconnects = useRef(new Set<string>());
   const connectRef = useRef<
     ((request: RemoteConnectRequest) => Promise<RemoteConnectOutcome>) | null
   >(null);
@@ -768,10 +769,12 @@ export function useRemoteSessions(): RemoteApi {
                   // Someone who already reconnected by hand gets no duplicate.
                   stillWanted: () =>
                     !cancelled &&
+                    !stoppedReconnects.current.has(sessionId) &&
                     !sessionsRef.current.some(
                       (current) => current.profileId === retry.profileId,
                     ),
                 }).then((outcome) => {
+                  stoppedReconnects.current.delete(sessionId);
                   if (cancelled) return;
                   setLastClosed((current) =>
                     current?.sessionId !== sessionId
@@ -782,7 +785,15 @@ export function useRemoteSessions(): RemoteApi {
                               (active) => active.profileId === retry.profileId,
                             ))
                         ? null
-                        : { ...current, reconnecting: false },
+                        : {
+                            ...current,
+                            reconnecting: false,
+                            reconnectFailed: outcome !== null,
+                            reason:
+                              outcome?.outcome === "failed" && outcome.detail
+                                ? outcome.detail
+                                : current.reason,
+                          },
                   );
                 });
               }
@@ -1106,7 +1117,18 @@ export function useRemoteSessions(): RemoteApi {
     [],
   );
 
-  const clearLastClosed = useCallback(() => setLastClosed(null), []);
+  // Closing the notice while it is reconnecting means "stop trying"; a
+  // connection that shows up a minute later on its own would be a surprise.
+  const clearLastClosed = useCallback(
+    () =>
+      setLastClosed((current) => {
+        if (current?.reconnecting) {
+          stoppedReconnects.current.add(current.sessionId);
+        }
+        return null;
+      }),
+    [],
+  );
 
   const readTextFile = useCallback(async (sessionId: string, path: string) => {
     const { invoke } = await core();

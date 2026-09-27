@@ -980,6 +980,8 @@ export const zhTW = {
   "terminal.sessionEnded.title": "工作階段已結束",
   "terminal.sessionClosed.body": "「{name}」已停止連線：{reason}",
   "terminal.sessionClosed.reconnecting": "「{name}」斷線了（{reason}），正在用已儲存的配對碼自動重新連線…",
+  "terminal.sessionClosed.reconnectFailed": "「{name}」自動重新連線沒有成功：{reason}。請確認對方的 LatticeTerm 有開著，再手動連線。",
+  "terminal.sessionClosed.stopReconnecting": "停止重新連線",
 
   // AI Agent Fleet --------------------------------------------------------
   "agents.hero.eyebrow": "本機協作中樞",

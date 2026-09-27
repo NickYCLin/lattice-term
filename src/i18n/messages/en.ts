@@ -1006,6 +1006,8 @@ export const en: Messages = {
   "terminal.sessionEnded.title": "Session ended",
   "terminal.sessionClosed.body": "{name} stopped unexpectedly: {reason}",
   "terminal.sessionClosed.reconnecting": "{name} disconnected ({reason}). Reconnecting with the saved pairing code…",
+  "terminal.sessionClosed.reconnectFailed": "Could not reconnect to {name} automatically: {reason}. Check that LatticeTerm is running on the other computer, then connect again.",
+  "terminal.sessionClosed.stopReconnecting": "Stop reconnecting",
 
   // AI Agent Fleet --------------------------------------------------------
   "agents.hero.eyebrow": "Local collaboration hub",

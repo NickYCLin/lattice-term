@@ -8,6 +8,8 @@ export interface SessionClosedNotice extends SessionIdentity {
   at: number;
   /** LatticeTerm is bringing this connection back by itself. */
   reconnecting?: boolean;
+  /** Every automatic attempt ran out; the person has to reconnect by hand. */
+  reconnectFailed?: boolean;
 }
 
 interface SessionEventReadinessAttempt {

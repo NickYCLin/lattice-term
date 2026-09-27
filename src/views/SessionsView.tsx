@@ -1035,14 +1035,20 @@ export function SessionsView({
             className="button button--ghost button--sm"
             onClick={latestClosed.clear}
           >
-            {t("common.close")}
+            {t(
+              latestClosed.notice.reconnecting
+                ? "terminal.sessionClosed.stopReconnecting"
+                : "common.close",
+            )}
           </button>
         }
       >
         {t(
           latestClosed.notice.reconnecting
             ? "terminal.sessionClosed.reconnecting"
-            : "terminal.sessionClosed.body",
+            : latestClosed.notice.reconnectFailed
+              ? "terminal.sessionClosed.reconnectFailed"
+              : "terminal.sessionClosed.body",
           {
             name: latestClosed.notice.label,
             reason: latestClosed.notice.reason,
