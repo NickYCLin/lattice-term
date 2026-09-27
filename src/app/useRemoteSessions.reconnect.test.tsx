@@ -99,7 +99,7 @@ it("reconnects with the saved pairing code after the host drops the share", asyn
 
   connects.push(connected("remote-2"));
   await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
-  expect(connectRequests.at(-1)).toMatchObject({
+  expect(connectRequests[connectRequests.length - 1]).toMatchObject({
     pairingCode: "",
     useSavedPairingCode: true,
     rememberPairingCode: false,
