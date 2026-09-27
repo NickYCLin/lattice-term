@@ -4,6 +4,21 @@
 
 ---
 
+## [2026.9.28](https://github.com/NickYCLin/lattice-term/compare/v2026.9.27...v2026.9.28) (2026-09-27)
+
+
+### 🚀 新增功能
+
+* **mcp:** AI 遠端指令可以對單一連線永遠允許 ([988ef7c](https://github.com/NickYCLin/lattice-term/commit/988ef7c773ee5a26eb0214c8f2f2a12d0e9075cc))
+* **remote:** Lattice Remote 斷線後用已存的配對碼自動重連 ([0ffb005](https://github.com/NickYCLin/lattice-term/commit/0ffb005b390333248bbc95c5c9961a9212f57f1b))
+
+
+### 🛠️ 問題修正
+
+* **agent:** Gemini 工作階段不再自己檢查更新 ([bcddccc](https://github.com/NickYCLin/lattice-term/commit/bcddcccbcaba8824443088a640585c521e56a89c))
+* **remote:** 自動重連可以中途停止，失敗時說明原因 ([3983cd6](https://github.com/NickYCLin/lattice-term/commit/3983cd65c6bac6112b012b707705c0976a7afb3f))
+* **test:** 重連測試不用 Array.at，讓型別檢查通過 ([f932972](https://github.com/NickYCLin/lattice-term/commit/f9329722f1ecbb115cb5622bd358aeebe90037d2))
+
 ## [2026.9.27](https://github.com/NickYCLin/lattice-term/compare/v2026.9.26...v2026.9.27) (2026-09-26)
 
 
