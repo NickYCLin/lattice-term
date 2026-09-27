@@ -1005,6 +1005,7 @@ export const en: Messages = {
   "terminal.sessionClosed.title": "Session disconnected",
   "terminal.sessionEnded.title": "Session ended",
   "terminal.sessionClosed.body": "{name} stopped unexpectedly: {reason}",
+  "terminal.sessionClosed.reconnecting": "{name} disconnected ({reason}). Reconnecting with the saved pairing code…",
 
   // AI Agent Fleet --------------------------------------------------------
   "agents.hero.eyebrow": "Local collaboration hub",

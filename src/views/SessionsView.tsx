@@ -1039,10 +1039,15 @@ export function SessionsView({
           </button>
         }
       >
-        {t("terminal.sessionClosed.body", {
-          name: latestClosed.notice.label,
-          reason: latestClosed.notice.reason,
-        })}
+        {t(
+          latestClosed.notice.reconnecting
+            ? "terminal.sessionClosed.reconnecting"
+            : "terminal.sessionClosed.body",
+          {
+            name: latestClosed.notice.label,
+            reason: latestClosed.notice.reason,
+          },
+        )}
       </Callout>
     </div>
   ) : null;

@@ -979,6 +979,7 @@ export const zhTW = {
   "terminal.sessionClosed.title": "工作階段已中斷",
   "terminal.sessionEnded.title": "工作階段已結束",
   "terminal.sessionClosed.body": "「{name}」已停止連線：{reason}",
+  "terminal.sessionClosed.reconnecting": "「{name}」斷線了（{reason}），正在用已儲存的配對碼自動重新連線…",
 
   // AI Agent Fleet --------------------------------------------------------
   "agents.hero.eyebrow": "本機協作中樞",

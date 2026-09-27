@@ -623,6 +623,65 @@ async function core() {
   return import("@tauri-apps/api/core");
 }
 
+/**
+ * Waits before each automatic attempt. The host rebuilds its share whenever
+ * its settings are applied, so the first retry comes quickly and later ones
+ * leave room for a machine that is waking up or changing networks.
+ */
+export const REMOTE_RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+
+/** Failures that another identical attempt cannot fix. */
+const FINAL_RECONNECT_STAGES = new Set([
+  "credential",
+  "pairing",
+  "profile",
+  "trust",
+  "legacyTrust",
+]);
+
+/**
+ * Only a relay connection whose pairing code sits in the credential store can
+ * come back without the person typing anything; everything else waits.
+ */
+export function remoteReconnectRequest(
+  request: RemoteConnectRequest,
+): RemoteConnectRequest | null {
+  if (!request.deviceId) return null;
+  if (!request.useSavedPairingCode && !request.rememberPairingCode) return null;
+  return {
+    ...request,
+    pairingCode: "",
+    useSavedPairingCode: true,
+    rememberPairingCode: false,
+    legacyPairing: false,
+  };
+}
+
+export async function runRemoteReconnect({
+  request,
+  connect,
+  sleep,
+  stillWanted,
+  delays = REMOTE_RECONNECT_DELAYS_MS,
+}: {
+  request: RemoteConnectRequest;
+  connect: (request: RemoteConnectRequest) => Promise<RemoteConnectOutcome>;
+  sleep: (ms: number) => Promise<void>;
+  stillWanted: () => boolean;
+  delays?: readonly number[];
+}): Promise<RemoteConnectOutcome | null> {
+  let last: RemoteConnectOutcome | null = null;
+  for (const delay of delays) {
+    await sleep(delay);
+    if (!stillWanted()) return null;
+    last = await connect(request);
+    if (last.outcome === "connected" || FINAL_RECONNECT_STAGES.has(last.stage)) {
+      return last;
+    }
+  }
+  return last;
+}
+
 export function useRemoteSessions(): RemoteApi {
   const [sessions, setSessions] = useState<RemoteSessionSummary[]>([]);
   const [transfers, setTransfers] = useState<
@@ -634,6 +693,10 @@ export function useRemoteSessions(): RemoteApi {
   const terminalOutput = useRef<RemoteTerminalOutputRouter | null>(null);
   const connectRaceGuard = useRef(new SessionConnectRaceGuard());
   const eventReadiness = useRef(new SessionEventReadinessGate());
+  const reconnectRequests = useRef(new Map<string, RemoteConnectRequest>());
+  const connectRef = useRef<
+    ((request: RemoteConnectRequest) => Promise<RemoteConnectOutcome>) | null
+  >(null);
   if (!terminalOutput.current) {
     terminalOutput.current = new RemoteTerminalOutputRouter();
   }
@@ -676,16 +739,53 @@ export function useRemoteSessions(): RemoteApi {
             terminalOutput.current?.close(sessionId);
             pendingFrames.delete(sessionId);
             const intentional = intentionalDisconnects.current.delete(sessionId);
+            const retry = reconnectRequests.current.get(sessionId);
+            reconnectRequests.current.delete(sessionId);
             if (!intentional) {
               const session = sessionsRef.current.find(
                 (current) => current.sessionId === sessionId,
               );
+              const reconnecting = Boolean(retry && session && !hydrating);
               setLastClosed({
                 sessionId,
                 label: session?.agentName ?? sessionId,
                 reason: event.payload.reason,
                 at: Date.now(),
+                reconnecting,
               });
+              if (retry && reconnecting) {
+                void runRemoteReconnect({
+                  request: retry,
+                  connect: (request) =>
+                    connectRef.current?.(request) ??
+                    Promise.resolve({
+                      outcome: "failed",
+                      stage: "events",
+                      detail: "",
+                    }),
+                  sleep: (ms) =>
+                    new Promise((resolve) => setTimeout(resolve, ms)),
+                  // Someone who already reconnected by hand gets no duplicate.
+                  stillWanted: () =>
+                    !cancelled &&
+                    !sessionsRef.current.some(
+                      (current) => current.profileId === retry.profileId,
+                    ),
+                }).then((outcome) => {
+                  if (cancelled) return;
+                  setLastClosed((current) =>
+                    current?.sessionId !== sessionId
+                      ? current
+                      : outcome?.outcome === "connected" ||
+                          (outcome === null &&
+                            sessionsRef.current.some(
+                              (active) => active.profileId === retry.profileId,
+                            ))
+                        ? null
+                        : { ...current, reconnecting: false },
+                  );
+                });
+              }
             }
             setSessions((current) =>
               current.filter((session) => session.sessionId !== sessionId),
@@ -837,6 +937,8 @@ export function useRemoteSessions(): RemoteApi {
           if (startupSnapshot) {
             terminalOutput.current?.replaySnapshot(startupSnapshot);
           }
+          const retry = remoteReconnectRequest(request);
+          if (retry) reconnectRequests.current.set(settled.sessionId, retry);
           const { outcome: _outcome, ...summary } = settled;
           setSessions((current) => [
             ...current.filter(
@@ -873,8 +975,11 @@ export function useRemoteSessions(): RemoteApi {
     [],
   );
 
+  connectRef.current = connect;
+
   const disconnect = useCallback(async (sessionId: string) => {
     intentionalDisconnects.current.add(sessionId);
+    reconnectRequests.current.delete(sessionId);
     try {
       const { invoke } = await core();
       await invoke("remote_disconnect", { sessionId });

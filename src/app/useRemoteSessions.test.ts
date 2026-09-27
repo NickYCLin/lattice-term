@@ -6,6 +6,8 @@ import {
   RemoteTerminalOutputRouter,
   reconcileRemoteFileTransfer,
   reconcileRemoteTerminalOutput,
+  remoteReconnectRequest,
+  runRemoteReconnect,
   settleRemoteConnectOutcome,
   streamRemoteFileUpload,
   type RemoteConnectOutcome,
@@ -741,5 +743,74 @@ describe("Lattice Remote connect races", () => {
     expect(settleRemoteConnectOutcome(connectedOutcome, later.finish())).toBe(
       connectedOutcome,
     );
+  });
+});
+
+describe("Lattice Remote automatic reconnect", () => {
+  const relayRequest = {
+    profileId: "mac",
+    hostname: "",
+    port: 0,
+    pairingCode: "secret-code",
+    rememberPairingCode: true,
+    deviceId: "008806370",
+    relayAddress: "relay.example",
+  };
+
+  it("only retries relay connections whose code is saved, never keeping the secret", () => {
+    expect(remoteReconnectRequest(relayRequest)).toEqual({
+      ...relayRequest,
+      pairingCode: "",
+      useSavedPairingCode: true,
+      rememberPairingCode: false,
+      legacyPairing: false,
+    });
+    expect(
+      remoteReconnectRequest({ ...relayRequest, rememberPairingCode: false }),
+    ).toBeNull();
+    expect(
+      remoteReconnectRequest({ ...relayRequest, deviceId: undefined }),
+    ).toBeNull();
+  });
+
+  it("keeps trying through transient failures and stops on a pairing refusal", async () => {
+    const sleeps: number[] = [];
+    const sleep = async (ms: number) => { sleeps.push(ms); };
+    const failed = (stage: string): RemoteConnectOutcome => ({
+      outcome: "failed", stage, detail: "",
+    });
+    const flaky = [failed("connect"), failed("connect"), connectedOutcome];
+    const outcome = await runRemoteReconnect({
+      request: relayRequest,
+      connect: async () => flaky.shift()!,
+      sleep,
+      stillWanted: () => true,
+      delays: [1, 2, 3, 4],
+    });
+    expect(outcome).toBe(connectedOutcome);
+    expect(sleeps).toEqual([1, 2, 3]);
+
+    let attempts = 0;
+    const refused = await runRemoteReconnect({
+      request: relayRequest,
+      connect: async () => { attempts += 1; return failed("pairing"); },
+      sleep,
+      stillWanted: () => true,
+      delays: [1, 2, 3],
+    });
+    expect(refused).toEqual(failed("pairing"));
+    expect(attempts).toBe(1);
+  });
+
+  it("stops without connecting once the person reconnected by hand", async () => {
+    let attempts = 0;
+    const outcome = await runRemoteReconnect({
+      request: relayRequest,
+      connect: async () => { attempts += 1; return connectedOutcome; },
+      sleep: async () => {},
+      stillWanted: () => false,
+    });
+    expect(outcome).toBeNull();
+    expect(attempts).toBe(0);
   });
 });
