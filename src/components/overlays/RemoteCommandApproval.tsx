@@ -3,7 +3,8 @@
  *
  * The exact text is shown before anything runs, refusing is the default, and
  * walking away is a refusal too: the desktop drops the proposal when its own
- * deadline passes. There is deliberately no "always allow" here.
+ * deadline passes. "Always allow" is offered last, is remembered against the
+ * saved connection only, and can be taken back in Settings.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -23,11 +24,13 @@ export function remainingSeconds(deadline: number, now: number): number {
 function ApprovalDialog({
   request,
   waiting,
+  error,
   onDecide,
 }: {
   request: PendingRemoteCommand;
   waiting: number;
-  onDecide: (approve: boolean, quietMinutes?: number) => void;
+  error?: string;
+  onDecide: (approve: boolean, quietMinutes?: number, always?: boolean) => void;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -79,6 +82,7 @@ function ApprovalDialog({
           <p className="dialog__body">{t("mcp.commandApproval.warning")}</p>
           <p className="dialog__body">{t("mcp.commandApproval.expires", { seconds })}</p>
           {waiting > 0 && <p className="dialog__body">{t("mcp.commandApproval.queued", { count: waiting })}</p>}
+          {error && <p className="dialog__body" role="alert">{t("mcp.commandApproval.alwaysFailed", { reason: error })}</p>}
         </div>
 
         <div className="dialog__actions">
@@ -95,6 +99,13 @@ function ApprovalDialog({
           >
             {t("mcp.commandApproval.approveQuiet", { minutes: QUIET_MINUTES })}
           </button>
+          <button
+            type="button"
+            className="button button--ghost button--danger"
+            onClick={() => onDecide(true, 0, true)}
+          >
+            {t("mcp.commandApproval.approveAlways")}
+          </button>
         </div>
       </div>
     </div>
@@ -103,15 +114,22 @@ function ApprovalDialog({
 
 export function RemoteCommandApproval() {
   const { pending, decide } = useRemoteCommandApprovals();
+  const [failure, setFailure] = useState<{ operationId: string; reason: string } | null>(null);
   const request = pending[0];
   if (!request) return null;
   return (
     <ApprovalDialog
       request={request}
       waiting={pending.length - 1}
-      onDecide={(approve, quietMinutes) =>
-        void decide(request.operationId, approve, quietMinutes)
-      }
+      error={failure?.operationId === request.operationId ? failure.reason : undefined}
+      onDecide={(approve, quietMinutes, always) => {
+        setFailure(null);
+        // A refused "always" leaves the proposal waiting; say why instead of
+        // letting the card sit there as if the click never happened.
+        decide(request.operationId, approve, quietMinutes, always).catch((reason: unknown) =>
+          setFailure({ operationId: request.operationId, reason: String(reason) }),
+        );
+      }}
     />
   );
 }

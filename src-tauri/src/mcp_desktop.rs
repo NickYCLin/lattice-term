@@ -666,6 +666,9 @@ pub struct DesktopService {
     /// carries no host, account or credential. Turning it off is a choice
     /// they make, and it takes effect at once.
     book_shared: Arc<AtomicBool>,
+    /// Saved SSH connections the person told the card to stop asking about.
+    /// Loaded from [`crate::mcp_command_trust`] and kept in step with it.
+    trusted_command_profiles: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl DesktopService {
@@ -684,7 +687,51 @@ impl DesktopService {
             approvals: watch::channel(0).0,
             book: None,
             book_shared: Arc::new(AtomicBool::new(true)),
+            trusted_command_profiles: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
+    }
+
+    /// Replaces the saved connections whose commands skip the card.
+    pub fn set_trusted_command_profiles(&self, profiles: Vec<String>) {
+        if let Ok(mut trusted) = self.trusted_command_profiles.lock() {
+            *trusted = profiles.into_iter().collect();
+        }
+        self.notify_approvals();
+    }
+
+    /// The saved SSH connection behind a waiting proposal, so the window can
+    /// remember "always allow" against the profile rather than one session.
+    pub fn pending_command_profile(&self, operation_id: &str) -> Option<(String, String)> {
+        let state = self.state.lock().ok()?;
+        let pending = state.approvals.get(operation_id)?;
+        let grant = state.grants.get(&pending.target_id)?;
+        if grant.view.backend != Backend::Ssh {
+            return None;
+        }
+        let profile = self.ssh_profile(&grant.session_id)?;
+        Some((profile, pending.target_label.clone()))
+    }
+
+    fn ssh_profile(&self, session_id: &str) -> Option<String> {
+        self.ssh
+            .list()
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+            .map(|session| session.profile_id)
+            .filter(|profile| !profile.is_empty())
+    }
+
+    fn command_trusted(&self, grant: &Grant) -> bool {
+        if grant.view.backend != Backend::Ssh {
+            return false;
+        }
+        let Some(profile) = self.ssh_profile(&grant.session_id) else {
+            return false;
+        };
+        self.trusted_command_profiles
+            .lock()
+            .map(|trusted| trusted.contains(&profile))
+            .unwrap_or(false)
     }
 
     pub fn with_screens(
@@ -1711,7 +1758,7 @@ impl DesktopService {
             .ok()
             .and_then(|quiet| *quiet)
             .is_some_and(|until| until > Instant::now());
-        if quiet {
+        if quiet || self.command_trusted(grant) {
             return Ok(());
         }
         let mut decided = {

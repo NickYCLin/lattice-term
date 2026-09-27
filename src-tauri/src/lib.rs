@@ -27,6 +27,7 @@ pub mod linux_webkit;
 mod local_files;
 pub mod local_terminal;
 pub mod mcp_book;
+pub mod mcp_command_trust;
 pub mod mcp_desktop;
 pub mod mcp_inventory;
 pub mod mcp_screen;
@@ -97,6 +98,7 @@ use zeroize::Zeroizing;
 
 type AppStorage = Mutex<FileStorage>;
 type AppConnectionBook = Mutex<crate::mcp_book::ConnectionBookSetting>;
+type AppCommandTrust = Mutex<crate::mcp_command_trust::CommandTrustSetting>;
 type AppAgentHistory = Mutex<AgentTerminalHistoryStore>;
 type AppDaemon = Arc<crate::agent_daemon::client::DaemonClient>;
 type AppAgentPlans = Mutex<FileAgentPlanStore>;
@@ -645,8 +647,21 @@ fn mcp_remote_command_decide(
     operation_id: String,
     approve: bool,
     quiet_minutes: Option<u32>,
+    always: Option<bool>,
     service: State<'_, Arc<mcp_desktop::DesktopService>>,
-) -> Vec<mcp_desktop::PendingCommandView> {
+    trust: State<'_, AppCommandTrust>,
+) -> Result<Vec<mcp_desktop::PendingCommandView>, String> {
+    // "Always" is remembered before this command is released, so a failed
+    // write leaves the proposal waiting instead of approving on a promise
+    // the next launch would not keep.
+    if approve && always == Some(true) {
+        let (profile_id, label) = service
+            .pending_command_profile(&operation_id)
+            .ok_or_else(|| "This connection was not opened from a saved SSH connection, so it cannot be allowed permanently.".to_string())?;
+        let mut guard = trust.lock().map_err(|error| error.to_string())?;
+        guard.allow(&profile_id, &label)?;
+        service.set_trusted_command_profiles(guard.profile_ids());
+    }
     service.decide_command(
         &operation_id,
         if approve {
@@ -656,7 +671,26 @@ fn mcp_remote_command_decide(
         },
         quiet_minutes.unwrap_or(0),
     );
-    service.pending_commands()
+    Ok(service.pending_commands())
+}
+
+#[tauri::command]
+fn mcp_remote_trusted_commands(
+    trust: State<'_, AppCommandTrust>,
+) -> Result<Vec<crate::mcp_command_trust::TrustedCommandConnection>, String> {
+    Ok(trust.lock().map_err(|error| error.to_string())?.list())
+}
+
+#[tauri::command]
+fn mcp_remote_trusted_clear(
+    profile_id: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    trust: State<'_, AppCommandTrust>,
+) -> Result<Vec<crate::mcp_command_trust::TrustedCommandConnection>, String> {
+    let mut guard = trust.lock().map_err(|error| error.to_string())?;
+    guard.revoke(&profile_id)?;
+    service.set_trusted_command_profiles(guard.profile_ids());
+    Ok(guard.list())
 }
 
 #[tauri::command]
@@ -4542,6 +4576,9 @@ pub fn run() {
             .with_connection_book(Arc::new(DesktopConnectionBook(app.handle().clone())));
             desktop_service.share_connection_book(book_setting.shared());
             app.manage(Mutex::new(book_setting));
+            let command_trust = crate::mcp_command_trust::CommandTrustSetting::open(&dir);
+            desktop_service.set_trusted_command_profiles(command_trust.profile_ids());
+            app.manage(Mutex::new(command_trust));
             app.manage(Arc::new(desktop_service));
             // The approval card has to appear wherever the user is, so the
             // waiting list is pushed rather than polled.
@@ -4593,6 +4630,8 @@ pub fn run() {
             mcp_screen_sessions,
             mcp_saved_connection_connect,
             mcp_remote_grant,
+            mcp_remote_trusted_commands,
+            mcp_remote_trusted_clear,
             mcp_remote_revoke,
             play_notification_sound,
             ios_export_document,

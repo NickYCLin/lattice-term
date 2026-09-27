@@ -53,6 +53,7 @@ describe("RemoteCommandApproval", () => {
     expect(html).toContain("還有 1 筆等你決定");
     // The quiet stretch is offered last and never as the default action.
     expect(html.indexOf("允許這一次")).toBeLessThan(html.indexOf("15 分鐘內不再問"));
+    expect(html.indexOf("15 分鐘內不再問")).toBeLessThan(html.indexOf("永遠允許這條連線"));
   });
 
   it("counts down to the deadline and never below zero", () => {

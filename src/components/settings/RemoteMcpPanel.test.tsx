@@ -26,7 +26,7 @@ describe("remote MCP permissions", () => {
     expect(html).not.toContain("settings.mcpRemote.");
     // Nothing to fill in: the panel reports what is open and how to stop it.
     expect(html).toContain(locale === "zh-TW" ? "不需要逐項授權" : "Nothing is granted item by item");
-    expect(html).toContain(locale === "zh-TW" ? "每次仍會跳出來等你同意" : "still waits for you, every time");
+    expect(html).toContain(locale === "zh-TW" ? "每次仍會跳出來等你同意" : "still waits for you every time");
     expect(html).toContain(locale === "zh-TW" ? "目前沒有連線" : "No connection is open");
     expect(html).not.toContain("<form");
     expect(html).not.toContain("<select");

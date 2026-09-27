@@ -13,6 +13,7 @@ export function savedProfilesNotConnected(profiles: ConnectionProfile[], session
 
 interface Target { id: string; label: string; backend: string; scopes: RemoteScopes; connected: boolean }
 interface QuietWindow { targetId: string; secondsLeft: number }
+interface TrustedConnection { profileId: string; label: string }
 
 /**
  * What an external AI tool can reach right now. Every connection the person
@@ -23,6 +24,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
   const [targets, setTargets] = useState<Target[]>([]);
   const [quiet, setQuiet] = useState<QuietWindow[]>([]);
+  const [trusted, setTrusted] = useState<TrustedConnection[]>([]);
   // On by default, so the box matches what the service already answers
   // before the desktop has replied.
   const [book, setBook] = useState(true);
@@ -32,13 +34,15 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [next, quietWindows, bookShared] = await Promise.all([
+    const [next, quietWindows, bookShared, trustedConnections] = await Promise.all([
       invoke<Target[]>("mcp_remote_targets"),
       invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
       invoke<boolean>("mcp_connection_book_shared"),
+      invoke<TrustedConnection[]>("mcp_remote_trusted_commands"),
     ]);
     setTargets(next);
     setQuiet(quietWindows);
+    setTrusted(trustedConnections);
     setBook(bookShared === true);
   }, [available]);
 
@@ -53,6 +57,14 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const stopQuiet = async (targetId: string) => {
     const { invoke } = await import("@tauri-apps/api/core");
     setQuiet(await invoke<QuietWindow[]>("mcp_remote_quiet_clear", { targetId }));
+  };
+
+  const stopTrusting = async (profileId: string) => {
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setTrusted(await invoke<TrustedConnection[]>("mcp_remote_trusted_clear", { profileId }));
+    } catch (reason) { setError(String(reason)); }
   };
 
   // Naming the saved connections is its own choice, separate from what any
@@ -90,6 +102,15 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
           <span>{t("settings.mcpRemote.book.hint")}</span></span>
       </label>}
       {error && <p role="alert">{error}</p>}
+      {available && trusted.length > 0 && <div className="mcp-remote__trusted">
+        <strong>{t("settings.mcpRemote.trustedTitle")}</strong>
+        <p>{t("settings.mcpRemote.trustedHint")}</p>
+        {trusted.map((connection) => <div className="setting" key={connection.profileId}>
+          <div className="setting__text"><strong>{connection.label || connection.profileId}</strong></div>
+          <button type="button" className="button button--ghost button--sm"
+            onClick={() => void stopTrusting(connection.profileId)}>{t("settings.mcpRemote.quietClear")}</button>
+        </div>)}
+      </div>}
       {!available ? <p>{t("settings.mcpRemote.desktopOnly")}</p>
         : targets.length === 0 ? <p>{t("settings.mcpRemote.none")}</p>
           : targets.map((target) => <div className="setting" key={target.id}>

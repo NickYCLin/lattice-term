@@ -25,3 +25,4 @@
 .mcp-remote__plan-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .mcp-remote__plan-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-raised); }
 .mcp-remote__plan-list p { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.mcp-remote__trusted { display: grid; gap: var(--space-2); min-width: 0; }

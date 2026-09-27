@@ -57,12 +57,13 @@ export function useRemoteCommandApprovals() {
   }, []);
 
   const decide = useCallback(
-    async (operationId: string, approve: boolean, quietMinutes = 0) => {
+    async (operationId: string, approve: boolean, quietMinutes = 0, always = false) => {
       const { invoke } = await import("@tauri-apps/api/core");
       const rest = await invoke<PendingRemoteCommand[]>("mcp_remote_command_decide", {
         operationId,
         approve,
         quietMinutes,
+        always,
       });
       setPending(rest);
     },
