@@ -3372,7 +3372,13 @@ fn gemini_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> 
         }
         value
     };
+    // LatticeTerm already checked and updated Gemini at app launch, so this
+    // session should not repeat the self-update or show its update banner.
     let mut settings = serde_json::json!({
+        "general": {
+            "enableAutoUpdate": false,
+            "enableAutoUpdateNotification": false
+        },
         "hooks": {
             "BeforeAgent": [hook(None)],
             "AfterAgent": [hook(None)],
@@ -10948,6 +10954,8 @@ notify = ["notify.exe", "turn-ended"]"#,
         assert_eq!(permission["hooks"][0], *before);
         assert!(settings.get("hooksConfig").is_none());
         assert!(settings.get("mcpServers").is_none());
+        assert_eq!(settings["general"]["enableAutoUpdate"], false);
+        assert_eq!(settings["general"]["enableAutoUpdateNotification"], false);
     }
 
     #[test]
