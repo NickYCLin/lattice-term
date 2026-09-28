@@ -4,6 +4,20 @@
 
 ---
 
+## [2026.9.29](https://github.com/NickYCLin/lattice-term/compare/v2026.9.28...v2026.9.29) (2026-09-28)
+
+
+### 🚀 新增功能
+
+* **chat:** Codex 對話可直接選用 skill、外掛與 App ([886f8f5](https://github.com/NickYCLin/lattice-term/commit/886f8f594afb9f44d2f1e70c9d80a7c12824bd09))
+* **mcp:** AI 遠端指令可以設定所有連線都不再詢問 ([3074a2c](https://github.com/NickYCLin/lattice-term/commit/3074a2cc8079449b566f7b918b62fbafcbcea81e))
+
+
+### 🛠️ 問題修正
+
+* **agent:** 更新後自動換掉閒置的舊版背景服務 ([64930ef](https://github.com/NickYCLin/lattice-term/commit/64930ef4374289f532627b528f6a16b793738455))
+* **chat:** 工作階段對話頁顯示是否正在回覆 ([d09e041](https://github.com/NickYCLin/lattice-term/commit/d09e04110b471b2eebe1bc4e78d01c2c5f71fbd8))
+
 ## [2026.9.28](https://github.com/NickYCLin/lattice-term/compare/v2026.9.27...v2026.9.28) (2026-09-27)
 
 
