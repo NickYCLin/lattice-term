@@ -50,6 +50,8 @@ pub struct Connection {
     /// Sessions the daemon told us about, so a lost connection can close
     /// them in the interface.
     sessions: Mutex<HashSet<String>>,
+    /// The build the service reported; empty for one too old to say.
+    build_version: Mutex<String>,
 }
 
 impl DaemonClient {
@@ -144,6 +146,7 @@ impl DaemonClient {
             next_id: AtomicU64::new(0),
             alive: AtomicBool::new(true),
             sessions: Mutex::new(HashSet::new()),
+            build_version: Mutex::new(String::new()),
         });
         tauri::async_runtime::spawn(async move {
             while let Some(line) = rx.recv().await {
@@ -192,6 +195,9 @@ impl DaemonClient {
             .store(reply.desktop_bridge_protocol, Ordering::Relaxed);
         if let Ok(mut sessions) = connection.sessions.lock() {
             sessions.extend(reply.sessions.into_iter().map(|summary| summary.session_id));
+        }
+        if let Ok(mut version) = connection.build_version.lock() {
+            *version = reply.build_version;
         }
         // The window keeps the active-session limit; a service started (or
         // restarted) after the user chose one should pace the same way. One
@@ -288,6 +294,60 @@ impl DaemonClient {
         self.attached().await.is_some_and(|connection| {
             connection.mcp_protocol.load(Ordering::Relaxed) != OBSERVER_PROTOCOL_VERSION
         })
+    }
+
+    /// Restarts a background service left over from before an update, but
+    /// only while it holds nothing: no session and no automation mid-run.
+    /// A busy one keeps running and the Agent Fleet page asks the person.
+    /// Returns whether a fresh service took its place.
+    pub async fn replace_if_outdated(&self) -> Result<bool, String> {
+        let Some(connection) = self.attached().await else {
+            return Ok(false);
+        };
+        let version = connection
+            .build_version
+            .lock()
+            .map(|version| version.clone())
+            .unwrap_or_default();
+        if version == env!("CARGO_PKG_VERSION") {
+            return Ok(false);
+        }
+        let sessions = connection
+            .request(Request::Sessions)
+            .await
+            .ok()
+            .and_then(|value| serde_json::from_value::<Vec<AgentSessionSummary>>(value).ok());
+        let automations = connection
+            .request(Request::AutomationsState)
+            .await
+            .ok()
+            .and_then(|value| {
+                serde_json::from_value::<Vec<super::automations::AutomationStatus>>(value).ok()
+            });
+        let (Some(sessions), Some(automations)) = (sessions, automations) else {
+            return Ok(false);
+        };
+        if !outdated_service_is_idle(sessions.len(), &automations) {
+            return Ok(false);
+        }
+        // The service may hang up before its reply arrives; the socket
+        // going away below is the real confirmation.
+        let _ = connection.request(Request::Shutdown).await;
+        {
+            let mut guard = self.connection.lock().await;
+            connection.alive.store(false, Ordering::Relaxed);
+            *guard = None;
+        }
+        let paths = DaemonPaths::for_client(&self.paths.data_dir);
+        let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+        while transport::connect(&paths).await.is_ok() {
+            if tokio::time::Instant::now() >= deadline {
+                return Err("The old background service did not stop in time.".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.ensure().await?;
+        Ok(true)
     }
 
     pub async fn mcp_output_scopes(&self) -> bool {
@@ -621,6 +681,38 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
     Ok(())
 }
 
+/// Nothing would be lost by restarting: no session to end and no
+/// automation halfway through a run. Schedules themselves are saved to disk.
+fn outdated_service_is_idle(
+    sessions: usize,
+    automations: &[super::automations::AutomationStatus],
+) -> bool {
+    sessions == 0 && automations.iter().all(|automation| !automation.running)
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::outdated_service_is_idle;
+    use crate::agent_daemon::automations::AutomationStatus;
+
+    fn automation(running: bool) -> AutomationStatus {
+        AutomationStatus {
+            id: "daily".to_string(),
+            next_run_at: None,
+            last_run_at: None,
+            running,
+        }
+    }
+
+    #[test]
+    fn only_an_empty_service_is_restarted() {
+        assert!(outdated_service_is_idle(0, &[]));
+        assert!(outdated_service_is_idle(0, &[automation(false)]));
+        assert!(!outdated_service_is_idle(1, &[]));
+        assert!(!outdated_service_is_idle(0, &[automation(true)]));
+    }
+}
+
 #[cfg(test)]
 mod log_tests {
     use super::last_failure_line;
@@ -659,6 +751,7 @@ mod history_tests {
             next_id: AtomicU64::new(0),
             alive: AtomicBool::new(true),
             sessions: Mutex::new(HashSet::new()),
+            build_version: Mutex::new(String::new()),
         };
         for read_output in [false, true] {
             assert!(connection
@@ -704,6 +797,7 @@ mod history_tests {
             next_id: AtomicU64::new(0),
             alive: AtomicBool::new(true),
             sessions: Mutex::new(HashSet::new()),
+            build_version: Mutex::new(String::new()),
         };
         let old = make();
         let new = make();
@@ -741,6 +835,7 @@ mod history_tests {
             next_id: AtomicU64::new(0),
             alive: AtomicBool::new(true),
             sessions: Mutex::new(HashSet::new()),
+            build_version: Mutex::new(String::new()),
         };
         for request in [
             Request::Shared,

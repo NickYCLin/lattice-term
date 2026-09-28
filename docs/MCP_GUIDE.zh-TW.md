@@ -98,7 +98,7 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 
 - 已經開著的 CLI 或對話請**結束再開一個新的**，舊的看不到新工具。
 - Codex Desktop、Cursor、Claude Desktop 請完整關閉再開。
-- LatticeTerm 更新後，請先把背景工作做完，再到 Agent Fleet 頁 **結束背景服務** 後重新啟動。只關桌面視窗不會換掉舊版背景服務。
+- LatticeTerm 更新後重開，背景服務沒有工作在跑的話會自動換成新版。還有背景工作的話，請先做完，再到 Agent Fleet 頁 **結束背景服務** 後重新啟動。
 
 ### 步驟 4：決定要開放什麼
 

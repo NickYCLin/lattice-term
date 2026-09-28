@@ -4631,6 +4631,27 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
+            // An update replaces the executable but not a background service
+            // that is still running; swap it for this build while it holds
+            // nothing, and hand the new one the launch plans again.
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let daemon = app.state::<AppDaemon>().inner().clone();
+                    match daemon.replace_if_outdated().await {
+                        Ok(true) => {
+                            let plans = app.state::<AppAgentPlans>();
+                            let sync = app.state::<McpPlanSync>();
+                            let _ = sync_mcp_plan_settings(&plans, &sync, |snapshot| {
+                                publish_mcp_plans(snapshot, &daemon)
+                            })
+                            .await;
+                        }
+                        Ok(false) => {}
+                        Err(error) => eprintln!("background service update skipped: {error}"),
+                    }
+                });
+            }
             app.manage(Arc::new(crate::agent_chat::AgentChatRegistry::with_mcp(
                 &data_dir,
             )));
