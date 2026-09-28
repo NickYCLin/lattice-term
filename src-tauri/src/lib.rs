@@ -1592,23 +1592,20 @@ async fn agent_chat_models(
     .await
 }
 
-/// Reads skill names/descriptions from the selected local CLI profile and
-/// workspace. It deliberately never returns the skill bodies or auth files.
+/// Lists what a message can name explicitly: skills, and for Codex also its
+/// plugins and apps. Never returns skill bodies or auth files.
 #[tauri::command]
 async fn agent_chat_skills(
     definition_id: String,
     working_directory: String,
     profile_config_path: Option<String>,
 ) -> Result<Vec<crate::agent_chat::ChatSkill>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::agent_chat::list_skills(
-            &definition_id,
-            &working_directory,
-            profile_config_path.as_deref(),
-        )
-    })
+    crate::agent_chat::list_catalog(
+        &definition_id,
+        &working_directory,
+        profile_config_path.as_deref(),
+    )
     .await
-    .map_err(|error| format!("Skill discovery task did not complete: {error}"))?
 }
 
 #[tauri::command]

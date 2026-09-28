@@ -24,8 +24,8 @@ use tokio::sync::oneshot;
 use super::{
     apply_profile_environment, bounded_output, codex_approval_line, codex_request_id,
     codex_v2_item_events, headless_command, kill_turn, read_bounded_line, stderr_tail, str_field,
-    truncate, u64_field, ChatAttachment, ChatEvent, ChatPermission, ChatSink, ChatUsage, Dialect,
-    LineError,
+    truncate, u64_field, ChatAttachment, ChatEvent, ChatMention, ChatPermission, ChatSink,
+    ChatUsage, Dialect, LineError,
 };
 
 /// A server with no turn in flight for this long is ended, which frees the
@@ -271,11 +271,12 @@ pub(super) fn turn_params(
     codex_thread_id: &str,
     prompt: &str,
     attachments: &[ChatAttachment],
+    mentions: &[ChatMention],
     permission: ChatPermission,
     model: Option<&str>,
     working_directory: &Path,
 ) -> Value {
-    let input = turn_input(prompt, attachments);
+    let input = turn_input(prompt, attachments, mentions);
     let (approval_policy, sandbox_policy) = turn_policies(permission);
     let mut params = serde_json::json!({
         "threadId": codex_thread_id,
@@ -290,13 +291,29 @@ pub(super) fn turn_params(
     params
 }
 
-fn turn_input(prompt: &str, attachments: &[ChatAttachment]) -> Vec<Value> {
+fn turn_input(
+    prompt: &str,
+    attachments: &[ChatAttachment],
+    mentions: &[ChatMention],
+) -> Vec<Value> {
     let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
     for attachment in attachments.iter().filter(|attachment| attachment.is_image) {
         input.push(serde_json::json!({
             "type": "localImage",
             "path": attachment.path.display().to_string(),
         }));
+    }
+    // Codex Desktop sends picks as their own items next to the text; the
+    // `$name` / `@name` left in the text is only how the reader sees them.
+    for mention in mentions {
+        input.push(match mention {
+            ChatMention::Skill { name, path } => serde_json::json!({
+                "type": "skill", "name": name, "path": path.display().to_string(),
+            }),
+            ChatMention::Link { name, path } => serde_json::json!({
+                "type": "mention", "name": name, "path": path,
+            }),
+        });
     }
     input
 }
@@ -306,6 +323,7 @@ fn prepare_steer(
     expected_turn_id: &str,
     prompt: &str,
     attachments: &[ChatAttachment],
+    mentions: &[ChatMention],
     reply: oneshot::Sender<Result<(), String>>,
 ) -> Result<(u64, String), String> {
     if state.exited || !state.thread_ready {
@@ -333,7 +351,7 @@ fn prepare_steer(
         "turn/steer",
         serde_json::json!({
             "threadId": native_thread, "expectedTurnId": native_turn,
-            "input": turn_input(prompt, attachments),
+            "input": turn_input(prompt, attachments, mentions),
         }),
     );
     state.next_rpc += 1;
@@ -354,6 +372,7 @@ pub(super) async fn steer(
     expected_turn_id: &str,
     prompt: &str,
     attachments: &[ChatAttachment],
+    mentions: &[ChatMention],
 ) -> Result<(), String> {
     let server = servers
         .get(thread_id)
@@ -364,6 +383,7 @@ pub(super) async fn steer(
         expected_turn_id,
         prompt,
         attachments,
+        mentions,
         reply,
     )?;
     // Never silently retry: a transport failure may follow an accepted write.
@@ -456,6 +476,7 @@ pub(super) struct TurnRequest<'a> {
     pub turn_id: &'a str,
     pub prompt: &'a str,
     pub attachments: &'a [ChatAttachment],
+    pub mentions: &'a [ChatMention],
     pub permission: ChatPermission,
     pub model: Option<&'a str>,
     /// Codex keeps an override for later turns too, so the window sends the
@@ -516,6 +537,7 @@ pub(super) async fn send_turn<S: ChatSink>(
                     &codex_thread_id,
                     request.prompt,
                     request.attachments,
+                    request.mentions,
                     request.permission,
                     request.model,
                     request.working_directory,
@@ -618,6 +640,7 @@ pub(super) async fn send_turn<S: ChatSink>(
         native_session_id.as_deref().unwrap_or_default(),
         request.prompt,
         request.attachments,
+        request.mentions,
         request.permission,
         request.model,
         request.working_directory,
@@ -1459,6 +1482,7 @@ mod tests {
                     turn_id,
                     prompt,
                     attachments: &[],
+                    mentions: &[],
                     permission: ChatPermission::Ask,
                     model: None,
                     effort: None,
@@ -1569,6 +1593,7 @@ mod tests {
                 turn_id: "t1",
                 prompt: "Call the ask_favorite tool from the latticeterm MCP server, then reply with exactly the text it returned and nothing else.",
                 attachments: &[],
+                mentions: &[],
                 permission: ChatPermission::Ask,
                 model: None,
                 effort: None,
@@ -1711,7 +1736,15 @@ mod tests {
             }),
             queued: Some(QueuedTurn {
                 turn_id: turn_id.into(),
-                params: turn_params("", "hi", &[], ChatPermission::Ask, None, Path::new("/w")),
+                params: turn_params(
+                    "",
+                    "hi",
+                    &[],
+                    &[],
+                    ChatPermission::Ask,
+                    None,
+                    Path::new("/w"),
+                ),
             }),
             next_rpc: RPC_THREAD_OPEN + 1,
             pending_rpc: HashMap::from([(RPC_THREAD_OPEN, RpcPurpose::ThreadOpen)]),
@@ -1754,7 +1787,7 @@ mod tests {
             let (tx, _) = oneshot::channel();
             let id = state.next_rpc;
             assert!(
-                prepare_steer(&mut state, expected, "extra", &[], tx).is_err(),
+                prepare_steer(&mut state, expected, "extra", &[], &[], tx).is_err(),
                 "{kind}"
             );
             assert_eq!(state.next_rpc, id);
@@ -1775,6 +1808,7 @@ mod tests {
             "lattice-turn",
             "extra",
             &attachments,
+            &[],
             tx,
         )
         .unwrap();
@@ -1792,9 +1826,15 @@ mod tests {
             Err(oneshot::error::TryRecvError::Empty)
         ));
         let (other, _) = oneshot::channel();
-        assert!(
-            prepare_steer(&mut server.state(), "lattice-turn", "duplicate", &[], other).is_err()
-        );
+        assert!(prepare_steer(
+            &mut server.state(),
+            "lattice-turn",
+            "duplicate",
+            &[],
+            &[],
+            other
+        )
+        .is_err());
 
         // Completion may reach the client before the steering receipt.
         let completed = feed(
@@ -1825,7 +1865,7 @@ mod tests {
             let server = server_with(steer_ready_state());
             let (tx, rx) = oneshot::channel();
             let (id, _) =
-                prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], tx).unwrap();
+                prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], &[], tx).unwrap();
             let mut response = response;
             response["id"] = Value::from(id);
             let out = handle_line(&server, &response);
@@ -1843,7 +1883,7 @@ mod tests {
     async fn closing_a_server_releases_pending_steering_receipts() {
         let server = server_with(steer_ready_state());
         let (tx, rx) = oneshot::channel();
-        prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], tx).unwrap();
+        prepare_steer(&mut server.state(), "lattice-turn", "extra", &[], &[], tx).unwrap();
         server.mark_exited();
         assert!(rx.await.is_err());
         assert!(server.state().pending_steers.is_empty());
@@ -2102,12 +2142,30 @@ mod tests {
                 path: std::path::PathBuf::from("/p/a.png"),
                 is_image: true,
             }],
+            &[
+                ChatMention::Skill {
+                    name: "pdf:pdf".into(),
+                    path: std::path::PathBuf::from("/s/pdf/SKILL.md"),
+                },
+                ChatMention::Link {
+                    name: "GitHub".into(),
+                    path: "plugin://github@curated".into(),
+                },
+            ],
             ChatPermission::WorkspaceWrite,
             Some("gpt-5.6-terra"),
             Path::new("/w"),
         );
         assert_eq!(params["input"][1]["type"], "localImage");
         assert_eq!(params["input"][1]["path"], "/p/a.png");
+        assert_eq!(
+            params["input"][2],
+            serde_json::json!({"type": "skill", "name": "pdf:pdf", "path": "/s/pdf/SKILL.md"})
+        );
+        assert_eq!(
+            params["input"][3],
+            serde_json::json!({"type": "mention", "name": "GitHub", "path": "plugin://github@curated"})
+        );
         assert_eq!(params["model"], "gpt-5.6-terra");
         assert_eq!(params["cwd"], "/w");
 

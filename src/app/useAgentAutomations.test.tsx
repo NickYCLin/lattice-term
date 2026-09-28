@@ -180,7 +180,7 @@ describe("useAgentAutomations", () => {
     let pending!: Promise<void>;
     await act(async () => { pending = current().steer(id, "extra", [{ path: "/fixture/a.png", name: "a.png", isImage: true }]); });
     expect(invoke).toHaveBeenLastCalledWith("agent_chat_steer", { request: { threadId: id, expectedTurnId: originalTurn,
-      prompt: "extra", attachments: [{ path: "/fixture/a.png" }],
+      prompt: "extra", attachments: [{ path: "/fixture/a.png" }], mentions: [],
     } });
     expect(current().threads[0].items.filter(item => item.type === "user")).toHaveLength(1);
     await expect(current().steer(id, "duplicate", [])).rejects.toThrow("awaiting confirmation");

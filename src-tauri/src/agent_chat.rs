@@ -27,6 +27,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
 mod browser;
+mod codex_catalog;
 mod codex_server;
 mod elicitation;
 
@@ -108,11 +109,89 @@ pub struct ChatTurnRequest {
     /// They are validated here and never read into WebView storage.
     #[serde(default)]
     pub attachments: Vec<ChatAttachmentRequest>,
+    /// Skills, plugins and apps picked in the composer (Codex only).
+    #[serde(default)]
+    pub mentions: Vec<ChatMentionRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatAttachmentRequest {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatMentionRequest {
+    pub kind: String,
+    pub name: String,
+    pub path: String,
+}
+
+/// A structured pick that travels next to the text, the way Codex Desktop
+/// sends it: a skill by its file, a plugin or app by its link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChatMention {
+    Skill { name: String, path: PathBuf },
+    Link { name: String, path: String },
+}
+
+const MAX_MENTIONS: usize = 16;
+
+fn validate_mentions(requests: &[ChatMentionRequest]) -> Result<Vec<ChatMention>, String> {
+    if requests.len() > MAX_MENTIONS {
+        return Err(format!(
+            "Mention at most {MAX_MENTIONS} skills or plugins at once."
+        ));
+    }
+    let link_id = |id: &str| {
+        !id.is_empty()
+            && id.len() <= 200
+            && id
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "._-@:".contains(character))
+    };
+    let mut mentions = Vec::with_capacity(requests.len());
+    for request in requests {
+        let name = request.name.trim();
+        if name.is_empty() || name.chars().count() > 128 || name.chars().any(char::is_control) {
+            return Err("A picked skill has an invalid name.".into());
+        }
+        let mention = match request.kind.as_str() {
+            "skill" => {
+                let path = PathBuf::from(&request.path);
+                let shaped = path.is_absolute()
+                    && path.file_name().is_some_and(|file| file == "SKILL.md")
+                    && !path
+                        .components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir));
+                if !shaped || !fs::metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+                    return Err(format!("The skill {name} is no longer available."));
+                }
+                ChatMention::Skill {
+                    name: name.to_string(),
+                    path,
+                }
+            }
+            "plugin" | "app" => {
+                let scheme = if request.kind == "plugin" {
+                    "plugin://"
+                } else {
+                    "app://"
+                };
+                match request.path.strip_prefix(scheme) {
+                    Some(id) if link_id(id) => ChatMention::Link {
+                        name: name.to_string(),
+                        path: request.path.clone(),
+                    },
+                    _ => return Err(format!("The {} {name} has an invalid link.", request.kind)),
+                }
+            }
+            _ => return Err("Unknown kind of mention.".into()),
+        };
+        if !mentions.contains(&mention) {
+            mentions.push(mention);
+        }
+    }
+    Ok(mentions)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,6 +202,8 @@ pub struct ChatSteerRequest {
     pub prompt: String,
     #[serde(default)]
     pub attachments: Vec<ChatAttachmentRequest>,
+    #[serde(default)]
+    pub mentions: Vec<ChatMentionRequest>,
 }
 
 /// Adds input to exactly one active Codex turn, keeping its existing settings.
@@ -139,6 +220,7 @@ pub async fn steer(
         return Err("The message is too long for one turn.".into());
     }
     let attachments = validate_attachments(&request.attachments)?;
+    let mentions = validate_mentions(&request.mentions)?;
     let prompt = prompt_with_attachments(&request.prompt, &attachments);
     if prompt.len() > MAX_PROMPT_BYTES {
         return Err("The message is too long for one turn.".into());
@@ -149,6 +231,7 @@ pub async fn steer(
         &request.expected_turn_id,
         &prompt,
         &attachments,
+        &mentions,
     )
     .await
 }
@@ -827,6 +910,12 @@ pub struct ChatSkill {
     pub name: String,
     pub description: Option<String>,
     pub source: String,
+    /// `skill`, `plugin` or `app`.
+    pub kind: String,
+    /// The skill file, or the `plugin://` / `app://` link Codex resolves.
+    pub path: Option<String>,
+    /// How Codex's composer writes the pick in the message text.
+    pub token: Option<String>,
 }
 
 const MAX_CHAT_SKILLS: usize = 128;
@@ -917,6 +1006,9 @@ fn append_skills_from_root(
                 name,
                 description,
                 source: source.to_string(),
+                kind: "skill".to_string(),
+                path: Some(canonical.display().to_string()),
+                token: None,
             });
         }
     }
@@ -931,7 +1023,11 @@ pub fn list_skills(
 ) -> Result<Vec<ChatSkill>, String> {
     let dialect = Dialect::from_definition(definition_id)
         .ok_or_else(|| "This CLI has no chat mode.".to_string())?;
-    let working_directory = validate_working_directory(working_directory)?;
+    let working_directory = if working_directory.trim().is_empty() {
+        None
+    } else {
+        Some(validate_working_directory(working_directory)?)
+    };
     let config_directory = profile_config_directory(dialect, profile_config_path)?;
     let default_config = match dialect {
         Dialect::Codex => home_directory().map(|home| home.join(".codex")),
@@ -952,17 +1048,56 @@ pub fn list_skills(
             &mut skills,
         );
     }
-    for directory in [
-        working_directory.join(".agents").join("skills"),
-        working_directory.join(".claude").join("skills"),
-        working_directory.join(".codex").join("skills"),
-        working_directory.join(".gemini").join("skills"),
-        working_directory.join(".antigravity").join("skills"),
-    ] {
+    for directory in working_directory.iter().flat_map(|working_directory| {
+        [
+            working_directory.join(".agents").join("skills"),
+            working_directory.join(".claude").join("skills"),
+            working_directory.join(".codex").join("skills"),
+            working_directory.join(".gemini").join("skills"),
+            working_directory.join(".antigravity").join("skills"),
+        ]
+    }) {
         append_skills_from_root(&directory, "專案", &mut seen, &mut skills);
     }
     skills.sort_by_key(|skill| skill.name.to_lowercase());
     Ok(skills)
+}
+
+/// Everything the composer can name explicitly. Codex reports its own
+/// skills, plugins and apps; the file scan stays as a fallback for when that
+/// probe fails and for the other CLIs.
+pub async fn list_catalog(
+    definition_id: &str,
+    working_directory: &str,
+    profile_config_path: Option<&str>,
+) -> Result<Vec<ChatSkill>, String> {
+    if Dialect::from_definition(definition_id) == Some(Dialect::Codex) {
+        if let Some(executable) = crate::agent::catalog_executable(definition_id) {
+            let directory = if working_directory.trim().is_empty() {
+                None
+            } else {
+                Some(validate_working_directory(working_directory)?)
+            };
+            let profile = profile_config_directory(Dialect::Codex, profile_config_path)?;
+            if let Ok(entries) =
+                codex_catalog::list(&executable, profile.as_deref(), directory.as_deref()).await
+            {
+                return Ok(entries);
+            }
+        }
+    }
+    let definition_id = definition_id.to_string();
+    let working_directory = working_directory.to_string();
+    let profile_config_path = profile_config_path.map(str::to_string);
+    tokio::task::spawn_blocking(move || {
+        list_skills(
+            &definition_id,
+            &working_directory,
+            profile_config_path.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| format!("Skill discovery task did not complete: {error}"))?
 }
 
 fn home_directory() -> Option<PathBuf> {
@@ -1360,6 +1495,10 @@ fn send_with_retry<S: ChatSink>(
             })
             .transpose()?;
         let attachments = validate_attachments(&request.attachments)?;
+        let mentions = validate_mentions(&request.mentions)?;
+        if !mentions.is_empty() && dialect != Dialect::Codex {
+            return Err("Only Codex takes picked skills and plugins as structured input.".into());
+        }
         let prompt = prompt_with_attachments(&request.prompt, &attachments);
         if prompt.len() > MAX_PROMPT_BYTES {
             return Err("The message is too long for one turn.".to_string());
@@ -1382,6 +1521,7 @@ fn send_with_retry<S: ChatSink>(
                     turn_id: &request.turn_id,
                     prompt: &prompt,
                     attachments: &attachments,
+                    mentions: &mentions,
                     permission: request.permission,
                     model,
                     effort,
@@ -2971,6 +3111,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mentions_accept_real_skill_files_and_plain_plugin_links_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let skill = directory.path().join("pdf").join("SKILL.md");
+        fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        fs::write(&skill, "---\nname: pdf\n---\n").unwrap();
+        let mention = |kind: &str, name: &str, path: &str| ChatMentionRequest {
+            kind: kind.into(),
+            name: name.into(),
+            path: path.into(),
+        };
+        let picked = validate_mentions(&[
+            mention("skill", "pdf", &skill.display().to_string()),
+            mention("plugin", "GitHub", "plugin://github@openai-curated"),
+            mention("app", "SharePoint", "app://connector_1e4f"),
+            mention("plugin", "GitHub", "plugin://github@openai-curated"),
+        ])
+        .unwrap();
+        assert_eq!(picked.len(), 3);
+        assert!(matches!(&picked[0], ChatMention::Skill { path, .. } if path == &skill));
+
+        let other = directory.path().join("notes.md");
+        fs::write(&other, "x").unwrap();
+        let traversal = format!("{}/pdf/../pdf/SKILL.md", directory.path().display());
+        for bad in [
+            mention("skill", "notes", &other.display().to_string()),
+            mention("skill", "pdf", "relative/SKILL.md"),
+            mention("skill", "pdf", &traversal),
+            mention("skill", "gone", "/nowhere/SKILL.md"),
+            mention("plugin", "x", "app://connector_1"),
+            mention("plugin", "x", "plugin://a b"),
+            mention("app", "x", "https://example.com"),
+            mention("file", "x", "/tmp"),
+            mention("skill", "", &skill.display().to_string()),
+        ] {
+            assert!(validate_mentions(&[bad]).is_err());
+        }
+        let many: Vec<_> = (0..=MAX_MENTIONS)
+            .map(|index| mention("app", "a", &format!("app://c{index}")))
+            .collect();
+        assert!(validate_mentions(&many).is_err());
+    }
+
+    #[test]
     fn general_chats_have_separate_durable_folders_and_preserve_content() {
         let data = tempfile::tempdir().unwrap();
         let first = general_chat_directory(data.path(), "one").unwrap();
@@ -3362,6 +3545,7 @@ mod tests {
             "thread",
             &prompt,
             &attachments,
+            &[],
             ChatPermission::ReadOnly,
             None,
             directory.path(),
@@ -3401,6 +3585,7 @@ mod tests {
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],
+                mentions: vec![],
             },
         ))
         .unwrap_err();
@@ -4100,6 +4285,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],
+                mentions: vec![],
             },
         ))
         .expect("turn starts");
@@ -4163,6 +4349,7 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
                 native_session_id: None,
                 profile_config_path: None,
                 attachments: vec![],
+                mentions: vec![],
             },
         ))
         .expect("turn starts");

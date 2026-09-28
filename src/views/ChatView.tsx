@@ -32,8 +32,10 @@ import {
   formatTokens,
   permissionsFor,
   threadIsFresh,
+  mentionsInPrompt,
   type ChatDefinitionId,
   type ChatAttachment,
+  type ChatMention,
   type ChatItem,
   type ChatPermission,
   type ChatThread,
@@ -664,6 +666,7 @@ function ThreadPane({
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [picks, setPicks] = useState<ChatMention[]>([]);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const [pastingImage, setPastingImage] = useState(false);
@@ -717,6 +720,7 @@ function ThreadPane({
   useEffect(() => {
     setNotice(null);
     setAttachments([]);
+    setPicks([]);
   }, [thread.id]);
 
   function addAttachments(paths: readonly string[]): boolean {
@@ -821,18 +825,20 @@ function ThreadPane({
     event?.preventDefault();
     if (!canSend || steeringRef.current || pastingImageRef.current) return;
     const prompt = draft;
+    const mentions = mentionsInPrompt(prompt, picks);
     if (running || pendingInputs.length > 0) {
       try {
-        chat.enqueue(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null);
+        chat.enqueue(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null, mentions);
       } catch (reason) {
         setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
         return;
       }
     } else {
-      void chat.send(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null);
+      void chat.send(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null, undefined, mentions);
     }
     setDraft("");
     setAttachments([]);
+    setPicks([]);
     pinnedToBottom.current = true;
     setSettingsOpen(false);
     setNotice(null);
@@ -844,9 +850,10 @@ function ThreadPane({
     setSteering(true);
     setNotice(null);
     try {
-      await chat.steer(thread.id, draft, attachments);
+      await chat.steer(thread.id, draft, attachments, undefined, mentionsInPrompt(draft, picks));
       setDraft("");
       setAttachments([]);
+      setPicks([]);
       pinnedToBottom.current = true;
     } catch (reason) {
       setNotice(t("chat.steer.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
@@ -1300,7 +1307,10 @@ function ThreadPane({
                 workingDirectory={thread.workingDirectory}
                 profileConfigPath={activeProfile?.configDirectory ?? null}
                 disabled={steering}
-                onPick={(text) => setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`))}
+                onPick={(text, pick) => {
+                  setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`));
+                  if (pick) setPicks((current) => [...current.filter((entry) => entry.path !== pick.path), pick]);
+                }}
               />
               <button type="button" className="button button--ghost button--sm"
                 onClick={() => void pasteImage()} disabled={steering || pastingImage}

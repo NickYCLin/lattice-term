@@ -518,6 +518,7 @@ pub async fn execute(
         native_session_id: None,
         profile_config_path: None,
         attachments: Vec::new(),
+        mentions: Vec::new(),
     };
     let sink = Arc::new(RecordingSink::new(planned.record));
     log(&format!("automation {automation_id}: run starting"));

@@ -1647,6 +1647,7 @@ export const en: Messages = {
   "chat.images.enlarge": "Enlarge",
   "chat.images.shrink": "Shrink",
   "chat.skills": "Skills",
+  "chat.skills.withPlugins": "Skills & plugins",
   "chat.skills.filter": "Search skills",
   "chat.skills.none": "This assistant finds no skills in the account or project.",
   "chat.changes.comment": "Comment on this line",

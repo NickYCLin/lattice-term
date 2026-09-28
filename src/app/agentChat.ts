@@ -186,6 +186,30 @@ export interface ChatEventEnvelope {
   event: ChatEvent;
 }
 
+/**
+ * A skill, plugin or app picked in the composer. Codex receives it as its
+ * own input item next to the text, the way Codex Desktop sends it.
+ */
+export interface ChatMention {
+  kind: "skill" | "plugin" | "app";
+  name: string;
+  path: string;
+  /** How the pick reads in the message, e.g. `$pdf` or `@github`. */
+  token: string;
+}
+
+/** Picks whose token is still in the text; deleting the token drops the pick. */
+export function mentionsInPrompt(prompt: string, picks: readonly ChatMention[]): ChatMention[] {
+  const kept: ChatMention[] = [];
+  for (const pick of picks) {
+    const at = prompt.indexOf(pick.token);
+    const after = prompt.charAt(at + pick.token.length);
+    if (at < 0 || /[A-Za-z0-9_:.-]/.test(after)) continue;
+    if (!kept.some(entry => entry.kind === pick.kind && entry.path === pick.path)) kept.push(pick);
+  }
+  return kept.slice(0, 16);
+}
+
 /** An explicitly selected local file; its bytes never enter WebView storage. */
 export interface ChatAttachment {
   path: string;

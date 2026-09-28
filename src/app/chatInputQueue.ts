@@ -1,4 +1,4 @@
-import type { ChatAttachment, ChatThread } from "./agentChat";
+import type { ChatAttachment, ChatMention, ChatThread } from "./agentChat";
 
 export const MAX_QUEUED_CHAT_INPUTS = 8;
 const MAX_QUEUED_PROMPT_LENGTH = 64 * 1024;
@@ -13,6 +13,20 @@ export interface QueuedChatInput {
   attachments: ChatAttachment[];
   profileConfigPath: string | null;
   createdAt: number;
+  mentions?: ChatMention[];
+}
+
+function restoreMentions(value: unknown): ChatMention[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16) return null;
+  const mentions: ChatMention[] = [];
+  for (const entry of value as Partial<ChatMention>[]) {
+    if (!entry || (entry.kind !== "skill" && entry.kind !== "plugin" && entry.kind !== "app") ||
+      typeof entry.name !== "string" || entry.name.length > 128 || !safePath(entry.path) ||
+      typeof entry.token !== "string" || entry.token.length > 160) return null;
+    mentions.push({ kind: entry.kind, name: entry.name, path: entry.path, token: entry.token });
+  }
+  return mentions;
 }
 
 function safePath(value: unknown): value is string {
@@ -33,11 +47,14 @@ export function restoreQueuedInputs(value: unknown): QueuedChatInput[] {
     if (!item.attachments.every(file => file && safePath(file.path) && typeof file.name === "string" &&
       file.name.length <= 512 && typeof file.isImage === "boolean")) return [];
     if (!item.prompt.trim() && item.attachments.length === 0) return [];
+    const mentions = restoreMentions(item.mentions);
+    if (!mentions) return [];
     seen.add(item.id);
     return [{ id: item.id, prompt: item.prompt, attachments: item.attachments.map(file => ({
       path: file.path, name: file.name, isImage: file.isImage,
     })), profileConfigPath: item.profileConfigPath ?? null,
-      createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : 0 }];
+      createdAt: typeof item.createdAt === "number" && Number.isFinite(item.createdAt) ? item.createdAt : 0,
+      ...(mentions.length > 0 ? { mentions } : {}) }];
   });
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatDefinitionId } from "../../app/agentChat";
+import type { ChatDefinitionId, ChatMention } from "../../app/agentChat";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
 
@@ -7,6 +7,15 @@ interface Skill {
   name: string;
   description: string | null;
   source: string;
+  kind?: ChatMention["kind"];
+  path?: string | null;
+  token?: string | null;
+}
+
+/** The structured pick Codex receives, when the entry carries one. */
+export function skillPick(definitionId: ChatDefinitionId, skill: Skill): ChatMention | null {
+  if (definitionId !== "codex" || !skill.path || !skill.token) return null;
+  return { kind: skill.kind ?? "skill", name: skill.name, path: skill.path, token: skill.token };
 }
 
 /**
@@ -30,7 +39,7 @@ export function ChatSkillPicker({
   workingDirectory: string;
   profileConfigPath: string | null;
   disabled: boolean;
-  onPick: (text: string) => void;
+  onPick: (text: string, mention: ChatMention | null) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -67,7 +76,6 @@ export function ChatSkillPicker({
     return () => document.removeEventListener("pointerdown", close, true);
   }, [open]);
 
-  if (!workingDirectory) return null;
   const needle = filter.trim().toLowerCase();
   const shown = (skills ?? []).filter(
     (skill) => !needle || skill.name.toLowerCase().includes(needle) || skill.description?.toLowerCase().includes(needle),
@@ -82,7 +90,7 @@ export function ChatSkillPicker({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
-        {t("chat.skills")}
+        {t(definitionId === "codex" ? "chat.skills.withPlugins" : "chat.skills")}
       </button>
       {open && (
         <div className="chat-skills__menu" role="dialog" aria-label={t("chat.skills")}>
@@ -100,11 +108,12 @@ export function ChatSkillPicker({
           {skills && shown.length === 0 && <p className="chat-settings__hint">{t("chat.skills.none")}</p>}
           <ul>
             {shown.map((skill) => (
-              <li key={`${skill.source}:${skill.name}`}>
+              <li key={skill.path ?? `${skill.source}:${skill.name}`}>
                 <button
                   type="button"
                   onClick={() => {
-                    onPick(skillMention(definitionId, skill.name));
+                    const pick = skillPick(definitionId, skill);
+                    onPick(pick ? `${pick.token} ` : skillMention(definitionId, skill.name), pick);
                     setOpen(false);
                   }}
                 >

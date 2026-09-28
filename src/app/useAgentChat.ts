@@ -40,6 +40,7 @@ import {
   saveStoredThreads,
   type ChatDefinitionId,
   type ChatAttachment,
+  type ChatMention,
   type ChatEvent,
   type ChatEventEnvelope,
   type ChatModelChoice,
@@ -183,10 +184,12 @@ export interface AgentChatApi {
     prompt: string,
     attachments?: readonly ChatAttachment[],
     profileConfigPath?: string | null,
+    queuedInputId?: string,
+    mentions?: readonly ChatMention[],
   ) => Promise<void>;
   stop: (id: string, expectedTurnId?: string) => Promise<void>;
-  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => Promise<void>;
-  enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null) => void;
+  steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string, mentions?: readonly ChatMention[]) => Promise<void>;
+  enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null, mentions?: readonly ChatMention[]) => void;
   removeQueued: (id: string, inputId: string) => void;
   resumeQueue: (id: string) => void;
   /** Answers an approval card; rejects with the reason when it cannot. */
@@ -578,6 +581,7 @@ export function useAgentChat(
     attachments: readonly ChatAttachment[] = [],
     profileConfigPath: string | null = null,
     queuedInputId?: string,
+    mentions: readonly ChatMention[] = [],
   ) => {
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
@@ -614,6 +618,9 @@ export function useAgentChat(
           cliProxyId: proxy?.id ?? null,
           nativeSessionId: thread.nativeSessionId,
           attachments: attachments.map(({ path }) => ({ path })),
+          mentions: thread.definitionId === "codex"
+            ? mentions.map(({ kind, name, path }) => ({ kind, name, path }))
+            : [],
         },
       });
     } catch (reason) {
@@ -625,7 +632,7 @@ export function useAgentChat(
     }
   }, []);
 
-  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string) => {
+  const steer = useCallback(async (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string, mentions: readonly ChatMention[] = []) => {
     const thread = threadsRef.current.find(entry => entry.id === id);
     if (thread?.definitionId !== "codex" || !thread.runningTurnId) throw new Error("No Codex turn is running in this chat.");
     if (expectedTurnId !== undefined && thread.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before sending instructions.");
@@ -639,6 +646,7 @@ export function useAgentChat(
       const { invoke } = await core();
       await invoke("agent_chat_steer", { request: { threadId: id, expectedTurnId: turnId,
         prompt, attachments: files.map(file => ({ path: file.path })),
+        mentions: mentions.map(({ kind, name, path }) => ({ kind, name, path })),
       } });
       changeThreads(current => current.map(entry => entry.id === id
         ? appendSteeredInput(entry, turnId, inputId, prompt, files, at) : entry));
@@ -704,11 +712,12 @@ export function useAgentChat(
     await invoke<boolean>("agent_chat_stop", { threadId: id, expectedTurnId: expectedTurnId ?? null });
   }, []);
 
-  const enqueue = useCallback((id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath: string | null = null) => {
+  const enqueue = useCallback((id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath: string | null = null, mentions: readonly ChatMention[] = []) => {
     const thread = threadsRef.current.find(entry => entry.id === id);
     if (!thread) throw new Error("This chat no longer exists.");
     const next = enqueueChatInput(thread, { id: crypto.randomUUID(), prompt,
-      attachments: [...attachments], profileConfigPath, createdAt: Date.now() });
+      attachments: [...attachments], profileConfigPath, createdAt: Date.now(),
+      ...(mentions.length > 0 ? { mentions: [...mentions] } : {}) });
     const snapshot = threadsRef.current.map(entry => entry.id === id ? next : entry);
     if (typeof localStorage !== "undefined" && !saveStoredThreads(localStorage, snapshot)) {
       throw new ChatQueueError("storage");
@@ -728,7 +737,7 @@ export function useAgentChat(
       if (thread.runningTurnId || thread.queuePaused || !next) continue;
       // Reserve this entry synchronously. Duplicate completion events and
       // React effect replays must not start the same queued turn twice.
-      void send(thread.id, next.prompt, next.attachments, next.profileConfigPath, next.id);
+      void send(thread.id, next.prompt, next.attachments, next.profileConfigPath, next.id, next.mentions ?? []);
     }
   }, [threads, send, changeThreads]);
 

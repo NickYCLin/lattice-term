@@ -1581,6 +1581,7 @@ export const zhTW = {
   "chat.images.enlarge": "放大",
   "chat.images.shrink": "縮小",
   "chat.skills": "Skills",
+  "chat.skills.withPlugins": "Skill 與外掛",
   "chat.skills.filter": "搜尋 skill",
   "chat.skills.none": "這個助理在帳號或專案裡找不到 skill。",
   "chat.changes.comment": "在這行留言",
