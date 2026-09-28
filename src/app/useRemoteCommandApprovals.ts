@@ -70,5 +70,18 @@ export function useRemoteCommandApprovals() {
     [],
   );
 
-  return { pending, decide };
+  /** Stops asking on every SSH connection, then lets this one through. */
+  const approveAll = useCallback(async (operationId: string) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke<boolean>("mcp_remote_trust_all_set", { trusted: true });
+    const rest = await invoke<PendingRemoteCommand[]>("mcp_remote_command_decide", {
+      operationId,
+      approve: true,
+      quietMinutes: 0,
+      always: false,
+    });
+    setPending(rest);
+  }, []);
+
+  return { pending, decide, approveAll };
 }

@@ -25,6 +25,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [targets, setTargets] = useState<Target[]>([]);
   const [quiet, setQuiet] = useState<QuietWindow[]>([]);
   const [trusted, setTrusted] = useState<TrustedConnection[]>([]);
+  const [trustAll, setTrustAll] = useState(false);
   // On by default, so the box matches what the service already answers
   // before the desktop has replied.
   const [book, setBook] = useState(true);
@@ -34,12 +35,14 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [next, quietWindows, bookShared, trustedConnections] = await Promise.all([
+    const [next, quietWindows, bookShared, trustedConnections, everyConnection] = await Promise.all([
       invoke<Target[]>("mcp_remote_targets"),
       invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
       invoke<boolean>("mcp_connection_book_shared"),
       invoke<TrustedConnection[]>("mcp_remote_trusted_commands"),
+      invoke<boolean>("mcp_remote_trust_all"),
     ]);
+    setTrustAll(everyConnection === true);
     setTargets(next);
     setQuiet(quietWindows);
     setTrusted(trustedConnections);
@@ -79,6 +82,16 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     finally { setBusy(false); }
   };
 
+  const shareTrustAll = async (trusted: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setTrustAll(await invoke<boolean>("mcp_remote_trust_all_set", { trusted }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+
   const pause = async (targetId: string) => {
     setBusy(true);
     setError("");
@@ -100,6 +113,13 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
         <span className="checkbox__box" aria-hidden="true">✓</span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.book")}</strong>
           <span>{t("settings.mcpRemote.book.hint")}</span></span>
+      </label>}
+      {available && <label className="checkbox mcp-remote__book">
+        <input type="checkbox" checked={trustAll} disabled={busy}
+          onChange={(event) => void shareTrustAll(event.currentTarget.checked)} />
+        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.trustAll")}</strong>
+          <span>{t("settings.mcpRemote.trustAll.hint")}</span></span>
       </label>}
       {error && <p role="alert">{error}</p>}
       {available && trusted.length > 0 && <div className="mcp-remote__trusted">

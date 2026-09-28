@@ -657,7 +657,7 @@ fn mcp_remote_command_decide(
     if approve && always == Some(true) {
         let (profile_id, label) = service
             .pending_command_profile(&operation_id)
-            .ok_or_else(|| "This connection was not opened from a saved SSH connection, so it cannot be allowed permanently.".to_string())?;
+            .ok_or_else(|| "這條連線已經中斷，沒辦法記住。".to_string())?;
         let mut guard = trust.lock().map_err(|error| error.to_string())?;
         guard.allow(&profile_id, &label)?;
         service.set_trusted_command_profiles(guard.profile_ids());
@@ -679,6 +679,28 @@ fn mcp_remote_trusted_commands(
     trust: State<'_, AppCommandTrust>,
 ) -> Result<Vec<crate::mcp_command_trust::TrustedCommandConnection>, String> {
     Ok(trust.lock().map_err(|error| error.to_string())?.list())
+}
+
+#[tauri::command]
+fn mcp_remote_trust_all(trust: State<'_, AppCommandTrust>) -> Result<bool, String> {
+    Ok(trust
+        .lock()
+        .map_err(|error| error.to_string())?
+        .allows_all())
+}
+
+/// Every SSH connection skips the card, or all of them ask again. The file
+/// is written first so the next launch keeps exactly what the window shows.
+#[tauri::command]
+fn mcp_remote_trust_all_set(
+    trusted: bool,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    trust: State<'_, AppCommandTrust>,
+) -> Result<bool, String> {
+    let mut guard = trust.lock().map_err(|error| error.to_string())?;
+    guard.set_allow_all(trusted)?;
+    service.set_trust_all_commands(guard.allows_all());
+    Ok(guard.allows_all())
 }
 
 #[tauri::command]
@@ -4578,6 +4600,7 @@ pub fn run() {
             app.manage(Mutex::new(book_setting));
             let command_trust = crate::mcp_command_trust::CommandTrustSetting::open(&dir);
             desktop_service.set_trusted_command_profiles(command_trust.profile_ids());
+            desktop_service.set_trust_all_commands(command_trust.allows_all());
             app.manage(Mutex::new(command_trust));
             app.manage(Arc::new(desktop_service));
             // The approval card has to appear wherever the user is, so the
@@ -4631,6 +4654,8 @@ pub fn run() {
             mcp_saved_connection_connect,
             mcp_remote_grant,
             mcp_remote_trusted_commands,
+            mcp_remote_trust_all,
+            mcp_remote_trust_all_set,
             mcp_remote_trusted_clear,
             mcp_remote_revoke,
             play_notification_sound,

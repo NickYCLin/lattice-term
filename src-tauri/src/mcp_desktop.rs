@@ -666,9 +666,19 @@ pub struct DesktopService {
     /// carries no host, account or credential. Turning it off is a choice
     /// they make, and it takes effect at once.
     book_shared: Arc<AtomicBool>,
-    /// Saved SSH connections the person told the card to stop asking about.
+    /// SSH connections the person told the card to stop asking about.
     /// Loaded from [`crate::mcp_command_trust`] and kept in step with it.
     trusted_command_profiles: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Every SSH connection skips the card, chosen in Settings.
+    trust_all_commands: Arc<AtomicBool>,
+}
+
+fn ssh_trust_key(profile_id: &str, username: &str, host: &str, port: u16) -> String {
+    if profile_id.is_empty() {
+        format!("ssh:{username}@{host}:{port}")
+    } else {
+        profile_id.to_string()
+    }
 }
 
 impl DesktopService {
@@ -688,7 +698,14 @@ impl DesktopService {
             book: None,
             book_shared: Arc::new(AtomicBool::new(true)),
             trusted_command_profiles: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            trust_all_commands: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Lets every SSH connection's commands skip the card, or asks again.
+    pub fn set_trust_all_commands(&self, trusted: bool) {
+        self.trust_all_commands.store(trusted, Ordering::Relaxed);
+        self.notify_approvals();
     }
 
     /// Replaces the saved connections whose commands skip the card.
@@ -699,8 +716,8 @@ impl DesktopService {
         self.notify_approvals();
     }
 
-    /// The saved SSH connection behind a waiting proposal, so the window can
-    /// remember "always allow" against the profile rather than one session.
+    /// The SSH connection behind a waiting proposal, so the window can
+    /// remember "always allow" against the connection rather than one session.
     pub fn pending_command_profile(&self, operation_id: &str) -> Option<(String, String)> {
         let state = self.state.lock().ok()?;
         let pending = state.approvals.get(operation_id)?;
@@ -708,24 +725,34 @@ impl DesktopService {
         if grant.view.backend != Backend::Ssh {
             return None;
         }
-        let profile = self.ssh_profile(&grant.session_id)?;
+        let profile = self.ssh_trust_key(&grant.session_id)?;
         Some((profile, pending.target_label.clone()))
     }
 
-    fn ssh_profile(&self, session_id: &str) -> Option<String> {
-        self.ssh
+    /// The saved profile when there is one, otherwise the account, host and
+    /// port the person typed in, so a hand-opened connection can be trusted.
+    fn ssh_trust_key(&self, session_id: &str) -> Option<String> {
+        let session = self
+            .ssh
             .list()
             .into_iter()
-            .find(|session| session.session_id == session_id)
-            .map(|session| session.profile_id)
-            .filter(|profile| !profile.is_empty())
+            .find(|session| session.session_id == session_id)?;
+        Some(ssh_trust_key(
+            &session.profile_id,
+            &session.username,
+            &session.host,
+            session.port,
+        ))
     }
 
     fn command_trusted(&self, grant: &Grant) -> bool {
         if grant.view.backend != Backend::Ssh {
             return false;
         }
-        let Some(profile) = self.ssh_profile(&grant.session_id) else {
+        if self.trust_all_commands.load(Ordering::Relaxed) {
+            return true;
+        }
+        let Some(profile) = self.ssh_trust_key(&grant.session_id) else {
             return false;
         };
         self.trusted_command_profiles
@@ -2636,6 +2663,19 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_hand_opened_connection_is_trusted_by_account_host_and_port() {
+        assert_eq!(ssh_trust_key("profile-1", "me", "mac", 22), "profile-1");
+        assert_eq!(
+            ssh_trust_key("", "me", "192.168.10.201", 22),
+            "ssh:me@192.168.10.201:22"
+        );
+        assert_ne!(
+            ssh_trust_key("", "me", "mac", 22),
+            ssh_trust_key("", "root", "mac", 22)
+        );
+    }
 
     fn service() -> Arc<DesktopService> {
         Arc::new(DesktopService::new(

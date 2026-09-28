@@ -3,8 +3,8 @@
  *
  * The exact text is shown before anything runs, refusing is the default, and
  * walking away is a refusal too: the desktop drops the proposal when its own
- * deadline passes. "Always allow" is offered last, is remembered against the
- * saved connection only, and can be taken back in Settings.
+ * deadline passes. "Always allow" and "stop asking everywhere" are offered
+ * last, and both can be taken back in Settings.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -26,11 +26,13 @@ function ApprovalDialog({
   waiting,
   error,
   onDecide,
+  onApproveAll,
 }: {
   request: PendingRemoteCommand;
   waiting: number;
   error?: string;
   onDecide: (approve: boolean, quietMinutes?: number, always?: boolean) => void;
+  onApproveAll: () => void;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -106,6 +108,9 @@ function ApprovalDialog({
           >
             {t("mcp.commandApproval.approveAlways")}
           </button>
+          <button type="button" className="button button--ghost button--danger" onClick={onApproveAll}>
+            {t("mcp.commandApproval.approveAll")}
+          </button>
         </div>
       </div>
     </div>
@@ -113,7 +118,7 @@ function ApprovalDialog({
 }
 
 export function RemoteCommandApproval() {
-  const { pending, decide } = useRemoteCommandApprovals();
+  const { pending, decide, approveAll } = useRemoteCommandApprovals();
   const [failure, setFailure] = useState<{ operationId: string; reason: string } | null>(null);
   const request = pending[0];
   if (!request) return null;
@@ -127,6 +132,12 @@ export function RemoteCommandApproval() {
         // A refused "always" leaves the proposal waiting; say why instead of
         // letting the card sit there as if the click never happened.
         decide(request.operationId, approve, quietMinutes, always).catch((reason: unknown) =>
+          setFailure({ operationId: request.operationId, reason: String(reason) }),
+        );
+      }}
+      onApproveAll={() => {
+        setFailure(null);
+        approveAll(request.operationId).catch((reason: unknown) =>
           setFailure({ operationId: request.operationId, reason: String(reason) }),
         );
       }}
