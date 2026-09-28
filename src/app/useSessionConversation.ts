@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentApi } from "./useAgentSessions";
 
 export interface SessionConversationMessage {
@@ -54,5 +54,6 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
       setSending(false);
     }
   }
-  return { messages, readError, sendError, sending, queued, send };
+  const acknowledge = useCallback(() => setQueued(null), []);
+  return { messages, readError, sendError, sending, queued, send, acknowledge };
 }

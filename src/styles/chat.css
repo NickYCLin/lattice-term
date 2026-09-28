@@ -1943,3 +1943,74 @@ button.chat-diff__line.is-commentable:focus-visible {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
+
+/* Shared CLI session conversation ------------------------------------ */
+
+.session-chat__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.session-chat__title h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-chat__state {
+  flex: none;
+  padding: 2px var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.session-chat__state.is-working {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.session-chat__state.is-needsAttention {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.session-chat__state.is-done {
+  color: var(--success);
+}
+
+.session-chat__activity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.session-chat__activity.is-attention {
+  padding: var(--space-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
+  color: var(--text);
+}
+
+.session-chat__pulse {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-chat__pulse {
+    animation: none;
+  }
+}

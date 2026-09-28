@@ -61,6 +61,22 @@ describe("ChatView", () => {
     expect(agents.launch).not.toHaveBeenCalled();
     expect(chat.importNativeConversation).not.toHaveBeenCalled();
   });
+  it("shows whether a shared session is replying or waiting in the conversation", () => {
+    const view = (state: "working" | "needsAttention" | "idle", queuedPrompts = 0) => renderToStaticMarkup(
+      <I18nProvider locale="zh-TW">
+        <ChatView agents={fakeAgentApi({ sessions: [fakeSession({ sessionId: "shared", state, queuedPrompts })] })}
+          chat={fakeChatApi()} automations={fakeAutomationsApi()}
+          workspaceSessionId="shared" onSelectWorkspaceSession={() => {}} onOpenSession={() => {}} />
+      </I18nProvider>,
+    );
+    expect(view("working")).toContain("助理正在回覆…");
+    expect(view("working", 2)).toContain("還有 2 則訊息排隊");
+    expect(view("needsAttention")).toContain("助理可能在等你確認或輸入");
+    const idle = view("idle");
+    expect(idle).toContain("閒置中");
+    expect(idle).not.toContain("助理正在回覆");
+  });
+
   it("offers external Codex and Claude conversations in Chat", () => {
     expect(render(fakeChatApi(), undefined, () => {})).toContain("外部對話");
   });
