@@ -96,6 +96,9 @@ pub struct RemoteSessionSummary {
     pub chat: bool,
     pub cli: bool,
     pub fleet: bool,
+    /// The host can pause its desktop stream while the viewer reads
+    /// sessions or conversations.
+    pub stream_pause: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -1185,6 +1188,7 @@ pub async fn connect(
         chat: hello.chat,
         cli: hello.cli,
         fleet: hello.fleet,
+        stream_pause: hello.stream_pause,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1307,7 +1311,8 @@ pub async fn connect(
                 }
                 Ok(RemoteMessage::Input(_))
                 | Ok(RemoteMessage::TerminalInput { .. })
-                | Ok(RemoteMessage::TerminalResize { .. }) => {
+                | Ok(RemoteMessage::TerminalResize { .. })
+                | Ok(RemoteMessage::StreamControl { .. }) => {
                     break "The Agent echoed an input message.".to_string()
                 }
                 Ok(RemoteMessage::FileResponse(response)) => {
@@ -1412,6 +1417,25 @@ pub async fn input(
             .map_err(|_| "The remote session is no longer connected.".to_string())?;
     }
     Ok(())
+}
+
+/// Asks a screen host to stop or resume capturing the desktop. Hosts that did
+/// not advertise the capability would drop the session on an unknown message,
+/// so the request is a quiet no-op for them.
+pub async fn stream_pause(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    paused: bool,
+) -> Result<(), String> {
+    let access = registry.access(session_id)?;
+    if !access.summary.stream_pause || access.summary.terminal {
+        return Ok(());
+    }
+    access
+        .outbound
+        .send(RemoteMessage::StreamControl { paused })
+        .await
+        .map_err(|_| "The remote session is no longer connected.".to_string())
 }
 
 /// Sends viewer keystrokes to a terminal-mode session. Mirrors `input`'s
@@ -1928,6 +1952,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -1958,6 +1983,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             file_root_label: String::new(),
             terminal,
         }

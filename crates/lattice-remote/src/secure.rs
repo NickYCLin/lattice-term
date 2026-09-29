@@ -490,6 +490,7 @@ mod tests {
                     chat: false,
                     cli: false,
                     fleet: false,
+                    stream_pause: false,
                     terminal: true,
                 }))
                 .await
@@ -798,6 +799,7 @@ mod tests {
                     chat: false,
                     cli: false,
                     fleet: false,
+                    stream_pause: false,
                     terminal: false,
                 }))
                 .await

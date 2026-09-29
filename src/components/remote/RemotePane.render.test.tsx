@@ -5,7 +5,7 @@ import type {
   RemoteSessionSummary,
 } from "../../app/useRemoteSessions";
 import { I18nProvider } from "../../i18n";
-import { RemotePane } from "./RemotePane";
+import { RemotePane, remoteDesktopHidden, remoteStreamPausable } from "./RemotePane";
 
 const session: RemoteSessionSummary = {
   sessionId: "remote-test",
@@ -75,6 +75,21 @@ describe("Lattice Remote canvas interaction", () => {
     expect(markup).toMatch(/<canvas[^>]*role="img"/);
     expect(markup).not.toMatch(/<canvas[^>]*tabindex=/);
     expect(markup).not.toContain('aria-label="開啟軟體鍵盤"');
+  });
+
+  it("pauses desktop frames only while the canvas is out of sight", () => {
+    const shown = { cliOpen: false, chatOpen: false, active: true, pageVisible: true };
+    expect(remoteDesktopHidden(shown)).toBe(false);
+    expect(remoteDesktopHidden({ ...shown, cliOpen: true })).toBe(true);
+    expect(remoteDesktopHidden({ ...shown, chatOpen: true })).toBe(true);
+    expect(remoteDesktopHidden({ ...shown, active: false })).toBe(true);
+    expect(remoteDesktopHidden({ ...shown, pageVisible: false })).toBe(true);
+  });
+
+  it("never sends stream control to hosts that did not advertise it", () => {
+    expect(remoteStreamPausable(session)).toBe(false);
+    expect(remoteStreamPausable({ ...session, streamPause: true })).toBe(true);
+    expect(remoteStreamPausable({ ...session, streamPause: true, terminal: true })).toBe(false);
   });
 
   it("labels the icon-only mobile file disclosure", () => {

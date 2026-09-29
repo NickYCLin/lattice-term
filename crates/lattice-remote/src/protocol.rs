@@ -95,6 +95,7 @@ const MESSAGE_TERMINAL_INPUT: u8 = 10;
 const MESSAGE_TERMINAL_RESIZE: u8 = 11;
 const MESSAGE_COMMAND_REQUEST: u8 = 12;
 const MESSAGE_COMMAND_EVENT: u8 = 13;
+const MESSAGE_STREAM_CONTROL: u8 = 16;
 
 /// One terminal payload may carry at most this many raw PTY bytes.
 pub const TERMINAL_CHUNK_SIZE: usize = 48 * 1024;
@@ -155,6 +156,9 @@ pub struct RemoteHello {
     pub chat: bool,
     pub cli: bool,
     pub fleet: bool,
+    /// The host honours `StreamControl`. Viewers must not send it otherwise:
+    /// older hosts close the session on an unknown message type.
+    pub stream_pause: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -399,6 +403,11 @@ pub enum RemoteMessage {
         cols: u16,
         rows: u16,
     },
+    /// The viewer is showing sessions or conversations instead of the
+    /// desktop, so the host may stop capturing frames until resumed.
+    StreamControl {
+        paused: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -547,6 +556,7 @@ impl RemoteMessage {
                     || hello.chat
                     || hello.cli
                     || hello.fleet
+                    || hello.stream_pause
                 {
                     output.push(u8::from(hello.terminal));
                 }
@@ -555,19 +565,28 @@ impl RemoteMessage {
                     || hello.chat
                     || hello.cli
                     || hello.fleet
+                    || hello.stream_pause
                 {
                     output.push(u8::from(hello.file_edit));
                 }
-                if hello.command_shells != 0 || hello.chat || hello.cli || hello.fleet {
+                if hello.command_shells != 0
+                    || hello.chat
+                    || hello.cli
+                    || hello.fleet
+                    || hello.stream_pause
+                {
                     output.push(hello.command_shells);
                 }
-                if hello.chat || hello.cli || hello.fleet {
+                if hello.chat || hello.cli || hello.fleet || hello.stream_pause {
                     output.push(u8::from(hello.chat));
                 }
-                if hello.cli || hello.fleet {
+                if hello.cli || hello.fleet || hello.stream_pause {
                     output.push(u8::from(hello.cli));
                 }
-                if hello.fleet {
+                if hello.fleet || hello.stream_pause {
+                    output.push(u8::from(hello.fleet));
+                }
+                if hello.stream_pause {
                     output.push(1);
                 }
                 Ok(output)
@@ -661,6 +680,7 @@ impl RemoteMessage {
                 output.extend_from_slice(&rows.to_be_bytes());
                 Ok(output)
             }
+            Self::StreamControl { paused } => Ok(vec![MESSAGE_STREAM_CONTROL, u8::from(*paused)]),
             Self::Close(reason) => {
                 let bytes = reason.as_bytes();
                 if bytes.len() > MAX_CLOSE_REASON_BYTES {
@@ -739,6 +759,7 @@ impl RemoteMessage {
                     chat: body.get(base_len + 3).copied().unwrap_or(0) == 1,
                     cli: body.get(base_len + 4).copied().unwrap_or(0) == 1,
                     fleet: body.get(base_len + 5).copied().unwrap_or(0) == 1,
+                    stream_pause: body.get(base_len + 6).copied().unwrap_or(0) == 1,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -856,6 +877,12 @@ impl RemoteMessage {
                 validate_terminal_size(cols, rows)?;
                 Ok(Self::TerminalResize { cols, rows })
             }
+            MESSAGE_STREAM_CONTROL => match body {
+                [flag] => Ok(Self::StreamControl {
+                    paused: decode_bool(*flag)?,
+                }),
+                _ => Err(ProtocolError::InvalidMessage("invalid stream control")),
+            },
             MESSAGE_CLOSE => {
                 if body.len() > MAX_CLOSE_REASON_BYTES {
                     return Err(ProtocolError::InvalidMessage("close reason is too long"));
@@ -1502,6 +1529,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: false,
         });
         assert_eq!(
@@ -1526,6 +1554,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.command_shells = 3;
@@ -1539,6 +1568,49 @@ mod tests {
             panic!("missing hello")
         };
         assert_eq!(old_hello.command_shells, 0);
+    }
+
+    #[test]
+    fn stream_pause_capability_rides_after_fleet_and_control_round_trips() {
+        let mut hello = RemoteHello {
+            protocol_version: PROTOCOL_VERSION,
+            agent_name: "test".into(),
+            width: 800,
+            height: 600,
+            view_only: true,
+            file_transfer: false,
+            file_root_label: String::new(),
+            terminal: false,
+            file_edit: false,
+            command_shells: 0,
+            chat: true,
+            cli: true,
+            fleet: false,
+            stream_pause: false,
+        };
+        let without = RemoteMessage::Hello(hello.clone()).encode().unwrap();
+        hello.stream_pause = true;
+        let with = RemoteMessage::Hello(hello.clone()).encode().unwrap();
+        assert_eq!(with.len(), without.len() + 2);
+        assert_eq!(
+            RemoteMessage::decode(&with).unwrap(),
+            RemoteMessage::Hello(hello)
+        );
+        let RemoteMessage::Hello(older) = RemoteMessage::decode(&without).unwrap() else {
+            panic!("missing hello")
+        };
+        assert!(!older.stream_pause);
+
+        for paused in [true, false] {
+            let message = RemoteMessage::StreamControl { paused };
+            assert_eq!(
+                RemoteMessage::decode(&message.encode().unwrap()).unwrap(),
+                message
+            );
+        }
+        assert!(RemoteMessage::decode(&[MESSAGE_STREAM_CONTROL]).is_err());
+        assert!(RemoteMessage::decode(&[MESSAGE_STREAM_CONTROL, 2]).is_err());
+        assert!(RemoteMessage::decode(&[MESSAGE_STREAM_CONTROL, 1, 0]).is_err());
     }
 
     #[test]
@@ -1557,6 +1629,7 @@ mod tests {
                 chat: false,
                 cli: false,
                 fleet: false,
+                stream_pause: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1633,6 +1706,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: true,
         })
         .encode()
@@ -1665,6 +1739,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: false,
         })
         .encode()
@@ -1684,6 +1759,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: true,
         })
         .encode()
@@ -1707,6 +1783,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1796,6 +1873,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: true,
         })
         .encode()
@@ -1908,6 +1986,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1925,6 +2004,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -1942,6 +2022,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: false,
+            stream_pause: false,
             terminal: false,
         })
         .encode()

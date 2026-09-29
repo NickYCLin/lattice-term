@@ -22,6 +22,33 @@ import {
 } from "./remotePointerInput";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 
+/** True when the desktop canvas cannot be seen, so its frames are wasted. */
+export function remoteDesktopHidden(view: {
+  cliOpen: boolean;
+  chatOpen: boolean;
+  active: boolean;
+  pageVisible: boolean;
+}): boolean {
+  return view.cliOpen || view.chatOpen || !view.active || !view.pageVisible;
+}
+
+/** Older hosts close the session on an unknown message, so only ask those that advertised it. */
+export function remoteStreamPausable(session: RemoteSessionSummary): boolean {
+  return session.streamPause === true && !session.terminal;
+}
+
+function usePageVisible() {
+  const [visible, setVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  return visible;
+}
+
 export function RemotePane({
   session,
   remote,
@@ -45,6 +72,16 @@ export function RemotePane({
   const [chatOpen, setChatOpen] = useState(session.chat === true && !session.cli);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const interactive = !session.viewOnly;
+  const pageVisible = usePageVisible();
+  // The desktop canvas is hidden behind the session and conversation panes.
+  // Pausing the host stream there saves phone battery and mobile data.
+  const desktopHidden = remoteDesktopHidden({ cliOpen, chatOpen, active, pageVisible });
+  const streamPause = remote.streamPause;
+  const canPause = remoteStreamPausable(session);
+  useEffect(() => {
+    if (!canPause) return;
+    void streamPause(session.sessionId, desktopHidden).catch(() => undefined);
+  }, [canPause, desktopHidden, session.sessionId, streamPause]);
   // The Remote API container changes whenever a frame updates, while the
   // memoised input method remains stable. Depending on the whole object would
   // run the cleanup below every frame and release an active drag at ~10 FPS.

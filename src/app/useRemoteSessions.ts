@@ -41,6 +41,8 @@ export interface RemoteSessionSummary {
   commandShells?: number;
   chat?: boolean;
   cli?: boolean;
+  /** Absent/false for older hosts: never send them stream control. */
+  streamPause?: boolean;
   fileRootLabel: string;
   /** True when the agent shares a shell (headless host) instead of a display. */
   terminal: boolean;
@@ -140,6 +142,8 @@ export interface RemoteApi {
     cols: number,
     rows: number,
   ) => Promise<void>;
+  /** Stops desktop frames while the viewer reads sessions or conversations. */
+  streamPause: (sessionId: string, paused: boolean) => Promise<void>;
   /** Registers one terminal output consumer and synchronously flushes its tail. */
   onTerminalData: (
     sessionId: string,
@@ -1026,6 +1030,14 @@ export function useRemoteSessions(): RemoteApi {
     [],
   );
 
+  const streamPause = useCallback(
+    async (sessionId: string, paused: boolean) => {
+      const { invoke } = await core();
+      await invoke("remote_stream_pause", { sessionId, paused });
+    },
+    [],
+  );
+
   const onTerminalData = useCallback(
     (sessionId: string, handler: (bytes: Uint8Array) => void) => {
       const router = terminalOutput.current;
@@ -1149,6 +1161,7 @@ export function useRemoteSessions(): RemoteApi {
     input,
     terminalInput,
     terminalResize,
+    streamPause,
     onTerminalData,
     listFiles,
     readTextFile,

@@ -3848,6 +3848,15 @@ async fn remote_input(
 }
 
 #[tauri::command]
+async fn remote_stream_pause(
+    session_id: String,
+    paused: bool,
+    registry: State<'_, Arc<RemoteRegistry>>,
+) -> Result<(), String> {
+    crate::remote::stream_pause(registry.inner(), &session_id, paused).await
+}
+
+#[tauri::command]
 async fn remote_terminal_input(
     session_id: String,
     data: String,
@@ -4823,6 +4832,7 @@ pub fn run() {
             remote_sessions,
             remote_terminal_snapshots,
             remote_input,
+            remote_stream_pause,
             remote_terminal_input,
             remote_terminal_resize,
             remote_host_configure,

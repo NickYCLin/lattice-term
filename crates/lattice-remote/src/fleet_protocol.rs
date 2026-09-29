@@ -78,6 +78,7 @@ mod tests {
             chat: false,
             cli: false,
             fleet: true,
+            stream_pause: false,
         };
         let encoded = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(

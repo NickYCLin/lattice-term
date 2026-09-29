@@ -2215,6 +2215,8 @@ impl Drop for FileRequestHandler {
     }
 }
 
+const STREAM_PAUSE_POLL: Duration = Duration::from_millis(500);
+
 async fn serve<S>(
     connection: SecureConnection<S>,
     fps: u32,
@@ -2259,6 +2261,7 @@ where
             chat: lattice_remote::chat_protocol::available(),
             cli: lattice_remote::chat_protocol::cli_available(),
             fleet: lattice_remote::chat_protocol::fleet_available(),
+            stream_pause: true,
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2309,6 +2312,9 @@ where
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
     let mut command_failed_rx = command_handler.subscribe_failures();
     let (receiver_stop_tx, mut receiver_stop_rx) = watch::channel(false);
+    // A viewer reading sessions or conversations does not need the desktop.
+    // Heartbeats keep the paused session alive without capturing frames.
+    let (paused_tx, mut paused_rx) = watch::channel(false);
     let chat_outgoing = outgoing.clone();
     let heartbeat = spawn_session_heartbeat(outgoing.clone());
     let receiver = tokio::spawn(async move {
@@ -2371,6 +2377,9 @@ where
                         break;
                     }
                 }
+                Ok(RemoteMessage::StreamControl { paused }) => {
+                    paused_tx.send_replace(paused);
+                }
                 Ok(RemoteMessage::Close(_)) | Err(_) => break,
                 // A viewer that heartbeats may be held to the idle deadline.
                 Ok(RemoteMessage::KeepAlive) => peer_heartbeats = true,
@@ -2388,6 +2397,20 @@ where
     let stream_result = loop {
         if receiver.is_finished() {
             break Ok(());
+        }
+        if *paused_rx.borrow_and_update() {
+            // The receiver owns the sender, so a closed channel means the
+            // session is ending; the next iteration observes that.
+            let _ = timeout(STREAM_PAUSE_POLL, paused_rx.changed()).await;
+            if !*paused_rx.borrow() {
+                capture = match capture_jpeg(&monitor) {
+                    Ok(capture) => capture,
+                    Err(error) => break Err(error),
+                };
+                width = capture.stream_width;
+                height = capture.stream_height;
+            }
+            continue;
         }
         let started = Instant::now();
         frame_id = frame_id.wrapping_add(1);
@@ -2586,6 +2609,7 @@ where
             chat: lattice_remote::chat_protocol::available(),
             cli: lattice_remote::chat_protocol::cli_available(),
             fleet: lattice_remote::chat_protocol::fleet_available(),
+            stream_pause: false,
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())

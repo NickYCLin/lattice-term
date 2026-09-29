@@ -1068,6 +1068,7 @@ mod tests {
                     chat: false,
                     cli: false,
                     fleet: true,
+                    stream_pause: false,
                     terminal: false,
                 }))
                 .await
