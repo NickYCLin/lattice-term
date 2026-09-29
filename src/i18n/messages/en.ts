@@ -275,6 +275,8 @@ export const en: Messages = {
 
   // Connection card -------------------------------------------------------
   "row.connect": "Connect",
+  "row.connectVia": "Connect to {name} over {protocol}",
+  "row.sameMachine": "Same computer: {names}",
   "row.connectDesktopOnly": "Desktop only",
   "row.connectDesktopOnlyHint": "You can manage this connection on mobile, but only LatticeTerm desktop can open it.",
   "row.connectBackendRequired": "App required",
@@ -393,6 +395,13 @@ export const en: Messages = {
   "inspector.security.body":
     "This entry holds host details only. Keys, passwords and host trust arrive with the secure store.",
   "inspector.close": "Close details",
+  "inspector.machine.title": "Same computer",
+  "inspector.machine.hint": "If another connection reaches this same computer (say one over SSH and one over Lattice Remote), merge them into one card.",
+  "inspector.machine.pick": "Choose a connection to merge",
+  "inspector.machine.link": "Merge",
+  "inspector.machine.show": "View",
+  "inspector.machine.unlink": "Split this connection out",
+  "inspector.machine.failed": "Could not save: {error}",
 
   // Host metrics ----------------------------------------------------------
   "metrics.title": "Host resources",
@@ -465,6 +474,8 @@ export const en: Messages = {
   "activity.samplesLoaded": "Sample connections loaded",
   "activity.samplesDetail": "{count} examples using documentation-only hostnames",
   "activity.duplicatedFrom": "Duplicated from {name}",
+  "activity.machineLinked": "Merged as the same computer",
+  "activity.machineUnlinked": "Split from the same computer",
 
   // Tunnels & Port Forwarding ---------------------------------------------
   "tunnels.metrics.total": "Total Tunnels",

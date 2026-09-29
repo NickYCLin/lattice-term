@@ -1275,6 +1275,22 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               onEdit={() => openEdit(selected.id)}
               onDuplicate={() => duplicateProfile(selected.id)}
               onDelete={() => requestDelete(selected.id)}
+              machine={{
+                peers: profiles.filter(
+                  (entry) =>
+                    entry.id !== selected.id &&
+                    !!selected.machineId &&
+                    entry.machineId === selected.machineId,
+                ),
+                candidates: profiles.filter(
+                  (entry) =>
+                    entry.id !== selected.id &&
+                    (!selected.machineId || entry.machineId !== selected.machineId),
+                ),
+                onShow: setSelectedId,
+                onLink: (id) => workspace.linkProfiles([selected.id, id]),
+                onUnlink: () => workspace.unlinkProfile(selected.id),
+              }}
             />
           )}
         </div>

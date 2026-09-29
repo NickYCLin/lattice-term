@@ -2443,6 +2443,7 @@ mod tests {
             favorite: true,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         }
     }
 

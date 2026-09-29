@@ -258,6 +258,7 @@ fn remote_host_profile() -> ConnectionProfile {
         favorite: false,
         device_id: None,
         relay_address: None,
+        machine_id: None,
     }
 }
 
@@ -991,6 +992,7 @@ mod tests {
             favorite: false,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         }
     }
 

@@ -8,13 +8,14 @@ import { readSelectedText, localFileError, type UploadFile } from "../app/localF
  * a way back.
  */
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { Workspace } from "../app/useWorkspace";
 import { canConnectProtocol } from "../app/platformCapabilities";
 import { exportTextFile } from "../app/fileExport";
 import {
   UNGROUPED,
+  mergeMachineCards,
   type ConnectionProfile,
 } from "../domain/connection";
 import type { SortOrder } from "../domain/query";
@@ -85,6 +86,19 @@ export function ConnectionsView({
     loadSamples,
     importProfiles,
   } = workspace;
+
+  // Same-computer entries fold into one card, even across groups: the card
+  // lives where the first of them sorts, the others disappear from the grid.
+  const cardFor = useMemo(
+    () =>
+      new Map(
+        mergeMachineCards(visibleProfiles).map((card) => [
+          card.profile.id,
+          card.linked,
+        ]),
+      ),
+    [visibleProfiles],
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -351,15 +365,31 @@ export function ConnectionsView({
                     : group.name}
                 </span>
                 <span className="connection-group__count">
-                  {group.profiles.length}
+                  {group.profiles.filter((profile) => cardFor.has(profile.id)).length}
                 </span>
               </h2>
               <ul className="connection-grid">
-                {group.profiles.map((profile) => (
+                {group.profiles
+                  .filter((profile) => cardFor.has(profile.id))
+                  .map((profile) => {
+                    const linked = cardFor.get(profile.id) ?? [];
+                    return (
                   <ConnectionCard
                     key={profile.id}
                     profile={profile}
-                    selected={profile.id === selectedId}
+                    linked={linked.map((peer) => ({
+                      profile: peer,
+                      onConnect: canConnectProtocol(
+                        peer.protocol,
+                        supportedProtocols,
+                      )
+                        ? () => onConnect(peer)
+                        : undefined,
+                    }))}
+                    selected={
+                      profile.id === selectedId ||
+                      linked.some((peer) => peer.id === selectedId)
+                    }
                     onSelect={() =>
                       setSelectedId(
                         profile.id === selectedId ? null : profile.id,
@@ -385,7 +415,8 @@ export function ConnectionsView({
                           : "runtime-unsupported"
                     }
                   />
-                ))}
+                    );
+                  })}
               </ul>
             </section>
           ))

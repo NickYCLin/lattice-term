@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createConnectionProfile, emptyDraft } from "../../domain/connection";
+import {
+  createConnectionProfile,
+  emptyDraft,
+  findProtocol,
+} from "../../domain/connection";
 import { I18nProvider } from "../../i18n";
 import { ConnectionCard } from "./ConnectionCard";
 
@@ -17,7 +21,7 @@ const profile = createConnectionProfile(
 function renderCard(
   options: Pick<
     Parameters<typeof ConnectionCard>[0],
-    "onConnect" | "unavailableReason"
+    "onConnect" | "unavailableReason" | "linked"
   >,
 ) {
   return renderToStaticMarkup(
@@ -53,3 +57,25 @@ describe("connection card runtime capability", () => {
     expect(markup).not.toContain("連線功能開發中");
   });
 });
+
+describe("same-computer card", () => {
+  it("offers one connect button per route and names the folded entry", () => {
+    const remote = createConnectionProfile(
+      { ...emptyDraft("lattice"), name: "蘋果筆電", deviceId: "008806370" },
+      "remote-card",
+    );
+    const markup = renderCard({
+      onConnect: vi.fn(),
+      linked: [{ profile: remote, onConnect: vi.fn() }],
+    });
+
+    expect(markup).toContain("同一台電腦：蘋果筆電");
+    expect(markup).toContain("用 RDP 連到「Office PC」");
+    expect(markup).toContain(`用 ${remoteAcronym()} 連到「蘋果筆電」`);
+    expect(markup).not.toContain(">連線</button>");
+  });
+});
+
+function remoteAcronym(): string {
+  return findProtocol("lattice").acronym;
+}

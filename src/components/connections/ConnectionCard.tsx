@@ -27,8 +27,15 @@ export type ConnectionUnavailableReason =
   | "backend-required"
   | "runtime-unsupported";
 
+/** Another route to the same computer, folded into this card. */
+export interface LinkedRoute {
+  profile: ConnectionProfile;
+  onConnect?: () => void;
+}
+
 export function ConnectionCard({
   profile,
+  linked = [],
   selected,
   onSelect,
   onEdit,
@@ -39,6 +46,7 @@ export function ConnectionCard({
   unavailableReason,
 }: {
   profile: ConnectionProfile;
+  linked?: LinkedRoute[];
   selected: boolean;
   onSelect: () => void;
   onEdit: () => void;
@@ -51,6 +59,8 @@ export function ConnectionCard({
 }) {
   const { t } = useI18n();
   const protocol = findProtocol(profile.protocol);
+  const routes: LinkedRoute[] = [{ profile, onConnect }, ...linked];
+  const connectable = routes.filter((route) => route.onConnect);
 
   return (
     <li
@@ -71,6 +81,13 @@ export function ConnectionCard({
           <span className="connection-card__target mono truncate">
             {connectionTarget(profile)}
           </span>
+          {linked.length > 0 && (
+            <span className="connection-card__target truncate">
+              {t("row.sameMachine", {
+                names: linked.map((route) => route.profile.name).join("、"),
+              })}
+            </span>
+          )}
         </span>
         <button
           type="button"
@@ -94,6 +111,15 @@ export function ConnectionCard({
       <div className="connection-card__meta">
         <EnvironmentBadge environment={profile.environment} />
         <span className="badge tone-neutral">{protocol.acronym}</span>
+        {linked.map((route) => (
+          <span
+            key={route.profile.id}
+            className="badge tone-neutral"
+            title={route.profile.name}
+          >
+            {findProtocol(route.profile.protocol).acronym}
+          </span>
+        ))}
         {profile.tags.slice(0, 2).map((tag) => (
           <TagChip key={tag} label={tag} />
         ))}
@@ -103,7 +129,26 @@ export function ConnectionCard({
       </div>
 
       <div className="connection-card__foot">
-        {onConnect ? (
+        {linked.length > 0 && connectable.length > 0 ? (
+          <span className="connection-card__routes">
+            {connectable.map((route) => (
+              <button
+                key={route.profile.id}
+                type="button"
+                className="button button--primary button--sm connection-card__go"
+                onClick={route.onConnect}
+                aria-label={t("row.connectVia", {
+                  name: route.profile.name,
+                  protocol: findProtocol(route.profile.protocol).acronym,
+                })}
+                title={connectionTarget(route.profile)}
+              >
+                <TerminalIcon size={13} />
+                {findProtocol(route.profile.protocol).acronym}
+              </button>
+            ))}
+          </span>
+        ) : onConnect ? (
           <button
             type="button"
             className="button button--primary button--sm connection-card__go"

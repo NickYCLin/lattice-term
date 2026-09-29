@@ -270,6 +270,8 @@ export const zhTW = {
 
   // 連線卡片 --------------------------------------------------------------
   "row.connect": "連線",
+  "row.connectVia": "用 {protocol} 連到「{name}」",
+  "row.sameMachine": "同一台電腦：{names}",
   "row.connectDesktopOnly": "桌面版限定",
   "row.connectDesktopOnlyHint": "這個連線可在行動裝置管理，但只能由 LatticeTerm 桌面版開啟。",
   "row.connectBackendRequired": "需要桌面應用程式",
@@ -384,6 +386,13 @@ export const zhTW = {
   "inspector.security.body":
     "這筆連線只存主機資訊。金鑰、密碼與主機信任會在安全儲存區完成後才加入。",
   "inspector.close": "關閉詳細資料",
+  "inspector.machine.title": "同一台電腦",
+  "inspector.machine.hint": "如果另一個連線其實是同一台電腦（例如一個走 SSH、一個走 Lattice Remote），可以合併成一張卡。",
+  "inspector.machine.pick": "選擇要合併的連線",
+  "inspector.machine.link": "合併",
+  "inspector.machine.show": "查看",
+  "inspector.machine.unlink": "把這個連線拆開",
+  "inspector.machine.failed": "沒有存成功：{error}",
 
   // 主機資源狀態 ----------------------------------------------------------
   "metrics.title": "主機資源",
@@ -452,6 +461,8 @@ export const zhTW = {
   "activity.samplesLoaded": "已載入範例連線",
   "activity.samplesDetail": "{count} 筆使用文件專用網域的範例",
   "activity.duplicatedFrom": "複製自「{name}」",
+  "activity.machineLinked": "合併成同一台電腦",
+  "activity.machineUnlinked": "從同一台電腦拆開",
 
   // 通道與連接埠轉送 --------------------------------------------------------
   "tunnels.metrics.total": "通道總數",

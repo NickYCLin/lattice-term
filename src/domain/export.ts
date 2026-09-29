@@ -69,6 +69,7 @@ export function serializeProfiles(
       // rather than secrets, so they travel with the rest of the entry.
       ...(profile.deviceId ? { deviceId: profile.deviceId } : {}),
       ...(profile.relayAddress ? { relayAddress: profile.relayAddress } : {}),
+      ...(profile.machineId ? { machineId: profile.machineId } : {}),
     })),
   };
 
@@ -189,6 +190,9 @@ export function parseAndValidateImport(jsonContent: string): ImportResult {
         : {}),
       ...(typeof record.relayAddress === "string"
         ? { relayAddress: record.relayAddress }
+        : {}),
+      ...(typeof record.machineId === "string"
+        ? { machineId: record.machineId }
         : {}),
     };
 

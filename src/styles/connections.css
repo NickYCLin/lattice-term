@@ -2837,6 +2837,45 @@
   pointer-events: auto;
 }
 
+/* One button per route when several connections reach the same computer. */
+.connection-card__routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.inspector__machine-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.inspector__machine-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.inspector__machine-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspector__machine-link {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.inspector__machine-link select {
+  flex: 1;
+  min-width: 0;
+}
+
 .sound-system-notification {
   margin: var(--space-3) 0;
 }

@@ -335,7 +335,24 @@ mod file_storage_tests {
             favorite: true,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         }
+    }
+
+    #[test]
+    fn machine_link_round_trips_and_stays_out_of_unlinked_entries() {
+        let plain = serde_json::to_value(profile("a", "A")).unwrap();
+        assert!(plain.get("machineId").is_none());
+        let linked = ConnectionProfile {
+            machine_id: Some("m1".to_string()),
+            ..profile("b", "B")
+        };
+        let value = serde_json::to_value(&linked).unwrap();
+        assert_eq!(value["machineId"], "m1");
+        let back: ConnectionProfile = serde_json::from_value(value).unwrap();
+        assert_eq!(back, linked);
+        let old: ConnectionProfile = serde_json::from_value(plain).unwrap();
+        assert_eq!(old.machine_id, None);
     }
 
     #[test]

@@ -46,6 +46,17 @@ describe("export & import", () => {
     expect(parsed.profiles[0].tags).toEqual(["edge", "eu"]);
   });
 
+  it("keeps the same-computer link through export and import", () => {
+    const linked = [
+      { ...profile1, machineId: "m1" },
+      { ...profile2, machineId: "m1" },
+    ];
+    const result = parseAndValidateImport(serializeProfiles(linked));
+
+    expect(result.validProfiles.map((entry) => entry.machineId)).toEqual(["m1", "m1"]);
+    expect(JSON.parse(serializeProfiles([profile1])).profiles[0]).not.toHaveProperty("machineId");
+  });
+
   it("successfully parses and validates valid export JSON", () => {
     const json = serializeProfiles([profile1, profile2]);
     const result = parseAndValidateImport(json);

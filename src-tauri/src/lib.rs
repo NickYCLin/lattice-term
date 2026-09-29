@@ -5221,6 +5221,7 @@ mod tests {
             favorite: false,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         }
     }
 
@@ -5314,6 +5315,7 @@ mod tests {
             favorite: false,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         };
 
         bind_ssh_request_to_profile(&mut request, &profile).unwrap();
@@ -5351,6 +5353,7 @@ mod tests {
             favorite: false,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         };
 
         assert!(bind_ssh_request_to_profile(&mut request, &profile).is_err());
@@ -5636,6 +5639,7 @@ mod tests {
             favorite: true,
             device_id: None,
             relay_address: None,
+            machine_id: None,
         };
 
         assert!(storage.insert_profile(profile.clone()).is_ok());

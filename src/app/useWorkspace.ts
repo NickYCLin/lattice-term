@@ -183,6 +183,7 @@ export function useWorkspace() {
         ...source,
         name: `${source.name} (2)`,
         favorite: false,
+        machineId: undefined,
       });
 
       setProfiles((current) => [...current, copy]);
@@ -229,6 +230,81 @@ export function useWorkspace() {
       persist(updated);
     },
     [persist, profiles],
+  );
+
+  /** Saves a whole-collection change, logging and reporting a failure. */
+  const replaceAll = useCallback(
+    async (next: ConnectionProfile[]): Promise<string | null> => {
+      const failure = await syncReplaceBackend(next);
+      if (failure) {
+        record({ kind: "workspace", titleKey: "activity.saveFailed", detail: failure });
+        return failure;
+      }
+      setProfiles(next);
+      return null;
+    },
+    [record],
+  );
+
+  /**
+   * Marks entries as routes to the same computer. Joining an entry that is
+   * already linked pulls the others into its existing link.
+   */
+  const linkProfiles = useCallback(
+    async (ids: string[]): Promise<string | null> => {
+      const chosen = profiles.filter((entry) => ids.includes(entry.id));
+      if (chosen.length < 2) return null;
+      const machineId =
+        chosen.find((entry) => entry.machineId)?.machineId ?? crypto.randomUUID();
+      const previous = new Set(
+        chosen.map((entry) => entry.machineId).filter((id): id is string => !!id),
+      );
+      const next = profiles.map((entry) =>
+        ids.includes(entry.id) ||
+        (entry.machineId !== undefined && previous.has(entry.machineId))
+          ? { ...entry, machineId }
+          : entry,
+      );
+      const failure = await replaceAll(next);
+      if (!failure) {
+        record({
+          kind: "updated",
+          subject: chosen.map((entry) => entry.name).join(" + "),
+          note: { key: "activity.machineLinked" },
+        });
+      }
+      return failure;
+    },
+    [profiles, record, replaceAll],
+  );
+
+  /** Takes one entry back out of its same-computer card. */
+  const unlinkProfile = useCallback(
+    async (id: string): Promise<string | null> => {
+      const target = profiles.find((entry) => entry.id === id);
+      if (!target?.machineId) return null;
+      const remaining = profiles.filter(
+        (entry) => entry.id !== id && entry.machineId === target.machineId,
+      );
+      const next = profiles.map((entry) => {
+        // A link left with a single member means nothing; clear it too.
+        if (entry.id === id || (remaining.length < 2 && entry.machineId === target.machineId)) {
+          const { machineId: _dropped, ...rest } = entry;
+          return rest;
+        }
+        return entry;
+      });
+      const failure = await replaceAll(next);
+      if (!failure) {
+        record({
+          kind: "updated",
+          subject: target.name,
+          note: { key: "activity.machineUnlinked" },
+        });
+      }
+      return failure;
+    },
+    [profiles, record, replaceAll],
   );
 
   const loadSamples = useCallback(async (): Promise<WorkspaceBatchResult> => {
@@ -346,6 +422,8 @@ export function useWorkspace() {
     duplicateProfile,
     removeProfile,
     toggleFavorite,
+    linkProfiles,
+    unlinkProfile,
     loadSamples,
     importProfiles,
     refreshProfiles,

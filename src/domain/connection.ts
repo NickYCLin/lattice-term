@@ -92,6 +92,8 @@ export interface ConnectionDraft {
   /** Set on relay entries; see `ConnectionProfile`. */
   deviceId?: string;
   relayAddress?: string;
+  /** See `ConnectionProfile.machineId`. */
+  machineId?: string;
 }
 
 export interface ConnectionProfile {
@@ -117,6 +119,11 @@ export interface ConnectionProfile {
   deviceId?: string;
   /** The relay that resolves `deviceId`, as `wss://host` or `host:port`. */
   relayAddress?: string;
+  /**
+   * Entries that reach the same computer by different routes, for example
+   * SSH and Lattice Remote, share this value and are shown as one card.
+   */
+  machineId?: string;
 }
 
 /** Whether an entry is addressed by device ID instead of hostname and port. */
@@ -201,6 +208,7 @@ export function draftFromProfile(profile: ConnectionProfile): ConnectionDraft {
     // direct one pointing at an empty address.
     ...(profile.deviceId ? { deviceId: profile.deviceId } : {}),
     ...(profile.relayAddress ? { relayAddress: profile.relayAddress } : {}),
+    ...(profile.machineId ? { machineId: profile.machineId } : {}),
   };
 }
 
@@ -322,6 +330,7 @@ export function createConnectionProfile(
   const group = (draft.group ?? "").trim();
   const deviceId = normalizeDeviceId(draft.deviceId ?? "");
   const relay = draft.protocol === "lattice" && !!deviceId;
+  const machineId = normalizeMachineId(draft.machineId);
 
   return {
     id,
@@ -344,7 +353,44 @@ export function createConnectionProfile(
           relayAddress: (draft.relayAddress ?? "").trim(),
         }
       : {}),
+    ...(machineId ? { machineId } : {}),
   };
+}
+
+/** A link key is an opaque short token; anything else is dropped. */
+function normalizeMachineId(value: string | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return /^[A-Za-z0-9-]{1,64}$/.test(trimmed) ? trimmed : undefined;
+}
+
+/** One card on the connections page: an entry plus its same-machine peers. */
+export interface MachineCard {
+  profile: ConnectionProfile;
+  linked: ConnectionProfile[];
+}
+
+/**
+ * Folds entries that share a `machineId` into the first of them, keeping the
+ * incoming order. A link with only one visible member stays an ordinary card.
+ */
+export function mergeMachineCards(profiles: ConnectionProfile[]): MachineCard[] {
+  const members = new Map<string, ConnectionProfile[]>();
+  for (const profile of profiles) {
+    if (!profile.machineId) continue;
+    const list = members.get(profile.machineId) ?? [];
+    list.push(profile);
+    members.set(profile.machineId, list);
+  }
+  const cards: MachineCard[] = [];
+  for (const profile of profiles) {
+    const peers = profile.machineId ? members.get(profile.machineId) : undefined;
+    if (!peers || peers.length < 2) {
+      cards.push({ profile, linked: [] });
+    } else if (peers[0].id === profile.id) {
+      cards.push({ profile, linked: peers.slice(1) });
+    }
+  }
+  return cards;
 }
 
 /**

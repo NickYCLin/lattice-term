@@ -8,6 +8,7 @@ import {
   findDuplicateTarget,
   isProtocolAvailable,
   isRelayProfile,
+  mergeMachineCards,
   parseTags,
   protocolUsesUsername,
   validateConnectionDraft,
@@ -404,5 +405,43 @@ describe("relay entries", () => {
     expect(isRelayProfile(direct)).toBe(false);
     expect(findDuplicateTarget([direct], relay)).toBeUndefined();
     expect(findDuplicateTarget([relay], direct)).toBeUndefined();
+  });
+});
+
+describe("same-computer links", () => {
+  const ssh = createConnectionProfile(
+    { ...emptyDraft("ssh"), name: "mac", hostname: "192.168.10.201", username: "me", machineId: "m1" },
+    "ssh",
+  );
+  const remote = createConnectionProfile(
+    { ...emptyDraft("lattice"), name: "蘋果筆電", deviceId: "008806370", machineId: "m1" },
+    "remote",
+  );
+  const other = createConnectionProfile(
+    { ...emptyDraft("ssh"), name: "nas", hostname: "nas.local", username: "me" },
+    "other",
+  );
+
+  it("folds linked entries into the first one and keeps the order", () => {
+    expect(mergeMachineCards([other, remote, ssh])).toEqual([
+      { profile: other, linked: [] },
+      { profile: remote, linked: [ssh] },
+    ]);
+  });
+
+  it("shows a link with a single visible member as a plain card", () => {
+    expect(mergeMachineCards([ssh, other])).toEqual([
+      { profile: ssh, linked: [] },
+      { profile: other, linked: [] },
+    ]);
+  });
+
+  it("survives editing and drops a malformed key", () => {
+    expect(createConnectionProfile(draftFromProfile(ssh), "ssh").machineId).toBe("m1");
+    const bad = createConnectionProfile(
+      { ...draftFromProfile(ssh), machineId: "../../etc" },
+      "ssh",
+    );
+    expect(bad).not.toHaveProperty("machineId");
   });
 });

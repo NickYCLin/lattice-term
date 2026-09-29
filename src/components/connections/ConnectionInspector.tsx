@@ -44,6 +44,7 @@ export function ConnectionInspector({
   onEdit,
   onDuplicate,
   onDelete,
+  machine,
 }: {
   profile: ConnectionProfile;
   metrics: MetricsState;
@@ -51,8 +52,31 @@ export function ConnectionInspector({
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** Linking entries that reach the same computer by different routes. */
+  machine?: {
+    peers: ConnectionProfile[];
+    candidates: ConnectionProfile[];
+    onShow: (id: string) => void;
+    onLink: (id: string) => Promise<string | null>;
+    onUnlink: () => Promise<string | null>;
+  };
 }) {
   const { t } = useI18n();
+  const [linkTarget, setLinkTarget] = useState("");
+  const [machineBusy, setMachineBusy] = useState(false);
+  const [machineError, setMachineError] = useState<string | null>(null);
+
+  async function runMachineAction(action: () => Promise<string | null>) {
+    setMachineBusy(true);
+    setMachineError(null);
+    try {
+      const failure = await action();
+      if (failure) setMachineError(failure);
+      else setLinkTarget("");
+    } finally {
+      setMachineBusy(false);
+    }
+  }
   const [tab, setTab] = useState<(typeof inspectorTabs)[number]>("info");
   const tabsId = useId();
   const protocol = findProtocol(profile.protocol);
@@ -190,6 +214,80 @@ export function ConnectionInspector({
                 />
               </dl>
             </section>
+
+            {machine && (machine.peers.length > 0 || machine.candidates.length > 0) && (
+              <section className="inspector__section">
+                <h3 className="eyebrow">{t("inspector.machine.title")}</h3>
+                {machine.peers.length > 0 ? (
+                  <ul className="inspector__machine-list">
+                    {machine.peers.map((peer) => (
+                      <li className="inspector__machine-item" key={peer.id}>
+                        <ProtocolTile protocol={peer.protocol} size="sm" />
+                        <span className="inspector__machine-name truncate">
+                          {peer.name}
+                          <small className="mono text-faint">
+                            {" "}
+                            {connectionTarget(peer)}
+                          </small>
+                        </span>
+                        <button
+                          type="button"
+                          className="button button--ghost button--sm"
+                          onClick={() => machine.onShow(peer.id)}
+                        >
+                          {t("inspector.machine.show")}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-faint">{t("inspector.machine.hint")}</p>
+                )}
+                {machine.candidates.length > 0 && (
+                  <div className="inspector__machine-link">
+                    <select
+                      className="select"
+                      aria-label={t("inspector.machine.pick")}
+                      value={linkTarget}
+                      disabled={machineBusy}
+                      onChange={(event) => setLinkTarget(event.target.value)}
+                    >
+                      <option value="">{t("inspector.machine.pick")}</option>
+                      {machine.candidates.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name} · {findProtocol(candidate.protocol).acronym}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="button button--secondary button--sm"
+                      disabled={!linkTarget || machineBusy}
+                      onClick={() =>
+                        void runMachineAction(() => machine.onLink(linkTarget))
+                      }
+                    >
+                      {t("inspector.machine.link")}
+                    </button>
+                  </div>
+                )}
+                {machine.peers.length > 0 && (
+                  <button
+                    type="button"
+                    className="button button--ghost button--sm"
+                    disabled={machineBusy}
+                    onClick={() => void runMachineAction(machine.onUnlink)}
+                  >
+                    {t("inspector.machine.unlink")}
+                  </button>
+                )}
+                {machineError && (
+                  <p className="text-faint" role="alert">
+                    {t("inspector.machine.failed", { error: machineError })}
+                  </p>
+                )}
+              </section>
+            )}
 
             <section className="inspector__section">
               <h3 className="eyebrow">{t("inspector.services")}</h3>

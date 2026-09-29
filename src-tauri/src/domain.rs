@@ -84,6 +84,10 @@ pub struct ConnectionProfile {
     pub device_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_address: Option<String>,
+    /// Entries that reach the same computer by different routes (say SSH
+    /// and Lattice Remote) share this value and show as one card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,6 +305,7 @@ impl ConnectionProfile {
                 })
                 .filter(|address| !address.is_empty()),
             device_id,
+            machine_id: None,
         }
     }
 
