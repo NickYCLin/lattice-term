@@ -55,7 +55,7 @@ describe("ChatView", () => {
       </I18nProvider>,
     );
     expect(markup).toContain("Shared project");
-    expect(markup).toContain("與工作階段頁共用同一個 CLI");
+    expect(markup).toContain("與工作階段頁共用同一個助理");
     expect(markup).toContain("傳送訊息到這個工作階段");
     expect(markup).toContain('aria-current="true"');
     expect(agents.launch).not.toHaveBeenCalled();

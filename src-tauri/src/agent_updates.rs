@@ -63,7 +63,7 @@ fn update_command(id: &str, installed: Option<&Path>) -> Result<(PathBuf, Vec<St
         let executable = definition
             .executable
             .as_deref()
-            .ok_or_else(|| "此 CLI 未提供直接更新指令，請參閱官方說明。".to_string())?;
+            .ok_or_else(|| "此助理未提供直接更新指令，請參閱官方說明。".to_string())?;
         let path = crate::agent::find_executable(executable)
             .ok_or_else(|| format!("找不到執行檔 {executable}，無法執行更新。"))?;
         Ok((path, definition.arguments.clone()))
@@ -80,7 +80,7 @@ fn update_command(id: &str, installed: Option<&Path>) -> Result<(PathBuf, Vec<St
             args.iter().map(|arg| arg.to_string()).collect(),
         )),
         None => Err(format!(
-            "這個 CLI 不是用 npm 安裝的，請用原本的安裝方式更新：{}",
+            "這個助理不是用 npm 安裝的，請用原本的安裝方式更新：{}",
             definition.source_url
         )),
     }
@@ -236,7 +236,7 @@ pub async fn update(id: &str) -> Result<String, String> {
         update_command(&owned_id, installed.as_deref().map(Path::new))
     })
     .await
-    .map_err(|_| "無法檢查已安裝的 CLI。".to_string())??;
+    .map_err(|_| "無法檢查已安裝的助理。".to_string())??;
     let (program, prefix_args) = crate::agent::launch_parts(&exe_path);
     let mut command = tokio::process::Command::new(program);
     command

@@ -38,7 +38,7 @@ describe("workspace import dialog", () => {
 
     expect(markup).toContain("後端重構");
     expect(markup).toContain("D:\\project\\api");
-    expect(markup).toContain("有 1 個 CLI 在這台電腦無法使用");
+    expect(markup).toContain("有 1 個助理在這台電腦無法使用");
     expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>匯入 0 個工作項目<\/button>/);
   });
 });

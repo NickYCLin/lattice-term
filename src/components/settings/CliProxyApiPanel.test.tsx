@@ -20,7 +20,7 @@ describe("CLIProxyAPI settings", () => {
     withSavedProxies([{ id: "default", label: "", baseUrl: "http://127.0.0.1:8317" }]);
     const html = renderToStaticMarkup(<I18nProvider locale={locale}><CliProxyApiPanel available /></I18nProvider>);
     expect(html).not.toContain("settings.cliProxy.");
-    expect(html).toContain(locale === "zh-TW" ? "不會寫入 CLI 設定檔" : "without writing the key to CLI configuration files");
+    expect(html).toContain(locale === "zh-TW" ? "不會寫入助理設定檔" : "without writing the key to CLI configuration files");
     expect(html).toContain(locale === "zh-TW" ? "之後不會再顯示" : "never shows it again");
     expect(html).toContain("http://127.0.0.1:8317");
   });

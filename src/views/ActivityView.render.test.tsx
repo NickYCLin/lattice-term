@@ -31,7 +31,7 @@ describe("ActivityView", () => {
     );
     expect(markup).toContain("還沒有任何紀錄");
     expect(markup).not.toContain("<table");
-    if (mobile) expect(markup).not.toContain("CLI 工作活動");
-    else expect(markup).toContain("CLI 工作活動");
+    if (mobile) expect(markup).not.toContain("助理工作活動");
+    else expect(markup).toContain("助理工作活動");
   });
 });

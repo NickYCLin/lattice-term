@@ -140,7 +140,7 @@ describe("AgentsView", () => {
     }));
     expect(markup).toContain("背景服務版本較舊，目前無法使用 MCP");
     expect(markup).toContain("existing CLI");
-    expect(markup).toContain("系統不會自動中斷 CLI");
+    expect(markup).toContain("系統不會自動中斷助理");
     expect(markup).toMatch(/<select class="select" disabled="">/);
   });
 

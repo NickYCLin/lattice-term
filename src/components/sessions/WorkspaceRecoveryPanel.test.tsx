@@ -16,7 +16,7 @@ it("keeps empty project entries visible and offers explicit retries without laun
   </I18nProvider>);
   expect(html).toContain("D:\\empty");
   expect(html).toContain("重試這個工作階段");
-  expect(html).toContain("請先關閉這個專案的 CLI 分頁");
+  expect(html).toContain("請先關閉這個專案的助理分頁");
   expect(html).toContain("讀取復原備份");
   expect(retry).not.toHaveBeenCalled();
 });
