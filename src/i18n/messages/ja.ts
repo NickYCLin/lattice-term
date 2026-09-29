@@ -1455,7 +1455,7 @@ export const messages: Messages = {
   "chat.turn.needsLogin.body": "{assistant} のログインが期限切れになり、チャットウィンドウはサインイン画面を開くことができません。AI Agent Fleet の {assistant} ターミナルを開き、そこにサインインします(/Claude Code のログイン、Codex のコード)、このメッセージを再び送信します。",
   "chat.delete": "会話の削除",
   "chat.delete.confirm.title": "「{title}」を削除しますか?",
-  "chat.delete.confirm.body": "ここに保存したコピーのみが削除されます。アシスタントのトランスクリプトは非接触です。",
+  "chat.delete.confirm.body": "アシスタント側の記録も一緒に削除されます。Codex はアーカイブに移動し（Codex Desktop には表示されなくなり、アーカイブから復元できます）、Claude Code は記録を削除します。",
   "chat.delete.confirm.action": "削除",
   "chat.notInstalled": "{cli} はインストールされていません。AI Agent Fleet に最初にインストールします。",
   "chat.storage.note": "会話のコピーはローカルに保存されます。アシスタントはメッセージと必要なファイルコンテンツを、使用するモデルサービスに送信します。",

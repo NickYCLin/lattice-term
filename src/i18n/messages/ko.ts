@@ -1451,7 +1451,7 @@ export const messages: Messages = {
   "chat.turn.needsLogin.body": "{assistant}의 로그인이 만료되고 채팅 창은 로그인 화면을 열 수 없습니다. AI Agent Fleet의 {assistant} 터미널을 열고, 거기에 로그인하십시오 (/로그인 코드, Codex에 대한 codex 로그인), 다음이 메시지를 다시 보냅니다.",
   "chat.delete": "대화 삭제",
   "chat.delete.confirm.title": "“{title}”을 삭제하시겠습니까?",
-  "chat.delete.confirm.body": "복사본만 제거됩니다. 조수의 자신의 성적표가 보이지 않습니다.",
+  "chat.delete.confirm.body": "어시스턴트 쪽 기록도 함께 제거됩니다. Codex는 보관함으로 옮겨지고(Codex Desktop 목록에서 사라지며 보관함에서 복원할 수 있음), Claude Code는 기록이 삭제됩니다.",
   "chat.delete.confirm.action": "삭제",
   "chat.notInstalled": "{cli}가 설치되지 않습니다. AI Agent Fleet에 설치하십시오.",
   "chat.storage.note": "대화 사본은 로컬로 저장됩니다. 당신의 조수는 당신이 사용하는 모형 서비스에 메시지와 필요한 파일 내용을 보냅니다.",

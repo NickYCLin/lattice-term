@@ -1474,7 +1474,7 @@ export const messages: Messages = {
   "chat.turn.needsLogin.body": "{assistant} 的登录已过期，对话窗口没办法替它跳出登录画面。请到 AI Agent Fleet 开一个 {assistant} 的终端机完成登录（Claude Code 是输入 /login，Codex 是 codex login），再回来重送这则消息。",
   "chat.delete": "删除对话",
   "chat.delete.confirm.title": "删除「{title}」？",
-  "chat.delete.confirm.body": "只会移除这里的纪录；助理 自己保存的对话不受影响。",
+  "chat.delete.confirm.body": "助理自己保存的记录也会一起移除：Codex 会移到归档（Codex Desktop 不再列出，可在归档里还原），Claude Code 会直接删除。",
   "chat.delete.confirm.action": "删除",
   "chat.notInstalled": "{cli} 尚未安装，请先到 AI Agent Fleet 安装。",
   "chat.storage.note": "对话副本保存在本机；助理会依所用模型，将消息与必要的文件内容发送给模型服务。",

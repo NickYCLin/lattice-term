@@ -1451,7 +1451,7 @@ export const messages: Messages = {
   "chat.turn.needsLogin.body": "{assistant}'s login has expired and the chat window cannot open its sign-in screen. Abrir una terminal {assistant} en AI Agent Fleet, regístrese allí (/login for Claude Code, codex login for Codex), y envíe este mensaje de nuevo.",
   "chat.delete": "Eliminar la conversación",
   "chat.delete.confirm.title": "Eliminar “{title}”?",
-  "chat.delete.confirm.body": "Sólo la copia guardada aquí es quitada; la transcripción propia del asistente es sin tocar.",
+  "chat.delete.confirm.body": "También se quita el registro del propio asistente: Codex lo archiva (Codex Desktop deja de mostrarlo y puedes restaurarlo desde el archivo); Claude Code lo elimina.",
   "chat.delete.confirm.action": "Eliminar",
   "chat.notInstalled": "{cli} no está instalado. Instala primero en AI Agent Fleet.",
   "chat.storage.note": "Una copia de conversación se almacena localmente. Su asistente envía mensajes y contenido de archivo necesario al servicio modelo que utiliza.",

@@ -1451,7 +1451,7 @@ export const messages: Messages = {
   "chat.turn.needsLogin.body": "La connexion de {assistant} a expiré et la fenêtre de chat ne peut pas ouvrir son écran de connexion. Ouvrez un terminal {assistant} dans AI Agent Fleet, connectez-vous là (/connexez pour Claude Code, codex login pour Codex), puis envoyez ce message à nouveau.",
   "chat.delete": "Supprimer la conversation",
   "chat.delete.confirm.title": "Supprimer{title}Qu'est-ce que tu fais ?",
-  "chat.delete.confirm.body": "Seule la copie conservée ici est retirée; la transcription de l'assistant est intacte.",
+  "chat.delete.confirm.body": "L'historique de l'assistant est aussi retiré : Codex l'archive (Codex Desktop ne l'affiche plus et vous pouvez le restaurer depuis l'archive) ; Claude Code le supprime.",
   "chat.delete.confirm.action": "Supprimer",
   "chat.notInstalled": "{cli} n'est pas installé. Installez-le d'abord dans AI Agent Fleet.",
   "chat.storage.note": "Une copie de conversation est stockée localement. Votre assistant envoie les messages et le contenu de fichier nécessaire au service modèle que vous utilisez.",
