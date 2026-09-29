@@ -45,6 +45,7 @@ describe("remote CLI list card", () => {
     expect(remoteCliCard({ ...base, groupLabel: "修座位表", project: "VowBook", model: "gpt-5.5" }, "預設模型")).toEqual({ title: "修座位表", detail: "OpenAI Codex · gpt-5.5", place: "VowBook" });
   });
   it("still reads lists from hosts that do not send the new fields", () => {
-    expect(remoteCliCard({ ...base, label: "", groupLabel: "" }, "預設模型")).toEqual({ title: "OpenAI Codex", detail: "OpenAI Codex", place: "" });
+    expect(remoteCliCard({ ...base, label: "", groupLabel: "" }, "預設模型")).toEqual({ title: "OpenAI Codex", detail: "", place: "" });
+    expect(remoteCliCard({ ...base, model: "gpt-5.5" }, "預設模型").detail).toBe("gpt-5.5");
   });
 });

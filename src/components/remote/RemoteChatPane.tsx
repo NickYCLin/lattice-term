@@ -74,7 +74,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
         </button>;
       })}
     </div> : current ? <>
-      <div className="remote-chat-heading"><strong>{heading!.title}</strong><small>{heading!.detail}</small>{heading!.place && <small className="remote-chat-heading__path" title={current.thread.directory}>{heading!.place}</small>}</div>
+      <div className="remote-chat-heading"><strong>{heading!.title}</strong><small>{heading!.detail}</small>{current.thread.directory && <small className="remote-chat-heading__path">{t("remote.cli.folder", { path: current.thread.directory })}</small>}</div>
       <div className="remote-chat-messages" aria-label={t("remote.chat.messages")}>
         {current.before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(current.before)}>{t("remote.chat.older")}</button>}
         {before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(null)}>{t("remote.chat.latest")}</button>}

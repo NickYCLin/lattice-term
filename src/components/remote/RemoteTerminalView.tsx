@@ -6,7 +6,7 @@
  * bytes, and the agent is told whenever the pane changes size.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -48,14 +48,18 @@ export function RemoteTerminalView({
   session,
   remote,
   theme,
+  terminalRef,
 }: {
   session: RemoteSessionSummary;
   remote: RemoteApi;
   /** Only used to re-theme the terminal when the palette changes. */
   theme: ThemeId;
+  /** Lets touch controls open the software keyboard from a user gesture. */
+  terminalRef?: MutableRefObject<Terminal | null>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
+  const ownRef = useRef<Terminal | null>(null);
+  const termRef = terminalRef ?? ownRef;
   const remoteRef = useRef(remote);
   remoteRef.current = remote;
   const sessionId = session.sessionId;
@@ -170,5 +174,6 @@ export function RemoteTerminalView({
     }
   }, [theme]);
 
-  return <div className="terminal-pane remote-terminal" ref={hostRef} />;
+  // Phones only raise the keyboard when focus happens inside the tap itself.
+  return <div className="terminal-pane remote-terminal" ref={hostRef} onClick={() => { if (!viewOnly) termRef.current?.focus(); }} />;
 }

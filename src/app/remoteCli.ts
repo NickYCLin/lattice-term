@@ -1,8 +1,8 @@
 import { agentDisplayName } from "./agentNames";
 import { CLI_PROXY_NAME } from "./cliProxyApi";
 import type { RemoteChatResponse } from "./remoteChat";
-/** `model`, `project` and `proxy` are absent from hosts before 2026.9.30. */
-export interface RemoteCliSession { id: string; label: string; groupLabel: string; agent: string; state: string; detached: boolean; model?: string; project?: string; proxy?: boolean }
+/** `model`, `project`, `directory` and `proxy` are absent from hosts before 2026.9.30. */
+export interface RemoteCliSession { id: string; label: string; groupLabel: string; agent: string; state: string; detached: boolean; model?: string; project?: string; directory?: string; proxy?: boolean }
 export interface RemoteCard { title: string; detail: string; place: string }
 /**
  * Mirrors the desktop sidebar: the project (or a name the user gave the tab)
@@ -15,9 +15,10 @@ export function remoteCliCard(session: RemoteCliSession, defaultModel: string): 
   const project = session.project?.trim() ?? "";
   const account = session.proxy ? CLI_PROXY_NAME : name;
   const model = session.model?.trim() || (session.model === undefined ? "" : defaultModel);
+  const title = custom ? group : project || name;
   return {
-    title: custom ? group : project || name,
-    detail: [account, model].filter(Boolean).join(" · "),
+    title,
+    detail: [account === title ? "" : account, model].filter(Boolean).join(" · "),
     place: [custom ? project : "", session.proxy ? name : ""].filter(Boolean).join(" · "),
   };
 }

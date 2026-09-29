@@ -5,10 +5,10 @@
 .remote-cli-pane p { margin: 0; }
 .remote-cli-heading { display: grid; gap: 2px; min-width: 0; }
 .remote-cli-heading > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-cli-heading > .remote-cli-heading__path { white-space: normal; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); color: var(--text-faint); }
 .remote-cli-heading small { color: var(--text-muted); }
-.remote-cli-keys { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
-.remote-cli-keys::-webkit-scrollbar { display: none; }
-.remote-cli-keys button { flex: 1 0 auto; min-width: 44px; min-height: 44px; padding-inline: 10px; }
+.remote-cli-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
+.remote-cli-keys button { min-width: 0; min-height: 44px; padding-inline: 2px; font-size: 13px; }
 .remote-cli-state { align-self: flex-start; flex: none; width: max-content; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 1.4; background: var(--surface-raised, transparent); color: var(--text-muted); border: 1px solid var(--line); }
 .remote-cli-state--working { background: var(--info-soft); color: var(--info); border-color: transparent; }
 .remote-cli-state--needsAttention { background: var(--warn-soft); color: var(--warn); border-color: transparent; }

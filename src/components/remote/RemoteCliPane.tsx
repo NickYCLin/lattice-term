@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Terminal } from "@xterm/xterm";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
 import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
-import { RefreshIcon } from "../icons";
+import { KeyboardIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import "./RemoteCliPane.css";
@@ -62,6 +63,7 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   const [problem, setProblem] = useState(false);
   const [ready, setReady] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const terminal = useRef<Terminal | null>(null);
   const channel = useMemo(() => new RemoteCliChannel(selected.id, operation => requestRemoteCli(connection.sessionId, operation), () => setProblem(true)), [connection.sessionId, selected.id]);
   const remote = useMemo(() => ({
     terminalInput: async (_id: string, data: string) => { channel.input(data); },
@@ -92,10 +94,19 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   const card = remoteCliCard(selected, t("terminal.model.pending"));
   const gated = useMemo(() => ({ ...remote, terminalInput: async (id: string, data: string) => { if (ready && !problem) await remote.terminalInput(id, data); } }), [remote, ready, problem]);
   return <>
-    <div className="remote-cli-heading"><strong>{card.title}</strong><small>{card.detail}</small></div>
+    <div className="remote-cli-heading"><strong>{card.title}</strong>{card.detail && <small>{card.detail}</small>}
+      {(selected.directory || selected.project) && <small className="remote-cli-heading__path" title={selected.directory || selected.project}>{t("remote.cli.folder", { path: selected.directory || selected.project || "" })}</small>}
+    </div>
     <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
     {truncated && <p className="muted">{t("remote.cli.truncated")}</p>}
-    <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} />
-    <div className="remote-cli-keys" role="toolbar" aria-label={t("remote.cli.keys")}>{[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button className="button button--secondary button--sm" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}</div>
+    <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} terminalRef={terminal} />
+    {/* Keep the software keyboard up while tapping helper keys. */}
+    <div className="remote-cli-keys" role="toolbar" aria-label={t("remote.cli.keys")} onPointerDown={event => event.preventDefault()}>
+      <button type="button" className="button button--primary button--sm remote-cli-keys__keyboard" disabled={!ready || problem} title={t("terminal.keybar.keyboard")} aria-label={t("terminal.keybar.keyboard")} onClick={() => {
+        const current = terminal.current;
+        if (current?.textarea && current.textarea === document.activeElement) current.blur(); else current?.focus();
+      }}><KeyboardIcon size={18} /></button>
+      {[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button type="button" className="button button--secondary button--sm" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}
+    </div>
   </>;
 }

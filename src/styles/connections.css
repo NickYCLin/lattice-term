@@ -2809,8 +2809,10 @@
 }
 
 /* xterm 6 paints its viewport black by default; it spans the padding above,
-   so let the themed .xterm background show through instead of a dark frame. */
-.terminal-pane .xterm .xterm-viewport {
+   so let the themed .xterm background show through instead of a dark frame.
+   Match xterm's own :not(.allow-transparency) selector and add one class, so
+   the rule still wins when the bundle places xterm.css after this file. */
+.terminal-pane .xterm:not(.allow-transparency) .xterm-viewport {
   background-color: transparent;
 }
 

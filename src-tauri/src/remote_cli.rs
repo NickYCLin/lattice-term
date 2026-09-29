@@ -9,7 +9,7 @@ use std::sync::{
 };
 use tauri::{AppHandle, Manager};
 
-// 50 summaries of six escaped labels stay below the 60 KiB encrypted response limit.
+// 50 summaries of escaped labels and a clipped folder stay below the 60 KiB encrypted response limit.
 const MAX_LISTED: usize = 50;
 fn label(value: &str) -> String {
     let mut output = String::new();
@@ -32,6 +32,32 @@ fn project_name(directory: &str) -> String {
             .next()
             .unwrap_or_default(),
     )
+}
+/// Where the CLI runs, with the home folder shortened to `~`. Long paths keep
+/// their last folders, which are the ones that tell projects apart.
+fn short_directory(directory: &str, home: Option<&str>) -> String {
+    const LIMIT: usize = 160;
+    let trimmed = directory.trim_end_matches(['/', '\\']);
+    let shown = match home.map(|home| home.trim_end_matches(['/', '\\'])) {
+        Some(home) if !home.is_empty() && trimmed == home => "~".to_string(),
+        Some(home)
+            if !home.is_empty()
+                && trimmed.starts_with(home)
+                && trimmed[home.len()..].starts_with(['/', '\\']) =>
+        {
+            format!("~{}", &trimmed[home.len()..])
+        }
+        _ => trimmed.to_string(),
+    };
+    let clean: Vec<char> = shown.chars().filter(|c| !c.is_control()).collect();
+    let mut tail = String::new();
+    for c in clean.iter().rev() {
+        if tail.len() + c.len_utf8() > LIMIT - '…'.len_utf8() {
+            return format!("…{}", tail.chars().rev().collect::<String>());
+        }
+        tail.push(*c);
+    }
+    clean.into_iter().collect()
 }
 /// Mirrors `cliProxyIdFromArguments` in the desktop UI.
 fn uses_cli_proxy(arguments: &[String]) -> bool {
@@ -74,6 +100,7 @@ impl Access {
         let mut ids = self.sessions.lock().map_err(|e| e.to_string())?;
         ids.retain(|_, native| sessions.iter().any(|s| s.session_id == *native));
         let mut output = Vec::new();
+        let home = dirs::home_dir().map(|home| home.to_string_lossy().into_owned());
         for session in sessions.into_iter().take(MAX_LISTED) {
             let id = if let Some((id, _)) = ids
                 .iter()
@@ -97,6 +124,7 @@ impl Access {
                 "detached": session.detached,
                 "model": label(session.model.as_deref().unwrap_or_default()),
                 "project": project_name(&session.working_directory),
+                "directory": short_directory(&session.working_directory, home.as_deref()),
                 "proxy": uses_cli_proxy(&session.launch_arguments),
             }));
         }
@@ -255,7 +283,7 @@ mod tests {
     #[test]
     fn escaped_labels_keep_a_full_list_within_the_wire_budget() {
         let hostile = "\\\"".repeat(1000);
-        let value = json!({"id": "a".repeat(32), "label": label(&hostile), "groupLabel": label(&hostile), "agent": label(&hostile), "state": "needsAttention", "detached": false, "model": label(&hostile), "project": project_name(&format!("/x/{hostile}")), "proxy": true});
+        let value = json!({"id": "a".repeat(32), "label": label(&hostile), "groupLabel": label(&hostile), "agent": label(&hostile), "state": "needsAttention", "detached": false, "model": label(&hostile), "project": project_name(&format!("/x/{hostile}")), "directory": short_directory(&format!("/x/{}", hostile.repeat(8)), None), "proxy": true});
         let response =
             json!({"id": "r".repeat(160), "value": vec![value; MAX_LISTED], "error": null});
         assert!(serde_json::to_vec(&response).unwrap().len() <= 60 * 1024);
@@ -267,6 +295,19 @@ mod tests {
             "LatticeTerm"
         );
         assert_eq!(project_name("C:\\Users\\me\\VowBook"), "VowBook");
+        assert_eq!(
+            short_directory("/home/me/projects/LatticeTerm/", Some("/home/me")),
+            "~/projects/LatticeTerm"
+        );
+        assert_eq!(short_directory("/home/me", Some("/home/me/")), "~");
+        assert_eq!(
+            short_directory("/home/meow/x", Some("/home/me")),
+            "/home/meow/x"
+        );
+        let deep = format!("/data/{}/LatticeTerm", "a".repeat(300));
+        let shown = short_directory(&deep, None);
+        assert!(shown.starts_with('…') && shown.ends_with("/LatticeTerm"));
+        assert!(shown.len() <= 160);
         assert_eq!(project_name(""), "");
         let proxied = ["-c", "model_provider=latticeterm_cliproxyapi_work"].map(String::from);
         assert!(uses_cli_proxy(&proxied));
