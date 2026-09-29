@@ -4,6 +4,35 @@
 
 ---
 
+## [2026.9.30](https://github.com/NickYCLin/lattice-term/compare/v2026.9.29...v2026.9.30) (2026-09-29)
+
+
+### 🚀 新增功能
+
+* **connections:** 同一台電腦的不同連線可以合併成一張卡 ([be1817b](https://github.com/NickYCLin/lattice-term/commit/be1817bf72bcc53f9e137d9e96f2bab8f24bfd65))
+* **remote:** 手機對話可以附上截圖 ([d417f6c](https://github.com/NickYCLin/lattice-term/commit/d417f6ce805c588c88bbb2e68d0f3b678e11c604))
+* **remote:** 手機清單帶上專案、帳號與模型 ([4d4fecc](https://github.com/NickYCLin/lattice-term/commit/4d4feccdaa743ad0264e48a6c060cbb9c06de1a2))
+* **remote:** 手機清單直接標出助理執行狀態與待核准 ([1d8a5dc](https://github.com/NickYCLin/lattice-term/commit/1d8a5dccc4b4c667c49515af0dcc62e58f7bf8d9))
+* **remote:** 看工作階段或對話時暫停傳送桌面畫面 ([6330cb2](https://github.com/NickYCLin/lattice-term/commit/6330cb2aaa94cff4bbead48e8a7c8a2771499bc3))
+* **session:** 刪除對話時同步移除 Codex 的紀錄 ([26c3895](https://github.com/NickYCLin/lattice-term/commit/26c3895ded9eb3944b065ce481f6a3baa77fc4ca))
+
+
+### 🛠️ 問題修正
+
+* **agent:** Mac 和 Linux 沒裝 Node.js 也能直接安裝 ([d4633cb](https://github.com/NickYCLin/lattice-term/commit/d4633cbcd5042bad3404481867d207ad3e75dbe4))
+* **agent:** 加開助理用檔案交接時保留更多對話內容 ([d8c676a](https://github.com/NickYCLin/lattice-term/commit/d8c676aba153020185373f81d1e6ab804379a3e4))
+* **agent:** 終端機自動回應不再取消加開助理的交接提示 ([4572abd](https://github.com/NickYCLin/lattice-term/commit/4572abd5e9e8f5c52976e7252424e54d874150c2))
+* **chat:** skill 清單的來源標籤跟著介面語言顯示 ([b3c25fe](https://github.com/NickYCLin/lattice-term/commit/b3c25fe71786edec33aa71da15c6ade21d5fca0d))
+* **i18n:** 其他語系的刪除說明改成會同步封存 ([58d8f77](https://github.com/NickYCLin/lattice-term/commit/58d8f77385c4ccb7ec08f2a316ab2fcebac8d184))
+* **i18n:** 工作階段與 Fleet 文案統一稱為助理 ([269ee7d](https://github.com/NickYCLin/lattice-term/commit/269ee7df568ac237b2644c7c692e5511339b7a2a))
+* **macos:** 從 Dock 開啟時也讀得到 shell 的 PATH ([f80bb70](https://github.com/NickYCLin/lattice-term/commit/f80bb704cdabf4589c667d2880472d5a0d0364d8))
+* **remote:** 手機助理與對話頁不再擠成多行 ([ac9ba19](https://github.com/NickYCLin/lattice-term/commit/ac9ba19a100d9bc3409dcda38cb667d41763f2eb))
+* **remote:** 手機助理頁加上鍵盤按鈕並顯示資料夾 ([3c69ab6](https://github.com/NickYCLin/lattice-term/commit/3c69ab6a5baa7a2504d8da040934c13bdcd1ec9c))
+* **remote:** 手機清單卡片直接顯示資料夾 ([42a3594](https://github.com/NickYCLin/lattice-term/commit/42a3594314abc80b220ab4d06389d436fc965c3c))
+* **remote:** 手機離開後把終端尺寸還給桌面 ([7504fdc](https://github.com/NickYCLin/lattice-term/commit/7504fdc4860ab1eb3861c002059aff4d6e181ff3))
+* **session:** 點尚未啟動的對話失敗時直接提示原因 ([eb251a9](https://github.com/NickYCLin/lattice-term/commit/eb251a9951f6372d2271ea000a40ef5e84e87031))
+* **ui:** 手機點過按鈕後不再卡著提示泡泡 ([e464ff7](https://github.com/NickYCLin/lattice-term/commit/e464ff78fe5553e626e89bb883b918183a3661a1))
+
 ## [2026.9.29](https://github.com/NickYCLin/lattice-term/compare/v2026.9.28...v2026.9.29) (2026-09-28)
 
 
