@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { mentionsInPrompt, type ChatMention } from "../../app/agentChat";
 import { restoreQueuedInputs } from "../../app/chatInputQueue";
-import { skillMention, skillPick } from "./ChatSkillPicker";
+import { skillMention, skillPick, skillSourceLabel } from "./ChatSkillPicker";
 
 describe("skill mentions", () => {
   it("uses Codex's own mention and plain words elsewhere", () => {
     expect(skillMention("codex", "release notes")).toBe("$release-notes ");
     expect(skillMention("claude", "pdf")).toBe("Use the `pdf` skill. ");
     expect(skillMention("gemini", "a`b\nc")).toBe("Use the `abc` skill. ");
+  });
+
+  it("shows the backend's fixed source words in the interface language", () => {
+    const t = (key: string) => `[${key}]`;
+    expect(skillSourceLabel("外掛", t)).toBe("[chat.skills.source.plugin]");
+    expect(skillSourceLabel("帳號", t)).toBe("[chat.skills.source.account]");
+    expect(skillSourceLabel("Custom", t)).toBe("Custom");
   });
 
   it("turns Codex catalogue entries into structured picks only for Codex", () => {

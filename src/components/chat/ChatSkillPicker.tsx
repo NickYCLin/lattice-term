@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatDefinitionId, ChatMention } from "../../app/agentChat";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
-import { useI18n } from "../../i18n/context";
+import { useI18n, type MessageKey } from "../../i18n/context";
 
 interface Skill {
   name: string;
@@ -10,6 +10,21 @@ interface Skill {
   kind?: ChatMention["kind"];
   path?: string | null;
   token?: string | null;
+}
+
+const SOURCE_KEYS: Record<string, MessageKey> = {
+  帳號: "chat.skills.source.account",
+  專案: "chat.skills.source.project",
+  外掛: "chat.skills.source.plugin",
+  內建: "chat.skills.source.builtin",
+  系統管理: "chat.skills.source.admin",
+  App: "chat.skills.source.app",
+};
+
+/** The backend names where an entry came from in fixed words; show them in the interface language. */
+export function skillSourceLabel(source: string, t: (key: MessageKey) => string): string {
+  const key = SOURCE_KEYS[source];
+  return key ? t(key) : source;
 }
 
 /** The structured pick Codex receives, when the entry carries one. */
@@ -98,13 +113,14 @@ export function ChatSkillPicker({
             className="input"
             autoFocus
             value={filter}
-            placeholder={t("chat.skills.filter")}
+            placeholder={t(definitionId === "codex" ? "chat.skills.filterWithPlugins" : "chat.skills.filter")}
             onChange={(event) => setFilter(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") setOpen(false);
             }}
           />
           {error && <p className="field__error">{error}</p>}
+          {!skills && !error && <p className="chat-settings__hint">{t("chat.skills.loading")}</p>}
           {skills && shown.length === 0 && <p className="chat-settings__hint">{t("chat.skills.none")}</p>}
           <ul>
             {shown.map((skill) => (
@@ -118,7 +134,7 @@ export function ChatSkillPicker({
                   }}
                 >
                   <strong>{skill.name}</strong>
-                  <span className="chat-chip">{skill.source}</span>
+                  <span className="chat-chip">{skillSourceLabel(skill.source, t)}</span>
                   {skill.description && <small>{skill.description}</small>}
                 </button>
               </li>

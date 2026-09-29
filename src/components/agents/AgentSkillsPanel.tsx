@@ -6,6 +6,7 @@ import {
 } from "../../app/chatAccountProfiles";
 import type { AgentDefinition } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
+import { skillSourceLabel } from "../chat/ChatSkillPicker";
 import { Callout } from "../common/Callout";
 import { AgentIcon } from "../icons";
 
@@ -13,6 +14,7 @@ interface DiscoveredSkill {
   name: string;
   description: string | null;
   source: string;
+  kind?: string;
 }
 
 interface SkillTarget {
@@ -95,7 +97,7 @@ export function AgentSkillsPanel({
           profileConfigPath: activeTarget.profileConfigPath,
         });
         if (request !== requestRef.current) return;
-        setSkills(result);
+        setSkills(result.filter((skill) => !skill.kind || skill.kind === "skill"));
       } catch (reason) {
         if (request !== requestRef.current) return;
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -163,7 +165,7 @@ export function AgentSkillsPanel({
                   <div>
                     <div className="agents-skills__name-row">
                       <strong>{skill.name}</strong>
-                      <span className="badge tone-neutral">{skill.source}</span>
+                      <span className="badge tone-neutral">{skillSourceLabel(skill.source, t)}</span>
                     </div>
                     {skill.description && <p>{skill.description}</p>}
                   </div>
