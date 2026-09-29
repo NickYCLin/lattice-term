@@ -19,6 +19,8 @@ describe("navigation tooltip layers", () => {
 
   it("supports keyboard focus and does not intercept pointer input", () => {
     expect(shellStyles).toMatch(/\[data-tooltip\]:focus-visible::after\s*\{[^}]*opacity:\s*1;/s);
+    expect(shellStyles).toMatch(/@media \(hover: hover\)\s*\{\s*\[data-tooltip\]:hover::after\s*\{[^}]*opacity:\s*1;/s);
+    expect(shellStyles).not.toMatch(/\[data-tooltip\]:hover::after,/);
     expect(shellStyles).toMatch(/\[data-tooltip\]::after\s*\{[^}]*pointer-events:\s*none;/s);
     expect(shellStyles).toMatch(/\.app--mobile \.rail \[data-tooltip\]::after,[^{]*\{[^}]*display:\s*none;/s);
   });

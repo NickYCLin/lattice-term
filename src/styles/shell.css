@@ -416,7 +416,13 @@
   transition: opacity var(--duration-fast) var(--ease);
 }
 
-[data-tooltip]:hover::after,
+/* Touch screens keep :hover after a tap, which left tooltips stuck on phones. */
+@media (hover: hover) {
+  [data-tooltip]:hover::after {
+    opacity: 1;
+  }
+}
+
 [data-tooltip]:focus-visible::after {
   opacity: 1;
 }
