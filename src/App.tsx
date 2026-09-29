@@ -91,6 +91,7 @@ import {
   type SavedAgentSession,
   type WorkspaceSessionSnapshot,
 } from "./app/workspaceSessionPersistence";
+import type { WorkspaceRetryResult } from "./components/sessions/WorkspaceRecoveryPanel";
 import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
 import { useAutomaticLocalConversations } from "./app/useAutomaticLocalConversations";
 import { loadAuthPref } from "./app/authPreferences";
@@ -436,8 +437,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setUnrestoredWorkspaceSessions([...sessions]);
   }
 
-  async function retryWorkspaceSession(saved: SavedAgentSession, activate = true) {
-    if (retryingWorkspaceRef.current || !sessionRestoreComplete) return;
+  async function retryWorkspaceSession(
+    saved: SavedAgentSession, activate = true,
+  ): Promise<WorkspaceRetryResult> {
+    if (retryingWorkspaceRef.current || !sessionRestoreComplete) return { status: "busy" };
     retryingWorkspaceRef.current = true;
     setRetryingWorkspace(true);
     setWorkspaceRecoveryError(false);
@@ -456,8 +459,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
       if (activate) setActiveSessionId(launched.sessionId);
       try { await agents.rename(launched.sessionId, saved.groupLabel); } catch { /* keep the live CLI */ }
-    } catch {
+      return { status: "started" };
+    } catch (reason) {
       setWorkspaceRecoveryError(true);
+      return { status: "failed", detail: reason instanceof Error ? reason.message : String(reason) };
     } finally {
       retryingWorkspaceRef.current = false;
       setRetryingWorkspace(false);

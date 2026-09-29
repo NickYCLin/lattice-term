@@ -12,7 +12,7 @@ export function useAutomaticLocalConversations(
   ready: boolean,
   pending: readonly SavedWorkspaceSession[],
   queue: (entries: readonly SavedAgentSession[]) => void,
-  retry: (entry: SavedAgentSession) => Promise<void>,
+  retry: (entry: SavedAgentSession) => Promise<unknown>,
 ) {
   const [enabled, setEnabled] = useState(() => {
     try { return window.localStorage.getItem(AUTO_LOCAL_CONVERSATIONS_KEY) === "true"; }

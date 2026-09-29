@@ -407,6 +407,7 @@ export function SessionsView({
     useState<SavedAgentSession | null>(null);
   const [syncNativeRemoval, setSyncNativeRemoval] = useState(true);
   const [nativeSyncError, setNativeSyncError] = useState<string | null>(null);
+  const [savedStartError, setSavedStartError] = useState<string | null>(null);
   const [removingSession, setRemovingSession] = useState(false);
   const [removeSessionError, setRemoveSessionError] = useState<string | null>(
     null,
@@ -1688,6 +1689,21 @@ export function SessionsView({
     );
   }
 
+  async function startSavedConversation(entry: SavedAgentSession) {
+    if (!recovery.onRetryWorkspaceSession) return;
+    setSavedStartError(null);
+    const result = await recovery.onRetryWorkspaceSession(entry);
+    if (result.status === "busy") {
+      setSavedStartError(t("terminal.projects.savedStartBusy"));
+    } else if (result.status === "failed") {
+      setSavedStartError(
+        /at most \d+ agent sessions|session limit/i.test(result.detail)
+          ? t("terminal.projects.savedStartLimit")
+          : t("terminal.projects.savedStartFailed", { detail: result.detail }),
+      );
+    }
+  }
+
   function syncNativeChoice(assistant: string) {
     return (
       <label className="dialog__body confirm-sync">
@@ -1723,7 +1739,7 @@ export function SessionsView({
         setMobileTreeOpen(false);
         const saved = savedAgentSessionById.get(sessionId);
         if (saved) {
-          void recovery.onRetryWorkspaceSession?.(saved);
+          void startSavedConversation(saved);
           return;
         }
         const group = agentGroups.find((candidate) =>
@@ -1936,6 +1952,26 @@ export function SessionsView({
     </>
   );
 
+  const savedStartCallout = savedStartError ? (
+    <div className="session-notice">
+      <Callout
+        tone="warn"
+        title={t("terminal.projects.savedStartTitle")}
+        actions={
+          <button
+            type="button"
+            className="button button--ghost button--sm"
+            onClick={() => setSavedStartError(null)}
+          >
+            {t("common.close")}
+          </button>
+        }
+      >
+        {savedStartError}
+      </Callout>
+    </div>
+  ) : null;
+
   const nativeSyncCallout = nativeSyncError ? (
     <div className="session-notice">
       <Callout
@@ -1966,6 +2002,7 @@ export function SessionsView({
         {workspaceTransferCallout}
         {addCliErrorCallout}
         {nativeSyncCallout}
+        {savedStartCallout}
         {newProjectError && !newProjectDialog && (
           <div className="session-notice">
             <Callout tone="danger" title={t("terminal.projects.chooseFailed")}>
@@ -2112,6 +2149,7 @@ export function SessionsView({
       {workspaceTransferCallout}
       {addCliErrorCallout}
         {nativeSyncCallout}
+        {savedStartCallout}
       {relocationNotice && (
         <div className="session-notice">
           <Callout
