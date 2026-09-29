@@ -81,8 +81,22 @@
 }
 
 .remote-toolbar__identity {
+  flex: 0 1 auto;
+  min-width: 3rem;
   color: var(--text);
   font-weight: 600;
+}
+
+.remote-toolbar > * {
+  flex-shrink: 0;
+}
+
+.remote-toolbar > .remote-toolbar__identity {
+  flex-shrink: 1;
+}
+
+.capture-button__tab {
+  white-space: nowrap;
 }
 
 .remote-toolbar__status {
@@ -765,6 +779,16 @@
   .canvas-soft-keyboard__toggle {
     display: inline-flex;
   }
+
+  .remote-toolbar {
+    min-height: 3rem;
+  }
+
+  .capture-button {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    justify-content: center;
+  }
 }
 
 .app--mobile .remote-workspace--files {
@@ -786,9 +810,18 @@
     grid-template-columns: 1fr;
   }
 
+  .remote-toolbar {
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+  }
+
   .remote-toolbar__status,
   .remote-toolbar__resolution {
     display: none;
+  }
+
+  .remote-toolbar__identity {
+    flex-grow: 1;
   }
 
   .capture-button__label {

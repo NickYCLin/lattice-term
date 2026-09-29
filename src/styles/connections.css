@@ -2808,6 +2808,12 @@
   padding: var(--space-3);
 }
 
+/* xterm 6 paints its viewport black by default; it spans the padding above,
+   so let the themed .xterm background show through instead of a dark frame. */
+.terminal-pane .xterm .xterm-viewport {
+  background-color: transparent;
+}
+
 /* The operating-system IME renders unfinished text in this xterm overlay.
    Keep it opaque and clearly underlined so the hidden terminal cursor cannot
    flash through the glyphs while Zhuyin/Cangjie composition is in progress. */

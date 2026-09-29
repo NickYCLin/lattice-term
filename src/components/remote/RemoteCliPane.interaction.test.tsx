@@ -83,8 +83,8 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     expect(container.textContent).toContain("Existing CLI");
     expect(container.textContent).toContain("背景工作階段");
     await click("Existing CLI");
-    for (let attempt = 0; attempt < 10 && !container.textContent.includes("已連接原本的 CLI"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
-    expect(container.textContent).toContain("已連接原本的 CLI");
+    for (let attempt = 0; attempt < 10 && !container.textContent.includes("已接上原本的助理"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
+    expect(container.textContent).toContain("已接上原本的助理");
     expect(rendered.text).toBe("abc");
     await act(async () => { await rendered.remote!.terminalInput("opaque", "中文\r"); await vi.advanceTimersByTimeAsync(35); });
     expect(operations.filter(op => op.kind === "cliInput")).toEqual([{ kind: "cliInput", sessionId: "opaque", data: "中文\r" }]);
@@ -95,8 +95,8 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     expect(operations).toHaveLength(hiddenCount);
     expect(operations.filter(op => op.kind === "cliInput")).toHaveLength(1);
     await render(true);
-    for (let attempt = 0; attempt < 10 && !container.textContent.includes("已連接原本的 CLI"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
-    expect(container.textContent).toContain("已連接原本的 CLI");
+    for (let attempt = 0; attempt < 10 && !container.textContent.includes("已接上原本的助理"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
+    expect(container.textContent).toContain("已接上原本的助理");
     await click("返回清單");
     const count = operations.filter(op => op.kind === "cliRead").length;
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });

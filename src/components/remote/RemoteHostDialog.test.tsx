@@ -125,7 +125,7 @@ describe("remote host dialog", () => {
     expect(windows).toContain("不受分享資料夾範圍限制");
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
     expect(windows).toContain("分享 Agent Fleet 工作區");
-    expect(windows).toContain("分享 CLI 並允許操作");
+    expect(windows).toContain("分享助理並允許操作");
     // A share nobody configured opens everything but running commands, which
     // reaches past the shared folder and stays a deliberate extra step.
     const unchecked = checkboxes.filter(input => !input.includes("checked"));

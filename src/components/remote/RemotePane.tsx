@@ -3,7 +3,7 @@ import type { KeyboardEvent, PointerEvent, WheelEvent } from "react";
 import type { RemoteApi, RemoteInput, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
 import { useI18n } from "../../i18n/context";
-import { FolderIcon, ScreenShareIcon, ShieldIcon, TerminalIcon } from "../icons";
+import { AgentIcon, ChatIcon, FolderIcon, ScreenShareIcon, ShieldIcon, TerminalIcon } from "../icons";
 import {
   CanvasSoftKeyboard,
   CanvasInputSequence,
@@ -283,19 +283,19 @@ export function RemotePane({
   return (
     <div className="remote-pane">
       <div className="remote-toolbar">
-        <span className="remote-toolbar__identity truncate">
+        <span className="remote-toolbar__identity" title={session.agentName}>
           {session.terminal ? (
             <TerminalIcon size={14} />
           ) : (
             <ScreenShareIcon size={14} />
           )}
-          {session.agentName}
+          <span className="truncate">{session.agentName}</span>
         </span>
         <span className="remote-toolbar__status">
           <ShieldIcon size={13} />
           {t("remote.session.encrypted")}
         </span>
-        {!session.terminal && (
+        {!session.terminal && !chatOpen && !cliOpen && (
           <>
             <span className="remote-toolbar__resolution mono">
               {session.width} × {session.height}
@@ -317,8 +317,8 @@ export function RemotePane({
             onReleaseAll={() => sendKeyboard({ kind: "releaseAll" })}
           />
         )}
-        {!session.terminal && <button type="button" className="capture-button" aria-pressed={cliOpen} onClick={() => { setCliOpen(value => !value); setChatOpen(false); setFilesOpen(false); setCommandsOpen(false); }}>{t("remote.cli.title")}</button>}
-        {session.chat && <button className="capture-button" aria-pressed={chatOpen} onClick={() => { setCliOpen(false); setChatOpen(value => !value); setFilesOpen(false); setCommandsOpen(false); }}>{t("remote.chat.title")}</button>}
+        {!session.terminal && <button type="button" className={`capture-button${cliOpen ? " is-active" : ""}`} aria-pressed={cliOpen} title={t("remote.cli.title")} onClick={() => { setCliOpen(value => !value); setChatOpen(false); setFilesOpen(false); setCommandsOpen(false); }}><AgentIcon size={13} /><span className="capture-button__tab">{t("remote.cli.tab")}</span></button>}
+        {session.chat && <button type="button" className={`capture-button${chatOpen ? " is-active" : ""}`} aria-pressed={chatOpen} title={t("remote.chat.title")} onClick={() => { setCliOpen(false); setChatOpen(value => !value); setFilesOpen(false); setCommandsOpen(false); }}><ChatIcon size={13} /><span className="capture-button__tab">{t("remote.chat.tab")}</span></button>}
         {!!session.commandShells && <button type="button" className={`capture-button${commandsOpen ? " is-active" : ""}`} aria-expanded={commandsOpen} aria-pressed={commandsOpen} aria-label={t("remote.commands.title")} onClick={() => { setCommandsOpen(value => !value); setFilesOpen(false); setChatOpen(false); setCliOpen(false); }}>
           <TerminalIcon size={13} /><span className="capture-button__label">{t("remote.commands.title")}</span>
         </button>}
@@ -336,7 +336,7 @@ export function RemotePane({
             <span className="capture-button__label">{t("remote.files.toggle")}</span>
           </button>
         )}
-        <span className={interactive ? "badge tone-ok" : "badge tone-info"}>
+        <span className={`${interactive ? "badge tone-ok" : "badge tone-info"} remote-toolbar__mode`}>
           {interactive
             ? t("remote.session.interactive")
             : t("remote.session.viewOnly")}

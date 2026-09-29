@@ -47,7 +47,7 @@ describe("session project sidebar", () => {
                   nodeId: claudeNodeId,
                   sessionId: "agent-claude",
                   label: "Claude Code",
-                  detail: "CLI 預設模型",
+                  detail: "預設模型",
                   kind: "agent",
                   status: "idle",
                 },
@@ -55,7 +55,7 @@ describe("session project sidebar", () => {
                   nodeId: secondCodexNodeId,
                   sessionId: "agent-codex-default",
                   label: "OpenAI Codex",
-                  detail: "CLI 預設模型",
+                  detail: "預設模型",
                   kind: "agent",
                   status: "idle",
                 },
@@ -94,7 +94,7 @@ describe("session project sidebar", () => {
     expect(markup).toContain("Claude Code");
     expect(markup).toContain("OpenAI Codex");
     expect(markup).toContain("gpt-5.6-sol");
-    expect(markup.match(/CLI 預設模型/g)).toHaveLength(2);
+    expect(markup.match(/預設模型/g)).toHaveLength(2);
     expect(markup).toContain('class="session-tree__project is-active"');
     expect(markup).toContain('data-folder-state="open"');
     expect(markup).toContain("session-tree__branch-toggle");

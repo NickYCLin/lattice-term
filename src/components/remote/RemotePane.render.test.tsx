@@ -43,7 +43,7 @@ describe("Lattice Remote canvas interaction", () => {
   it("opens the CLI list for an explicit grant without enabling desktop input", () => {
     const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><RemotePane session={{ ...session, cli: true, viewOnly: true }} remote={remote} theme="dark" /></I18nProvider>);
     expect(markup).toContain("remote-workspace--cli");
-    expect(markup).toContain('aria-label="CLI 工作階段"');
+    expect(markup).toContain('aria-label="助理工作階段"');
     expect(markup).not.toContain('aria-label="開啟軟體鍵盤"');
     expect(renderRemote(true)).not.toContain("remote-workspace--cli");
   });

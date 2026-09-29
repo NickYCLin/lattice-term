@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
-import { RemoteCliChannel, requestRemoteCli, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
+import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
+import { RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import "./RemoteCliPane.css";
@@ -34,17 +35,24 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
     return () => { stopped = true; clearTimeout(timer); };
   }, [active, session.sessionId, session.cli, selected, generation]);
   return <section className="remote-cli-pane" aria-label={t("remote.cli.title")}>
-    <header><strong>{t("remote.cli.title")}</strong>
-      {selected && <button className="button button--ghost" onClick={() => setSelected(null)}>{t("remote.cli.back")}</button>}
-      <button className="button button--ghost" onClick={() => { setProblem(false); refresh(value => value + 1); }}>{t("remote.chat.refresh")}</button>
+    <header className="remote-pane-header">
+      {selected ? <button className="button button--secondary button--sm" onClick={() => setSelected(null)}>{t("remote.cli.back")}</button> : <strong>{t("remote.cli.title")}</strong>}
+      <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(false); refresh(value => value + 1); }}><RefreshIcon size={15} /></button>
     </header>
     {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
       <p className="muted">{t("remote.cli.hint")}</p>
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
       {!problem && <p role="status">{!loaded ? t("remote.cli.loading") : sessions.length === 0 ? t("remote.cli.empty") : ""}</p>}
-      <div className="remote-chat-list">{sessions.map(item => <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
-        <strong>{item.groupLabel || item.label}</strong><span>{item.label} · {item.agent}</span><small>{item.detached ? t("remote.cli.background") : t("remote.cli.desktop")}</small>{isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
-      </button>)}</div>
+      <div className="remote-chat-list">{sessions.map(item => {
+        const card = remoteCliCard(item, t("terminal.model.pending"));
+        return <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
+          <strong>{card.title}</strong><span>{card.detail}</span>
+          <span className="remote-card-meta">
+            {isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
+            <small>{[card.place, item.detached ? t("remote.cli.background") : t("remote.cli.desktop")].filter(Boolean).join(" · ")}</small>
+          </span>
+        </button>;
+      })}</div>
     </>}
   </section>;
 }
@@ -81,12 +89,13 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   }) as unknown as RemoteApi, [channel, connection.sessionId, selected.id]);
   // Keep the terminal mounted while initial output arrives, but intercept input
   // until caught up. Toggling viewOnly would rebuild xterm and restart replay.
+  const card = remoteCliCard(selected, t("terminal.model.pending"));
   const gated = useMemo(() => ({ ...remote, terminalInput: async (id: string, data: string) => { if (ready && !problem) await remote.terminalInput(id, data); } }), [remote, ready, problem]);
   return <>
-    <div><strong>{selected.groupLabel || selected.label}</strong> · {selected.label}</div>
-    <p role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
+    <div className="remote-cli-heading"><strong>{card.title}</strong><small>{card.detail}</small></div>
+    <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
     {truncated && <p className="muted">{t("remote.cli.truncated")}</p>}
     <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} />
-    <div className="remote-cli-keys">{[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button className="button button--ghost" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}</div>
+    <div className="remote-cli-keys" role="toolbar" aria-label={t("remote.cli.keys")}>{[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button className="button button--secondary button--sm" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}</div>
   </>;
 }

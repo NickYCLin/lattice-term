@@ -266,7 +266,7 @@ it("opens permissions without immediately submitting the newly rendered save act
     expect(grant).toBeDefined();
     const input = allNodes(grant).find(node => node.tagName === "INPUT")!;
     await act(async () => { props(input).onChange!({ currentTarget: { checked: true } }); });
-    const cliGrant = find("LABEL", "分享 CLI 並允許操作")!;
+    const cliGrant = find("LABEL", "分享助理並允許操作")!;
     const cliInput = allNodes(cliGrant).find(node => node.tagName === "INPUT")!;
     await act(async () => { props(cliInput).onChange!({ currentTarget: { checked: true } }); });
     expect(host.start).not.toHaveBeenCalled();
