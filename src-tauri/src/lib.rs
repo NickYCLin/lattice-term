@@ -26,6 +26,7 @@ mod jev;
 pub mod linux_webkit;
 mod local_files;
 pub mod local_terminal;
+pub mod login_path;
 pub mod mcp_book;
 pub mod mcp_command_trust;
 pub mod mcp_desktop;
