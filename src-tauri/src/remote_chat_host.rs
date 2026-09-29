@@ -304,6 +304,7 @@ mod tests {
             operation: ChatOperation::Send {
                 thread_id: "thread-1".into(),
                 text: "hello".into(),
+                attachments: Vec::new(),
             },
         };
         assert!(

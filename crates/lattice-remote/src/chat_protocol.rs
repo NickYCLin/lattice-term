@@ -40,6 +40,19 @@ pub enum ChatOperation {
     Send {
         thread_id: String,
         text: String,
+        /// Upload IDs from finished `Attach` operations. Omitted when empty so
+        /// hosts older than 2026.9.30 still accept plain messages.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<String>,
+    },
+    /// One piece of an image the phone is sending with its next message.
+    Attach {
+        thread_id: String,
+        upload_id: String,
+        offset: u32,
+        total: u32,
+        /// Standard base64 of the bytes starting at `offset`.
+        data: String,
     },
     Steer {
         thread_id: String,
@@ -71,6 +84,11 @@ impl ChatOperation {
         )
     }
 }
+pub const MAX_ATTACHMENTS: usize = 4;
+pub const MAX_ATTACHMENT_BYTES: u32 = 8 * 1024 * 1024;
+/// Base64 characters per `Attach`; the whole request stays under the 24 KiB
+/// desktop bridge frame.
+pub const MAX_ATTACHMENT_CHUNK: usize = 16 * 1024;
 fn identifier(value: &str) -> bool {
     !value.is_empty() && value.len() <= 160 && !value.chars().any(char::is_control)
 }
@@ -94,11 +112,36 @@ impl ChatRequest {
             ChatOperation::Read { thread_id, before } => {
                 identifier(thread_id) && before.as_deref().is_none_or(identifier)
             }
-            ChatOperation::Send { thread_id, text } => {
+            ChatOperation::Send {
+                thread_id,
+                text,
+                attachments,
+            } => {
                 identifier(thread_id)
-                    && !text.trim().is_empty()
+                    && (!text.trim().is_empty() || !attachments.is_empty())
                     && text.len() <= 16 * 1024
                     && !text.contains('\0')
+                    && attachments.len() <= MAX_ATTACHMENTS
+                    && attachments.iter().all(|id| identifier(id))
+            }
+            ChatOperation::Attach {
+                thread_id,
+                upload_id,
+                offset,
+                total,
+                data,
+            } => {
+                identifier(thread_id)
+                    && identifier(upload_id)
+                    && *total > 0
+                    && *total <= MAX_ATTACHMENT_BYTES
+                    && offset < total
+                    && !data.is_empty()
+                    && data.len() <= MAX_ATTACHMENT_CHUNK
+                    && data.len() % 4 == 0
+                    && data
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
             }
             ChatOperation::Steer {
                 thread_id,
@@ -348,9 +391,55 @@ mod tests {
             id: "x".into(),
             operation: ChatOperation::Send {
                 thread_id: "a".into(),
-                text: "x".repeat(16385)
+                text: "x".repeat(16385),
+                attachments: Vec::new(),
             }
         }
         .valid());
+    }
+    #[test]
+    fn images_arrive_in_bounded_base64_pieces() {
+        let plain =
+            serde_json::json!({"id":"x","operation":{"kind":"send","threadId":"a","text":"hello"}});
+        let request: ChatRequest = serde_json::from_value(plain.clone()).unwrap();
+        assert!(request.valid());
+        assert_eq!(serde_json::to_value(&request).unwrap(), plain);
+        let send = |text: &str, attachments: Vec<String>| ChatRequest {
+            id: "x".into(),
+            operation: ChatOperation::Send {
+                thread_id: "a".into(),
+                text: text.into(),
+                attachments,
+            },
+        };
+        assert!(send("", vec!["up".into()]).valid());
+        assert!(!send(" ", Vec::new()).valid());
+        assert!(!send("hi", vec!["up".into(); MAX_ATTACHMENTS + 1]).valid());
+        assert!(!send("hi", vec!["".into()]).valid());
+        let attach = |offset: u32, total: u32, data: String| ChatRequest {
+            id: "x".into(),
+            operation: ChatOperation::Attach {
+                thread_id: "a".into(),
+                upload_id: "up".into(),
+                offset,
+                total,
+                data,
+            },
+        };
+        assert!(attach(0, 3, "YWJj".into()).valid());
+        assert!(attach(0, 3, "YWJj".into()).mutates());
+        assert!(!attach(3, 3, "YWJj".into()).valid());
+        assert!(!attach(0, 0, "YWJj".into()).valid());
+        assert!(!attach(0, MAX_ATTACHMENT_BYTES + 1, "YWJj".into()).valid());
+        assert!(!attach(0, 3, "YWJ".into()).valid());
+        assert!(!attach(0, 3, "YW\nj".into()).valid());
+        assert!(!attach(0, 3, "A".repeat(MAX_ATTACHMENT_CHUNK + 4)).valid());
+        let bytes = serde_json::to_vec(&attach(
+            0,
+            MAX_ATTACHMENT_BYTES,
+            "A".repeat(MAX_ATTACHMENT_CHUNK),
+        ))
+        .unwrap();
+        assert!(bytes.len() + 128 < 24 * 1024);
     }
 }

@@ -28,6 +28,12 @@
 .remote-chat-message .remote-chat-actions { margin-top: 8px; }
 .remote-chat-message .remote-chat-actions > span { flex: 0; }
 .remote-chat-composer { display: grid; gap: 8px; position: sticky; bottom: 0; background: var(--surface); padding-top: 4px; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
+.remote-chat-images { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; overflow-x: auto; }
+.remote-chat-images li { position: relative; flex: 0 0 auto; }
+.remote-chat-images img { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.remote-chat-images button { position: absolute; top: -6px; inset-inline-end: -6px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; }
+.remote-chat-uploading { margin: 0; font-size: var(--text-sm); }
+.remote-chat-attach { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
 .remote-chat-composer textarea { resize: vertical; font-size: 16px; min-height: 3rem; }
 .remote-chat-status { display: flex; }
 .remote-workspace--chat { display: block; }

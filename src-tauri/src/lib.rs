@@ -1719,6 +1719,32 @@ async fn agent_chat_paste_image(
     .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?
 }
 
+/// Saves an image a phone attached to a shared conversation.
+#[tauri::command]
+async fn agent_chat_stage_remote_image(
+    app: AppHandle,
+    thread_id: String,
+    data: String,
+) -> Result<String, String> {
+    use base64::Engine;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+    if data.len() > 12 * 1024 * 1024 {
+        return Err("The image exceeds the 8 MiB attachment limit.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data.as_bytes())
+            .map_err(|_| "The image data is damaged.")?;
+        crate::chat_attachments::stage_remote_image(&data_dir, &thread_id, &bytes)
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|error| format!("Image operation did not complete: {error}"))?
+}
+
 /// Writes an image sitting on the clipboard to a temp PNG and returns its path.
 ///
 /// Local agent CLIs (Claude Code, Gemini, …) accept an image by its file path,
@@ -4740,6 +4766,7 @@ pub fn run() {
             agent_import_memory_handoff,
             agent_write_handoff_file,
             agent_resize,
+            agent_chat_stage_remote_image,
             agent_disconnect,
             agent_sessions,
             agent_rename,

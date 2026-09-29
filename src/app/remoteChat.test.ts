@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createThread, type ChatThread } from "./agentChat";
 import { fakeChatApi } from "./testFixtures/agentApis";
-import { performRemoteChat, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
+import { performRemoteChat, RemoteUploads, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
 function thread() { return createThread({ definitionId: "codex", workingDirectory: "/work", permission: "ask", model: "" }, "thread", 1); }
 describe("Remote conversation projection", () => {
   it("keeps a full list of worst-case conversations within the wire budget", async () => {
@@ -95,5 +95,33 @@ describe("Remote conversation projection", () => {
     expect(chat.send).toHaveBeenCalledWith(value.id, "接續處理", [], null);
     await performRemoteChat(chat, [], { kind: "create", templateId: value.id });
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory: "/work", permission: "ask", definitionId: "codex", activate: false }));
+  });
+});
+
+describe("Remote image uploads", () => {
+  it("joins pieces in order, tolerates a retried piece and attaches the image once", async () => {
+    const stage = vi.fn(async (_thread: string, data: string) => `/data/chat/${data.length}.jpg`);
+    const uploads = new RemoteUploads(stage);
+    const send = vi.fn(async () => {});
+    const chat = fakeChatApi({ threads: [thread()], send });
+    const piece = (offset: number, data: string) => performRemoteChat(chat, [], { kind: "attach", threadId: "thread", uploadId: "up", offset, total: 6, data }, uploads);
+    await expect(piece(0, "YWJj")).resolves.toEqual({ received: 3, done: false });
+    await expect(piece(0, "YWJj")).resolves.toEqual({ received: 3, done: false });
+    await expect(piece(6, "ZGVm")).rejects.toThrow("again");
+    await expect(piece(3, "ZGVm")).resolves.toEqual({ received: 6, done: true });
+    expect(stage).toHaveBeenCalledWith("thread", "YWJjZGVm");
+    await performRemoteChat(chat, [], { kind: "send", threadId: "thread", text: "", attachments: ["up"] }, uploads);
+    expect(send).toHaveBeenCalledWith("thread", "", [{ path: "/data/chat/8.jpg", name: "8.jpg", isImage: true }], null);
+    await expect(performRemoteChat(chat, [], { kind: "send", threadId: "thread", text: "again", attachments: ["up"] }, uploads)).rejects.toThrow("Attach it again");
+  });
+  it("drops uploads that stalled and refuses another conversation's image", async () => {
+    let now = 0;
+    const uploads = new RemoteUploads(async () => "/x.jpg", () => now);
+    await uploads.add({ kind: "attach", threadId: "a", uploadId: "up", offset: 0, total: 3, data: "YWJj" });
+    expect(() => uploads.take("b", ["up"])).toThrow();
+    await uploads.add({ kind: "attach", threadId: "a", uploadId: "slow", offset: 0, total: 6, data: "YWJj" });
+    now = 11 * 60_000;
+    await expect(uploads.add({ kind: "attach", threadId: "a", uploadId: "slow", offset: 3, total: 6, data: "ZGVm" })).rejects.toThrow();
+    expect(() => uploads.take("a", ["up"])).toThrow();
   });
 });
