@@ -7309,6 +7309,8 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
                 sequence.len() > 2 && (0x40..=0x7e).contains(&byte)
             } else if sequence.starts_with(b"\x1b]") {
                 byte == 7 || sequence.ends_with(b"\x1b\\")
+            } else if sequence.starts_with(b"\x1bP") {
+                sequence.len() > 3 && sequence.ends_with(b"\x1b\\")
             } else {
                 sequence.len() >= 2
             };
@@ -7365,12 +7367,25 @@ fn is_terminal_status_reply(bytes: &[u8]) -> bool {
                     )
                 }),
                 b'I' | b'O' => parameters.is_empty(),
+                // Kitty keyboard mode report (CSI ? flags u). Key events use
+                // CSI code u without the question mark, so keep those out.
+                b'u' => parameters
+                    .strip_prefix(b"?")
+                    .is_some_and(|flags| !flags.is_empty() && flags.iter().all(u8::is_ascii_digit)),
                 _ => false,
             };
             if !reply {
                 return false;
             }
             remaining = &body[end + 1..];
+        } else if let Some(body) = remaining.strip_prefix(b"\x1bP") {
+            let Some(end) = body.windows(2).position(|pair| pair == b"\x1b\\") else {
+                return false;
+            };
+            if !is_terminal_dcs_report(&body[..end]) {
+                return false;
+            }
+            remaining = &body[end + 2..];
         } else if let Some(body) = remaining.strip_prefix(b"\x1b]") {
             let Some(end) = body.iter().position(|byte| *byte == 7 || *byte == 27) else {
                 return false;
@@ -7392,6 +7407,22 @@ fn is_terminal_status_reply(bytes: &[u8]) -> bool {
         }
     }
     true
+}
+
+/// DCS replies xterm.js sends on its own: XTVERSION (`>|name`) and DECRQSS
+/// (`1$r...` / `0$r`). Claude Code and other TUIs query these at startup.
+fn is_terminal_dcs_report(payload: &[u8]) -> bool {
+    let printable = |bytes: &[u8]| bytes.iter().all(|byte| (0x20..0x7f).contains(byte));
+    if let Some(version) = payload.strip_prefix(b">|") {
+        return !version.is_empty() && version.len() <= 256 && printable(version);
+    }
+    if let Some(setting) = payload
+        .strip_prefix(b"1$r")
+        .or_else(|| payload.strip_prefix(b"0$r"))
+    {
+        return setting.len() <= 256 && printable(setting);
+    }
+    false
 }
 
 fn is_terminal_color_report(payload: &[u8]) -> bool {
@@ -13707,6 +13738,10 @@ notify = ["notify.exe", "turn-ended"]"#,
             b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
             b"\x1b]11;rgb:0000/0000/0000\x07",
             b"\x1b[I\x1b[O",
+            b"\x1bP>|xterm.js(6.1.0-beta.304)\x1b\\",
+            b"\x1bP1$r0m\x1b\\",
+            b"\x1b[?0u",
+            b"\x1b[?1;2c\x1bP>|xterm.js(6.1.0)\x1b\\\x1b[?0u",
         ] {
             for split in 0..=reply.len() {
                 let mut input = AgentInputControl::default();
@@ -13743,6 +13778,9 @@ notify = ["notify.exe", "turn-ended"]"#,
             b"\x1b[?2026;1y",
             b"\x1b[>2026;1$y",
             b"\x1b[?2026x",
+            b"\x1b[97u",
+            b"\x1b[?u",
+            b"\x1bPq#0;2;0;0;0\x1b\\",
             b"\x1b[A",
         ] {
             assert!(!is_terminal_status_reply(sequence));
