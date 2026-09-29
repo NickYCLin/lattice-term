@@ -1,9 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { createThread, type ChatThread } from "./agentChat";
 import { fakeChatApi } from "./testFixtures/agentApis";
-import { performRemoteChat, remotePage, remoteThread } from "./remoteChat";
+import { performRemoteChat, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
 function thread() { return createThread({ definitionId: "codex", workingDirectory: "/work", permission: "ask", model: "" }, "thread", 1); }
 describe("Remote conversation projection", () => {
+  it("keeps a full list of worst-case conversations within the wire budget", async () => {
+    const hostile = "\u0001\"".repeat(2000);
+    const threads = Array.from({ length: 60 }, (_, i) => ({ ...thread(), id: `${i}`.padStart(36, "0"), title: hostile, workingDirectory: hostile, model: hostile, runningTurnId: "t".repeat(64), provider: "cliproxyapi" as const }));
+    const list = await performRemoteChat(fakeChatApi({ threads }), [], { kind: "list" });
+    const response = { id: "r".repeat(160), value: list, error: null };
+    expect(new TextEncoder().encode(JSON.stringify(response)).length).toBeLessThanOrEqual(60 * 1024);
+  });
+  it("names the project, account and model like the desktop sidebar", () => {
+    const value = { ...thread(), workingDirectory: "/data/me/projects/LatticeTerm/", model: "claude-opus-5-5", provider: "cliproxyapi" as const, title: "上傳 TestFlight" };
+    const remote = remoteThread(value);
+    expect(remoteThreadCard(remote, "新對話", "預設模型")).toEqual({ title: "上傳 TestFlight", detail: "CLIProxyAPI · claude-opus-5-5", place: "LatticeTerm · OpenAI Codex" });
+    expect(remoteThreadCard({ ...remote, title: " ", model: "", proxy: false }, "新對話", "預設模型")).toEqual({ title: "新對話", detail: "OpenAI Codex · 預設模型", place: "LatticeTerm" });
+    expect(remoteThreadCard({ ...remote, model: undefined, proxy: undefined }, "新對話", "預設模型").detail).toBe("OpenAI Codex");
+    expect(remoteProjectName("C:\\Users\\me\\VowBook")).toBe("VowBook");
+    expect(remoteThreadActivity({ ...remote, runningTurnId: null })).toBe("idle");
+    expect(remoteThreadActivity({ ...remote, runningTurnId: "t" })).toBe("working");
+    expect(remoteThreadActivity({ ...remote, runningTurnId: "t", awaitingApproval: true })).toBe("needsAttention");
+  });
   it("binds supplemental instructions to the observed Codex turn", async () => {
     const value = { ...thread(), runningTurnId: "active-turn" };
     const steer = vi.fn(async () => {});

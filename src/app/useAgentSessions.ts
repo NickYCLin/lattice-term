@@ -7,6 +7,7 @@ import {
   snapshotSessionIds,
   type SessionClosedNotice,
 } from "./sessionSnapshot";
+import { FALLBACK_CATALOG_SOURCE } from "./agentNames";
 
 export type AgentLifecycle = "working" | "needsAttention" | "idle" | "done";
 export type AgentStateSource = "heuristic" | "integration";
@@ -290,21 +291,6 @@ export function markAgentSessionClosed(
   );
 }
 
-const FALLBACK_CATALOG_SOURCE: [string, string, string, boolean][] = [
-  ["codex", "OpenAI Codex", "codex", true],
-  ["claude", "Claude Code", "claude", true],
-  ["gemini", "Gemini CLI", "gemini", true],
-  ["antigravity", "Google Antigravity CLI", "agy", true],
-  ["opencode", "OpenCode", "opencode", false],
-  ["copilot", "GitHub Copilot CLI", "copilot", false],
-  ["hermes", "Hermes Agent", "hermes", true],
-  ["cursor", "Cursor Agent", "agent", true],
-  ["aider", "Aider", "aider", false],
-  ["qwen", "Qwen Code", "qwen", false],
-  ["kimi", "Kimi Code CLI", "kimi", false],
-  ["droid", "Factory Droid", "droid", false],
-  ["grok", "Grok CLI", "grok", false],
-];
 
 const FALLBACK_CATALOG: AgentDefinition[] = FALLBACK_CATALOG_SOURCE.map(
   ([id, label, executable, resumeSupported]) => ({

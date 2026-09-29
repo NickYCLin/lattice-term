@@ -9,7 +9,8 @@ use std::sync::{
 };
 use tauri::{AppHandle, Manager};
 
-// 100 summaries remain comfortably below the encrypted response limit.
+// 50 summaries of six escaped labels stay below the 60 KiB encrypted response limit.
+const MAX_LISTED: usize = 50;
 fn label(value: &str) -> String {
     let mut output = String::new();
     for c in value.chars().filter(|c| !c.is_control()) {
@@ -19,6 +20,27 @@ fn label(value: &str) -> String {
         output.push(c);
     }
     output
+}
+/// Only the folder name, so the phone can tell projects apart without the
+/// account path.
+fn project_name(directory: &str) -> String {
+    // The host may describe a Windows path while running elsewhere in tests.
+    label(
+        directory
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or_default(),
+    )
+}
+/// Mirrors `cliProxyIdFromArguments` in the desktop UI.
+fn uses_cli_proxy(arguments: &[String]) -> bool {
+    arguments.windows(2).any(|pair| {
+        (pair[0] == "-c" || pair[0] == "--config")
+            && pair[1]
+                .strip_prefix("model_provider=")
+                .is_some_and(|provider| provider.starts_with("latticeterm_cliproxyapi"))
+    })
 }
 pub struct Access {
     active: AtomicBool,
@@ -52,7 +74,7 @@ impl Access {
         let mut ids = self.sessions.lock().map_err(|e| e.to_string())?;
         ids.retain(|_, native| sessions.iter().any(|s| s.session_id == *native));
         let mut output = Vec::new();
-        for session in sessions.into_iter().take(100) {
+        for session in sessions.into_iter().take(MAX_LISTED) {
             let id = if let Some((id, _)) = ids
                 .iter()
                 .find(|(_, native)| **native == session.session_id)
@@ -66,7 +88,17 @@ impl Access {
                 id
             };
             // Do not disclose native IDs, executable arguments, account paths or PIDs.
-            output.push(json!({"id": id, "label": label(&session.label), "groupLabel": label(&session.group_label), "agent": label(&session.definition_id), "state": session.state, "detached": session.detached}));
+            output.push(json!({
+                "id": id,
+                "label": label(&session.label),
+                "groupLabel": label(&session.group_label),
+                "agent": label(&session.definition_id),
+                "state": session.state,
+                "detached": session.detached,
+                "model": label(session.model.as_deref().unwrap_or_default()),
+                "project": project_name(&session.working_directory),
+                "proxy": uses_cli_proxy(&session.launch_arguments),
+            }));
         }
         Ok(json!(output))
     }
@@ -223,9 +255,25 @@ mod tests {
     #[test]
     fn escaped_labels_keep_a_full_list_within_the_wire_budget() {
         let hostile = "\\\"".repeat(1000);
-        let value = json!({"id": "a".repeat(32), "label": label(&hostile), "groupLabel": label(&hostile), "agent": label(&hostile), "state": "needsAttention", "detached": false});
-        let response = json!({"id": "r".repeat(160), "value": vec![value; 100], "error": null});
+        let value = json!({"id": "a".repeat(32), "label": label(&hostile), "groupLabel": label(&hostile), "agent": label(&hostile), "state": "needsAttention", "detached": false, "model": label(&hostile), "project": project_name(&format!("/x/{hostile}")), "proxy": true});
+        let response =
+            json!({"id": "r".repeat(160), "value": vec![value; MAX_LISTED], "error": null});
         assert!(serde_json::to_vec(&response).unwrap().len() <= 60 * 1024);
+    }
+    #[test]
+    fn the_list_names_the_project_folder_and_proxy_without_the_path() {
+        assert_eq!(
+            project_name("/data/me/projects/LatticeTerm/"),
+            "LatticeTerm"
+        );
+        assert_eq!(project_name("C:\\Users\\me\\VowBook"), "VowBook");
+        assert_eq!(project_name(""), "");
+        let proxied = ["-c", "model_provider=latticeterm_cliproxyapi_work"].map(String::from);
+        assert!(uses_cli_proxy(&proxied));
+        assert!(!uses_cli_proxy(&["-c", "model=gpt"].map(String::from)));
+        assert!(!uses_cli_proxy(&[
+            "model_provider=latticeterm_cliproxyapi".to_string()
+        ]));
     }
     #[test]
     fn existing_pty_lists_reads_accepts_input_and_revokes_without_relaunch() {

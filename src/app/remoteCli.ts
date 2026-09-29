@@ -1,5 +1,26 @@
+import { agentDisplayName } from "./agentNames";
+import { CLI_PROXY_NAME } from "./cliProxyApi";
 import type { RemoteChatResponse } from "./remoteChat";
-export interface RemoteCliSession { id: string; label: string; groupLabel: string; agent: string; state: string; detached: boolean }
+/** `model`, `project` and `proxy` are absent from hosts before 2026.9.30. */
+export interface RemoteCliSession { id: string; label: string; groupLabel: string; agent: string; state: string; detached: boolean; model?: string; project?: string; proxy?: boolean }
+export interface RemoteCard { title: string; detail: string; place: string }
+/**
+ * Mirrors the desktop sidebar: the project (or a name the user gave the tab)
+ * first, then which account and model it runs on.
+ */
+export function remoteCliCard(session: RemoteCliSession, defaultModel: string): RemoteCard {
+  const name = session.label.trim() || agentDisplayName(session.agent);
+  const group = session.groupLabel.trim();
+  const custom = group !== "" && group.toLowerCase() !== name.toLowerCase();
+  const project = session.project?.trim() ?? "";
+  const account = session.proxy ? CLI_PROXY_NAME : name;
+  const model = session.model?.trim() || (session.model === undefined ? "" : defaultModel);
+  return {
+    title: custom ? group : project || name,
+    detail: [account, model].filter(Boolean).join(" · "),
+    place: [custom ? project : "", session.proxy ? name : ""].filter(Boolean).join(" · "),
+  };
+}
 export interface RemoteCliOutput { sessionId: string; cursor: number; nextCursor: number; endOffset: number; truncated: boolean; base64: string }
 export type RemoteCliOperation =
   | { kind: "cliList" }

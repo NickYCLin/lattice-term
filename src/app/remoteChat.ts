@@ -2,6 +2,9 @@
 import type { ChatItem, ChatThread } from "./agentChat";
 import type { AgentChatApi } from "./useAgentChat";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
+import { agentDisplayName } from "./agentNames";
+import { CLI_PROXY_NAME } from "./cliProxyApi";
+import type { RemoteCard } from "./remoteCli";
 export type RemoteChatOperation =
   | { kind: "list" }
   | { kind: "read"; threadId: string; before: string | null }
@@ -12,7 +15,24 @@ export type RemoteChatOperation =
   | { kind: "create"; templateId: string };
 export interface RemoteChatRequest { id: string; operation: RemoteChatOperation }
 export interface RemoteChatResponse { id: string; value: unknown; error: string | null }
-export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean; awaitingApproval?: boolean }
+export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean; awaitingApproval?: boolean; model?: string; proxy?: boolean }
+export type RemoteActivity = "working" | "needsAttention" | "idle";
+export function remoteThreadActivity(thread: RemoteChatThread): RemoteActivity {
+  return thread.awaitingApproval ? "needsAttention" : thread.runningTurnId ? "working" : "idle";
+}
+/** Last folder of a host path; the full path stays in the conversation view. */
+export function remoteProjectName(directory: string): string {
+  return directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+}
+export function remoteThreadCard(thread: RemoteChatThread, untitled: string, defaultModel: string): RemoteCard {
+  const name = agentDisplayName(thread.agent);
+  const model = thread.model === undefined ? "" : thread.model.trim() || defaultModel;
+  return {
+    title: thread.title.trim() || untitled,
+    detail: [thread.proxy ? CLI_PROXY_NAME : name, model].filter(Boolean).join(" · "),
+    place: [remoteProjectName(thread.directory), thread.proxy ? name : ""].filter(Boolean).join(" · "),
+  };
+}
 export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();
@@ -30,7 +50,7 @@ function clipForJson(text: string, bytes: number): string {
   return result;
 }
 export function remoteThread(thread: ChatThread): RemoteChatThread {
-  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt,
+  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt, model: clipForJson(thread.model ?? "", 64), proxy: thread.provider === "cliproxyapi",
     canSteer: thread.definitionId === "codex" && !!thread.runningTurnId && !thread.pendingInputs?.length && !thread.items.some(item => item.type === "approval" && item.decision === "pending"),
     awaitingApproval: !!thread.runningTurnId && thread.items.some(item => item.type === "approval" && item.decision === "pending"),
   };
