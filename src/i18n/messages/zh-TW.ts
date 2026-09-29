@@ -2204,6 +2204,7 @@ export const zhTW = {
   "remote.cli.folder": "資料夾：{path}",
   "remote.cli.back": "返回清單",
   "remote.cli.disabled": "主機還沒分享助理，或版本太舊。請在遠端主機的「連線與權限設定」開啟「分享助理並允許操作」，儲存後重新連線；兩端都要更新到支援的版本。",
+  "remote.cli.hostOutdated": "這台主機的 LatticeTerm 還是舊版，更新到 2026.9.30 以後，這裡才會顯示每個助理所在的資料夾、專案和模型。",
   "remote.cli.hint": "選一個主機上的助理，就能看終端輸出並接著操作。",
   "remote.cli.empty": "主機目前沒有開著的助理。請先在主機的工作階段頁啟動。",
   "remote.cli.error": "助理讀取失敗或操作沒有得到確認。請確認主機仍在分享，重新整理看過輸出後再輸入；沒確認的輸入不會自動重送。",

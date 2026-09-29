@@ -44,10 +44,12 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
       <p className="muted">{t("remote.cli.hint")}</p>
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
       {!problem && <p role="status">{!loaded ? t("remote.cli.loading") : sessions.length === 0 ? t("remote.cli.empty") : ""}</p>}
+      {sessions.length > 0 && sessions.every(item => item.directory === undefined && item.project === undefined) && <p className="remote-host-outdated">{t("remote.cli.hostOutdated")}</p>}
       <div className="remote-chat-list">{sessions.map(item => {
         const card = remoteCliCard(item, t("terminal.model.pending"));
         return <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
-          <strong>{card.title}</strong><span>{card.detail}</span>
+          <strong>{card.title}</strong>{card.detail && <span>{card.detail}</span>}
+          {(item.directory || item.project) && <span className="remote-card-path">{t("remote.cli.folder", { path: item.directory || item.project || "" })}</span>}
           <span className="remote-card-meta">
             {isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
             <small>{[card.place, item.detached ? t("remote.cli.background") : t("remote.cli.desktop")].filter(Boolean).join(" · ")}</small>

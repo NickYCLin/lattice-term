@@ -69,7 +69,8 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
       {threads.map(thread => {
         const card = remoteThreadCard(thread, t("remote.chat.untitled"), t("terminal.model.pending"));
         return <button className="remote-chat-thread" key={thread.id} onClick={() => { setSelected(thread.id); setPage(null); setBefore(null); setProblem(null); }}>
-          <strong className="remote-chat-thread__title">{card.title}</strong><span>{card.detail}</span>
+          <strong className="remote-chat-thread__title">{card.title}</strong>{card.detail && <span>{card.detail}</span>}
+          {thread.directory && <span className="remote-card-path">{t("remote.cli.folder", { path: thread.directory })}</span>}
           <span className="remote-card-meta"><ActivityPill activity={remoteThreadActivity(thread)} />{card.place && <small>{card.place}</small>}</span>
         </button>;
       })}

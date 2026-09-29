@@ -2292,6 +2292,7 @@ export const en: Messages = {
   "remote.cli.folder": "Folder: {path}",
   "remote.cli.back": "Back to sessions",
   "remote.cli.disabled": "The host has not shared CLIs or needs an update. Enable “Share and control CLI sessions” in the host connection settings, save and reconnect. Both devices need a version supporting this feature.",
+  "remote.cli.hostOutdated": "This host runs an older LatticeTerm. Update it to 2026.9.30 or later to see each CLI's folder, project, and model here.",
   "remote.cli.hint": "Choose an existing CLI to view its terminal and continue working.",
   "remote.cli.empty": "No CLIs are running. Start one in the host Sessions page.",
   "remote.cli.error": "The CLI is unavailable or an operation was not acknowledged. Check host sharing and refresh the output before typing again. Uncertain input is not retried.",

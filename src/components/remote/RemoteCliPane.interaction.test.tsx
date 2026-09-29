@@ -82,6 +82,7 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     for (let attempt = 0; attempt < 10 && !container.textContent.includes("Existing CLI"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
     expect(container.textContent).toContain("Existing CLI");
     expect(container.textContent).toContain("背景工作階段");
+    expect(container.textContent).toContain("還是舊版");
     await click("Existing CLI");
     for (let attempt = 0; attempt < 10 && !container.textContent.includes("已接上原本的助理"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
     expect(container.textContent).toContain("已接上原本的助理");
