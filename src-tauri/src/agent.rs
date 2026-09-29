@@ -5234,16 +5234,69 @@ fn node_requirement() -> AgentInstallRequirement {
     }
 }
 
+/// Installs the current Node.js LTS from nodejs.org into `~/.local` without
+/// sudo. The tarball is only unpacked after its SHA-256 matches the release's
+/// SHASUMS256.txt. npm then keeps global CLIs in `~/.local/bin` as well.
+#[cfg(not(windows))]
+const NODE_LTS_INSTALL_SCRIPT: &str = concat!(
+    r#"set -eu; "#,
+    r#"case "$(uname -s)" in Darwin) os=darwin; key=osx-ARCH-tar ;; Linux) os=linux; key=linux-ARCH ;; *) echo 'This system is not supported by the Node.js installer.'; exit 1 ;; esac; "#,
+    r#"case "$(uname -m)" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) echo 'This CPU is not supported by the Node.js installer.'; exit 1 ;; esac; "#,
+    r#"key=$(printf '%s' "$key" | sed "s/ARCH/$arch/"); "#,
+    r#"version=$(curl -fsSL https://nodejs.org/dist/index.tab | awk -F '\t' -v f="$key" 'NR > 1 && $10 != "-" { n = split($3, a, ","); for (i = 1; i <= n; i++) if (a[i] == f) { print $1; exit } }'); "#,
+    r#"if [ -z "$version" ]; then echo 'No Node.js LTS build was found.'; exit 1; fi; "#,
+    r#"folder="node-$version-$os-$arch"; "#,
+    r#"name="$folder.tar.gz"; "#,
+    r#"base="https://nodejs.org/dist/$version"; "#,
+    r#"tmp=$(mktemp -d); "#,
+    r#"trap 'rm -rf "$tmp"' EXIT; "#,
+    r#"echo "Downloading $base/$name"; "#,
+    r#"curl -fsSL "$base/$name" -o "$tmp/$name"; "#,
+    r#"expected=$(curl -fsSL "$base/SHASUMS256.txt" | awk -v n="$name" '$2 == n { print $1 }'); "#,
+    r#"if command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 "$tmp/$name" | awk '{ print $1 }'); else actual=$(sha256sum "$tmp/$name" | awk '{ print $1 }'); fi; "#,
+    r#"if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then echo 'The Node.js download checksum does not match.'; exit 1; fi; "#,
+    r#"echo "SHA-256 verified. Installing Node.js $version into ~/.local ..."; "#,
+    r#"mkdir -p "$HOME/.local"; "#,
+    r#"tar -xzf "$tmp/$name" -C "$HOME/.local" --strip-components=1 "$folder/bin" "$folder/include" "$folder/lib" "$folder/share"; "#,
+    r#""$HOME/.local/bin/node" --version; "#,
+    r#"echo 'Node.js is installed. Return to LatticeTerm to install the CLI.'"#,
+);
+
 #[cfg(not(windows))]
 fn node_requirement() -> AgentInstallRequirement {
     AgentInstallRequirement {
         name: "Node.js".to_string(),
-        install: manual_install(NODE_DOWNLOAD_URL, NODE_DOWNLOAD_URL),
+        install: direct_install(
+            "sh",
+            &["-c", NODE_LTS_INSTALL_SCRIPT],
+            "nodejs.org LTS → ~/.local  (SHA-256 verified)",
+            NODE_DOWNLOAD_URL,
+        ),
     }
 }
 
 fn find_npm() -> Option<PathBuf> {
-    find_executable("npm").or_else(|| find_npm_in(&well_known_node_directories()))
+    find_executable("npm").or_else(|| {
+        let npm = find_npm_in(&well_known_node_directories())?;
+        // npm starts through `#!/usr/bin/env node`, and CLIs it installs land
+        // in the same folder. A desktop process started before Node.js was
+        // installed would otherwise find neither.
+        if let Some(directory) = npm.parent() {
+            prepend_to_process_path(directory);
+        }
+        Some(npm)
+    })
+}
+
+fn prepend_to_process_path(directory: &Path) {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&current).any(|entry| entry == directory) {
+        return;
+    }
+    let entries = std::iter::once(directory.to_path_buf()).chain(std::env::split_paths(&current));
+    if let Ok(joined) = std::env::join_paths(entries) {
+        std::env::set_var("PATH", joined);
+    }
 }
 
 /// Standard Node.js install folders. The MSI adds them to PATH, but a
@@ -5262,17 +5315,27 @@ fn well_known_node_directories() -> Vec<PathBuf> {
     directories
 }
 
+/// Where the built-in Node.js installer puts npm.
 #[cfg(not(windows))]
 fn well_known_node_directories() -> Vec<PathBuf> {
-    Vec::new()
+    std::env::var_os("HOME")
+        .map(|home| vec![PathBuf::from(home).join(".local").join("bin")])
+        .unwrap_or_default()
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 fn find_npm_in(directories: &[PathBuf]) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "npm.cmd" } else { "npm" };
     directories.iter().find_map(|directory| {
-        let candidate = directory.join("npm.cmd");
-        is_executable(&candidate)
-            .then(|| plain_win32_path(candidate.canonicalize().unwrap_or(candidate)))
+        let candidate = directory.join(name);
+        // Unix npm is a symlink into lib/node_modules; keep the bin path so
+        // its folder can still go on PATH.
+        is_executable(&candidate).then(|| {
+            if cfg!(windows) {
+                plain_win32_path(candidate.canonicalize().unwrap_or(candidate))
+            } else {
+                candidate
+            }
+        })
     })
 }
 
@@ -9487,9 +9550,19 @@ model = "gpt-5.3-codex"
             requirement.install.source_url,
             "https://nodejs.org/en/download"
         );
+        let script = requirement.install.arguments.last().expect("script");
+        assert!(script.contains("SHASUMS256.txt"));
+        assert!(requirement.install.executable.is_some());
+        assert!(validate_arguments(&requirement.install.arguments).is_ok());
+        #[cfg(not(windows))]
+        {
+            assert!(script.contains("https://nodejs.org/dist/index.tab"));
+            assert!(script.contains("shasum -a 256"));
+            assert!(script.contains("$HOME/.local"));
+            assert!(!script.contains("sudo"));
+        }
         #[cfg(windows)]
         {
-            let script = requirement.install.arguments.last().expect("script");
             assert!(script.contains("https://nodejs.org/dist/index.json"));
             assert!(script.contains("SHASUMS256.txt"));
             assert!(script.contains("Get-FileHash"));
