@@ -203,6 +203,16 @@ function normalizeDirectory(path: string): string {
     .toLocaleLowerCase();
 }
 
+const MAX_PASTED_HANDOFF_CHARS = 12_000;
+
+/** A pasted fallback must stay small enough for a terminal prompt. */
+function pastedHandoffTail(transcript: string): string {
+  const characters = Array.from(transcript);
+  return characters.length <= MAX_PASTED_HANDOFF_CHARS
+    ? transcript
+    : characters.slice(-MAX_PASTED_HANDOFF_CHARS).join("");
+}
+
 function localProjectLabel(workingDirectory: string): string {
   const plain = displayPath(workingDirectory).replace(/[\\/]+$/, "");
   const segments = plain.split(/[\\/]/).filter(Boolean);
@@ -862,7 +872,9 @@ export function SessionsView({
         (member) => member.sessionId === sourceId,
       );
       try {
-        const transcript = await agents.exportTranscript(sourceId);
+        const transcript = await agents.exportTranscript(sourceId, {
+          forFile: true,
+        });
         if (!transcript) {
           setAddCliError({
             title: t("terminal.handoff.exportFailedTitle"),
@@ -877,7 +889,9 @@ export function SessionsView({
             source: source?.label ?? t("terminal.handoff.anotherAssistant"),
           });
         } catch {
-          seedInput = t("terminal.handoff.frame", { transcript });
+          seedInput = t("terminal.handoff.frame", {
+            transcript: pastedHandoffTail(transcript),
+          });
         }
       } catch {
         setAddCliError({

@@ -702,7 +702,10 @@ export interface AgentApi {
   /** Writes a clipboard image to a temp file and returns its path, or null. */
   pasteClipboardImage: (sessionId: string) => Promise<string | null>;
   /** Reads a CLI's conversation as text for a handoff, or null if unavailable. */
-  exportTranscript: (sessionId: string) => Promise<string | null>;
+  exportTranscript: (
+    sessionId: string,
+    options?: { forFile?: boolean },
+  ) => Promise<string | null>;
   /** Writes an opt-in handoff to a target's known memory format, if supported. */
   importMemoryHandoff: (request: AgentMemoryHandoffRequest) => Promise<boolean>;
   /** Writes the handoff brief to a private file and returns its path. */
@@ -1449,9 +1452,15 @@ export function useAgentSessions(): AgentApi {
   );
 
   const exportTranscript = useCallback(
-    async (sessionId: string): Promise<string | null> => {
+    async (
+      sessionId: string,
+      options?: { forFile?: boolean },
+    ): Promise<string | null> => {
       const { invoke } = await core();
-      return invoke<string | null>("agent_export_transcript", { sessionId });
+      return invoke<string | null>("agent_export_transcript", {
+        sessionId,
+        forFile: options?.forFile ?? false,
+      });
     },
     [],
   );

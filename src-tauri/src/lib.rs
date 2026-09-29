@@ -1844,10 +1844,19 @@ async fn agent_session_conversation(
 #[tauri::command]
 async fn agent_export_transcript(
     session_id: String,
+    for_file: Option<bool>,
     registry: State<'_, Arc<AgentRegistry>>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<Option<String>, String> {
-    const MAX_HANDOFF_CHARS: usize = 12000;
+    // A pasted handoff has to fit a terminal prompt, but a handoff file is
+    // read by the next CLI itself, so it can keep much more of the history.
+    const MAX_PASTED_HANDOFF_CHARS: usize = 12_000;
+    const MAX_FILE_HANDOFF_CHARS: usize = 60_000;
+    let max_chars = if for_file.unwrap_or(false) {
+        MAX_FILE_HANDOFF_CHARS
+    } else {
+        MAX_PASTED_HANDOFF_CHARS
+    };
     let summary = if crate::agent_daemon::owns(&session_id) {
         daemon.session_summary(&session_id).await
     } else {
@@ -1872,7 +1881,7 @@ async fn agent_export_transcript(
             &working_directory,
             captured_session_id.as_deref(),
             profile_config_path.as_deref().map(std::path::Path::new),
-            MAX_HANDOFF_CHARS,
+            max_chars,
         )
     })
     .await
