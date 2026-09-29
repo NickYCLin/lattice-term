@@ -6,7 +6,7 @@
  * happen.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { AlertIcon } from "../icons";
 import { useModalFocus } from "./modalFocus";
 
@@ -18,6 +18,7 @@ export function ConfirmDialog({
   tone = "danger",
   confirmDisabled = false,
   busy = false,
+  children,
   onConfirm,
   onCancel,
 }: {
@@ -28,6 +29,8 @@ export function ConfirmDialog({
   tone?: "danger" | "default";
   confirmDisabled?: boolean;
   busy?: boolean;
+  /** Extra choices shown under the body, such as a sync checkbox. */
+  children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -73,6 +76,7 @@ export function ConfirmDialog({
         <p className="dialog__body" id="confirm-body">
           {body}
         </p>
+        {children}
         <div className="dialog__actions">
           <button
             type="button"

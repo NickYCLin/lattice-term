@@ -45,8 +45,14 @@ import type { SftpApi } from "../app/useSftpSessions";
 import type { ThemeId } from "../app/themes";
 import {
   savedAgentWorkingDirectories,
+  type SavedAgentSession,
   type SavedWorkspaceSession,
 } from "../app/workspaceSessionPersistence";
+import { savedAgentSidebarItems } from "../app/savedSidebarItems";
+import {
+  removeNativeConversation,
+  syncsNativeConversation,
+} from "../app/nativeConversationSync";
 import { agentGroupSidebarStatus } from "../app/sessionStatus";
 import {
   agentSessionSidebarMemberNodeId,
@@ -397,6 +403,10 @@ export function SessionsView({
     useState<SessionSidebarProjectItem | null>(null);
   const [pendingRemoveSession, setPendingRemoveSession] =
     useState<SessionRef | null>(null);
+  const [pendingRemoveSaved, setPendingRemoveSaved] =
+    useState<SavedAgentSession | null>(null);
+  const [syncNativeRemoval, setSyncNativeRemoval] = useState(true);
+  const [nativeSyncError, setNativeSyncError] = useState<string | null>(null);
   const [removingSession, setRemovingSession] = useState(false);
   const [removeSessionError, setRemoveSessionError] = useState<string | null>(
     null,
@@ -1251,12 +1261,16 @@ export function SessionsView({
   const activeProjectId = active ? projectIdForSession(active) : null;
   const activeProject =
     projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null;
+  const { byProject: savedSidebarItems, byId: savedAgentSessionById } =
+    savedAgentSidebarItems(unrestoredWorkspaceSessions, localProjectId, (assistant) =>
+      t("terminal.projects.savedDetail", { assistant }),
+    );
   const sidebarProjects: SessionSidebarProjectItem[] = projects.map((project) => ({
     nodeId: sidebarProjectNodeId(project.id),
     projectId: project.id,
     label: project.label,
     workingDirectory: project.workingDirectory,
-    sessions: project.sessions.flatMap<SessionSidebarSessionItem>((session) => {
+    sessions: [...project.sessions.flatMap<SessionSidebarSessionItem>((session) => {
       if (session.kind !== "agent") {
         return [
           {
@@ -1289,7 +1303,7 @@ export function SessionsView({
         ].join(" "),
         status: agentGroupSidebarStatus([member]),
       }));
-    }),
+    }), ...(savedSidebarItems.get(project.id) ?? [])],
   }));
   const restoredSidebarNodes = useMemo(() => {
     const nodes = new Map<string, LiveSessionSidebarNode>();
@@ -1611,6 +1625,85 @@ export function SessionsView({
     setSelectedProjectModel(defaultModelSelection());
   }
 
+  function savedNativeConversation(entry: SavedAgentSession) {
+    if (!entry.resumeSessionId || !syncsNativeConversation(entry.definitionId)) return null;
+    return {
+      definitionId: entry.definitionId,
+      label: entry.label,
+      nativeSessionId: entry.resumeSessionId,
+      profileConfigPath: entry.profileConfigPath ?? null,
+      workingDirectory: entry.workingDirectory,
+    };
+  }
+
+  function liveNativeConversation(session: SessionRef) {
+    if (session.kind !== "agent") return null;
+    const member = session.members.find(
+      (candidate) => candidate.sessionId === session.sessionId,
+    );
+    if (!member?.capturedSessionId || !syncsNativeConversation(member.definitionId)) {
+      return null;
+    }
+    return {
+      definitionId: member.definitionId,
+      label: member.label,
+      nativeSessionId: member.capturedSessionId,
+      profileConfigPath: member.profileConfigPath ?? null,
+      workingDirectory: member.workingDirectory,
+    };
+  }
+
+  function savedInProject(project: SessionSidebarProjectItem) {
+    if (!project.workingDirectory) return [];
+    const key = localProjectId(project.workingDirectory);
+    return unrestoredWorkspaceSessions.filter(
+      (entry): entry is SavedAgentSession =>
+        entry.kind === "agent" && localProjectId(entry.workingDirectory) === key,
+    );
+  }
+
+  // The assistant's own history is changed after the item is gone here, one
+  // conversation at a time; a failure is reported instead of undoing it.
+  async function syncNativeRemovals(
+    refs: readonly NonNullable<ReturnType<typeof savedNativeConversation>>[],
+  ) {
+    let failed: { label: string; detail: string } | null = null;
+    for (const ref of refs) {
+      try {
+        await removeNativeConversation(ref);
+      } catch (reason) {
+        failed ??= {
+          label: ref.label,
+          detail: reason instanceof Error ? reason.message : String(reason),
+        };
+      }
+    }
+    setNativeSyncError(
+      failed
+        ? t("terminal.projects.syncNativeFailed", {
+            assistant: failed.label,
+            detail: failed.detail,
+          })
+        : null,
+    );
+  }
+
+  function syncNativeChoice(assistant: string) {
+    return (
+      <label className="dialog__body confirm-sync">
+        <input
+          type="checkbox"
+          checked={syncNativeRemoval}
+          onChange={(event) => setSyncNativeRemoval(event.currentTarget.checked)}
+        />
+        <span>
+          {assistant}
+          <small className="field__hint">{t("terminal.projects.syncNativeHint")}</small>
+        </span>
+      </label>
+    );
+  }
+
   const projectSidebar = (
     <SessionProjectSidebar
       projects={sidebarProjects}
@@ -1628,6 +1721,11 @@ export function SessionsView({
       onLaunchProject={openSavedProject}
       onSelect={(sessionId) => {
         setMobileTreeOpen(false);
+        const saved = savedAgentSessionById.get(sessionId);
+        if (saved) {
+          void recovery.onRetryWorkspaceSession?.(saved);
+          return;
+        }
         const group = agentGroups.find((candidate) =>
           candidate.members.some((member) => member.sessionId === sessionId),
         );
@@ -1635,6 +1733,12 @@ export function SessionsView({
         else onSelect(sessionId);
       }}
       onRemove={(sidebarSession) => {
+        const saved = savedAgentSessionById.get(sidebarSession.sessionId);
+        if (saved) {
+          setSyncNativeRemoval(true);
+          setPendingRemoveSaved(saved);
+          return;
+        }
         const session = sessions.find((candidate) =>
           candidate.kind === "agent"
             ? candidate.members.some(
@@ -1644,6 +1748,7 @@ export function SessionsView({
         );
         if (!session) return;
         setRemoveSessionError(null);
+        setSyncNativeRemoval(true);
         setPendingRemoveSession(
           session.kind === "agent"
             ? {
@@ -1678,7 +1783,10 @@ export function SessionsView({
         )
       }
       onDeleteFolder={setPendingDeleteFolder}
-      onRemoveProject={setPendingRemoveProject}
+      onRemoveProject={(project) => {
+        setSyncNativeRemoval(true);
+        setPendingRemoveProject(project);
+      }}
       onToggleFolder={(folderId) =>
         updateSidebarLayout((layout) =>
           toggleSessionSidebarFolder(layout, folderId),
@@ -1697,6 +1805,157 @@ export function SessionsView({
     />
   );
 
+  const removalDialogs = (
+    <>
+      {pendingDeleteFolder && (
+        <ConfirmDialog
+          title={t("terminal.projects.folderDeleteTitle", {
+            name: pendingDeleteFolder.name,
+          })}
+          body={t("terminal.projects.folderDeleteBody")}
+          confirmLabel={t("terminal.projects.folderDeleteAction")}
+          cancelLabel={t("common.cancel")}
+          onCancel={() => setPendingDeleteFolder(null)}
+          onConfirm={() => {
+            updateSidebarLayout((layout) =>
+              removeSessionSidebarFolder(layout, pendingDeleteFolder.id),
+            );
+            setPendingDeleteFolder(null);
+          }}
+        />
+      )}
+      {pendingRemoveProject && (
+        <ConfirmDialog
+          title={t("terminal.projects.removeProjectTitle", {
+            name: pendingRemoveProject.label,
+          })}
+          body={t("terminal.projects.removeProjectBody")}
+          confirmLabel={t("terminal.projects.removeProjectAction")}
+          cancelLabel={t("common.cancel")}
+          tone="danger"
+          onCancel={() => setPendingRemoveProject(null)}
+          onConfirm={() => {
+            const natives = syncNativeRemoval
+              ? savedInProject(pendingRemoveProject).flatMap((entry) => {
+                  const native = savedNativeConversation(entry);
+                  return native ? [native] : [];
+                })
+              : [];
+            if (pendingRemoveProject.workingDirectory) {
+              recovery.onRemoveLocalProject?.(pendingRemoveProject.workingDirectory);
+              updateSidebarLayout((layout) => ({
+                ...layout,
+                placements: Object.fromEntries(
+                  Object.entries(layout.placements).filter(
+                    ([id]) => id !== pendingRemoveProject.nodeId,
+                  ),
+                ),
+              }));
+            }
+            setPendingRemoveProject(null);
+            if (natives.length) void syncNativeRemovals(natives);
+          }}
+        >
+          {savedInProject(pendingRemoveProject).some((entry) => savedNativeConversation(entry)) &&
+            syncNativeChoice(
+              t("terminal.projects.syncNativeProject", {
+                count: savedInProject(pendingRemoveProject).filter((entry) =>
+                  savedNativeConversation(entry),
+                ).length,
+              }),
+            )}
+        </ConfirmDialog>
+      )}
+      {pendingRemoveSaved && (
+        <ConfirmDialog
+          title={t("terminal.projects.sessionRemoveTitle", {
+            name: pendingRemoveSaved.groupLabel || pendingRemoveSaved.label,
+          })}
+          body={t("terminal.projects.savedRemoveBody")}
+          confirmLabel={t("terminal.projects.sessionRemoveAction")}
+          cancelLabel={t("common.cancel")}
+          onCancel={() => setPendingRemoveSaved(null)}
+          onConfirm={() => {
+            const native = syncNativeRemoval
+              ? savedNativeConversation(pendingRemoveSaved)
+              : null;
+            recovery.onDiscardWorkspaceSession?.(pendingRemoveSaved);
+            setPendingRemoveSaved(null);
+            if (native) void syncNativeRemovals([native]);
+          }}
+        >
+          {savedNativeConversation(pendingRemoveSaved) &&
+            syncNativeChoice(
+              t("terminal.projects.syncNative", { assistant: pendingRemoveSaved.label }),
+            )}
+        </ConfirmDialog>
+      )}
+      {pendingRemoveSession && (
+        <ConfirmDialog
+          title={t("terminal.projects.sessionRemoveTitle", {
+            name: pendingRemoveSession.label,
+          })}
+          body={
+            removeSessionError
+              ? t("terminal.projects.sessionRemoveFailed", {
+                  detail: removeSessionError,
+                })
+              : t("terminal.projects.sessionRemoveBody")
+          }
+          confirmLabel={t("terminal.projects.sessionRemoveAction")}
+          cancelLabel={t("common.cancel")}
+          confirmDisabled={removingSession}
+          busy={removingSession}
+          onCancel={() => {
+            if (removingSession) return;
+            setPendingRemoveSession(null);
+            setRemoveSessionError(null);
+          }}
+          onConfirm={() => {
+            if (removingSession) return;
+            setRemovingSession(true);
+            setRemoveSessionError(null);
+            void removeSession(pendingRemoveSession)
+              .then(() => setPendingRemoveSession(null))
+              .catch((reason) =>
+                setRemoveSessionError(
+                  reason instanceof Error ? reason.message : String(reason),
+                ),
+              )
+              .finally(() => setRemovingSession(false));
+          }}
+        >
+          {liveNativeConversation(pendingRemoveSession) &&
+            syncNativeChoice(
+              t("terminal.projects.syncNative", {
+                assistant: liveNativeConversation(pendingRemoveSession)?.label ?? "",
+              }),
+            )}
+        </ConfirmDialog>
+      )}
+    </>
+  );
+
+  const nativeSyncCallout = nativeSyncError ? (
+    <div className="session-notice">
+      <Callout
+        tone="warn"
+        title={t("terminal.projects.syncNativeFailedTitle")}
+        actions={
+          <button
+            type="button"
+            className="button button--ghost button--sm"
+            onClick={() => setNativeSyncError(null)}
+          >
+            {t("common.close")}
+          </button>
+        }
+      >
+        {nativeSyncError}
+      </Callout>
+    </div>
+  ) : null;
+
   if (!active || !activeProject) {
     return (
       <div className="terminal-workspace">
@@ -1706,6 +1965,7 @@ export function SessionsView({
         {closedCallout}
         {workspaceTransferCallout}
         {addCliErrorCallout}
+        {nativeSyncCallout}
         {newProjectError && !newProjectDialog && (
           <div className="session-notice">
             <Callout tone="danger" title={t("terminal.projects.chooseFailed")}>
@@ -1795,6 +2055,7 @@ export function SessionsView({
         {folderDialog}
         {workspaceImportDialog}
         {clearWorkspaceDialog}
+        {removalDialogs}
       </div>
     );
   }
@@ -1837,7 +2098,9 @@ export function SessionsView({
   }
 
   async function removeSession(session: SessionRef) {
+    const native = syncNativeRemoval ? liveNativeConversation(session) : null;
     await close(session);
+    if (native) await syncNativeRemovals([native]);
   }
 
   return (
@@ -1848,6 +2111,7 @@ export function SessionsView({
       {closedCallout}
       {workspaceTransferCallout}
       {addCliErrorCallout}
+        {nativeSyncCallout}
       {relocationNotice && (
         <div className="session-notice">
           <Callout
@@ -2412,85 +2676,7 @@ export function SessionsView({
       {relocationDialog}
       {workspaceImportDialog}
       {clearWorkspaceDialog}
-      {pendingDeleteFolder && (
-        <ConfirmDialog
-          title={t("terminal.projects.folderDeleteTitle", {
-            name: pendingDeleteFolder.name,
-          })}
-          body={t("terminal.projects.folderDeleteBody")}
-          confirmLabel={t("terminal.projects.folderDeleteAction")}
-          cancelLabel={t("common.cancel")}
-          onCancel={() => setPendingDeleteFolder(null)}
-          onConfirm={() => {
-            updateSidebarLayout((layout) =>
-              removeSessionSidebarFolder(layout, pendingDeleteFolder.id),
-            );
-            setPendingDeleteFolder(null);
-          }}
-        />
-      )}
-      {pendingRemoveProject && (
-        <ConfirmDialog
-          title={t("terminal.projects.removeProjectTitle", {
-            name: pendingRemoveProject.label,
-          })}
-          body={t("terminal.projects.removeProjectBody")}
-          confirmLabel={t("terminal.projects.removeProjectAction")}
-          cancelLabel={t("common.cancel")}
-          tone="danger"
-          onCancel={() => setPendingRemoveProject(null)}
-          onConfirm={() => {
-            if (pendingRemoveProject.workingDirectory) {
-              recovery.onRemoveLocalProject?.(pendingRemoveProject.workingDirectory);
-              updateSidebarLayout((layout) => ({
-                ...layout,
-                placements: Object.fromEntries(
-                  Object.entries(layout.placements).filter(
-                    ([id]) => id !== pendingRemoveProject.nodeId,
-                  ),
-                ),
-              }));
-            }
-            setPendingRemoveProject(null);
-          }}
-        />
-      )}
-      {pendingRemoveSession && (
-        <ConfirmDialog
-          title={t("terminal.projects.sessionRemoveTitle", {
-            name: pendingRemoveSession.label,
-          })}
-          body={
-            removeSessionError
-              ? t("terminal.projects.sessionRemoveFailed", {
-                  detail: removeSessionError,
-                })
-              : t("terminal.projects.sessionRemoveBody")
-          }
-          confirmLabel={t("terminal.projects.sessionRemoveAction")}
-          cancelLabel={t("common.cancel")}
-          confirmDisabled={removingSession}
-          busy={removingSession}
-          onCancel={() => {
-            if (removingSession) return;
-            setPendingRemoveSession(null);
-            setRemoveSessionError(null);
-          }}
-          onConfirm={() => {
-            if (removingSession) return;
-            setRemovingSession(true);
-            setRemoveSessionError(null);
-            void removeSession(pendingRemoveSession)
-              .then(() => setPendingRemoveSession(null))
-              .catch((reason) =>
-                setRemoveSessionError(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
-              )
-              .finally(() => setRemovingSession(false));
-          }}
-        />
-      )}
+      {removalDialogs}
     </div>
   );
 }

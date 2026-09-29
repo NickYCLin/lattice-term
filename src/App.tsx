@@ -464,6 +464,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     }
   }
 
+  function discardWorkspaceSession(saved: SavedAgentSession) {
+    replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
+  }
+
   function recoverWorkspaceSnapshot(snapshot: WorkspaceSessionSnapshot) {
     replacePendingWorkspace(recoverLocalWorkspaceSessions(
       unrestoredSessionsRef.current, snapshot, agents.sessions));
@@ -1190,6 +1194,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     projectStorageError={localProjects.error || workspacePersistenceError}
                     onRemoveLocalProject={removeLocalProject}
                     onRetryWorkspaceSession={retryWorkspaceSession}
+                    onDiscardWorkspaceSession={discardWorkspaceSession}
                     onRecoverWorkspaceSnapshot={recoverWorkspaceSnapshot}
                     retryingWorkspace={retryingWorkspace}
                     workspaceRecoveryError={workspaceRecoveryError}

@@ -101,6 +101,7 @@ const statusKeys: Record<Exclude<SessionSidebarStatus, "connected">, MessageKey>
   attention: "terminal.projects.status.attention",
   idle: "terminal.projects.status.idle",
   done: "terminal.projects.status.done",
+  saved: "terminal.projects.status.saved",
 };
 
 function glyphFor(kind: SessionSidebarKind) {
@@ -963,6 +964,10 @@ export function SessionProjectSidebar({
             <span>
               <i className="status-done" aria-hidden="true" />
               {t("terminal.projects.statusGuideDone")}
+            </span>
+            <span>
+              <i className="status-saved" aria-hidden="true" />
+              {t("terminal.projects.statusGuideSaved")}
             </span>
           </section>
         )}

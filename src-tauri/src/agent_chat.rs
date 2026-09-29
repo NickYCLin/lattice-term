@@ -2955,77 +2955,45 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
-fn cleanup_codex_files(session_id: &str, profile_config_path: Option<&str>) {
-    let codex_home = profile_config_path
+fn codex_home_for(profile_config_path: Option<&str>) -> Option<PathBuf> {
+    profile_config_path
+        .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
-        .or_else(|| home_directory().map(|h| h.join(".codex")));
+        .or_else(|| home_directory().map(|h| h.join(".codex")))
+}
 
-    let Some(codex_dir) = codex_home else {
-        return;
-    };
-
-    // 1. Remove rollout session files in sessions/YYYY/MM/DD/rollout-*-<session_id>.jsonl
-    let sessions_dir = codex_dir.join("sessions");
-    if sessions_dir.is_dir() {
-        let suffix = format!("-{session_id}.jsonl");
-        let exact_suffix = format!("{session_id}.jsonl");
-        let mut dirs = vec![sessions_dir];
-        let mut searched = 0;
-        while let Some(current) = dirs.pop() {
+/// Whether Codex still lists the conversation: its rollout is under
+/// `sessions/`, not `archived_sessions/`. Read-only.
+fn codex_rollout_is_active(codex_home: &Path, session_id: &str) -> bool {
+    let suffix = format!("-{session_id}.jsonl");
+    let mut dirs = vec![codex_home.join("sessions")];
+    let mut searched = 0;
+    while let Some(current) = dirs.pop() {
+        let Ok(entries) = fs::read_dir(current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            searched += 1;
             if searched > 50_000 {
-                break;
+                return false;
             }
-            if let Ok(entries) = fs::read_dir(current) {
-                for entry in entries.flatten() {
-                    searched += 1;
-                    let path = entry.path();
-                    if path.is_dir() {
-                        dirs.push(path);
-                    } else if path.is_file() {
-                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            if name.ends_with(&suffix) || name.ends_with(&exact_suffix) {
-                                let _ = fs::remove_file(&path);
-                            }
-                        }
-                    }
-                }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                dirs.push(entry.path());
+            } else if kind.is_file()
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.ends_with(&suffix))
+            {
+                return true;
             }
         }
     }
-
-    // 2. Remove entry from session_index.jsonl if present
-    let index_path = codex_dir.join("session_index.jsonl");
-    if index_path.is_file() {
-        if let Ok(content) = fs::read_to_string(&index_path) {
-            let mut modified = false;
-            let mut new_lines = Vec::new();
-            for line in content.lines() {
-                if line.contains(session_id) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-                        if val.get("id").and_then(|v| v.as_str()) == Some(session_id) {
-                            modified = true;
-                            continue;
-                        }
-                    } else {
-                        modified = true;
-                        continue;
-                    }
-                }
-                new_lines.push(line);
-            }
-            if modified {
-                let mut out = new_lines.join("\n");
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                let tmp_path = codex_dir.join(format!(".session_index.tmp.{}", std::process::id()));
-                if fs::write(&tmp_path, out.as_bytes()).is_ok() {
-                    let _ = fs::rename(&tmp_path, &index_path);
-                }
-            }
-        }
-    }
+    false
 }
 
 fn cleanup_claude_files(session_id: &str, profile_config_path: Option<&str>) {
@@ -3055,8 +3023,9 @@ fn cleanup_claude_files(session_id: &str, profile_config_path: Option<&str>) {
     }
 }
 
-/// Permanently deletes a native CLI conversation from the CLI's own store
-/// (e.g. Codex or Claude), keeping external desktops and CLI histories in sync.
+/// Removes a native CLI conversation from the CLI's own store so Codex
+/// Desktop and the CLI histories stop listing it. Codex conversations are
+/// archived (recoverable in Codex); Claude Code transcripts are deleted.
 pub async fn delete_native_conversation(
     definition_id: &str,
     native_session_id: &str,
@@ -3076,27 +3045,30 @@ pub async fn delete_native_conversation(
 
     match definition_id {
         "codex" => {
-            // 1. Invoke `codex delete --force <uuid>` to safely delete the thread in Codex's SQLite db and sessions
+            // Codex Desktop's own delete is an archive: the rollout moves to
+            // archived_sessions and the thread can be restored from Codex.
+            // Going through the CLI keeps Codex's state database in step.
+            let codex_home = codex_home_for(profile_config_path);
             if let Some(executable) = crate::agent::catalog_executable("codex") {
                 let mut command = headless_command(&executable);
-                command.args(["delete", "--force", session_id]);
-                if let Some(profile_path) = profile_config_path {
-                    if !profile_path.trim().is_empty() {
-                        command.env("CODEX_HOME", profile_path);
-                    }
+                command.args(["archive", session_id]);
+                if let Some(home) = &codex_home {
+                    command.env("CODEX_HOME", home);
                 }
                 if let Some(cwd) = working_directory {
                     if let Ok(path) = fs::canonicalize(cwd) {
                         command.current_dir(path);
                     }
                 }
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(15), command.status())
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(20), command.status())
                     .await;
             }
-
-            // 2. Perform defensive cleanup of rollout files and session index
-            cleanup_codex_files(session_id, profile_config_path);
-            Ok(())
+            match codex_home {
+                Some(home) if codex_rollout_is_active(&home, session_id) => {
+                    Err("Codex did not archive this conversation.".to_string())
+                }
+                _ => Ok(()),
+            }
         }
         "claude" => {
             cleanup_claude_files(session_id, profile_config_path);
@@ -3192,48 +3164,39 @@ mod tests {
             .is_err());
     }
 
-    #[tokio::test]
-    async fn delete_native_conversation_cleans_up_codex_and_claude_files() {
+    #[test]
+    fn codex_rollout_lookup_ignores_archived_copies() {
         let temp = tempfile::tempdir().unwrap();
-        let codex_home = temp.path().join("codex");
-        let sessions_dir = codex_home.join("sessions/2026/09/24");
-        fs::create_dir_all(&sessions_dir).unwrap();
-        let session_file = sessions_dir.join("rollout-test-12345-abc-uuid.jsonl");
-        fs::write(&session_file, "content").unwrap();
-        assert!(session_file.exists());
-
-        let index_file = codex_home.join("session_index.jsonl");
+        let sessions = temp.path().join("sessions/2026/09/24");
+        let archived = temp.path().join("archived_sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::create_dir_all(&archived).unwrap();
         fs::write(
-            &index_file,
-            "{\"id\":\"abc-uuid\",\"title\":\"Target\"}\n{\"id\":\"other-uuid\",\"title\":\"Keep\"}\n",
+            sessions.join("rollout-2026-09-24T10-00-00-abc-uuid.jsonl"),
+            "x",
         )
         .unwrap();
+        fs::write(
+            archived.join("rollout-2026-09-24T10-00-00-old-uuid.jsonl"),
+            "x",
+        )
+        .unwrap();
+        assert!(codex_rollout_is_active(temp.path(), "abc-uuid"));
+        assert!(!codex_rollout_is_active(temp.path(), "old-uuid"));
+        assert!(!codex_rollout_is_active(
+            &temp.path().join("missing"),
+            "abc-uuid"
+        ));
+    }
 
+    #[tokio::test]
+    async fn delete_native_conversation_removes_claude_transcript() {
+        let temp = tempfile::tempdir().unwrap();
         let claude_home = temp.path().join("claude");
         let project_dir = claude_home.join("projects/some-project");
         fs::create_dir_all(&project_dir).unwrap();
         let claude_session_file = project_dir.join("abc-uuid.jsonl");
         fs::write(&claude_session_file, "content").unwrap();
-        assert!(claude_session_file.exists());
-
-        let res = delete_native_conversation(
-            "codex",
-            "abc-uuid",
-            Some(codex_home.to_str().unwrap()),
-            None,
-        )
-        .await;
-        assert!(res.is_ok());
-        assert!(!session_file.exists(), "rollout file should be removed");
-        let index_content = fs::read_to_string(&index_file).unwrap();
-        assert!(
-            !index_content.contains("abc-uuid"),
-            "index entry should be removed"
-        );
-        assert!(
-            index_content.contains("other-uuid"),
-            "other entries should remain"
-        );
 
         let res_claude = delete_native_conversation(
             "claude",

@@ -5,7 +5,9 @@ export type SessionSidebarStatus =
   | "attention"
   | "idle"
   | "done"
-  | "connected";
+  | "connected"
+  /** Kept from an earlier run or an imported conversation; not started. */
+  | "saved";
 
 export function aggregateSessionSidebarStatus(
   statuses: readonly SessionSidebarStatus[],

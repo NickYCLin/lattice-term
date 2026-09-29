@@ -14,6 +14,8 @@ export interface WorkspaceRecoveryProps {
   projectStorageError?: boolean;
   onRemoveLocalProject?: (path: string) => void;
   onRetryWorkspaceSession?: (session: SavedAgentSession) => Promise<void>;
+  /** Drops a saved conversation that has not been started. */
+  onDiscardWorkspaceSession?: (session: SavedAgentSession) => void;
   onRecoverWorkspaceSnapshot?: (snapshot: WorkspaceSessionSnapshot) => void;
   retryingWorkspace?: boolean;
   workspaceRecoveryError?: boolean;

@@ -1967,6 +1967,24 @@
   color: var(--warn);
 }
 
+/* Saved but not started: a dashed ring and muted text, so it reads as
+   something to open rather than a running assistant. */
+.session-tree__status.status-saved,
+.session-projects__status-guide .status-saved {
+  color: var(--text-faint);
+}
+
+.session-tree__status.status-saved > span,
+.session-projects__status-guide .status-saved {
+  background: transparent;
+  border: 1.5px dashed currentColor;
+  box-shadow: none;
+}
+
+.session-tree__session.status-saved .session-tree__session-select {
+  color: var(--text-muted);
+}
+
 @keyframes session-status-pulse {
   0%,
   100% {

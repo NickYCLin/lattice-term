@@ -392,6 +392,27 @@
   line-height: 1.65;
 }
 
+.confirm-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.confirm-sync input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+}
+
+.confirm-sync span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .dialog__stack {
   display: flex;
   flex-direction: column;
