@@ -15,6 +15,14 @@ describe("remote CLI input", () => {
     expect(chunks.join("")).toBe("🙂".repeat(5000));
     expect(chunks.every(chunk => new TextEncoder().encode(chunk).length <= 16000)).toBe(true);
   });
+  it("claims the phone size again after a pause", async () => {
+    const request = vi.fn(async (_op: RemoteCliOperation) => {});
+    const channel = new RemoteCliChannel("one", request, vi.fn());
+    channel.reclaimSize();
+    channel.resize(900, 40); channel.reclaimSize();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls.map(([op]) => op)).toEqual([{ kind: "cliResize", sessionId: "one", cols: 500, rows: 40 }, { kind: "cliResize", sessionId: "one", cols: 500, rows: 40 }]);
+  });
   it("stops later writes after an uncertain input and never retries it", async () => {
     vi.useFakeTimers();
     const request = vi.fn(async () => { throw new Error("timeout"); });

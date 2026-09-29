@@ -1942,6 +1942,7 @@ async fn agent_resize(
     registry: State<'_, Arc<AgentRegistry>>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<(), String> {
+    crate::remote_cli::remember_desktop_size(&session_id, cols, rows);
     if crate::agent_daemon::owns(&session_id) {
         daemon
             .request(

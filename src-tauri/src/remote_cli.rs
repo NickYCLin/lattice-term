@@ -5,9 +5,88 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, LazyLock, Mutex,
 };
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
+
+/// A phone that stopped reading for this long has left the terminal.
+const PHONE_IDLE: Duration = Duration::from_secs(5);
+/// The phone resizes the shared PTY to fit its screen. Remember the desktop
+/// size so the desktop view gets its layout back once the phone leaves.
+#[derive(Default)]
+struct Sizes {
+    desktop: HashMap<String, (u32, u32)>,
+    phone: HashMap<String, Instant>,
+}
+impl Sizes {
+    /// Returns true when the phone starts sizing this terminal.
+    fn phone_resized(&mut self, id: &str, now: Instant) -> bool {
+        self.phone.insert(id.to_string(), now).is_none()
+    }
+    fn phone_read(&mut self, id: &str, now: Instant) {
+        if let Some(seen) = self.phone.get_mut(id) {
+            *seen = now;
+        }
+    }
+    /// Once the phone is idle, stop tracking it and hand back the desktop size.
+    fn phone_left(&mut self, id: &str, now: Instant) -> Option<Option<(u32, u32)>> {
+        let seen = *self.phone.get(id)?;
+        if now.duration_since(seen) < PHONE_IDLE {
+            return None;
+        }
+        self.phone.remove(id);
+        Some(self.desktop.get(id).copied())
+    }
+}
+static SIZES: LazyLock<Mutex<Sizes>> = LazyLock::new(Mutex::default);
+/// Called for every resize coming from the desktop's own terminal view.
+pub fn remember_desktop_size(session_id: &str, cols: u32, rows: u32) {
+    if let Ok(mut sizes) = SIZES.lock() {
+        sizes.desktop.insert(session_id.to_string(), (cols, rows));
+    }
+}
+async fn apply_size(app: &AppHandle, native: &str, cols: u32, rows: u32) -> Result<(), String> {
+    if crate::agent_daemon::owns(native) {
+        app.state::<crate::AppDaemon>()
+            .request(
+                false,
+                crate::agent_daemon::Request::Resize {
+                    session_id: native.to_string(),
+                    cols,
+                    rows,
+                },
+            )
+            .await
+            .map(|_| ())
+    } else {
+        crate::agent::resize(
+            app.state::<Arc<AgentRegistry>>().inner(),
+            native,
+            cols,
+            rows,
+        )
+    }
+}
+fn restore_when_phone_leaves(app: AppHandle, native: String) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let left = match SIZES.lock() {
+                Ok(mut sizes) => sizes.phone_left(&native, Instant::now()),
+                Err(_) => return,
+            };
+            match left {
+                None => continue,
+                Some(Some((cols, rows))) => {
+                    let _ = apply_size(&app, &native, cols, rows).await;
+                    return;
+                }
+                Some(None) => return,
+            }
+        }
+    });
+}
 
 // 50 summaries of escaped labels and a clipped folder stay below the 60 KiB encrypted response limit.
 const MAX_LISTED: usize = 50;
@@ -173,6 +252,16 @@ impl Access {
             _ => return Err("Not a CLI operation.".into()),
         };
         let native = self.resolve(&remote_id)?;
+        if let Ok(mut sizes) = SIZES.lock() {
+            let now = Instant::now();
+            match &operation {
+                ChatOperation::CliResize { .. } if sizes.phone_resized(&native, now) => {
+                    restore_when_phone_leaves(app.clone(), native.clone());
+                }
+                ChatOperation::CliRead { .. } => sizes.phone_read(&native, now),
+                _ => {}
+            }
+        }
         let background = crate::agent_daemon::owns(&native);
         if !background {
             return self.perform_local(&registry, &crate::agent::EventSink(app.clone()), operation);
@@ -279,6 +368,23 @@ mod tests {
         fn model(&self, _: &str, _: &str) {}
         fn usage(&self, _: &str, _: &AgentTokenUsage) {}
         fn queue(&self, _: &str, _: usize) {}
+    }
+    #[test]
+    fn the_desktop_size_comes_back_after_the_phone_goes_quiet() {
+        let mut sizes = Sizes::default();
+        let start = Instant::now();
+        sizes.desktop.insert("a".into(), (180, 48));
+        assert!(sizes.phone_resized("a", start));
+        assert!(!sizes.phone_resized("a", start));
+        sizes.phone_read("a", start + Duration::from_secs(4));
+        assert_eq!(sizes.phone_left("a", start + Duration::from_secs(6)), None);
+        assert_eq!(
+            sizes.phone_left("a", start + Duration::from_secs(9)),
+            Some(Some((180, 48)))
+        );
+        assert_eq!(sizes.phone_left("a", start + Duration::from_secs(20)), None);
+        sizes.phone_read("b", start);
+        assert!(!sizes.phone.contains_key("b"));
     }
     #[test]
     fn escaped_labels_keep_a_full_list_within_the_wire_budget() {

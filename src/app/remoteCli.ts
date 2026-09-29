@@ -76,9 +76,15 @@ export class RemoteCliChannel {
     this.buffered = "";
     if (chunk) this.enqueue({ kind: "cliInput", sessionId: this.sessionId, data: chunk });
   }
+  private size: { cols: number; rows: number } | null = null;
   resize(cols: number, rows: number) {
     this.flush();
-    this.enqueue({ kind: "cliResize", sessionId: this.sessionId, cols: Math.max(2, Math.min(500, cols)), rows: Math.max(2, Math.min(300, rows)) });
+    this.size = { cols: Math.max(2, Math.min(500, cols)), rows: Math.max(2, Math.min(300, rows)) };
+    this.enqueue({ kind: "cliResize", sessionId: this.sessionId, ...this.size });
+  }
+  /** The host gives the desktop its size back once the phone goes quiet, so claim it again after a pause. */
+  reclaimSize() {
+    if (this.size) this.resize(this.size.cols, this.size.rows);
   }
   stop() { this.generation++; this.pendingBytes = 0; this.active = false; this.buffered = ""; clearTimeout(this.timer); this.timer = undefined; }
 }

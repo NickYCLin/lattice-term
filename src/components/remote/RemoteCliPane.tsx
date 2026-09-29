@@ -72,11 +72,13 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
     terminalResize: async (_id: string, cols: number, rows: number) => { channel.resize(cols, rows); },
     onTerminalData: (_id: string, listener: (bytes: Uint8Array) => void) => {
       channel.resume();
-      let stopped = false, cursor = 0;
+      let stopped = false, cursor = 0, polled = Date.now();
       let timer: ReturnType<typeof setTimeout>;
       async function poll() {
         try {
+          if (Date.now() - polled > 3000) channel.reclaimSize();
           const output = await requestRemoteCli<RemoteCliOutput>(connection.sessionId, { kind: "cliRead", sessionId: selected.id, cursor });
+          polled = Date.now();
           if (stopped) return;
           if (output.sessionId !== selected.id || output.nextCursor < output.cursor || output.cursor < cursor && !output.truncated) throw new Error("Invalid terminal cursor");
           if (output.truncated) { listener(new TextEncoder().encode("\x1bc")); setTruncated(true); }
