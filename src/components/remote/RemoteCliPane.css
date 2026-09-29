@@ -7,3 +7,7 @@
 .remote-cli-pane p { margin: 0; }
 .remote-cli-keys { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: env(safe-area-inset-bottom); }
 .remote-cli-keys button { min-width: 44px; min-height: 44px; }
+.remote-cli-state { align-self: flex-start; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--surface-raised, transparent); color: var(--text-muted); border: 1px solid var(--line); }
+.remote-cli-state--working { background: var(--info-soft); color: var(--info); border-color: transparent; }
+.remote-cli-state--needsAttention { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.remote-cli-state--done { background: var(--ok-soft); color: var(--ok); border-color: transparent; }

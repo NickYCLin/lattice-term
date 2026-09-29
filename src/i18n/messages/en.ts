@@ -2305,6 +2305,7 @@ export const en: Messages = {
   "remote.chat.untitled": "New conversation",
   "remote.chat.running": "Running",
   "remote.chat.idle": "Ready",
+  "remote.chat.awaitingApproval": "Waiting for your approval",
   "remote.chat.new": "New with same settings",
   "remote.chat.messages": "Conversation history",
   "remote.chat.older": "Earlier messages",

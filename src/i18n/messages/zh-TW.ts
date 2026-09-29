@@ -2217,6 +2217,7 @@ export const zhTW = {
   "remote.chat.untitled": "新對話",
   "remote.chat.running": "執行中",
   "remote.chat.idle": "等待訊息",
+  "remote.chat.awaitingApproval": "等你核准",
   "remote.chat.new": "以相同設定開新對話",
   "remote.chat.messages": "對話紀錄",
   "remote.chat.older": "較早的訊息",

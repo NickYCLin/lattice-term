@@ -64,7 +64,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
       <p className="muted">{t("remote.chat.hint")}</p>
       {threads.length === 0 && <p>{t("remote.chat.empty")}</p>}
       {threads.map(thread => <button className="remote-chat-thread" key={thread.id} onClick={() => { setSelected(thread.id); setPage(null); setBefore(null); setProblem(null); }}>
-        <strong>{thread.title || t("remote.chat.untitled")}</strong><span>{thread.agent} · {thread.runningTurnId ? t("remote.chat.running") : t("remote.chat.idle")}</span><small>{thread.directory}</small>
+        <strong>{thread.title || t("remote.chat.untitled")}</strong><span>{thread.agent} · {thread.awaitingApproval ? t("remote.chat.awaitingApproval") : thread.runningTurnId ? t("remote.chat.running") : t("remote.chat.idle")}</span><small>{thread.directory}</small>
       </button>)}
     </div> : current ? <>
       <div className="remote-chat-heading"><strong>{current.thread.title || t("remote.chat.untitled")}</strong><small>{current.thread.agent} · {current.thread.directory}</small>

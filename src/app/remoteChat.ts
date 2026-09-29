@@ -12,7 +12,7 @@ export type RemoteChatOperation =
   | { kind: "create"; templateId: string };
 export interface RemoteChatRequest { id: string; operation: RemoteChatOperation }
 export interface RemoteChatResponse { id: string; value: unknown; error: string | null }
-export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean }
+export interface RemoteChatThread { id: string; title: string; agent: string; directory: string; runningTurnId: string | null; updatedAt: number; canSteer?: boolean; awaitingApproval?: boolean }
 export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();
@@ -32,6 +32,7 @@ function clipForJson(text: string, bytes: number): string {
 export function remoteThread(thread: ChatThread): RemoteChatThread {
   return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt,
     canSteer: thread.definitionId === "codex" && !!thread.runningTurnId && !thread.pendingInputs?.length && !thread.items.some(item => item.type === "approval" && item.decision === "pending"),
+    awaitingApproval: !!thread.runningTurnId && thread.items.some(item => item.type === "approval" && item.decision === "pending"),
   };
 }
 function remoteItem(item: ChatItem): RemoteChatItem {

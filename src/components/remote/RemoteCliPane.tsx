@@ -6,6 +6,12 @@ import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import "./RemoteCliPane.css";
 
+const CLI_STATES = ["working", "needsAttention", "idle", "done"] as const;
+type CliState = (typeof CLI_STATES)[number];
+function isCliState(state: string): state is CliState {
+  return (CLI_STATES as readonly string[]).includes(state);
+}
+
 export function RemoteCliPane({ session, theme, active = true }: { session: RemoteSessionSummary; theme: ThemeId; active?: boolean }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<RemoteCliSession[]>([]);
@@ -37,7 +43,7 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
       {!problem && <p role="status">{!loaded ? t("remote.cli.loading") : sessions.length === 0 ? t("remote.cli.empty") : ""}</p>}
       <div className="remote-chat-list">{sessions.map(item => <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
-        <strong>{item.groupLabel || item.label}</strong><span>{item.label} · {item.agent}</span><small>{item.detached ? t("remote.cli.background") : t("remote.cli.desktop")}</small>
+        <strong>{item.groupLabel || item.label}</strong><span>{item.label} · {item.agent}</span><small>{item.detached ? t("remote.cli.background") : t("remote.cli.desktop")}</small>{isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
       </button>)}</div>
     </>}
   </section>;
