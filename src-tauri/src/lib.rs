@@ -1507,6 +1507,37 @@ async fn agent_chat_local_history_read(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn agent_chat_local_history_page(
+    profiles: Vec<crate::transcript::HistoryProfile>,
+    limit: usize,
+) -> Result<crate::transcript::LocalConversationPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transcript::local_conversation_page(&profiles, limit)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn agent_chat_local_history_snapshot(
+    definition_id: String,
+    native_session_id: String,
+    profile_id: Option<String>,
+    profiles: Vec<crate::transcript::HistoryProfile>,
+) -> Result<crate::transcript::LocalConversationSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transcript::read_local_conversation_snapshot(
+            &definition_id,
+            &native_session_id,
+            profile_id.as_deref(),
+            &profiles,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Runs one chat turn. Returns once the CLI is running; its reply arrives
 /// as `agent-chat://event` events carrying the same thread and turn ids.
 #[tauri::command]
@@ -4773,6 +4804,8 @@ pub fn run() {
             agent_daemon_set_autostart,
             agent_chat_supported,
             agent_chat_local_history,
+            agent_chat_local_history_page,
+            agent_chat_local_history_snapshot,
             agent_chat_local_history_read,
             agent_account_profile_directory,
             agent_account_profile_status,

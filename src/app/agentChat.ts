@@ -270,6 +270,9 @@ export interface ChatThread {
   browserEnabled?: boolean;
   /** Imported cloud export: a read-only reference, never a resumable CLI session. */
   archived?: boolean;
+  nativeHistorySource?: boolean;
+  nativeHistoryArchived?: boolean;
+  historyTruncated?: boolean;
   /**
    * When the user put this thread away. Unlike `archived` it is still a
    * normal, resumable conversation; it only leaves the main list.
@@ -346,6 +349,7 @@ export function importNativeConversation(
   return {
     ...thread,
     nativeSessionId: settings.nativeSessionId,
+    nativeHistorySource: true,
     accountProfileId: settings.accountProfileId,
     items: settings.messages.slice(-MAX_STORED_ITEMS).map((message, index) =>
       message.role === "user"

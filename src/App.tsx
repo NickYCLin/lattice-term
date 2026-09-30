@@ -94,7 +94,8 @@ import {
 } from "./app/workspaceSessionPersistence";
 import type { WorkspaceRetryResult } from "./components/sessions/WorkspaceRecoveryPanel";
 import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
-import { useAutomaticLocalConversations } from "./app/useAutomaticLocalConversations";
+import { NativeHistoryContext, useNativeConversations } from "./app/useNativeConversations";
+import type { LocalConversation } from "./app/localConversationSessions";
 import { loadAuthPref } from "./app/authPreferences";
 import {
   playCompletionSound,
@@ -480,26 +481,12 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setWorkspaceRecoveryError(false);
   }
 
-  function queueLocalConversations(entries: readonly SavedAgentSession[]) {
-    if (entries.length === 0) return;
-    const pending = [...unrestoredSessionsRef.current, ...entries];
-    // Reject overflow before saving: the normal bounded writer must not drop
-    // any of the conversations promised by a bulk import.
-    if (pending.length + agents.sessions.length + ssh.sessions.length > 1024) {
-      throw new Error("The workspace cannot hold more than 1024 sessions.");
-    }
-    saveWorkspaceSessionSnapshot(window.localStorage, preserveUnrestoredWorkspaceSessions(
-      snapshotLiveWorkspaceSessions(agents.sessions, ssh.sessions, activeSessionId),
-      pending, storedSessionSnapshotRef.current?.active ?? null,
-    ));
-    replacePendingWorkspace(pending);
-    setTerminalMounted(true);
+  const nativeHistory = useNativeConversations(runtime.host === "tauri" && agents.mode === "ready");
+  const [nativeSelection, setNativeSelection] = useState<LocalConversation | null>(null);
+  function openNativeConversation(entry: LocalConversation) {
+    setNativeSelection(entry);
+    setHistoryOpen(true);
   }
-
-  const automaticConversations = useAutomaticLocalConversations(
-    agents, sessionRestoreComplete, unrestoredWorkspaceSessions,
-    queueLocalConversations,
-  );
 
   function removeLocalProject(path: string) {
     localProjects.remove(path);
@@ -1070,6 +1057,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   );
 
   return (
+    <NativeHistoryContext.Provider value={{ ...nativeHistory, open: openNativeConversation }}>
     <div className={`app${onMobile ? " app--mobile" : ""}`} data-view={view}>
       <NavRail
         current={view}
@@ -1433,8 +1421,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         <LocalConversationDialog
           agents={agents}
           chat={chatRuntime?.chat ?? null}
-          automatic={automaticConversations}
-          onClose={() => setHistoryOpen(false)}
+          initialSelection={nativeSelection}
+          onClose={() => { setHistoryOpen(false); setNativeSelection(null); }}
           onOpenChat={() => { setChatWorkspaceSessionId(null); setView("chat"); }}
           onOpenSessionChat={(sessionId) => {
             setChatWorkspaceSessionId(sessionId);
@@ -1607,6 +1595,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       <RemoteCommandApproval />
       </Suspense>
     </div>
+    </NativeHistoryContext.Provider>
   );
 }
 

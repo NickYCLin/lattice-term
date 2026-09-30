@@ -883,6 +883,7 @@ pub struct LocalConversation {
     pub updated_at: u64,
     pub model_provider: Option<String>,
     pub archived: bool,
+    pub title_source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -897,6 +898,10 @@ const HISTORY_MAX_ENTRIES: usize = 50_000;
 const HISTORY_MAX_RESULTS: usize = 100;
 const HISTORY_MAX_MESSAGES: usize = 300;
 const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
+
+#[cfg(test)]
+#[path = "transcript/sync_tests.rs"]
+mod sync_tests;
 
 // A unit test runs on a machine that already has `~/.codex` and `~/.claude`.
 // Scanning those pushes the test's own fixtures past the result cap, so the
@@ -1029,16 +1034,29 @@ fn scan_local_conversations(
     result: &mut Vec<(LocalConversation, PathBuf)>,
     all: bool,
     archived: bool,
+    retained: usize,
+    incomplete: &mut bool,
 ) -> Result<(), String> {
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0;
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                if error.kind() != io::ErrorKind::NotFound {
+                    *incomplete = true;
+                }
+                continue;
+            }
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                *incomplete = true;
+                continue;
+            };
             visited += 1;
             if visited > HISTORY_MAX_ENTRIES {
+                *incomplete = true;
                 return if all {
                     Err(
                         "Local history exceeds the scan limit; no conversations were opened."
@@ -1049,6 +1067,7 @@ fn scan_local_conversations(
                 };
             }
             let Ok(file_type) = entry.file_type() else {
+                *incomplete = true;
                 continue;
             };
             if file_type.is_symlink() {
@@ -1057,6 +1076,8 @@ fn scan_local_conversations(
             if file_type.is_dir() {
                 if depth < 5 {
                     stack.push((entry.path(), depth + 1));
+                } else {
+                    *incomplete = true;
                 }
                 continue;
             }
@@ -1112,6 +1133,7 @@ fn scan_local_conversations(
                         None
                     },
                     archived,
+                    title_source: "firstMessage".into(),
                 },
                 path,
             ));
@@ -1123,9 +1145,9 @@ fn scan_local_conversations(
                         .into(),
                 );
             }
-            if !all && result.len() >= 2_000 {
-                result.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
-                result.truncate(1_000);
+            if !all && result.len() >= retained.saturating_mul(2).max(2) {
+                sort_history(result);
+                result.truncate(retained);
             }
         }
     }
@@ -1145,23 +1167,123 @@ pub fn list_local_conversations_with_limit(
     list_local_conversations_with_options(profiles, all, false)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalConversationPage {
+    pub entries: Vec<LocalConversation>,
+    pub has_more: bool,
+    pub incomplete: bool,
+}
+
+fn sort_history(entries: &mut [(LocalConversation, PathBuf)]) {
+    entries.sort_by(|a, b| {
+        b.0.updated_at
+            .cmp(&a.0.updated_at)
+            .then_with(|| a.0.definition_id.cmp(&b.0.definition_id))
+            .then_with(|| a.0.profile_id.cmp(&b.0.profile_id))
+            .then_with(|| a.0.native_session_id.cmp(&b.0.native_session_id))
+    });
+}
+
+// The append-only native name index has id/thread_name rows. Last valid row wins.
+// It is optional: an unavailable or unfamiliar index must not hide conversations.
+fn codex_names(home: &Path) -> HashMap<String, String> {
+    use std::io::{Seek, SeekFrom};
+    let mut names = HashMap::new();
+    let Some(mut file) = open_regular_transcript(&home.join("session_index.jsonl")) else {
+        return names;
+    };
+    let bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
+    const LIMIT: u64 = 8 * 1024 * 1024;
+    if bytes > LIMIT && file.seek(SeekFrom::Start(bytes - LIMIT)).is_err() {
+        return names;
+    }
+    let mut reader = BufReader::new(file.take(LIMIT));
+    let mut line = Vec::new();
+    if bytes > LIMIT {
+        let _ = read_bounded_line(&mut reader, &mut line, 16 * 1024);
+    }
+    while let Ok(Some(valid)) = read_bounded_line(&mut reader, &mut line, 16 * 1024) {
+        if !valid {
+            continue;
+        }
+        let Ok(row) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if let (Some(id), Some(name)) = (
+            row.get("id").and_then(Value::as_str),
+            row.get("thread_name").and_then(Value::as_str),
+        ) {
+            if id.len() <= 128 && !name.trim().is_empty() && !name.chars().any(char::is_control) {
+                names.insert(id.to_owned(), name.chars().take(200).collect());
+            }
+        }
+    }
+    names
+}
+
 pub fn list_local_conversations_with_options(
     profiles: &[HistoryProfile],
     all: bool,
     include_archived: bool,
 ) -> Result<Vec<LocalConversation>, String> {
+    collect_local_conversations(profiles, all, include_archived, HISTORY_MAX_RESULTS)
+        .map(|page| page.0)
+}
+
+/// Refresh a growing, bounded prefix atomically instead of appending unstable offsets.
+pub fn local_conversation_page(
+    profiles: &[HistoryProfile],
+    limit: usize,
+) -> Result<LocalConversationPage, String> {
+    let limit = limit.clamp(1, HISTORY_MAX_ENTRIES);
+    let (mut entries, incomplete) = collect_local_conversations(profiles, false, true, limit + 1)?;
+    let has_more = entries.len() > limit;
+    entries.truncate(limit);
+    Ok(LocalConversationPage {
+        entries,
+        has_more,
+        incomplete: incomplete || (has_more && limit == HISTORY_MAX_ENTRIES),
+    })
+}
+
+fn collect_local_conversations(
+    profiles: &[HistoryProfile],
+    all: bool,
+    include_archived: bool,
+    retained: usize,
+) -> Result<(Vec<LocalConversation>, bool), String> {
     if profiles.len() > HISTORY_MAX_PROFILES {
         return Err("Too many account profiles.".into());
     }
     let mut entries = Vec::new();
+    let mut incomplete = false;
     if scan_default_history_roots() {
         for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
             if let Some(root) = history_root(kind, None) {
-                scan_local_conversations(kind, &root, None, &mut entries, all, false)?;
+                scan_local_conversations(
+                    kind,
+                    &root,
+                    None,
+                    &mut entries,
+                    all,
+                    false,
+                    retained,
+                    &mut incomplete,
+                )?;
             }
             if include_archived && kind == TranscriptKind::Codex {
                 if let Some(root) = history_root_with_archive(kind, None, true) {
-                    scan_local_conversations(kind, &root, None, &mut entries, all, true)?;
+                    scan_local_conversations(
+                        kind,
+                        &root,
+                        None,
+                        &mut entries,
+                        all,
+                        true,
+                        retained,
+                        &mut incomplete,
+                    )?;
                 }
             }
         }
@@ -1185,6 +1307,8 @@ pub fn list_local_conversations_with_options(
                 &mut entries,
                 all,
                 false,
+                retained,
+                &mut incomplete,
             )?;
         }
         if include_archived && kind == TranscriptKind::Codex {
@@ -1196,11 +1320,14 @@ pub fn list_local_conversations_with_options(
                     &mut entries,
                     all,
                     true,
+                    retained,
+                    &mut incomplete,
                 )?;
             }
         }
     }
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
+    sort_history(&mut entries);
+    let mut names: HashMap<PathBuf, HashMap<String, String>> = HashMap::new();
     let mut seen = std::collections::HashSet::new();
     let mut selected = Vec::new();
     for (mut conversation, path) in entries {
@@ -1215,12 +1342,35 @@ pub fn list_local_conversations_with_options(
             TranscriptKind::from_definition(&conversation.definition_id).expect("validated above");
         conversation.title =
             history_preview(&path, kind).unwrap_or_else(|| conversation.native_session_id.clone());
+        if kind == TranscriptKind::Codex {
+            // Account-scoped native name index; never borrow a name from another account.
+            let profile = conversation.profile_id.as_deref().and_then(|id| {
+                profiles
+                    .iter()
+                    .find(|profile| profile.definition_id == "codex" && profile.profile_id == id)
+            });
+            if let Some(root) = history_root_with_archive(
+                kind,
+                profile.map(|p| Path::new(&p.config_directory)),
+                conversation.archived,
+            ) {
+                if let Some(parent) = root.parent() {
+                    let index = names
+                        .entry(parent.to_path_buf())
+                        .or_insert_with(|| codex_names(parent));
+                    if let Some(name) = index.get(&conversation.native_session_id) {
+                        conversation.title = name.clone();
+                        conversation.title_source = "nativeIndex".into();
+                    }
+                }
+            }
+        }
         selected.push(conversation);
-        if !all && selected.len() == HISTORY_MAX_RESULTS {
+        if !all && selected.len() == retained {
             break;
         }
     }
-    Ok(selected)
+    Ok((selected, incomplete))
 }
 
 pub fn read_local_conversation(
@@ -1229,6 +1379,16 @@ pub fn read_local_conversation(
     profile_id: Option<&str>,
     profiles: &[HistoryProfile],
 ) -> Result<Vec<LocalConversationMessage>, String> {
+    read_local_conversation_snapshot(definition_id, session_id, profile_id, profiles)
+        .map(|snapshot| snapshot.messages)
+}
+
+pub fn read_local_conversation_snapshot(
+    definition_id: &str,
+    session_id: &str,
+    profile_id: Option<&str>,
+    profiles: &[HistoryProfile],
+) -> Result<LocalConversationSnapshot, String> {
     // Resolve the exact identity inside the selected account. The latest-100
     // preview is not an authorization list and must not hide older records.
     if profiles.len() > HISTORY_MAX_PROFILES
@@ -1275,7 +1435,7 @@ pub fn read_local_conversation(
         _ => None,
     }
     .ok_or("The local conversation is no longer available.")?;
-    read_conversation_messages(&path, kind)
+    read_conversation_snapshot(&path, kind)
 }
 
 /// Reads only the exact native conversation owned by this running session.
@@ -1296,9 +1456,15 @@ pub fn read_session_conversation(
         return Err("The account directory is unavailable.".into());
     }
     let root = history_root(kind, profile_directory)
+        .or_else(|| history_root_with_archive(kind, profile_directory, true))
         .ok_or("The conversation directory is unavailable.")?;
     let path = match kind {
-        TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id)),
+        TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
+            .or_else(|| {
+                history_root_with_archive(kind, profile_directory, true).and_then(|archive| {
+                    locate_codex_in(&archive, working_directory, Some(session_id))
+                })
+            }),
         TranscriptKind::Claude => locate_claude_in(&root, working_directory, Some(session_id)),
         _ => None,
     }
@@ -1321,13 +1487,28 @@ pub(crate) fn codex_session_provider(
     Ok(read_codex_session_meta(&path).and_then(|meta| meta.model_provider))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalConversationSnapshot {
+    pub messages: Vec<LocalConversationMessage>,
+    pub truncated: bool,
+}
+
 fn read_conversation_messages(
     path: &Path,
     kind: TranscriptKind,
 ) -> Result<Vec<LocalConversationMessage>, String> {
+    read_conversation_snapshot(path, kind).map(|snapshot| snapshot.messages)
+}
+
+fn read_conversation_snapshot(
+    path: &Path,
+    kind: TranscriptKind,
+) -> Result<LocalConversationSnapshot, String> {
     let mut messages = Vec::new();
     let mut bytes = 0;
-    visit_transcript_rows(path, |value| {
+    let mut truncated = false;
+    let incomplete = visit_transcript_rows(path, |value| {
         let (role, content) = match kind {
             TranscriptKind::Codex => {
                 let Some(payload) = value.get("payload") else {
@@ -1369,12 +1550,16 @@ fn read_conversation_messages(
             text,
         });
         while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
+            truncated = true;
             let removed: LocalConversationMessage = messages.remove(0);
             bytes -= removed.text.len();
         }
     })
     .ok_or("The local conversation could not be read safely.")?;
-    Ok(messages)
+    Ok(LocalConversationSnapshot {
+        messages,
+        truncated: truncated || incomplete,
+    })
 }
 
 fn is_gemini_session(path: &Path) -> bool {

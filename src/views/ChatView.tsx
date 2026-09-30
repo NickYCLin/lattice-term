@@ -1,3 +1,4 @@
+import { NativeConversationList } from "../components/chat/NativeConversationList";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
@@ -389,6 +390,7 @@ export function ChatView({
               </div>
             )}
             <SidebarStorageNotice />
+            <NativeConversationList />
             <ChatThreadTree
               layout={sidebarLayout}
               threads={listedThreads}
@@ -1130,6 +1132,9 @@ function ThreadPane({
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
         <div className="chat-messages__inner">
+          {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("history.textOnly")} · {t("history.stateUnknown")}</p>}
+          {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
+          {thread.historyTruncated && <p role="status">{t("history.truncated")}</p>}
           {thread.items.length === 0 && (
             <div className="chat-welcome">
               <span className="chat-avatar chat-avatar--lg" aria-hidden="true">

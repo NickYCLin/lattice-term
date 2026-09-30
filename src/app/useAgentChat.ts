@@ -1,3 +1,5 @@
+import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
+import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
 /**
  * Chat threads with an agent CLI, kept in the WebView and driven by the
  * Rust chat runner.
@@ -271,6 +273,24 @@ export function useAgentChat(
     setThreads(next);
   }, []);
 
+  const nativeHistory = useNativeHistory();
+  const mirror = threads.find(thread => thread.id === activeThreadId && isNativeHistoryMirror(thread));
+  const nativeEntry = nativeHistory && mirror && (mirror.definitionId === "codex" || mirror.definitionId === "claude")
+    ? nativeHistory.entries.find(entry => entry.definitionId === mirror.definitionId && entry.profileId === mirror.accountProfileId && entry.nativeSessionId === mirror.nativeSessionId)
+      ?? { definitionId: mirror.definitionId, profileId: mirror.accountProfileId, nativeSessionId: mirror.nativeSessionId!,
+        title: mirror.title, workingDirectory: mirror.workingDirectory, resumable: false, updatedAt: 0, archived: mirror.nativeHistoryArchived }
+    : null;
+  const nativeMessages = useNativeConversationMessages(nativeEntry, nativeHistory?.profileKey ?? "[]");
+  useEffect(() => {
+    if (!nativeEntry || !nativeMessages.value || !mirror) return;
+    changeThreads(current => {
+      const old = current.find(thread => thread.id === mirror.id);
+      if (!old) return current;
+      const next = refreshNativeHistoryMirror(old, nativeEntry, nativeMessages.value!);
+      return next === old ? current : current.map(thread => thread.id === old.id ? next : thread);
+    });
+  }, [nativeMessages.value, nativeEntry?.title, nativeEntry?.archived, mirror?.id, changeThreads]);
+
   // Persist a little after the last change so a streaming reply does not
   // rewrite storage on every token.
   useEffect(() => {
@@ -369,8 +389,13 @@ export function useAgentChat(
       thread.accountProfileId === settings.accountProfileId,
     );
     if (existing) {
+      const next = refreshNativeHistoryMirror(existing, {
+        definitionId: settings.definitionId, profileId: settings.accountProfileId, nativeSessionId: settings.nativeSessionId,
+        workingDirectory: settings.workingDirectory, title: settings.title, updatedAt: 0, resumable: true,
+      }, { messages: [...settings.messages], truncated: false });
+      if (next !== existing) changeThreads(current => current.map(thread => thread.id === existing.id ? next : thread));
       setActiveThreadId(existing.id);
-      return existing;
+      return next;
     }
     const thread = importNativeConversation(settings);
     changeThreads((current) => [thread, ...current]);
@@ -585,6 +610,8 @@ export function useAgentChat(
     queuedInputId?: string,
     mentions: readonly ChatMention[] = [],
   ) => {
+    if (threadsRef.current.find(thread => thread.id === id)?.nativeHistoryArchived) throw new Error("This conversation is archived in the original app. Unarchive it there before resuming.");
+
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
     const turnId = crypto.randomUUID();

@@ -1,3 +1,4 @@
+import { NativeConversationList } from "../chat/NativeConversationList";
 import { PathDropZone } from "../files/PathDropZone";
 import { FileDropZone } from "../files/FileDropZone";
 import type { UploadFile } from "../../app/localFiles";
@@ -1074,6 +1075,7 @@ export function SessionProjectSidebar({
         )}
       </div>
       <SidebarStorageNotice />
+            <NativeConversationList />
       <div
         className={`session-tree${draggedNodeId ? " is-dragging" : ""}`}
         role="list"

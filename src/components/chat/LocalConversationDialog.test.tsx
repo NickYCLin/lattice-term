@@ -12,8 +12,8 @@ describe("external conversations dialog", () => {
           onClose={() => {}} onOpenChat={() => {}} onOpenSession={() => {}} />
       </I18nProvider>,
     );
-    expect(html).toContain("Continue in Sessions");
-    expect(html).toContain("Continue in Chat");
+    expect(html).toContain("Start CLI to resume");
+    expect(html).toContain("Start CLI and open chat");
     expect(html).toContain("conversations.json");
     expect(html).toContain("https://chatgpt.com/codex");
     expect(html).toContain("https://claude.ai/");

@@ -14,6 +14,7 @@ export interface LocalConversation {
   updatedAt: number;
   modelProvider?: string | null;
   archived?: boolean;
+  titleSource?: "nativeIndex" | "firstMessage";
 }
 
 export function isProxyConversation(entry: LocalConversation): boolean {

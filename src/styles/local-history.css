@@ -8,3 +8,9 @@
 .local-history__message p { white-space: pre-wrap; margin: .4rem 0; }
 .local-history__browse { display: block; width: calc(100% - 2rem); margin: 0 1rem .5rem; }
 @media (max-width: 600px) { .local-history__columns { grid-template-columns: 1fr; } .local-history__list { min-height: 5rem; max-height: 20vh; } }
+
+.native-history { padding: 12px; border-top: 1px solid var(--border); }
+.native-history__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.native-history__entries { max-height: 280px; overflow: auto; margin-top: 8px; }
+.native-history__entries small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-history .input { width: 100%; }
