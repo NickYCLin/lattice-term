@@ -193,6 +193,29 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 
 **F. 看遠端畫面、操作鍵鼠**
 
+**Lattice Remote 的命令與檔案入口（不需 SSH）**
+
+- 先查 `list_authorized_connections`，選 `backend: remote` 且具有相應
+  `command`／`upload`／`download` 能力的目標。舊版背景服務要更新並重啟；
+  主機也必須已提供相應的 Remote 通道。不可把畫面輸入當成命令入口。
+- `remote_run_command` 帶 `targetId`、`shell`（`cmd` 或 `powerShell`）、
+  `command`、`directory`、`requestId`。空目錄使用主機預設目錄，
+  命令限單行 4096 bytes、60 秒，不繼承前一次命令的環境。
+- `remote_file_transfer` 帶 `targetId`、`direction`、`localPath`、
+  `remotePath`、`requestId`。`remotePath` 如 `/deploy/package.zip`，
+  是分享端選定根目錄內的路徑，不是 `C:\` 等主機絕對路徑。
+  上傳限 8 MiB 的一般檔案，`localPath` 使用本機絕對路徑，拒絕連結、
+  裝置路徑與同名覆寫。下載的 `localPath` 必須是空字串，檔案會用不重複
+  名稱存到本機 Downloads。
+- 兩種操作都逐筆顯示內容供使用者確認；拒絕、未回應或送出前撤權就不執行，
+  不沿用 SSH 的永久信任。執行中撤權或取消會嘗試停止已送出的操作，
+  但不代表回復已造成的變更。
+- 用 `get_remote_operation` 確認結果。上傳的 SHA-256 是送出資料的雜湊，
+  不代表已從遠端重讀驗證；命令必須檢查 `exitStatus`，不能只看請求已接受。
+  重送同一操作必須沿用相同 `requestId` 與參數。
+
+**畫面操作**
+
 1. `capture_remote_screen` 取一張畫面，會拿到 `frameId`、`width`、`height`；有鍵鼠授權時還有 `snapshotId`。每條連線每兩秒最多一張。
 2. `send_remote_input` 帶同一組 `snapshotId` 與 `frameId`，必須在 10 秒內送出；座標用畫面原始像素（左上角 0,0）。
 3. 一次一個動作。每做完一個動作就重新擷取畫面確認結果，再做下一個。畫面變了會回 `not_ready`，重新擷取即可。
@@ -232,6 +255,8 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 | `get_host_metrics` | `targetId` | Linux 主機 CPU、記憶體、磁碟等數值 |
 | `ssh_exec_job` | `targetId`、`planId`、`requestId` | 執行使用者預先核准的具名指令 |
 | `ssh_run_command` | `targetId`、`command`、`requestId` | 提出臨時指令，由使用者逐筆核准 |
+| `remote_run_command` | `targetId`、`shell`、`command`、`directory`、`requestId` | Lattice Remote 單次命令，由使用者逐筆核准 |
+| `remote_file_transfer` | `targetId`、`direction`、`localPath`、`remotePath`、`requestId` | Lattice Remote 單檔傳輸，不覆寫，逐筆核准 |
 | `sftp_list_directory` | `targetId`、`rootId`、`path` | 列出核准根目錄下的內容 |
 | `sftp_transfer` | `targetId`、`rootId`、`direction`、`localPath`、`remotePath`、`requestId` | 單檔上傳／下載 |
 | `get_remote_operation` | `targetId`、`operationId` | 查指令或傳檔的結果（不會重跑） |

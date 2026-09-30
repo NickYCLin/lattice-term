@@ -224,7 +224,9 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 臨時指令，SFTP 給該帳號家目錄底下的列目錄、上傳與下載（本機端寫入
 「下載」資料夾），RDP／VNC／Lattice Remote 給畫面，分享端允許控制時再
 加鍵盤滑鼠；Lattice Remote 若也分享了 Fleet 工作區，另外自動補一筆
-Fleet 授權。連線本身仍要你在桌面建立：主機金鑰、密碼與配對碼都走原本
+Fleet 授權。Lattice Remote 分享端若已開放命令或檔案功能，也會列出對應
+能力，但每一筆命令與檔案傳輸仍須在桌面確認，不沿用 SSH 的免確認設定。
+連線本身仍要你在桌面建立：主機金鑰、密碼與配對碼都走原本
 的流程，MCP 不代為確認，也不會自己開啟沒連上的項目。
 
 授權綁定這一次連線。斷線即結束，重連會是一筆新授權。設定頁的「MCP 遠端
@@ -269,6 +271,8 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 | `sftp_list_directory` | 已核准根目錄下的有界清單 |
 | `ssh_exec_job` | 獨立、非互動 SSH channel 的命名指令工作 |
 | `ssh_run_command` | 提出臨時指令，每次都要使用者在桌面看過原文並同意才執行 |
+| `remote_run_command` | 透過 Lattice Remote 加密通道執行單次命令，逐筆確認 shell、工作目錄與原文 |
+| `remote_file_transfer` | Lattice Remote 單檔上傳／下載，逐筆確認方向與路徑，不覆寫同名檔 |
 | `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
 | `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
 | `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
@@ -330,7 +334,7 @@ Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗�
 `capture_remote_screen` 交出使用者明確分享的那個遠端畫面的最新一張，就是桌面此刻收到的那一幀。
 
 - **畫面與輸入分開授權**。只勾 `screen` 就只能看圖；`input` 需另外勾選，且必須同時允許畫面擷取。沒有連續串流或錄影。
-- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在清單裡）。可在設定頁直接使用已保存憑證開啟；連線成功後仍要授權 `screen`／`input`，不能混用指令或檔案權限。Lattice Remote 分享端也必須已允許控制，MCP 不會替使用者申請或核准控制。
+- **要先有活著的畫面工作階段**：RDP、VNC，或 Lattice Remote 的畫面分享（純終端的 Remote 分享沒有畫面，不會出現在畫面清單裡）。`screen`／`input` 不代表可以執行命令或傳檔；Remote 命令與檔案功能另查分享端能力，並逐筆確認。Lattice Remote 分享端也必須已允許控制，MCP 不會替使用者申請或核准控制。
 - **授權綁定這一次連線**。斷線重連會產生新的一輪，舊授權即失效，要重新授權。保留的影格也綁定後端及連線世代，舊連線延遲送來的影格不得進入新連線。
 - **沒授權就不留畫面**。桌面平常不保留任何 frame；勾了分享才開始保留「最新的一張」，最後一筆畫面授權撤銷或工作階段結束就立刻丟掉；授權被拒時不開始保留。畫面只在記憶體裡，不落地。
 - **每兩秒一張**，超過回 `limit_reached`（`busy`）。還沒有畫面回 `not_ready`；單張超過 1.5 MB（JPEG 原始 bytes 上限；桌面橋接回覆上限為 2 MiB）回 `unsupported`，請降低遠端解析度或色深，不回傳上一張舊圖。

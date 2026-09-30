@@ -20,6 +20,7 @@ export interface PendingRemoteCommand {
   command: string;
   timeoutMs: number;
   expiresInMs: number;
+  requiresEachApproval?: boolean;
 }
 
 export function useRemoteCommandApprovals() {

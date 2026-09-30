@@ -314,6 +314,22 @@ fn local_path(root: &Path, relative: &str, existing_file: bool) -> Result<PathBu
     Ok(current)
 }
 
+/// Read one explicitly approved absolute path with the same link/device/race
+/// checks as scoped SFTP uploads. This does not grant its parent to MCP.
+pub(super) fn read_approved_local(path: &str) -> Result<Vec<u8>, ServiceError> {
+    let path = Path::new(path);
+    let parent = path
+        .parent()
+        .and_then(Path::to_str)
+        .ok_or_else(path_error)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(path_error)?;
+    let root = prepare_local_root(parent)?;
+    read_local(&root, name)
+}
+
 fn read_local(root: &Path, relative: &str) -> Result<Vec<u8>, ServiceError> {
     let path = local_path(root, relative, true)?;
     let mut options = std::fs::OpenOptions::new();

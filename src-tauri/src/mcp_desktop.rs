@@ -10,6 +10,8 @@ mod fleet;
 #[cfg(test)]
 mod loopback_tests;
 mod paths;
+mod remote_files;
+mod remote_jobs;
 mod screen_input;
 mod ssh_jobs;
 pub(crate) use fleet::intersect_scopes as intersect_fleet_scopes;
@@ -55,10 +57,10 @@ const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 pub enum Backend {
     Ssh,
     Sftp,
-    /// Screen sessions. They share one capability — the picture the user is
-    /// already looking at — and nothing else: no shell, no files.
+    /// Screen-only backends never gain shell or file capabilities.
     Rdp,
     Vnc,
+    /// Remote can also advertise separately authorized command/file channels.
     Remote,
 }
 
@@ -272,6 +274,20 @@ pub enum DesktopOperation {
         command: String,
         request_id: String,
     },
+    RemoteCommand {
+        target_id: String,
+        shell: lattice_remote::command_protocol::CommandShell,
+        command: String,
+        directory: String,
+        request_id: String,
+    },
+    RemoteFileTransfer {
+        target_id: String,
+        direction: TransferDirection,
+        local_path: String,
+        remote_path: String,
+        request_id: String,
+    },
     Transfer {
         target_id: String,
         root_id: String,
@@ -306,6 +322,8 @@ impl DesktopOperation {
         "listDirectory",
         "exec",
         "execCommand",
+        "remoteCommand",
+        "remoteFileTransfer",
         "transfer",
         "cancel",
         "operationStatus",
@@ -337,6 +355,8 @@ impl DesktopOperation {
             Self::ListDirectory { .. } => "listDirectory",
             Self::Exec { .. } => "exec",
             Self::ExecCommand { .. } => "execCommand",
+            Self::RemoteCommand { .. } => "remoteCommand",
+            Self::RemoteFileTransfer { .. } => "remoteFileTransfer",
             Self::Transfer { .. } => "transfer",
             Self::Cancel { .. } => "cancel",
             Self::OperationStatus { .. } => "operationStatus",
@@ -353,6 +373,8 @@ impl DesktopOperation {
             | Self::ListDirectory { target_id, .. }
             | Self::Exec { target_id, .. }
             | Self::ExecCommand { target_id, .. }
+            | Self::RemoteCommand { target_id, .. }
+            | Self::RemoteFileTransfer { target_id, .. }
             | Self::Transfer { target_id, .. }
             | Self::Cancel { target_id, .. }
             | Self::OperationStatus { target_id, .. } => Some(target_id),
@@ -368,11 +390,20 @@ impl DesktopOperation {
             Self::ListDirectory { .. } => Some(Scope::List),
             Self::Exec { .. } => Some(Scope::Exec),
             Self::ExecCommand { .. } => Some(Scope::Command),
+            Self::RemoteCommand { .. } => Some(Scope::Command),
             Self::Transfer {
+                direction: TransferDirection::Upload,
+                ..
+            }
+            | Self::RemoteFileTransfer {
                 direction: TransferDirection::Upload,
                 ..
             } => Some(Scope::Upload),
             Self::Transfer {
+                direction: TransferDirection::Download,
+                ..
+            }
+            | Self::RemoteFileTransfer {
                 direction: TransferDirection::Download,
                 ..
             } => Some(Scope::Download),
@@ -390,6 +421,8 @@ impl DesktopOperation {
             Self::ScreenInput { request_id, .. }
             | Self::Exec { request_id, .. }
             | Self::ExecCommand { request_id, .. }
+            | Self::RemoteCommand { request_id, .. }
+            | Self::RemoteFileTransfer { request_id, .. }
             | Self::Transfer { request_id, .. }
             | Self::Cancel { request_id, .. } => Some(request_id),
             _ => None,
@@ -480,6 +513,8 @@ pub struct PendingCommandView {
     pub command: String,
     pub timeout_ms: u32,
     pub expires_in_ms: u64,
+    #[serde(default)]
+    pub requires_each_approval: bool,
 }
 
 /// A grant that is currently skipping the card, as the settings page shows it.
@@ -502,6 +537,7 @@ struct PendingApproval {
     target_label: String,
     client: String,
     command: String,
+    requires_each_approval: bool,
     requested_at: Instant,
     decision: watch::Sender<Option<CommandDecision>>,
 }
@@ -514,6 +550,7 @@ impl PendingApproval {
             target_label: self.target_label.clone(),
             client: self.client.clone(),
             command: self.command.clone(),
+            requires_each_approval: self.requires_each_approval,
             timeout_ms: AD_HOC_TIMEOUT_MS,
             expires_in_ms: APPROVAL_TIMEOUT
                 .saturating_sub(self.requested_at.elapsed())
@@ -942,6 +979,24 @@ impl DesktopService {
                 "The sharing host must allow control before MCP input can be granted.",
             ));
         }
+        if request.backend == Backend::Remote
+            && request.scopes.command
+            && !self.remote.list().iter().any(|session| {
+                session.session_id == request.session_id && session.command_shells != 0
+            })
+        {
+            return Err(ServiceError::denied());
+        }
+        if request.backend == Backend::Remote
+            && (request.scopes.upload || request.scopes.download)
+            && !self
+                .remote
+                .list()
+                .iter()
+                .any(|session| session.session_id == request.session_id && session.file_transfer)
+        {
+            return Err(ServiceError::denied());
+        }
         let identity = self
             .identity(request.backend, &request.session_id)
             .ok_or_else(ServiceError::unavailable)?;
@@ -1239,7 +1294,12 @@ impl DesktopService {
                     Backend::Remote,
                     session.session_id.clone(),
                     session.host.clone(),
-                    screen_scopes(controllable),
+                    Scopes {
+                        command: session.command_shells != 0,
+                        upload: session.file_transfer,
+                        download: session.file_transfer,
+                        ..screen_scopes(controllable)
+                    },
                     None,
                 ));
             }
@@ -1391,6 +1451,8 @@ impl DesktopService {
             operation,
             DesktopOperation::Exec { .. }
                 | DesktopOperation::ExecCommand { .. }
+                | DesktopOperation::RemoteCommand { .. }
+                | DesktopOperation::RemoteFileTransfer { .. }
                 | DesktopOperation::Transfer { .. }
         ) {
             let mut lease = lease.ok_or_else(ServiceError::invalid)?;
@@ -1469,7 +1531,38 @@ impl DesktopService {
                 }
             }
             DesktopOperation::ExecCommand { command, .. } => {
+                if grant.view.backend != Backend::Ssh {
+                    return Err(ServiceError::denied());
+                }
                 valid_command(command)?;
+            }
+            DesktopOperation::RemoteCommand {
+                command,
+                directory,
+                shell,
+                ..
+            } => {
+                if grant.view.backend != Backend::Remote {
+                    return Err(ServiceError::denied());
+                }
+                remote_jobs::validate(command, directory)?;
+                if !self.remote.list().iter().any(|session| {
+                    session.session_id == grant.session_id
+                        && session.command_shells & shell.flag() != 0
+                }) {
+                    return Err(ServiceError::denied());
+                }
+            }
+            DesktopOperation::RemoteFileTransfer {
+                direction,
+                local_path,
+                remote_path,
+                ..
+            } => {
+                if grant.view.backend != Backend::Remote {
+                    return Err(ServiceError::denied());
+                }
+                remote_files::validate(*direction, local_path, remote_path)?;
             }
             DesktopOperation::ListDirectory { root_id, path, .. } => {
                 if !grant.roots.iter().any(|root| root.id == *root_id) {
@@ -1628,6 +1721,82 @@ impl DesktopService {
                     )
                     .await
                 }
+                DesktopOperation::RemoteCommand {
+                    shell,
+                    command,
+                    directory,
+                    ..
+                } => {
+                    let lease = lease.ok_or_else(ServiceError::invalid)?;
+                    let proposal = serde_json::to_string(&json!({
+                        "transport": "Lattice Remote",
+                        "shell": shell,
+                        "directory": directory,
+                        "command": command,
+                        "timeoutSeconds": 60
+                    }))
+                    .map_err(|_| ServiceError::invalid())?;
+                    self.await_approval(
+                        client,
+                        grant,
+                        &proposal,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await?;
+                    remote_jobs::execute(
+                        &self.remote,
+                        &grant.session_id,
+                        grant.identity as u64,
+                        *shell,
+                        command,
+                        directory,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await
+                }
+                DesktopOperation::RemoteFileTransfer {
+                    direction,
+                    local_path,
+                    remote_path,
+                    ..
+                } => {
+                    let lease = lease.ok_or_else(ServiceError::invalid)?;
+                    let proposal = serde_json::to_string(&json!({
+                        "transport": "Lattice Remote",
+                        "operation": "fileTransfer",
+                        "direction": direction,
+                        "localPath": local_path,
+                        "remotePath": remote_path,
+                        "downloadDestination": "Downloads (unique filename)",
+                        "overwrite": false
+                    }))
+                    .map_err(|_| ServiceError::invalid())?;
+                    self.await_approval(
+                        client,
+                        grant,
+                        &proposal,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await?;
+                    remote_files::execute(
+                        &self.remote,
+                        &grant.session_id,
+                        grant.identity as u64,
+                        *direction,
+                        local_path,
+                        remote_path,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await
+                }
                 DesktopOperation::Transfer {
                     root_id,
                     direction,
@@ -1663,7 +1832,10 @@ impl DesktopService {
         // and a proposed command may legitimately wait for a person first.
         if matches!(
             operation,
-            DesktopOperation::Exec { .. } | DesktopOperation::ExecCommand { .. }
+            DesktopOperation::Exec { .. }
+                | DesktopOperation::ExecCommand { .. }
+                | DesktopOperation::RemoteCommand { .. }
+                | DesktopOperation::RemoteFileTransfer { .. }
         ) {
             return work.await;
         }
@@ -1785,7 +1957,9 @@ impl DesktopService {
             .ok()
             .and_then(|quiet| *quiet)
             .is_some_and(|until| until > Instant::now());
-        if quiet || self.command_trusted(grant) {
+        // SSH trust must never silently authorize a different transport.
+        // Remote operations currently require approval for every request.
+        if grant.view.backend == Backend::Ssh && (quiet || self.command_trusted(grant)) {
             return Ok(());
         }
         let mut decided = {
@@ -1807,6 +1981,7 @@ impl DesktopService {
                     target_label: grant.view.label.clone(),
                     client: client.to_string(),
                     command: command.to_string(),
+                    requires_each_approval: grant.view.backend == Backend::Remote,
                     requested_at: Instant::now(),
                     decision: decision.0,
                 },
@@ -2067,9 +2242,9 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
             || request.scopes.metrics
             || request.scopes.list
             || request.scopes.exec
-            || request.scopes.command
-            || request.scopes.upload
-            || request.scopes.download
+            || (request.scopes.command && request.backend != Backend::Remote)
+            || (request.scopes.upload && request.backend != Backend::Remote)
+            || (request.scopes.download && request.backend != Backend::Remote)
             || !request.exec_plans.is_empty()
             || !request.roots.is_empty())
     {
@@ -2115,7 +2290,9 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
         }
     }
     if (request.scopes.exec && request.exec_plans.is_empty())
-        || ((request.scopes.list || request.scopes.upload || request.scopes.download)
+        || ((request.scopes.list
+            || ((request.scopes.upload || request.scopes.download)
+                && request.backend != Backend::Remote))
             && request.roots.is_empty())
     {
         return Err(ServiceError::invalid());
@@ -2516,6 +2693,20 @@ mod tests {
                 command: "c".into(),
                 request_id: "q".into(),
             },
+            DesktopOperation::RemoteCommand {
+                target_id: "t".into(),
+                shell: lattice_remote::command_protocol::CommandShell::PowerShell,
+                command: "Get-Location".into(),
+                directory: String::new(),
+                request_id: "q".into(),
+            },
+            DesktopOperation::RemoteFileTransfer {
+                target_id: "t".into(),
+                direction: TransferDirection::Upload,
+                local_path: "file".into(),
+                remote_path: "/file".into(),
+                request_id: "q".into(),
+            },
             DesktopOperation::Cancel {
                 target_id: "t".into(),
                 operation_id: "o".into(),
@@ -2534,7 +2725,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 12);
+        assert_eq!(DesktopOperation::KINDS.len(), 14);
     }
 
     #[test]

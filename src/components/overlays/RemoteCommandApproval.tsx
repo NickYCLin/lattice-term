@@ -94,23 +94,27 @@ function ApprovalDialog({
           <button type="button" className="button button--ghost button--danger" onClick={() => onDecide(true)}>
             {t("mcp.commandApproval.approve")}
           </button>
-          <button
-            type="button"
-            className="button button--ghost button--danger"
-            onClick={() => onDecide(true, QUIET_MINUTES)}
-          >
-            {t("mcp.commandApproval.approveQuiet", { minutes: QUIET_MINUTES })}
-          </button>
-          <button
-            type="button"
-            className="button button--ghost button--danger"
-            onClick={() => onDecide(true, 0, true)}
-          >
-            {t("mcp.commandApproval.approveAlways")}
-          </button>
-          <button type="button" className="button button--ghost button--danger" onClick={onApproveAll}>
-            {t("mcp.commandApproval.approveAll")}
-          </button>
+          {!request.requiresEachApproval && (
+            <>
+              <button
+                type="button"
+                className="button button--ghost button--danger"
+                onClick={() => onDecide(true, QUIET_MINUTES)}
+              >
+                {t("mcp.commandApproval.approveQuiet", { minutes: QUIET_MINUTES })}
+              </button>
+              <button
+                type="button"
+                className="button button--ghost button--danger"
+                onClick={() => onDecide(true, 0, true)}
+              >
+                {t("mcp.commandApproval.approveAlways")}
+              </button>
+              <button type="button" className="button button--ghost button--danger" onClick={onApproveAll}>
+                {t("mcp.commandApproval.approveAll")}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

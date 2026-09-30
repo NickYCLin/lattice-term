@@ -62,4 +62,14 @@ describe("RemoteCommandApproval", () => {
     expect(remainingSeconds(now + 119_400, now)).toBe(120);
     expect(remainingSeconds(now - 5_000, now)).toBe(0);
   });
+
+  it("does not offer SSH trust shortcuts for Remote proposals", () => {
+    waiting.length = 0;
+    waiting.push(proposal({ requiresEachApproval: true }));
+    const html = render();
+    expect(html).toContain("允許這一次");
+    expect(html).not.toContain("15 分鐘內不再問");
+    expect(html).not.toContain("永遠允許這條連線");
+    expect(html).not.toContain("以後所有連線都不再問");
+  });
 });

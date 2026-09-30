@@ -885,6 +885,27 @@ async fn stop_remote_session(
 }
 
 impl RemoteRegistry {
+    /// Pin file requests to the already authorized connection. A reconnect
+    /// must never redirect an in-flight MCP transfer to another session.
+    pub(crate) fn mcp_file_access(
+        &self,
+        session_id: &str,
+        generation: u64,
+    ) -> Result<(Arc<RemoteFilesClient>, mpsc::Sender<RemoteMessage>), String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let record = state
+            .sessions
+            .get(session_id)
+            .ok_or("Remote session closed.")?;
+        if record.generation != generation || !record.summary.file_transfer {
+            return Err("Remote file grant changed.".into());
+        }
+        Ok((
+            record.files.clone().ok_or("Remote files unavailable.")?,
+            record.outbound.clone(),
+        ))
+    }
+
     pub fn command_state(
         &self,
         session_id: &str,
@@ -923,6 +944,15 @@ pub async fn command_start(
     session_id: &str,
     input: crate::remote_commands::CommandInput,
 ) -> Result<crate::remote_commands::CommandView, String> {
+    command_start_checked(registry, session_id, input, None).await
+}
+
+pub(crate) async fn command_start_checked(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    input: crate::remote_commands::CommandInput,
+    generation: Option<u64>,
+) -> Result<crate::remote_commands::CommandView, String> {
     use lattice_remote::command_protocol::{CommandEnd, CommandEvent};
     let (outbound, generation, request, view) = {
         let mut state = registry.state.lock().map_err(|e| e.to_string())?;
@@ -930,6 +960,9 @@ pub async fn command_start(
             .sessions
             .get_mut(session_id)
             .ok_or("The remote session is not connected.")?;
+        if generation.is_some_and(|expected| expected != record.generation) {
+            return Err("The remote connection changed.".into());
+        }
         if record.summary.command_shells & input.shell.flag() == 0 {
             return Err("The host has not allowed this command shell.".into());
         }
@@ -978,12 +1011,24 @@ pub async fn command_cancel(
     session_id: &str,
     id: u32,
 ) -> Result<(), String> {
+    command_cancel_checked(registry, session_id, id, None).await
+}
+
+pub(crate) async fn command_cancel_checked(
+    registry: &RemoteRegistry,
+    session_id: &str,
+    id: u32,
+    generation: Option<u64>,
+) -> Result<(), String> {
     let outbound = {
         let mut state = registry.state.lock().map_err(|e| e.to_string())?;
         let record = state
             .sessions
             .get_mut(session_id)
             .ok_or("The remote session is not connected.")?;
+        if generation.is_some_and(|expected| expected != record.generation) {
+            return Err("The remote connection changed.".into());
+        }
         let command = record.command.as_mut().ok_or("No command is running.")?;
         if command.view.id != id || !command.view.active() {
             return Err("This command is no longer running.".into());
@@ -2032,6 +2077,226 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_remote_commands_require_approval_and_replay_without_rerunning() {
+        use crate::mcp_desktop::*;
+        use lattice_remote::command_protocol::{
+            CommandEnd, CommandEvent, CommandRequest, CommandShell,
+        };
+        let registry = Arc::new(RemoteRegistry::new());
+        let (wire, mut peer) = mpsc::channel(4);
+        let mut summary = remote_summary("mcp-command", false);
+        summary.command_shells = CommandShell::PowerShell.flag();
+        let mut record = idle_test_record(summary, 17);
+        record.outbound = wire;
+        register_test_record(&registry, record);
+        let service = Arc::new(
+            DesktopService::new(
+                Arc::new(crate::ssh::SshRegistry::new()),
+                Arc::new(crate::sftp::SftpRegistry::new()),
+            )
+            .with_screens(
+                Arc::new(crate::rdp::RdpRegistry::new()),
+                Arc::new(crate::vnc::VncRegistry::new()),
+                registry.clone(),
+                Arc::new(crate::mcp_screen::ScreenFrames::default()),
+            ),
+        );
+        let targets = service
+            .execute("test-client", DesktopOperation::ListConnections)
+            .await
+            .unwrap();
+        let target = targets["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|target| target["scopes"]["command"] == true)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let operation = DesktopOperation::RemoteCommand {
+            target_id: target.clone(),
+            shell: CommandShell::PowerShell,
+            command: "Write-Output 'fixture'".into(),
+            directory: "C:\\test space".into(),
+            request_id: "remote-command-1".into(),
+        };
+        let mut refused = operation.clone();
+        if let DesktopOperation::RemoteCommand { request_id, .. } = &mut refused {
+            *request_id = "remote-refused".into();
+        }
+        let rejected = service.execute("test-client", refused).await.unwrap();
+        let rejected_id = rejected["operationId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while service.pending_commands().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        service.decide_command(&rejected_id, CommandDecision::Deny, 0);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match service
+                    .execute(
+                        "test-client",
+                        DesktopOperation::OperationStatus {
+                            target_id: target.clone(),
+                            operation_id: rejected_id.clone(),
+                        },
+                    )
+                    .await
+                {
+                    Err(error) => {
+                        assert_eq!(error.code, "not_authorized");
+                        break;
+                    }
+                    Ok(_) => tokio::task::yield_now().await,
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            peer.try_recv().is_err(),
+            "refused requests never reach the host"
+        );
+        let accepted = service
+            .execute("test-client", operation.clone())
+            .await
+            .unwrap();
+        let id = accepted["operationId"].as_str().unwrap().to_owned();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while service.pending_commands().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let pending = &service.pending_commands()[0];
+        assert!(pending.requires_each_approval);
+        assert!(pending.command.contains("powerShell"));
+        assert!(pending.command.contains("C:\\\\test space"));
+        assert!(peer.try_recv().is_err(), "nothing may run before approval");
+        service.decide_command(&id, CommandDecision::Approve, 0);
+        let message = tokio::time::timeout(Duration::from_secs(3), peer.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let RemoteMessage::CommandRequest(CommandRequest::Run {
+            id: command_id,
+            command,
+            shell,
+            ..
+        }) = message
+        else {
+            panic!("expected bounded command, not terminal input");
+        };
+        assert_eq!(shell, CommandShell::PowerShell);
+        assert_eq!(command, "Write-Output 'fixture'");
+        registry
+            .command_event(
+                "mcp-command",
+                17,
+                CommandEvent::Started {
+                    id: command_id,
+                    directory: "C:\\test space".into(),
+                },
+            )
+            .unwrap();
+        registry
+            .command_event(
+                "mcp-command",
+                17,
+                CommandEvent::Output {
+                    id: command_id,
+                    stderr: false,
+                    bytes: b"fixture".to_vec(),
+                },
+            )
+            .unwrap();
+        registry
+            .command_event(
+                "mcp-command",
+                17,
+                CommandEvent::Finished {
+                    id: command_id,
+                    reason: CommandEnd::Exited,
+                    exit_code: Some(7),
+                    detail: String::new(),
+                },
+            )
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let result = service
+                    .execute(
+                        "test-client",
+                        DesktopOperation::OperationStatus {
+                            target_id: target.clone(),
+                            operation_id: id.clone(),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                if result["state"] != "running" {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(result["stdout"], "fixture");
+        assert_eq!(result["exitStatus"], 7);
+        let replay = service.execute("test-client", operation).await.unwrap();
+        assert_eq!(replay["duplicate"], true);
+        assert!(peer.try_recv().is_err());
+        // Another client cannot read or cancel this client's result.
+        assert!(service
+            .execute(
+                "other",
+                DesktopOperation::OperationStatus {
+                    target_id: target.clone(),
+                    operation_id: id,
+                }
+            )
+            .await
+            .is_err());
+        // SSH's tool cannot be used to bypass the Remote-specific shell checks.
+        assert!(service
+            .execute(
+                "test-client",
+                DesktopOperation::ExecCommand {
+                    target_id: target.clone(),
+                    command: "echo test".into(),
+                    request_id: "wrong-backend".into(),
+                }
+            )
+            .await
+            .is_err());
+        {
+            let mut state = registry.state.lock().unwrap();
+            state.sessions.get_mut("mcp-command").unwrap().generation = 18;
+        }
+        assert!(
+            service
+                .execute(
+                    "test-client",
+                    DesktopOperation::OperationStatus {
+                        target_id: target,
+                        operation_id: accepted["operationId"].as_str().unwrap().into(),
+                    }
+                )
+                .await
+                .is_err(),
+            "old grants cannot read results after reconnection"
+        );
+        let record = registry.remove("mcp-command").unwrap().unwrap();
+        stop_remote_session(record, "test completed", Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
     async fn command_grants_are_independent_of_mouse_access_and_only_one_job_runs() {
         let registry = Arc::new(RemoteRegistry::new());
         let mut summary = remote_summary("command-test", false);
@@ -2052,6 +2317,11 @@ mod tests {
             assert_eq!(record.command_next, 0);
             record.summary.command_shells = 1;
         }
+        assert!(
+            command_start_checked(&registry, "command-test", input(), Some(6))
+                .await
+                .is_err()
+        );
         let view = command_start(&registry, "command-test", input())
             .await
             .unwrap();

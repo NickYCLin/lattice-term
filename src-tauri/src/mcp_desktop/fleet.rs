@@ -207,6 +207,7 @@ pub(super) fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError>
         || scopes.metrics
         || scopes.list
         || scopes.exec
+        || scopes.command
         || scopes.upload
         || scopes.download
         || scopes.screen

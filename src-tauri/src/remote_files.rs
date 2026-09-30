@@ -166,6 +166,16 @@ impl RemoteFilesClient {
         outgoing: &mpsc::Sender<RemoteMessage>,
         remote_path: String,
     ) -> Result<RemoteFileTransfer, String> {
+        self.download_start_with_receipt(outgoing, remote_path, &mut None)
+            .await
+    }
+
+    pub(crate) async fn download_start_with_receipt(
+        &self,
+        outgoing: &mpsc::Sender<RemoteMessage>,
+        remote_path: String,
+        receipt: &mut Option<String>,
+    ) -> Result<RemoteFileTransfer, String> {
         let remote_path = normalize_remote_path(&remote_path)?;
         let transfer_id = next_operation_id();
         let name = path_name(&remote_path);
@@ -194,6 +204,7 @@ impl RemoteFilesClient {
             );
             state.transfers.insert(transfer_id, transfer.clone());
         }
+        *receipt = Some(transfer.transfer_id.clone());
         if outgoing
             .send(RemoteMessage::FileRequest(RemoteFileRequest::Download {
                 transfer_id,
@@ -216,6 +227,20 @@ impl RemoteFilesClient {
         name: String,
         size: u64,
         overwrite: bool,
+    ) -> Result<RemoteFileTransfer, String> {
+        self.upload_begin_with_receipt(outgoing, parent, name, size, overwrite, &mut None)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn upload_begin_with_receipt(
+        &self,
+        outgoing: &mpsc::Sender<RemoteMessage>,
+        parent: String,
+        name: String,
+        size: u64,
+        overwrite: bool,
+        receipt: &mut Option<String>,
     ) -> Result<RemoteFileTransfer, String> {
         let remote_path = join_remote_path(&parent, &name)?;
         let transfer_id = next_operation_id();
@@ -245,6 +270,7 @@ impl RemoteFilesClient {
             );
             state.transfers.insert(transfer_id, transfer.clone());
         }
+        *receipt = Some(transfer.transfer_id.clone());
         if outgoing
             .send(RemoteMessage::FileRequest(RemoteFileRequest::UploadStart {
                 transfer_id,
