@@ -1027,16 +1027,25 @@ fn visible_user_text(mut text: &str) -> &str {
     }
 }
 
+struct HistoryScanOptions {
+    all: bool,
+    archived: bool,
+    retained: usize,
+}
+
 fn scan_local_conversations(
     kind: TranscriptKind,
     root: &Path,
     profile_id: Option<&str>,
     result: &mut Vec<(LocalConversation, PathBuf)>,
-    all: bool,
-    archived: bool,
-    retained: usize,
+    options: HistoryScanOptions,
     incomplete: &mut bool,
 ) -> Result<(), String> {
+    let HistoryScanOptions {
+        all,
+        archived,
+        retained,
+    } = options;
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0;
     while let Some((dir, depth)) = stack.pop() {
@@ -1266,9 +1275,11 @@ fn collect_local_conversations(
                     &root,
                     None,
                     &mut entries,
-                    all,
-                    false,
-                    retained,
+                    HistoryScanOptions {
+                        all,
+                        archived: false,
+                        retained,
+                    },
                     &mut incomplete,
                 )?;
             }
@@ -1279,9 +1290,11 @@ fn collect_local_conversations(
                         &root,
                         None,
                         &mut entries,
-                        all,
-                        true,
-                        retained,
+                        HistoryScanOptions {
+                            all,
+                            archived: true,
+                            retained,
+                        },
                         &mut incomplete,
                     )?;
                 }
@@ -1305,9 +1318,11 @@ fn collect_local_conversations(
                 &root,
                 Some(&profile.profile_id),
                 &mut entries,
-                all,
-                false,
-                retained,
+                HistoryScanOptions {
+                    all,
+                    archived: false,
+                    retained,
+                },
                 &mut incomplete,
             )?;
         }
@@ -1318,9 +1333,11 @@ fn collect_local_conversations(
                     &root,
                     Some(&profile.profile_id),
                     &mut entries,
-                    all,
-                    true,
-                    retained,
+                    HistoryScanOptions {
+                        all,
+                        archived: true,
+                        retained,
+                    },
                     &mut incomplete,
                 )?;
             }
