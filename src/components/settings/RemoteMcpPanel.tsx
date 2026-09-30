@@ -26,6 +26,7 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const [quiet, setQuiet] = useState<QuietWindow[]>([]);
   const [trusted, setTrusted] = useState<TrustedConnection[]>([]);
   const [trustAll, setTrustAll] = useState(false);
+  const [allowRemote, setAllowRemote] = useState(false);
   // On by default, so the box matches what the service already answers
   // before the desktop has replied.
   const [book, setBook] = useState(true);
@@ -35,14 +36,16 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
   const refresh = useCallback(async () => {
     if (!available) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const [next, quietWindows, bookShared, trustedConnections, everyConnection] = await Promise.all([
+    const [next, quietWindows, bookShared, trustedConnections, everyConnection, remoteAllowed] = await Promise.all([
       invoke<Target[]>("mcp_remote_targets"),
       invoke<QuietWindow[]>("mcp_remote_quiet_commands"),
       invoke<boolean>("mcp_connection_book_shared"),
       invoke<TrustedConnection[]>("mcp_remote_trusted_commands"),
       invoke<boolean>("mcp_remote_trust_all"),
+      invoke<boolean>("mcp_remote_auto_allow"),
     ]);
     setTrustAll(everyConnection === true);
+    setAllowRemote(remoteAllowed === true);
     setTargets(next);
     setQuiet(quietWindows);
     setTrusted(trustedConnections);
@@ -102,6 +105,16 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
     finally { setBusy(false); }
   };
 
+  const shareRemote = async (allowed: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      setAllowRemote(await invoke<boolean>("mcp_remote_auto_allow_set", { allowed }));
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+
   return <section className="panel glass mcp-remote" aria-label={t("settings.mcpRemote.title")}>
     <header className="panel__head"><div><h2 className="panel__title">{t("settings.mcpRemote.title")}</h2>
       <p className="panel__hint">{t("settings.mcpRemote.hint")}</p></div></header>
@@ -120,6 +133,13 @@ export function RemoteMcpPanel({ available }: { available: boolean }) {
         <span className="checkbox__box" aria-hidden="true">✓</span>
         <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.trustAll")}</strong>
           <span>{t("settings.mcpRemote.trustAll.hint")}</span></span>
+      </label>}
+      {available && <label className="checkbox mcp-remote__book">
+        <input type="checkbox" checked={allowRemote} disabled={busy}
+          onChange={(event) => void shareRemote(event.currentTarget.checked)} />
+        <span className="checkbox__box" aria-hidden="true">✓</span>
+        <span className="mcp-remote__book-text"><strong>{t("settings.mcpRemote.autoAllow")}</strong>
+          <span>{t("settings.mcpRemote.autoAllow.hint")}</span></span>
       </label>}
       {error && <p role="alert">{error}</p>}
       {available && trusted.length > 0 && <div className="mcp-remote__trusted">

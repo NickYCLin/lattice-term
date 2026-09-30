@@ -255,8 +255,8 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 | `get_host_metrics` | `targetId` | Linux 主機 CPU、記憶體、磁碟等數值 |
 | `ssh_exec_job` | `targetId`、`planId`、`requestId` | 執行使用者預先核准的具名指令 |
 | `ssh_run_command` | `targetId`、`command`、`requestId` | 提出臨時指令，由使用者逐筆核准 |
-| `remote_run_command` | `targetId`、`shell`、`command`、`directory`、`requestId` | Lattice Remote 單次命令，由使用者逐筆核准 |
-| `remote_file_transfer` | `targetId`、`direction`、`localPath`、`remotePath`、`requestId` | Lattice Remote 單檔傳輸，不覆寫，逐筆核准 |
+| `remote_run_command` | `targetId`、`shell`、`command`、`directory`、`requestId` | Lattice Remote 單次命令，預設免逐筆確認，可在設定關閉 |
+| `remote_file_transfer` | `targetId`、`direction`、`localPath`、`remotePath`、`requestId` | Lattice Remote 單檔傳輸，不覆寫，沿用 Remote 確認設定 |
 | `sftp_list_directory` | `targetId`、`rootId`、`path` | 列出核准根目錄下的內容 |
 | `sftp_transfer` | `targetId`、`rootId`、`direction`、`localPath`、`remotePath`、`requestId` | 單檔上傳／下載 |
 | `get_remote_operation` | `targetId`、`operationId` | 查指令或傳檔的結果（不會重跑） |

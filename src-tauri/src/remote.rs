@@ -2078,6 +2078,15 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_remote_commands_require_approval_and_replay_without_rerunning() {
+        check_mcp_remote_command(false).await;
+    }
+
+    #[tokio::test]
+    async fn mcp_remote_commands_default_to_no_card_and_still_deduplicate() {
+        check_mcp_remote_command(true).await;
+    }
+
+    async fn check_mcp_remote_command(auto_allow: bool) {
         use crate::mcp_desktop::*;
         use lattice_remote::command_protocol::{
             CommandEnd, CommandEvent, CommandRequest, CommandShell,
@@ -2121,68 +2130,74 @@ mod tests {
             directory: "C:\\test space".into(),
             request_id: "remote-command-1".into(),
         };
-        let mut refused = operation.clone();
-        if let DesktopOperation::RemoteCommand { request_id, .. } = &mut refused {
-            *request_id = "remote-refused".into();
-        }
-        let rejected = service.execute("test-client", refused).await.unwrap();
-        let rejected_id = rejected["operationId"].as_str().unwrap().to_owned();
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while service.pending_commands().is_empty() {
-                tokio::task::yield_now().await;
+        if !auto_allow {
+            service.set_allow_remote_operations(false);
+            let mut refused = operation.clone();
+            if let DesktopOperation::RemoteCommand { request_id, .. } = &mut refused {
+                *request_id = "remote-refused".into();
             }
-        })
-        .await
-        .unwrap();
-        service.decide_command(&rejected_id, CommandDecision::Deny, 0);
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                match service
-                    .execute(
-                        "test-client",
-                        DesktopOperation::OperationStatus {
-                            target_id: target.clone(),
-                            operation_id: rejected_id.clone(),
-                        },
-                    )
-                    .await
-                {
-                    Err(error) => {
-                        assert_eq!(error.code, "not_authorized");
-                        break;
-                    }
-                    Ok(_) => tokio::task::yield_now().await,
+            let rejected = service.execute("test-client", refused).await.unwrap();
+            let rejected_id = rejected["operationId"].as_str().unwrap().to_owned();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while service.pending_commands().is_empty() {
+                    tokio::task::yield_now().await;
                 }
-            }
-        })
-        .await
-        .unwrap();
-        assert!(
-            peer.try_recv().is_err(),
-            "refused requests never reach the host"
-        );
+            })
+            .await
+            .unwrap();
+            service.decide_command(&rejected_id, CommandDecision::Deny, 0);
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    match service
+                        .execute(
+                            "test-client",
+                            DesktopOperation::OperationStatus {
+                                target_id: target.clone(),
+                                operation_id: rejected_id.clone(),
+                            },
+                        )
+                        .await
+                    {
+                        Err(error) => {
+                            assert_eq!(error.code, "not_authorized");
+                            break;
+                        }
+                        Ok(_) => tokio::task::yield_now().await,
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                peer.try_recv().is_err(),
+                "refused requests never reach the host"
+            );
+        }
         let accepted = service
             .execute("test-client", operation.clone())
             .await
             .unwrap();
         let id = accepted["operationId"].as_str().unwrap().to_owned();
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while service.pending_commands().is_empty() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        let pending = &service.pending_commands()[0];
-        assert!(pending.requires_each_approval);
-        assert!(pending.command.contains("powerShell"));
-        assert!(pending.command.contains("C:\\\\test space"));
-        assert!(peer.try_recv().is_err(), "nothing may run before approval");
-        service.decide_command(&id, CommandDecision::Approve, 0);
+        if !auto_allow {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while service.pending_commands().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let pending = &service.pending_commands()[0];
+            assert!(pending.requires_each_approval);
+            assert!(pending.command.contains("powerShell"));
+            assert!(pending.command.contains("C:\\\\test space"));
+            assert!(peer.try_recv().is_err(), "nothing may run before approval");
+            service.decide_command(&id, CommandDecision::Approve, 0);
+        }
         let message = tokio::time::timeout(Duration::from_secs(3), peer.recv())
             .await
             .unwrap()
             .unwrap();
+        assert!(service.pending_commands().is_empty());
         let RemoteMessage::CommandRequest(CommandRequest::Run {
             id: command_id,
             command,

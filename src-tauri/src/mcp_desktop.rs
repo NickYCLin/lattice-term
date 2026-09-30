@@ -708,6 +708,7 @@ pub struct DesktopService {
     trusted_command_profiles: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Every SSH connection skips the card, chosen in Settings.
     trust_all_commands: Arc<AtomicBool>,
+    allow_remote_operations: Arc<AtomicBool>,
 }
 
 fn ssh_trust_key(profile_id: &str, username: &str, host: &str, port: u16) -> String {
@@ -736,12 +737,20 @@ impl DesktopService {
             book_shared: Arc::new(AtomicBool::new(true)),
             trusted_command_profiles: Arc::new(Mutex::new(std::collections::HashSet::new())),
             trust_all_commands: Arc::new(AtomicBool::new(false)),
+            allow_remote_operations: Arc::new(AtomicBool::new(true)),
         }
     }
 
     /// Lets every SSH connection's commands skip the card, or asks again.
     pub fn set_trust_all_commands(&self, trusted: bool) {
         self.trust_all_commands.store(trusted, Ordering::Relaxed);
+        self.notify_approvals();
+    }
+
+    /// Controls cards only; host capabilities and operation checks still apply.
+    pub fn set_allow_remote_operations(&self, allowed: bool) {
+        self.allow_remote_operations
+            .store(allowed, Ordering::Relaxed);
         self.notify_approvals();
     }
 
@@ -1958,8 +1967,11 @@ impl DesktopService {
             .and_then(|quiet| *quiet)
             .is_some_and(|until| until > Instant::now());
         // SSH trust must never silently authorize a different transport.
-        // Remote operations currently require approval for every request.
-        if grant.view.backend == Backend::Ssh && (quiet || self.command_trusted(grant)) {
+        // Remote has its own persisted switch; host grants remain mandatory.
+        if (grant.view.backend == Backend::Ssh && (quiet || self.command_trusted(grant)))
+            || (grant.view.backend == Backend::Remote
+                && self.allow_remote_operations.load(Ordering::Relaxed))
+        {
             return Ok(());
         }
         let mut decided = {

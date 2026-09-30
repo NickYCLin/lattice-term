@@ -6,8 +6,8 @@
 //! profile; one typed in by hand is keyed by `ssh:account@host:port`, so
 //! reconnecting or restarting the app keeps the choice either way.
 //!
-//! Anything this build cannot read — a missing, damaged or newer file — means
-//! nothing is trusted: a broken file must never skip the card on its own.
+//! Remote operations default to no card for host-authorized capabilities.
+//! Damaged, unreadable or newer settings still fail closed.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -28,6 +28,12 @@ struct StoreFile {
     profiles: BTreeMap<String, String>,
     #[serde(default)]
     allow_all: bool,
+    #[serde(default = "remote_default")]
+    allow_remote: bool,
+}
+
+fn remote_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,16 +48,22 @@ pub struct CommandTrustSetting {
     path: PathBuf,
     profiles: BTreeMap<String, String>,
     allow_all: bool,
+    allow_remote: bool,
 }
 
 impl CommandTrustSetting {
     pub fn open(dir: &Path) -> Self {
         let path = dir.join(STORE_FILE);
-        let file = fs::read_to_string(&path)
+        let raw = fs::read_to_string(&path);
+        let missing = raw
+            .as_ref()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        let file = raw
             .ok()
             .and_then(|raw| serde_json::from_str::<StoreFile>(&raw).ok())
             .filter(|file| file.version == STORE_VERSION);
         let allow_all = file.as_ref().is_some_and(|file| file.allow_all);
+        let allow_remote = file.as_ref().map_or(missing, |file| file.allow_remote);
         let profiles = file
             .map(|file| file.profiles)
             .unwrap_or_default()
@@ -63,7 +75,16 @@ impl CommandTrustSetting {
             path,
             profiles,
             allow_all,
+            allow_remote,
         }
+    }
+
+    pub fn allows_remote(&self) -> bool {
+        self.allow_remote
+    }
+
+    pub fn set_allow_remote(&mut self, allowed: bool) -> Result<(), String> {
+        self.save(self.profiles.clone(), self.allow_all, allowed)
     }
 
     pub fn allows_all(&self) -> bool {
@@ -74,7 +95,7 @@ impl CommandTrustSetting {
         if self.allow_all == allow_all {
             return Ok(());
         }
-        self.save(self.profiles.clone(), allow_all)
+        self.save(self.profiles.clone(), allow_all, self.allow_remote)
     }
 
     pub fn profile_ids(&self) -> Vec<String> {
@@ -105,7 +126,7 @@ impl CommandTrustSetting {
             .collect();
         let mut next = self.profiles.clone();
         next.insert(profile_id.to_string(), label);
-        self.save(next, self.allow_all)
+        self.save(next, self.allow_all, self.allow_remote)
     }
 
     pub fn revoke(&mut self, profile_id: &str) -> Result<(), String> {
@@ -114,22 +135,29 @@ impl CommandTrustSetting {
         }
         let mut next = self.profiles.clone();
         next.remove(profile_id);
-        self.save(next, self.allow_all)
+        self.save(next, self.allow_all, self.allow_remote)
     }
 
     /// The file is written first; memory only follows a successful write, so
     /// what the card skips always matches what the next launch will read.
-    fn save(&mut self, profiles: BTreeMap<String, String>, allow_all: bool) -> Result<(), String> {
+    fn save(
+        &mut self,
+        profiles: BTreeMap<String, String>,
+        allow_all: bool,
+        allow_remote: bool,
+    ) -> Result<(), String> {
         let encoded = serde_json::to_vec_pretty(&StoreFile {
             version: STORE_VERSION,
             profiles: profiles.clone(),
             allow_all,
+            allow_remote,
         })
         .map_err(|error| error.to_string())?;
         crate::durable_file::atomic_write_private(&self.path, &encoded)
             .map_err(|error| error.to_string())?;
         self.profiles = profiles;
         self.allow_all = allow_all;
+        self.allow_remote = allow_remote;
         Ok(())
     }
 }
@@ -141,6 +169,32 @@ fn valid_profile_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_defaults_on_but_remembers_asking_without_changing_ssh() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut setting = CommandTrustSetting::open(dir.path());
+        assert!(setting.allows_remote());
+        assert!(!setting.allows_all());
+        setting.set_allow_remote(false).unwrap();
+        setting.allow("mac", "Mac").unwrap();
+        let mut reopened = CommandTrustSetting::open(dir.path());
+        assert!(!reopened.allows_remote());
+        reopened.set_allow_remote(true).unwrap();
+        assert!(CommandTrustSetting::open(dir.path()).allows_remote());
+        assert!(!reopened.allows_all());
+        assert_eq!(reopened.profile_ids(), vec!["mac"]);
+    }
+
+    #[test]
+    fn unreadable_settings_and_failed_writes_do_not_enable_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(STORE_FILE)).unwrap();
+        let mut setting = CommandTrustSetting::open(dir.path());
+        assert!(!setting.allows_remote());
+        assert!(setting.set_allow_remote(true).is_err());
+        assert!(!setting.allows_remote());
+    }
 
     #[test]
     fn remembers_allowed_connections_across_launches_and_forgets_revoked_ones() {
@@ -166,6 +220,7 @@ mod tests {
     fn a_damaged_or_newer_file_trusts_nothing() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join(STORE_FILE), b"{ not json").unwrap();
+        assert!(!CommandTrustSetting::open(dir.path()).allows_remote());
         assert!(CommandTrustSetting::open(dir.path())
             .profile_ids()
             .is_empty());
@@ -174,6 +229,7 @@ mod tests {
             br#"{"version":2,"profiles":{"mac":"Mac"}}"#,
         )
         .unwrap();
+        assert!(!CommandTrustSetting::open(dir.path()).allows_remote());
         assert!(CommandTrustSetting::open(dir.path())
             .profile_ids()
             .is_empty());
@@ -202,6 +258,7 @@ mod tests {
         )
         .unwrap();
         let setting = CommandTrustSetting::open(dir.path());
+        assert!(setting.allows_remote());
         assert!(!setting.allows_all());
         assert_eq!(setting.profile_ids(), vec!["mac".to_string()]);
     }

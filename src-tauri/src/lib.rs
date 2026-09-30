@@ -690,6 +690,26 @@ fn mcp_remote_trust_all(trust: State<'_, AppCommandTrust>) -> Result<bool, Strin
         .allows_all())
 }
 
+#[tauri::command]
+fn mcp_remote_auto_allow(trust: State<'_, AppCommandTrust>) -> Result<bool, String> {
+    Ok(trust
+        .lock()
+        .map_err(|error| error.to_string())?
+        .allows_remote())
+}
+
+#[tauri::command]
+fn mcp_remote_auto_allow_set(
+    allowed: bool,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    trust: State<'_, AppCommandTrust>,
+) -> Result<bool, String> {
+    let mut guard = trust.lock().map_err(|error| error.to_string())?;
+    guard.set_allow_remote(allowed)?;
+    service.set_allow_remote_operations(guard.allows_remote());
+    Ok(guard.allows_remote())
+}
+
 /// Every SSH connection skips the card, or all of them ask again. The file
 /// is written first so the next launch keeps exactly what the window shows.
 #[tauri::command]
@@ -4649,6 +4669,7 @@ pub fn run() {
             let command_trust = crate::mcp_command_trust::CommandTrustSetting::open(&dir);
             desktop_service.set_trusted_command_profiles(command_trust.profile_ids());
             desktop_service.set_trust_all_commands(command_trust.allows_all());
+            desktop_service.set_allow_remote_operations(command_trust.allows_remote());
             app.manage(Mutex::new(command_trust));
             app.manage(Arc::new(desktop_service));
             // The approval card has to appear wherever the user is, so the
@@ -4724,6 +4745,8 @@ pub fn run() {
             mcp_remote_grant,
             mcp_remote_trusted_commands,
             mcp_remote_trust_all,
+            mcp_remote_auto_allow,
+            mcp_remote_auto_allow_set,
             mcp_remote_trust_all_set,
             mcp_remote_trusted_clear,
             mcp_remote_revoke,
