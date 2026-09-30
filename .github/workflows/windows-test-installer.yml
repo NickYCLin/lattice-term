@@ -122,12 +122,37 @@ jobs:
           $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
           if (-not $installer) { throw "Tauri did not produce an NSIS installer." }
           Get-FileHash -Algorithm SHA256 $installer.FullName
+          $mainExe = Get-Item "src-tauri/target/release/lattice-term.exe"
+          $binaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($mainExe.FullName))
+          $syncCommands = @("agent_chat_local_history_page", "agent_chat_local_history_snapshot")
+          foreach ($command in $syncCommands) {
+            if (-not $binaryText.Contains($command)) { throw "Built executable is missing $command" }
+          }
+          $sidecarNames = @("lattice-agent", "lattice-remote", "lattice-rdp-engine", "lattice-vnc-engine")
+          $payload = @($mainExe) + @($sidecarNames | ForEach-Object {
+            Get-Item "src-tauri/binaries/$_-x86_64-pc-windows-msvc.exe" -ErrorAction Stop
+          })
+          $manifest = [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            runId = $env:GITHUB_RUN_ID
+            syncCommands = $syncCommands
+            files = @(@($installer) + $payload | ForEach-Object {
+              [ordered]@{
+                name = $_.Name.Replace("-x86_64-pc-windows-msvc", "")
+                bytes = $_.Length
+                sha256 = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+              }
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content "src-tauri/target/release/bundle/nsis/manifest.json" -Encoding utf8
 
       - name: Upload Windows installer
         if: always() && steps.build_installer.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: LatticeTerm-Windows-amd64-test
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/manifest.json
           if-no-files-found: error
           retention-days: 7
