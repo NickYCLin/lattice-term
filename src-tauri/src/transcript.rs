@@ -750,6 +750,7 @@ struct CodexSessionMeta {
     source_is_string: bool,
     source_is_known_main_cli: bool,
     source_is_interactive: bool,
+    model_provider: Option<String>,
 }
 
 /// Codex keeps the session identity in the first JSONL row. Read only a
@@ -777,6 +778,10 @@ fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
     let source = payload.get("source").and_then(Value::as_str);
     let originator = payload.get("originator").and_then(Value::as_str);
     Some(CodexSessionMeta {
+        model_provider: payload
+            .get("model_provider")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         id: payload
             .get("id")
             .and_then(Value::as_str)
@@ -813,6 +818,21 @@ fn locate_codex_in(
 ) -> Option<PathBuf> {
     let root = fs::canonicalize(sessions_root).ok()?;
     if let Some(id) = captured {
+        // Normal Codex filenames include the native ID. Avoid reopening every
+        // unrelated transcript on each two-second conversation refresh.
+        if let Some(path) = newest_matching(&root, |path| {
+            is_codex_rollout(path)
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.contains(id))
+                && read_codex_session_meta(path)
+                    .is_some_and(|meta| meta.source_is_string && meta.id.as_deref() == Some(id))
+        }) {
+            return Some(path);
+        }
+        // Older/imported files may use another name; metadata remains the
+        // authority, so keep exact-ID lookup for them as well.
         return newest_matching(&root, |path| {
             is_codex_rollout(path)
                 && read_codex_session_meta(path)
@@ -861,6 +881,8 @@ pub struct LocalConversation {
     pub resumable: bool,
     pub title: String,
     pub updated_at: u64,
+    pub model_provider: Option<String>,
+    pub archived: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -895,7 +917,16 @@ fn scan_default_history_roots() -> bool {
 }
 
 fn history_root(kind: TranscriptKind, profile: Option<&Path>) -> Option<PathBuf> {
+    history_root_with_archive(kind, profile, false)
+}
+
+fn history_root_with_archive(
+    kind: TranscriptKind,
+    profile: Option<&Path>,
+    archived: bool,
+) -> Option<PathBuf> {
     let name = match kind {
+        TranscriptKind::Codex if archived => "archived_sessions",
         TranscriptKind::Codex => "sessions",
         TranscriptKind::Claude => "projects",
         _ => return None,
@@ -997,6 +1028,7 @@ fn scan_local_conversations(
     profile_id: Option<&str>,
     result: &mut Vec<(LocalConversation, PathBuf)>,
     all: bool,
+    archived: bool,
 ) -> Result<(), String> {
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0;
@@ -1050,7 +1082,7 @@ fn scan_local_conversations(
             // Keep readable history even when its project has since moved;
             // only the resume actions need a still-existing directory.
             let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
-            let resumable = canonical.is_some();
+            let resumable = canonical.is_some() && !archived;
             let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd));
             let Ok(metadata) = entry.metadata() else {
                 continue;
@@ -1074,6 +1106,12 @@ fn scan_local_conversations(
                     resumable,
                     title: String::new(),
                     updated_at,
+                    model_provider: if kind == TranscriptKind::Codex {
+                        read_codex_session_meta(&path).and_then(|meta| meta.model_provider)
+                    } else {
+                        None
+                    },
+                    archived,
                 },
                 path,
             ));
@@ -1104,6 +1142,14 @@ pub fn list_local_conversations_with_limit(
     profiles: &[HistoryProfile],
     all: bool,
 ) -> Result<Vec<LocalConversation>, String> {
+    list_local_conversations_with_options(profiles, all, false)
+}
+
+pub fn list_local_conversations_with_options(
+    profiles: &[HistoryProfile],
+    all: bool,
+    include_archived: bool,
+) -> Result<Vec<LocalConversation>, String> {
     if profiles.len() > HISTORY_MAX_PROFILES {
         return Err("Too many account profiles.".into());
     }
@@ -1111,7 +1157,12 @@ pub fn list_local_conversations_with_limit(
     if scan_default_history_roots() {
         for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
             if let Some(root) = history_root(kind, None) {
-                scan_local_conversations(kind, &root, None, &mut entries, all)?;
+                scan_local_conversations(kind, &root, None, &mut entries, all, false)?;
+            }
+            if include_archived && kind == TranscriptKind::Codex {
+                if let Some(root) = history_root_with_archive(kind, None, true) {
+                    scan_local_conversations(kind, &root, None, &mut entries, all, true)?;
+                }
             }
         }
     }
@@ -1127,7 +1178,26 @@ pub fn list_local_conversations_with_limit(
             return Err("Account profile directory must be absolute.".into());
         }
         if let Some(root) = history_root(kind, Some(path)) {
-            scan_local_conversations(kind, &root, Some(&profile.profile_id), &mut entries, all)?;
+            scan_local_conversations(
+                kind,
+                &root,
+                Some(&profile.profile_id),
+                &mut entries,
+                all,
+                false,
+            )?;
+        }
+        if include_archived && kind == TranscriptKind::Codex {
+            if let Some(root) = history_root_with_archive(kind, Some(path), true) {
+                scan_local_conversations(
+                    kind,
+                    &root,
+                    Some(&profile.profile_id),
+                    &mut entries,
+                    all,
+                    true,
+                )?;
+            }
         }
     }
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.0.updated_at));
@@ -1159,33 +1229,49 @@ pub fn read_local_conversation(
     profile_id: Option<&str>,
     profiles: &[HistoryProfile],
 ) -> Result<Vec<LocalConversationMessage>, String> {
-    // Resolve identity from the list again; never trust a renderer-provided
-    // path or follow a symlink outside a known account's transcript tree.
-    let selected = list_local_conversations(profiles)?
-        .into_iter()
-        .find(|entry| {
-            entry.definition_id == definition_id
-                && entry.native_session_id == session_id
-                && entry.profile_id.as_deref() == profile_id
-        })
-        .ok_or("The local conversation is no longer available.")?;
-    let kind = TranscriptKind::from_definition(definition_id).ok_or("Unknown assistant.")?;
-    let profile = profile_id
-        .and_then(|id| {
-            profiles
+    // Resolve the exact identity inside the selected account. The latest-100
+    // preview is not an authorization list and must not hide older records.
+    if profiles.len() > HISTORY_MAX_PROFILES
+        || session_id.is_empty()
+        || session_id.len() > 128
+        || session_id.starts_with('-')
+        || session_id.chars().any(char::is_control)
+    {
+        return Err("Invalid conversation identity.".into());
+    }
+    let kind = TranscriptKind::from_definition(definition_id)
+        .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
+        .ok_or("Unknown assistant.")?;
+    let profile = match profile_id {
+        Some(id) => Some(Path::new(
+            &profiles
                 .iter()
                 .find(|p| p.profile_id == id && p.definition_id == definition_id)
+                .ok_or("The account profile is no longer available.")?
+                .config_directory,
+        )),
+        None => None,
+    };
+    if profile.is_some_and(|path| !path.is_absolute() || !path.is_dir()) {
+        return Err("The account directory is unavailable.".into());
+    }
+    let root = history_root(kind, profile)
+        .or_else(|| {
+            (kind == TranscriptKind::Codex)
+                .then(|| history_root_with_archive(kind, profile, true))
+                .flatten()
         })
-        .map(|p| Path::new(&p.config_directory));
-    let root =
-        history_root(kind, profile).ok_or("The local conversation is no longer available.")?;
+        .ok_or("The local conversation is no longer available.")?;
     let path = match kind {
-        TranscriptKind::Codex => {
-            locate_codex_in(&root, &selected.working_directory, Some(session_id))
-        }
-        TranscriptKind::Claude => {
-            locate_claude_in(&root, &selected.working_directory, Some(session_id))
-        }
+        TranscriptKind::Codex => locate_codex_in(&root, "", Some(session_id))
+            .or_else(|| {
+                history_root_with_archive(kind, profile, true)
+                    .and_then(|archive| locate_codex_in(&archive, "", Some(session_id)))
+            })
+            .filter(|path| {
+                read_codex_session_meta(path).is_some_and(|meta| meta.source_is_interactive)
+            }),
+        TranscriptKind::Claude => locate_claude_in(&root, "", Some(session_id)),
         _ => None,
     }
     .ok_or("The local conversation is no longer available.")?;
@@ -1218,6 +1304,21 @@ pub fn read_session_conversation(
     }
     .ok_or("The session conversation is not available yet.")?;
     read_conversation_messages(&path, kind)
+}
+
+/// The provider comes only from the exact native record in this account,
+/// never from terminal output or a renderer-supplied file path.
+pub(crate) fn codex_session_provider(
+    session_id: &str,
+    profile_directory: Option<&Path>,
+) -> Result<Option<String>, String> {
+    let Some(root) = history_root(TranscriptKind::Codex, profile_directory) else {
+        return Ok(None);
+    };
+    let Some(path) = locate_codex_in(&root, "", Some(session_id)) else {
+        return Ok(None);
+    };
+    Ok(read_codex_session_meta(&path).and_then(|meta| meta.model_provider))
 }
 
 fn read_conversation_messages(
@@ -1675,6 +1776,38 @@ mod tests {
     }
 
     #[test]
+    fn archived_codex_history_is_readable_but_never_automatically_resumed() {
+        ONLY_PROFILE_HISTORY.with(|flag| flag.set(true));
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("account");
+        let archived = profile.join("archived_sessions/rollout-archived.jsonl");
+        write_codex_rollout(
+            &archived,
+            "archived",
+            directory.path(),
+            serde_json::json!("cli"),
+            "codex_cli_rs",
+            100,
+        );
+        let profiles = vec![HistoryProfile {
+            definition_id: "codex".into(),
+            profile_id: "account".into(),
+            config_directory: profile.to_string_lossy().into_owned(),
+        }];
+        assert!(list_local_conversations(&profiles).unwrap().is_empty());
+        let found = list_local_conversations_with_options(&profiles, false, true).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].archived);
+        assert!(!found[0].resumable);
+        let messages =
+            read_local_conversation("codex", "archived", Some("account"), &profiles).unwrap();
+        assert!(!messages.is_empty());
+        assert!(archived.is_file());
+        assert!(!profile.join("sessions").exists());
+        assert!(read_local_conversation("codex", "archived", Some("other"), &profiles).is_err());
+    }
+
+    #[test]
     fn local_history_lists_app_server_and_claude_and_reads_only_text() {
         ONLY_PROFILE_HISTORY.with(|flag| flag.set(true));
         let directory = tempfile::tempdir().unwrap();
@@ -1821,6 +1954,18 @@ mod tests {
                 .len(),
             105
         );
+        // Every listed identity remains readable, including those excluded
+        // by the newest-100 preview, without falling back to another account.
+        for index in 0..105 {
+            assert!(read_local_conversation(
+                "codex",
+                &format!("session-{index}"),
+                Some("account"),
+                &profiles
+            )
+            .is_ok());
+        }
+        assert!(read_local_conversation("codex", "session-0", Some("removed"), &profiles).is_err());
     }
 
     #[test]

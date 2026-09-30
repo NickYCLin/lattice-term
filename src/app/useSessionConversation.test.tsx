@@ -35,3 +35,28 @@ it("reads the selected session, rejects stale reads and sends only through that 
     expect(invoke).toHaveBeenCalledTimes(reads);
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
 });
+
+it("shows live output during a slow transcript read and preserves the actual read error", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let reject!: (error: Error) => void;
+  let output!: (text: string) => void;
+  const unsubscribe = vi.fn();
+  const agents = fakeAgentApi({ onOutputTail: (_id, handler) => { output = handler; return unsubscribe; } });
+  invoke.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", agents); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { output("\x1b[31mWorking on files\x1b[0m"); await vi.advanceTimersByTimeAsync(8000); });
+    expect(api.slow).toBe(true);
+    expect(api.output).toBe("Working on files");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await act(async () => { reject(new Error("The account directory is unavailable.")); });
+    expect(api.readError).toBe("The account directory is unavailable.");
+    expect(api.loading).toBe(false);
+    expect(api.output).toBe("Working on files");
+    await act(async () => { root.unmount(); });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});

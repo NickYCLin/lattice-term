@@ -125,6 +125,8 @@ export interface AgentChatApi {
     title: string;
     accountProfileId: string | null;
     messages: readonly NativeHistoryMessage[];
+    provider?: "cliproxyapi";
+    proxyId?: string;
   }) => ChatThread;
   importArchivedConversation: (settings: {
     definitionId: "codex" | "claude";

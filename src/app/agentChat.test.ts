@@ -353,6 +353,7 @@ describe("storage", () => {
     const native = importNativeConversation({
       definitionId: "codex", nativeSessionId: "desktop-1", workingDirectory: "/work",
       title: "Test", accountProfileId: null, messages,
+      provider: "cliproxyapi", proxyId: "demo",
     }, 1000);
     const archive = importArchivedConversation({ definitionId: "claude", title: "Export", messages }, 2000);
     expect(native.nativeSessionId).toBe("desktop-1");
@@ -362,6 +363,9 @@ describe("storage", () => {
     const storage = memoryStorage();
     expect(saveStoredThreads(storage, [archive, native])).toBe(true);
     expect(loadStoredThreads(storage)[0].archived).toBe(true);
+    expect(loadStoredThreads(storage).find(thread => thread.id === native.id)).toMatchObject({
+      nativeSessionId: "desktop-1", provider: "cliproxyapi", proxyId: "demo",
+    });
   });
 
   it("round-trips threads and forgets any running turn", () => {

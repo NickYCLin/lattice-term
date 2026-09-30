@@ -100,6 +100,7 @@ export function fakeAgentApi(overrides: Partial<AgentApi> = {}): AgentApi {
     disconnect: vi.fn(async () => {}),
     clearLastClosed: vi.fn(),
     onData: vi.fn(() => () => {}),
+    onOutputTail: vi.fn(() => () => {}),
     onClosed: vi.fn(() => () => {}),
     ...overrides,
   };

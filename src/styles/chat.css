@@ -2009,6 +2009,25 @@ button.chat-diff__line.is-commentable:focus-visible {
   animation: chat-pulse 1.2s ease-in-out infinite;
 }
 
+.session-chat__output {
+  width: 100%;
+  min-width: 0;
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.session-chat__output summary { cursor: pointer; }
+.session-chat__output p { color: var(--text-muted); font-size: var(--text-sm); }
+.session-chat__output pre {
+  max-height: 26rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+.session-chat__diagnostic { overflow-wrap: anywhere; color: var(--warn); }
+
 @media (prefers-reduced-motion: reduce) {
   .session-chat__pulse {
     animation: none;

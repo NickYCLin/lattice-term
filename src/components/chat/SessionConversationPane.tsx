@@ -22,6 +22,8 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
   const [draft, setDraft] = useState("");
   const messagesRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const outputPinned = useRef(true);
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
@@ -33,6 +35,10 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
     const node = messagesRef.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
   }, [conversation.messages, working, attention]);
+  useLayoutEffect(() => {
+    const node = outputRef.current;
+    if (node && outputPinned.current) node.scrollTop = node.scrollHeight;
+  }, [conversation.output]);
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
   return <>
     <header className="chat-header">
@@ -55,8 +61,21 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
     }}>
       <div className="chat-messages__inner">
         {!supported ? <p>{t("sessionChat.unsupported")}</p>
-          : conversation.readError ? <p role="status">{t("sessionChat.readError")}</p>
-          : conversation.messages.length === 0 ? <p>{t("sessionChat.waiting")}</p> : null}
+          : conversation.readError ? <div role="status"><p>{t("sessionChat.readError")}</p><p className="session-chat__diagnostic">{conversation.readError}</p></div>
+          : conversation.messages.length === 0 ? <p role="status">{t(
+            session.closedReason ? "sessionChat.closed"
+              : conversation.slow ? "sessionChat.slow"
+              : conversation.loading ? "common.loading" : "sessionChat.waiting",
+          )}</p> : null}
+        {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
+        <details className="session-chat__output" open={conversation.messages.length === 0 || working || attention || Boolean(session.closedReason)}>
+          <summary>{t("sessionChat.output")}</summary>
+          <p>{t("sessionChat.outputHint")}</p>
+          <pre ref={outputRef} aria-label={t("sessionChat.output")} onScroll={event => {
+            const node = event.currentTarget;
+            outputPinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+          }}>{conversation.output || t("sessionChat.noOutput")}</pre>
+        </details>
         {conversation.messages.map((message, index) => (
           <div key={index} className={`chat-msg chat-msg--${message.role}`}>
             <div className={message.role === "user" ? "chat-bubble" : "chat-msg__body"}>

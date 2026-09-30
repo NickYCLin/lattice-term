@@ -94,6 +94,44 @@ describe("Agent Fleet hydration and MCP permissions", () => {
     });
   });
 
+  it("keeps UTF-8 characters intact when terminal events split their bytes", async () => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const tail = vi.fn();
+    const stop = render().onOutputTail("s1", tail);
+    const bytes = new TextEncoder().encode("處理中");
+    for (let offset = 0; offset < bytes.length; offset++) {
+      host.listeners.get("agent://data")!({ payload: {
+        sessionId: "s1", offset, base64: btoa(String.fromCharCode(bytes[offset])),
+      } });
+    }
+    expect(tail).toHaveBeenLastCalledWith("處理中");
+    stop();
+  });
+
+  it("observes output without consuming terminal replay and keeps startup errors after exit", async () => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const session = fakeSession();
+    host.listeners.get("agent://launched")!({ payload: session });
+    render();
+    const tail = vi.fn();
+    const stop = render().onOutputTail(session.sessionId, tail);
+    const message = "Error: saved provider not found\r\n";
+    host.listeners.get("agent://data")!({ payload: {
+      sessionId: session.sessionId, offset: 0, base64: btoa(message),
+    } });
+    expect(tail).toHaveBeenLastCalledWith(message);
+    const terminal = vi.fn();
+    const stopTerminal = render().onData(session.sessionId, terminal);
+    expect(new TextDecoder().decode(terminal.mock.calls[0][0])).toBe(message);
+    host.listeners.get("agent://closed")!({ payload: { sessionId: session.sessionId, reason: "Exit 1" } });
+    const reopened = vi.fn();
+    const stopReopened = render().onOutputTail(session.sessionId, reopened);
+    expect(reopened).toHaveBeenLastCalledWith(message);
+    stop(); stopTerminal(); stopReopened();
+  });
+
   afterEach(() => {
     host.cleanup.forEach((cleanup) => cleanup());
   });

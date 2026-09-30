@@ -58,21 +58,17 @@ impl ProxyLaunch {
         Ok(Self {
             base_url,
             key,
-            provider: format!("{PROVIDER}_{suffix}"),
+            provider: format!(
+                "{PROVIDER}_v2_{}_{suffix}",
+                proxy_id.unwrap_or(crate::credentials::CLI_PROXY_DEFAULT_ID)
+            ),
         })
     }
 
     /// Codex deep-merges provider tables. A fresh name prevents stale headers,
     /// bearer tokens or auth commands from an existing provider being inherited.
     pub fn arguments(&self) -> Vec<String> {
-        let mut provider = toml::Table::new();
-        provider.insert("name".into(), "CLIProxyAPI".into());
-        provider.insert("base_url".into(), format!("{}/v1", self.base_url).into());
-        provider.insert("wire_api".into(), "responses".into());
-        provider.insert("requires_openai_auth".into(), false.into());
-        if self.key.is_some() {
-            provider.insert("env_key".into(), KEY_ENV.into());
-        }
+        let provider = self.provider_table();
         vec![
             "-c".into(),
             format!("model_provider={}", self.provider),
@@ -83,6 +79,34 @@ impl ProxyLaunch {
                 toml::Value::Table(provider)
             ),
         ]
+    }
+
+    fn provider_table(&self) -> toml::Table {
+        let mut provider = toml::Table::new();
+        provider.insert("name".into(), "CLIProxyAPI".into());
+        provider.insert("base_url".into(), format!("{}/v1", self.base_url).into());
+        provider.insert("wire_api".into(), "responses".into());
+        provider.insert("requires_openai_auth".into(), false.into());
+        if self.key.is_some() {
+            provider.insert("env_key".into(), KEY_ENV.into());
+        }
+        provider
+    }
+
+    /// TUI resume restores the provider saved in the thread, even when the
+    /// process selects a fresh one. Supply that missing definition only for
+    /// our own namespace. Credentials still come from the child environment.
+    pub fn resume_arguments(&self, provider: &str) -> Result<Vec<String>, String> {
+        if !is_managed_provider(provider) {
+            return Err("Cannot replace another provider while resuming a conversation.".into());
+        }
+        Ok(vec![
+            "-c".into(),
+            format!(
+                "model_providers.{provider}={}",
+                toml::Value::Table(self.provider_table())
+            ),
+        ])
     }
 
     pub fn key(&self) -> Option<&str> {
@@ -118,6 +142,81 @@ impl ProxyLaunch {
         digest.update(self.key().unwrap_or_default().as_bytes());
         digest.finalize().into()
     }
+}
+
+pub fn is_managed_provider(provider: &str) -> bool {
+    provider == PROVIDER
+        || provider
+            .strip_prefix(&format!("{PROVIDER}_"))
+            .is_some_and(|suffix| {
+                !suffix.is_empty()
+                    && suffix.len() <= 80
+                    && suffix.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                    })
+            })
+}
+
+/// Do not merge a recovery alias into a user-defined provider: inherited
+/// headers or auth commands could redirect credentials. Check user/profile
+/// and project configuration before adding the process-local alias.
+pub fn check_resume_alias(
+    provider: &str,
+    config_home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<(), String> {
+    fn defines(value: &toml::Value, provider: &str) -> bool {
+        value
+            .get("model_providers")
+            .and_then(|v| v.get(provider))
+            .is_some()
+            || value
+                .as_table()
+                .is_some_and(|table| table.values().any(|v| defines(v, provider)))
+    }
+    let mut paths = vec![config_home.join("config.toml")];
+    match std::fs::read_dir(config_home) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry.map_err(|_| "Cannot inspect Codex account configuration.")?;
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| n.ends_with(".config.toml"))
+                {
+                    paths.push(entry.path());
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("Cannot inspect Codex account configuration.".into()),
+    }
+    paths.extend(cwd.ancestors().map(|dir| dir.join(".codex/config.toml")));
+    for path in paths {
+        let file =
+            match std::fs::File::open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(
+                    "Cannot verify Codex configuration before restoring the proxy conversation."
+                        .into(),
+                ),
+            };
+        use std::io::Read;
+        let mut text = String::new();
+        file.take(2 * 1024 * 1024 + 1)
+            .read_to_string(&mut text)
+            .map_err(|_| "Cannot read Codex configuration.")?;
+        if text.len() > 2 * 1024 * 1024 {
+            return Err("Codex configuration exceeds the recovery limit.".into());
+        }
+        let value: toml::Value =
+            toml::from_str(&text).map_err(|_| "Cannot parse Codex configuration.")?;
+        if defines(&value, provider) {
+            return Err("The saved proxy provider is already defined in Codex configuration. Remove the conflicting definition or resume it directly in Codex.".into());
+        }
+    }
+    Ok(())
 }
 
 pub fn base_from_arguments(arguments: &[String]) -> Result<Option<ProxyTarget>, String> {
@@ -176,6 +275,35 @@ pub fn saved_arguments(base_url: &str, proxy_id: Option<&str>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restores_the_missing_native_provider_without_persisting_credentials() {
+        let proxy = launch(Some("fixture-secret"));
+        let old = format!("{PROVIDER}_{}", "a".repeat(32));
+        let args = proxy.resume_arguments(&old).unwrap();
+        assert!(args[1].starts_with(&format!("model_providers.{old}=")));
+        assert!(!args.join(" ").contains("fixture-secret"));
+        let table: toml::Value = args[1].split_once('=').unwrap().1.parse().unwrap();
+        assert_eq!(table["env_key"].as_str(), Some(KEY_ENV));
+        assert!(proxy.resume_arguments("openai").is_err());
+        assert!(proxy
+            .resume_arguments("latticeterm_cliproxyapi_bad.key")
+            .is_err());
+    }
+
+    #[test]
+    fn refuses_to_merge_recovery_into_existing_provider_headers() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let provider = format!("{PROVIDER}_old");
+        check_resume_alias(&provider, home.path(), project.path()).unwrap();
+        std::fs::write(
+            home.path().join("work.config.toml"),
+            format!("[model_providers.{provider}.http_headers]\nAuthorization = 'stale'\n"),
+        )
+        .unwrap();
+        assert!(check_resume_alias(&provider, home.path(), project.path()).is_err());
+    }
 
     fn launch(key: Option<&str>) -> ProxyLaunch {
         ProxyLaunch {

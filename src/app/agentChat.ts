@@ -329,6 +329,8 @@ export function importNativeConversation(
     title: string;
     accountProfileId: string | null;
     messages: readonly NativeHistoryMessage[];
+    provider?: "cliproxyapi";
+    proxyId?: string;
   },
   now = Date.now(),
 ): ChatThread {
@@ -338,6 +340,8 @@ export function importNativeConversation(
     permission: defaultPermission(settings.definitionId),
     model: "",
     title: threadTitle(settings.title),
+    provider: settings.provider,
+    proxyId: settings.proxyId,
   }, crypto.randomUUID(), now);
   return {
     ...thread,

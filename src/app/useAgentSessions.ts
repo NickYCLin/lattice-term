@@ -326,7 +326,7 @@ export const MAX_AGENT_BROADCAST_TARGETS = 32;
 export const MAX_SAVED_AGENT_PLANS = 32;
 export const CLAUDE_SAFE_MODE_STARTUP_WINDOW_MS = 15_000;
 
-function visibleTerminalText(output: string): string {
+export function visibleTerminalText(output: string): string {
   return output
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "");
@@ -719,6 +719,8 @@ export interface AgentApi {
     sessionId: string,
     handler: (bytes: Uint8Array) => void,
   ) => () => void;
+  /** Read-only output observer; never consumes the terminal's pending replay. */
+  onOutputTail: (sessionId: string, handler: (text: string) => void) => () => void;
   onClosed: (
     sessionId: string,
     handler: (reason: string) => void,
@@ -752,6 +754,8 @@ export function useAgentSessions(): AgentApi {
   const pendingBytes = useRef(new Map<string, number>());
   const outputOffsets = useRef(new Map<string, number>());
   const outputTails = useRef(new Map<string, string>());
+  const outputDecoders = useRef(new Map<string, TextDecoder>());
+  const outputTailHandlers = useRef(new Map<string, Set<(text: string) => void>>());
   const sessionsRef = useRef(sessions);
   const intentionalDisconnects = useRef(new Set<string>());
   const launchRaceGuard = useRef(new AgentLaunchRaceGuard());
@@ -844,14 +848,20 @@ export function useAgentSessions(): AgentApi {
       if (endOffset <= cursor) return;
       const fresh = bytes.subarray(Math.max(0, cursor - offset));
       if (fresh.length === 0) return;
+      // PTY chunks may split a UTF-8 character. Reset only after a replay gap.
+      if (offset > cursor) outputDecoders.current.delete(sessionId);
+      const decoder = outputDecoders.current.get(sessionId) ?? new TextDecoder();
+      outputDecoders.current.set(sessionId, decoder);
       outputOffsets.current.set(sessionId, endOffset);
       const outputTail = `${outputTails.current.get(sessionId) ?? ""}${
-        new TextDecoder().decode(fresh)
+        decoder.decode(fresh, { stream: true })
       }`;
       outputTails.current.set(
         sessionId,
         outputTail.slice(-MAX_AGENT_OUTPUT_TAIL),
       );
+      outputTailHandlers.current.get(sessionId)?.forEach(handler =>
+        handler(outputTails.current.get(sessionId) ?? ""));
 
       const handlers = dataHandlers.current.get(sessionId);
       if (handlers?.size) {
@@ -887,6 +897,7 @@ export function useAgentSessions(): AgentApi {
           reason: string;
         }>("agent://closed", (event) => {
           const sessionId = event.payload.sessionId;
+          outputDecoders.current.delete(sessionId);
           if (hydrating) closedDuringHydration.add(sessionId);
           launchRaceGuard.current.observeClosed(
             sessionId,
@@ -911,7 +922,7 @@ export function useAgentSessions(): AgentApi {
                   codexUpdateRetryRequests.current.has(launchCandidate),
                 )
               : null;
-          if (knownSession || !pendingLaunch) {
+          if (!knownSession && !pendingLaunch) {
             outputTails.current.delete(sessionId);
           }
           if (!intentional && !knownSession && !pendingLaunch) {
@@ -1281,8 +1292,8 @@ export function useAgentSessions(): AgentApi {
           outputTails.current.get(session.sessionId) ?? "",
           codexUpdateRetryRequests.current.has(request),
         );
-        outputTails.current.delete(session.sessionId);
         if (codexRestart) {
+          outputTails.current.delete(session.sessionId);
           codexUpdateRetryRequests.current.add(codexRestart);
           const restarted = await launchRef.current?.(codexRestart);
           if (restarted) {
@@ -1562,6 +1573,7 @@ export function useAgentSessions(): AgentApi {
       pendingBytes.current.delete(sessionId);
       outputOffsets.current.delete(sessionId);
       outputTails.current.delete(sessionId);
+      outputDecoders.current.delete(sessionId);
       launchRequests.current.delete(sessionId);
       dataHandlers.current.delete(sessionId);
       closeHandlers.current.delete(sessionId);
@@ -1581,6 +1593,17 @@ export function useAgentSessions(): AgentApi {
   }, []);
 
   const clearLastClosed = useCallback(() => setLastClosed(null), []);
+
+  const onOutputTail = useCallback((sessionId: string, handler: (text: string) => void) => {
+    const handlers = outputTailHandlers.current.get(sessionId) ?? new Set();
+    handlers.add(handler);
+    outputTailHandlers.current.set(sessionId, handlers);
+    handler(outputTails.current.get(sessionId) ?? "");
+    return () => {
+      handlers.delete(handler);
+      if (!handlers.size) outputTailHandlers.current.delete(sessionId);
+    };
+  }, []);
 
   const onData = useCallback(
     (sessionId: string, handler: (bytes: Uint8Array) => void) => {
@@ -1653,6 +1676,7 @@ export function useAgentSessions(): AgentApi {
     disconnect,
     clearLastClosed,
     onData,
+    onOutputTail,
     onClosed,
   };
 }

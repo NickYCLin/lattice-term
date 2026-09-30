@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { loadChatAccountProfiles } from "./chatAccountProfiles";
-import { localConversationLaunchIntents, type LocalConversation } from "./localConversationSessions";
+import { loadCliProxySettings } from "./cliProxyApi";
+import { isProxyConversation, nativeConversationProxy, localConversationLaunchIntents, type LocalConversation } from "./localConversationSessions";
 import type { AgentApi } from "./useAgentSessions";
 import type { SavedAgentSession, SavedWorkspaceSession } from "./workspaceSessionPersistence";
 
@@ -20,6 +21,7 @@ export function useAutomaticLocalConversations(
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsProxySelection, setNeedsProxySelection] = useState(0);
   const latest = useRef({ agents, pending, queue, retry });
   latest.current = { agents, pending, queue, retry };
   const enabledRef = useRef(enabled);
@@ -46,8 +48,10 @@ export function useAutomaticLocalConversations(
         });
         if (!enabledRef.current || !mounted.current) return;
         const state = latest.current;
+        const proxies = loadCliProxySettings(window.localStorage).proxies;
+        setNeedsProxySelection(entries.filter(entry => isProxyConversation(entry) && !nativeConversationProxy(entry, proxies)).length);
         const intents = localConversationLaunchIntents(entries, profiles,
-          state.agents.catalog, state.agents.sessions, state.pending);
+          state.agents.catalog, state.agents.sessions, state.pending, proxies);
         // Store every intent before starting any process. Capacity, missing
         // paths, and CLI failures leave the item available in Recovery.
         state.queue(intents);
@@ -73,5 +77,5 @@ export function useAutomaticLocalConversations(
       setError(null);
     } catch (reason) { setError(String(reason)); }
   }
-  return { enabled, busy, error, setAutoOpen };
+  return { enabled, busy, error, needsProxySelection, setAutoOpen };
 }

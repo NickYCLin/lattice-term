@@ -6675,11 +6675,30 @@ pub fn launch_with_replay(
     let launch_arguments = request.arguments.clone();
     let (definition_id, label, executable, mut arguments, working_directory) =
         resolve_launch(&request)?;
+    let profile_config_path =
+        profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
+    let resumed_provider = if definition_id == "codex" {
+        request
+            .resume_session_id
+            .as_deref()
+            .map(|id| crate::transcript::codex_session_provider(id, profile_config_path.as_deref()))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let proxy_target = if definition_id == "codex" {
         crate::cliproxy::launch::base_from_arguments(&arguments)?
     } else {
         None
     };
+    if resumed_provider
+        .as_deref()
+        .is_some_and(crate::cliproxy::launch::is_managed_provider)
+        && proxy_target.is_none()
+    {
+        return Err("這個對話使用 CLIProxyAPI。請從「外部對話」選取原本的 CLIProxyAPI 連線後再恢復，原始紀錄仍保留。".into());
+    }
     let proxy = proxy_target
         .as_ref()
         .map(|target| {
@@ -6689,6 +6708,23 @@ pub fn launch_with_replay(
     let mut proxy_catalog = None;
     if let (Some(proxy), Some(target)) = (&proxy, &proxy_target) {
         arguments = proxy.configure_arguments(arguments);
+        if let Some(provider) = resumed_provider.as_deref() {
+            let config_home = profile_config_path
+                .clone()
+                .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
+                .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+                .ok_or("Cannot locate the Codex account directory.")?;
+            crate::cliproxy::launch::check_resume_alias(
+                provider,
+                &config_home,
+                &working_directory,
+            )?;
+            let after_provider = proxy.arguments().len();
+            arguments.splice(
+                after_provider..after_provider,
+                proxy.resume_arguments(provider)?,
+            );
+        }
         // Without this, `/model` inside the session lists Codex's native
         // models instead of the ones this proxy serves.
         let (program, prefix) = launch_parts(&executable);
@@ -6704,8 +6740,6 @@ pub fn launch_with_replay(
             arguments.splice(after_provider..after_provider, catalog.arguments());
         }
     }
-    let profile_config_path =
-        profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
     let launch_model = model_from_arguments(&arguments).or_else(|| {
         // The default login's configured model says nothing about a profile.
         profile_config_path

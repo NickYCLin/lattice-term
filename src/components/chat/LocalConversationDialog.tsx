@@ -7,8 +7,9 @@ import { useChatAccountProfiles } from "../../app/useChatAccountProfiles";
 import { useI18n } from "../../i18n/context";
 import { CloseIcon } from "../icons";
 import { useModalFocus } from "../overlays/modalFocus";
-import { conversationSession, localConversationLaunchIntents, type LocalConversation } from "../../app/localConversationSessions";
+import { conversationSession, isProxyConversation, nativeConversationProxy, localConversationLaunchIntents, type LocalConversation } from "../../app/localConversationSessions";
 import type { useAutomaticLocalConversations } from "../../app/useAutomaticLocalConversations";
+import { useCliProxySettings } from "../../app/useCliProxyApi";
 
 type Conversation = LocalConversation;
 
@@ -28,6 +29,9 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
 }) {
   const { t } = useI18n();
   const profiles = useChatAccountProfiles();
+  const { proxies } = useCliProxySettings();
+  const [proxyId, setProxyId] = useState("");
+  const [allLoaded, setAllLoaded] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [entries, setEntries] = useState<Conversation[]>([]);
@@ -46,22 +50,29 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   const profileArgsRef = useRef(profileArgs);
   profileArgsRef.current = profileArgs;
   const selectionRef = useRef(0);
+  const mounted = useRef(false);
+  const requiresProxy = selected !== null && isProxyConversation(selected);
+  const selectedProxy = proxies.find(proxy => proxy.id === proxyId);
+  const existingSession = selected && conversationSession(selected, profiles, agents.sessions, true);
+  const missingProxy = requiresProxy && !selectedProxy && !existingSession;
 
   useModalFocus({ dialogRef, getInitialFocus: () => closeRef.current, onEscape: onClose, escapeDisabled: launching });
 
   useEffect(() => {
+    mounted.current = true;
     let active = true;
     const request = selectionRef.current;
-    invoke<Conversation[]>("agent_chat_local_history", { profiles: profileArgsRef.current })
+    invoke<Conversation[]>("agent_chat_local_history", { profiles: profileArgsRef.current, includeArchived: true })
       .then((found) => { if (active && request === selectionRef.current) setEntries(found); })
       .catch((reason) => { if (active && request === selectionRef.current) setError(String(reason)); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; selectionRef.current++; };
+    return () => { active = false; mounted.current = false; selectionRef.current++; };
   }, []);
 
   async function select(entry: Conversation) {
     const request = ++selectionRef.current;
     setSelected(entry);
+    setProxyId(nativeConversationProxy(entry, proxies)?.id ?? "");
     setSelectedArchive(null);
     setSelectedStoredId(null);
     setMessages([]);
@@ -84,7 +95,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
 
   function openChat() {
     if (onOpenSessionChat) { void openSession(true); return; }
-    if (!selected || !selected.resumable || !chat || busy || error) return;
+    if (!selected || !selected.resumable || !chat || busy || error || missingProxy) return;
     chat.importNativeConversation({
       definitionId: selected.definitionId,
       nativeSessionId: selected.nativeSessionId,
@@ -92,6 +103,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
       title: selected.title,
       accountProfileId: selected.profileId,
       messages,
+      ...(requiresProxy && selectedProxy ? { provider: "cliproxyapi" as const, proxyId: selectedProxy.id } : {}),
     });
     onOpenChat();
     onClose();
@@ -129,9 +141,9 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   }
 
   async function openSession(inChat = false) {
-    if (!selected || !selected.resumable || busy || error || automatic?.busy) return;
+    if (!selected || !selected.resumable || busy || error || automatic?.busy || missingProxy) return;
     const open = inChat && onOpenSessionChat ? onOpenSessionChat : onOpenSession;
-    const existing = conversationSession(selected, profiles, agents.sessions);
+    const existing = conversationSession(selected, profiles, agents.sessions, true);
     if (existing) { open(existing.sessionId); onClose(); return; }
     const installed = agents.catalog.find((entry) => entry.id === selected.definitionId && entry.installed);
     if (!installed) return;
@@ -142,14 +154,14 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
       const profile = profiles.find((entry) =>
         entry.id === selected.profileId && entry.definitionId === selected.definitionId);
       if (selected.profileId && !profile) throw new Error(t("history.profileMissing"));
-      const intent = localConversationLaunchIntents([selected], profiles, agents.catalog, [], [])[0];
+      const intent = localConversationLaunchIntents([selected], profiles, agents.catalog, [], [], proxies, selectedProxy)[0];
       if (!intent) throw new Error(t("history.profileMissing"));
       const launched = await agents.launch({
         definitionId: selected.definitionId,
         label: intent.groupLabel,
         groupId: intent.groupKey,
         executable: "",
-        arguments: [],
+        arguments: intent.launchArguments,
         resumeSessionId: selected.nativeSessionId,
         restoreExistingSession: true,
         profileConfigPath: profile?.configDirectory ?? null,
@@ -168,6 +180,17 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   }
 
   const installed = selected && agents.catalog.some((entry) => entry.id === selected.definitionId && entry.installed);
+  async function loadOlder() {
+    setLoading(true);
+    setError(null);
+    try {
+      const found = await invoke<Conversation[]>("agent_chat_local_history", { profiles: profileArgsRef.current, all: true, includeArchived: true });
+      if (!mounted.current) return;
+      setEntries(found);
+      setAllLoaded(true);
+    } catch (reason) { if (mounted.current) setError(String(reason)); }
+    finally { if (mounted.current) setLoading(false); }
+  }
   const storedArchives = chat?.threads.filter((thread) => thread.archived) ?? [];
   const selectedStored = storedArchives.find((thread) => thread.id === selectedStoredId);
   return (
@@ -187,12 +210,14 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
           <p>{t("history.autoOpenHint")}</p>
           {automatic.busy && <p role="status">{t("history.autoOpening")}</p>}
           {automatic.error && <p role="alert">{automatic.error}</p>}
+          {automatic.needsProxySelection > 0 && <p role="status">{t("history.proxySkipped", { count: automatic.needsProxySelection })}</p>}
         </div>}
         <label className="dialog__body">{t("history.importExport")}{" "}
-          <input type="file" accept=".json,application/json" disabled={launching} onChange={(event) => void importFile(event.currentTarget.files?.[0])} />
+          <input type="file" accept=".json,application/json" disabled={launching || loading} onChange={(event) => void importFile(event.currentTarget.files?.[0])} />
         </label>
         <div className="local-history__columns">
           <div className="local-history__list" aria-label={t("history.title")}>
+            {!allLoaded && !loading && entries.length >= 100 && <button type="button" className="button button--secondary" disabled={launching || busy} onClick={() => void loadOlder()}>{t("history.loadOlder")}</button>}
             {storedArchives.map((entry) => (
               <button type="button" key={`stored:${entry.id}`} disabled={launching} className={`local-history__entry${selectedStoredId === entry.id ? " is-active" : ""}`}
                 onClick={() => { selectionRef.current++; setBusy(false); setSelected(null); setSelectedArchive(null); setSelectedStoredId(entry.id); setError(null); }}>
@@ -209,13 +234,20 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
                 className={`local-history__entry${selected?.nativeSessionId === entry.nativeSessionId && selected?.definitionId === entry.definitionId && selected?.profileId === entry.profileId ? " is-active" : ""}`}
                 onClick={() => void select(entry)}>
                 <strong>{entry.title}</strong>
-                <small>{entry.definitionId === "codex" ? "Codex" : "Claude Code"} · {new Date(entry.updatedAt * 1000).toLocaleString()}</small>
+                <small>{entry.definitionId === "codex" ? "Codex" : "Claude Code"} · {new Date(entry.updatedAt * 1000).toLocaleString()}{entry.archived ? ` · ${t("history.nativeArchived")}` : ""}</small>
               </button>
             ))}
           </div>
           <div className="local-history__preview">
             {selected && <><p className="dialog__body mono">{selected.workingDirectory}</p>
-              {!selected.resumable && <p className="dialog__body">{t("history.directoryMissing")}</p>}
+              {requiresProxy && !selected.archived && <label className="dialog__body">{t("history.proxyConnection")}
+                <select className="select" value={proxyId} disabled={launching} onChange={event => setProxyId(event.target.value)}>
+                  <option value="">{t("history.proxyChoose")}</option>
+                  {proxies.map(proxy => <option key={proxy.id} value={proxy.id}>{proxy.label || proxy.baseUrl}</option>)}
+                </select>
+                <p>{t(proxies.length ? "history.proxyHint" : "history.proxyMissing")}</p>
+              </label>}
+              {!selected.resumable && <p className="dialog__body">{t(selected.archived ? "history.nativeArchivedHint" : "history.directoryMissing")}</p>}
               {busy && !messages.length ? <p>{t("common.loading")}</p> : messages.map((message, index) => (
                 <div key={index} className="local-history__message">
                   <strong>{message.role === "user" ? t("history.user") : t("history.assistant")}</strong>
@@ -245,9 +277,9 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
         <div className="dialog__actions">
           <button type="button" className="button button--ghost" disabled={launching} onClick={onClose}>{t("common.close")}</button>
           <button type="button" className="button button--ghost" onClick={() => void openSession()}
-            disabled={!selected?.resumable || !installed || busy || automatic?.busy || Boolean(error)}>{t("history.openSession")}</button>
+            disabled={!selected?.resumable || !installed || busy || loading || missingProxy || automatic?.busy || Boolean(error)}>{t("history.openSession")}</button>
           <button type="button" className="button button--primary" onClick={selectedArchive || selectedStoredId ? openArchive : openChat}
-            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || busy || automatic?.busy)) || !chat || Boolean(error)}>
+            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || busy || loading || missingProxy || automatic?.busy)) || !chat || Boolean(error)}>
             {selectedStoredId ? t("history.viewArchive") : selectedArchive ? t("history.importArchive") : t("history.openChat")}
           </button>
         </div>

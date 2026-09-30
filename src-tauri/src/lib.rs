@@ -1455,9 +1455,14 @@ fn agent_chat_supported() -> Vec<String> {
 async fn agent_chat_local_history(
     profiles: Vec<crate::transcript::HistoryProfile>,
     all: Option<bool>,
+    include_archived: Option<bool>,
 ) -> Result<Vec<crate::transcript::LocalConversation>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::list_local_conversations_with_limit(&profiles, all.unwrap_or(false))
+        crate::transcript::list_local_conversations_with_options(
+            &profiles,
+            all.unwrap_or(false),
+            include_archived.unwrap_or(false),
+        )
     })
     .await
     .map_err(|error| error.to_string())?
