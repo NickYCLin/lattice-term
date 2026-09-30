@@ -12,9 +12,9 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::{oneshot, Semaphore};
 
-// Version 3 adds separately granted SSH workspace Fleet operations.
+// Version 4 adds explicitly shared desktop PTYs. Version 3 added SSH Fleet.
 // Older peers must refuse remote sharing instead of guessing new scopes.
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 const MAX_TARGETS: usize = 64;
 const MAX_CALLS: usize = 16;
 const MAX_REPLY: usize = 512 * 1024;

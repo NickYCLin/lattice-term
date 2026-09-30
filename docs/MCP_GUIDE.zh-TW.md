@@ -387,3 +387,30 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 - 說清楚你實際做了什麼、用了哪個連線或工作階段、結果是從哪裡確認的。
 - 沒確認到的就說沒確認，不要把「已送出」說成「已完成」。
 - 需要使用者在 LatticeTerm 操作時，直接說出要按哪個頁面、哪個按鈕。
+
+
+### 分享既有前景工作階段（含 CLIProxyAPI）
+
+Agent Fleet 的執行中清單現在也能對前景工作階段選擇「MCP 權限」。
+預設不分享；「只能看」開放狀態與輸出，「完全開放」另允許送出指示。
+這個操作沿用同一個 PTY 與原生對話，不啟動替代程序，不改換代理或模型。
+它只適用於 Fleet 持有的終端工作階段，包括在對話頁呈現的同一工作階段；
+獨立 headless 對話不會因這個開關自動公開。
+
+外部 AI 先呼叫 `list_authorized_connections`，選 `backend: desktopAgent`
+的目標，再呼叫 `desktop_agent`：
+
+- `action: {kind: "state"}`：核對 sessionId、source、conversationId、工作目錄、模型與設定來源。
+- `action: {kind: "read", cursor: 0, maxBytes: 16384}`：讀取既有尾端輸出，後續使用 nextCursor。
+- `action: {kind: "prompt", text: "工作指示", requestId: "唯一識別碼"}`：只在官方整合回報閒置／完成且沒有未送出的人工輸入時送出。忙碌時拒絕，不自動排隊或重開對話。
+
+`configuration.provider` 依啟動設定識別 CLIProxyAPI，不以標題猜測；不含代理網址、密鑰或帳號路徑。
+`launchEffort` 只表示啟動參數，`currentEffortVerified: false` 明示尚未證實執行中變更。
+模型沿用原工作階段的模型紀錄，不能只憑代理名稱或成功啟動服務宣稱上游推論已驗證。
+送出結果須接著讀輸出確認，未知結果只能使用同一 requestId 查重。
+
+撤銷／更改權限會使舊 targetId 失效；斷開桌面通道也撤銷授權。
+重新連線不會自動重新分享。關閉桌面會依前景工作階段原有生命週期結束程序；
+這個功能不把前景程序搬入背景，也不替使用者重開對話。
+更新後需要相容的桌面與背景服務（bridge protocol 4）；舊服務明確拒絕新操作。
+如果更新需要關閉尚在工作的桌面，先保存並由使用者決定何時退出，不能強制結束。

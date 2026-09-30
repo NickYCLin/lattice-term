@@ -140,23 +140,23 @@ export function useAgentDaemon(sessionsHint: number): {
       throw new Error("Restart the background service after existing work finishes to set separate output permissions.");
     }
     const { invoke } = await import("@tauri-apps/api/core");
-    const next = await invoke<AgentSharedSession[]>("agent_mcp_share", {
+    await invoke<AgentSharedSession[]>("agent_mcp_share", {
       sessionId,
       shared,
       ...(shared ? { readOutput } : {}),
     });
-    setStatus((current) => ({ ...current, shared: next.map(normalizeSharedSession) }));
-  }, [status.mcpOutputScopes]);
+    await refresh();
+  }, [status.mcpOutputScopes, refresh]);
 
   const control = useCallback(async (sessionId: string, control: boolean) => {
     if (!hasDesktopBackend()) return;
     const { invoke } = await import("@tauri-apps/api/core");
-    const next = await invoke<AgentSharedSession[]>("agent_mcp_control", {
+    await invoke<AgentSharedSession[]>("agent_mcp_control", {
       sessionId,
       control,
     });
-    setStatus((current) => ({ ...current, shared: next.map(normalizeSharedSession) }));
-  }, []);
+    await refresh();
+  }, [refresh]);
 
   return { status, refresh, stop, start, share, control };
 }

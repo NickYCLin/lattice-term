@@ -321,6 +321,8 @@ impl DaemonClient {
     pub async fn mcp_needs_restart(&self) -> bool {
         self.attached().await.is_some_and(|connection| {
             connection.mcp_protocol.load(Ordering::Relaxed) != OBSERVER_PROTOCOL_VERSION
+                || connection.desktop_bridge_protocol.load(Ordering::Relaxed)
+                    != super::desktop_bridge::PROTOCOL
         })
     }
 
@@ -337,7 +339,10 @@ impl DaemonClient {
             .lock()
             .map(|version| version.clone())
             .unwrap_or_default();
-        if version == env!("CARGO_PKG_VERSION") {
+        if version == env!("CARGO_PKG_VERSION")
+            && connection.desktop_bridge_protocol.load(Ordering::Relaxed)
+                == super::desktop_bridge::PROTOCOL
+        {
             return Ok(false);
         }
         let sessions = connection

@@ -1072,7 +1072,7 @@ export const zhTW = {
   "agents.daemon.stopConfirm.body": "背景裡的 {count} 個工作階段會一起結束，正在跑的助理會被停掉，無法復原。",
   "agents.daemon.stopConfirm.action": "結束背景服務",
   "agents.mcp.title": "分享給外部 AI（MCP）",
-  "agents.mcp.hint": "LatticeTerm 可以當成 MCP 伺服器，讓另一個 AI 工具（例如 Claude Code、Codex 或 Gemini CLI）使用你留在背景的工作階段。每個工作階段選一種權限：只能看，或完全開放。把下面任一段設定加到你的 AI 工具就能連上。",
+  "agents.mcp.hint": "LatticeTerm 可以當成 MCP 伺服器，讓另一個 AI 工具（例如 Claude Code、Codex 或 Gemini CLI）使用你明確分享的既有工作階段。前景工作階段不會重開或改換模型，關閉桌面後便停止分享；背景工作階段可繼續執行。每個工作階段選一種權限：只能看，或完全開放。把下面任一段設定加到你的 AI 工具就能連上。",
   "agents.mcp.sharedCount": "已分享 {count} 個工作階段",
   "agents.mcp.none": "目前沒有分享任何工作階段",
   "agents.mcp.access": "MCP 權限",

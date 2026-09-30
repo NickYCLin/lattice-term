@@ -1102,7 +1102,7 @@ export const en: Messages = {
   "agents.daemon.stopConfirm.body": "The {count} background session(s) end with it; running CLIs are stopped and this cannot be undone.",
   "agents.daemon.stopConfirm.action": "End background service",
   "agents.mcp.title": "Share with external AI (MCP)",
-  "agents.mcp.hint": "LatticeTerm can act as an MCP server so another AI tool (Claude Code, Codex, Gemini CLI…) can use the sessions you keep in the background. Pick one level per session: view only, or full. Add any of the configurations below to your AI tool to connect.",
+  "agents.mcp.hint": "LatticeTerm can act as an MCP server so another AI tool (Claude Code, Codex, Gemini CLI…) can use sessions you explicitly share. Desktop sessions keep the same process and model; closing the desktop ends access. Background sessions can continue running. Pick one level per session: view only, or full. Add any of the configurations below to your AI tool to connect.",
   "agents.mcp.sharedCount": "{count} session(s) shared",
   "agents.mcp.none": "No session is shared",
   "agents.mcp.access": "MCP access",

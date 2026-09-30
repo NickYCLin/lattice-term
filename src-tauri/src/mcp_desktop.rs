@@ -9,6 +9,8 @@
 
 mod file_queries;
 mod fleet;
+mod foreground;
+pub use foreground::DesktopAgentAction;
 #[cfg(test)]
 mod loopback_tests;
 mod operation_tracking;
@@ -60,6 +62,8 @@ const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum Backend {
+    /// An explicitly shared, already running local Agent Fleet PTY.
+    DesktopAgent,
     Ssh,
     Sftp,
     /// Screen-only backends never gain shell or file capabilities.
@@ -250,6 +254,10 @@ pub trait ConnectionBook: Send + Sync {
 pub enum DesktopOperation {
     ListConnections,
     ListSavedConnections,
+    DesktopAgent {
+        target_id: String,
+        action: DesktopAgentAction,
+    },
     ConnectSaved {
         profile_id: String,
         request_id: String,
@@ -349,6 +357,7 @@ impl DesktopOperation {
     /// because a service started before an upgrade closes the connection on
     /// an operation it cannot parse.
     pub const KINDS: &'static [&'static str] = &[
+        "desktopAgent",
         "listConnections",
         "listSavedConnections",
         "connectSaved",
@@ -386,6 +395,7 @@ impl DesktopOperation {
 
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::DesktopAgent { .. } => "desktopAgent",
             Self::ListConnections => "listConnections",
             Self::ListSavedConnections => "listSavedConnections",
             Self::ConnectSaved { .. } => "connectSaved",
@@ -410,7 +420,8 @@ impl DesktopOperation {
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::ListConnections | Self::ListSavedConnections | Self::ConnectSaved { .. } => None,
-            Self::Fleet { target_id, .. }
+            Self::DesktopAgent { target_id, .. }
+            | Self::Fleet { target_id, .. }
             | Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
             | Self::ScreenInput { target_id, .. }
@@ -430,6 +441,7 @@ impl DesktopOperation {
 
     pub fn required_scope(&self) -> Option<Scope> {
         match self {
+            Self::DesktopAgent { action, .. } => Some(action.scope()),
             Self::Fleet { action, .. } => Some(action.scope()),
             Self::GetMetrics { .. } => Some(Scope::Metrics),
             Self::CaptureScreen { .. } => Some(Scope::Screen),
@@ -467,6 +479,7 @@ impl DesktopOperation {
 
     fn request_id(&self) -> Option<&str> {
         match self {
+            Self::DesktopAgent { action, .. } => action.request_id(),
             Self::Fleet { action, .. } => action.request_id(),
             Self::ScreenInput { request_id, .. }
             | Self::ConnectSaved { request_id, .. }
@@ -739,6 +752,10 @@ struct Paused {
 }
 
 pub struct DesktopService {
+    foreground: Option<(
+        Arc<crate::agent::AgentRegistry>,
+        Arc<dyn crate::agent::AgentSink>,
+    )>,
     ssh: Arc<SshRegistry>,
     sftp: Arc<SftpRegistry>,
     rdp: Arc<crate::rdp::RdpRegistry>,
@@ -779,6 +796,7 @@ impl DesktopService {
     /// [`Self::with_screens`] names the registries that own them.
     pub fn new(ssh: Arc<SshRegistry>, sftp: Arc<SftpRegistry>) -> Self {
         Self {
+            foreground: None,
             ssh,
             sftp,
             rdp: Arc::new(crate::rdp::RdpRegistry::new()),
@@ -967,6 +985,7 @@ impl DesktopService {
 
     fn identity(&self, backend: Backend, session_id: &str) -> Option<usize> {
         match backend {
+            Backend::DesktopAgent => self.foreground.as_ref()?.0.session_identity(session_id),
             Backend::Ssh => self
                 .ssh
                 .session_handle(session_id)
@@ -1161,6 +1180,16 @@ impl DesktopService {
                 },
             );
             grant.revoked.send_replace(true);
+            if grant.view.backend == Backend::DesktopAgent {
+                if let Some((registry, sink)) = &self.foreground {
+                    let _ = crate::agent::set_mcp_control(
+                        sink.as_ref(),
+                        registry,
+                        &grant.session_id,
+                        false,
+                    );
+                }
+            }
             self.stop_retaining(&state, &grant);
         }
         state.captures.remove(target_id);
@@ -1697,6 +1726,12 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
             }
+            DesktopOperation::DesktopAgent { action, .. } => {
+                if grant.view.backend != Backend::DesktopAgent {
+                    return Err(ServiceError::denied());
+                }
+                action.validate()?;
+            }
             DesktopOperation::ListConnections
             | DesktopOperation::ListSavedConnections
             | DesktopOperation::ConnectSaved { .. }
@@ -1730,6 +1765,9 @@ impl DesktopService {
             .unwrap_or_else(|| watch::channel(false).1);
         let work = async {
             match operation {
+                DesktopOperation::DesktopAgent { action, .. } => {
+                    self.execute_desktop_agent(grant, action).await
+                }
                 DesktopOperation::Fleet { action, .. } => {
                     if grant.view.backend == Backend::Remote {
                         return fleet::execute_relay(
@@ -2397,6 +2435,9 @@ fn label(label: &str) -> bool {
 }
 
 fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
+    if request.backend == Backend::DesktopAgent {
+        return foreground::validate_grant(request);
+    }
     fleet::validate_grant(request)?;
     if !label(&request.label)
         || request.session_id.is_empty()
@@ -2842,6 +2883,10 @@ mod tests {
     #[test]
     fn every_operation_kind_is_announced_and_matches_its_wire_tag() {
         let samples = [
+            DesktopOperation::DesktopAgent {
+                target_id: "t".into(),
+                action: DesktopAgentAction::State {},
+            },
             DesktopOperation::ListConnections,
             DesktopOperation::ListSavedConnections,
             DesktopOperation::ConnectSaved {
@@ -2920,7 +2965,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 18);
+        assert_eq!(DesktopOperation::KINDS.len(), 19);
     }
 
     #[test]

@@ -101,8 +101,8 @@ describe("AgentsView", () => {
     expect(markup).toContain("claude mcp add latticeterm -- /opt/lattice-term mcp --data-dir &#x27;/data dir&#x27;");
     expect(markup).toContain("codex mcp add latticeterm -- ");
     expect(markup).not.toContain("[mcp_servers.latticeterm]");
-    // One choice: the desktop-owned session has no observer path.
-    expect(markup.match(/<span class="field__label">MCP 權限<\/span>/g)).toHaveLength(1);
+    // Both sources expose explicit, initially separate sharing choices.
+    expect(markup.match(/<span class="field__label">MCP 權限<\/span>/g)).toHaveLength(2);
     expect(markup).toMatch(/<option value="full" selected="">完全開放/);
     // A shared session shows who acted on it.
     expect(markup).toContain("MCP 可控");
@@ -243,6 +243,16 @@ describe("AgentsView", () => {
     expect(markup).toContain("留在背景");
     expect(markup).toContain("夜間批次");
     expect(markup).toContain(">背景<");
+  });
+
+  it("offers explicit MCP sharing for an existing foreground session without relaunching", () => {
+    const markup = render(fakeAgentApi({ sessions: [fakeSession({ detached: false, label: "Existing proxy" })] }));
+    expect(markup).toContain("Existing proxy");
+    expect(markup).toContain('class="agents-mcp__toggle"');
+    expect(markup).toContain('value="off"');
+    expect(markup).toContain('value="view"');
+    expect(markup).toContain('value="full"');
+    expect(markup).not.toContain(">背景<");
   });
 
   it("badges a saved launch plan that restores into the background", () => {

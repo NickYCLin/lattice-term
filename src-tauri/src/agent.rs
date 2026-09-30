@@ -2596,6 +2596,12 @@ impl AgentRegistry {
         Some((endpoint.address, entry.report_token.clone()?))
     }
 
+    pub(crate) fn session_identity(&self, session_id: &str) -> Option<usize> {
+        self.get(session_id)
+            .ok()
+            .map(|entry| Arc::as_ptr(&entry) as usize)
+    }
+
     pub fn session_summary(&self, session_id: &str) -> Option<AgentSessionSummary> {
         let sessions = self.sessions.lock().ok()?;
         let entry = sessions.get(session_id)?;
@@ -14773,5 +14779,10 @@ notify = ["notify.exe", "turn-ended"]"#,
 
         assert!(registry.list().is_empty());
         assert!(!path.exists());
+    }
+    #[cfg(unix)]
+    mod foreground_mcp_tests {
+        use super::*;
+        include!("agent/foreground_mcp_tests.rs");
     }
 }

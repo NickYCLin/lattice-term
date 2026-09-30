@@ -2116,15 +2116,19 @@ async fn agent_output_snapshots(
 /// of them the user shared with MCP observers, and how an MCP client should
 /// start the adapter for this installation.
 #[tauri::command]
-async fn agent_daemon_status(daemon: State<'_, AppDaemon>) -> Result<AgentDaemonStatus, String> {
+async fn agent_daemon_status(
+    daemon: State<'_, AppDaemon>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<AgentDaemonStatus, String> {
     let sessions = daemon.sessions().await;
-    let shared = match daemon
+    let mut shared: Vec<crate::agent_daemon::SharedSession> = match daemon
         .request(false, crate::agent_daemon::Request::Shared)
         .await
     {
         Ok(value) => serde_json::from_value(value).unwrap_or_default(),
         Err(_) => Vec::new(),
     };
+    shared.extend(service.foreground_shared());
     // Older running daemons may not implement history. Do not present an
     // unavailable history as a verified empty one.
     let history = daemon
@@ -2152,9 +2156,26 @@ async fn agent_mcp_share(
     shared: bool,
     read_output: Option<bool>,
     daemon: State<'_, AppDaemon>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    sync: State<'_, McpRemoteSync>,
 ) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     if !crate::agent_daemon::owns(&session_id) {
-        return Err("Only sessions kept in the background can be shared.".to_string());
+        let control = shared
+            && service
+                .foreground_shared()
+                .iter()
+                .any(|s| s.session_id == session_id && s.control);
+        update_foreground_share(
+            &daemon,
+            &service,
+            &sync,
+            &session_id,
+            shared,
+            read_output.unwrap_or(false),
+            control,
+        )
+        .await?;
+        return Ok(service.foreground_shared());
     }
     let value = daemon
         .request(
@@ -2176,9 +2197,26 @@ async fn agent_mcp_control(
     session_id: String,
     control: bool,
     daemon: State<'_, AppDaemon>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    sync: State<'_, McpRemoteSync>,
 ) -> Result<Vec<crate::agent_daemon::SharedSession>, String> {
     if !crate::agent_daemon::owns(&session_id) {
-        return Err("Only sessions kept in the background can be controlled.".to_string());
+        let current = service
+            .foreground_shared()
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .ok_or("Share this session before allowing control")?;
+        update_foreground_share(
+            &daemon,
+            &service,
+            &sync,
+            &session_id,
+            true,
+            current.read_output,
+            control,
+        )
+        .await?;
+        return Ok(service.foreground_shared());
     }
     let value = daemon
         .request(
@@ -2190,6 +2228,61 @@ async fn agent_mcp_control(
         )
         .await?;
     decode_mcp_shared_response(value)
+}
+
+async fn update_foreground_share(
+    daemon: &AppDaemon,
+    service: &Arc<mcp_desktop::DesktopService>,
+    sync: &McpRemoteSync,
+    session_id: &str,
+    shared: bool,
+    read: bool,
+    control: bool,
+) -> Result<(), String> {
+    let _guard = sync.0.lock().await;
+    // Local revocation never waits for a daemon that may be offline.
+    service
+        .share_foreground(session_id, false, false, false)
+        .await
+        .map_err(|e| e.message)?;
+    if !shared {
+        if let Some(connection) = daemon.attached().await {
+            connection
+                .request(agent_daemon::Request::DesktopGrants {
+                    targets: service.targets(),
+                })
+                .await?;
+        }
+        return Ok(());
+    }
+    // Negotiate the current bridge before exposing a new grant.
+    let connection = daemon.ensure().await?;
+    connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: service.targets(),
+        })
+        .await?;
+    service
+        .share_foreground(session_id, shared, read, control)
+        .await
+        .map_err(|e| e.message)?;
+    if let Err(error) = connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: service.targets(),
+        })
+        .await
+    {
+        let _ = service
+            .share_foreground(session_id, false, false, false)
+            .await;
+        let _ = connection
+            .request(agent_daemon::Request::DesktopGrants {
+                targets: service.targets(),
+            })
+            .await;
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn decode_mcp_shared_response(
@@ -4697,6 +4790,12 @@ pub fn run() {
             // Built last: it binds an MCP grant to the live session in each
             // of the registries it can share.
             let book_setting = crate::mcp_book::ConnectionBookSetting::open(&dir);
+            let agent_registry = AgentRegistry::with_local_reporter_and_mcp(
+                Arc::new(crate::agent::EventSink(app.handle().clone())),
+                &dir,
+            )
+            .map_err(std::io::Error::other)?;
+            app.manage(agent_registry);
             let desktop_service = mcp_desktop::DesktopService::new(
                 app.state::<Arc<SshRegistry>>().inner().clone(),
                 app.state::<Arc<SftpRegistry>>().inner().clone(),
@@ -4706,6 +4805,10 @@ pub fn run() {
                 app.state::<Arc<VncRegistry>>().inner().clone(),
                 app.state::<Arc<RemoteRegistry>>().inner().clone(),
                 app.state::<Arc<mcp_screen::ScreenFrames>>().inner().clone(),
+            )
+            .with_foreground_agents(
+                app.state::<Arc<AgentRegistry>>().inner().clone(),
+                Arc::new(crate::agent::EventSink(app.handle().clone())),
             )
             .with_connection_book(Arc::new(DesktopConnectionBook(app.handle().clone())));
             desktop_service.share_connection_book(book_setting.shared());
@@ -4732,12 +4835,6 @@ pub fn run() {
             });
             app.manage(Arc::new(TunnelRegistry::new()));
             app.manage(Arc::new(SensitiveClipboard::default()));
-            let agent_registry = AgentRegistry::with_local_reporter_and_mcp(
-                Arc::new(crate::agent::EventSink(app.handle().clone())),
-                &dir,
-            )
-            .map_err(std::io::Error::other)?;
-            app.manage(agent_registry);
             app.manage(crate::jev::JevService::default());
             let data_dir = app.path().app_data_dir().map_err(std::io::Error::other)?;
             app.manage(Arc::new(crate::agent_daemon::client::DaemonClient::new(

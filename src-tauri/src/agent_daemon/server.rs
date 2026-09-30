@@ -1350,6 +1350,11 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::GetMetrics { .. } => audit::Action::RemoteMetrics,
         Op::CaptureScreen { .. } => audit::Action::RemoteScreen,
         Op::ScreenInput { .. } => audit::Action::RemoteInput,
+        Op::DesktopAgent { action, .. } => match action {
+            crate::mcp_desktop::DesktopAgentAction::Prompt { .. } => audit::Action::Prompt,
+            crate::mcp_desktop::DesktopAgentAction::Read { .. } => audit::Action::Read,
+            _ => return None,
+        },
         Op::Fleet { .. } => audit::Action::RemoteFleet,
         Op::ListDirectory { .. } | Op::FindFiles { .. } => audit::Action::RemoteList,
         Op::ReadText { .. } => audit::Action::RemoteDownload,

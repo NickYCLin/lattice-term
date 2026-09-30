@@ -1671,7 +1671,7 @@ export function AgentsView({
                       </label>
                     );
                   })()}
-                  {session.detached && (
+                  {(
                     <label className="agents-mcp__toggle">
                       <span className="field__label">{t("agents.mcp.access")}</span>
                       <select
