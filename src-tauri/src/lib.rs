@@ -1515,9 +1515,14 @@ async fn agent_chat_local_history_read(
 async fn agent_chat_local_history_page(
     profiles: Vec<crate::transcript::HistoryProfile>,
     limit: usize,
+    include_archived: Option<bool>,
 ) -> Result<crate::transcript::LocalConversationPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::local_conversation_page(&profiles, limit)
+        crate::transcript::local_conversation_page(
+            &profiles,
+            limit,
+            include_archived.unwrap_or(false),
+        )
     })
     .await
     .map_err(|error| error.to_string())?

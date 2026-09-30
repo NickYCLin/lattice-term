@@ -58,24 +58,25 @@ export function useSerialNativeRead<T>(key: string, enabled: boolean, interval: 
 }
 
 export interface NativeHistoryPage { entries: LocalConversation[]; hasMore: boolean; incomplete: boolean }
-export interface NativeMessageSnapshot { messages: { role: "user" | "assistant"; text: string }[]; truncated: boolean }
+export interface NativeMessageSnapshot { messages: { role: "user" | "assistant"; text: string }[]; truncated: boolean; archived?: boolean }
 
 export function useNativeConversations(enabled: boolean) {
   const profiles = useChatAccountProfiles();
   const profileKey = JSON.stringify(profiles.map(({ id, definitionId, configDirectory }) => ({ profileId: id, definitionId, configDirectory })));
-  const [limit, setLimit] = useState(NATIVE_HISTORY_PAGE_SIZE);
-  const result = useSerialNativeRead(profileKey, enabled, NATIVE_HISTORY_REFRESH_MS,
-    () => invoke<NativeHistoryPage>("agent_chat_local_history_page", { profiles: JSON.parse(profileKey), limit }));
+  const [{ limit, includeArchived }, setOptions] = useState({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived: false });
+  const result = useSerialNativeRead(`${profileKey}:${includeArchived}`, enabled, NATIVE_HISTORY_REFRESH_MS,
+    () => invoke<NativeHistoryPage>("agent_chat_local_history_page", { profiles: JSON.parse(profileKey), limit, includeArchived }));
   const previousLimit = useRef(limit);
   useEffect(() => {
     if (previousLimit.current !== limit) { previousLimit.current = limit; result.refresh(); }
   }, [limit, result.refresh]);
   return {
-    ...result, profiles, profileKey, limit,
+    ...result, profiles, profileKey, limit, includeArchived,
+    setIncludeArchived: (includeArchived: boolean) => setOptions({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived }),
     entries: result.value?.entries ?? [],
     hasMore: result.value?.hasMore === true && limit < NATIVE_HISTORY_MAX,
     incomplete: result.value?.incomplete === true,
-    loadMore: () => setLimit(current => Math.min(NATIVE_HISTORY_MAX, current + NATIVE_HISTORY_PAGE_SIZE)),
+    loadMore: () => setOptions(current => ({ ...current, limit: Math.min(NATIVE_HISTORY_MAX, current.limit + NATIVE_HISTORY_PAGE_SIZE) })),
   };
 }
 

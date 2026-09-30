@@ -1,12 +1,13 @@
 import { agentSessionSidebarMemberNodeId } from "./agentSessionPresentation";
 import type { SessionSidebarSessionItem } from "../components/sessions/SessionProjectSidebar";
 import type { SavedAgentSession, SavedWorkspaceSession } from "./workspaceSessionPersistence";
+import { isDormantNativeHistory } from "./workspaceSessionPersistence";
 
 const SAVED_PREFIX = "saved:";
 
 /**
  * Sidebar rows for conversations kept but not started (over the concurrent
- * limit, a failed start, or an imported history), grouped by project so a
+ * limit or a failed start), grouped by project so a
  * restored folder is never shown empty. Node ids are the ones each keeps
  * once it starts, so a row stays where the user put it.
  */
@@ -19,7 +20,7 @@ export function savedAgentSidebarItems(
   const byId = new Map<string, SavedAgentSession>();
   const groups = new Map<string, SavedAgentSession[]>();
   for (const entry of pending) {
-    if (entry.kind !== "agent") continue;
+    if (entry.kind !== "agent" || isDormantNativeHistory(entry)) continue;
     const group = groups.get(entry.groupKey) ?? [];
     group.push(entry);
     groups.set(entry.groupKey, group);

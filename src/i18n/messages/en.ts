@@ -10,6 +10,9 @@ import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
   "workspace.recovery.title": "Saved projects and recovery",
+  "workspace.recovery.legacy": "Previously imported history ({count})",
+  "workspace.recovery.legacyHint": "These older shortcuts do not indicate running or resumable sessions. Open External conversations to see currently available history. Removing a shortcut does not delete the original conversation.",
+  "workspace.recovery.dismissLegacy": "Remove shortcut",
   "workspace.recovery.hint": "Projects stay here after their CLIs close. Failed restores remain available for individual retries.",
   "workspace.recovery.error": "The operation could not finish. Check storage, the project directory, CLI installation and login, then try again. Existing records have been retained.",
   "workspace.recovery.retry": "Retry this session",
@@ -110,6 +113,8 @@ export const en: Messages = {
   "history.exportEmpty": "No supported conversations found. Select the extracted conversation JSON file.",
   "history.browse": "External conversations",
   "history.synced": "Native conversations",
+  "history.includeArchived": "Show archived conversations",
+  "history.unavailable": "Read-only; original folder unavailable",
   "history.refresh": "Refresh",
   "history.readOnlySync": "Read-only sync refreshes the list every 10 seconds. Selecting a conversation does not start an assistant.",
   "history.search": "Search native conversations or projects",

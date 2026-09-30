@@ -409,7 +409,12 @@ export function missingSavedAgentSessions(
   });
 }
 
-/** Imported history stays dormant unless selected or explicitly kept in the background. */
+/** Old bulk imports are history, not evidence of a usable or running CLI. */
+export function isDormantNativeHistory(entry: SavedWorkspaceSession): boolean {
+  return entry.kind === "agent" && entry.groupKey.startsWith("native:") && !entry.detached;
+}
+
+/** Imported history requires an explicit continuation, even if previously selected. */
 export function planAgentRestoration(
   saved: readonly SavedAgentSession[],
   active: SavedActiveSession,
@@ -420,7 +425,7 @@ export function planAgentRestoration(
   const automatic: SavedAgentSession[] = [];
   const deferred: SavedAgentSession[] = [];
   for (const entry of saved) {
-    if (entry.groupKey.startsWith("native:") && !entry.detached && !selected(entry)) deferred.push(entry);
+    if (isDormantNativeHistory(entry)) deferred.push(entry);
     else automatic.push(entry);
   }
   // The previously selected conversation must not lose its slot to unrelated tabs.

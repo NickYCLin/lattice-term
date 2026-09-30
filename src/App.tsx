@@ -105,7 +105,9 @@ import { anyAgentSessionJustCompleted } from "./app/sessionStatus";
 import { useMobileViewport } from "./app/useMobileViewport";
 import { PlusIcon, ScreenShareIcon } from "./components/icons";
 import { useModalFocus } from "./components/overlays/modalFocus";
-import { LocalConversationDialog } from "./components/chat/LocalConversationDialog";
+const LocalConversationDialog = lazy(() =>
+  import("./components/chat/LocalConversationDialog").then(module => ({ default: module.LocalConversationDialog })),
+);
 import "./styles/index.css";
 import "./styles/local-history.css";
 

@@ -1005,6 +1005,49 @@ fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
     None
 }
 
+/// Hide metadata-only Codex shells, but keep uncertain/large records rather
+/// than mistaking a bounded read or a temporary file error for lost history.
+fn codex_history_may_have_user_input(path: &Path) -> bool {
+    let Some(file) = open_regular_transcript(path) else {
+        return true;
+    };
+    if file.metadata().map_or(true, |meta| meta.len() > 256 * 1024) {
+        return true;
+    }
+    let mut reader = BufReader::new(file).take(256 * 1024);
+    let mut line = Vec::new();
+    for _ in 0..64 {
+        match read_bounded_line(&mut reader, &mut line, MAX_CODEX_SESSION_META_BYTES) {
+            Ok(None) => return false,
+            Ok(Some(true)) => {}
+            _ => return true,
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            return true;
+        };
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(Value::as_str) == Some("user_message") {
+            return true;
+        }
+        if payload.get("role").and_then(Value::as_str) == Some("user") {
+            let content = &payload["content"];
+            let text = content_text(content);
+            if !visible_user_text(&text).is_empty()
+                || content.as_array().is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| matches!(item["type"].as_str(), Some("input_image" | "image")))
+                })
+            {
+                return true;
+            }
+        }
+    }
+    true
+}
+
 /// Runtime context arrives in user-role records too. It is not a conversation
 /// title or a message typed by the person. Keep actual text after a context block.
 fn visible_user_text(mut text: &str) -> &str {
@@ -1102,6 +1145,9 @@ fn scan_local_conversations(
                 _ => None,
             };
             let Some((id, cwd)) = candidate else { continue };
+            if kind == TranscriptKind::Codex && !codex_history_may_have_user_input(&path) {
+                continue;
+            }
             if id.len() > 128
                 || id.is_empty()
                 || id.starts_with('-')
@@ -1244,9 +1290,11 @@ pub fn list_local_conversations_with_options(
 pub fn local_conversation_page(
     profiles: &[HistoryProfile],
     limit: usize,
+    include_archived: bool,
 ) -> Result<LocalConversationPage, String> {
     let limit = limit.clamp(1, HISTORY_MAX_ENTRIES);
-    let (mut entries, incomplete) = collect_local_conversations(profiles, false, true, limit + 1)?;
+    let (mut entries, incomplete) =
+        collect_local_conversations(profiles, false, include_archived, limit + 1)?;
     let has_more = entries.len() > limit;
     entries.truncate(limit);
     Ok(LocalConversationPage {
@@ -1452,7 +1500,13 @@ pub fn read_local_conversation_snapshot(
         _ => None,
     }
     .ok_or("The local conversation is no longer available.")?;
-    read_conversation_snapshot(&path, kind)
+    let mut snapshot = read_conversation_snapshot(&path, kind)?;
+    snapshot.archived = Some(
+        kind == TranscriptKind::Codex
+            && history_root_with_archive(kind, profile, true)
+                .is_some_and(|archive| path.starts_with(archive)),
+    );
+    Ok(snapshot)
 }
 
 /// Reads only the exact native conversation owned by this running session.
@@ -1509,6 +1563,8 @@ pub(crate) fn codex_session_provider(
 pub struct LocalConversationSnapshot {
     pub messages: Vec<LocalConversationMessage>,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
 }
 
 fn read_conversation_messages(
@@ -1576,6 +1632,7 @@ fn read_conversation_snapshot(
     Ok(LocalConversationSnapshot {
         messages,
         truncated: truncated || incomplete,
+        archived: None,
     })
 }
 
@@ -1943,7 +2000,7 @@ mod tests {
             .unwrap();
     }
 
-    fn write_codex_rollout(
+    pub(super) fn write_codex_rollout(
         path: &Path,
         id: &str,
         cwd: &Path,

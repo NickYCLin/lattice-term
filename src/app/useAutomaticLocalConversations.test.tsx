@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installFakeDom } from "./testFixtures/hookDom";
 import { fakeAgentApi } from "./testFixtures/agentApis";
 import { AUTO_LOCAL_CONVERSATIONS_KEY, useAutomaticLocalConversations } from "./useAutomaticLocalConversations";
-import { useSerialNativeRead, NATIVE_HISTORY_REFRESH_MS } from "./useNativeConversations";
+import { useNativeConversations, useSerialNativeRead, NATIVE_HISTORY_REFRESH_MS } from "./useNativeConversations";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -30,9 +30,32 @@ it("refreshes new and renamed/archived records without executing legacy auto-ope
     await act(async () => { await vi.advanceTimersByTimeAsync(NATIVE_HISTORY_REFRESH_MS); });
     expect(api.entries[0]).toMatchObject({ title: "Renamed", archived: true });
     await act(async () => { api.loadMore(); });
-    expect(invoke).toHaveBeenLastCalledWith("agent_chat_local_history_page", { profiles: [], limit: 200 });
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_local_history_page", { profiles: [], limit: 200, includeArchived: false });
     expect(queue).not.toHaveBeenCalled(); expect(retry).not.toHaveBeenCalled(); expect(agents.launch).not.toHaveBeenCalled();
     expect(invoke.mock.calls.every(([name]) => name === "agent_chat_local_history_page")).toBe(true);
+  } finally { await act(async () => { root.unmount(); }); }
+});
+
+it("hides archives by default and resets pagination without accepting a stale archive reply", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let archiveReply!: (value: unknown) => void;
+  invoke.mockImplementation((_command, args) => args.includeArchived
+    ? new Promise(done => { archiveReply = done; })
+    : Promise.resolve({ entries: [], hasMore: true, incomplete: false }));
+  let api!: ReturnType<typeof useNativeConversations>;
+  function Probe() { api = useNativeConversations(true); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    expect(api.includeArchived).toBe(false);
+    await act(async () => { api.loadMore(); });
+    expect(api.limit).toBe(200);
+    await act(async () => { api.setIncludeArchived(true); });
+    expect(api.limit).toBe(100);
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_local_history_page", { profiles: [], limit: 100, includeArchived: true });
+    await act(async () => { api.setIncludeArchived(false); });
+    await act(async () => { archiveReply({ entries: [{ archived: true }], hasMore: false, incomplete: false }); });
+    expect(api.entries).toEqual([]);
+    expect(api.includeArchived).toBe(false);
   } finally { await act(async () => { root.unmount(); }); }
 });
 

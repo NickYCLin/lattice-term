@@ -24,3 +24,10 @@ it("does not cross accounts or replace a running turn or locally continued rich 
   const continued = { ...old, items: [...old.items, { type: "text" as const, id: "local", text: "local answer" }] };
   expect(refreshNativeHistoryMirror(continued, entry, snapshot)).toBe(continued);
 });
+it("tracks archive changes from the exact snapshot even when archives are hidden from the list", () => {
+  const old = mirror();
+  const archived = refreshNativeHistoryMirror(old, entry, { messages: [], truncated: false, archived: true });
+  expect(archived.nativeHistoryArchived).toBe(true);
+  const restored = refreshNativeHistoryMirror(archived, { ...entry, archived: true }, { messages: [], truncated: false, archived: false });
+  expect(restored.nativeHistoryArchived).toBe(false);
+});

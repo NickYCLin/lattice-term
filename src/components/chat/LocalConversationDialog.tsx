@@ -35,8 +35,11 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   const [selectedArchive, setSelectedArchive] = useState<ArchivedConversation | null>(null);
   const [selectedStoredId, setSelectedStoredId] = useState<string | null>(null);
   const [selection, setSelected] = useState<Conversation | null>(initialSelection);
-  const selected = selection && (entries.find(entry => nativeConversationKey(entry) === nativeConversationKey(selection)) ?? selection);
-  const reader = useNativeConversationMessages(selected, history.profileKey);
+  const sourceSelection = selection && (entries.find(entry => nativeConversationKey(entry) === nativeConversationKey(selection)) ?? selection);
+  const reader = useNativeConversationMessages(sourceSelection, history.profileKey);
+  const selected = sourceSelection && reader.value?.archived !== undefined
+    ? { ...sourceSelection, archived: reader.value.archived, resumable: sourceSelection.resumable && !reader.value.archived }
+    : sourceSelection;
   const messages = reader.value?.messages ?? [];
   const loading = history.busy && !history.value;
   const [busy, setBusy] = useState(false);
@@ -161,6 +164,8 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
         <p className="dialog__body">{t("history.intro")}</p>
         <p className="dialog__body">{t("history.readOnlySync")}</p>
         <button type="button" className="button button--ghost" disabled={history.busy} onClick={history.refresh}>{t("history.refresh")}</button>
+        <label><input type="checkbox" checked={history.includeArchived} disabled={launching}
+          onChange={event => history.setIncludeArchived(event.target.checked)} /> {t("history.includeArchived")}</label>
         {history.incomplete && <p className="dialog__body" role="status">{t("history.incomplete")}</p>}
         {history.error && <p className="dialog__body" role="alert">{t("history.stale")} {history.error}</p>}
         <label className="dialog__body">{t("history.importExport")}{" "}

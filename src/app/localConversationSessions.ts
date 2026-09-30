@@ -70,7 +70,7 @@ export function localConversationLaunchIntents(
 ): SavedAgentSession[] {
   const result: SavedAgentSession[] = [];
   for (const entry of entries) {
-    if (entry.archived) continue;
+    if (entry.archived || !entry.resumable) continue;
     const proxy = isProxyConversation(entry) ? selectedProxy ?? nativeConversationProxy(entry, proxies) : undefined;
     // Old random provider names contain no routing information. Let the user
     // choose rather than sending history to a guessed endpoint.

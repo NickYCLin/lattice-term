@@ -5,7 +5,7 @@ import type { SavedAgentSession } from "./workspaceSessionPersistence";
 
 function saved(overrides: Partial<SavedAgentSession>): SavedAgentSession {
   return {
-    kind: "agent", groupKey: "native:codex:default:a", groupLabel: "修登入頁",
+    kind: "agent", groupKey: "project:a", groupLabel: "修登入頁",
     definitionId: "codex", label: "Codex", executable: "codex", launchArguments: [],
     workingDirectory: "/home/me/work", resumeSessionId: "a",
     ...overrides,
@@ -13,9 +13,19 @@ function saved(overrides: Partial<SavedAgentSession>): SavedAgentSession {
 }
 
 describe("savedAgentSidebarItems", () => {
+  it("keeps bulk-imported history out of the sidebar without changing saved records", () => {
+    const legacy = Array.from({ length: 300 }, (_, index) => saved({ groupKey: `native:codex:default:${index}` }));
+    const background = saved({ groupKey: "native:codex:default:background", detached: true });
+    const pending = [...legacy, background, saved({})];
+    const before = JSON.stringify(pending);
+    const result = savedAgentSidebarItems(pending, path => path, () => "");
+    expect(result.byId.size).toBe(2);
+    expect([...result.byId.values()]).toContain(background);
+    expect(JSON.stringify(pending)).toBe(before);
+  });
   it("puts unstarted conversations in their project folder", () => {
     const first = saved({});
-    const second = saved({ groupKey: "native:claude:default:b", groupLabel: "", definitionId: "claude", label: "Claude Code", workingDirectory: "/home/me/tools", resumeSessionId: "b" });
+    const second = saved({ groupKey: "project:b", groupLabel: "", definitionId: "claude", label: "Claude Code", workingDirectory: "/home/me/tools", resumeSessionId: "b" });
     const { byProject, byId } = savedAgentSidebarItems(
       [first, second, { kind: "ssh", profileId: "p" } as never],
       (path) => `local:${path}`,

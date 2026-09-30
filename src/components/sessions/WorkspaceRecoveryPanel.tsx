@@ -4,6 +4,7 @@ import { useI18n } from "../../i18n/context";
 import { projectDirectoryKey } from "../../app/localProjects";
 import {
   readWorkspaceRecoverySnapshots,
+  isDormantNativeHistory,
   type SavedAgentSession,
   type SavedWorkspaceSession,
   type WorkspaceSessionSnapshot,
@@ -28,7 +29,7 @@ export interface WorkspaceRecoveryProps {
 
 export function WorkspaceRecoveryPanel({
   localProjectDirectories = [], projectStorageError,
-  onRemoveLocalProject, onRetryWorkspaceSession, onRecoverWorkspaceSnapshot,
+  onRemoveLocalProject, onRetryWorkspaceSession, onRecoverWorkspaceSnapshot, onDiscardWorkspaceSession,
   retryingWorkspace, workspaceRecoveryError, pending, occupied, ready,
 }: WorkspaceRecoveryProps & {
   pending: readonly SavedWorkspaceSession[];
@@ -42,7 +43,8 @@ export function WorkspaceRecoveryPanel({
   const [error, setError] = useState(false);
   const [imported, setImported] = useState(false);
   const saved = copies.find(copy => copy.index === selected)?.snapshot;
-  const agents = pending.filter((entry): entry is SavedAgentSession => entry.kind === "agent");
+  const legacy = pending.filter((entry): entry is SavedAgentSession => isDormantNativeHistory(entry));
+  const agents = pending.filter((entry): entry is SavedAgentSession => entry.kind === "agent" && !isDormantNativeHistory(entry));
   const preview = saved?.sessions.filter((entry): entry is SavedAgentSession => entry.kind === "agent") ?? [];
   return <details className="panel workspace-recovery">
     <summary>{t("workspace.recovery.title")}{agents.length > 0 ? ` (${agents.length})` : ""}</summary>
@@ -55,6 +57,15 @@ export function WorkspaceRecoveryPanel({
       <button className="button button--secondary button--sm" disabled={!ready || retryingWorkspace || !onRetryWorkspaceSession}
         onClick={() => void onRetryWorkspaceSession?.(entry)}>{t("workspace.recovery.retry")}</button>
     </div>)}
+    {legacy.length > 0 && <details>
+      <summary>{t("workspace.recovery.legacy", { count: legacy.length })}</summary>
+      <p className="field__hint">{t("workspace.recovery.legacyHint")}</p>
+      {legacy.map((entry, index) => <div className="workspace-recovery__row" key={`${entry.groupKey}:${index}`}>
+        <span>{entry.groupLabel || entry.label}</span>
+        <button className="button button--secondary button--sm" disabled={!ready || retryingWorkspace || !onDiscardWorkspaceSession}
+          onClick={() => onDiscardWorkspaceSession?.(entry)}>{t("workspace.recovery.dismissLegacy")}</button>
+      </div>)}
+    </details>}
     <h3>{t("workspace.projects.saved")}</h3>
     {localProjectDirectories.map(path => {
       const active = occupied.some(item => projectDirectoryKey(item) === projectDirectoryKey(path));

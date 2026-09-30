@@ -14,6 +14,7 @@ export function NativeConversationList() {
       <button type="button" className="button button--ghost button--sm" disabled={history.busy} onClick={history.refresh}>{t("history.refresh")}</button>
     </div>
     <p className="field__hint">{t("history.readOnlySync")}</p>
+    <label><input type="checkbox" checked={history.includeArchived} onChange={event => history.setIncludeArchived(event.target.checked)} /> {t("history.includeArchived")}</label>
     <input className="input" aria-label={t("history.search")} placeholder={t("history.search")} value={query} onChange={event => setQuery(event.target.value)} />
     {history.error && <p role="alert">{t("history.stale")} {history.error}</p>}
     {history.incomplete && <p role="status">{t("history.incomplete")}</p>}
@@ -21,7 +22,7 @@ export function NativeConversationList() {
     <div className="native-history__entries">
       {entries.map(entry => <button type="button" className="local-history__entry" key={nativeConversationKey(entry)} onClick={() => history.open(entry)}>
         <strong>{entry.title}</strong>
-        <small>{entry.definitionId} · {entry.profileId ?? t("history.defaultAccount")} · {entry.archived ? t("history.nativeArchived") : t("history.stateUnknown")}</small>
+        <small>{entry.definitionId} · {entry.profileId ?? t("history.defaultAccount")} · {entry.archived ? t("history.nativeArchived") : !entry.resumable ? t("history.unavailable") : t("history.stateUnknown")}</small>
         <small title={entry.workingDirectory}>{entry.workingDirectory}</small>
       </button>)}
     </div>

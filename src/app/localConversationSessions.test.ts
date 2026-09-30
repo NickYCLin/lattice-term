@@ -38,6 +38,7 @@ it("deduplicates native IDs per account, preserves unreadable directories and ro
 it("does not substitute the default account when a profile is missing", () => {
   expect(localConversationLaunchIntents([{ ...entry, profileId: "removed" }], [], [fakeDefinition()], [], [])).toEqual([]);
   expect(localConversationLaunchIntents([{ ...entry, archived: true }], [], [fakeDefinition()], [], [])).toEqual([]);
+  expect(localConversationLaunchIntents([{ ...entry, resumable: false }], [], [fakeDefinition()], [], [])).toEqual([]);
 });
 
 it("allows an explicit retry after exit without automatically relaunching failed sessions", () => {

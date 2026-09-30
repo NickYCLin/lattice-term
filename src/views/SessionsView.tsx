@@ -45,6 +45,7 @@ import type { SftpApi } from "../app/useSftpSessions";
 import type { ThemeId } from "../app/themes";
 import {
   savedAgentWorkingDirectories,
+  isDormantNativeHistory,
   type SavedAgentSession,
   type SavedWorkspaceSession,
 } from "../app/workspaceSessionPersistence";
@@ -1659,7 +1660,7 @@ export function SessionsView({
     const key = localProjectId(project.workingDirectory);
     return unrestoredWorkspaceSessions.filter(
       (entry): entry is SavedAgentSession =>
-        entry.kind === "agent" && localProjectId(entry.workingDirectory) === key,
+        entry.kind === "agent" && !isDormantNativeHistory(entry) && localProjectId(entry.workingDirectory) === key,
     );
   }
 

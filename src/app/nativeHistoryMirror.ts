@@ -21,8 +21,9 @@ export function refreshNativeHistoryMirror(thread: ChatThread, entry: LocalConve
     const old = thread.items[index];
     return old.type === item.type && "text" in old && old.text === item.text;
   });
-  if (sameText && thread.title === entry.title && Boolean(thread.nativeHistoryArchived) === Boolean(entry.archived) &&
+  const archived = snapshot.archived ?? entry.archived === true;
+  if (sameText && thread.title === entry.title && Boolean(thread.nativeHistoryArchived) === archived &&
     Boolean(thread.historyTruncated) === snapshot.truncated) return thread;
   return { ...thread, items: sameText ? thread.items : items, title: entry.title,
-    nativeHistorySource: true, nativeHistoryArchived: entry.archived === true, historyTruncated: snapshot.truncated };
+    nativeHistorySource: true, nativeHistoryArchived: archived, historyTruncated: snapshot.truncated };
 }

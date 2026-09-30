@@ -51,7 +51,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace session persistence", () => {
-  it("keeps a legacy bulk import dormant across reloads and resumes only the selected conversation", () => {
+  it("keeps a legacy bulk import dormant across reloads including an obsolete selected entry", () => {
     const live = Array.from({ length: 300 }, (_, index) => agent({
       sessionId: `s-${index}`, groupId: `native:codex:default:${index}`,
       capturedSessionId: `conversation-${index}`,
@@ -61,10 +61,10 @@ describe("workspace session persistence", () => {
     saveWorkspaceSessionSnapshot(target, snapshot);
     const saved = loadWorkspaceSessionSnapshot(target)!;
     const plan = planAgentRestoration(missingSavedAgentSessions(saved.sessions, []), saved.active);
-    expect(plan.automatic.map(entry => entry.resumeSessionId)).toEqual(["conversation-299"]);
-    expect(plan.deferred).toHaveLength(299);
+    expect(plan.automatic).toEqual([]);
+    expect(plan.deferred).toHaveLength(300);
     const persisted = preserveUnrestoredWorkspaceSessions(
-      snapshotLiveWorkspaceSessions([live[299]], [], "s-299"), plan.deferred, saved.active,
+      snapshotLiveWorkspaceSessions([], [], null), plan.deferred, saved.active,
     );
     saveWorkspaceSessionSnapshot(target, persisted);
     const reloaded = loadWorkspaceSessionSnapshot(target)!;
@@ -78,8 +78,8 @@ describe("workspace session persistence", () => {
     const otherAccount = { ...selected, sessionId: "other", profileConfigPath: "C:\\other" };
     const snapshot = snapshotLiveWorkspaceSessions([agent(), background, otherAccount, selected], [], "selected");
     const plan = planAgentRestoration(missingSavedAgentSessions(snapshot.sessions, []), snapshot.active);
-    expect(plan.automatic.map(entry => entry.lastSessionId)).toEqual(["selected", "agent-live-1", "background"]);
-    expect(plan.deferred.map(entry => entry.profileConfigPath)).toEqual(["C:\\other"]);
+    expect(plan.automatic.map(entry => entry.lastSessionId)).toEqual(["agent-live-1", "background"]);
+    expect(plan.deferred.map(entry => entry.profileConfigPath)).toEqual(["C:\\other", "C:\\account"]);
   });
 
   it("previews healthy backups and merges missing tabs without replacing live work", () => {
