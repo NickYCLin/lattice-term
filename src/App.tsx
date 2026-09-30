@@ -82,6 +82,7 @@ import {
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
   missingSavedAgentSessions,
+  planAgentRestoration,
   recoverLocalWorkspaceSessions,
   savedAgentWorkingDirectories,
   preserveUnrestoredWorkspaceSessions,
@@ -497,7 +498,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
 
   const automaticConversations = useAutomaticLocalConversations(
     agents, sessionRestoreComplete, unrestoredWorkspaceSessions,
-    queueLocalConversations, saved => retryWorkspaceSession(saved, false),
+    queueLocalConversations,
   );
 
   function removeLocalProject(path: string) {
@@ -552,7 +553,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         // entries after a machine restart or a partially restored backend.
         if (snapshot) {
           const renamedGroups = new Set<string>();
-          for (const saved of missingSavedAgentSessions(snapshot.sessions, agents.sessions)) {
+          const plan = planAgentRestoration(
+            missingSavedAgentSessions(snapshot.sessions, agents.sessions), snapshot.active,
+          );
+          unrestored.push(...plan.deferred);
+          for (const saved of plan.automatic) {
             try {
               const freshArguments = agentFreshLaunchArguments(saved);
               const restoreArguments = agentRestoreArguments(saved);

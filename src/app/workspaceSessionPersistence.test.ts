@@ -5,6 +5,7 @@ import {
   agentRestoreArguments,
   loadWorkspaceSessionSnapshot,
   missingSavedAgentSessions,
+  planAgentRestoration,
   recoverLocalWorkspaceSessions,
   readWorkspaceRecoverySnapshots,
   preserveUnrestoredWorkspaceSessions,
@@ -50,6 +51,37 @@ function agent(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace session persistence", () => {
+  it("keeps a legacy bulk import dormant across reloads and resumes only the selected conversation", () => {
+    const live = Array.from({ length: 300 }, (_, index) => agent({
+      sessionId: `s-${index}`, groupId: `native:codex:default:${index}`,
+      capturedSessionId: `conversation-${index}`,
+    }));
+    const snapshot = snapshotLiveWorkspaceSessions(live, [], "s-299");
+    const target = storage();
+    saveWorkspaceSessionSnapshot(target, snapshot);
+    const saved = loadWorkspaceSessionSnapshot(target)!;
+    const plan = planAgentRestoration(missingSavedAgentSessions(saved.sessions, []), saved.active);
+    expect(plan.automatic.map(entry => entry.resumeSessionId)).toEqual(["conversation-299"]);
+    expect(plan.deferred).toHaveLength(299);
+    const persisted = preserveUnrestoredWorkspaceSessions(
+      snapshotLiveWorkspaceSessions([live[299]], [], "s-299"), plan.deferred, saved.active,
+    );
+    saveWorkspaceSessionSnapshot(target, persisted);
+    const reloaded = loadWorkspaceSessionSnapshot(target)!;
+    expect(reloaded.sessions).toHaveLength(300);
+    expect(planAgentRestoration(missingSavedAgentSessions(reloaded.sessions, [live[299]]), reloaded.active).automatic).toEqual([]);
+  });
+
+  it("preserves explicit background and ordinary tab restoration while respecting account identity", () => {
+    const selected = agent({ groupId: "native:codex:account:one", profileConfigPath: "C:\\account", sessionId: "selected" });
+    const background = agent({ sessionId: "background", groupId: "native:codex:default:background", detached: true });
+    const otherAccount = { ...selected, sessionId: "other", profileConfigPath: "C:\\other" };
+    const snapshot = snapshotLiveWorkspaceSessions([agent(), background, otherAccount, selected], [], "selected");
+    const plan = planAgentRestoration(missingSavedAgentSessions(snapshot.sessions, []), snapshot.active);
+    expect(plan.automatic.map(entry => entry.lastSessionId)).toEqual(["selected", "agent-live-1", "background"]);
+    expect(plan.deferred.map(entry => entry.profileConfigPath)).toEqual(["C:\\other"]);
+  });
+
   it("previews healthy backups and merges missing tabs without replacing live work", () => {
     const target = storage();
     const first = agent();

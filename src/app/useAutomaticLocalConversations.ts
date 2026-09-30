@@ -13,7 +13,6 @@ export function useAutomaticLocalConversations(
   ready: boolean,
   pending: readonly SavedWorkspaceSession[],
   queue: (entries: readonly SavedAgentSession[]) => void,
-  retry: (entry: SavedAgentSession) => Promise<unknown>,
 ) {
   const [enabled, setEnabled] = useState(() => {
     try { return window.localStorage.getItem(AUTO_LOCAL_CONVERSATIONS_KEY) === "true"; }
@@ -22,8 +21,8 @@ export function useAutomaticLocalConversations(
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsProxySelection, setNeedsProxySelection] = useState(0);
-  const latest = useRef({ agents, pending, queue, retry });
-  latest.current = { agents, pending, queue, retry };
+  const latest = useRef({ agents, pending, queue });
+  latest.current = { agents, pending, queue };
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const running = useRef(false);
@@ -52,13 +51,9 @@ export function useAutomaticLocalConversations(
         setNeedsProxySelection(entries.filter(entry => isProxyConversation(entry) && !nativeConversationProxy(entry, proxies)).length);
         const intents = localConversationLaunchIntents(entries, profiles,
           state.agents.catalog, state.agents.sessions, state.pending, proxies);
-        // Store every intent before starting any process. Capacity, missing
-        // paths, and CLI failures leave the item available in Recovery.
+        // History is a list of resumable conversations, not a request to
+        // spawn every CLI. Keep all entries available for an explicit click.
         state.queue(intents);
-        for (const intent of intents) {
-          if (!enabledRef.current || !mounted.current) break;
-          await latest.current.retry(intent);
-        }
       } catch (reason) {
         if (mounted.current) setError(reason instanceof Error ? reason.message : String(reason));
       } finally {

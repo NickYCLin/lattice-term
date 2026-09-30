@@ -409,6 +409,25 @@ export function missingSavedAgentSessions(
   });
 }
 
+/** Imported history stays dormant unless selected or explicitly kept in the background. */
+export function planAgentRestoration(
+  saved: readonly SavedAgentSession[],
+  active: SavedActiveSession,
+): { automatic: SavedAgentSession[]; deferred: SavedAgentSession[] } {
+  const selected = (entry: SavedAgentSession) => active?.kind === "agent" &&
+    active.groupKey === entry.groupKey && active.definitionId === entry.definitionId &&
+    (active.profileConfigPath ?? null) === (entry.profileConfigPath ?? null);
+  const automatic: SavedAgentSession[] = [];
+  const deferred: SavedAgentSession[] = [];
+  for (const entry of saved) {
+    if (entry.groupKey.startsWith("native:") && !entry.detached && !selected(entry)) deferred.push(entry);
+    else automatic.push(entry);
+  }
+  // The previously selected conversation must not lose its slot to unrelated tabs.
+  automatic.sort((a, b) => Number(selected(b)) - Number(selected(a)));
+  return { automatic, deferred };
+}
+
 /** Merge a reviewed local backup without executing or dropping distinct tabs. */
 export function recoverLocalWorkspaceSessions(
   pending: readonly SavedWorkspaceSession[],
