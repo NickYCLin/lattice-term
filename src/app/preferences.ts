@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { defaultLocale, localeCatalog, type Locale } from "../i18n/catalog";
+import { detectSystemLocale } from "../i18n/systemLocale";
 import {
   normalizeNotificationSound,
   normalizeNotificationVolume,
@@ -87,7 +88,7 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     theme: normalizeTheme(stored.theme),
     locale: knownLocales.has(String(stored.locale))
       ? (stored.locale as Locale)
-      : defaultPreferences.locale,
+      : detectSystemLocale(),
     density: stored.density === "compact" ? "compact" : "comfortable",
     motion: stored.motion === "full" || stored.motion === "reduced" ? stored.motion : "system",
     vaultAutoLock: knownVaultAutoLockChoices.has(String(stored.vaultAutoLock))
@@ -112,13 +113,13 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
   };
 }
 
-function readStored(): Preferences {
+export function readStoredPreferences(): Preferences {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultPreferences;
+    if (!raw) return sanitizePreferences({});
     return sanitizePreferences(JSON.parse(raw) as Partial<Preferences>);
   } catch {
-    return defaultPreferences;
+    return sanitizePreferences({});
   }
 }
 
@@ -130,7 +131,7 @@ export interface PreferencesValue {
 }
 
 export function usePreferences(): PreferencesValue {
-  const [preferences, setPreferences] = useState<Preferences>(readStored);
+  const [preferences, setPreferences] = useState<Preferences>(readStoredPreferences);
   const [systemTheme, setSystemTheme] = useState<ThemeId>(() =>
     resolveTheme("system"),
   );
@@ -167,7 +168,7 @@ export function usePreferences(): PreferencesValue {
     root.dataset.motion = preferences.motion;
     root.lang =
       localeCatalog.find((entry) => entry.id === preferences.locale)?.tag ??
-      "zh-Hant-TW";
+      "en";
   }, [activeTheme, preferences.density, preferences.motion, preferences.locale]);
 
   return useMemo(

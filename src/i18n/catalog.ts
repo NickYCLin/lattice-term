@@ -3,7 +3,7 @@ import { en } from "./messages/en";
 import { zhTW, type Messages } from "./messages/zh-TW";
 
 export type Locale = "zh-TW" | "en" | "zh-CN" | "ja" | "ko" | "es" | "fr" | "de" | "pt-BR";
-export const defaultLocale: Locale = "zh-TW";
+export const defaultLocale: Locale = "en";
 export const localeCatalog: { id: Locale; label: string; englishLabel: string; shortLabel: string; tag: string }[] = [
   { id: "zh-TW", englishLabel: "Traditional Chinese", shortLabel: "繁", label: "繁體中文", tag: "zh-Hant-TW" },
   { id: "en", englishLabel: "English", shortLabel: "EN", label: "English", tag: "en" },
@@ -32,7 +32,7 @@ export async function loadCatalogue(locale: Locale): Promise<Messages> {
   const loading = pending.get(locale);
   if (loading) return loading;
   const loader = loaders[locale as keyof typeof loaders];
-  if (!loader) return zhTW;
+  if (!loader) return en;
   const request = loader().then(({ messages }) => {
     catalogues[locale] = messages;
     return messages;

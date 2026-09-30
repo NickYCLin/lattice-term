@@ -1,5 +1,50 @@
-import { describe, expect, it } from "vitest";
-import { defaultPreferences, sanitizePreferences } from "./preferences";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { defaultPreferences, readStoredPreferences, sanitizePreferences } from "./preferences";
+
+afterEach(() => { vi.unstubAllGlobals(); });
+
+describe("stored language preference", () => {
+  function setup(languages: string[], stored: string | null = null) {
+    vi.stubGlobal("navigator", { languages, language: languages[0] });
+    vi.stubGlobal("localStorage", { getItem: () => stored });
+  }
+
+  it.each([["en-US", "en"], ["zh-TW", "zh-TW"], ["zh-CN", "zh-CN"], ["nl-NL", "en"]])(
+    "starts a fresh profile in %s as %s",
+    (tag, expected) => {
+      setup([tag]);
+      expect(readStoredPreferences().locale).toBe(expected);
+    },
+  );
+
+  it("preserves a saved choice even when the system language differs", () => {
+    setup(["en-US"], JSON.stringify({ locale: "zh-TW" }));
+    expect(readStoredPreferences().locale).toBe("zh-TW");
+    setup(["zh-TW"], JSON.stringify({ locale: "en" }));
+    expect(readStoredPreferences().locale).toBe("en");
+  });
+
+  it.each(['{"theme":"light"}', '{"locale":"unknown"}', "null", "{broken"])(
+    "uses the system language for missing or invalid settings: %s",
+    (stored) => {
+      setup(["ja-JP"], stored);
+      expect(readStoredPreferences().locale).toBe("ja");
+    },
+  );
+
+  it("still chooses a language when storage is unavailable", () => {
+    setup(["fr-FR"]);
+    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); } });
+    expect(readStoredPreferences().locale).toBe("fr");
+  });
+
+  it("supports WebViews exposing only a single language and environments without a navigator", () => {
+    vi.stubGlobal("navigator", { language: "zh-HK" });
+    expect(sanitizePreferences({}).locale).toBe("zh-TW");
+    vi.stubGlobal("navigator", undefined);
+    expect(sanitizePreferences({}).locale).toBe("en");
+  });
+});
 
 describe("sanitizePreferences", () => {
   it.each([

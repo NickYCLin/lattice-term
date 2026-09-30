@@ -131,6 +131,11 @@ branch; external-host and installed-app acceptance remain pending, and remote Fl
 
 ## Documentation and contributions
 
+On first launch, the interface follows the system/browser language preferences
+reported by the WebView. Unsupported languages fall back to English. Chinese
+locales use Traditional or Simplified Chinese as appropriate. A language selected
+in Settings takes precedence on subsequent launches.
+
 The language links at the top cover all nine interface languages. The Traditional Chinese and English
 READMEs provide fuller guides; the other editions offer a concise introduction, download instructions,
 quick start, and limitations.

@@ -1,7 +1,7 @@
 /**
  * Interface localisation.
  *
- * Traditional Chinese is the default and the source of truth for the key set;
+ * Traditional Chinese is the source of truth for the key set;
  * every other catalogue has to satisfy the same `Messages` type, so a missing
  * translation is a build error instead of a blank label.
  */
@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { catalogues, loadCatalogue, localeCatalog, type Locale } from "./catalog";
 import { I18nContext, type I18nValue, type TranslateValues } from "./context";
 import { zhTW, type MessageKey } from "./messages/zh-TW";
+import { en } from "./messages/en";
 
 /** Replaces `{name}` placeholders; unknown placeholders are left untouched. */
 function interpolate(template: string, values?: TranslateValues): string {
@@ -27,7 +28,7 @@ export function I18nProvider({
   locale: Locale;
   children: ReactNode;
 }) {
-  const [loaded, setLoaded] = useState(() => ({ locale, catalogue: catalogues[locale] ?? zhTW }));
+  const [loaded, setLoaded] = useState(() => ({ locale, catalogue: catalogues[locale] ?? en }));
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -40,7 +41,7 @@ export function I18nProvider({
   const catalogue = catalogues[locale] ?? loaded.catalogue;
   const t = useCallback(
     (key: MessageKey, values?: TranslateValues) => {
-      return interpolate(catalogue[key] ?? zhTW[key] ?? key, values);
+      return interpolate(catalogue[key] ?? en[key] ?? zhTW[key] ?? key, values);
     },
     [catalogue],
   );
@@ -49,7 +50,7 @@ export function I18nProvider({
     () => ({
       locale,
       t,
-      tag: localeCatalog.find((entry) => entry.id === locale)?.tag ?? "zh-Hant-TW",
+      tag: localeCatalog.find((entry) => entry.id === locale)?.tag ?? "en",
     }),
     [locale, t],
   );
