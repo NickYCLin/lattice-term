@@ -250,7 +250,7 @@ try {
             "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
             "remote_host::", "remote::", "remote_commands::", "remote_chat_host::", "notification_sound::",
             "durable_file::", "backup::", "credentials::", "vault::",
-            "npm_shim", "git_changes::", "chat_images::", "mcp_inventory::")) {
+            "npm_shim", "cliproxy::catalog::", "git_changes::", "chat_images::", "mcp_inventory::")) {
         $check = [ordered]@{ filter = $filter; passed = $false }
         $report.tests += $check
         $all = @(Get-TestNames (Invoke-NativeChecked $testCopy @($filter, "--list", "--format", "terse")))

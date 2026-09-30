@@ -527,13 +527,15 @@ async fn read_event(
 
 fn spawn_engine() -> Result<(Child, BoxedSidecarStdin, tokio::process::ChildStdout), String> {
     let path = engine_path()?;
-    let mut child = Command::new(path)
+    let mut command = Command::new(path);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| error.to_string())?;
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; protocol uses pipes.
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
     let stdin = child
         .stdin
         .take()

@@ -94,14 +94,20 @@ pub fn prepare(
 }
 
 fn codex_version(program: &std::ffi::OsStr, prefix: &[std::ffi::OsString]) -> Option<String> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(prefix)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // This probe also runs while restoring proxy sessions in a GUI app.
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = command.spawn().ok()?;
     let deadline = Instant::now() + VERSION_TIMEOUT;
     loop {
         match child.try_wait() {
@@ -282,6 +288,45 @@ fn without_update_plan_instructions(instructions: &str) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[cfg(windows)]
+    #[test]
+    fn version_probe_has_no_console_even_through_a_cmd_shim() {
+        let fixture = tempfile::tempdir().unwrap();
+        let script = fixture.path().join("probe.ps1");
+        std::fs::write(
+            &script,
+            r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
+Write-Output 'codex-cli 0.134.0'
+"#,
+        )
+        .unwrap();
+        let prefix: Vec<std::ffi::OsString> = [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .chain(std::iter::once(script.into_os_string()))
+        .collect();
+        let version = codex_version(std::ffi::OsStr::new("powershell.exe"), &prefix).unwrap();
+        assert!(supports_layered_profiles(&version));
+
+        let shim = fixture.path().join("probe.cmd");
+        std::fs::write(
+            &shim,
+            "@echo off\r\n\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0probe.ps1\" %*\r\n",
+        )
+        .unwrap();
+        let (program, prefix) = crate::agent::launch_parts(&shim);
+        let version = codex_version(&program, &prefix).unwrap();
+        assert!(supports_layered_profiles(&version));
+    }
 
     fn model(id: &str, owner: Option<&str>) -> ProxyModel {
         ProxyModel {
