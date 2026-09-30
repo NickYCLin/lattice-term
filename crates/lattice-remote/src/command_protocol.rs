@@ -10,16 +10,18 @@ pub const MAX_COMMAND_CHUNK: usize = 4096;
 pub enum CommandShell {
     Cmd,
     PowerShell,
+    Posix,
 }
 impl CommandShell {
     pub fn flag(self) -> u8 {
         match self {
             Self::Cmd => 1,
             Self::PowerShell => 2,
+            Self::Posix => 4,
         }
     }
     pub fn from_flags(flags: u8) -> Vec<Self> {
-        [Self::Cmd, Self::PowerShell]
+        [Self::Cmd, Self::PowerShell, Self::Posix]
             .into_iter()
             .filter(|s| flags & s.flag() != 0)
             .collect()

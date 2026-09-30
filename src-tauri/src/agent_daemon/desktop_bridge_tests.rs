@@ -9,6 +9,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 fn target(id: &str) -> TargetView {
     TargetView {
+        command_shells: Vec::new(),
         id: id.into(),
         label: "Synthetic connection".into(),
         backend: Backend::Ssh,

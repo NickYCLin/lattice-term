@@ -4,7 +4,7 @@ export interface RemoteCommandView {
   sessionId: string;
   id: number;
   revision: number;
-  shell: "cmd" | "powerShell";
+  shell: "cmd" | "powerShell" | "posix";
   command: string;
   directory: string;
   state: "starting" | "running" | "cancelling" | "exited" | "cancelled" | "timedOut" | "outputLimit" | "failed";

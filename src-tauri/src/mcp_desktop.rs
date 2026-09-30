@@ -199,6 +199,8 @@ pub struct TargetView {
     pub plans: Vec<NamedView>,
     pub roots: Vec<NamedView>,
     pub connected: bool,
+    #[serde(default)]
+    pub command_shells: Vec<lattice_remote::command_protocol::CommandShell>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1010,6 +1012,7 @@ impl DesktopService {
                 .remote
                 .fleet_generation(session_id)
                 .or_else(|| self.remote.screen_generation(session_id))
+                .or_else(|| self.remote.command_generation(session_id))
                 .map(|generation| generation as usize),
         }
     }
@@ -1092,7 +1095,20 @@ impl DesktopService {
                 .map_err(|_| ServiceError::unavailable())?;
             roots.push(paths::prepare_root(&session, root).await?);
         }
+        let command_shells = if request.backend == Backend::Remote && request.scopes.command {
+            self.remote
+                .list()
+                .into_iter()
+                .find(|s| s.session_id == request.session_id)
+                .map(|s| {
+                    lattice_remote::command_protocol::CommandShell::from_flags(s.command_shells)
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let view = TargetView {
+            command_shells,
             id: opaque_id()?,
             label: request.label,
             backend: request.backend,
@@ -1393,6 +1409,18 @@ impl DesktopService {
                         upload: session.file_transfer,
                         download: session.file_transfer,
                         ..screen_scopes(controllable)
+                    },
+                    None,
+                ));
+            }
+            if session.terminal && session.command_shells != 0 {
+                found.push((
+                    Backend::Remote,
+                    session.session_id.clone(),
+                    session.host.clone(),
+                    Scopes {
+                        command: true,
+                        ..Scopes::default()
                     },
                     None,
                 ));
@@ -2449,7 +2477,12 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
     }
     if request.backend.is_screen()
         && !request.scopes.fleet_observe
-        && (!request.scopes.screen
+        && ((!request.scopes.screen
+            && !(request.backend == Backend::Remote
+                && request.scopes.command
+                && !request.scopes.input
+                && !request.scopes.upload
+                && !request.scopes.download))
             || request.scopes.metrics
             || request.scopes.list
             || request.scopes.exec
@@ -2976,6 +3009,7 @@ mod tests {
             Arc::new(Grant {
                 fleet: None,
                 view: TargetView {
+                    command_shells: Vec::new(),
                     id: id.into(),
                     label: "test screen".into(),
                     backend: Backend::Rdp,
@@ -3157,6 +3191,7 @@ mod tests {
     #[test]
     fn observer_views_cannot_serialize_saved_commands_hosts_or_absolute_roots() {
         let view = TargetView {
+            command_shells: Vec::new(),
             id: "opaque".into(),
             label: "Test".into(),
             backend: Backend::Ssh,
@@ -3169,7 +3204,8 @@ mod tests {
             connected: true,
         };
         let object = serde_json::to_value(view).unwrap();
-        assert_eq!(object.as_object().unwrap().len(), 7);
+        assert_eq!(object.as_object().unwrap().len(), 8);
+        assert_eq!(object["commandShells"], json!([]));
         for forbidden in [
             "sessionId",
             "host",

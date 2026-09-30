@@ -52,7 +52,7 @@ pub(super) async fn execute(
     tokio::pin!(deadline);
     loop {
         // Never read another connection's output, even if its session ID is reused.
-        if registry.screen_generation(session_id) != Some(generation) {
+        if registry.command_generation(session_id) != Some(generation) {
             return Err(ServiceError::reconnected());
         }
         let view = registry

@@ -7,8 +7,12 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch, Semaphore};
 
 pub fn supported_shells(allowed: bool) -> u8 {
-    if cfg!(windows) && allowed {
+    if !allowed {
+        0
+    } else if cfg!(windows) {
         3
+    } else if cfg!(unix) {
+        4
     } else {
         0
     }
@@ -54,7 +58,10 @@ impl Commands {
     }
     pub async fn handle(&mut self, request: CommandRequest) -> bool {
         let id = request.id();
-        if !request.valid() || supported_shells(self.allowed) == 0 {
+        if !request.valid()
+            || supported_shells(self.allowed) == 0
+            || matches!(&request, CommandRequest::Run { shell, .. } if supported_shells(self.allowed) & shell.flag() == 0)
+        {
             return self
                 .reject(id, "Command execution is not enabled on this host.")
                 .await;
@@ -100,7 +107,9 @@ impl Commands {
             let _permit = permit;
             #[cfg(windows)]
             let sent = windows::run(request, receiver, outgoing).await;
-            #[cfg(not(windows))]
+            #[cfg(unix)]
+            let sent = unix::run(request, receiver, outgoing).await;
+            #[cfg(not(any(windows, unix)))]
             let sent = {
                 let _ = (request, receiver, outgoing);
                 true
@@ -129,7 +138,7 @@ impl Drop for Commands {
     fn drop(&mut self) {
         if let Some((_, cancel, task)) = self.active.take() {
             let _ = cancel.send(true);
-            task.abort(); // Dropping the owned Job Object terminates its process tree.
+            task.abort(); // Dropping the owned job/process group cleans up its children.
         }
     }
 }
@@ -145,6 +154,8 @@ async fn send(outgoing: &mpsc::Sender<RemoteMessage>, event: CommandEvent) -> bo
 }
 
 mod scripts;
+#[cfg(unix)]
+mod unix;
 #[cfg(windows)]
 mod windows;
 

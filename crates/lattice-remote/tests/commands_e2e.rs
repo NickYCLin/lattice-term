@@ -1,5 +1,5 @@
-//! Real compiled Windows Agent, TCP pairing and encrypted command channel.
-#![cfg(all(feature = "agent", windows))]
+//! Real compiled Agent, TCP pairing and encrypted command channel.
+#![cfg(all(feature = "agent", any(windows, unix)))]
 use lattice_remote::command_protocol::{CommandEnd, CommandEvent, CommandRequest, CommandShell};
 use lattice_remote::{RemoteMessage, SecureConnection, Transport};
 use std::time::Duration;
@@ -50,7 +50,7 @@ async fn agent() -> (Child, SecureConnection<Transport>) {
     let RemoteMessage::Hello(hello) = connection.receive().await.unwrap() else {
         panic!("missing hello")
     };
-    assert_eq!(hello.command_shells, 3);
+    assert_eq!(hello.command_shells, if cfg!(windows) { 3 } else { 4 });
     // Keep status stdout drained without retaining pairing/readiness payloads.
     tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
     (child, connection)
@@ -79,24 +79,33 @@ async fn event(connection: &mut SecureConnection<Transport>) -> CommandEvent {
     .unwrap()
 }
 #[tokio::test]
-async fn windows_encrypted_agent_executes_both_shells_without_screen_automation() {
+async fn encrypted_agent_executes_advertised_shells_without_screen_automation() {
     let temp = tempfile::Builder::new()
         .prefix("remote 指令 &'")
         .tempdir()
         .unwrap();
     let (mut child, mut connection) = agent().await;
-    for (id, shell, command) in [
-        (
+    let cases = if cfg!(windows) {
+        vec![
+            (
+                1,
+                CommandShell::Cmd,
+                "echo 中文測試\r\necho stderr-marker 1>&2\r\nexit /b 9",
+            ),
+            (
+                2,
+                CommandShell::PowerShell,
+                "Write-Output '中文測試';[Console]::Error.WriteLine('stderr-marker');exit 9",
+            ),
+        ]
+    } else {
+        vec![(
             1,
-            CommandShell::Cmd,
-            "echo 中文測試\r\necho stderr-marker 1>&2\r\nexit /b 9",
-        ),
-        (
-            2,
-            CommandShell::PowerShell,
-            "Write-Output '中文測試';[Console]::Error.WriteLine('stderr-marker');exit 9",
-        ),
-    ] {
+            CommandShell::Posix,
+            "printf '中文測試'; printf stderr-marker >&2; exit 9",
+        )]
+    };
+    for (id, shell, command) in cases {
         connection
             .send(&RemoteMessage::CommandRequest(CommandRequest::Run {
                 id,

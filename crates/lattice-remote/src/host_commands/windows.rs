@@ -115,6 +115,7 @@ async fn execute(
             payload
         }
         CommandShell::PowerShell => serde_json::json!({"command":command}),
+        CommandShell::Posix => return Err("POSIX shell is unavailable on Windows.".into()),
     };
     let encoded = base64::engine::general_purpose::STANDARD.encode(
         BOOTSTRAP

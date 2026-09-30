@@ -166,7 +166,7 @@ const waitingStatus = (savedPairingCode: boolean): RemoteHostStatus => ({
   savedPairingCode,
 });
 
-async function mountDialog(host: RemoteHostApi) {
+async function mountDialog(host: RemoteHostApi, platform = "windows") {
   const { container } = installHostDom();
   const root = createRoot(container as unknown as Element);
   await act(async () => {
@@ -174,7 +174,7 @@ async function mountDialog(host: RemoteHostApi) {
       <I18nProvider locale="zh-TW">
         <RemoteHostDialog
           host={host}
-          platform="windows"
+          platform={platform}
           sensitiveClipboardClear="off"
           onClose={vi.fn()}
         />
@@ -536,4 +536,19 @@ it("shows an active password as current-run only after deleting its saved copy",
     if (firstMounted) await act(async () => { first.root.unmount(); });
     if (second) await act(async () => { second!.root.unmount(); });
   }
+});
+
+
+it("requires an explicit Linux command grant separate from terminal input", async () => {
+  const host = hostForForm(true);
+  const view = await mountDialog(host, "linux");
+  try {
+    const label = view.find("LABEL", "允許獨立命令執行")!;
+    const input = allNodes(label).find(node => node.tagName === "INPUT")!;
+    expect(props(input).checked).toBe(false);
+    expect(host.start).not.toHaveBeenCalled();
+    await act(async () => { props(input).onChange!({ currentTarget: { checked: true } }); });
+    await act(async () => { await props(view.find("FORM")!).onSubmit!({ defaultPrevented: false, preventDefault() {} }); });
+    expect(host.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ allowCommands: true, allowInput: false }));
+  } finally { await act(async () => view.root.unmount()); }
 });

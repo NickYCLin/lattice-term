@@ -755,7 +755,7 @@ impl RemoteMessage {
                     file_root_label,
                     terminal,
                     file_edit,
-                    command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 3,
+                    command_shells: body.get(base_len + 2).copied().unwrap_or(0) & 7,
                     chat: body.get(base_len + 3).copied().unwrap_or(0) == 1,
                     cli: body.get(base_len + 4).copied().unwrap_or(0) == 1,
                     fleet: body.get(base_len + 5).copied().unwrap_or(0) == 1,
@@ -1557,7 +1557,7 @@ mod tests {
             stream_pause: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
-        hello.command_shells = 3;
+        hello.command_shells = 7;
         let message = RemoteMessage::Hello(hello);
         let mut encoded = message.encode().unwrap();
         assert_eq!(encoded.len(), old.len() + 3);

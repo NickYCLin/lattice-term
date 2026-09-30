@@ -7,7 +7,7 @@ import "./RemoteCommandPane.css";
 export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionSummary; hidden: boolean }) {
   const { t } = useI18n();
   const command = useRemoteCommand(session.sessionId);
-  const [shell, setShell] = useState<"cmd" | "powerShell">((session.commandShells ?? 0) & 2 ? "powerShell" : "cmd");
+  const [shell, setShell] = useState<"cmd" | "powerShell" | "posix">((session.commandShells ?? 0) & 4 ? "posix" : (session.commandShells ?? 0) & 2 ? "powerShell" : "cmd");
   const [text, setText] = useState("");
   const [directory, setDirectory] = useState("");
   const [seconds, setSeconds] = useState(30);
@@ -25,6 +25,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
     }}>
       <label className="field">{t("remote.commands.shell")}
         <select className="input" value={shell} disabled={busy || active} onChange={e => setShell(e.currentTarget.value as typeof shell)}>
+          {!!((session.commandShells ?? 0) & 4) && <option value="posix">POSIX /bin/sh</option>}
           {!!((session.commandShells ?? 0) & 2) && <option value="powerShell">PowerShell</option>}
           {!!((session.commandShells ?? 0) & 1) && <option value="cmd">cmd</option>}
         </select>
@@ -33,7 +34,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
         <input className="input mono" maxLength={4096} value={directory} disabled={busy || active} placeholder={t("remote.commands.home")} onChange={e => setDirectory(e.currentTarget.value)} />
       </label>
       <label className="field">{t("remote.commands.command")}
-        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} spellCheck={false} value={text} disabled={busy || active} placeholder={shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(e.currentTarget.value)} />
+        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} spellCheck={false} value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(e.currentTarget.value)} />
       </label>
       <label className="field">{t("remote.commands.timeout")}
         <select className="input" value={seconds} disabled={busy || active} onChange={e => setSeconds(Number(e.currentTarget.value))}>

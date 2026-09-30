@@ -265,7 +265,7 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 - 先查 `list_authorized_connections`，選 `backend: remote` 且具有相應
   `command`／`upload`／`download` 能力的目標。舊版背景服務要更新並重啟；
   主機也必須已提供相應的 Remote 通道。不可把畫面輸入當成命令入口。
-- `remote_run_command` 帶 `targetId`、`shell`（`cmd` 或 `powerShell`）、
+- `remote_run_command` 帶 `targetId`、`shell`（Windows 為 `cmd`／`powerShell`，Unix 為 `posix`）、
   `command`、`directory`、`requestId`。空目錄使用主機預設目錄，
   命令限單行 4096 bytes、60 秒，不繼承前一次命令的環境。
 - `remote_file_transfer` 帶 `targetId`、`direction`、`localPath`、

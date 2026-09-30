@@ -593,6 +593,16 @@ impl RemoteRegistry {
             .map(|r| r.generation)
     }
 
+    pub fn command_generation(&self, session_id: &str) -> Option<u64> {
+        self.state
+            .lock()
+            .ok()?
+            .sessions
+            .get(session_id)
+            .filter(|r| r.summary.command_shells != 0)
+            .map(|r| r.generation)
+    }
+
     pub fn screen_generation(&self, session_id: &str) -> Option<u64> {
         let state = self.state.lock().ok()?;
         state
@@ -2078,23 +2088,72 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_remote_commands_require_approval_and_replay_without_rerunning() {
-        check_mcp_remote_command(false).await;
+        check_mcp_remote_command(false, false).await;
     }
 
     #[tokio::test]
     async fn mcp_remote_commands_default_to_no_card_and_still_deduplicate() {
-        check_mcp_remote_command(true).await;
+        check_mcp_remote_command(true, false).await;
     }
 
-    async fn check_mcp_remote_command(auto_allow: bool) {
+    #[tokio::test]
+    async fn terminal_without_host_command_permission_has_no_mcp_target() {
+        use crate::mcp_desktop::*;
+        let registry = Arc::new(RemoteRegistry::new());
+        register_test_record(
+            &registry,
+            idle_test_record(remote_summary("no-command", true), 17),
+        );
+        let service = Arc::new(
+            DesktopService::new(
+                Arc::new(crate::ssh::SshRegistry::new()),
+                Arc::new(crate::sftp::SftpRegistry::new()),
+            )
+            .with_screens(
+                Arc::new(crate::rdp::RdpRegistry::new()),
+                Arc::new(crate::vnc::VncRegistry::new()),
+                registry.clone(),
+                Arc::new(crate::mcp_screen::ScreenFrames::default()),
+            ),
+        );
+        let targets = service
+            .execute("test-client", DesktopOperation::ListConnections)
+            .await
+            .unwrap();
+        assert!(targets["connections"].as_array().unwrap().is_empty());
+        let record = registry.remove("no-command").unwrap().unwrap();
+        stop_remote_session(record, "owned test completed", Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn mcp_posix_terminal_requires_approval_and_has_no_screen_grant() {
+        check_mcp_remote_command(false, true).await;
+    }
+
+    async fn check_mcp_remote_command(auto_allow: bool, terminal: bool) {
         use crate::mcp_desktop::*;
         use lattice_remote::command_protocol::{
             CommandEnd, CommandEvent, CommandRequest, CommandShell,
         };
         let registry = Arc::new(RemoteRegistry::new());
         let (wire, mut peer) = mpsc::channel(4);
-        let mut summary = remote_summary("mcp-command", false);
-        summary.command_shells = CommandShell::PowerShell.flag();
+        let mut summary = remote_summary("mcp-command", terminal);
+        let selected_shell = if terminal {
+            CommandShell::Posix
+        } else {
+            CommandShell::PowerShell
+        };
+        let selected_command = if terminal {
+            "printf fixture"
+        } else {
+            "Write-Output 'fixture'"
+        };
+        let selected_directory = if terminal {
+            "/tmp/test space"
+        } else {
+            "C:\\test space"
+        };
+        summary.command_shells = selected_shell.flag();
         let mut record = idle_test_record(summary, 17);
         record.outbound = wire;
         register_test_record(&registry, record);
@@ -2123,11 +2182,18 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        if terminal {
+            let found = &targets["connections"][0];
+            assert_eq!(found["scopes"]["screen"], false);
+            assert_eq!(found["scopes"]["input"], false);
+            assert_eq!(found["scopes"]["upload"], false);
+            assert_eq!(found["commandShells"], serde_json::json!(["posix"]));
+        }
         let operation = DesktopOperation::RemoteCommand {
             target_id: target.clone(),
-            shell: CommandShell::PowerShell,
-            command: "Write-Output 'fixture'".into(),
-            directory: "C:\\test space".into(),
+            shell: selected_shell,
+            command: selected_command.into(),
+            directory: selected_directory.into(),
             request_id: "remote-command-1".into(),
         };
         if !auto_allow {
@@ -2188,8 +2254,10 @@ mod tests {
             .unwrap();
             let pending = &service.pending_commands()[0];
             assert!(pending.requires_each_approval);
-            assert!(pending.command.contains("powerShell"));
-            assert!(pending.command.contains("C:\\\\test space"));
+            assert!(pending
+                .command
+                .contains(if terminal { "posix" } else { "powerShell" }));
+            assert!(pending.command.contains("test space"));
             assert!(peer.try_recv().is_err(), "nothing may run before approval");
             service.decide_command(&id, CommandDecision::Approve, 0);
         }
@@ -2207,8 +2275,8 @@ mod tests {
         else {
             panic!("expected bounded command, not terminal input");
         };
-        assert_eq!(shell, CommandShell::PowerShell);
-        assert_eq!(command, "Write-Output 'fixture'");
+        assert_eq!(shell, selected_shell);
+        assert_eq!(command, selected_command);
         registry
             .command_event(
                 "mcp-command",

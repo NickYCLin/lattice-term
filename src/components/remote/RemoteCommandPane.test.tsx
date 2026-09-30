@@ -22,6 +22,13 @@ describe("remote command panel", () => {
     expect(markup).toContain("停止");
     expect(markup).toContain("stderr marker");
   });
+  it("offers POSIX only when independently advertised", () => {
+    const markup = render(4);
+    expect(markup).toContain('value="posix"');
+    expect(markup).toContain("id; pwd");
+    expect(markup).not.toContain('value="cmd"');
+    expect(markup).not.toContain('value="powerShell"');
+  });
   it("retains the result when hidden and shows a nonzero exit status", () => {
     mock.state = "exited";
     const markup = render(3, true);

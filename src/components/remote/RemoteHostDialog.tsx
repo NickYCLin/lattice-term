@@ -186,7 +186,7 @@ export function RemoteHostDialog({
         allowChat,
         allowCli,
         fleet: allowFleet ? { directory: fleetDirectory, read: fleetRead, control: fleetControl, launch: fleetLaunch } : null,
-        allowCommands: platform === "windows" && allowCommands,
+        allowCommands: ["windows", "linux", "macos"].includes(platform ?? "") && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
         mode,
@@ -833,7 +833,7 @@ export function RemoteHostDialog({
               </fieldset>}
               <label className="checkbox-field"><input type="checkbox" checked={allowChat} disabled={busy} onChange={e => setAllowChat(e.currentTarget.checked)} />{t("remote.chat.allow")}</label>
               <p className="muted">{t("remote.chat.shareHint")}</p>
-              {platform === "windows" && <label className="remote-host-toggle">
+              {["windows", "linux", "macos"].includes(platform ?? "") && <label className="remote-host-toggle">
                 <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />
                 <span><strong>{t("remote.commands.allow")}</strong><small>{t("remote.commands.allowHint")}</small></span>
               </label>}

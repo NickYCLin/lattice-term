@@ -593,8 +593,8 @@ async fn start_inner(
         return Err("This device is already sharing its display.".to_string());
     }
 
-    if request.allow_commands && !cfg!(windows) {
-        return Err("Command execution requires a Windows sharing host.".into());
+    if request.allow_commands && !cfg!(any(windows, unix)) {
+        return Err("Command execution is unavailable on this host.".into());
     }
     let relay_mode = request.mode.trim() == "relay";
     validate_saved_pairing_choice(&request, relay_mode)?;

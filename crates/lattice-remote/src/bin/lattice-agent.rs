@@ -205,7 +205,7 @@ By default the session is view-only. Pass --allow-input to let the paired\n\
 viewer control this machine's mouse and keyboard; without it, input messages\n\
 are ignored. File access stays disabled unless --file-root explicitly shares\n\
 one folder; every remote path is then confined to that folder.\n\n\
-Windows commands: --allow-commands independently permits cmd / PowerShell\n\
+Commands: --allow-commands independently permits cmd / PowerShell on Windows, /bin/sh on Unix\n\
 execution as this account, beyond the file-sharing root. Off by default.\n\n\
 Terminal mode: --terminal shares an encrypted shell session instead of the\n\
 display, so a headless host (no desktop) works too. --allow-input lets the\n\
@@ -335,8 +335,8 @@ fn parse_options() -> Result<Options, String> {
             "--json" => json = true,
             "--allow-input" => allow_input = true,
             "--allow-commands" => {
-                if !cfg!(windows) {
-                    return Err("Command execution requires a Windows sharing host.".into());
+                if !cfg!(any(windows, unix)) {
+                    return Err("Command execution is unavailable on this host.".into());
                 }
                 allow_commands = true;
             }
