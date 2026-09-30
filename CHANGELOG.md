@@ -4,6 +4,39 @@
 
 ---
 
+## [2026.10.1](https://github.com/NickYCLin/lattice-term/compare/v2026.9.30...v2026.10.1) (2026-09-30)
+
+
+### 🚀 新增功能
+
+* **mcp:** Remote 命令與傳檔預設免確認 ([6540188](https://github.com/NickYCLin/lattice-term/commit/6540188a03ca4f5e7969588301f83344dc0750d9))
+* **mcp:** 分享既有前景助理並保留代理對話 ([1e2841a](https://github.com/NickYCLin/lattice-term/commit/1e2841a11028a660975d12236e7d19fe8c6136f9))
+* **mcp:** 加入遠端工作追蹤與即時輸出 ([09179ae](https://github.com/NickYCLin/lattice-term/commit/09179ae80fe0846e1c6bceab7f40bf6ef40120ca))
+* **mcp:** 支援 Remote 命令與檔案傳輸 ([0d9d84b](https://github.com/NickYCLin/lattice-term/commit/0d9d84b9c8f452fe3a5135a7a509c0be52f7e074))
+* **mcp:** 支援遠端文字分頁與檔名搜尋 ([1931f73](https://github.com/NickYCLin/lattice-term/commit/1931f73eee16950654cabecc190fc85813203c8b))
+* **mcp:** 自動啟動服務並開啟儲存連線 ([4ef8725](https://github.com/NickYCLin/lattice-term/commit/4ef872585dcf42802254e8f2ff6a6f7ac288f8df))
+* **remote:** 補齊Linux命令通道與獨立授權 ([34f9d52](https://github.com/NickYCLin/lattice-term/commit/34f9d52f9e3b811eecb378bc58aae6a9b51a15bd))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 修正對話紀錄讀取與代理連線續接 ([9bbb272](https://github.com/NickYCLin/lattice-term/commit/9bbb27290f240e8f3eeb3feb88f31c50cf132cef))
+* **chat:** 同步兩頁原生對話清單與最新訊息 ([6145222](https://github.com/NickYCLin/lattice-term/commit/6145222546ac148f739edec6a53d9d8646b5a2ba))
+* **i18n:** 首次啟動依系統語言選擇介面 ([47d3a1b](https://github.com/NickYCLin/lattice-term/commit/47d3a1b5f8ba2133247625908c73237920d5bcb3))
+* **mcp:** 同版號更新時辨識POSIX服務協定 ([45c5f49](https://github.com/NickYCLin/lattice-term/commit/45c5f49cb3a7db70a57d7e940b4d62c55ebcb0f5))
+* **mcp:** 避免滑鼠移動誤判編輯與分享狀態倒退 ([d23ca4a](https://github.com/NickYCLin/lattice-term/commit/d23ca4ace416a6fde00ee871c2b751883e8d5556))
+* **mcp:** 顯示前景提示受阻的精確原因 ([fcf6774](https://github.com/NickYCLin/lattice-term/commit/fcf67742b81f2647f551e2258772f0b472f084f2))
+* **remote:** 修正 Windows 命令編碼與驗收逾時 ([5ed9595](https://github.com/NickYCLin/lattice-term/commit/5ed95950b1f287d0a79d3f8b4f26d2f5973bbd05))
+* **sessions:** 避免舊匯入紀錄塞滿工作階段 ([3c5c0e9](https://github.com/NickYCLin/lattice-term/commit/3c5c0e9a3f29402122ac6f24ebd2925c775ad212))
+* **session:** 避免歷史對話自動占滿助理名額 ([22f1b67](https://github.com/NickYCLin/lattice-term/commit/22f1b67716a2efc4cdf86c5c5910aa718c85f628))
+* **windows:** 修正原生測試的視窗元件載入 ([8c6c0ec](https://github.com/NickYCLin/lattice-term/commit/8c6c0ec7c7ad4a4b48ccd9cc2295c68677f95ebd))
+* **windows:** 避免背景程序閃出命令視窗 ([f902a98](https://github.com/NickYCLin/lattice-term/commit/f902a98a318d474e13bbe47b622e345d74baab44))
+
+
+### 🧹 架構優化
+
+* **chat:** 集中原生對話掃描選項 ([c247a41](https://github.com/NickYCLin/lattice-term/commit/c247a41ca61dc0b8d07e6f5ece5236c7cd59f006))
+
 ## [2026.9.30](https://github.com/NickYCLin/lattice-term/compare/v2026.9.29...v2026.9.30) (2026-09-29)
 
 
