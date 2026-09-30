@@ -3,7 +3,7 @@
  * after the window closes.  The interface only needs to know whether it is
  * running, how many sessions it holds, and how to end it on request.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { hasDesktopBackend } from "./nativeRuntime";
 
 export interface AgentMcpLaunch {
@@ -85,11 +85,14 @@ export function useAgentDaemon(sessionsHint: number): {
 } {
   const [status, setStatus] = useState<AgentDaemonStatus>(EMPTY_DAEMON_STATUS);
 
+  const refreshRevision = useRef(0);
   const refresh = useCallback(async () => {
     if (!hasDesktopBackend()) return;
+    const revision = ++refreshRevision.current;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const next = await invoke<AgentDaemonStatus>("agent_daemon_status");
+      if (revision !== refreshRevision.current) return;
       setStatus({
         ...next,
         mcpNeedsRestart: next.mcpNeedsRestart ?? false,
@@ -99,7 +102,7 @@ export function useAgentDaemon(sessionsHint: number): {
         history: next.history ?? null,
       });
     } catch {
-      setStatus(EMPTY_DAEMON_STATUS);
+      if (revision === refreshRevision.current) setStatus(EMPTY_DAEMON_STATUS);
     }
   }, []);
 

@@ -7481,6 +7481,11 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
                         input.desktop_paste = false;
                         input.last_input_kind = Some("paste_end");
                     }
+                    sequence if is_passive_mouse_motion(sequence) => {
+                        // SGR no-button motion cannot type or submit a draft.
+                        // Preserve an existing edit/paste hold; never clear it.
+                        input.last_input_kind = Some("mouse_hover");
+                    }
                     sequence if is_terminal_status_reply(sequence) => {
                         input.last_input_kind = Some("terminal_status_reply");
                     }
@@ -7512,6 +7517,30 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
         }
     }
     activity
+}
+
+/// Only complete SGR motion with no button held. Clicks, drags, wheel,
+/// releases, malformed reports and other protocols remain conservative.
+fn is_passive_mouse_motion(bytes: &[u8]) -> bool {
+    let Some(body) = bytes
+        .strip_prefix(b"\x1b[<")
+        .and_then(|b| b.strip_suffix(b"M"))
+    else {
+        return false;
+    };
+    let mut fields = body.split(|b| *b == b';');
+    let number = |field: &[u8]| -> Option<u32> {
+        if field.is_empty() || field.len() > 6 || !field.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        std::str::from_utf8(field).ok()?.parse().ok()
+    };
+    let (Some(button), Some(x), Some(y), None) =
+        (fields.next(), fields.next(), fields.next(), fields.next())
+    else {
+        return false;
+    };
+    matches!((number(button), number(x), number(y)), (Some(b), Some(1..=999999), Some(1..=999999)) if b & !28 == 35)
 }
 
 fn is_terminal_status_reply(bytes: &[u8]) -> bool {

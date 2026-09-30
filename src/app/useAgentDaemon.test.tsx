@@ -154,3 +154,33 @@ describe("MCP content permission negotiation", () => {
     expect(invoke.mock.calls.some(([command]) => command === "agent_daemon_stop")).toBe(false);
   });
 });
+
+it("keeps the latest foreground share when an older status poll finishes last", async () => {
+  const current = await mount({ mcpOutputScopes: true, shared: [] });
+  const replies: Array<(value: unknown) => void> = [];
+  invoke.mockImplementation((command: string) => {
+    if (command !== "agent_daemon_status") throw new Error(command);
+    return new Promise(resolve => replies.push(resolve));
+  });
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  await act(async () => {
+    first = current().refresh();
+    await vi.waitFor(() => expect(replies).toHaveLength(1));
+    second = current().refresh();
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+  });
+  await act(async () => {
+    replies[1]({ running: true, mcpOutputScopes: true, sessions: 0, shared: [
+      { sessionId: "agent-session-foreground", readOutput: true, control: true },
+    ] });
+    await second;
+  });
+  await act(async () => {
+    replies[0]({ running: true, mcpOutputScopes: true, sessions: 0, shared: [] });
+    await first;
+  });
+  expect(current().status.shared).toEqual([
+    { sessionId: "agent-session-foreground", readOutput: true, control: true },
+  ]);
+});

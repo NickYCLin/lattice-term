@@ -143,3 +143,26 @@ fn foreground_input_diagnostics_do_not_treat_keys_as_readiness() {
     assert_eq!(input.last_input_kind, Some("mouse_or_unknown_csi"));
     assert!(input.desktop_busy());
 }
+
+#[test]
+fn passive_mouse_motion_preserves_drafts_without_creating_an_edit() {
+    let mut input = AgentInputControl::default();
+    for report in [b"\x1b[<35;10;20M".as_slice(), b"\x1b[<63;1;999999M"] {
+        assert!(is_passive_mouse_motion(report));
+        for byte in report { observe_desktop_input(&mut input, &[*byte]); }
+        assert!(!input.desktop_busy());
+        assert_eq!(input.last_input_kind,Some("mouse_hover"));
+    }
+    observe_desktop_input(&mut input,b"unfinished draft");
+    observe_desktop_input(&mut input,b"\x1b[<35;10;20M");
+    assert!(input.desktop_busy());
+    observe_desktop_input(&mut input,b"\r");
+    observe_desktop_input(&mut input,b"\x1b[<35;10;20M");
+    assert!(!input.desktop_busy());
+    for report in [b"\x1b[<0;10;20M".as_slice(),b"\x1b[<32;10;20M",b"\x1b[<64;10;20M",b"\x1b[<35;10;20m",b"\x1b[<35;0;20M",b"\x1b[<35;10;20;1M"] {
+        assert!(!is_passive_mouse_motion(report));
+        let mut input=AgentInputControl::default();
+        observe_desktop_input(&mut input,report);
+        assert!(input.desktop_busy());
+    }
+}
