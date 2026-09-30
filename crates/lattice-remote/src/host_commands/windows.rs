@@ -44,7 +44,9 @@ impl Job {
 // This fixed bootstrap cannot execute user code until its stdin is supplied.
 // The parent assigns the process to a kill-on-close Job before sending JSON.
 // No user text or paths become PowerShell source or outer command arguments.
-const BOOTSTRAP: &str = r#"$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';$utf8=New-Object System.Text.UTF8Encoding($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;$OutputEncoding=$utf8;try{$text=[Console]::In.ReadToEnd();if(!$text){exit 125};$r=ConvertFrom-Json $text;if($r.file){$p=New-Object System.Diagnostics.ProcessStartInfo;$p.FileName=[Environment]::SystemDirectory+'\cmd.exe';$p.Arguments='/d /s /c ""'+$r.file+'""';$p.UseShellExecute=$false;$p.CreateNoWindow=$true;$p.RedirectStandardInput=$true;$p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true;$c=[Diagnostics.Process]::Start($p);$c.StandardInput.Close();$a=$c.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput());$b=$c.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError());$c.WaitForExit();$a.GetAwaiter().GetResult();$b.GetAwaiter().GetResult();$code=$c.ExitCode;$c.Dispose();exit $code};$global:LASTEXITCODE=0;& ([ScriptBlock]::Create($r.command));$ok=$?;$code=$LASTEXITCODE;if($code){exit $code};if(!$ok){exit 1};exit 0}catch{[Console]::Error.WriteLine($_.ToString());exit 1}"#;
+// Set the child's code page before it opens the UTF-8 batch file. Resolve chcp
+// from the system directory, never PATH or the user's working directory.
+const BOOTSTRAP: &str = r#"$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';$utf8=New-Object System.Text.UTF8Encoding($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;$OutputEncoding=$utf8;try{$text=[Console]::In.ReadToEnd();if(!$text){exit 125};$r=ConvertFrom-Json $text;if($r.file){$p=New-Object System.Diagnostics.ProcessStartInfo;$p.FileName=[Environment]::SystemDirectory+'\cmd.exe';$p.Arguments='/d /s /c ""'+[Environment]::SystemDirectory+'\chcp.com" 65001>nul && "'+$r.file+'""';$p.UseShellExecute=$false;$p.CreateNoWindow=$true;$p.RedirectStandardInput=$true;$p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true;$c=[Diagnostics.Process]::Start($p);$c.StandardInput.Close();$a=$c.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput());$b=$c.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError());$c.WaitForExit();$null=$a.GetAwaiter().GetResult();$null=$b.GetAwaiter().GetResult();$code=$c.ExitCode;$c.Dispose();exit $code};$global:LASTEXITCODE=0;& ([ScriptBlock]::Create($r.command));$ok=$?;$code=$LASTEXITCODE;if($code){exit $code};if(!$ok){exit 1};exit 0}catch{[Console]::Error.WriteLine($_.ToString());exit 1}"#;
 
 async fn execute(
     request: CommandRequest,
@@ -104,11 +106,8 @@ async fn execute(
                 .suffix(super::scripts::SUFFIX)
                 .tempfile_in(&scripts)
                 .map_err(|_| "Cannot create the owned command script.")?;
-            write!(
-                file,
-                "@echo off\r\nchcp 65001 >nul\r\n{command}\r\nexit /b %errorlevel%\r\n"
-            )
-            .map_err(|_| "Cannot write the owned command script.")?;
+            write!(file, "@echo off\r\n{command}\r\nexit /b %errorlevel%\r\n")
+                .map_err(|_| "Cannot write the owned command script.")?;
             file.flush()
                 .map_err(|_| "Cannot flush the owned command script.")?;
             let payload = serde_json::json!({"file":file.path()});
@@ -265,8 +264,12 @@ mod tests {
     ) -> (CommandEnd, Option<i32>, String, String) {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
+        // Bound the whole receive loop, but do not fail before the command's
+        // own budget (plus process teardown) on a busy Windows runner.
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_secs(u64::from(TEST_COMMAND_BUDGET) + 15);
         loop {
-            let event = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            let event = tokio::time::timeout_at(deadline, rx.recv())
                 .await
                 .unwrap()
                 .unwrap();
@@ -327,6 +330,12 @@ mod tests {
             .prefix("commands 中文 &'")
             .tempdir()
             .unwrap();
+        // A working-directory program must not replace our encoding setup.
+        std::fs::write(
+            temp.path().join("chcp.cmd"),
+            "@echo encoding-helper-was-shadowed\r\n@exit /b 99\r\n",
+        )
+        .unwrap();
         for (shell, command) in [
             (CommandShell::Cmd, "echo 中文🦀\r\necho stderr-test 1>&2\r\necho once>>count.txt\r\nexit /b 7"),
             (CommandShell::PowerShell, "Write-Output '中文🦀';[Console]::Error.WriteLine('stderr-test');Add-Content count.txt once;exit 7"),
@@ -340,8 +349,8 @@ mod tests {
             assert!(commands.handle(request.clone()).await);
             let (end, code, out, err) = result(&mut rx).await;
             assert_eq!((end, code), (CommandEnd::Exited, Some(7)));
-            assert!(out.contains("中文🦀"), "{out:?}");
-            assert!(err.contains("stderr-test"), "{err:?}");
+            assert_eq!(out.trim(), "中文🦀");
+            assert_eq!(err.trim(), "stderr-test");
             assert!(!err.contains("#< CLIXML"), "{err:?}");
             assert!(!err.contains("<Objs"), "{err:?}");
             assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), 1);
@@ -384,9 +393,11 @@ mod tests {
         assert_eq!(limited.2.len() + limited.3.len(), MAX_COMMAND_OUTPUT);
         commands.shutdown().await;
         assert!(commands.handle(request(3, CommandShell::PowerShell,
-            "$p=Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep 60' -PassThru;$p.Id | Set-Content child.txt;Start-Sleep 60", temp.path(), 30)).await);
+            "$p=Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep 60' -PassThru;$p.Id | Set-Content child.txt;Start-Sleep 60", temp.path(), TEST_COMMAND_BUDGET)).await);
         let child_file = temp.path().join("child.txt");
-        for _ in 0..200 {
+        let child_deadline =
+            tokio::time::Instant::now() + Duration::from_secs(u64::from(TEST_COMMAND_BUDGET));
+        while tokio::time::Instant::now() < child_deadline {
             if child_file.exists() {
                 break;
             }
