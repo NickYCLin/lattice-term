@@ -19,7 +19,7 @@ const MAX_LIST_ENTRIES: usize = 512;
 
 pub(super) struct Root {
     pub id: String,
-    remote: String,
+    pub(super) remote: String,
     local: Option<PathBuf>,
 }
 
@@ -131,7 +131,7 @@ fn join_remote(root: &str, components: &[&str]) -> String {
 }
 
 /// No path returned by a server is trusted merely because it has a prefix.
-async fn check_remote(
+pub(super) async fn check_remote(
     session: &SftpSession,
     root: &str,
     relative: &str,

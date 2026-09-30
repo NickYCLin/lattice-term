@@ -6,6 +6,7 @@
 //! SFTP path checks assume a cooperative trusted server. They are not a chroot
 //! and cannot defeat another remote process changing directories between calls.
 
+mod file_queries;
 mod fleet;
 #[cfg(test)]
 mod loopback_tests;
@@ -265,6 +266,27 @@ pub enum DesktopOperation {
         root_id: String,
         path: String,
     },
+    ReadText {
+        target_id: String,
+        root_id: String,
+        path: String,
+        #[serde(default)]
+        offset: u64,
+        #[serde(default = "file_queries::default_page_bytes")]
+        max_bytes: u32,
+        expected_sha256: Option<String>,
+    },
+    FindFiles {
+        target_id: String,
+        root_id: String,
+        #[serde(default)]
+        path: String,
+        name_contains: String,
+        #[serde(default = "file_queries::default_depth")]
+        max_depth: u8,
+        #[serde(default = "file_queries::default_matches")]
+        max_results: u16,
+    },
     Exec {
         target_id: String,
         plan_id: String,
@@ -324,6 +346,8 @@ impl DesktopOperation {
         "captureScreen",
         "screenInput",
         "listDirectory",
+        "readText",
+        "findFiles",
         "exec",
         "execCommand",
         "remoteCommand",
@@ -358,6 +382,8 @@ impl DesktopOperation {
             Self::CaptureScreen { .. } => "captureScreen",
             Self::ScreenInput { .. } => "screenInput",
             Self::ListDirectory { .. } => "listDirectory",
+            Self::ReadText { .. } => "readText",
+            Self::FindFiles { .. } => "findFiles",
             Self::Exec { .. } => "exec",
             Self::ExecCommand { .. } => "execCommand",
             Self::RemoteCommand { .. } => "remoteCommand",
@@ -377,6 +403,8 @@ impl DesktopOperation {
             | Self::CaptureScreen { target_id }
             | Self::ScreenInput { target_id, .. }
             | Self::ListDirectory { target_id, .. }
+            | Self::ReadText { target_id, .. }
+            | Self::FindFiles { target_id, .. }
             | Self::Exec { target_id, .. }
             | Self::ExecCommand { target_id, .. }
             | Self::RemoteCommand { target_id, .. }
@@ -394,7 +422,8 @@ impl DesktopOperation {
             Self::GetMetrics { .. } => Some(Scope::Metrics),
             Self::CaptureScreen { .. } => Some(Scope::Screen),
             Self::ScreenInput { .. } => Some(Scope::Input),
-            Self::ListDirectory { .. } => Some(Scope::List),
+            Self::ListDirectory { .. } | Self::FindFiles { .. } => Some(Scope::List),
+            Self::ReadText { .. } => Some(Scope::Download),
             Self::Exec { .. } => Some(Scope::Exec),
             Self::ExecCommand { .. } => Some(Scope::Command),
             Self::RemoteCommand { .. } => Some(Scope::Command),
@@ -1594,6 +1623,32 @@ impl DesktopService {
                 }
                 paths::preflight_directory(path)?;
             }
+            DesktopOperation::ReadText {
+                root_id,
+                path,
+                offset,
+                max_bytes,
+                expected_sha256,
+                ..
+            } => {
+                if !grant.roots.iter().any(|root| root.id == *root_id) {
+                    return Err(ServiceError::denied());
+                }
+                file_queries::validate_read(path, *offset, *max_bytes, expected_sha256.as_deref())?;
+            }
+            DesktopOperation::FindFiles {
+                root_id,
+                path,
+                name_contains,
+                max_depth,
+                max_results,
+                ..
+            } => {
+                if !grant.roots.iter().any(|root| root.id == *root_id) {
+                    return Err(ServiceError::denied());
+                }
+                file_queries::validate_find(path, name_contains, *max_depth, *max_results)?;
+            }
             DesktopOperation::Transfer {
                 root_id,
                 local_path,
@@ -1693,6 +1748,54 @@ impl DesktopService {
                         .find(|root| root.id == *root_id)
                         .ok_or_else(ServiceError::denied)?;
                     paths::list_directory(&self.sftp, &grant.session_id, root, path).await
+                }
+                DesktopOperation::ReadText {
+                    root_id,
+                    path,
+                    offset,
+                    max_bytes,
+                    expected_sha256,
+                    ..
+                } => {
+                    let root = grant
+                        .roots
+                        .iter()
+                        .find(|root| root.id == *root_id)
+                        .ok_or_else(ServiceError::denied)?;
+                    file_queries::read_text(
+                        &self.sftp,
+                        &grant.session_id,
+                        root,
+                        path,
+                        *offset,
+                        *max_bytes,
+                        expected_sha256.as_deref(),
+                    )
+                    .await
+                }
+                DesktopOperation::FindFiles {
+                    root_id,
+                    path,
+                    name_contains,
+                    max_depth,
+                    max_results,
+                    ..
+                } => {
+                    let root = grant
+                        .roots
+                        .iter()
+                        .find(|root| root.id == *root_id)
+                        .ok_or_else(ServiceError::denied)?;
+                    file_queries::find_files(
+                        &self.sftp,
+                        &grant.session_id,
+                        root,
+                        path,
+                        name_contains,
+                        *max_depth,
+                        *max_results,
+                    )
+                    .await
                 }
                 DesktopOperation::Exec { plan_id, .. } => {
                     let plan = grant
@@ -2325,7 +2428,9 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
         valid_id(&root.id)?;
         if !ids.insert(&root.id)
             || !label(&root.label)
-            || ((request.scopes.upload || request.scopes.download) && root.local_path.is_none())
+            // Text reads need no local destination. Transfers still enforce
+            // their approved local root in paths::transfer.
+            || (request.scopes.upload && root.local_path.is_none())
         {
             return Err(ServiceError::invalid());
         }
@@ -2724,6 +2829,22 @@ mod tests {
                 root_id: "r".into(),
                 path: String::new(),
             },
+            DesktopOperation::ReadText {
+                target_id: "t".into(),
+                root_id: "r".into(),
+                path: "README.md".into(),
+                offset: 0,
+                max_bytes: 16384,
+                expected_sha256: None,
+            },
+            DesktopOperation::FindFiles {
+                target_id: "t".into(),
+                root_id: "r".into(),
+                path: String::new(),
+                name_contains: "readme".into(),
+                max_depth: 3,
+                max_results: 50,
+            },
             DesktopOperation::Exec {
                 target_id: "t".into(),
                 plan_id: "p".into(),
@@ -2769,7 +2890,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 15);
+        assert_eq!(DesktopOperation::KINDS.len(), 17);
     }
 
     #[test]
@@ -3142,5 +3263,59 @@ mod tests {
             timeout_ms: 60_001,
         });
         assert!(validate_grant(&request).is_err());
+    }
+
+    #[test]
+    fn text_read_grants_need_download_permission_but_no_local_destination() {
+        let mut grant = request();
+        grant.backend = Backend::Sftp;
+        grant.scopes = Scopes {
+            download: true,
+            ..Default::default()
+        };
+        grant.exec_plans.clear();
+        grant.roots = vec![RootRequest {
+            id: "root".into(),
+            label: "Read text".into(),
+            remote_path: "/approved".into(),
+            local_path: None,
+        }];
+        assert!(validate_grant(&grant).is_ok());
+        grant.scopes.upload = true;
+        assert!(validate_grant(&grant).is_err());
+        let read: DesktopOperation = serde_json::from_value(json!({
+            "type":"readText","targetId":"target","rootId":"root","path":"README"
+        }))
+        .unwrap();
+        assert_eq!(read.required_scope(), Some(Scope::Download));
+        let DesktopOperation::ReadText {
+            offset,
+            max_bytes,
+            expected_sha256,
+            ..
+        } = read
+        else {
+            panic!()
+        };
+        assert_eq!(offset, 0);
+        assert_eq!(max_bytes, 16384);
+        assert_eq!(expected_sha256, None);
+        let find: DesktopOperation = serde_json::from_value(json!({
+            "type":"findFiles","targetId":"target","rootId":"root","nameContains":"readme"
+        }))
+        .unwrap();
+        assert_eq!(find.required_scope(), Some(Scope::List));
+        let DesktopOperation::FindFiles {
+            path,
+            max_depth,
+            max_results,
+            ..
+        } = find
+        else {
+            panic!()
+        };
+        assert_eq!(path, "");
+        assert_eq!(max_depth, 3);
+        assert_eq!(max_results, 50);
     }
 }

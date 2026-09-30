@@ -291,6 +291,8 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 | `list_saved_connections` | 開關打開時才可用：只列連線簿的名稱、群組、標籤、環境、協定與是否連線，不含主機、埠、帳號、裝置 ID 與憑證 |
 | `get_host_metrics` | 既有 SSH 連線上的固定 Linux probe，只回傳數值，不含掛載路徑與裝置名稱 |
 | `sftp_list_directory` | 已核准根目錄下的有界清單 |
+| `sftp_find_files` | 核准根目錄內依檔名片段搜尋，需 list 權限 |
+| `sftp_read_text` | 分頁讀 UTF-8 一般檔案，需 download 權限，不落地本機 |
 | `ssh_exec_job` | 獨立、非互動 SSH channel 的命名指令工作 |
 | `ssh_run_command` | 提出臨時指令，每次都要使用者在桌面看過原文並同意才執行 |
 | `remote_run_command` | 透過 Lattice Remote 加密通道執行單次命令，預設免逐筆確認，可在設定關閉 |
@@ -298,6 +300,19 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 | `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
 | `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
 | `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
+
+文字讀取限 1 MiB，頁面預設 16 KiB、範圍 4 bytes～32 KiB，
+offset 必須落在 UTF-8 字元邊界；不接受 NUL 或無效 UTF-8。
+續頁帶前次的 `expectedSha256`，內容變動回 `file_conflict`。
+每頁重讀有界檔案，前後重查路徑與 metadata；SFTP 不提供原子快照，
+仍依賴可信任伺服器，不將這些檢查視為 chroot。
+
+檔名搜尋不分大小寫，不支援 glob 或內容搜尋，不跟隨連結。
+`maxDepth` 預設 3、上限 8，0 表示只查起始目錄；
+`maxResults` 預設 50、上限 200。另限制 64 個目錄、4096 筆項目、
+8 秒與單一目錄 512 筆。遇上限、深度限制或無法讀取的子目錄時，
+回傳 `truncated`、`limitsReached` 與略過目錄數量。起始目錄失敗直接回錯誤。
+兩項新操作透過 capability 協商，不加入 protocol 3 的舊版操作集合。
 
 指令／傳檔先回 `operationId` 與 running，client 必須再查結果。指令分別保存 stdout、stderr、exit status／signal、截斷與逾時，輸出合計最多 32 KiB，UI 固定指令上限 30 秒（後端上限 60 秒）。結束通道不代表全部遠端衍生程序已停止，也不會回復先前寫入；不可把 `accepted` 或 EOF 當成 exit 0。相同 client／request ID 的重送不重跑，最多保存 256 筆／15 分鐘；失聯或超時可能結果未確認，不得改用新 ID 盲目重送。
 

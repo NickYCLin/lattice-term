@@ -151,6 +151,99 @@ fn filenames(directory: &Path) -> BTreeSet<String> {
 
 #[tokio::test]
 #[ignore = "Requires local OpenSSH sftp-server; CI runs openssh_ tests explicitly"]
+async fn openssh_mcp_text_pages_search_and_revocation() {
+    crate::sftp_test_server::bounded(async {
+        let fixture = Fixture::start(None).await;
+        std::fs::write(fixture.remote.join("README.txt"), "a中🙂尾").unwrap();
+        std::fs::create_dir(fixture.remote.join("sub")).unwrap();
+        std::fs::write(fixture.remote.join("sub/readme.md"), "nested").unwrap();
+        std::os::unix::fs::symlink("README.txt", fixture.remote.join("readme-link")).unwrap();
+        let read = |path: &str, offset, expected_sha256| DesktopOperation::ReadText {
+            target_id: fixture.target.id.clone(),
+            root_id: "workspace".into(),
+            path: path.into(),
+            offset,
+            max_bytes: 4,
+            expected_sha256,
+        };
+        let first = fixture
+            .service
+            .execute("client", read("README.txt", 0, None))
+            .await
+            .unwrap();
+        assert_eq!(first["text"], "a中");
+        assert_eq!(first["nextOffset"], 4);
+        let hash = first["sha256"].as_str().unwrap().to_string();
+        let next = fixture
+            .service
+            .execute("client", read("README.txt", 4, Some(hash.clone())))
+            .await
+            .unwrap();
+        assert_eq!(next["text"], "🙂");
+        std::fs::write(fixture.remote.join("README.txt"), "changed").unwrap();
+        let changed = fixture
+            .service
+            .execute("client", read("README.txt", 4, Some(hash)))
+            .await
+            .unwrap_err();
+        assert_eq!(changed.code, "file_conflict");
+        for bad in ["readme-link", "../outside", "sub"] {
+            assert!(fixture
+                .service
+                .execute("client", read(bad, 0, None))
+                .await
+                .is_err());
+        }
+        std::fs::write(fixture.remote.join("binary"), b"a\0b").unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .execute("client", read("binary", 0, None))
+                .await
+                .unwrap_err()
+                .code,
+            "unsupported_encoding"
+        );
+        let find = |depth| DesktopOperation::FindFiles {
+            target_id: fixture.target.id.clone(),
+            root_id: "workspace".into(),
+            path: String::new(),
+            name_contains: "README".into(),
+            max_depth: depth,
+            max_results: 50,
+        };
+        let all = fixture.service.execute("client", find(3)).await.unwrap();
+        assert_eq!(all["matches"].as_array().unwrap().len(), 2);
+        assert_eq!(all["truncated"], false);
+        let shallow = fixture.service.execute("client", find(0)).await.unwrap();
+        assert_eq!(shallow["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(shallow["truncated"], true);
+        fixture.service.revoke_all();
+        assert_eq!(
+            fixture
+                .service
+                .execute("client", find(3))
+                .await
+                .unwrap_err()
+                .code,
+            "not_authorized"
+        );
+        assert_eq!(
+            fixture
+                .service
+                .execute("client", read("README.txt", 0, None))
+                .await
+                .unwrap_err()
+                .code,
+            "not_authorized"
+        );
+        fixture.close().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires local OpenSSH sftp-server; CI runs openssh_ tests explicitly"]
 async fn openssh_mcp_retained_sftp_entry_is_not_live_after_transport_disconnect() {
     crate::sftp_test_server::bounded(async {
         let fixture = Fixture::start(None).await;

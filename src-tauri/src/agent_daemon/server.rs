@@ -1350,7 +1350,8 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::CaptureScreen { .. } => audit::Action::RemoteScreen,
         Op::ScreenInput { .. } => audit::Action::RemoteInput,
         Op::Fleet { .. } => audit::Action::RemoteFleet,
-        Op::ListDirectory { .. } => audit::Action::RemoteList,
+        Op::ListDirectory { .. } | Op::FindFiles { .. } => audit::Action::RemoteList,
+        Op::ReadText { .. } => audit::Action::RemoteDownload,
         Op::Exec { .. } => audit::Action::RemoteExec,
         Op::ExecCommand { .. } | Op::RemoteCommand { .. } => audit::Action::RemoteCommand,
         Op::Transfer {
