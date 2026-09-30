@@ -1,0 +1,97 @@
+name: Linux test installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: Native Linux architecture
+        type: choice
+        options: [arm64, amd64]
+        default: arm64
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-test-installer-${{ github.ref }}-${{ inputs.architecture }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Linux ${{ inputs.architecture }} test installer
+    runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+    timeout-minutes: 90
+    env:
+      CANDIDATE_ARCH: ${{ inputs.architecture }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Configure Linux bindgen
+        run: echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(gcc -print-file-name=include)" >> "$GITHUB_ENV"
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            src-tauri -> target
+            crates/lattice-remote -> target
+            crates/lattice-rdp -> target
+            crates/lattice-vnc -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify native host command boundary
+        run: |
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --lib host_commands
+          cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --test commands_e2e
+
+      # Same sidecars, frontend and Tauri packaging as release.yml. A test
+      # installer never creates a Release, updater signature or pairing data.
+      - name: Build unsigned Debian installer
+        run: |
+          config="$RUNNER_TEMP/tauri-linux-test.json"
+          printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > "$config"
+          npm run tauri -- build --bundles deb --no-sign --ci --config "$config"
+
+      - name: Verify payload architecture and record hashes
+        run: |
+          mkdir candidate
+          cp src-tauri/target/release/bundle/deb/*.deb candidate/
+          package=$(find candidate -maxdepth 1 -name '*.deb' -print -quit)
+          test "$(dpkg-deb -f "$package" Architecture)" = "$CANDIDATE_ARCH"
+          dpkg-deb -x "$package" "$RUNNER_TEMP/candidate-payload"
+          export PAYLOAD_DIRECTORY="$RUNNER_TEMP/candidate-payload/usr/bin"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          files=list(pathlib.Path('candidate').glob('*.deb'))
+          files += [pathlib.Path(os.environ['PAYLOAD_DIRECTORY'])/name for name in ('lattice-term','lattice-agent')]
+          manifest={'sourceCommit':os.environ['GITHUB_SHA'],'runId':os.environ['GITHUB_RUN_ID'],
+                    'architecture':os.environ['CANDIDATE_ARCH'],'installed':False,
+                    'files':[{'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files]}
+          pathlib.Path('candidate/manifest.json').write_text(json.dumps(manifest,indent=2))
+          PY
+
+      - name: Upload Linux test installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LatticeTerm-Linux-${{ inputs.architecture }}-test
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 7
