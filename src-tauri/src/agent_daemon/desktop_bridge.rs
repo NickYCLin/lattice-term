@@ -14,7 +14,9 @@ use tokio::sync::{oneshot, Semaphore};
 
 // Version 4 adds explicitly shared desktop PTYs. Version 3 added SSH Fleet.
 // Older peers must refuse remote sharing instead of guessing new scopes.
-pub const PROTOCOL: u32 = 4;
+// v5 adds POSIX shell requests and advertised commandShells metadata.
+// Same-date candidate upgrades must replace an idle v4 daemon before sending them.
+pub const PROTOCOL: u32 = 5;
 const MAX_TARGETS: usize = 64;
 const MAX_CALLS: usize = 16;
 const MAX_REPLY: usize = 512 * 1024;
