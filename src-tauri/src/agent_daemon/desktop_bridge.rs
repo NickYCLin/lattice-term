@@ -244,7 +244,11 @@ impl Bridge {
                 .map_err(|_| "Remote grants unavailable")?;
             match operation.target_id() {
                 None => {
-                    if matches!(operation, DesktopOperation::ListSavedConnections) {
+                    if matches!(
+                        operation,
+                        DesktopOperation::ListSavedConnections
+                            | DesktopOperation::ConnectSaved { .. }
+                    ) {
                         // The book lives in the desktop's profile store, so ask
                         // the desktop; the grant list here is a different answer.
                         let (owner_id, owner) = owners

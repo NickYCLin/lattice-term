@@ -1,7 +1,8 @@
 //! Explicit, revocable access to connections owned by the desktop window.
 //!
-//! This service never connects, authenticates, accepts host keys, or reads a
-//! saved profile. A desktop grant is bound to one already trusted live session.
+//! Saved-profile connections delegate to the desktop's normal login and trust
+//! checks. No supplied host, credential or host-key approval crosses MCP.
+//! A desktop grant is bound to one already trusted live session.
 //! Commands and absolute paths stay here; the daemon sees only redacted views.
 //! SFTP path checks assume a cooperative trusted server. They are not a chroot
 //! and cannot defeat another remote process changing directories between calls.
@@ -14,12 +15,14 @@ mod operation_tracking;
 mod paths;
 mod remote_files;
 mod remote_jobs;
+mod saved_connect;
 mod screen_input;
 mod ssh_jobs;
 pub(crate) use fleet::intersect_scopes as intersect_fleet_scopes;
 #[cfg(windows)]
 pub(crate) use fleet::valid_windows_workspace_path;
 pub use fleet::{FleetAction, FleetPlatform, FleetWorkspace};
+pub(crate) use saved_connect::{connect_from_desktop, ConnectFuture};
 pub use screen_input::ScreenAction;
 
 use crate::domain::{ConnectionProfile, Environment, Protocol};
@@ -209,7 +212,7 @@ const MAX_BOOK_ENTRIES: usize = 500;
 ///
 /// Deliberately without hostname, account, port, device identity or relay
 /// address: naming the places this person works is enough to ask for one by
-/// name, and reaching any of them still needs a session they opened.
+/// name; opening one delegates to the desktop's saved login and trust checks.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedConnectionView {
@@ -232,6 +235,9 @@ pub struct SavedConnectionView {
 /// the book as unavailable rather than as an empty book.
 pub trait ConnectionBook: Send + Sync {
     fn profiles(&self) -> Vec<ConnectionProfile>;
+    fn connect(&self, _profile: ConnectionProfile) -> ConnectFuture {
+        Box::pin(async { Err(ServiceError::unavailable()) })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +250,10 @@ pub trait ConnectionBook: Send + Sync {
 pub enum DesktopOperation {
     ListConnections,
     ListSavedConnections,
+    ConnectSaved {
+        profile_id: String,
+        request_id: String,
+    },
     Fleet {
         target_id: String,
         action: FleetAction,
@@ -341,6 +351,7 @@ impl DesktopOperation {
     pub const KINDS: &'static [&'static str] = &[
         "listConnections",
         "listSavedConnections",
+        "connectSaved",
         "fleet",
         "getMetrics",
         "captureScreen",
@@ -377,6 +388,7 @@ impl DesktopOperation {
         match self {
             Self::ListConnections => "listConnections",
             Self::ListSavedConnections => "listSavedConnections",
+            Self::ConnectSaved { .. } => "connectSaved",
             Self::Fleet { .. } => "fleet",
             Self::GetMetrics { .. } => "getMetrics",
             Self::CaptureScreen { .. } => "captureScreen",
@@ -397,7 +409,7 @@ impl DesktopOperation {
 
     pub fn target_id(&self) -> Option<&str> {
         match self {
-            Self::ListConnections | Self::ListSavedConnections => None,
+            Self::ListConnections | Self::ListSavedConnections | Self::ConnectSaved { .. } => None,
             Self::Fleet { target_id, .. }
             | Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
@@ -446,6 +458,7 @@ impl DesktopOperation {
             // Cancellation/status require ownership of the original operation.
             Self::ListConnections
             | Self::ListSavedConnections
+            | Self::ConnectSaved { .. }
             | Self::Cancel { .. }
             | Self::ListOperations { .. }
             | Self::OperationStatus { .. } => None,
@@ -456,6 +469,7 @@ impl DesktopOperation {
         match self {
             Self::Fleet { action, .. } => action.request_id(),
             Self::ScreenInput { request_id, .. }
+            | Self::ConnectSaved { request_id, .. }
             | Self::Exec { request_id, .. }
             | Self::ExecCommand { request_id, .. }
             | Self::RemoteCommand { request_id, .. }
@@ -743,6 +757,7 @@ pub struct DesktopService {
     /// carries no host, account or credential. Turning it off is a choice
     /// they make, and it takes effect at once.
     book_shared: Arc<AtomicBool>,
+    connecting: tokio::sync::Mutex<()>,
     /// SSH connections the person told the card to stop asking about.
     /// Loaded from [`crate::mcp_command_trust`] and kept in step with it.
     trusted_command_profiles: Arc<Mutex<std::collections::HashSet<String>>>,
@@ -775,6 +790,7 @@ impl DesktopService {
             approvals: watch::channel(0).0,
             book: None,
             book_shared: Arc::new(AtomicBool::new(true)),
+            connecting: tokio::sync::Mutex::new(()),
             trusted_command_profiles: Arc::new(Mutex::new(std::collections::HashSet::new())),
             trust_all_commands: Arc::new(AtomicBool::new(false)),
             allow_remote_operations: Arc::new(AtomicBool::new(true)),
@@ -1482,6 +1498,15 @@ impl DesktopService {
             let (connections, truncated) = self.saved_connections()?;
             return Ok(json!({ "connections": connections, "truncated": truncated }));
         }
+        if let DesktopOperation::ConnectSaved {
+            profile_id,
+            request_id,
+        } = &operation
+        {
+            return self
+                .connect_saved(client, profile_id, request_id, &operation)
+                .await;
+        }
         let grant = self.authorized(&operation)?;
         self.preflight(client, &grant, &operation)?;
         if let DesktopOperation::OperationStatus { operation_id, .. } = &operation {
@@ -1674,6 +1699,7 @@ impl DesktopService {
             }
             DesktopOperation::ListConnections
             | DesktopOperation::ListSavedConnections
+            | DesktopOperation::ConnectSaved { .. }
             | DesktopOperation::ListOperations { .. }
             | DesktopOperation::GetMetrics { .. } => {}
         }
@@ -2818,6 +2844,10 @@ mod tests {
         let samples = [
             DesktopOperation::ListConnections,
             DesktopOperation::ListSavedConnections,
+            DesktopOperation::ConnectSaved {
+                profile_id: "profile".into(),
+                request_id: "connect".into(),
+            },
             DesktopOperation::GetMetrics {
                 target_id: "t".into(),
             },
@@ -2890,7 +2920,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 17);
+        assert_eq!(DesktopOperation::KINDS.len(), 18);
     }
 
     #[test]

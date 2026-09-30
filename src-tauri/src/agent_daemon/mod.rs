@@ -120,6 +120,7 @@ fn remote_code(code: &str) -> &'static str {
     match code {
         "busy" => mapped::LIMIT_REACHED,
         "path_not_allowed" | "denied" => mapped::NOT_AUTHORIZED,
+        "credential_required" | "host_verification_required" => mapped::NEEDS_USER_ACTION,
         _ => mapped::FAILED,
     }
 }

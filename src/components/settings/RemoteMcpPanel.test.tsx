@@ -40,7 +40,8 @@ describe("remote MCP permissions", () => {
 
   it.each(["zh-TW", "en"] as const)("makes the connection book its own choice in %s", (locale) => {
     const html = renderToStaticMarkup(<I18nProvider locale={locale}><RemoteMcpPanel available /></I18nProvider>);
-    expect(html).toContain(locale === "zh-TW" ? "允許外部 AI 讀取連線簿" : "Let external AI read the connection book");
+    expect(html).toContain(locale === "zh-TW" ? "允許外部 AI 讀取並開啟儲存連線" : "Let external AI read and open saved connections");
+    expect(html).toContain(locale === "zh-TW" ? "本機保存的密碼或配對碼" : "locally saved password or pairing code");
     // The book names places to work; the way into them is never part of it.
     expect(html).toContain(locale === "zh-TW" ? "不含主機、埠、帳號與任何憑證" : "Never the host, port, account or any credential");
     expect(html).toContain('type="checkbox"');

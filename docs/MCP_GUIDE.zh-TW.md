@@ -23,17 +23,22 @@ LatticeTerm 本身可以當成一個 MCP 伺服器。接上之後，外部 AI �
 | SFTP 列目錄、上傳、下載 | 你目前連著的 SFTP 連線 | 連上即開放 |
 | 看遠端畫面、操作鍵鼠 | 目前連著的 RDP、VNC、Lattice Remote 畫面 | 連上即開放畫面；鍵鼠要分享端允許控制 |
 | 讀連線簿 | 儲存連線的名稱、群組、標籤、協定、是否連線 | 預設開啟，可在設定頁關掉 |
+| 開啟儲存的連線 | SSH、SFTP、RDP、VNC、Lattice Remote | 先保存登入資料並完成主機驗證，之後 AI 可直接連 |
 | 遠端主機上的 Agent Fleet | 另一台已裝 LatticeTerm 的主機上的工作區 | 在設定頁另外設定（見[遠端 Fleet](#遠端主機的-agent-fleet)） |
 
-AI **拿不到**：密碼、私鑰、配對碼、主機位址、帳號，也不能自己開一條你沒連上的連線。
+AI **拿不到**密碼、私鑰或配對碼。連線簿也不會傳出主機位址與帳號；
+AI 只提供已儲存項目的 ID，由 LatticeTerm 使用本機登入資料連線。
 
-### 步驟 1：確認 LatticeTerm 與背景服務在跑
+### 步驟 1：保存連線與登入資料
 
-1. 打開 LatticeTerm。
-2. 到 **Agent Fleet** 頁，看上方背景服務的狀態。如果顯示「背景服務沒在跑」，按 **啟動背景服務**。
-3. 想讓 AI 在你沒開視窗時也連得上，可到 **設定 → 背景服務** 打開「登入時啟動」。
+1. 在 LatticeTerm 保存需要使用的連線與登入資料。
+2. 第一次連線時完成主機身分驗證。
+3. 接上 MCP 後，AI 可用 `connect_saved_connection` 開啟這筆連線，不用每次先手動點連線。
 
-外部 AI 是透過背景服務連進來的；背景服務沒在跑，AI 就只會看到 `daemonRunning: false`。SSH、SFTP、遠端畫面這些能力還需要**桌面視窗開著**，因為連線本身在桌面上。
+一般設定會自動啟動缺少的背景服務，使用遠端工具時也會開啟桌面。
+已開著的視窗不會被搶焦點。`get_capabilities` 的 `automaticStartup` 會告訴 AI
+這個 adapter 是否啟用自動啟動。指定不同資料目錄、遠端工作區，
+或加上 `--no-autostart` 時，仍需自行啟動服務。
 
 ### 步驟 2：把 LatticeTerm 加到你的 AI 工具
 
@@ -116,7 +121,7 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 - SFTP：家目錄底下的列目錄、上傳；下載的檔案會放進本機「下載」資料夾。單檔上限 8 MiB，不覆寫既有檔案。
 - RDP、VNC、Lattice Remote：每兩秒最多一張畫面；鍵鼠需要分享端允許控制。你自己在遠端視窗動滑鼠或打字時，AI 的鍵鼠會暫停。
 - 要暫時收回某條連線，按 **暫停十分鐘**；斷線則立即結束所有授權。
-- **允許外部 AI 讀取連線簿**：預設開啟，AI 可以看到儲存連線的名稱與是否已連線，但沒連上的項目還是只有你能開。
+- **允許外部 AI 讀取並開啟儲存連線**：預設開啟，AI 可以列出儲存連線，並使用本機保存的登入資料連線；關掉後，列出與自動連線都會停止。
 
 ### 步驟 5：確認接好了
 
@@ -131,10 +136,10 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 | 狀況 | 原因 | 處理方式 |
 | --- | --- | --- |
 | AI 說沒有 latticeterm 工具、「無法使用 MCP」 | 這個對話是在加入設定之前開的，或設定寫在別的 scope／設定檔 | 開新的對話或重開 AI 工具；Codex 用 `codex mcp list`、Claude Code 用 `claude mcp list` 確認有 `latticeterm` |
-| 工具出現了，但回 `daemon_unavailable` 或 `daemonRunning: false` | 背景服務沒在跑 | Agent Fleet 頁按「啟動背景服務」 |
+| 工具出現了，但回 `daemon_unavailable` 或 `daemonRunning: false` | 自動啟動失敗或已停用 | 檢查 `automaticStartup`、資料目錄與 Agent Fleet 頁的服務狀態 |
 | 回 `needs_user_action`，說要重啟背景服務 | 背景服務是更新前的舊版 | 做完背景工作後，結束背景服務再重新啟動 |
 | `list_authorized_connections` 是空的 | 桌面現在沒有任何連線，或那條連線被暫停了 | 在 LatticeTerm 連上要用的主機；到設定頁確認沒有暫停 |
-| `list_saved_connections` 回 `needs_user_action` | 桌面視窗沒開，或連線簿開關被關掉 | 打開 LatticeTerm，確認「允許外部 AI 讀取連線簿」是開的 |
+| `list_saved_connections` 回 `needs_user_action` | 桌面視窗沒開，或連線簿開關被關掉 | 打開 LatticeTerm，確認「允許外部 AI 讀取並開啟儲存連線」是開的 |
 | `list_agent_sessions` 是空的 | 沒有分享任何背景工作階段 | 在 Agent Fleet 頁把工作階段的 MCP 權限改成「只能看」或「完全開放」 |
 | `ssh_run_command` 一直沒結果 | 桌面的核准卡片沒人按，兩分鐘後自動作廢 | 到 LatticeTerm 按允許或拒絕 |
 | 設定檔路徑有空白就失敗 | 參數沒加引號 | 路徑用引號包起來，或直接用 Agent Fleet 頁複製的指令 |
@@ -298,7 +303,21 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 
 **G. 找使用者存的連線**
 
-`list_saved_connections` 會列出連線簿每一筆的名稱、群組、標籤、環境、協定，以及有沒有連線。已連線的項目附有 `targetId`，可以直接用在上面的遠端工具。**沒連線的項目你開不了**，請告訴使用者要在 LatticeTerm 裡連哪一筆。
+`list_saved_connections` 會列出連線簿每一筆的名稱、群組、標籤、環境、協定，以及有沒有連線。
+已連線的項目附有 `targetId`，可直接用在遠端工具。沒連線時呼叫：
+
+```json
+{"profileId":"連線簿回傳的 id","requestId":"這次連線請求的唯一 ID"}
+```
+
+工具名稱是 `connect_saved_connection`。成功後直接使用回傳的 `targetId`，
+檔案操作的 `rootId` 則從 `connection.roots` 取得。
+已有連線時會重用；回覆遺失就用相同 `requestId` 重送。
+結果未確認時先重新列連線，不要一直換 ID 重試。
+
+支援保存的密碼與 Lattice Remote 配對碼。私鑰登入、RDP 網域、
+缺少登入資料或尚未驗證的主機仍需從桌面處理；不會請 AI 索取密碼。
+已暫停 MCP 分享的連線不會再開一條繞過暫停。
 
 ### 工具速查
 
@@ -314,6 +333,7 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 | `cancel_agent_task` | `sessionId`、`scope`（`turn`／`queue`／`session`）、`requestId` | 中斷回合、清佇列、結束工作階段 |
 | `list_authorized_connections` | 無 | 目前開放的連線：`id`（即 `targetId`）、`backend`、`scopes`、`plans`、`roots`、`connected` |
 | `list_saved_connections` | 無 | 連線簿名稱與連線狀態 |
+| `connect_saved_connection` | `profileId`、`requestId` | 使用保存的登入資料開啟連線 |
 | `get_host_metrics` | `targetId` | Linux 主機 CPU、記憶體、磁碟等數值 |
 | `ssh_exec_job` | `targetId`、`planId`、`requestId` | 執行使用者預先核准的具名指令 |
 | `ssh_run_command` | `targetId`、`command`、`requestId` | 提出臨時指令，由使用者逐筆核准 |

@@ -17,9 +17,9 @@ OpenCode 的全域設定。因此在工作階段裡的 CLI
 以及已有系統管理層設定檔的 Gemini／Qwen，LatticeTerm 都不插手。設定頁可請原生層使用 LatticeTerm
 安全儲存的密碼、SSH 金鑰偏好或 Lattice Remote 配對碼開啟連線，模型與
 WebView 都拿不到憑證。更新前已經執行中的 CLI 不會在中途改寫工具清單，
-完成更新後請新開工作階段；連線與各項操作仍預設不授權。
+完成更新後請新開工作階段；連線與各項操作仍由桌面檢查權限。
 
-這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，範圍就是你目前連著的 SSH／SFTP 工作階段；D 同樣涵蓋 RDP／VNC／Lattice Remote 的單張畫面擷取與鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。連線由你在桌面建立，建立之後不需要再授權。實作、測試與實機驗收分開記錄，見文末。
+這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，範圍就是你目前連著的 SSH／SFTP 工作階段；D 同樣涵蓋 RDP／VNC／Lattice Remote 的單張畫面擷取與鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。連線可由你在桌面建立，也可由 MCP 使用已保存的登入資料開啟，建立之後不需要再授權。實作、測試與實機驗收分開記錄，見文末。
 
 ## 運作方式
 
@@ -42,7 +42,7 @@ lattice-term agent-daemon（背景服務）
 - **降級或取消立即生效。** 從「完全開放」改回「只能看」或「不分享」時，尚未送出的 MCP 指示一併移除，使用者自己排隊的工作保留。背景服務內部仍分開記錄內容讀取與控制，舊版介面留下的「只分享狀態」會照原權限顯示徽章，重新選一次就換成新的等級。內容與 metadata 都可能含敏感資訊，請選擇合適的分享對象。
 - **啟動也有獨立授權。** 「允許 MCP 啟動已保存的背景啟動項目」打開後，client 才能用 `launch_agent` 啟動保存清單裡勾了「留在背景」的項目，完全沿用保存的 CLI、參數、工作目錄、沙箱與共用指示。它啟動的工作階段會自動分享、開放內容讀取並可控；介面會明示這三個效果。開關存在啟動項目檔裡，開著時背景服務保持常駐。
 - **你看得到誰做了什麼。** MCP 區塊列最近 256 筆 Agent 寫入、遠端操作與遠端授權變更，包含已接受、重送、失敗或結果未確認。撤權或工作階段結束不移除紀錄；安全寫入此裝置後可跨背景服務重啟還原。介面區分已儲存、尚在儲存、只在記憶體與無法儲存。client 名稱由對方自報，不是已驗證身分，請勿包含敏感資訊。
-- **adapter 不會啟動背景服務。** 背景服務沒在跑時，`list_agent_sessions` 回 `daemonRunning: false` 與空清單，讀取與等待回 `isError` 說明原因；不會為了讓模型有東西看而拉起程序。
+- **本機 MCP 自動啟動服務。** 使用預設資料目錄時，adapter 會在需要時啟動背景服務；明確傳入相同的預設目錄也適用。第一次列遠端連線或連線簿時，會啟動桌面並接上 bridge，已開著的視窗不搶焦點。`--no-autostart`、不同的資料目錄與 `--workspace-directory` 保持被動，未啟動時仍回報 `daemonRunning: false`。不會為升級而結束使用中的背景工作。
 - **權限由背景服務端強制。** adapter 以 `observer` 角色打招呼，背景服務只接受已分享工作階段的觀測、另外授權的操作，以及允許的啟動項目查詢；其他管理請求一律拒絕。`readOnlyHint` 等 MCP annotation 只是描述。
 - **權杖留在 adapter 程序。** 連線用的 `agent-daemon.token`（0600）由 adapter 讀取，不會出現在任何工具結果裡。
 - **觀察者收不到終端位元組事件。** 背景服務只把已分享工作階段的 `state`／`closed`／`model`／`usage`／`queue` 事件推給觀察者，輸出一律用 cursor 主動讀，慢的 client 不會累積終端資料。
@@ -279,9 +279,11 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 連線簿預設就讀得到，和你開著的連線一樣不必另外設定。client 用
 `list_saved_connections` 會看到你儲存的每一筆連線名稱、群組、標籤、環境與協
 定，以及那一筆現在有沒有連線。不含主機、埠、帳號、裝置 ID、relay 位址與任何憑
-證，一次最多 500 筆並以 `truncated` 標示被截掉。讀到名稱不等於拿到權限：沒連線
-的項目仍然只有你能在桌面開啟；已連線的項目會附上當下的 `targetId`，可以直接接
-上下面那些遠端工具。設定頁的「允許外部 AI 讀取連線簿」可以隨時關掉，關掉即時生
+證，一次最多 500 筆並以 `truncated` 標示被截掉。尚未連線的項目可用
+`connect_saved_connection` 開啟，僅接受已儲存的 profile ID 與 `requestId`；
+沿用桌面的密碼／配對碼與主機驗證，不接受模型提供主機或憑證。
+已連線的項目會附上當下的 `targetId`，可以直接接
+上下面那些遠端工具。設定頁的「允許外部 AI 讀取並開啟儲存連線」可以隨時關掉，關掉即時生
 效；這個選擇存在資料目錄的 `mcp-connection-book.json`，關掉桌面也保留。檔案讀不
 到或損毀時回到預設，只有這個版本看得懂的檔案才會把連線簿關起來。
 
@@ -289,6 +291,7 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 | --- | --- |
 | `list_authorized_connections` | 只列已授權名稱、opaque ID、能力及連線狀態，不含主機、帳號、憑證、指令與實際根目錄 |
 | `list_saved_connections` | 開關打開時才可用：只列連線簿的名稱、群組、標籤、環境、協定與是否連線，不含主機、埠、帳號、裝置 ID 與憑證 |
+| `connect_saved_connection` | 開啟指定的已儲存連線，重用現有連線並回傳可操作的 targetId |
 | `get_host_metrics` | 既有 SSH 連線上的固定 Linux probe，只回傳數值，不含掛載路徑與裝置名稱 |
 | `sftp_list_directory` | 已核准根目錄下的有界清單 |
 | `sftp_find_files` | 核准根目錄內依檔名片段搜尋，需 list 權限 |
@@ -300,6 +303,14 @@ client 用 `ssh_run_command` 送出指令原文後，桌面會跳出卡片顯示
 | `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
 | `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
 | `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
+
+自動連線支援 SSH、SFTP、RDP、VNC、Lattice Remote。SSH／SFTP 使用保存的密碼，
+私鑰登入仍須從桌面開啟；RDP 使用未指定網域的憑證，其他網域的憑證不會混用。
+缺少登入資料、主機金鑰未確認或已變更時，不會自行接受或繞過驗證。
+連線簿開關也控制這個入口；已暫停 MCP 分享的連線不會另開一條來繞過。
+同一時間只處理一個連線建立，同一 client 的 requestId 沿用 15 分鐘去重紀錄；
+連線建立有 12 秒期限。逾時結果未確認時，先重新列連線，不要換 ID 盲目重試。
+新目標會先同步給 daemon，再回覆 MCP，接續的指令不用等下一輪背景刷新。
 
 文字讀取限 1 MiB，頁面預設 16 KiB、範圍 4 bytes～32 KiB，
 offset 必須落在 UTF-8 字元邊界；不接受 NUL 或無效 UTF-8。

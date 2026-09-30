@@ -497,6 +497,47 @@ async fn the_saved_connection_book_is_read_from_the_desktop() {
 }
 
 #[tokio::test]
+async fn a_saved_connection_can_be_opened_before_any_remote_grant_exists() {
+    let bridge = Arc::new(Bridge::default());
+    let sink = DaemonSink::default();
+    let operation = DesktopOperation::ConnectSaved {
+        profile_id: "saved-profile".into(),
+        request_id: "one-attempt".into(),
+    };
+    assert!(bridge
+        .call("observer fixture", operation.clone())
+        .await
+        .unwrap_err()
+        .starts_with("needs_user_action"));
+    let (owner, sender, mut receiver) = desktop(&sink, &bridge);
+    bridge
+        .replace(owner, ClientRole::Desktop, sender, Vec::new())
+        .unwrap();
+    let task = call(&bridge, operation);
+    let id = match receive(&mut receiver).await {
+        Frame::Request {
+            id,
+            body:
+                Request::DesktopInvoke {
+                    operation: DesktopOperation::ConnectSaved { profile_id, .. },
+                    ..
+                },
+        } => {
+            assert_eq!(profile_id, "saved-profile");
+            id
+        }
+        _ => panic!("connection request did not reach the desktop"),
+    };
+    bridge.resolve(
+        owner,
+        ClientRole::Desktop,
+        id,
+        Ok(json!({"connected":true,"targetId":"new-target"})),
+    );
+    assert_eq!(completed(task).await.unwrap()["targetId"], "new-target");
+}
+
+#[tokio::test]
 async fn disconnected_owners_cannot_restore_grants_or_deliver_late_replies() {
     let bridge = Arc::new(Bridge::default());
     let sink = DaemonSink::default();

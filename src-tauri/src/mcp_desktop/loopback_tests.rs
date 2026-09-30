@@ -415,6 +415,124 @@ async fn bounded(test: impl std::future::Future<Output = ()>) {
 }
 
 #[tokio::test]
+async fn saved_ssh_connect_reuses_one_session_and_respects_revocation() {
+    struct Book {
+        ssh: Arc<SshRegistry>,
+        request: ConnectRequest,
+        known: HostKeyRecord,
+        changed: Arc<AtomicBool>,
+    }
+    impl ConnectionBook for Book {
+        fn profiles(&self) -> Vec<ConnectionProfile> {
+            vec![ConnectionProfile {
+                id: self.request.profile_id.clone(),
+                name: "Loopback".into(),
+                protocol: Protocol::Ssh,
+                hostname: if self.changed.load(Ordering::Relaxed) {
+                    "changed.invalid".into()
+                } else {
+                    self.request.hostname.clone()
+                },
+                username: self.request.username.clone(),
+                port: self.request.port,
+                environment: Environment::Development,
+                group: String::new(),
+                tags: vec![],
+                favorite: false,
+                device_id: None,
+                relay_address: None,
+                machine_id: None,
+            }]
+        }
+        fn connect(&self, _: ConnectionProfile) -> ConnectFuture {
+            let (ssh, known, request) =
+                (self.ssh.clone(), self.known.clone(), self.request.clone());
+            Box::pin(async move {
+                match crate::ssh::connect(Arc::new(Sink::default()), ssh, Some(known), request)
+                    .await
+                {
+                    ConnectOutcome::Connected { .. } => Ok(()),
+                    _ => Err(ServiceError::failed()),
+                }
+            })
+        }
+    }
+    bounded(async {
+        let peer = Peer::start().await;
+        let ssh = Arc::new(SshRegistry::new());
+        let changed = Arc::new(AtomicBool::new(false));
+        let service = Arc::new(
+            DesktopService::new(ssh.clone(), Arc::new(SftpRegistry::new())).with_connection_book(
+                Arc::new(Book {
+                    ssh: ssh.clone(),
+                    request: peer.request(),
+                    known: peer.known.clone(),
+                    changed: changed.clone(),
+                }),
+            ),
+        );
+        let operation = |request: &str| DesktopOperation::ConnectSaved {
+            profile_id: "synthetic-only".into(),
+            request_id: request.into(),
+        };
+        let first = service.execute("client", operation("first")).await.unwrap();
+        assert_eq!(first["connected"], true);
+        let target = first["targetId"].as_str().unwrap();
+        assert!(service.targets().iter().any(|grant| grant.id == target));
+        let authentications = peer.authentications.load(Ordering::Relaxed);
+        assert!(authentications > 0);
+        for (client, request) in [
+            ("client", "first"),
+            ("client", "second"),
+            ("other", "third"),
+        ] {
+            let repeated = service.execute(client, operation(request)).await.unwrap();
+            assert_eq!(repeated["targetId"], target);
+            assert_eq!(
+                repeated["duplicate"].as_bool().unwrap_or(false),
+                request == "first"
+            );
+        }
+        assert_eq!(ssh.list().len(), 1);
+        assert_eq!(
+            peer.authentications.load(Ordering::Relaxed),
+            authentications
+        );
+        changed.store(true, Ordering::Relaxed);
+        assert_eq!(
+            service
+                .execute("client", operation("changed-profile"))
+                .await
+                .unwrap_err()
+                .code,
+            "not_authorized"
+        );
+        assert_eq!(
+            peer.authentications.load(Ordering::Relaxed),
+            authentications
+        );
+        changed.store(false, Ordering::Relaxed);
+        service.revoke(target).unwrap();
+        assert_eq!(
+            service
+                .execute("client", operation("after-revoke"))
+                .await
+                .unwrap_err()
+                .code,
+            "not_authorized"
+        );
+        assert_eq!(
+            peer.authentications.load(Ordering::Relaxed),
+            authentications
+        );
+        crate::ssh::disconnect(&ssh, &ssh.list()[0].session_id)
+            .await
+            .unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn actual_ssh_host_key_unknown_and_changed_are_rejected_before_authentication() {
     bounded(async {
         let peer = Peer::start().await;

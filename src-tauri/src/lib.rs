@@ -539,6 +539,10 @@ async fn mcp_remote_targets(
 struct DesktopConnectionBook(tauri::AppHandle);
 
 impl mcp_desktop::ConnectionBook for DesktopConnectionBook {
+    fn connect(&self, profile: domain::ConnectionProfile) -> mcp_desktop::ConnectFuture {
+        mcp_desktop::connect_from_desktop(self.0.clone(), profile)
+    }
+
     fn profiles(&self) -> Vec<domain::ConnectionProfile> {
         self.0
             .try_state::<AppStorage>()
@@ -4598,7 +4602,11 @@ pub fn run() {
 
     #[cfg(desktop)]
     let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(
-        |app, _arguments, _working_directory| {
+        |app, arguments, _working_directory| {
+            if arguments.iter().any(|argument| argument == "--mcp-desktop") {
+                agent_daemon::client::start_desktop_bridge(app.clone());
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let handle = window.clone();
                 let _ = window.run_on_main_thread(move || {
@@ -4731,6 +4739,7 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
+            agent_daemon::client::start_desktop_bridge(app.handle().clone());
             // An update replaces the executable but not a background service
             // that is still running; swap it for this build while it holds
             // nothing, and hand the new one the launch plans again.

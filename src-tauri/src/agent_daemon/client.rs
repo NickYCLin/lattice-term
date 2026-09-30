@@ -28,6 +28,27 @@ const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(8);
 pub(crate) const DAEMON_GONE: &str = "The background service is no longer running.";
 
+/// Make desktop-owned connections available even before an Agent is launched.
+pub(crate) fn start_desktop_bridge(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let Some(daemon) = app.try_state::<crate::AppDaemon>() else {
+            return;
+        };
+        let Ok(connection) = daemon.ensure().await else {
+            return;
+        };
+        let sync = app.state::<crate::McpRemoteSync>();
+        let _guard = sync.0.lock().await;
+        let service = app.state::<Arc<crate::mcp_desktop::DesktopService>>();
+        service.grant_live_connections().await;
+        let _ = connection
+            .request(Request::DesktopGrants {
+                targets: service.targets(),
+            })
+            .await;
+    });
+}
+
 pub struct DaemonClient {
     app: AppHandle,
     paths: DaemonPaths,
@@ -94,6 +115,13 @@ impl DaemonClient {
             return Ok(connection);
         }
         let mut guard = self.connection.lock().await;
+        // Another caller may have started it while we waited for the lock.
+        if let Some(connection) = guard
+            .as_ref()
+            .filter(|connection| connection.alive.load(Ordering::Relaxed))
+        {
+            return Ok(Arc::clone(connection));
+        }
         let log_was = daemon_log_length(&self.paths);
         spawn_daemon(&self.paths)?;
         let deadline = tokio::time::Instant::now() + START_TIMEOUT;
@@ -548,12 +576,33 @@ async fn reader_loop<R: AsyncBufReadExt + Unpin>(
                     .inner()
                     .clone();
                 let connection = Arc::clone(&connection);
+                let publish_app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let _permit = permit;
                     if !connection.alive.load(Ordering::Relaxed) {
                         return;
                     }
-                    let result = service.execute(&client, operation).await;
+                    let opens_connection = matches!(
+                        operation,
+                        crate::mcp_desktop::DesktopOperation::ConnectSaved { .. }
+                    );
+                    let mut result = service.execute(&client, operation).await;
+                    if opens_connection && result.is_ok() {
+                        // The returned target must be routable before MCP can
+                        // issue its very next command, not ten seconds later.
+                        let sync = publish_app.state::<crate::McpRemoteSync>();
+                        let _guard = sync.0.lock().await;
+                        if connection
+                            .request(Request::DesktopGrants {
+                                targets: service.targets(),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            result = Err(crate::mcp_desktop::ServiceError::new("unknown_outcome",
+                                "The connection opened but sharing could not be confirmed. List saved connections before retrying."));
+                        }
+                    }
                     let frame = match result {
                         Ok(result) => Frame::Response {
                             id,
@@ -623,7 +672,7 @@ fn last_failure_line(log: &str) -> Option<String> {
 /// Starts `lattice-term agent-daemon` detached from this process: its own
 /// session on Unix, no console and no job on Windows. Nothing is inherited
 /// but the environment; the log file catches what it has to say.
-fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
+pub(super) fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
     std::fs::create_dir_all(&paths.data_dir)
