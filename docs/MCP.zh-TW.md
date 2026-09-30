@@ -510,3 +510,9 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 - **D 的延伸**：SSH 與 Lattice Remote／Relay 工作區、多 PTY 已接入 MCP；Relay 需主機端獨立工作區授權，詳見 [Relay Fleet](RELAY_FLEET.zh-TW.md)。桌面遠端 Fleet panes 與巢狀派工未提供。外部主機、安裝版與真實 CLI 的驗收另列，不以 loopback fixture 代替。
 
 歡迎在 #180 繼續討論優先順序。
+
+### 前景提示就緒診斷
+
+`desktop_agent` 的 `state` 回傳 `promptReadiness`，包含 `ready`、`blockers`、`lastInputKind` 與 `snapshotOnly=true`。這是觀察當下的快照，送出時仍重新檢查；不會清除草稿、改變權限或把推測狀態升級為正式就緒。
+
+阻擋原因分為 `control_not_granted`、`input_profile_unsupported`、`desktop_editing`、`desktop_paste_incomplete`、`desktop_escape_incomplete`、`startup_seed_pending`、`integration_not_reported`、`lifecycle_not_ready`、`queued_prompts_pending`。`lastInputKind` 僅回傳輸入種類，不回傳草稿、按鍵內容或回報憑證。遇到 `not_ready` 先讀這些原因，不應反覆要求使用者送相同提示或自動清除輸入。

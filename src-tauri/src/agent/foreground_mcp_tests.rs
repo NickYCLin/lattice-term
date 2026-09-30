@@ -98,3 +98,48 @@ async fn desktop_mcp_revoke_and_close_never_reuse_authority() {
     assert!(f.service.foreground_shared().is_empty());
     assert!(f.service.targets().iter().all(|t|!t.connected));
 }
+
+#[tokio::test]
+async fn desktop_mcp_readiness_reports_exact_gates_without_clearing_them() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true,true).await;
+    let state = f.call(&target,Action::State {}).await.unwrap();
+    assert_eq!(state["promptReadiness"]["ready"],true);
+    let entry = f.registry.get(&f.id).unwrap();
+    {
+        let mut input = entry.input.lock().unwrap();
+        input.desktop_editing = true;
+        input.desktop_paste = true;
+        input.desktop_escape = vec![27];
+        input.startup_seed_pending = true;
+    }
+    let state = f.call(&target,Action::State {}).await.unwrap();
+    assert_eq!(state["promptReadiness"]["blockers"],serde_json::json!([
+        "desktop_editing","desktop_paste_incomplete","desktop_escape_incomplete","startup_seed_pending"
+    ]));
+    assert!(entry.input.lock().unwrap().desktop_busy());
+    assert_eq!(mcp_prompt(f.sink.as_ref(),&f.registry,&f.id,"must remain blocked",true).unwrap_err(),MCP_NOT_READY);
+    { let mut summary = entry.summary.lock().unwrap(); summary.state = AgentLifecycle::Working; summary.state_source = AgentStateSource::Heuristic; }
+    assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"integration_not_reported"));
+    f.registry.update_state(&f.id,AgentLifecycle::Working,AgentStateSource::Integration);
+    assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"lifecycle_not_ready"));
+}
+
+#[test]
+fn foreground_input_diagnostics_do_not_treat_keys_as_readiness() {
+    let mut input = AgentInputControl::default();
+    observe_desktop_input(&mut input, b"draft");
+    assert!(input.desktop_busy());
+    observe_desktop_input(&mut input, b"\x1b[I");
+    assert_eq!(input.last_input_kind, Some("terminal_status_reply"));
+    assert!(input.desktop_busy());
+    observe_desktop_input(&mut input, b"\r");
+    assert!(!input.desktop_busy());
+    observe_desktop_input(&mut input, b"\x1b[13u");
+    assert_eq!(input.last_input_kind, Some("extended_keyboard_event"));
+    assert!(input.desktop_busy());
+    observe_desktop_input(&mut input, b"\r");
+    observe_desktop_input(&mut input, b"\x1b[<0;10;20M");
+    assert_eq!(input.last_input_kind, Some("mouse_or_unknown_csi"));
+    assert!(input.desktop_busy());
+}

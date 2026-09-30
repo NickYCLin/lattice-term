@@ -224,10 +224,14 @@ impl DesktopService {
             .ok_or_else(ServiceError::unavailable)?;
         match action {
             DesktopAgentAction::State {} => {
+                let blockers = registry
+                    .mcp_prompt_blockers(&grant.session_id)
+                    .map_err(|_| ServiceError::unavailable())?;
                 Ok(json!({"sessionId":summary.session_id,"source":"desktop",
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
                 "state":summary.state,"stateSource":summary.state_source,"queuedPrompts":summary.queued_prompts,
+                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id)},
                 "configuration":launch_identity(&summary),"readOutput":grant.view.scopes.fleet_read,"control":grant.view.scopes.fleet_control}))
             }
             DesktopAgentAction::Read { cursor, max_bytes } => {

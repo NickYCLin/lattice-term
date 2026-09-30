@@ -953,6 +953,7 @@ struct AgentInputControl {
     desktop_escape: Vec<u8>,
     startup_seed_pending: bool,
     rejected_desktop_through: u64,
+    last_input_kind: Option<&'static str>,
 }
 
 impl AgentInputControl {
@@ -2600,6 +2601,59 @@ impl AgentRegistry {
         self.get(session_id)
             .ok()
             .map(|entry| Arc::as_ptr(&entry) as usize)
+    }
+
+    /// A read-only snapshot of prompt gates; never includes draft text or keys.
+    /// Sending still rechecks every gate under the input lock.
+    pub(crate) fn mcp_prompt_blockers(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<&'static str>, String> {
+        let entry = self.get(session_id)?;
+        let input = entry.input.lock().map_err(|e| e.to_string())?;
+        let summary = entry.summary.lock().map_err(|e| e.to_string())?;
+        let mut reasons = Vec::new();
+        if current_mcp_grant(&entry).is_none() {
+            reasons.push("control_not_granted");
+        }
+        if require_mcp_input_profile(&entry, &summary.definition_id).is_err() {
+            reasons.push("input_profile_unsupported");
+        }
+        if input.desktop_editing {
+            reasons.push("desktop_editing");
+        }
+        if input.desktop_paste {
+            reasons.push("desktop_paste_incomplete");
+        }
+        if !input.desktop_escape.is_empty() {
+            reasons.push("desktop_escape_incomplete");
+        }
+        if input.startup_seed_pending {
+            reasons.push("startup_seed_pending");
+        }
+        if summary.state_source != AgentStateSource::Integration {
+            reasons.push("integration_not_reported");
+        } else if !releases_queued_prompt(summary.state, summary.state_source) {
+            reasons.push("lifecycle_not_ready");
+        }
+        if !entry
+            .queued_prompts
+            .lock()
+            .map_err(|e| e.to_string())?
+            .is_empty()
+        {
+            reasons.push("queued_prompts_pending");
+        }
+        Ok(reasons)
+    }
+
+    pub(crate) fn mcp_last_input_kind(&self, session_id: &str) -> Option<&'static str> {
+        self.get(session_id)
+            .ok()?
+            .input
+            .lock()
+            .ok()?
+            .last_input_kind
     }
 
     pub fn session_summary(&self, session_id: &str) -> Option<AgentSessionSummary> {
@@ -7421,12 +7475,23 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
                 match sequence.as_slice() {
                     b"\x1b[200~" => {
                         input.desktop_paste = true;
+                        input.last_input_kind = Some("paste_start");
                     }
                     b"\x1b[201~" => {
                         input.desktop_paste = false;
+                        input.last_input_kind = Some("paste_end");
                     }
-                    sequence if is_terminal_status_reply(sequence) => {}
+                    sequence if is_terminal_status_reply(sequence) => {
+                        input.last_input_kind = Some("terminal_status_reply");
+                    }
                     _ => {
+                        input.last_input_kind = Some(if sequence.starts_with(b"\x1b[<") {
+                            "mouse_or_unknown_csi"
+                        } else if sequence.starts_with(b"\x1b[") && sequence.ends_with(b"u") {
+                            "extended_keyboard_event"
+                        } else {
+                            "unrecognized_escape"
+                        });
                         input.desktop_editing = true;
                         activity = true;
                     }
@@ -7435,7 +7500,13 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
             }
         } else if byte == 27 {
             input.desktop_escape.push(byte);
+            input.last_input_kind = Some("escape_started");
         } else {
+            input.last_input_kind = Some(if matches!(byte, b'\r' | b'\n') {
+                "enter"
+            } else {
+                "text_or_control"
+            });
             input.desktop_editing = input.desktop_paste || !matches!(byte, b'\r' | b'\n');
             activity = true;
         }
