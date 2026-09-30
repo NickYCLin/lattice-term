@@ -50,7 +50,7 @@ describe("Windows account-free native regression CI", () => {
 
   test("wires contracts, native execution and an always-uploaded report into the existing job", () => {
     expect(workflow).toContain("./scripts/verify-windows-lib-tests.ps1 -SelfTest");
-    expect(workflow).toContain("run: ./scripts/verify-windows-lib-tests.ps1\n");
+    expect(workflow).toMatch(/run: \.\/scripts\/verify-windows-lib-tests\.ps1\r?\n/);
     expect(workflow).toMatch(/name: Upload Windows native regression report\r?\n\s+if: always\(\)/);
     expect(workflow).toContain("path: windows-native-tests-report.json");
     for (const path of ["scripts/verify-windows-lib-tests.ps1", "scripts/verify-windows-lib-tests.test.mjs", "scripts/windows-lib-test.manifest"]) {
