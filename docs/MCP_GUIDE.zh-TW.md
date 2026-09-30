@@ -182,7 +182,34 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 3. 主機狀態用 `get_host_metrics`（只支援 Linux，其他系統回 `unsupported`，不用重試）。
 4. 使用者預先核准的指令用 `ssh_exec_job` 帶 `planId`，不能加參數。
 5. 要跑自己寫的指令用 `ssh_run_command`：單行、最多 4096 bytes、不能有控制字元，逾時 60 秒。**使用者會在桌面看到完整原文並決定是否允許**，所以指令要寫得清楚、先說明用途，不要一次塞很多事。拒絕或兩分鐘沒回應就是沒執行。
-6. 以上都會回 `operationId`。用 `get_remote_operation` 查到 `state` 不再是 running 為止，再看 `exitStatus`（或 `exitSignal`）、`stdout`、`stderr`，以及 `stdoutTruncated`／`stderrTruncated`。通道關閉不等於 exit 0。
+6. 以上都會回 `operationId`。用 `wait_remote_operation` 等待完成，再看回傳 `operation` 的 `state`、`exitStatus`（或 `exitSignal`）、`stdout`、`stderr`，以及 `stdoutTruncated`／`stderrTruncated`。通道關閉不等於 exit 0。
+
+**追蹤執行進度、找回結果**
+
+| 想知道什麼 | 使用工具 | 回傳重點 |
+| --- | --- | --- |
+| 剛才那個工作跑完了嗎？ | `wait_remote_operation` | 預設等 30 秒，最多 120 秒；`completed` 代表結束，成功與否仍要看工作結果 |
+| 還在跑什麼、已經輸出什麼？ | `get_remote_operation` | `phase`、`elapsedMs`；SSH 執行中即可讀取有上限的 stdout／stderr |
+| 忘了 operation ID，或原本的回覆遺失 | `list_remote_operations` | 同一 client、同一 target 的近期工作，包含 `requestId`，最新的在前面 |
+
+等待範例：
+
+```json
+{"targetId":"清單提供的目標 ID","operationId":"啟動時取得的操作 ID","timeoutMs":30000}
+```
+
+`timedOut: true` 只代表這次等待結束，工作仍會繼續；可帶相同 ID 再等一次，
+不要重新執行原命令。`timeoutMs: 0` 只讀一次狀態。SSH 輸出是目前的完整
+快照，應取代上次內容，不能一段段串接；stdout 與 stderr 合計最多 32 KiB，
+超出時會標示截斷，執行中的快照約每 250 ms 更新。
+
+`phase: awaitingApproval` 代表等桌面核准，`executing` 代表正在處理，
+`cancelling` 代表已請求取消，`finished` 代表結束。未要求核准的連線會直接執行。
+近期清單不含指令原文、路徑或輸出；完成後保留 15 分鐘，執行中項目繼續保留，
+桌面重啟後不保留。取消授權或連線斷開後不能再讀取舊結果。
+
+新增的清單工具需要背景服務與桌面都更新；等待工具沿用原本的狀態查詢，
+可搭配只支援 `get_remote_operation` 的服務使用。舊桌面沒有即時輸出與耗時欄位。
 
 **E. 在 SFTP 上處理檔案**
 

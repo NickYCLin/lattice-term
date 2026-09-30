@@ -9,6 +9,7 @@
 mod fleet;
 #[cfg(test)]
 mod loopback_tests;
+mod operation_tracking;
 mod paths;
 mod remote_files;
 mod remote_jobs;
@@ -305,6 +306,9 @@ pub enum DesktopOperation {
         target_id: String,
         operation_id: String,
     },
+    ListOperations {
+        target_id: String,
+    },
 }
 
 impl DesktopOperation {
@@ -327,6 +331,7 @@ impl DesktopOperation {
         "transfer",
         "cancel",
         "operationStatus",
+        "listOperations",
     ];
 
     /// What a service on bridge protocol 3 understood before it announced
@@ -360,6 +365,7 @@ impl DesktopOperation {
             Self::Transfer { .. } => "transfer",
             Self::Cancel { .. } => "cancel",
             Self::OperationStatus { .. } => "operationStatus",
+            Self::ListOperations { .. } => "listOperations",
         }
     }
 
@@ -377,6 +383,7 @@ impl DesktopOperation {
             | Self::RemoteFileTransfer { target_id, .. }
             | Self::Transfer { target_id, .. }
             | Self::Cancel { target_id, .. }
+            | Self::ListOperations { target_id }
             | Self::OperationStatus { target_id, .. } => Some(target_id),
         }
     }
@@ -411,6 +418,7 @@ impl DesktopOperation {
             Self::ListConnections
             | Self::ListSavedConnections
             | Self::Cancel { .. }
+            | Self::ListOperations { .. }
             | Self::OperationStatus { .. } => None,
         }
     }
@@ -565,6 +573,9 @@ struct OperationRecord {
     request_id: String,
     target_id: String,
     fingerprint: String,
+    kind: &'static str,
+    started_at: Instant,
+    progress: Option<Value>,
     finished_at: Option<Instant>,
     result: Option<Result<Value, ServiceError>>,
     cancel: watch::Sender<bool>,
@@ -1448,6 +1459,10 @@ impl DesktopService {
             let result = self.operation_status(client, &grant.view.id, operation_id);
             return self.authorized(&operation).and(result);
         }
+        if matches!(operation, DesktopOperation::ListOperations { .. }) {
+            let result = self.list_operations(client, &grant.view.id);
+            return self.authorized(&operation).and(result);
+        }
         let mut lease = if let Some(request_id) = operation.request_id() {
             match self.reserve(client, request_id, &grant.view.id, &operation)? {
                 Reservation::Replay(value) => return self.authorized(&operation).and(value),
@@ -1604,6 +1619,7 @@ impl DesktopService {
             }
             DesktopOperation::ListConnections
             | DesktopOperation::ListSavedConnections
+            | DesktopOperation::ListOperations { .. }
             | DesktopOperation::GetMetrics { .. } => {}
         }
         Ok(())
@@ -1695,6 +1711,7 @@ impl DesktopService {
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
+                        |value| lease.publish_progress(value),
                     )
                     .await
                 }
@@ -1727,6 +1744,7 @@ impl DesktopService {
                         &lease.id,
                         grant.revoked.subscribe(),
                         lease.cancel.subscribe(),
+                        |value| lease.publish_progress(value),
                     )
                     .await
                 }
@@ -2073,6 +2091,9 @@ impl DesktopService {
                 request_id: request_id.into(),
                 target_id: target_id.into(),
                 fingerprint,
+                kind: operation.kind(),
+                started_at: Instant::now(),
+                progress: None,
                 finished_at: None,
                 result: None,
                 cancel: cancel.clone(),
@@ -2109,7 +2130,9 @@ impl DesktopService {
                     "No retained operation is available for this client and target.",
                 )
             })?;
-        replay(entry)
+        let mut value = replay(entry)?;
+        value["phase"] = json!(operation_tracking::phase(&state, entry));
+        Ok(value)
     }
 
     fn cancel(&self, client: &str, target_id: &str, id: &str) -> Result<Value, ServiceError> {
@@ -2151,6 +2174,7 @@ impl OperationLease {
     fn finish(&mut self, result: Result<Value, ServiceError>) {
         if let Ok(mut state) = self.state.lock() {
             if let Some(entry) = state.operations.get_mut(&self.id) {
+                entry.progress = None;
                 entry.result = Some(result);
                 entry.finished_at = Some(Instant::now());
             }
@@ -2178,10 +2202,15 @@ fn replay(entry: &OperationRecord) -> Result<Value, ServiceError> {
             if let Some(object) = result.as_object_mut() {
                 object.insert("duplicate".into(), json!(true));
             }
-            Ok(result)
+            operation_tracking::with_tracking(entry, result)
         }
         Some(Err(error)) => Err(error.clone()),
-        None => Ok(json!({ "operationId": entry.id, "state": "running", "duplicate": true })),
+        None => operation_tracking::with_tracking(
+            entry,
+            entry.progress.clone().unwrap_or_else(
+                || json!({ "operationId": entry.id, "state": "running", "duplicate": true }),
+            ),
+        ),
     }
 }
 
@@ -2728,6 +2757,9 @@ mod tests {
                 target_id: "t".into(),
                 operation_id: "o".into(),
             },
+            DesktopOperation::ListOperations {
+                target_id: "t".into(),
+            },
         ];
         for operation in &samples {
             let wire = serde_json::to_value(operation).unwrap();
@@ -2737,7 +2769,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 14);
+        assert_eq!(DesktopOperation::KINDS.len(), 15);
     }
 
     #[test]
@@ -2881,7 +2913,7 @@ mod tests {
         );
     }
 
-    fn service() -> Arc<DesktopService> {
+    pub(super) fn service() -> Arc<DesktopService> {
         Arc::new(DesktopService::new(
             Arc::new(SshRegistry::new()),
             Arc::new(SftpRegistry::new()),

@@ -279,7 +279,10 @@ impl server::Handler for Handler {
                 session.eof(channel)?;
                 session.close(channel)?;
             }
-            b"hold" => {}
+            b"hold" => {
+                session.data(channel, "工作進行中\n".as_bytes().to_vec())?;
+                session.extended_data(channel, 1, b"still running\n".to_vec())?;
+            }
             _ if data.starts_with(b"export LC_ALL=C;") => {}
             _ => {
                 session.channel_failure(channel)?;
@@ -576,6 +579,56 @@ async fn actual_ssh_exec_is_bounded_deduplicated_and_does_not_close_the_users_te
             .await
             .unwrap();
         let id = started["operationId"].as_str().unwrap();
+        // Output is readable while the remote command is still waiting.
+        loop {
+            let progress = service
+                .execute(
+                    "client",
+                    DesktopOperation::OperationStatus {
+                        target_id: grant.id.clone(),
+                        operation_id: id.into(),
+                    },
+                )
+                .await
+                .unwrap();
+            if progress["stdout"] == "工作進行中\n" {
+                assert_eq!(progress["state"], "running");
+                assert_eq!(progress["completed"], false);
+                assert_eq!(progress["stderr"], "still running\n");
+                assert!(progress["exitStatus"].is_null());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let list_request = DesktopOperation::ListOperations {
+            target_id: grant.id.clone(),
+        };
+        let listing = service
+            .execute("client", list_request.clone())
+            .await
+            .unwrap();
+        assert!(listing["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op["operationId"] == id));
+        assert!(service
+            .execute("other-client", list_request.clone())
+            .await
+            .unwrap()["operations"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .execute(
+                "other-client",
+                DesktopOperation::OperationStatus {
+                    target_id: grant.id.clone(),
+                    operation_id: id.into(),
+                }
+            )
+            .await
+            .is_err());
         service
             .execute(
                 "client",
@@ -618,6 +671,7 @@ async fn actual_ssh_exec_is_bounded_deduplicated_and_does_not_close_the_users_te
             .await
             .unwrap();
         service.revoke(&grant.id).unwrap();
+        assert!(service.execute("client", list_request).await.is_err());
         assert!(service
             .execute(
                 "client",

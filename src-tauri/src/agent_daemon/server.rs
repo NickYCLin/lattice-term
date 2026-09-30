@@ -1370,7 +1370,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
             ..
         } => audit::Action::RemoteDownload,
         Op::Cancel { .. } => audit::Action::RemoteCancel,
-        Op::OperationStatus { .. } => audit::Action::RemoteStatus,
+        Op::OperationStatus { .. } | Op::ListOperations { .. } => audit::Action::RemoteStatus,
     })
 }
 

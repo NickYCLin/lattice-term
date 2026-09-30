@@ -37,8 +37,8 @@ impl Output {
         json!({
             "operationId": id,
             "state": state,
-            "stdout": String::from_utf8_lossy(&self.stdout),
-            "stderr": String::from_utf8_lossy(&self.stderr),
+            "stdout": snapshot_text(&self.stdout, state == "running"),
+            "stderr": snapshot_text(&self.stderr, state == "running"),
             "stdoutTruncated": self.stdout_truncated,
             "stderrTruncated": self.stderr_truncated,
             "exitStatus": self.exit_status,
@@ -57,12 +57,29 @@ impl Output {
     }
 }
 
+fn snapshot_text(bytes: &[u8], running: bool) -> String {
+    // A live snapshot can end between SSH packets in the middle of a character.
+    // Hold that suffix until its remaining bytes arrive; malformed bytes still
+    // use the existing replacement-character behavior.
+    if running {
+        for tail in 1..=3.min(bytes.len()) {
+            if std::str::from_utf8(&bytes[bytes.len() - tail..])
+                .is_err_and(|error| error.valid_up_to() == 0 && error.error_len().is_none())
+            {
+                return String::from_utf8_lossy(&bytes[..bytes.len() - tail]).into_owned();
+            }
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 pub(super) async fn execute(
     handle: Arc<client::Handle<TrustingHandler>>,
     plan: &ExecPlan,
     operation_id: &str,
     mut revoked: watch::Receiver<bool>,
     mut cancel: watch::Receiver<bool>,
+    publish: impl Fn(Value),
 ) -> Result<Value, ServiceError> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(u64::from(plan.timeout_ms));
     let mut output = Output::default();
@@ -83,15 +100,24 @@ pub(super) async fn execute(
         _ = tokio::time::sleep_until(deadline) => return Ok(output.result(operation_id, "timedOut")),
         sent = writer.exec(true, plan.command.clone()) => sent.map_err(|_| ServiceError::new("unknown_outcome", "The exec request could not be confirmed; inspect its status before retrying."))?,
     }
+    let mut updates = tokio::time::interval(Duration::from_millis(250));
+    updates.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut dirty = true;
     let state = loop {
         tokio::select! {
             biased;
             _ = cancelled(&mut revoked) => return Err(ServiceError::denied()),
             _ = cancelled(&mut cancel) => break "cancelled",
             _ = tokio::time::sleep_until(deadline) => break "timedOut",
+            _ = updates.tick() => {
+                if dirty {
+                    publish(output.result(operation_id, "running"));
+                    dirty = false;
+                }
+            },
             message = reader.wait() => match message {
-                Some(ChannelMsg::Data { data }) => output.data(&data, false),
-                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => output.data(&data, true),
+                Some(ChannelMsg::Data { data }) => { output.data(&data, false); dirty = true; },
+                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => { output.data(&data, true); dirty = true; },
                 Some(ChannelMsg::ExitStatus { exit_status }) => output.exit_status = Some(exit_status),
                 Some(ChannelMsg::ExitSignal { signal_name, .. }) => output.exit_signal = Some(signal_label(&signal_name)),
                 // EOF is not an exit status. Servers can send the status later.
@@ -129,6 +155,18 @@ fn signal_label(signal: &russh::Sig) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_snapshots_hold_split_utf8_without_hiding_malformed_bytes() {
+        for text in ["é", "中", "🙂"] {
+            for cut in 1..text.len() {
+                assert_eq!(snapshot_text(&text.as_bytes()[..cut], true), "");
+            }
+            assert_eq!(snapshot_text(text.as_bytes(), true), text);
+        }
+        assert_eq!(snapshot_text(&[b'a', 0xff, 0xe4], true), "a�");
+        assert_eq!(snapshot_text(&[0xe4], false), "�");
+    }
 
     #[test]
     fn stdout_and_stderr_are_separate_but_share_one_memory_budget() {
