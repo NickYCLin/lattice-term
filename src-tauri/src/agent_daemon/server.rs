@@ -1244,9 +1244,15 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
             if bytes.is_empty() || bytes.len() > MAX_STAGED_IMAGE_BYTES {
                 return Err("The pasted image is empty or too large.".to_string());
             }
+            // Phone images arrive as JPEG; keep an extension the CLI recognizes.
+            let suffix = if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+                ".jpg"
+            } else {
+                ".png"
+            };
             let mut file = tempfile::Builder::new()
                 .prefix("latticeterm-clip-")
-                .suffix(".png")
+                .suffix(suffix)
                 .tempfile()
                 .map_err(|error| format!("Cannot stage the pasted image: {error}"))?;
             file.write_all(&bytes)

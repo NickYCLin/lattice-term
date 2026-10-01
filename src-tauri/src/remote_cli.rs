@@ -147,10 +147,123 @@ fn uses_cli_proxy(arguments: &[String]) -> bool {
                 .is_some_and(|provider| provider.starts_with("latticeterm_cliproxyapi"))
     })
 }
+const MAX_UPLOADS: usize = 4;
+const UPLOAD_TTL: Duration = Duration::from_secs(10 * 60);
+struct Upload {
+    session: String,
+    total: u32,
+    bytes: Vec<u8>,
+    at: Instant,
+}
+enum Piece {
+    Partial(usize),
+    Done(Vec<u8>),
+    /// The last piece was sent again after the image was already pasted.
+    AlreadyPasted,
+}
+/// Phone images arriving piece by piece, keyed by the phone's upload ID.
+#[derive(Default)]
+struct Uploads {
+    partial: HashMap<String, Upload>,
+    finished: HashMap<String, (String, Instant)>,
+}
+impl Uploads {
+    fn add(
+        &mut self,
+        session: &str,
+        upload_id: &str,
+        offset: u32,
+        total: u32,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<Piece, String> {
+        self.partial
+            .retain(|_, upload| now.duration_since(upload.at) < UPLOAD_TTL);
+        self.finished
+            .retain(|_, (_, at)| now.duration_since(*at) < UPLOAD_TTL);
+        if self
+            .finished
+            .get(upload_id)
+            .is_some_and(|(owner, _)| owner == session)
+        {
+            return Ok(Piece::AlreadyPasted);
+        }
+        if !self.partial.contains_key(upload_id) {
+            if offset != 0 {
+                return Err("The image upload expired. Send the image again.".into());
+            }
+            if self.partial.len() >= MAX_UPLOADS {
+                return Err("Too many images are uploading. Try again shortly.".into());
+            }
+            self.partial.insert(
+                upload_id.to_string(),
+                Upload {
+                    session: session.to_string(),
+                    total,
+                    bytes: Vec::new(),
+                    at: now,
+                },
+            );
+        }
+        let upload = self
+            .partial
+            .get_mut(upload_id)
+            .ok_or("The image upload expired. Send the image again.")?;
+        let start = offset as usize;
+        let end = start + data.len();
+        let received = upload.bytes.len();
+        if upload.session != session || upload.total != total || end > total as usize {
+            self.partial.remove(upload_id);
+            return Err("The image upload does not match. Send the image again.".into());
+        }
+        // A retried piece that already arrived is acknowledged, not appended twice.
+        if end <= received && upload.bytes[start..end] == *data {
+            return Ok(Piece::Partial(received));
+        }
+        if start != received {
+            self.partial.remove(upload_id);
+            return Err("Part of the image was lost. Send the image again.".into());
+        }
+        upload.bytes.extend_from_slice(data);
+        upload.at = now;
+        if upload.bytes.len() < total as usize {
+            return Ok(Piece::Partial(upload.bytes.len()));
+        }
+        let upload = self
+            .partial
+            .remove(upload_id)
+            .ok_or("The image upload expired. Send the image again.")?;
+        Ok(Piece::Done(upload.bytes))
+    }
+    fn pasted(&mut self, session: &str, upload_id: &str, now: Instant) {
+        self.finished
+            .insert(upload_id.to_string(), (session.to_string(), now));
+    }
+}
+/// Only images the CLIs can read are saved; the bytes decide, not a name.
+fn image_suffix(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(".png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some(".jpg")
+    } else {
+        None
+    }
+}
+/// What a desktop paste of the saved image would type into the CLI.
+fn pasted_path(path: &str, bracketed: bool) -> String {
+    let path: String = path.chars().filter(|c| !c.is_control()).collect();
+    if bracketed {
+        format!("\x1b[200~{path}\x1b[201~")
+    } else {
+        path
+    }
+}
 pub struct Access {
     active: AtomicBool,
     revoked: tokio::sync::Notify,
     sessions: Mutex<HashMap<String, String>>,
+    uploads: Mutex<Uploads>,
 }
 impl Access {
     pub fn new(allowed: bool) -> Self {
@@ -158,6 +271,7 @@ impl Access {
             active: AtomicBool::new(allowed),
             revoked: tokio::sync::Notify::new(),
             sessions: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(Uploads::default()),
         }
     }
     pub fn allowed(&self) -> bool {
@@ -248,10 +362,24 @@ impl Access {
         let remote_id = match &operation {
             ChatOperation::CliRead { session_id, .. }
             | ChatOperation::CliInput { session_id, .. }
-            | ChatOperation::CliResize { session_id, .. } => session_id.clone(),
+            | ChatOperation::CliResize { session_id, .. }
+            | ChatOperation::CliAttach { session_id, .. } => session_id.clone(),
             _ => return Err("Not a CLI operation.".into()),
         };
         let native = self.resolve(&remote_id)?;
+        if let ChatOperation::CliAttach {
+            upload_id,
+            offset,
+            total,
+            data,
+            bracketed,
+            ..
+        } = operation
+        {
+            return self
+                .attach(app, &native, &upload_id, offset, total, &data, bracketed)
+                .await;
+        }
         if let Ok(mut sizes) = SIZES.lock() {
             let now = Instant::now();
             match &operation {
@@ -316,6 +444,91 @@ impl Access {
         self.check()?;
         Ok(result)
     }
+    #[allow(clippy::too_many_arguments)]
+    async fn attach(
+        &self,
+        app: &AppHandle,
+        native: &str,
+        upload_id: &str,
+        offset: u32,
+        total: u32,
+        data: &str,
+        bracketed: bool,
+    ) -> Result<Value, String> {
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let piece = engine
+            .decode(data)
+            .map_err(|_| "Part of the image was damaged. Send the image again.")?;
+        let piece = self.uploads.lock().map_err(|e| e.to_string())?.add(
+            native,
+            upload_id,
+            offset,
+            total,
+            &piece,
+            Instant::now(),
+        )?;
+        let image = match piece {
+            Piece::Partial(received) => return Ok(json!({"received": received, "done": false})),
+            Piece::AlreadyPasted => return Ok(json!({"received": total, "done": true})),
+            Piece::Done(image) => image,
+        };
+        let suffix = image_suffix(&image).ok_or("Only PNG or JPEG images can be sent.")?;
+        self.check()?;
+        let background = crate::agent_daemon::owns(native);
+        let path = if background {
+            app.state::<crate::AppDaemon>()
+                .request(
+                    false,
+                    crate::agent_daemon::Request::StageImage {
+                        session_id: native.to_string(),
+                        png: engine.encode(&image),
+                    },
+                )
+                .await?
+                .as_str()
+                .map(str::to_string)
+                .ok_or("Cannot save the image on the host.")?
+        } else {
+            use std::io::Write as _;
+            let mut file = tempfile::Builder::new()
+                .prefix("latticeterm-phone-")
+                .suffix(suffix)
+                .tempfile()
+                .map_err(|e| format!("Cannot save the image on the host: {e}"))?;
+            file.write_all(&image)
+                .map_err(|e| format!("Cannot save the image on the host: {e}"))?;
+            app.state::<Arc<AgentRegistry>>()
+                .stage_clipboard_image(native, file)?
+                .to_string_lossy()
+                .into_owned()
+        };
+        // The path stays on the host; only the CLI sees it.
+        let paste = engine.encode(pasted_path(&path, bracketed).as_bytes());
+        self.check()?;
+        if background {
+            app.state::<crate::AppDaemon>()
+                .request(
+                    false,
+                    crate::agent_daemon::Request::Send {
+                        session_id: native.to_string(),
+                        data: paste,
+                    },
+                )
+                .await?;
+        } else {
+            crate::agent::send(
+                &crate::agent::EventSink(app.clone()),
+                app.state::<Arc<AgentRegistry>>().inner(),
+                native,
+                &paste,
+            )?;
+        }
+        if let Ok(mut uploads) = self.uploads.lock() {
+            uploads.pasted(native, upload_id, Instant::now());
+        }
+        Ok(json!({"received": total, "done": true}))
+    }
     fn perform_local(
         &self,
         registry: &AgentRegistry,
@@ -351,6 +564,62 @@ impl Access {
             }
             _ => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+    #[test]
+    fn phone_images_arrive_in_order_and_retries_are_not_pasted_twice() {
+        let now = Instant::now();
+        let mut uploads = Uploads::default();
+        assert!(matches!(
+            uploads.add("s", "u", 0, 6, b"abc", now),
+            Ok(Piece::Partial(3))
+        ));
+        assert!(matches!(
+            uploads.add("s", "u", 0, 6, b"abc", now),
+            Ok(Piece::Partial(3))
+        ));
+        assert!(uploads.add("other", "u", 3, 6, b"def", now).is_err());
+        assert!(matches!(
+            uploads.add("s", "u", 0, 6, b"abc", now),
+            Ok(Piece::Partial(3))
+        ));
+        let Ok(Piece::Done(bytes)) = uploads.add("s", "u", 3, 6, b"def", now) else {
+            panic!("the last piece completes the image");
+        };
+        assert_eq!(bytes, b"abcdef");
+        uploads.pasted("s", "u", now);
+        assert!(matches!(
+            uploads.add("s", "u", 3, 6, b"def", now),
+            Ok(Piece::AlreadyPasted)
+        ));
+        assert!(uploads.add("s", "gap", 3, 6, b"def", now).is_err());
+        assert!(uploads.add("s", "skip", 0, 9, b"abc", now).is_ok());
+        assert!(uploads.add("s", "skip", 6, 9, b"ghi", now).is_err());
+        assert!(uploads.add("s", "skip", 3, 9, b"def", now).is_err());
+        assert!(uploads.add("s", "long", 0, 2, b"abc", now).is_err());
+        for id in ["a", "b", "c", "d"] {
+            assert!(uploads.add("s", id, 0, 9, b"abc", now).is_ok());
+        }
+        assert!(uploads.add("s", "e", 0, 9, b"abc", now).is_err());
+        let later = now + UPLOAD_TTL;
+        assert!(uploads.add("s", "e", 0, 9, b"abc", later).is_ok());
+        assert!(uploads.add("s", "a", 3, 9, b"def", later).is_err());
+    }
+    #[test]
+    fn only_png_or_jpeg_is_pasted_as_a_plain_path() {
+        assert_eq!(image_suffix(b"\x89PNG\r\n\x1a\nrest"), Some(".png"));
+        assert_eq!(image_suffix(&[0xff, 0xd8, 0xff, 0xe0]), Some(".jpg"));
+        assert_eq!(image_suffix(b"GIF89a"), None);
+        assert_eq!(image_suffix(b"<svg"), None);
+        assert_eq!(pasted_path("/tmp/a b.jpg", false), "/tmp/a b.jpg");
+        assert_eq!(
+            pasted_path("/tmp/a\r.jpg", true),
+            "\x1b[200~/tmp/a.jpg\x1b[201~"
+        );
     }
 }
 

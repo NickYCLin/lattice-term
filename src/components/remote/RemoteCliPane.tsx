@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
-import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
-import { KeyboardIcon, RefreshIcon } from "../icons";
+import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOperation, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
+import { REMOTE_ATTACHMENT_CHUNK } from "../../app/remoteChat";
+import { ImageFileIcon, KeyboardIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
+import { readRemoteImage, type PickedImage } from "./remoteImage";
 import "./RemoteCliPane.css";
 
 const CLI_STATES = ["working", "needsAttention", "idle", "done"] as const;
@@ -66,6 +68,8 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   const [ready, setReady] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const terminal = useRef<Terminal | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const [image, setImage] = useState<{ state: "uploading"; percent: number } | { state: "sent" | "failed" | "unreadable" } | null>(null);
   const channel = useMemo(() => new RemoteCliChannel(selected.id, operation => requestRemoteCli(connection.sessionId, operation), () => setProblem(true)), [connection.sessionId, selected.id]);
   const remote = useMemo(() => ({
     terminalInput: async (_id: string, data: string) => { channel.input(data); },
@@ -97,12 +101,36 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   // until caught up. Toggling viewOnly would rebuild xterm and restart replay.
   const card = remoteCliCard(selected, t("terminal.model.pending"));
   const gated = useMemo(() => ({ ...remote, terminalInput: async (id: string, data: string) => { if (ready && !problem) await remote.terminalInput(id, data); } }), [remote, ready, problem]);
+  const uploading = image?.state === "uploading";
+  async function sendImage(file: File) {
+    let picked: PickedImage;
+    try { picked = await readRemoteImage(file); } catch { setImage({ state: "unreadable" }); return; }
+    setImage({ state: "uploading", percent: 0 });
+    try {
+      await channel.settle();
+      const uploadId = crypto.randomUUID();
+      const bracketed = terminal.current?.modes.bracketedPasteMode ?? false;
+      for (let start = 0; start < picked.data.length; start += REMOTE_ATTACHMENT_CHUNK) {
+        const operation: RemoteCliOperation = { kind: "cliAttach", sessionId: selected.id, uploadId, offset: start / 4 * 3, total: picked.bytes, data: picked.data.slice(start, start + REMOTE_ATTACHMENT_CHUNK), bracketed };
+        // The host ignores a piece it already has, so one resend is safe.
+        try { await requestRemoteCli(connection.sessionId, operation); }
+        catch { await requestRemoteCli(connection.sessionId, operation); }
+        setImage({ state: "uploading", percent: Math.min(100, Math.round((start + REMOTE_ATTACHMENT_CHUNK) / picked.data.length * 100)) });
+      }
+      setImage({ state: "sent" });
+    } catch { setImage({ state: "failed" }); }
+  }
   return <>
     <div className="remote-cli-heading"><strong>{card.title}</strong>{card.detail && <small>{card.detail}</small>}
       {(selected.directory || selected.project) && <small className="remote-cli-heading__path" title={selected.directory || selected.project}>{t("remote.cli.folder", { path: selected.directory || selected.project || "" })}</small>}
     </div>
     <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
     {truncated && <p className="muted">{t("remote.cli.truncated")}</p>}
+    {image && <p className={image.state === "failed" || image.state === "unreadable" ? "remote-cli-image remote-cli-image--problem" : "remote-cli-image muted"} role={image.state === "failed" || image.state === "unreadable" ? "alert" : "status"}>{
+      image.state === "uploading" ? t("remote.cli.imageUploading", { percent: String(image.percent) })
+        : image.state === "sent" ? t("remote.cli.imageSent")
+        : image.state === "unreadable" ? t("remote.chat.imageUnreadable") : t("remote.cli.imageFailed")
+    }</p>}
     <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} terminalRef={terminal} />
     {/* Keep the software keyboard up while tapping helper keys. */}
     <div className="remote-cli-keys" role="toolbar" aria-label={t("remote.cli.keys")} onPointerDown={event => event.preventDefault()}>
@@ -110,6 +138,12 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
         const current = terminal.current;
         if (current?.textarea && current.textarea === document.activeElement) current.blur(); else current?.focus();
       }}><KeyboardIcon size={18} /></button>
+      <button type="button" className="button button--secondary button--sm" disabled={!ready || problem || uploading} title={t("remote.cli.image")} aria-label={t("remote.cli.image")} onClick={() => picker.current?.click()}><ImageFileIcon size={18} /></button>
+      <input ref={picker} type="file" accept="image/*" hidden onChange={event => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) void sendImage(file);
+      }} />
       {[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button type="button" className="button button--secondary button--sm" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}
     </div>
   </>;

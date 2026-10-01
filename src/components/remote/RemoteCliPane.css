@@ -7,8 +7,10 @@
 .remote-cli-heading > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote-cli-heading > .remote-cli-heading__path { white-space: normal; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); color: var(--text-faint); }
 .remote-cli-heading small { color: var(--text-muted); }
-.remote-cli-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
+.remote-cli-keys { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
 .remote-cli-keys button { min-width: 0; min-height: 44px; padding-inline: 2px; font-size: 13px; }
+@media (max-width: 380px) { .remote-cli-keys { gap: 4px; } .remote-cli-keys button { font-size: 12px; } }
+.remote-cli-image--problem { color: var(--warn); }
 .remote-cli-state { align-self: flex-start; flex: none; width: max-content; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 1.4; background: var(--surface-raised, transparent); color: var(--text-muted); border: 1px solid var(--line); }
 .remote-cli-state--working { background: var(--info-soft); color: var(--info); border-color: transparent; }
 .remote-cli-state--needsAttention { background: var(--warn-soft); color: var(--warn); border-color: transparent; }

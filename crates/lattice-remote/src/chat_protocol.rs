@@ -33,6 +33,22 @@ pub enum ChatOperation {
         cols: u32,
         rows: u32,
     },
+    /// One piece of an image from the phone. When the last piece arrives the
+    /// host saves the image and pastes its path into that CLI, the same way
+    /// a desktop clipboard image is pasted. Hosts released through 2026.10.1
+    /// reject it as an unknown operation.
+    CliAttach {
+        session_id: String,
+        upload_id: String,
+        offset: u32,
+        total: u32,
+        /// Standard base64 of the bytes starting at `offset`.
+        data: String,
+        /// The phone's terminal has bracketed paste on, so the path is
+        /// wrapped in paste markers like a desktop paste.
+        #[serde(default)]
+        bracketed: bool,
+    },
     Read {
         thread_id: String,
         before: Option<String>,
@@ -80,7 +96,11 @@ impl ChatOperation {
     pub fn is_cli(&self) -> bool {
         matches!(
             self,
-            Self::CliList | Self::CliRead { .. } | Self::CliInput { .. } | Self::CliResize { .. }
+            Self::CliList
+                | Self::CliRead { .. }
+                | Self::CliInput { .. }
+                | Self::CliResize { .. }
+                | Self::CliAttach { .. }
         )
     }
 }
@@ -91,6 +111,18 @@ pub const MAX_ATTACHMENT_BYTES: u32 = 8 * 1024 * 1024;
 pub const MAX_ATTACHMENT_CHUNK: usize = 16 * 1024;
 fn identifier(value: &str) -> bool {
     !value.is_empty() && value.len() <= 160 && !value.chars().any(char::is_control)
+}
+fn image_piece(upload_id: &str, offset: u32, total: u32, data: &str) -> bool {
+    identifier(upload_id)
+        && total > 0
+        && total <= MAX_ATTACHMENT_BYTES
+        && offset < total
+        && !data.is_empty()
+        && data.len() <= MAX_ATTACHMENT_CHUNK
+        && data.len() % 4 == 0
+        && data
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
 }
 impl ChatRequest {
     pub fn valid(&self) -> bool {
@@ -109,6 +141,14 @@ impl ChatRequest {
                 cols,
                 rows,
             } => identifier(session_id) && (2..=500).contains(cols) && (2..=300).contains(rows),
+            ChatOperation::CliAttach {
+                session_id,
+                upload_id,
+                offset,
+                total,
+                data,
+                ..
+            } => identifier(session_id) && image_piece(upload_id, *offset, *total, data),
             ChatOperation::Read { thread_id, before } => {
                 identifier(thread_id) && before.as_deref().is_none_or(identifier)
             }
@@ -130,19 +170,7 @@ impl ChatRequest {
                 offset,
                 total,
                 data,
-            } => {
-                identifier(thread_id)
-                    && identifier(upload_id)
-                    && *total > 0
-                    && *total <= MAX_ATTACHMENT_BYTES
-                    && offset < total
-                    && !data.is_empty()
-                    && data.len() <= MAX_ATTACHMENT_CHUNK
-                    && data.len() % 4 == 0
-                    && data
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
-            }
+            } => identifier(thread_id) && image_piece(upload_id, *offset, *total, data),
             ChatOperation::Steer {
                 thread_id,
                 turn_id,
@@ -439,6 +467,58 @@ mod tests {
             MAX_ATTACHMENT_BYTES,
             "A".repeat(MAX_ATTACHMENT_CHUNK),
         ))
+        .unwrap();
+        assert!(bytes.len() + 128 < 24 * 1024);
+    }
+    #[test]
+    fn cli_images_use_the_same_piece_bounds_and_stay_cli_scoped() {
+        let attach = |offset: u32, total: u32, data: String| ChatRequest {
+            id: "x".into(),
+            operation: ChatOperation::CliAttach {
+                session_id: "opaque".into(),
+                upload_id: "up".into(),
+                offset,
+                total,
+                data,
+                bracketed: true,
+            },
+        };
+        let request = attach(0, 3, "YWJj".into());
+        assert!(request.valid());
+        assert!(request.mutates());
+        assert!(request.operation.is_cli());
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(encoded["operation"]["kind"], "cliAttach");
+        assert_eq!(encoded["operation"]["uploadId"], "up");
+        assert_eq!(
+            serde_json::from_value::<ChatRequest>(encoded).unwrap(),
+            request
+        );
+        let older = serde_json::json!({"id":"x","operation":{"kind":"cliAttach","sessionId":"s","uploadId":"u","offset":0,"total":3,"data":"YWJj"}});
+        let ChatOperation::CliAttach { bracketed, .. } =
+            serde_json::from_value::<ChatRequest>(older)
+                .unwrap()
+                .operation
+        else {
+            panic!("expected an image piece");
+        };
+        assert!(!bracketed);
+        assert!(!attach(3, 3, "YWJj".into()).valid());
+        assert!(!attach(0, MAX_ATTACHMENT_BYTES + 1, "YWJj".into()).valid());
+        assert!(!attach(0, 3, "YW\nj".into()).valid());
+        assert!(!attach(0, 3, "A".repeat(MAX_ATTACHMENT_CHUNK + 4)).valid());
+        assert!(serde_json::from_value::<ChatRequest>(serde_json::json!({"id":"x","operation":{"kind":"cliAttach","sessionId":"s","uploadId":"u","offset":0,"total":3,"data":"YWJj","path":"/tmp/x"}})).is_err());
+        let bytes = serde_json::to_vec(&ChatRequest {
+            id: "r".repeat(160),
+            operation: ChatOperation::CliAttach {
+                session_id: "s".repeat(160),
+                upload_id: "u".repeat(160),
+                offset: MAX_ATTACHMENT_BYTES - 1,
+                total: MAX_ATTACHMENT_BYTES,
+                data: "A".repeat(MAX_ATTACHMENT_CHUNK),
+                bracketed: true,
+            },
+        })
         .unwrap();
         assert!(bytes.len() + 128 < 24 * 1024);
     }

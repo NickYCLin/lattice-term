@@ -27,7 +27,9 @@ export type RemoteCliOperation =
   | { kind: "cliList" }
   | { kind: "cliRead"; sessionId: string; cursor: number }
   | { kind: "cliInput"; sessionId: string; data: string }
-  | { kind: "cliResize"; sessionId: string; cols: number; rows: number };
+  | { kind: "cliResize"; sessionId: string; cols: number; rows: number }
+  /** Hosts released through 2026.10.1 reject this as an unknown operation. */
+  | { kind: "cliAttach"; sessionId: string; uploadId: string; offset: number; total: number; data: string; bracketed: boolean };
 export async function requestRemoteCli<T>(connectionId: string, operation: RemoteCliOperation): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   const response = await invoke<RemoteChatResponse>("remote_chat_request", { sessionId: connectionId, request: { id: crypto.randomUUID(), operation } });
@@ -86,5 +88,7 @@ export class RemoteCliChannel {
   reclaimSize() {
     if (this.size) this.resize(this.size.cols, this.size.rows);
   }
+  /** Sends anything typed so far and waits for it, so a pasted image path lands after it. */
+  async settle() { this.flush(); await this.queue; }
   stop() { this.generation++; this.pendingBytes = 0; this.active = false; this.buffered = ""; clearTimeout(this.timer); this.timer = undefined; }
 }

@@ -11,6 +11,8 @@ vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote 
   useEffect(() => remote.onTerminalData(session.sessionId, bytes => { rendered.text += new TextDecoder().decode(bytes); }), [session.sessionId]);
   return <div>Test terminal</div>;
 } }));
+const IMAGE = "A".repeat(16 * 1024) + "QUJD";
+vi.mock("./remoteImage", () => ({ readRemoteImage: async () => ({ key: "image", preview: "", data: IMAGE, bytes: IMAGE.length / 4 * 3 }) }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); });
 class HostNode {
   nodeType = 1;
@@ -66,6 +68,7 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     const op: RemoteCliOperation = request.operation; operations.push(op);
     let value: unknown = null;
     if (op.kind === "cliList") value = [{ id: "opaque", label: "Codex", groupLabel: "Existing CLI", agent: "codex", detached: true }];
+    if (op.kind === "cliAttach") value = { received: op.offset + op.data.length / 4 * 3, done: op.offset + op.data.length / 4 * 3 === op.total };
     if (op.kind === "cliRead") value = { sessionId: "opaque", cursor: op.cursor, nextCursor: 3, endOffset: 3, base64: op.cursor === 0 ? "YWJj" : "", truncated: false };
     return { id: request.id, value, error: null };
   });
@@ -89,12 +92,22 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     expect(rendered.text).toBe("abc");
     await act(async () => { await rendered.remote!.terminalInput("opaque", "中文\r"); await vi.advanceTimersByTimeAsync(35); });
     expect(operations.filter(op => op.kind === "cliInput")).toEqual([{ kind: "cliInput", sessionId: "opaque", data: "中文\r" }]);
+    await act(async () => { await rendered.remote!.terminalInput("opaque", "look at this "); });
+    const picker = allNodes(container).find(node => node.tagName === "INPUT")!;
+    const pickerProps = Object.keys(picker).find(name => name.startsWith("__reactProps$"))!;
+    await act(async () => {
+      (picker as unknown as Record<string, { onChange: (event: unknown) => void }>)[pickerProps].onChange({ target: { files: [{}], value: "photo.png" } });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    const sent = operations.filter(op => op.kind === "cliInput" || op.kind === "cliAttach");
+    expect(sent.slice(1).map(op => op.kind === "cliAttach" ? [op.offset, op.data.length, op.total, op.bracketed] : op.data)).toEqual(["look at this ", [0, 16 * 1024, 12291, false], [12288, 4, 12291, false]]);
+    expect(new Set(sent.flatMap(op => op.kind === "cliAttach" ? [op.uploadId] : [])).size).toBe(1);
     await act(async () => { await rendered.remote!.terminalInput("opaque", "cancel pending"); });
     await render(false);
     const hiddenCount = operations.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(operations).toHaveLength(hiddenCount);
-    expect(operations.filter(op => op.kind === "cliInput")).toHaveLength(1);
+    expect(operations.filter(op => op.kind === "cliInput")).toHaveLength(2);
     await render(true);
     for (let attempt = 0; attempt < 10 && !container.textContent.includes("已接上原本的助理"); attempt++) { await act(async () => { await vi.advanceTimersByTimeAsync(10); }); }
     expect(container.textContent).toContain("已接上原本的助理");
