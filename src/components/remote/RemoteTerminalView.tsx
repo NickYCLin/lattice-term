@@ -13,6 +13,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import { TerminalImeFallback } from "../terminal/terminalImeFallback";
 import { TerminalImePresentation } from "../terminal/terminalImePresentation";
+import { MobileTerminalInput } from "../terminal/mobileTerminalInput";
 import {
   TERMINAL_LETTER_SPACING,
   terminalFontFamily,
@@ -116,17 +117,21 @@ export function RemoteTerminalView({
     };
     fitAndReport();
 
-    attachTerminalClipboard(
-      terminal,
-      remoteTerminalClipboardOptions(() =>
-        imePresentation.shouldProcessTerminalKeyEvent(),
-      ),
-    );
-
     const sendInput = (data: string) => {
       if (viewOnly) return;
       void remoteRef.current.terminalInput(sessionId, data).catch(() => {});
     };
+    const mobileInput = new MobileTerminalInput(textarea, sendInput);
+
+    attachTerminalClipboard(
+      terminal,
+      remoteTerminalClipboardOptions(
+        (event) =>
+          imePresentation.shouldProcessTerminalKeyEvent() &&
+          mobileInput.shouldProcessTerminalKeyEvent(event),
+      ),
+    );
+
     const imeFallback = new TerminalImeFallback(sendInput);
     const typed = terminal.onData((rawData) => {
       const data = imeFallback.recordTerminalData(rawData);
@@ -159,6 +164,7 @@ export function RemoteTerminalView({
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       textarea?.removeEventListener("input", handleInput);
       imePresentation.dispose();
+      mobileInput.dispose();
       imeFallback.dispose();
       typed.dispose();
       terminal.dispose();
