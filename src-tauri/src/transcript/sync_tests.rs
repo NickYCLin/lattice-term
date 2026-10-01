@@ -24,6 +24,166 @@ fn profiles(home: &Path) -> Vec<HistoryProfile> {
     }]
 }
 
+fn scan_options() -> HistoryScanOptions {
+    HistoryScanOptions {
+        all: false,
+        archived: false,
+        retained: 100,
+    }
+}
+
+fn write_rows(path: &Path, rows: &[serde_json::Value]) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let rows = rows.iter().map(ToString::to_string).collect::<Vec<_>>();
+    fs::write(path, rows.join("\n")).unwrap();
+}
+
+#[test]
+fn gemini_history_lists_only_main_chats_with_a_visible_prompt() {
+    let home = tempfile::tempdir().unwrap();
+    let project = home.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    let tmp = home.path().join("tmp");
+    let chats = tmp.join("hash").join("chats");
+    fs::create_dir_all(&chats).unwrap();
+    fs::write(
+        tmp.join("hash").join(".project_root"),
+        project.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    write_rows(
+        &chats.join("session-main.jsonl"),
+        &[
+            serde_json::json!({"sessionId":"gemini-main","kind":"main"}),
+            serde_json::json!({"id":"u1","type":"user","content":[{"text":"整理發布流程\n細節"}]}),
+            serde_json::json!({"id":"m1","type":"gemini","content":[{"text":"好的"}]}),
+            serde_json::json!({"id":"t1","type":"tool","content":[{"text":"不應出現"}]}),
+        ],
+    );
+    write_rows(
+        &chats.join("session-sub.jsonl"),
+        &[
+            serde_json::json!({"sessionId":"gemini-sub","kind":"subagent"}),
+            serde_json::json!({"id":"u1","type":"user","content":[{"text":"子任務"}]}),
+        ],
+    );
+    write_rows(
+        &chats.join("session-empty.jsonl"),
+        &[
+            serde_json::json!({"sessionId":"gemini-empty"}),
+            serde_json::json!({"id":"u1","type":"user","content":[{"text":"/help"}]}),
+        ],
+    );
+    let mut entries = Vec::new();
+    let mut incomplete = false;
+    scan_local_conversations(
+        TranscriptKind::Gemini,
+        &tmp,
+        None,
+        &mut entries,
+        scan_options(),
+        &mut incomplete,
+    )
+    .unwrap();
+    assert!(!incomplete);
+    assert_eq!(entries.len(), 1);
+    let (entry, path) = &entries[0];
+    assert_eq!(entry.definition_id, "gemini");
+    assert_eq!(entry.native_session_id, "gemini-main");
+    assert!(entry.resumable);
+    assert_eq!(
+        Path::new(&entry.working_directory),
+        fs::canonicalize(&project).unwrap()
+    );
+    assert_eq!(
+        history_preview(path, TranscriptKind::Gemini).as_deref(),
+        Some("整理發布流程")
+    );
+    let snapshot = read_conversation_snapshot(path, TranscriptKind::Gemini).unwrap();
+    let roles = snapshot
+        .messages
+        .iter()
+        .map(|message| (message.role, message.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        [("user", "整理發布流程\n細節"), ("assistant", "好的")]
+    );
+}
+
+#[test]
+fn antigravity_history_follows_prompt_history_and_skips_detached_brains() {
+    let home = tempfile::tempdir().unwrap();
+    let project = home.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    let root = home.path().join("antigravity-cli");
+    let main_id = "11111111-2222-3333-4444-555555555555";
+    let detached_id = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+    write_rows(
+        &root.join("history.jsonl"),
+        &[
+            serde_json::json!({"type":"slash_command","display":"/model"}),
+            serde_json::json!({"conversationId":main_id,"workspace":project}),
+            serde_json::json!({"conversationId":"../escape","workspace":project}),
+        ],
+    );
+    let transcript = |id: &str| {
+        root.join("brain")
+            .join(id)
+            .join(".system_generated")
+            .join("logs")
+            .join("transcript.jsonl")
+    };
+    write_rows(
+        &transcript(main_id),
+        &[
+            serde_json::json!({"status":"DONE","source":"USER_EXPLICIT","type":"USER_INPUT","content":"檢查模型清單"}),
+            serde_json::json!({"status":"RUNNING","source":"MODEL","type":"PLANNER_RESPONSE","content":"草稿"}),
+            serde_json::json!({"status":"DONE","source":"MODEL","type":"TOOL_CALL","content":"工具輸出"}),
+            serde_json::json!({"status":"DONE","source":"MODEL","type":"PLANNER_RESPONSE","content":"已確認"}),
+        ],
+    );
+    write_rows(
+        &transcript(detached_id),
+        &[
+            serde_json::json!({"status":"DONE","source":"USER_EXPLICIT","type":"USER_INPUT","content":"子代理"}),
+        ],
+    );
+    let mut entries = Vec::new();
+    let mut incomplete = false;
+    scan_antigravity_conversations(&root, &mut entries, scan_options(), &mut incomplete).unwrap();
+    assert!(!incomplete);
+    assert_eq!(entries.len(), 1);
+    let (entry, path) = &entries[0];
+    assert_eq!(entry.definition_id, "antigravity");
+    assert_eq!(entry.native_session_id, main_id);
+    assert!(entry.resumable);
+    assert_eq!(
+        history_preview(path, TranscriptKind::Antigravity).as_deref(),
+        Some("檢查模型清單")
+    );
+    let snapshot = read_conversation_snapshot(path, TranscriptKind::Antigravity).unwrap();
+    let roles = snapshot
+        .messages
+        .iter()
+        .map(|message| (message.role, message.text.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(roles, [("user", "檢查模型清單"), ("assistant", "已確認")]);
+    assert!(antigravity_transcript(&root, "../escape").is_none());
+    assert!(antigravity_transcript(&root, detached_id).is_some());
+}
+
+#[test]
+fn gemini_family_history_is_never_borrowed_for_an_account_profile() {
+    let profile = tempfile::tempdir().unwrap();
+    fs::create_dir_all(profile.path().join("tmp")).unwrap();
+    fs::create_dir_all(profile.path().join("antigravity-cli")).unwrap();
+    for kind in [TranscriptKind::Gemini, TranscriptKind::Antigravity] {
+        assert!(history_root(kind, Some(profile.path())).is_none());
+        assert!(history_root_with_archive(kind, None, true).is_none());
+    }
+}
+
 #[test]
 fn history_pages_exclude_internal_and_empty_records_before_applying_the_limit() {
     ONLY_PROFILE_HISTORY.with(|flag| flag.set(true));

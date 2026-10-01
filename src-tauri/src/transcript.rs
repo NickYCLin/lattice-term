@@ -560,10 +560,9 @@ fn rewind_gemini_messages(
     }
 }
 
-fn parse_gemini(path: &Path, max_chars: usize) -> Option<String> {
-    if max_chars == 0 {
-        return None;
-    }
+/// Replays Gemini's append-only chat log into the visible turns. Returns
+/// `None` when an oversized or invalid row could have rewritten the history.
+fn gemini_turns(path: &Path) -> Option<Vec<(&'static str, String)>> {
     let mut records = Vec::new();
     let mut positions = HashMap::new();
     let mut text_bytes = 0usize;
@@ -593,15 +592,43 @@ fn parse_gemini(path: &Path, max_chars: usize) -> Option<String> {
     if !valid || skipped_oversized {
         return None;
     }
+    Some(
+        records
+            .into_iter()
+            .filter_map(|record| Some((record.role?, record.text)))
+            .filter(|(_, text)| !text.trim().is_empty())
+            .collect(),
+    )
+}
+
+fn parse_gemini(path: &Path, max_chars: usize) -> Option<String> {
+    if max_chars == 0 {
+        return None;
+    }
     let mut out = String::new();
     let mut truncated = false;
-    for record in records {
-        if let Some(role) = record.role {
-            push_turn(&mut out, role, &record.text);
-            truncated |= trim_tail(&mut out, max_chars);
-        }
+    for (role, text) in gemini_turns(path)? {
+        push_turn(&mut out, role, &text);
+        truncated |= trim_tail(&mut out, max_chars);
     }
     finish_transcript(out, truncated)
+}
+
+/// Antigravity logs every planner step; only completed user prompts and final
+/// planner answers are part of the conversation a person would read.
+fn antigravity_turn(value: &Value) -> Option<(&'static str, &str)> {
+    if value.get("status").and_then(Value::as_str) != Some("DONE") {
+        return None;
+    }
+    let role = match (
+        value.get("source").and_then(Value::as_str),
+        value.get("type").and_then(Value::as_str),
+    ) {
+        (Some("USER_EXPLICIT"), Some("USER_INPUT")) => "user",
+        (Some("MODEL"), Some("PLANNER_RESPONSE")) => "assistant",
+        _ => return None,
+    };
+    Some((role, value.get("content").and_then(Value::as_str)?))
 }
 
 fn parse_antigravity(path: &Path, max_chars: usize) -> Option<String> {
@@ -611,22 +638,10 @@ fn parse_antigravity(path: &Path, max_chars: usize) -> Option<String> {
     let mut out = String::new();
     let mut truncated = false;
     let skipped_oversized = visit_transcript_rows(path, |value| {
-        if value.get("status").and_then(Value::as_str) != Some("DONE") {
-            return;
+        if let Some((role, text)) = antigravity_turn(value) {
+            push_turn(&mut out, role, text);
+            truncated |= trim_tail(&mut out, max_chars);
         }
-        let role = match (
-            value.get("source").and_then(Value::as_str),
-            value.get("type").and_then(Value::as_str),
-        ) {
-            (Some("USER_EXPLICIT"), Some("USER_INPUT")) => "user",
-            (Some("MODEL"), Some("PLANNER_RESPONSE")) => "assistant",
-            _ => return,
-        };
-        let Some(text) = value.get("content").and_then(Value::as_str) else {
-            return;
-        };
-        push_turn(&mut out, role, text);
-        truncated |= trim_tail(&mut out, max_chars);
     })?;
     finish_transcript(out, truncated || skipped_oversized)
 }
@@ -934,10 +949,17 @@ fn history_root_with_archive(
         TranscriptKind::Codex if archived => "archived_sessions",
         TranscriptKind::Codex => "sessions",
         TranscriptKind::Claude => "projects",
+        TranscriptKind::Gemini if !archived => "tmp",
+        TranscriptKind::Antigravity if !archived => "antigravity-cli",
         _ => return None,
     };
+    let shared_gemini_home = matches!(kind, TranscriptKind::Gemini | TranscriptKind::Antigravity);
     let parent = match profile {
+        // Account profiles exist only for Codex and Claude; never fall back to
+        // the default Gemini home for a profile-scoped request.
+        Some(_) if shared_gemini_home => return None,
         Some(path) => path.to_path_buf(),
+        None if shared_gemini_home => home()?.join(".gemini"),
         None => match kind {
             TranscriptKind::Codex => std::env::var_os("CODEX_HOME").map(PathBuf::from),
             TranscriptKind::Claude => std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
@@ -958,6 +980,12 @@ fn history_root_with_archive(
 }
 
 fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
+    if kind == TranscriptKind::Gemini {
+        return gemini_turns(path)?
+            .iter()
+            .filter(|(role, _)| *role == "user")
+            .find_map(|(_, text)| first_line_preview(visible_user_text(text)));
+    }
     let file = open_regular_transcript(path)?;
     let mut reader = BufReader::new(file).take(256 * 1024);
     let mut line = Vec::new();
@@ -991,18 +1019,28 @@ fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
                     msg.and_then(|m| m.get("content")),
                 )
             }
+            TranscriptKind::Antigravity => (
+                antigravity_turn(&value).map(|(role, _)| role),
+                value.get("content"),
+            ),
             _ => return None,
         };
         if role != Some("user") {
             continue;
         }
         let text = content.map(content_text).unwrap_or_default();
-        let text = visible_user_text(&text);
-        if let Some(first) = text.lines().map(str::trim).find(|line| !line.is_empty()) {
-            return Some(first.chars().take(80).collect());
+        if let Some(first) = first_line_preview(visible_user_text(&text)) {
+            return Some(first);
         }
     }
     None
+}
+
+fn first_line_preview(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(80).collect())
 }
 
 /// Hide metadata-only Codex shells, but keep uncertain/large records rather
@@ -1084,11 +1122,7 @@ fn scan_local_conversations(
     options: HistoryScanOptions,
     incomplete: &mut bool,
 ) -> Result<(), String> {
-    let HistoryScanOptions {
-        all,
-        archived,
-        retained,
-    } = options;
+    let all = options.all;
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut visited = 0;
     while let Some((dir, depth)) = stack.pop() {
@@ -1142,69 +1176,196 @@ fn scan_local_conversations(
                     .and_then(|meta| meta.source_is_interactive.then_some((meta.id?, meta.cwd?))),
                 TranscriptKind::Claude if is_jsonl(&path) => read_claude_session_meta(&path)
                     .and_then(|meta| meta.is_main.then_some((meta.id, meta.cwd))),
+                TranscriptKind::Gemini if is_gemini_session(&path) => {
+                    read_gemini_session_meta(&path)
+                }
                 _ => None,
             };
             let Some((id, cwd)) = candidate else { continue };
             if kind == TranscriptKind::Codex && !codex_history_may_have_user_input(&path) {
                 continue;
             }
-            if id.len() > 128
-                || id.is_empty()
-                || id.starts_with('-')
-                || id.chars().any(char::is_control)
-            {
+            push_history_entry(
+                kind,
+                HistoryCandidate { path, id, cwd },
+                profile_id,
+                &options,
+                result,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+struct HistoryCandidate {
+    path: PathBuf,
+    id: String,
+    cwd: String,
+}
+
+fn push_history_entry(
+    kind: TranscriptKind,
+    candidate: HistoryCandidate,
+    profile_id: Option<&str>,
+    options: &HistoryScanOptions,
+    result: &mut Vec<(LocalConversation, PathBuf)>,
+) -> Result<(), String> {
+    let HistoryCandidate { path, id, cwd } = candidate;
+    if id.len() > 128 || id.is_empty() || id.starts_with('-') || id.chars().any(char::is_control) {
+        return Ok(());
+    }
+    // Keep readable history even when its project has since moved;
+    // only the resume actions need a still-existing directory.
+    let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
+    let resumable = canonical.is_some() && !options.archived;
+    let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd.trim_start_matches(r"\\?\")));
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        return Ok(());
+    };
+    let updated_at = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |time| time.as_secs());
+    let definition_id = match kind {
+        TranscriptKind::Antigravity => "antigravity",
+        TranscriptKind::Claude => "claude",
+        TranscriptKind::Codex => "codex",
+        TranscriptKind::Gemini => "gemini",
+    };
+    result.push((
+        LocalConversation {
+            definition_id: definition_id.into(),
+            profile_id: profile_id.map(str::to_string),
+            native_session_id: id,
+            working_directory: cwd.to_string_lossy().into_owned(),
+            resumable,
+            title: String::new(),
+            updated_at,
+            model_provider: if kind == TranscriptKind::Codex {
+                read_codex_session_meta(&path).and_then(|meta| meta.model_provider)
+            } else {
+                None
+            },
+            archived: options.archived,
+            title_source: "firstMessage".into(),
+        },
+        path,
+    ));
+    // Keep a bounded newest-first working set even when several
+    // accounts have very large histories.
+    if options.all && result.len() > 1024 {
+        return Err(
+            "More than 1024 local conversations were found; use individual selection.".into(),
+        );
+    }
+    if !options.all && result.len() >= options.retained.saturating_mul(2).max(2) {
+        sort_history(result);
+        result.truncate(options.retained);
+    }
+    Ok(())
+}
+
+/// Gemini writes a metadata row first and the project root beside the chat
+/// directory. Subagent records and chats without any visible user turn stay
+/// out of the list, matching what Gemini itself offers to resume.
+fn read_gemini_session_meta(path: &Path) -> Option<(String, String)> {
+    if path.parent()?.file_name()? != "chats" {
+        return None;
+    }
+    let file = open_regular_transcript(path)?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    if !read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES)
+        .ok()?
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let meta = serde_json::from_slice::<Value>(&line).ok()?;
+    if meta
+        .get("kind")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind != "main")
+    {
+        return None;
+    }
+    let id = meta.get("sessionId").and_then(Value::as_str)?.to_string();
+    let root_file = open_regular_transcript(&path.parent()?.parent()?.join(".project_root"))?;
+    let mut cwd = String::new();
+    root_file
+        .take((MAX_GEMINI_PROJECT_ROOT_BYTES + 1) as u64)
+        .read_to_string(&mut cwd)
+        .ok()?;
+    let cwd = cwd.trim();
+    if cwd.is_empty() || cwd.len() > MAX_GEMINI_PROJECT_ROOT_BYTES || cwd.contains('\0') {
+        return None;
+    }
+    gemini_turns(path)?
+        .iter()
+        .any(|(role, text)| *role == "user" && !visible_user_text(text).is_empty())
+        .then(|| (id, cwd.to_string()))
+}
+
+const MAX_ANTIGRAVITY_HISTORY_LINE_BYTES: usize = 64 * 1024;
+
+/// Antigravity's prompt history is the only record that ties a conversation
+/// to its workspace. Brain folders missing from it are subagents or detached
+/// work, so they are not listed as resumable top-level conversations.
+fn scan_antigravity_conversations(
+    root: &Path,
+    result: &mut Vec<(LocalConversation, PathBuf)>,
+    options: HistoryScanOptions,
+    incomplete: &mut bool,
+) -> Result<(), String> {
+    let Some(file) = open_regular_transcript(&root.join("history.jsonl")) else {
+        return Ok(());
+    };
+    let mut reader = BufReader::new(file).take(MAX_TRANSCRIPT_FILE_BYTES + 1);
+    let mut line = Vec::new();
+    let mut workspaces = HashMap::new();
+    loop {
+        match read_bounded_line(&mut reader, &mut line, MAX_ANTIGRAVITY_HISTORY_LINE_BYTES) {
+            Ok(None) => break,
+            Ok(Some(true)) => {}
+            Ok(Some(false)) => {
+                *incomplete = true;
                 continue;
             }
-            // Keep readable history even when its project has since moved;
-            // only the resume actions need a still-existing directory.
-            let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
-            let resumable = canonical.is_some() && !archived;
-            let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd));
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            let updated_at = metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |time| time.as_secs());
-            result.push((
-                LocalConversation {
-                    definition_id: if kind == TranscriptKind::Codex {
-                        "codex"
-                    } else {
-                        "claude"
-                    }
-                    .into(),
-                    profile_id: profile_id.map(str::to_string),
-                    native_session_id: id,
-                    working_directory: cwd.to_string_lossy().into_owned(),
-                    resumable,
-                    title: String::new(),
-                    updated_at,
-                    model_provider: if kind == TranscriptKind::Codex {
-                        read_codex_session_meta(&path).and_then(|meta| meta.model_provider)
-                    } else {
-                        None
-                    },
-                    archived,
-                    title_source: "firstMessage".into(),
-                },
-                path,
-            ));
-            // Keep a bounded newest-first working set even when several
-            // accounts have very large histories.
-            if all && result.len() > 1024 {
-                return Err(
-                    "More than 1024 local conversations were found; use individual selection."
-                        .into(),
-                );
-            }
-            if !all && result.len() >= retained.saturating_mul(2).max(2) {
-                sort_history(result);
-                result.truncate(retained);
+            Err(_) => {
+                *incomplete = true;
+                break;
             }
         }
+        let Ok(row) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        let (Some(id), Some(workspace)) = (
+            row.get("conversationId")
+                .or_else(|| row.get("conversation_id"))
+                .and_then(Value::as_str),
+            row.get("workspace").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if antigravity_conversation_id(id) && !workspace.trim().is_empty() {
+            workspaces.insert(id.to_string(), workspace.to_string());
+        }
+    }
+    if reader.limit() == 0 {
+        *incomplete = true;
+    }
+    for (id, cwd) in workspaces {
+        let Some(path) = antigravity_transcript(root, &id) else {
+            continue;
+        };
+        push_history_entry(
+            TranscriptKind::Antigravity,
+            HistoryCandidate { path, id, cwd },
+            None,
+            &options,
+            result,
+        )?;
     }
     Ok(())
 }
@@ -1316,7 +1477,27 @@ fn collect_local_conversations(
     let mut entries = Vec::new();
     let mut incomplete = false;
     if scan_default_history_roots() {
-        for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
+        for kind in [
+            TranscriptKind::Codex,
+            TranscriptKind::Claude,
+            TranscriptKind::Gemini,
+            TranscriptKind::Antigravity,
+        ] {
+            if kind == TranscriptKind::Antigravity {
+                if let Some(root) = history_root(kind, None) {
+                    scan_antigravity_conversations(
+                        &root,
+                        &mut entries,
+                        HistoryScanOptions {
+                            all,
+                            archived: false,
+                            retained,
+                        },
+                        &mut incomplete,
+                    )?;
+                }
+                continue;
+            }
             if let Some(root) = history_root(kind, None) {
                 scan_local_conversations(
                     kind,
@@ -1464,9 +1645,7 @@ pub fn read_local_conversation_snapshot(
     {
         return Err("Invalid conversation identity.".into());
     }
-    let kind = TranscriptKind::from_definition(definition_id)
-        .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
-        .ok_or("Unknown assistant.")?;
+    let kind = TranscriptKind::from_definition(definition_id).ok_or("Unknown assistant.")?;
     let profile = match profile_id {
         Some(id) => Some(Path::new(
             &profiles
@@ -1497,7 +1676,10 @@ pub fn read_local_conversation_snapshot(
                 read_codex_session_meta(path).is_some_and(|meta| meta.source_is_interactive)
             }),
         TranscriptKind::Claude => locate_claude_in(&root, "", Some(session_id)),
-        _ => None,
+        TranscriptKind::Gemini => newest_matching(&root, |path| {
+            is_gemini_session(path) && read_gemini_session_id(path).as_deref() == Some(session_id)
+        }),
+        TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
     }
     .ok_or("The local conversation is no longer available.")?;
     let mut snapshot = read_conversation_snapshot(&path, kind)?;
@@ -1521,7 +1703,6 @@ pub fn read_session_conversation(
         return Ok(Vec::new());
     };
     let kind = TranscriptKind::from_definition(definition_id)
-        .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
         .ok_or("This CLI does not support conversation view.")?;
     if profile_directory.is_some_and(|path| !path.is_absolute() || !path.is_dir()) {
         return Err("The account directory is unavailable.".into());
@@ -1537,7 +1718,8 @@ pub fn read_session_conversation(
                 })
             }),
         TranscriptKind::Claude => locate_claude_in(&root, working_directory, Some(session_id)),
-        _ => None,
+        TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
+        TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
     }
     .ok_or("The session conversation is not available yet.")?;
     read_conversation_messages(&path, kind)
@@ -1581,6 +1763,35 @@ fn read_conversation_snapshot(
     let mut messages = Vec::new();
     let mut bytes = 0;
     let mut truncated = false;
+    let mut push = |role: &'static str, text: String| {
+        let text = if role == "user" {
+            visible_user_text(&text).to_string()
+        } else {
+            text
+        };
+        if text.is_empty() {
+            return;
+        }
+        bytes += text.len();
+        messages.push(LocalConversationMessage { role, text });
+        while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
+            truncated = true;
+            let removed: LocalConversationMessage = messages.remove(0);
+            bytes -= removed.text.len();
+        }
+    };
+    if kind == TranscriptKind::Gemini {
+        for (role, text) in
+            gemini_turns(path).ok_or("The local conversation could not be read safely.")?
+        {
+            push(role, text);
+        }
+        return Ok(LocalConversationSnapshot {
+            messages,
+            truncated,
+            archived: None,
+        });
+    }
     let incomplete = visit_transcript_rows(path, |value| {
         let (role, content) = match kind {
             TranscriptKind::Codex => {
@@ -1599,34 +1810,20 @@ fn read_conversation_snapshot(
                 let role = value.get("type").and_then(Value::as_str);
                 (role, value.get("message").and_then(|m| m.get("content")))
             }
+            TranscriptKind::Antigravity => {
+                if let Some((role, text)) = antigravity_turn(value) {
+                    push(role, text.trim().to_string());
+                }
+                return;
+            }
+            TranscriptKind::Gemini => return,
+        };
+        let role = match role {
+            Some("user") => "user",
+            Some("assistant") => "assistant",
             _ => return,
         };
-        if !matches!(role, Some("user" | "assistant")) {
-            return;
-        }
-        let text = content.map(content_text).unwrap_or_default();
-        let text = if role == Some("user") {
-            visible_user_text(&text).to_string()
-        } else {
-            text
-        };
-        if text.is_empty() {
-            return;
-        }
-        bytes += text.len();
-        messages.push(LocalConversationMessage {
-            role: if role == Some("user") {
-                "user"
-            } else {
-                "assistant"
-            },
-            text,
-        });
-        while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
-            truncated = true;
-            let removed: LocalConversationMessage = messages.remove(0);
-            bytes -= removed.text.len();
-        }
+        push(role, content.map(content_text).unwrap_or_default());
     })
     .ok_or("The local conversation could not be read safely.")?;
     Ok(LocalConversationSnapshot {
@@ -1747,24 +1944,32 @@ fn path_matches_workspace(candidate: &str, expected_cwd: &Path) -> bool {
     norm_candidate == norm_expected
 }
 
+/// Resolves only the exact brain transcript for a conversation ID and keeps
+/// the canonical result inside the Antigravity data root.
+fn antigravity_transcript(root: &Path, id: &str) -> Option<PathBuf> {
+    if !antigravity_conversation_id(id) {
+        return None;
+    }
+    let root = fs::canonicalize(root).ok()?;
+    let transcript = root
+        .join("brain")
+        .join(id)
+        .join(".system_generated")
+        .join("logs")
+        .join("transcript.jsonl");
+    fs::canonicalize(transcript)
+        .ok()
+        .filter(|path| path.starts_with(&root) && path.is_file())
+}
+
 fn locate_antigravity_in(
     root: &Path,
     working_directory: &str,
     captured: Option<&str>,
 ) -> Option<PathBuf> {
     let root = fs::canonicalize(root).ok()?;
-    if let Some(captured) = captured.filter(|value| antigravity_conversation_id(value)) {
-        let transcript = root
-            .join("brain")
-            .join(captured)
-            .join(".system_generated")
-            .join("logs")
-            .join("transcript.jsonl");
-        if let Ok(canonical) = fs::canonicalize(&transcript) {
-            if canonical.starts_with(&root) && canonical.is_file() {
-                return Some(canonical);
-            }
-        }
+    if let Some(transcript) = captured.and_then(|id| antigravity_transcript(&root, id)) {
+        return Some(transcript);
     }
 
     let expected_cwd = fs::canonicalize(working_directory).ok()?;
