@@ -35,6 +35,21 @@ it("deduplicates native IDs per account, preserves unreadable directories and ro
   expect(localConversationLaunchIntents([{ ...entry, profileId: "other" }], profiles, [fakeDefinition()], live, intents)).toEqual([]);
 });
 
+it("resumes Gemini and Antigravity history with their own CLI definitions", () => {
+  const catalog = [
+    fakeDefinition({ id: "gemini", label: "Gemini CLI", executable: "gemini" }),
+    fakeDefinition({ id: "antigravity", label: "Google Antigravity CLI", executable: "agy" }),
+  ];
+  const intents = localConversationLaunchIntents([
+    { ...entry, definitionId: "gemini", nativeSessionId: "gemini-native", title: "整理報表" },
+    { ...entry, definitionId: "antigravity", nativeSessionId: "agy-native", title: "" },
+  ], [], catalog, [], []);
+  expect(intents.map(intent => [intent.definitionId, intent.resumeSessionId, intent.groupLabel])).toEqual([
+    ["gemini", "gemini-native", "整理報表"],
+    ["antigravity", "agy-native", "Google Antigravity CLI"],
+  ]);
+});
+
 it("does not substitute the default account when a profile is missing", () => {
   expect(localConversationLaunchIntents([{ ...entry, profileId: "removed" }], [], [fakeDefinition()], [], [])).toEqual([]);
   expect(localConversationLaunchIntents([{ ...entry, archived: true }], [], [fakeDefinition()], [], [])).toEqual([]);

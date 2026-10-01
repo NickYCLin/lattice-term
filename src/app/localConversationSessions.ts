@@ -5,7 +5,7 @@ import type { SavedAgentSession, SavedWorkspaceSession } from "./workspaceSessio
 import { cliProxyLaunchArguments, type CliProxyEndpoint } from "./cliProxyApi";
 
 export interface LocalConversation {
-  definitionId: "codex" | "claude";
+  definitionId: "codex" | "claude" | "gemini" | "antigravity";
   profileId: string | null;
   nativeSessionId: string;
   workingDirectory: string;

@@ -9,8 +9,13 @@ import { useModalFocus } from "../overlays/modalFocus";
 import { conversationSession, isProxyConversation, nativeConversationProxy, localConversationLaunchIntents, type LocalConversation } from "../../app/localConversationSessions";
 import { nativeConversationKey, useNativeHistory, useNativeConversations, useNativeConversationMessages } from "../../app/useNativeConversations";
 import { useCliProxySettings } from "../../app/useCliProxyApi";
+import { agentDisplayName } from "../../app/agentNames";
 
 type Conversation = LocalConversation;
+
+function chatImportable(entry: LocalConversation): entry is LocalConversation & { definitionId: "codex" | "claude" } {
+  return entry.definitionId === "codex" || entry.definitionId === "claude";
+}
 
 export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onOpenSession, onOpenSessionChat, initialSelection = null }: {
   agents: AgentApi;
@@ -66,7 +71,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
 
   function openChat() {
     if (onOpenSessionChat) { void openSession(true); return; }
-    if (!selected || !selected.resumable || !chat || busy || error || missingProxy || !reader.value || reader.error) return;
+    if (!selected || !chatImportable(selected) || !selected.resumable || !chat || busy || error || missingProxy || !reader.value || reader.error) return;
     chat.importNativeConversation({
       definitionId: selected.definitionId,
       nativeSessionId: selected.nativeSessionId,
@@ -150,6 +155,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
   }
 
   const installed = selected && agents.catalog.some((entry) => entry.id === selected.definitionId && entry.installed);
+  const chatUnavailable = Boolean(selected && !onOpenSessionChat && !chatImportable(selected));
   const storedArchives = chat?.threads.filter((thread) => thread.archived) ?? [];
   const selectedStored = storedArchives.find((thread) => thread.id === selectedStoredId);
   return (
@@ -190,7 +196,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
                 className={`local-history__entry${selected?.nativeSessionId === entry.nativeSessionId && selected?.definitionId === entry.definitionId && selected?.profileId === entry.profileId ? " is-active" : ""}`}
                 onClick={() => void select(entry)}>
                 <strong>{entry.title}</strong>
-                <small>{entry.definitionId === "codex" ? "Codex" : "Claude Code"} · {new Date(entry.updatedAt * 1000).toLocaleString()}{entry.archived ? ` · ${t("history.nativeArchived")}` : ""}</small>
+                <small>{agentDisplayName(entry.definitionId)} · {new Date(entry.updatedAt * 1000).toLocaleString()}{entry.archived ? ` · ${t("history.nativeArchived")}` : ""}</small>
               </button>
             ))}
           </div>
@@ -240,7 +246,7 @@ export function LocalConversationDialog({ agents, chat, onClose, onOpenChat, onO
           <button type="button" className="button button--ghost" onClick={() => void openSession()}
             disabled={!selected?.resumable || !installed || busy || loading || missingProxy || !reader.value || Boolean(error || reader.error)}>{t("history.resumeSessionExplicit")}</button>
           <button type="button" className="button button--primary" onClick={selectedArchive || selectedStoredId ? openArchive : openChat}
-            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || busy || loading || missingProxy || !reader.value)) || !chat || Boolean(error || reader.error)}>
+            disabled={(!selectedArchive && !selectedStoredId && (!selected?.resumable || !installed || chatUnavailable || busy || loading || missingProxy || !reader.value)) || !chat || Boolean(error || reader.error)}>
             {selectedStoredId ? t("history.viewArchive") : selectedArchive ? t("history.importArchive") : t("history.resumeChatExplicit")}
           </button>
         </div>
