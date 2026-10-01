@@ -3,6 +3,13 @@
 工作階段與對話頁共用同一份本機歷史清單。開啟清單或預覽只讀取紀錄，
 不會自動啟動 CLI；使用者明確選擇續接後，才進入既有的啟動流程。
 
+目前讀取 Codex、Claude Code、Gemini CLI 與 Google Antigravity CLI 的
+本機紀錄。Copilot、Cursor、Qwen、OpenCode、Grok 等 CLI 尚未解析，
+不會出現在清單中；雲端上的 ChatGPT、Claude 網頁對話也不在本機紀錄內。
+
+側欄的「原生對話」區塊預設收合，標題旁顯示已載入筆數，展開後才列出
+清單，避免把專案樹擠到下方。完整操作仍可從「外部對話」視窗進行。
+
 ## 同步範圍
 
 | 項目 | 行為 |
@@ -14,6 +21,9 @@
 | 本機續接內容 | 執行中、等待輸入或已有本機新內容的 thread 不被來源快照覆蓋 |
 | 舊紀錄 | 每次多載入 100 筆，最多 50,000 筆；預設不列封存，可勾選「顯示已封存對話」 |
 | 內部紀錄 | 排除 Codex 子 Agent、非互動 exec 與確認沒有使用者輸入的空紀錄；讀取不完整時保留紀錄 |
+| Gemini | 讀取 `~/.gemini/tmp/<專案>/chats`，只列主對話且至少有一則使用者訊息，略過子代理紀錄 |
+| Antigravity | 依 `~/.gemini/antigravity-cli` 的 history.jsonl 列出；未列在 history 的 brain 資料夾不顯示 |
+| 帳號設定 | Gemini 與 Antigravity 目前只讀預設目錄，不借用其他帳號設定的紀錄 |
 | 舊版批次匯入 | 尚未啟動的歷史捷徑集中在復原區，不占專案側欄、不自動續接；明確勾選留在背景的項目維持原行為 |
 | 名稱 | 支援可選的 session_index.jsonl 中 id/thread_name 索引；沒有時標示以首則訊息代替 |
 | 截斷 | 文字快照最多最近 300 則或 256 KiB，超限時明確提示 |
@@ -31,9 +41,9 @@
 ## 實作位置
 
 - `useNativeConversations.ts`：共用清單、串行輪詢、過期回應保護。
-- `NativeConversationList.tsx`：兩頁共用的搜尋、分頁與狀態提示。
+- `NativeConversationList.tsx`：兩頁共用、預設收合的搜尋、分頁與狀態提示。
 - `nativeHistoryMirror.ts`：更新已匯入文字，保護本機續接內容。
-- `transcript.rs`：有界掃描、帳號區分、封存、名稱索引與文字快照。
+- `transcript.rs`：四種 CLI 的有界掃描、帳號區分、封存、名稱索引與文字快照。
 - Tauri 命令 `agent_chat_local_history_page` 與
   `agent_chat_local_history_snapshot` 提供唯讀資料；舊命令仍保留相容性。
 
@@ -46,6 +56,8 @@ STATUS_ENTRYPOINT_NOT_FOUND；不更改系統 DLL、登錄或全域 PATH。
 - 這是本機 CLI 格式的唯讀同步，沒有加入雙向改名、封存、刪除或發送。
   不能據此宣稱與 Codex Desktop 的所有帳號或雲端對話完全一致。
 - 只同步文字，不包含工具輸出、推理、圖片或審批互動。
+- Gemini 與 Antigravity 續接時會啟動對應 CLI，再以工作階段顯示在對話頁；
+  不會直接轉成 LatticeTerm 內建聊天 thread。
 - 只有目前選取的已匯入鏡像持續更新；背景 thread 不會批次改寫。
 - 未載入分頁中的來源名稱與封存狀態，必須載入後才可更新。
 - 原生名稱索引格式已用測試資料驗證，尚待比對使用者目前 Desktop 格式。
