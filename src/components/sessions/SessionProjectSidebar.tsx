@@ -1075,7 +1075,7 @@ export function SessionProjectSidebar({
         )}
       </div>
       <SidebarStorageNotice />
-            <NativeConversationList />
+      <NativeConversationList />
       <div
         className={`session-tree${draggedNodeId ? " is-dragging" : ""}`}
         role="list"
