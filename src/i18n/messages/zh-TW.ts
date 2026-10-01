@@ -1461,6 +1461,11 @@ export const zhTW = {
   "agents.terminal.inputFailed": "Agent 已結束，無法再送出輸入。",
 
   // 對話模式 --------------------------------------------------------------
+  "chat.mcpAccess.title": "這個對話的 MCP 分享",
+  "chat.mcpAccess.read": "允許讀取",
+  "chat.mcpAccess.control": "允許傳訊",
+  "chat.mcpAccess.hint": "預設關閉，只分享這個原對話。傳訊沿用原模型與帳號，不代替你同意審批；有草稿或工作進行中時不傳送。關閉或重新載入桌面後需重新分享。",
+  "chat.mcpAccess.failed": "無法更新分享，請確認背景服務版本並重新載入桌面。",
   "chat.title": "對話",
   "chat.new": "新對話",
   "chat.untitled": "新對話",

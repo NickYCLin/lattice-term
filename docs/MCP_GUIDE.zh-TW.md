@@ -414,3 +414,17 @@ Agent Fleet 的執行中清單現在也能對前景工作階段選擇「MCP 權�
 這個功能不把前景程序搬入背景，也不替使用者重開對話。
 更新後需要相容的桌面與背景服務（bridge protocol 4）；舊服務明確拒絕新操作。
 如果更新需要關閉尚在工作的桌面，先保存並由使用者決定何時退出，不能強制結束。
+
+
+### 與獨立對話頁交談
+
+在 LatticeTerm 開啟要使用的原對話，依需要勾選該對話的「允許讀取」及
+「允許傳訊」。兩項預設都關閉，不會因為已分享 Fleet 或 Remote 而一併開放。
+先呼叫 `list_authorized_connections`，選 `backend: desktopChat`，再用
+`desktop_chat` 的 `state`、`read`、`send`。`read` 以回傳的 `before` 讀取較舊頁；
+`send` 必須附上 `requestId`，且不得在不確定結果後換新 ID 重送。
+
+訊息送往同一原對話，保留模型、帳號與 CLIProxyAPI。若桌面有草稿、附件、
+工作進行中或審批，先由使用者處理；MCP 不會清除草稿或自動同意審批。
+取消分享即停止存取；重新開啟桌面後要重新分享。詳細範圍與驗收界線見
+[MCP 說明](MCP.zh-TW.md#獨立對話頁的-mcp)。

@@ -2230,6 +2230,147 @@ async fn agent_mcp_control(
     decode_mcp_shared_response(value)
 }
 
+// These commands are window-only. MCP can never create its own chat grant.
+fn require_chat_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("Only the main desktop may share conversations".into())
+    }
+}
+#[tauri::command]
+fn mcp_chat_open(
+    window: tauri::WebviewWindow,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<String, String> {
+    require_chat_window(&window)?;
+    service.chat.open().map_err(|e| e.message)
+}
+#[tauri::command]
+fn mcp_chat_close(
+    window: tauri::WebviewWindow,
+    nonce: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<(), String> {
+    require_chat_window(&window)?;
+    service.chat.close(&nonce);
+    Ok(())
+}
+#[tauri::command]
+fn mcp_chat_heartbeat(
+    window: tauri::WebviewWindow,
+    nonce: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<Vec<String>, String> {
+    require_chat_window(&window)?;
+    service.chat.heartbeat(&nonce).map_err(|e| e.message)?;
+    Ok(service
+        .targets()
+        .into_iter()
+        .filter(|t| t.backend == mcp_desktop::Backend::DesktopChat && t.connected)
+        .map(|t| t.id)
+        .collect())
+}
+#[tauri::command]
+fn mcp_chat_claim(
+    window: tauri::WebviewWindow,
+    nonce: String,
+    id: String,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<mcp_desktop::ChatRequest, String> {
+    require_chat_window(&window)?;
+    service.chat.claim(&nonce, &id).map_err(|e| e.message)
+}
+#[tauri::command]
+fn mcp_chat_reply(
+    window: tauri::WebviewWindow,
+    nonce: String,
+    id: String,
+    value: serde_json::Value,
+    error: Option<String>,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+) -> Result<(), String> {
+    require_chat_window(&window)?;
+    service
+        .chat
+        .reply(&nonce, &id, value, error)
+        .map_err(|e| e.message)
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChatShareRequest {
+    nonce: String,
+    thread_id: String,
+    label: String,
+    read: bool,
+    control: bool,
+}
+#[tauri::command]
+async fn mcp_chat_share(
+    window: tauri::WebviewWindow,
+    request: ChatShareRequest,
+    service: State<'_, Arc<mcp_desktop::DesktopService>>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpRemoteSync>,
+) -> Result<Option<mcp_desktop::TargetView>, String> {
+    require_chat_window(&window)?;
+    let _guard = sync.0.lock().await;
+    service
+        .share_chat(
+            &request.nonce,
+            &request.thread_id,
+            &request.label,
+            false,
+            false,
+        )
+        .await
+        .map_err(|e| e.message)?;
+    if !request.read && !request.control {
+        if let Some(connection) = daemon.attached().await {
+            connection
+                .request(agent_daemon::Request::DesktopGrants {
+                    targets: service.targets(),
+                })
+                .await?;
+        }
+        return Ok(None);
+    }
+    let connection = daemon.ensure().await?;
+    connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: service.targets(),
+        })
+        .await?;
+    let grant = service
+        .share_chat(
+            &request.nonce,
+            &request.thread_id,
+            &request.label,
+            request.read,
+            request.control,
+        )
+        .await
+        .map_err(|e| e.message)?;
+    if let Err(error) = connection
+        .request(agent_daemon::Request::DesktopGrants {
+            targets: service.targets(),
+        })
+        .await
+    {
+        let _ = service
+            .share_chat(
+                &request.nonce,
+                &request.thread_id,
+                &request.label,
+                false,
+                false,
+            )
+            .await;
+        return Err(error);
+    }
+    Ok(grant)
+}
+
 async fn update_foreground_share(
     daemon: &AppDaemon,
     service: &Arc<mcp_desktop::DesktopService>,
@@ -4811,6 +4952,15 @@ pub fn run() {
                 Arc::new(crate::agent::EventSink(app.handle().clone())),
             )
             .with_connection_book(Arc::new(DesktopConnectionBook(app.handle().clone())));
+            let chat_app = app.handle().clone();
+            desktop_service.chat.set_emitter(Arc::new(move |id| {
+                chat_app
+                    .emit_to("main", "mcp-chat://request", id)
+                    .map_err(|_| mcp_desktop::ServiceError {
+                        code: "unavailable".into(),
+                        message: "The chat window is unavailable".into(),
+                    })
+            }));
             desktop_service.share_connection_book(book_setting.shared());
             app.manage(Mutex::new(book_setting));
             let command_trust = crate::mcp_command_trust::CommandTrustSetting::open(&dir);
@@ -5036,6 +5186,12 @@ pub fn run() {
             remote_terminal_input,
             remote_terminal_resize,
             remote_host_configure,
+            mcp_chat_open,
+            mcp_chat_close,
+            mcp_chat_heartbeat,
+            mcp_chat_claim,
+            mcp_chat_reply,
+            mcp_chat_share,
             remote_chat_request,
             remote_chat_reply,
             remote_command_start,

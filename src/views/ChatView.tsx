@@ -1,3 +1,5 @@
+import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { desktopChatAccess } from "../app/desktopChat";
 import { NativeConversationList } from "../components/chat/NativeConversationList";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
@@ -678,6 +680,11 @@ function ThreadPane({
   const composerDropRef = useRef<HTMLDivElement>(null);
   const [steering, setSteering] = useState(false);
   const steeringRef = useRef(false);
+  useLayoutEffect(() => {
+    if (draft.length || attachments.length || pastingImage || steering) desktopChatAccess.drafts.add(thread.id);
+    else desktopChatAccess.drafts.delete(thread.id);
+    return () => { desktopChatAccess.drafts.delete(thread.id); };
+  }, [thread.id, draft, attachments, pastingImage, steering]);
   const fresh = threadIsFresh(thread);
   const [settingsOpen, setSettingsOpen] = useState(fresh);
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -996,6 +1003,7 @@ function ThreadPane({
             </button>
           </div>
         </div>
+        <ChatMcpAccess thread={thread} />
         {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             <AccountModelField

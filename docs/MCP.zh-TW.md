@@ -37,7 +37,7 @@ lattice-term agent-daemon（背景服務）
            桌面 SSH／SFTP registry            ← 原有登入與主機信任不交給模型
 ```
 
-- **背景與前景 Agent 各自明確授權。** 背景工作階段使用原有 `list_agent_sessions`／read／prompt 工具。既有前景 Fleet PTY 使用桌面逐階段分享與 `desktop_agent` 工具，不重開對話；獨立 headless 對話不公開。前景授權不持久保存，桌面通道中斷即失效。SSH／SFTP 使用各自的桌面授權。
+- **背景與前景 Agent 各自明確授權。** 背景工作階段使用原有 `list_agent_sessions`／read／prompt 工具。既有前景 Fleet PTY 使用桌面逐階段分享與 `desktop_agent` 工具，不重開對話；獨立對話頁透過逐對話分享與 `desktop_chat` 工具開放。前景授權不持久保存，桌面通道中斷即失效。SSH／SFTP 使用各自的桌面授權。
 - **預設不分享，一個選單決定權限。** 每個背景工作階段旁的「MCP 權限」只有三個選項：「不分享」、「只能看」（工作階段資訊、狀態與終端輸出）、「完全開放」（再加上送指示、清除 MCP 佇列與結束工作階段）。分享狀態存在背景服務記憶體，工作階段或背景服務結束就自動取消。
 - **降級或取消立即生效。** 從「完全開放」改回「只能看」或「不分享」時，尚未送出的 MCP 指示一併移除，使用者自己排隊的工作保留。背景服務內部仍分開記錄內容讀取與控制，舊版介面留下的「只分享狀態」會照原權限顯示徽章，重新選一次就換成新的等級。內容與 metadata 都可能含敏感資訊，請選擇合適的分享對象。
 - **啟動也有獨立授權。** 「允許 MCP 啟動已保存的背景啟動項目」打開後，client 才能用 `launch_agent` 啟動保存清單裡勾了「留在背景」的項目，完全沿用保存的 CLI、參數、工作目錄、沙箱與共用指示。它啟動的工作階段會自動分享、開放內容讀取並可控；介面會明示這三個效果。開關存在啟動項目檔裡，開著時背景服務保持常駐。
@@ -516,3 +516,31 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 `desktop_agent` 的 `state` 回傳 `promptReadiness`，包含 `ready`、`blockers`、`lastInputKind` 與 `snapshotOnly=true`。這是觀察當下的快照，送出時仍重新檢查；不會清除草稿、改變權限或把推測狀態升級為正式就緒。
 
 阻擋原因分為 `control_not_granted`、`input_profile_unsupported`、`desktop_editing`、`desktop_paste_incomplete`、`desktop_escape_incomplete`、`startup_seed_pending`、`integration_not_reported`、`lifecycle_not_ready`、`queued_prompts_pending`。`lastInputKind` 僅回傳輸入種類，不回傳草稿、按鍵內容或回報憑證。遇到 `not_ready` 先讀這些原因，不應反覆要求使用者送相同提示或自動清除輸入。
+
+
+## 獨立對話頁的 MCP
+
+在原對話上分別勾選「允許讀取」及「允許傳訊」，預設兩項都關閉。
+`list_authorized_connections` 只列出已分享的 `backend: desktopChat`；使用其中
+`id` 作為 `desktop_chat` 的 `targetId`，不能猜 thread ID 或代替使用者分享。
+
+- `action: { kind: "state" }`：目前模型、CLIProxyAPI 標記及傳訊阻擋原因。
+- `action: { kind: "read", before: null }`：最多 40 筆、約 40 KiB 的最新內容；
+  用回傳的 `before` 讀取上一頁。個別過長訊息以 `truncated` 標示。
+- `action: { kind: "send", text: "…", requestId: "唯一識別碼" }`：送到同一原對話，
+  沿用原 provider、model、account、CLIProxyAPI 設定，不建立或替換對話。
+
+讀取與傳訊分別使用 `fleetRead`、`fleetControl` 權限；分享即包含 `fleetObserve`
+以供辨識。這些權限只適用於該 `desktopChat` 目標，不能拿去操作 Fleet PTY。
+讀取不能傳訊，控制也不隱含讀取；審批必須仍由使用者在桌面處理。
+草稿、附件、忙碌、排隊輸入、待審批、封存或分享後的設定變更都會阻擋傳訊。
+
+同一 client 的相同 `requestId` 在既有 15 分鐘保留期內不重送；改內容重用 ID
+會拒絕。不確定結果時沿用原 ID 並讀取原對話，不可用新 ID 盲目重試。
+分享僅存在記憶體，關閉、重新載入、心跳失效或桌面通道中斷後需重新分享。
+此功能使用既有 MCP stdio／桌面通道，沒有新增 HTTP 服務或自動同意審批。
+桌面 bridge 升為 v6；背景服務太舊時會拒絕，不能把舊版服務當成支援。
+
+程式回歸使用測試對話與模擬前端回覆；不代表已安裝版本或真實模型往返通過。
+實機驗收須先分享指定測試對話，再驗證分頁、同一 thread 訊息往返、原模型／
+帳號／CLIProxyAPI、草稿阻擋、取消分享及重新開啟後權限關閉。

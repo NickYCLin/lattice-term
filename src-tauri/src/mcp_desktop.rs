@@ -7,9 +7,11 @@
 //! SFTP path checks assume a cooperative trusted server. They are not a chroot
 //! and cannot defeat another remote process changing directories between calls.
 
+mod chat;
 mod file_queries;
 mod fleet;
 mod foreground;
+pub use chat::{ChatBridge, ChatRequest, DesktopChatAction};
 pub use foreground::DesktopAgentAction;
 #[cfg(test)]
 mod loopback_tests;
@@ -64,6 +66,7 @@ const AD_HOC_TIMEOUT_MS: u32 = 60_000;
 pub enum Backend {
     /// An explicitly shared, already running local Agent Fleet PTY.
     DesktopAgent,
+    DesktopChat,
     Ssh,
     Sftp,
     /// Screen-only backends never gain shell or file capabilities.
@@ -256,6 +259,10 @@ pub trait ConnectionBook: Send + Sync {
 pub enum DesktopOperation {
     ListConnections,
     ListSavedConnections,
+    DesktopChat {
+        target_id: String,
+        action: DesktopChatAction,
+    },
     DesktopAgent {
         target_id: String,
         action: DesktopAgentAction,
@@ -360,6 +367,7 @@ impl DesktopOperation {
     /// an operation it cannot parse.
     pub const KINDS: &'static [&'static str] = &[
         "desktopAgent",
+        "desktopChat",
         "listConnections",
         "listSavedConnections",
         "connectSaved",
@@ -398,6 +406,7 @@ impl DesktopOperation {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::DesktopAgent { .. } => "desktopAgent",
+            Self::DesktopChat { .. } => "desktopChat",
             Self::ListConnections => "listConnections",
             Self::ListSavedConnections => "listSavedConnections",
             Self::ConnectSaved { .. } => "connectSaved",
@@ -422,7 +431,8 @@ impl DesktopOperation {
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::ListConnections | Self::ListSavedConnections | Self::ConnectSaved { .. } => None,
-            Self::DesktopAgent { target_id, .. }
+            Self::DesktopChat { target_id, .. }
+            | Self::DesktopAgent { target_id, .. }
             | Self::Fleet { target_id, .. }
             | Self::GetMetrics { target_id }
             | Self::CaptureScreen { target_id }
@@ -444,6 +454,7 @@ impl DesktopOperation {
     pub fn required_scope(&self) -> Option<Scope> {
         match self {
             Self::DesktopAgent { action, .. } => Some(action.scope()),
+            Self::DesktopChat { action, .. } => Some(action.scope()),
             Self::Fleet { action, .. } => Some(action.scope()),
             Self::GetMetrics { .. } => Some(Scope::Metrics),
             Self::CaptureScreen { .. } => Some(Scope::Screen),
@@ -482,6 +493,7 @@ impl DesktopOperation {
     fn request_id(&self) -> Option<&str> {
         match self {
             Self::DesktopAgent { action, .. } => action.request_id(),
+            Self::DesktopChat { action, .. } => action.request_id(),
             Self::Fleet { action, .. } => action.request_id(),
             Self::ScreenInput { request_id, .. }
             | Self::ConnectSaved { request_id, .. }
@@ -754,6 +766,7 @@ struct Paused {
 }
 
 pub struct DesktopService {
+    pub chat: Arc<ChatBridge>,
     foreground: Option<(
         Arc<crate::agent::AgentRegistry>,
         Arc<dyn crate::agent::AgentSink>,
@@ -799,6 +812,7 @@ impl DesktopService {
     pub fn new(ssh: Arc<SshRegistry>, sftp: Arc<SftpRegistry>) -> Self {
         Self {
             foreground: None,
+            chat: Arc::new(ChatBridge::default()),
             ssh,
             sftp,
             rdp: Arc::new(crate::rdp::RdpRegistry::new()),
@@ -988,6 +1002,7 @@ impl DesktopService {
     fn identity(&self, backend: Backend, session_id: &str) -> Option<usize> {
         match backend {
             Backend::DesktopAgent => self.foreground.as_ref()?.0.session_identity(session_id),
+            Backend::DesktopChat => self.chat.identity(session_id),
             Backend::Ssh => self
                 .ssh
                 .session_handle(session_id)
@@ -1754,6 +1769,12 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
             }
+            DesktopOperation::DesktopChat { action, .. } => {
+                if grant.view.backend != Backend::DesktopChat {
+                    return Err(ServiceError::denied());
+                }
+                action.validate()?;
+            }
             DesktopOperation::DesktopAgent { action, .. } => {
                 if grant.view.backend != Backend::DesktopAgent {
                     return Err(ServiceError::denied());
@@ -1793,6 +1814,9 @@ impl DesktopService {
             .unwrap_or_else(|| watch::channel(false).1);
         let work = async {
             match operation {
+                DesktopOperation::DesktopChat { action, .. } => {
+                    self.chat.request(grant, action.clone()).await
+                }
                 DesktopOperation::DesktopAgent { action, .. } => {
                     self.execute_desktop_agent(grant, action).await
                 }
@@ -2463,7 +2487,10 @@ fn label(label: &str) -> bool {
 }
 
 fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
-    if request.backend == Backend::DesktopAgent {
+    if matches!(
+        request.backend,
+        Backend::DesktopAgent | Backend::DesktopChat
+    ) {
         return foreground::validate_grant(request);
     }
     fleet::validate_grant(request)?;
@@ -2916,6 +2943,10 @@ mod tests {
     #[test]
     fn every_operation_kind_is_announced_and_matches_its_wire_tag() {
         let samples = [
+            DesktopOperation::DesktopChat {
+                target_id: "t".into(),
+                action: DesktopChatAction::State {},
+            },
             DesktopOperation::DesktopAgent {
                 target_id: "t".into(),
                 action: DesktopAgentAction::State {},
@@ -2998,7 +3029,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 19);
+        assert_eq!(DesktopOperation::KINDS.len(), 20);
     }
 
     #[test]

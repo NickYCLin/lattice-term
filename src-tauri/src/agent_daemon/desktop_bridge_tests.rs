@@ -1301,3 +1301,165 @@ async fn mcp_adapter_desktop_agent_routes_only_explicit_grants() {
         .unwrap()
         .unwrap();
 }
+
+// Real MCP adapter and local daemon transport; the chat window is a fixture.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_adapter_desktop_chat_routes_only_explicit_grants() {
+    use crate::agent_daemon::{
+        automations::Scheduler,
+        mcp::McpServer,
+        read_or_create_token,
+        server::{serve, Logger},
+        DaemonPaths,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let canonical = directory.path().canonicalize().unwrap();
+    let paths = DaemonPaths::new(&canonical);
+    let token = read_or_create_token(&paths).unwrap();
+    let server = tokio::spawn(serve(
+        paths.clone(),
+        token.clone(),
+        Arc::new(crate::agent::AgentRegistry::new()),
+        Arc::new(DaemonSink::default()),
+        Arc::new(Scheduler::open(&canonical)),
+        Arc::new(crate::agent_chat::AgentChatRegistry::new()),
+        Duration::from_secs(600),
+        Arc::new(Logger::silent()),
+    ));
+    let mut desktop = WireClient::connect(&paths, &token, ClientRole::Desktop).await;
+    let adapter = Arc::new(McpServer::new(paths));
+    adapter.handle(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"foreground fixture","version":"1"}}})).await.unwrap();
+    let missing = adapter_tool(
+        &adapter,
+        2,
+        "desktop_chat",
+        json!({"targetId":"existing-chat","action":{"kind":"state"}}),
+    )
+    .await;
+    assert_eq!(missing["result"]["isError"], true);
+    let mut view = target("existing-chat");
+    view.backend = Backend::DesktopChat;
+    view.scopes = Scopes {
+        fleet_observe: true,
+        fleet_read: true,
+        ..Scopes::default()
+    };
+    desktop
+        .send(&[Frame::Request {
+            id: 2,
+            body: Request::DesktopGrants {
+                targets: vec![view.clone()],
+            },
+        }])
+        .await;
+    assert!(matches!(
+        desktop.read().await,
+        Frame::Response { ok: true, .. }
+    ));
+    let list = adapter_tool(&adapter, 3, "list_authorized_connections", json!({})).await;
+    assert_eq!(
+        list["result"]["structuredContent"]["connections"][0]["backend"],
+        "desktopChat"
+    );
+    let denied = adapter_tool(&adapter,4,"desktop_chat",json!({"targetId":"existing-chat","action":{"kind":"send","text":"must not send","requestId":"read-only"}})).await;
+    assert_eq!(denied["result"]["isError"], true);
+    for (id, action, reply) in [
+        (
+            5,
+            json!({"kind":"state"}),
+            json!({"threadId":"original-thread","source":"desktop","model":"fixture-model"}),
+        ),
+        (
+            6,
+            json!({"kind":"read","before":"older-message"}),
+            json!({"threadId":"original-thread","text":"existing output","nextCursor":15}),
+        ),
+    ] {
+        let adapter = adapter.clone();
+        let call = tokio::spawn(async move {
+            adapter_tool(
+                &adapter,
+                id,
+                "desktop_chat",
+                json!({"targetId":"existing-chat","action":action}),
+            )
+            .await
+        });
+        let invocation = match desktop.read().await {
+            Frame::Request {
+                id,
+                body:
+                    Request::DesktopInvoke {
+                        operation: DesktopOperation::DesktopChat { target_id, .. },
+                        ..
+                    },
+            } => {
+                assert_eq!(target_id, "existing-chat");
+                id
+            }
+            _ => panic!("only the fixed desktop_chat operation may cross the bridge"),
+        };
+        desktop
+            .send(&[Frame::Response {
+                id: invocation,
+                ok: true,
+                result: reply.clone(),
+                error: None,
+            }])
+            .await;
+        assert_eq!(call.await.unwrap()["result"]["structuredContent"], reply);
+    }
+    let adapter2 = adapter.clone();
+    let read = tokio::spawn(async move {
+        adapter_tool(
+            &adapter2,
+            7,
+            "desktop_chat",
+            json!({"targetId":"existing-chat","action":{"kind":"read"}}),
+        )
+        .await
+    });
+    let invocation = match desktop.read().await {
+        Frame::Request { id, .. } => id,
+        _ => panic!("expected read"),
+    };
+    desktop
+        .send(&[
+            Frame::Request {
+                id: 3,
+                body: Request::DesktopGrants { targets: vec![] },
+            },
+            Frame::Response {
+                id: invocation,
+                ok: true,
+                result: json!({"text":"revoked-output-sentinel"}),
+                error: None,
+            },
+        ])
+        .await;
+    assert!(matches!(
+        desktop.read().await,
+        Frame::Response { ok: true, .. }
+    ));
+    let read = read.await.unwrap();
+    assert_eq!(read["result"]["isError"], true);
+    assert!(!read.to_string().contains("revoked-output-sentinel"));
+    desktop
+        .send(&[Frame::Request {
+            id: 4,
+            body: Request::Shutdown,
+        }])
+        .await;
+    assert!(matches!(
+        desktop.read().await,
+        Frame::Response { ok: true, .. }
+    ));
+    drop(adapter);
+    drop(desktop);
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

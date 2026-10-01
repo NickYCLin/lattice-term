@@ -9,6 +9,7 @@
  * code out of the first paint; it renders nothing and hands its API up.
  */
 
+import { useDesktopChatHost } from "./useDesktopChatHost";
 import { useRemoteChatHost } from "./useRemoteChatHost";
 import type { RemoteHostStatus } from "./useRemoteHost";
 import { useEffect } from "react";
@@ -38,6 +39,7 @@ export function ChatRuntime({
 }) {
   const chat = useAgentChat(completionSound, completionVolume, completionNotification);
   useRemoteChatHost(chat, remoteHost ?? null);
+  useDesktopChatHost(chat);
   const automations = useAgentAutomations(chat, locale);
   useEffect(() => {
     onChange({ chat, automations });

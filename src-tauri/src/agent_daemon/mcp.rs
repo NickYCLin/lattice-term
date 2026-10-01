@@ -526,7 +526,8 @@ impl McpServer {
             "launch_agent" => self.launch_agent(&arguments).await,
             "send_agent_prompt" => self.send_agent_prompt(&arguments).await,
             "cancel_agent_task" => self.cancel_agent_task(&arguments).await,
-            "desktop_agent"
+            "desktop_chat"
+            | "desktop_agent"
             | "remote_fleet"
             | "list_authorized_connections"
             | "list_saved_connections"
@@ -657,10 +658,13 @@ impl McpServer {
                 { "id": "agentFleetDesktop", "access": "explicitScopes", "supported":desktop_bridge,
                   "available":remote_targets.iter().any(|t| t["backend"] == "desktopAgent" && t["connected"] == true),
                   "sharedSessions":remote_targets.iter().filter(|t|t["backend"] == "desktopAgent" && t["connected"] == true).count() },
+                { "id": "agentChatDesktop", "access": "explicitScopes", "supported": desktop_bridge,
+                  "available": remote_targets.iter().any(|t| t["backend"] == "desktopChat" && t["connected"] == true) },
                 { "id": "desktopSshSftp", "access": "explicitScopes", "supported": desktop_bridge,
-                  "available": remote_targets.iter().any(|target| target["connected"] == true && target["backend"] != "desktopAgent"),
-                  "authorizedConnections": remote_targets.iter().filter(|t|t["backend"] != "desktopAgent").count() },
+                  "available": remote_targets.iter().any(|target| target["connected"] == true && target["backend"] != "desktopAgent" && target["backend"] != "desktopChat"),
+                  "authorizedConnections": remote_targets.iter().filter(|t|t["backend"] != "desktopAgent" && t["backend"] != "desktopChat").count() },
             ],
+            "sharedChatThreads": remote_targets.iter().filter(|t| t["backend"] == "desktopChat" && t["connected"] == true).count(),
             "sharedSessions": shared,
             "outputReadableSessions": readable,
             "workspaceScope": connection.as_ref().is_some_and(|c| c.workspace_scope.load(Ordering::Relaxed)),
@@ -725,7 +729,7 @@ impl McpServer {
             "limitations": [
                 "The background session tools expose only background sessions explicitly shared in LatticeTerm; controllable sessions accept prompts or cancels. Existing desktop PTYs use the separate desktop_agent tool.",
                 "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
-                "Existing desktop Fleet PTYs, including CLIProxyAPI, are available only after the person explicitly shares that session. Find backend desktopAgent in list_authorized_connections, then use desktop_agent to verify identity, read and prompt the same process. Standalone headless chat threads are not exposed. Desktop disconnection revokes foreground grants; no automatic relaunch or replacement.",
+                "Existing desktop Fleet PTYs, including CLIProxyAPI, are available only after the person explicitly shares that session. Find backend desktopAgent in list_authorized_connections, then use desktop_agent to verify identity, read and prompt the same process. Standalone chat threads use desktop_chat after explicit per-thread sharing; discover backend desktopChat. Desktop disconnection revokes foreground grants; no automatic relaunch or replacement.",
                 "list_saved_connections reports saved names while connection-book sharing is enabled. Use connect_saved_connection with its profile ID to open SSH, SFTP, RDP, VNC or Lattice Remote using saved credentials. Host verification, missing credentials and RDP domain context still require user action. Local default MCP starts the service and desktop as needed; custom data directories and remote workspace adapters stay passive.",
                 "Use ssh_run_command for SSH or remote_run_command for Lattice Remote, never paste shell commands through screen input. Commands require their own grant. SSH trust settings apply only to SSH. Remote commands and remote_file_transfer run without a card by default, subject to the independent Remote approval setting and the sharing host's advertised capability. When approval is required, refusal, silence for two minutes or revocation before dispatch means nothing runs.",
                 "capture_remote_screen returns one still picture of an RDP, VNC or Lattice Remote screen the user shared, at most one every two seconds, and only while that exact connection is live. Input needs a separate input grant and a client-bound capture receipt, expires after ten seconds, and is refused if the picture changes. Manual viewer input revokes MCP input. There is no continuous stream; reconnection ends the grant.",
@@ -1191,6 +1195,7 @@ fn desktop_tool_kind(name: &str) -> Option<&'static str> {
         "capture_remote_screen" => "captureScreen",
         "send_remote_input" => "screenInput",
         "desktop_agent" => "desktopAgent",
+        "desktop_chat" => "desktopChat",
         "remote_fleet" => "fleet",
         "get_remote_operation" | "wait_remote_operation" => "operationStatus",
         "list_remote_operations" => "listOperations",
@@ -1214,7 +1219,7 @@ fn tools_where(connection: Option<&Arc<Connection>>, wanted: Option<bool>) -> Ve
         .collect()
 }
 
-const TOOL_NAMES: [&str; 28] = [
+const TOOL_NAMES: [&str; 29] = [
     "get_capabilities",
     "remote_fleet",
     "list_agent_sessions",
@@ -1226,6 +1231,7 @@ const TOOL_NAMES: [&str; 28] = [
     "cancel_agent_task",
     "list_authorized_connections",
     "desktop_agent",
+    "desktop_chat",
     "list_saved_connections",
     "connect_saved_connection",
     "get_host_metrics",
@@ -1955,8 +1961,9 @@ fn desktop_tool_definitions() -> Vec<Value> {
         json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
     }).collect();
     [
-        ("list_authorized_connections", "List connections and explicitly shared desktopAgent PTYs in the live LatticeTerm desktop. Desktop agents are never shared automatically. Remote connections are shared automatically; a reconnection gets a new targetId, so call this again instead of asking the user to grant anything. For Lattice Remote, input exists only when the host computer allows control, and Fleet only when the host shares its Fleet workspace, both set on the host in its own device-sharing settings; the controlling side cannot turn them on, and applying them there restarts the share (LatticeTerm reconnects by itself when the pairing code is saved). No hosts, usernames, credentials or command text.", json!({}), vec![], true, false),
+        ("list_authorized_connections", "List connections and explicitly shared desktopAgent PTYs or desktopChat conversations in the live LatticeTerm desktop. Desktop agents are never shared automatically. Remote connections are shared automatically; a reconnection gets a new targetId, so call this again instead of asking the user to grant anything. For Lattice Remote, input exists only when the host computer allows control, and Fleet only when the host shares its Fleet workspace, both set on the host in its own device-sharing settings; the controlling side cannot turn them on, and applying them there restarts the share (LatticeTerm reconnects by itself when the pairing code is saved). No hosts, usernames, credentials or command text.", json!({}), vec![], true, false),
         ("desktop_agent", "Inspect, read or prompt an explicitly shared existing desktop Agent Fleet session, including CLIProxyAPI. targetId must come from list_authorized_connections with backend desktopAgent. Does not launch or resume a conversation. State exposes identity and launch configuration provenance, not credentials. Reading needs fleetRead; prompting needs fleetControl and official idle/done state with no unfinished human input. Reuse requestId after an uncertain result. Closing the desktop ends access; never replace its conversation automatically.", json!({"targetId":id,"action":{"oneOf":[{"type":"object","properties":{"kind":{"const":"state"}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"read"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1,"maximum":65536}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"prompt"},"text":{"type":"string","minLength":1,"maxLength":16000},"requestId":id},"required":["kind","text","requestId"],"additionalProperties":false}]}}), vec!["targetId","action"], false, true),
+        ("desktop_chat", "Read or send text to an explicitly shared existing standalone chat. Discover backend desktopChat in list_authorized_connections. State needs fleetObserve, paged read needs fleetRead, send needs fleetControl. Reuse requestId after an uncertain result. Preserves the original thread, provider, model and account; never creates a replacement, changes approval policy or accepts approvals. Busy, pending approval, draft, archived or changed configuration rejects sending. Closing/reloading the desktop revokes access.", json!({"targetId":id,"action":{"oneOf":[{"type":"object","properties":{"kind":{"const":"state"}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"read"},"before":{"type":["string","null"],"maxLength":128}},"required":["kind"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"send"},"text":{"type":"string","minLength":1,"maxLength":16384},"requestId":id},"required":["kind","text","requestId"],"additionalProperties":false}]}}), vec!["targetId","action"], false, true),
         ("list_saved_connections", "List saved connection names while connection-book sharing is enabled. No hosts, accounts or credentials. The default local adapter opens LatticeTerm and its background service as needed. An open entry includes targetId; otherwise pass its id as profileId to connect_saved_connection.", json!({}), vec![], true, false),
         ("connect_saved_connection", "Open one saved SSH, SFTP, RDP, VNC or Lattice Remote connection using the desktop's saved password or pairing code. profileId comes from list_saved_connections; never supply hosts or credentials. Reuses an existing live connection, respects paused MCP access, and returns targetId plus connection scopes and roots. Private-key login, RDP domain context, missing credentials and unverified or changed host identities still need the desktop. Reuse requestId after a lost reply; never blindly repeat an unknown outcome with a new ID.", json!({"profileId":id,"requestId":id}), vec!["profileId","requestId"], false, false),
         ("get_host_metrics", "Read the fixed Linux metrics probe for an authorized live SSH connection. Cannot accept commands. A host that does not report Linux /proc data answers with code \"unsupported\"; that will not change on a retry.", json!({"targetId":id}), vec!["targetId"], true, false),
@@ -3609,6 +3616,7 @@ mod tests {
                 "cancel_agent_task",
                 "list_authorized_connections",
                 "desktop_agent",
+                "desktop_chat",
                 "list_saved_connections",
                 "connect_saved_connection",
                 "get_host_metrics",

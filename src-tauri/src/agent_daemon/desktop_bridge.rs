@@ -16,7 +16,8 @@ use tokio::sync::{oneshot, Semaphore};
 // Older peers must refuse remote sharing instead of guessing new scopes.
 // v5 adds POSIX shell requests and advertised commandShells metadata.
 // Same-date candidate upgrades must replace an idle v4 daemon before sending them.
-pub const PROTOCOL: u32 = 5;
+// v6 adds explicitly shared standalone desktop chat threads.
+pub const PROTOCOL: u32 = 6;
 const MAX_TARGETS: usize = 64;
 const MAX_CALLS: usize = 16;
 const MAX_REPLY: usize = 512 * 1024;
