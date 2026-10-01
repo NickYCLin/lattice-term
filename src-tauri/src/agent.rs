@@ -1596,7 +1596,14 @@ impl ModelCaptureState {
                 .skip(length - MODEL_CAPTURE_WINDOW_CHARS)
                 .collect();
         }
-        if let Some(model) = find_model_name(&self.definition_id, &self.buffer) {
+        // While the picker is open its rows are bare model names, so only a
+        // labelled line or Codex's own confirmation may name the choice.
+        let found = if self.model_command_active {
+            find_labelled_model_name(&self.definition_id, &self.buffer)
+        } else {
+            find_model_name(&self.definition_id, &self.buffer)
+        };
+        if let Some(model) = found {
             if self.model_command_active {
                 // A /model picker lists several names before the choice
                 // lands, so the first sighting is usually the menu itself.
@@ -6617,14 +6624,49 @@ fn status_model_token(definition_id: &str, line: &str) -> Option<String> {
 /// matching requires an explicit `model:`/`model=` label; Claude's TUI is the
 /// one verified exception because it prints family names as a status badge.
 fn find_model_name(definition_id: &str, text: &str) -> Option<String> {
+    scan_model_name(definition_id, text, true)
+}
+
+fn find_labelled_model_name(definition_id: &str, text: &str) -> Option<String> {
+    scan_model_name(definition_id, text, false)
+}
+
+/// Codex confirms a `/model` choice as "Model changed to …". A full-screen
+/// redraw positions rows with cursor moves rather than newlines, so the
+/// confirmation can share a stripped line with the picker's rows; it is
+/// read first so that a row such as `gpt-image-2.5` never stands in for it.
+fn model_change_confirmation(definition_id: &str, text: &str) -> Option<String> {
+    let lowered = text.to_ascii_lowercase();
+    let (index, marker) = ["model changed to ", "set model to "]
+        .into_iter()
+        .filter_map(|marker| lowered.rfind(marker).map(|index| (index, marker)))
+        .max_by_key(|(index, _)| *index)?;
+    let rest = text[index + marker.len()..]
+        .lines()
+        .next()
+        .unwrap_or_default();
+    if definition_id == "claude" {
+        if let Some(model) = claude_family_model(rest) {
+            return Some(model);
+        }
+    }
+    clean_model_token(rest)
+}
+
+fn scan_model_name(definition_id: &str, text: &str, allow_bare: bool) -> Option<String> {
+    if let Some(model) = model_change_confirmation(definition_id, text) {
+        return Some(model);
+    }
     for line in text.lines().rev() {
-        if definition_id == "claude" {
-            if let Some(model) = claude_family_model(line) {
+        if allow_bare {
+            if definition_id == "claude" {
+                if let Some(model) = claude_family_model(line) {
+                    return Some(model);
+                }
+            }
+            if let Some(model) = status_model_token(definition_id, line) {
                 return Some(model);
             }
-        }
-        if let Some(model) = status_model_token(definition_id, line) {
-            return Some(model);
         }
         let lowered = line.to_ascii_lowercase();
         let marker = lowered
@@ -6635,14 +6677,7 @@ fn find_model_name(definition_id: &str, text: &str) -> Option<String> {
                     .find("model =")
                     .map(|index| (index, "model =".len()))
             })
-            .or_else(|| lowered.find("model=").map(|index| (index, "model=".len())))
-            // Codex confirms a `/model` choice this way. A proxy model has no
-            // recognizable prefix, so this line is the only place it shows.
-            .or_else(|| {
-                lowered
-                    .find("model changed to ")
-                    .map(|index| (index, "model changed to ".len()))
-            });
+            .or_else(|| lowered.find("model=").map(|index| (index, "model=".len())));
         if let Some((index, marker_length)) = marker {
             if let Some(model) = clean_model_token(&line[index + marker_length..]) {
                 if definition_id == "claude" {
@@ -9565,7 +9600,7 @@ model = "gpt-5.3-codex"
         }
         assert!(capture.enabled);
         assert_eq!(
-            capture.feed(b"gpt-5.6-sol xhigh").as_deref(),
+            capture.feed(b"model: gpt-5.6-sol xhigh").as_deref(),
             Some("gpt-5.6-sol")
         );
         // The picker may still be open; the watch survives the first match.
@@ -9609,6 +9644,43 @@ model = "gpt-5.3-codex"
         assert_eq!(capture.feed(b"model: gpt-9.9-fake"), None);
     }
 
+    #[test]
+    fn proxy_picker_rows_never_replace_the_confirmed_choice() {
+        let mut capture = ModelCaptureState {
+            definition_id: "codex".to_string(),
+            enabled: false,
+            buffer: String::new(),
+            scanned_chars: 0,
+            input_buffer: String::new(),
+            model_command_active: false,
+        };
+        for byte in b"/model\r" {
+            capture.input(&[*byte]);
+        }
+        // Bare picker rows are not a choice.
+        assert_eq!(
+            capture.feed(b"  gpt-6-astra\x1b[2;3H  gpt-image-2.5-flare\x1b[3;3H  claude-opus-5-5"),
+            None
+        );
+        capture.input(b"\r");
+        // The redraw keeps stale rows on the same stripped line as the
+        // confirmation; only the confirmation names the selected model.
+        assert_eq!(
+            capture
+                .feed(b"\x1b[5;1H\xe2\x80\xa2 Model changed to claude-opus-5-5 high\x1b[9;3Hgpt-image-2.5-flare")
+                .as_deref(),
+            Some("claude-opus-5-5")
+        );
+    }
+
+    #[test]
+    fn claude_model_command_reports_the_family_it_set() {
+        assert_eq!(
+            find_labelled_model_name("claude", "  ⎿  Set model to Opus 5.5 (claude-opus-5-5)")
+                .as_deref(),
+            Some("Claude Opus 5.5")
+        );
+    }
     #[cfg(windows)]
     #[test]
     fn working_directories_lose_the_verbatim_prefix() {
