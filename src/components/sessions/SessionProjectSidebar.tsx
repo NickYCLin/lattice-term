@@ -1,4 +1,3 @@
-import { NativeConversationList } from "../chat/NativeConversationList";
 import { PathDropZone } from "../files/PathDropZone";
 import { FileDropZone } from "../files/FileDropZone";
 import type { UploadFile } from "../../app/localFiles";
@@ -128,7 +127,6 @@ export function SessionProjectSidebar({
   onChooseProject,
   onDropProject,
   onDropWorkspace,
-  onBrowseHistory,
   onLaunchProject,
   onSelect,
   onRemove,
@@ -155,7 +153,6 @@ export function SessionProjectSidebar({
   onChooseProject: () => void;
   onDropProject?: (path: string) => void | Promise<void>;
   onDropWorkspace?: (file: UploadFile) => void | Promise<void>;
-  onBrowseHistory?: () => void;
   onLaunchProject: (workingDirectory: string) => void;
   onSelect: (sessionId: string) => void;
   onRemove: (session: SessionSidebarSessionItem) => void;
@@ -940,9 +937,6 @@ export function SessionProjectSidebar({
           </button>
           </PathDropZone>
         </div>
-        {onBrowseHistory && <button type="button" className="button button--ghost button--sm local-history__browse" onClick={onBrowseHistory}>
-          {t("history.browse")}
-        </button>}
         {statusLegendOpen && (
           <section
             className="session-projects__status-guide"
@@ -1075,7 +1069,6 @@ export function SessionProjectSidebar({
         )}
       </div>
       <SidebarStorageNotice />
-      <NativeConversationList />
       <div
         className={`session-tree${draggedNodeId ? " is-dragging" : ""}`}
         role="list"

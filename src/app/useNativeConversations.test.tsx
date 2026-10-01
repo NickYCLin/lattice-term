@@ -2,38 +2,36 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installFakeDom } from "./testFixtures/hookDom";
-import { fakeAgentApi } from "./testFixtures/agentApis";
-import { AUTO_LOCAL_CONVERSATIONS_KEY, useAutomaticLocalConversations } from "./useAutomaticLocalConversations";
-import { useNativeConversations, useSerialNativeRead, NATIVE_HISTORY_REFRESH_MS } from "./useNativeConversations";
+import { dismissNativeConversation, loadDismissedNativeConversations, MAX_DISMISSED_NATIVE } from "./nativeConversationDismissals";
+import { useNativeConversations, useSerialNativeRead } from "./useNativeConversations";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+}
+
+let listeners: Map<string, Set<(event: { key: string | null }) => void>>;
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.stubGlobal("addEventListener", vi.fn()); vi.stubGlobal("removeEventListener", vi.fn());
-  vi.stubGlobal("localStorage", { getItem: (key: string) => key === AUTO_LOCAL_CONVERSATIONS_KEY ? "true" : null });
+  listeners = new Map();
+  vi.stubGlobal("addEventListener", (type: string, listener: (event: { key: string | null }) => void) => {
+    listeners.set(type, (listeners.get(type) ?? new Set()).add(listener));
+  });
+  vi.stubGlobal("removeEventListener", (type: string, listener: (event: { key: string | null }) => void) => { listeners.get(type)?.delete(listener); });
+  vi.stubGlobal("dispatchEvent", () => { listeners.forEach(set => set.forEach(listener => listener({ key: null }))); return true; });
+  vi.stubGlobal("localStorage", memoryStorage());
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-it("refreshes new and renamed/archived records without executing legacy auto-open intents", async () => {
-  const root = createRoot(installFakeDom() as unknown as Element);
-  const agents = fakeAgentApi({ mode: "ready" });
-  const queue = vi.fn(); const retry = vi.fn();
-  const entry = { definitionId: "codex", profileId: null, nativeSessionId: "one", title: "Old", workingDirectory: "/work", resumable: true, updatedAt: 1 };
-  invoke.mockResolvedValueOnce({ entries: [entry], hasMore: true, incomplete: false })
-    .mockResolvedValue({ entries: [{ ...entry, title: "Renamed", archived: true }], hasMore: false, incomplete: false });
-  let api!: ReturnType<typeof useAutomaticLocalConversations>;
-  function Probe() { api = useAutomaticLocalConversations(agents, true, [], queue, retry); return null; }
-  try {
-    await act(async () => { root.render(<Probe />); });
-    expect(api.entries[0].title).toBe("Old");
-    await act(async () => { await vi.advanceTimersByTimeAsync(NATIVE_HISTORY_REFRESH_MS); });
-    expect(api.entries[0]).toMatchObject({ title: "Renamed", archived: true });
-    await act(async () => { api.loadMore(); });
-    expect(invoke).toHaveBeenLastCalledWith("agent_chat_local_history_page", { profiles: [], limit: 200, includeArchived: false });
-    expect(queue).not.toHaveBeenCalled(); expect(retry).not.toHaveBeenCalled(); expect(agents.launch).not.toHaveBeenCalled();
-    expect(invoke.mock.calls.every(([name]) => name === "agent_chat_local_history_page")).toBe(true);
-  } finally { await act(async () => { root.unmount(); }); }
+const entry = (nativeSessionId: string) => ({
+  definitionId: "codex", profileId: null, nativeSessionId, title: nativeSessionId, workingDirectory: "/work", resumable: true, updatedAt: 1,
 });
 
 it("hides archives by default and resets pagination without accepting a stale archive reply", async () => {
@@ -57,6 +55,35 @@ it("hides archives by default and resets pagination without accepting a stale ar
     expect(api.entries).toEqual([]);
     expect(api.includeArchived).toBe(false);
   } finally { await act(async () => { root.unmount(); }); }
+});
+
+it("drops a deleted conversation from the synced list and keeps it out on later reads", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  invoke.mockResolvedValue({ entries: [entry("kept"), entry("deleted")], hasMore: false, incomplete: false });
+  let api!: ReturnType<typeof useNativeConversations>;
+  function Probe() { api = useNativeConversations(true); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    expect(api.entries.map(item => item.nativeSessionId)).toEqual(["kept", "deleted"]);
+    await act(async () => { dismissNativeConversation(entry("deleted")); });
+    expect(api.entries.map(item => item.nativeSessionId)).toEqual(["kept"]);
+    await act(async () => { api.refresh(); });
+    expect(api.entries.map(item => item.nativeSessionId)).toEqual(["kept"]);
+  } finally { await act(async () => { root.unmount(); }); }
+});
+
+it("keeps dismissals per account and bounded", () => {
+  const storage = memoryStorage();
+  dismissNativeConversation({ definitionId: "claude", profileId: "work", nativeSessionId: "same" }, storage);
+  dismissNativeConversation({ definitionId: "claude", profileId: "work", nativeSessionId: "same" }, storage);
+  const dismissed = loadDismissedNativeConversations(storage);
+  expect(dismissed.size).toBe(1);
+  expect(dismissed.has(JSON.stringify(["claude", null, "same"]))).toBe(false);
+  for (let index = 0; index <= MAX_DISMISSED_NATIVE; index += 1) {
+    dismissNativeConversation({ definitionId: "gemini", profileId: null, nativeSessionId: String(index) }, storage);
+  }
+  expect(loadDismissedNativeConversations(storage).size).toBe(MAX_DISMISSED_NATIVE);
+  expect(loadDismissedNativeConversations({ getItem: () => "not json" }).size).toBe(0);
 });
 
 it("serializes refresh requests, retains content after an error and stops after unmount", async () => {

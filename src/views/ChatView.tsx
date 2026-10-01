@@ -1,6 +1,6 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { desktopChatAccess } from "../app/desktopChat";
-import { NativeConversationList } from "../components/chat/NativeConversationList";
+import { NativeConversationRows } from "../components/chat/NativeConversationRows";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
@@ -130,7 +130,6 @@ export function ChatView({
   chat,
   automations,
   onOpenSession,
-  onBrowseHistory,
   theme = "dark",
   workspaceSessionId = null,
   onSelectWorkspaceSession,
@@ -139,7 +138,6 @@ export function ChatView({
   chat: AgentChatApi;
   automations: AgentAutomationsApi;
   onOpenSession: (sessionId: string) => void;
-  onBrowseHistory?: () => void;
   theme?: ThemeId;
   workspaceSessionId?: string | null;
   onSelectWorkspaceSession?: (id: string | null) => void;
@@ -315,11 +313,6 @@ export function ChatView({
             </button>
           </div>
           <div className="chat-composer__actions">
-            {mode === "threads" && onBrowseHistory && (
-              <button type="button" className="button button--ghost button--sm" onClick={onBrowseHistory}>
-                {t("history.browse")}
-              </button>
-            )}
             {mode === "threads" && (
               <button
                 type="button"
@@ -392,7 +385,6 @@ export function ChatView({
               </div>
             )}
             <SidebarStorageNotice />
-            <NativeConversationList />
             <ChatThreadTree
               layout={sidebarLayout}
               threads={listedThreads}
@@ -440,6 +432,7 @@ export function ChatView({
                 </div>
               )}
             />
+            <NativeConversationRows chat={chat} projectFilter={projectFilter} onOpened={() => setSelectedSessionId(null)} />
             {chat.layout.folders.length > 0 && (
               <p className="chat-threads__hint">{t("chat.folder.dragHint")}</p>
             )}

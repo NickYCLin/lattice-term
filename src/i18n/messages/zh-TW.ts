@@ -8,7 +8,7 @@
 export const zhTW = {
   "workspace.recovery.title": "已存專案與復原",
   "workspace.recovery.legacy": "舊版匯入紀錄（{count}）",
-  "workspace.recovery.legacyHint": "這些是舊版留下的歷史捷徑，不代表正在執行或仍可續接。請從「外部對話」查看目前可用的對話。移除捷徑不會刪除原始對話。",
+  "workspace.recovery.legacyHint": "這些是舊版留下的歷史捷徑，不代表正在執行或仍可續接。各 CLI 保存的對話會直接列在對話清單。移除捷徑不會刪除原始對話。",
   "workspace.recovery.dismissLegacy": "移除捷徑",
   "workspace.recovery.hint": "關閉助理後仍保留專案。還原失敗的工作階段可在這裡逐項重試。",
   "workspace.recovery.error": "操作未完成。請檢查儲存空間、專案路徑、助理安裝及登入狀態後重試；原有紀錄仍保留。",

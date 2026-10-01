@@ -1305,6 +1305,24 @@ button.chat-chip:hover {
   color: var(--text-muted);
 }
 
+.chat-native-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-native-rows .chat-thread[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.chat-native-rows__error {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2) var(--space-4);
+  color: var(--danger);
+  font-size: var(--text-2xs);
+}
+
 .chat-shelf {
   margin-top: var(--space-3);
   color: var(--text-muted);

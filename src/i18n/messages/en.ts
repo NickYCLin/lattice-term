@@ -11,7 +11,7 @@ import type { Messages } from "./zh-TW";
 export const en: Messages = {
   "workspace.recovery.title": "Saved projects and recovery",
   "workspace.recovery.legacy": "Previously imported history ({count})",
-  "workspace.recovery.legacyHint": "These older shortcuts do not indicate running or resumable sessions. Open External conversations to see currently available history. Removing a shortcut does not delete the original conversation.",
+  "workspace.recovery.legacyHint": "These older shortcuts do not indicate running or resumable sessions. Conversations kept by each CLI appear directly in the conversation list. Removing a shortcut does not delete the original conversation.",
   "workspace.recovery.dismissLegacy": "Remove shortcut",
   "workspace.recovery.hint": "Projects stay here after their CLIs close. Failed restores remain available for individual retries.",
   "workspace.recovery.error": "The operation could not finish. Check storage, the project directory, CLI installation and login, then try again. Existing records have been retained.",

@@ -17,6 +17,8 @@ import {
   fakeThread,
   installFakeStorage,
 } from "../app/testFixtures/agentApis";
+import { NativeHistoryContext, type NativeHistory } from "../app/useNativeConversations";
+import type { LocalConversation } from "../app/localConversationSessions";
 import { I18nProvider } from "../i18n";
 import { ChatView } from "./ChatView";
 
@@ -28,7 +30,6 @@ function render(
       fakeDefinition({ id: "claude", label: "Claude Code", executable: "claude" }),
     ],
   }),
-  onBrowseHistory?: () => void,
 ): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
@@ -37,7 +38,6 @@ function render(
         chat={chat}
         automations={fakeAutomationsApi()}
         onOpenSession={() => {}}
-        onBrowseHistory={onBrowseHistory}
       />
     </I18nProvider>,
   );
@@ -77,8 +77,33 @@ describe("ChatView", () => {
     expect(idle).not.toContain("助理正在回覆");
   });
 
-  it("offers external Codex and Claude conversations in Chat", () => {
-    expect(render(fakeChatApi(), undefined, () => {})).toContain("外部對話");
+  it("lists every CLI conversation directly, without a separate history panel", () => {
+    const entry = (nativeSessionId: string, title: string, definitionId: LocalConversation["definitionId"] = "codex"): LocalConversation => ({
+      definitionId, profileId: null, nativeSessionId, title, workingDirectory: "/work/app", resumable: true, updatedAt: 1,
+    });
+    const history = {
+      entries: [entry("one", "Codex Desktop 對話"), entry("two", "已開啟過的對話"), entry("three", "Gemini 對話", "gemini"),
+        { ...entry("four", "已封存的對話"), archived: true }],
+      profiles: [], profileKey: "[]", hasMore: false, busy: false, error: null,
+    } as unknown as NativeHistory;
+    const opened = fakeThread({ title: "已開啟過的對話", nativeSessionId: "two", accountProfileId: null });
+    const markup = renderToStaticMarkup(
+      <NativeHistoryContext.Provider value={history}>
+        <I18nProvider locale="zh-TW">
+          <ChatView agents={fakeAgentApi()} chat={fakeChatApi({ threads: [opened] })}
+            automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+        </I18nProvider>
+      </NativeHistoryContext.Provider>,
+    );
+    expect(markup).toContain("Codex Desktop 對話");
+    expect(markup).toContain("Gemini 對話");
+    expect(markup.match(/已開啟過的對話/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(markup).not.toContain("chat-native-rows__error");
+    expect(markup).not.toContain("已封存的對話");
+    expect(markup).not.toContain("外部對話");
+    expect(markup).not.toContain("原生對話");
+    const rows = markup.slice(markup.indexOf("chat-native-rows"));
+    expect(rows).not.toContain("已開啟過的對話");
   });
   it("does not offer approval for an unsupported MCP form", () => {
     const thread = fakeThread({ items: [{

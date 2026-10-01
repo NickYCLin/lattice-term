@@ -1,16 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatAccountProfiles } from "./useChatAccountProfiles";
 import type { LocalConversation } from "./localConversationSessions";
+import { nativeConversationKey, useDismissedNativeConversations } from "./nativeConversationDismissals";
+
+export { nativeConversationKey };
 
 export const NATIVE_HISTORY_REFRESH_MS = 10_000;
 export const NATIVE_MESSAGE_REFRESH_MS = 2_000;
 export const NATIVE_HISTORY_PAGE_SIZE = 100;
 export const NATIVE_HISTORY_MAX = 50_000;
-
-export function nativeConversationKey(entry: Pick<LocalConversation, "definitionId" | "profileId" | "nativeSessionId">) {
-  return JSON.stringify([entry.definitionId, entry.profileId, entry.nativeSessionId]);
-}
 
 /** A single reader, with explicit retries and stale-response protection. Never starts a CLI. */
 export function useSerialNativeRead<T>(key: string, enabled: boolean, interval: number, read: () => Promise<T>) {
@@ -66,6 +65,10 @@ export function useNativeConversations(enabled: boolean) {
   const [{ limit, includeArchived }, setOptions] = useState({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived: false });
   const result = useSerialNativeRead(`${profileKey}:${includeArchived}`, enabled, NATIVE_HISTORY_REFRESH_MS,
     () => invoke<NativeHistoryPage>("agent_chat_local_history_page", { profiles: JSON.parse(profileKey), limit, includeArchived }));
+  const dismissed = useDismissedNativeConversations();
+  const value = result.value;
+  const entries = useMemo(() => (value?.entries ?? []).filter(entry => !dismissed.has(nativeConversationKey(entry))),
+    [value, dismissed]);
   const previousLimit = useRef(limit);
   useEffect(() => {
     if (previousLimit.current !== limit) { previousLimit.current = limit; result.refresh(); }
@@ -73,7 +76,7 @@ export function useNativeConversations(enabled: boolean) {
   return {
     ...result, profiles, profileKey, limit, includeArchived,
     setIncludeArchived: (includeArchived: boolean) => setOptions({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived }),
-    entries: result.value?.entries ?? [],
+    entries,
     hasMore: result.value?.hasMore === true && limit < NATIVE_HISTORY_MAX,
     incomplete: result.value?.incomplete === true,
     loadMore: () => setOptions(current => ({ ...current, limit: Math.min(NATIVE_HISTORY_MAX, current.limit + NATIVE_HISTORY_PAGE_SIZE) })),
@@ -90,5 +93,5 @@ export function useNativeConversationMessages(entry: LocalConversation | null, p
 }
 
 export type NativeHistory = ReturnType<typeof useNativeConversations>;
-export const NativeHistoryContext = createContext<(NativeHistory & { open: (entry: LocalConversation) => void }) | null>(null);
+export const NativeHistoryContext = createContext<NativeHistory | null>(null);
 export const useNativeHistory = () => useContext(NativeHistoryContext);

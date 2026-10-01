@@ -318,7 +318,7 @@ export interface ChatThread {
   unread: boolean;
 }
 
-/** Text-only view of another local client's native Codex/Claude Code thread. */
+/** Text-only view of a conversation kept in a CLI's own history. */
 export interface NativeHistoryMessage {
   role: "user" | "assistant";
   text: string;
@@ -326,7 +326,7 @@ export interface NativeHistoryMessage {
 
 export function importNativeConversation(
   settings: {
-    definitionId: "codex" | "claude";
+    definitionId: ChatDefinitionId;
     nativeSessionId: string;
     workingDirectory: string;
     title: string;

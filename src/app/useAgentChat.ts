@@ -1,5 +1,6 @@
 import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
 import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
+import { dismissNativeConversation } from "./nativeConversationDismissals";
 /**
  * Chat threads with an agent CLI, kept in the WebView and driven by the
  * Rust chat runner.
@@ -121,7 +122,7 @@ export interface AgentChatApi {
   supported: readonly ChatDefinitionId[];
   createThread: (settings: ChatThreadCreation) => ChatThread;
   importNativeConversation: (settings: {
-    definitionId: "codex" | "claude";
+    definitionId: ChatDefinitionId;
     nativeSessionId: string;
     workingDirectory: string;
     title: string;
@@ -275,7 +276,7 @@ export function useAgentChat(
 
   const nativeHistory = useNativeHistory();
   const mirror = threads.find(thread => thread.id === activeThreadId && isNativeHistoryMirror(thread));
-  const nativeEntry = nativeHistory && mirror && (mirror.definitionId === "codex" || mirror.definitionId === "claude")
+  const nativeEntry = nativeHistory && mirror
     ? nativeHistory.entries.find(entry => entry.definitionId === mirror.definitionId && entry.profileId === mirror.accountProfileId && entry.nativeSessionId === mirror.nativeSessionId)
       ?? { definitionId: mirror.definitionId, profileId: mirror.accountProfileId, nativeSessionId: mirror.nativeSessionId!,
         title: mirror.title, workingDirectory: mirror.workingDirectory, resumable: false, updatedAt: 0, archived: mirror.nativeHistoryArchived }
@@ -545,6 +546,13 @@ export function useAgentChat(
   const remove = useCallback((id: string, profileConfigPath?: string | null) => {
     completionTracker.current.cancel(id);
     const threadToDelete = threadsRef.current.find((thread) => thread.id === id);
+    if (threadToDelete?.nativeSessionId && !threadToDelete.remote) {
+      dismissNativeConversation({
+        definitionId: threadToDelete.definitionId,
+        profileId: threadToDelete.accountProfileId ?? null,
+        nativeSessionId: threadToDelete.nativeSessionId,
+      });
+    }
     // A Codex thread keeps a server alive between turns; closing the thread
     // must end it whether or not a turn is running. A mirror of a subtask on
     // another machine has no local thread to close.

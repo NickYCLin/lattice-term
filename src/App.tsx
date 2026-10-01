@@ -95,7 +95,6 @@ import {
 import type { WorkspaceRetryResult } from "./components/sessions/WorkspaceRecoveryPanel";
 import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
 import { NativeHistoryContext, useNativeConversations } from "./app/useNativeConversations";
-import type { LocalConversation } from "./app/localConversationSessions";
 import { loadAuthPref } from "./app/authPreferences";
 import {
   playCompletionSound,
@@ -105,11 +104,7 @@ import { anyAgentSessionJustCompleted } from "./app/sessionStatus";
 import { useMobileViewport } from "./app/useMobileViewport";
 import { PlusIcon, ScreenShareIcon } from "./components/icons";
 import { useModalFocus } from "./components/overlays/modalFocus";
-const LocalConversationDialog = lazy(() =>
-  import("./components/chat/LocalConversationDialog").then(module => ({ default: module.LocalConversationDialog })),
-);
 import "./styles/index.css";
-import "./styles/local-history.css";
 
 const ConnectionsView = lazy(() =>
   import("./views/ConnectionsView").then((module) => ({
@@ -366,7 +361,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       window.removeEventListener("latticeterm:open-chat", openFromWindow);
     };
   }, []);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [mobileResourceSidebarOpen, setMobileResourceSidebarOpen] =
     useState(false);
   // A desktop-only view reached on mobile (stale state) snaps back home.
@@ -484,11 +478,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   }
 
   const nativeHistory = useNativeConversations(runtime.host === "tauri" && agents.mode === "ready");
-  const [nativeSelection, setNativeSelection] = useState<LocalConversation | null>(null);
-  function openNativeConversation(entry: LocalConversation) {
-    setNativeSelection(entry);
-    setHistoryOpen(true);
-  }
 
   function removeLocalProject(path: string) {
     localProjects.remove(path);
@@ -1059,7 +1048,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   );
 
   return (
-    <NativeHistoryContext.Provider value={{ ...nativeHistory, open: openNativeConversation }}>
+    <NativeHistoryContext.Provider value={nativeHistory}>
     <div className={`app${onMobile ? " app--mobile" : ""}`} data-view={view}>
       <NavRail
         current={view}
@@ -1185,7 +1174,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     vnc={vnc}
                     activeSessionId={activeSessionId}
                     onSelect={setActiveSessionId}
-                    onBrowseHistory={() => setHistoryOpen(true)}
                     theme={activeTheme}
                     sessionRestoreComplete={sessionRestoreComplete}
                     restoredWorkspaceSessions={restoredWorkspaceSessions}
@@ -1221,7 +1209,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               <ChatView
                 agents={agents}
                 chat={chatRuntime.chat}
-                onBrowseHistory={() => setHistoryOpen(true)}
                 workspaceSessionId={chatWorkspaceSessionId}
                 onSelectWorkspaceSession={setChatWorkspaceSessionId}
                 automations={chatRuntime.automations}
@@ -1416,24 +1403,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           platform={platform}
           sensitiveClipboardClear={preferences.sensitiveClipboardClear}
           onClose={() => setRemoteHostOpen(false)}
-        />
-      )}
-
-      {historyOpen && (
-        <LocalConversationDialog
-          agents={agents}
-          chat={chatRuntime?.chat ?? null}
-          initialSelection={nativeSelection}
-          onClose={() => { setHistoryOpen(false); setNativeSelection(null); }}
-          onOpenChat={() => { setChatWorkspaceSessionId(null); setView("chat"); }}
-          onOpenSessionChat={(sessionId) => {
-            setChatWorkspaceSessionId(sessionId);
-            setView("chat");
-          }}
-          onOpenSession={(sessionId) => {
-            setActiveSessionId(sessionId);
-            setView("terminal");
-          }}
         />
       )}
 
