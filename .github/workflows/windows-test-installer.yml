@@ -128,6 +128,7 @@ jobs:
           foreach ($command in $syncCommands) {
             if (-not $binaryText.Contains($command)) { throw "Built executable is missing $command" }
           }
+          if (-not $binaryText.Contains("desktop_chat")) { throw "Built executable is missing desktop_chat" }
           $sidecarNames = @("lattice-agent", "lattice-remote", "lattice-rdp-engine", "lattice-vnc-engine")
           $payload = @($mainExe) + @($sidecarNames | ForEach-Object {
             Get-Item "src-tauri/binaries/$_-x86_64-pc-windows-msvc.exe" -ErrorAction Stop
@@ -135,6 +136,7 @@ jobs:
           $manifest = [ordered]@{
             sourceCommit = $env:GITHUB_SHA
             runId = $env:GITHUB_RUN_ID
+            desktopChatMcp = $true
             syncCommands = $syncCommands
             files = @(@($installer) + $payload | ForEach-Object {
               [ordered]@{

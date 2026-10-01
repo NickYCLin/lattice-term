@@ -362,7 +362,7 @@ try {
       "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
       "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
       "list_authorized_connections", "list_saved_connections", "get_host_metrics", "sftp_list_directory",
-      "connect_saved_connection",
+      "connect_saved_connection", "desktop_agent", "desktop_chat",
       "sftp_read_text", "sftp_find_files",
       "ssh_exec_job", "ssh_run_command", "remote_run_command", "remote_file_transfer", "sftp_transfer", "capture_remote_screen", "send_remote_input", "remote_fleet", "get_remote_operation",
       "wait_remote_operation", "list_remote_operations", "cancel_remote_operation",
@@ -374,6 +374,7 @@ try {
     assert.equal(remote.authorizedConnections, 0);
     assert.deepEqual(ok(await adapter.call("list_authorized_connections")).connections, []);
     assert.equal((await adapter.call("get_host_metrics", { targetId: "not-granted" })).isError, true);
+    assert.equal((await adapter.call("desktop_chat", { targetId: "not-granted", action: { kind: "read" } })).isError, true);
     const list = ok(await adapter.call("list_agent_sessions"));
     assert.deepEqual(
       list.sessions.map((s) => s.sessionId),
