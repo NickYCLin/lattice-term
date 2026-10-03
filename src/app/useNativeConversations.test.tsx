@@ -79,10 +79,13 @@ it("keeps dismissals per account and bounded", () => {
   const dismissed = loadDismissedNativeConversations(storage);
   expect(dismissed.size).toBe(1);
   expect(dismissed.has(JSON.stringify(["claude", null, "same"]))).toBe(false);
-  for (let index = 0; index <= MAX_DISMISSED_NATIVE; index += 1) {
-    dismissNativeConversation({ definitionId: "gemini", profileId: null, nativeSessionId: String(index) }, storage);
-  }
-  expect(loadDismissedNativeConversations(storage).size).toBe(MAX_DISMISSED_NATIVE);
+  const full = Array.from({ length: MAX_DISMISSED_NATIVE }, (_, index) => JSON.stringify(["gemini", null, String(index)]));
+  storage.setItem("latticeterm.nativeConversationDismissed.v1", JSON.stringify(full));
+  dismissNativeConversation({ definitionId: "gemini", profileId: null, nativeSessionId: "newest" }, storage);
+  const bounded = loadDismissedNativeConversations(storage);
+  expect(bounded.size).toBe(MAX_DISMISSED_NATIVE);
+  expect(bounded.has(full[0])).toBe(false);
+  expect(bounded.has(JSON.stringify(["gemini", null, "newest"]))).toBe(true);
   expect(loadDismissedNativeConversations({ getItem: () => "not json" }).size).toBe(0);
 });
 
