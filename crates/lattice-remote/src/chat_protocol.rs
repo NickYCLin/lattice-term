@@ -119,7 +119,7 @@ fn image_piece(upload_id: &str, offset: u32, total: u32, data: &str) -> bool {
         && offset < total
         && !data.is_empty()
         && data.len() <= MAX_ATTACHMENT_CHUNK
-        && data.len() % 4 == 0
+        && data.len().is_multiple_of(4)
         && data
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
