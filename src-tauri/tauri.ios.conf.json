@@ -9,7 +9,7 @@
     "externalBin": [],
     "iOS": {
       "bundleVersion": "1",
-      "minimumSystemVersion": "14.0",
+      "minimumSystemVersion": "15.0",
       "infoPlist": "Info.ios.plist"
     }
   }
