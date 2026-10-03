@@ -986,7 +986,7 @@ fn invalidate_mcp_input_profile(entry: &AgentSessionEntry, bytes: &[u8]) {
 fn next_desktop_input_ticket(entry: &AgentSessionEntry, bytes: &[u8]) -> Result<u64, String> {
     let ticket = entry
         .desktop_input_ticket
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |ticket| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |ticket| {
             ticket.checked_add(1)
         })
         .map_err(|_| "The terminal input ticket limit was reached.".to_string())?
@@ -2114,7 +2114,7 @@ impl AgentRegistry {
             .spawn(move || {
                 for stream in listener.incoming().flatten() {
                     if active_reports
-                        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                        .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                             (active < 8).then_some(active + 1)
                         })
                         .is_err()
@@ -8295,7 +8295,7 @@ pub fn set_mcp_control(
     let entry = registry.get(session_id)?;
     let _ = entry
         .mcp_grant_epoch
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |epoch| {
             ((epoch & 1 == 1) != enabled).then(|| epoch.wrapping_add(1))
         });
     if enabled {
