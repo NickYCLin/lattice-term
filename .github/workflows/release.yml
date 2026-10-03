@@ -283,8 +283,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Candidate CI already ran the suite with normal timeouts. Packaging
+      # runners (macOS Intel, Windows) are much slower, so a timing-only
+      # failure here must not strand a verified release as a draft.
       - name: Verify released source
-        run: npm run check
+        run: |
+          npm run version:check
+          npm run actions:check
+          npx vitest run --testTimeout=30000
+          npm run build
 
       - name: Check the updater signing key
         shell: bash

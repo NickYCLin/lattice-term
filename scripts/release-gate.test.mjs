@@ -199,5 +199,7 @@ describe("release workflow wiring", () => {
     expect(ci).toContain("ref: ${{ inputs.ref || github.sha }}");
     expect(workflow).toContain("prerelease: false");
     expect(workflow).not.toContain("gh pr merge");
+    expect(workflow).toContain("npx vitest run --testTimeout=30000");
+    expect(workflow).toContain("npm run build");
   });
 });
