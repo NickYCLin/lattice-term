@@ -4,6 +4,26 @@
 
 ---
 
+## [2026.10.3](https://github.com/NickYCLin/lattice-term/compare/v2026.10.1...v2026.10.3) (2026-10-03)
+
+
+### 🚀 新增功能
+
+* **chat:** 外部對話可續接 Gemini 與 Antigravity ([651a3ca](https://github.com/NickYCLin/lattice-term/commit/651a3ca14625c400a51e230e4834ef2036ab150c))
+* **mcp:** 讓獨立對話可逐項分享讀取與傳訊 ([ad5fdeb](https://github.com/NickYCLin/lattice-term/commit/ad5fdeb94e4afa2c96d1568e8631157d0a288781))
+* **remote:** 手機可傳圖片給遠端 CLI ([f172477](https://github.com/NickYCLin/lattice-term/commit/f1724776ef50941764abcd2774cbae82f3d7d0a0))
+* **sessions:** 同步 Gemini 與 Antigravity 本機對話 ([76d0dff](https://github.com/NickYCLin/lattice-term/commit/76d0dff45223e6a886f5c5a078d82c36cf80f925))
+
+
+### 🛠️ 問題修正
+
+* **agent:** 改用 try_update 讓新版 Rust 能通過檢查 ([7c01b6a](https://github.com/NickYCLin/lattice-term/commit/7c01b6a06a48a7330730040c283684b2d8652725))
+* **agent:** 模型選單不再把清單項目當成目前模型 ([fee9f6e](https://github.com/NickYCLin/lattice-term/commit/fee9f6e5e5735ef338a6c7432b6b9ec7a9c66046))
+* **chat:** 移除外部對話入口，改為直接同步對話 ([ea24a38](https://github.com/NickYCLin/lattice-term/commit/ea24a385993062e444c208e0e7f15d878fb50750))
+* **remote:** 手機操作遠端 CLI 時可輸入空白與標點 ([60a5bc0](https://github.com/NickYCLin/lattice-term/commit/60a5bc0bfbfe9b7e5253234b192ddc43b2a0bd33))
+* **remote:** 改用 is_multiple_of 通過新版 Clippy ([d85d42d](https://github.com/NickYCLin/lattice-term/commit/d85d42dc3299ac013f693e6e677653de2c62ed0e))
+* **sessions:** 原生對話區改為預設收合 ([e87f580](https://github.com/NickYCLin/lattice-term/commit/e87f580a5c914933d1ec892218e9337e12e79891))
+
 ## [2026.10.1](https://github.com/NickYCLin/lattice-term/compare/v2026.9.30...v2026.10.1) (2026-09-30)
 
 
