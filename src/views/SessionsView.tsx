@@ -1956,7 +1956,11 @@ export function SessionsView({
     </div>
   ) : null;
 
-  const savedStartCallout = savedStartError ? (
+  const savedStartCallout = recovery.retryingWorkspace ? (
+    <div className="session-notice" role="status">
+      <Callout tone="info">{t("terminal.projects.savedStarting")}</Callout>
+    </div>
+  ) : savedStartError ? (
     <div className="session-notice">
       <Callout
         tone="warn"

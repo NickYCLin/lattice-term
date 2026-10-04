@@ -442,7 +442,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   ]);
   const retryingWorkspaceRef = useRef(false);
   const [retryingWorkspace, setRetryingWorkspace] = useState(false);
-  const [workspaceRecoveryError, setWorkspaceRecoveryError] = useState(false);
   const [workspacePersistenceError, setWorkspacePersistenceError] = useState(false);
 
   function replacePendingWorkspace(sessions: readonly SavedWorkspaceSession[]) {
@@ -456,7 +455,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     if (retryingWorkspaceRef.current || !sessionRestoreComplete) return { status: "busy" };
     retryingWorkspaceRef.current = true;
     setRetryingWorkspace(true);
-    setWorkspaceRecoveryError(false);
     try {
       const launched = await agents.launch({
         definitionId: saved.definitionId, label: saved.label,
@@ -474,7 +472,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       try { await agents.rename(launched.sessionId, saved.groupLabel); } catch { /* keep the live CLI */ }
       return { status: "started" };
     } catch (reason) {
-      setWorkspaceRecoveryError(true);
       return { status: "failed", detail: reason instanceof Error ? reason.message : String(reason) };
     } finally {
       retryingWorkspaceRef.current = false;
@@ -1192,7 +1189,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     onRetryWorkspaceSession={retryWorkspaceSession}
                     onDiscardWorkspaceSession={discardWorkspaceSession}
                     retryingWorkspace={retryingWorkspace}
-                    workspaceRecoveryError={workspaceRecoveryError}
                   />
                 </div>
               </Suspense>

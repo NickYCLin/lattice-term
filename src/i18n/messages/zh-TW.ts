@@ -989,6 +989,7 @@ export const zhTW = {
   "terminal.projects.statusGuideSaved": "尚未啟動：點一下接續",
   "terminal.projects.savedDetail": "{assistant} · 尚未啟動，點一下接續",
   "terminal.projects.savedRemoveBody": "這段對話還沒啟動，會從側欄移除。",
+  "terminal.projects.savedStarting": "正在接續這段對話…",
   "terminal.projects.savedStartTitle": "這段對話沒有啟動",
   "terminal.projects.savedStartBusy": "正在啟動另一段對話，等它好了再點一次。",
   "terminal.projects.savedStartLimit": "同時執行的助理已經到上限，先關掉幾個再點一次。對話還留在原處。",

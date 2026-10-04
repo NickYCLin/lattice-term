@@ -13,5 +13,4 @@ export interface WorkspaceRecoveryProps {
   /** Drops a saved conversation that has not been started. */
   onDiscardWorkspaceSession?: (session: SavedAgentSession) => void;
   retryingWorkspace?: boolean;
-  workspaceRecoveryError?: boolean;
 }

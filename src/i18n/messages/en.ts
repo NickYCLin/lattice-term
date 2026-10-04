@@ -1012,6 +1012,7 @@ export const en: Messages = {
   "terminal.projects.statusGuideSaved": "Not started: click to resume",
   "terminal.projects.savedDetail": "{assistant} · not started, click to resume",
   "terminal.projects.savedRemoveBody": "This conversation has not been started. It will be removed from the sidebar.",
+  "terminal.projects.savedStarting": "Resuming this conversation…",
   "terminal.projects.savedStartTitle": "This conversation did not start",
   "terminal.projects.savedStartBusy": "Another conversation is starting. Click again once it is ready.",
   "terminal.projects.savedStartLimit": "The limit of assistants running at once has been reached. Close a few and click again; the conversation stays where it is.",
