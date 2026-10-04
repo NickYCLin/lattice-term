@@ -83,16 +83,15 @@ import {
   loadWorkspaceSessionSnapshot,
   missingSavedAgentSessions,
   planAgentRestoration,
-  recoverLocalWorkspaceSessions,
+  isDormantNativeHistory,
   savedAgentWorkingDirectories,
   preserveUnrestoredWorkspaceSessions,
   saveWorkspaceSessionSnapshot,
   snapshotLiveWorkspaceSessions,
   type SavedWorkspaceSession,
   type SavedAgentSession,
-  type WorkspaceSessionSnapshot,
 } from "./app/workspaceSessionPersistence";
-import type { WorkspaceRetryResult } from "./components/sessions/WorkspaceRecoveryPanel";
+import type { WorkspaceRetryResult } from "./app/workspaceRecovery";
 import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
 import { NativeHistoryContext, useNativeConversations } from "./app/useNativeConversations";
 import { loadAuthPref } from "./app/authPreferences";
@@ -410,8 +409,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [terminalMounted, setTerminalMounted] = useState(false);
   const [initialWorkspaceSnapshot] = useState(() => loadWorkspaceSessionSnapshot(window.localStorage));
   const storedSessionSnapshotRef = useRef(initialWorkspaceSnapshot);
+  // Legacy imported-history shortcuts stay with each assistant's own
+  // conversation list; keeping them here only produced empty projects.
   const restoredWorkspaceSessions = useMemo(
-    () => storedSessionSnapshotRef.current?.sessions ?? [],
+    () => (storedSessionSnapshotRef.current?.sessions ?? [])
+      .filter((entry) => !isDormantNativeHistory(entry)),
     [],
   );
   const [unrestoredWorkspaceSessions, setUnrestoredWorkspaceSessions] = useState(
@@ -471,12 +473,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
   }
 
-  function recoverWorkspaceSnapshot(snapshot: WorkspaceSessionSnapshot) {
-    replacePendingWorkspace(recoverLocalWorkspaceSessions(
-      unrestoredSessionsRef.current, snapshot, agents.sessions));
-    setWorkspaceRecoveryError(false);
-  }
-
   const nativeHistory = useNativeConversations(runtime.host === "tauri" && agents.mode === "ready");
 
   function removeLocalProject(path: string) {
@@ -534,7 +530,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           const plan = planAgentRestoration(
             missingSavedAgentSessions(snapshot.sessions, agents.sessions), snapshot.active,
           );
-          unrestored.push(...plan.deferred);
           for (const saved of plan.automatic) {
             try {
               const freshArguments = agentFreshLaunchArguments(saved);
@@ -1183,7 +1178,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     onRemoveLocalProject={removeLocalProject}
                     onRetryWorkspaceSession={retryWorkspaceSession}
                     onDiscardWorkspaceSession={discardWorkspaceSession}
-                    onRecoverWorkspaceSnapshot={recoverWorkspaceSnapshot}
                     retryingWorkspace={retryingWorkspace}
                     workspaceRecoveryError={workspaceRecoveryError}
                   />

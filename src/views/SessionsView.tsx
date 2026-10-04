@@ -96,7 +96,7 @@ import {
 } from "../components/sessions/SessionProjectSidebar";
 import { AgentSessionRelocationDialog } from "../components/sessions/AgentSessionRelocationDialog";
 import { WorkspaceImportDialog } from "../components/sessions/WorkspaceImportDialog";
-import { WorkspaceRecoveryPanel, type WorkspaceRecoveryProps } from "../components/sessions/WorkspaceRecoveryPanel";
+import type { WorkspaceRecoveryProps } from "../app/workspaceRecovery";
 import {
   AgentIcon,
   CloseIcon,
@@ -1950,6 +1950,12 @@ export function SessionsView({
     </>
   );
 
+  const storageCallout = recovery.projectStorageError ? (
+    <div className="session-notice">
+      <Callout tone="warn">{t("workspace.recovery.error")}</Callout>
+    </div>
+  ) : null;
+
   const savedStartCallout = savedStartError ? (
     <div className="session-notice">
       <Callout
@@ -1994,8 +2000,7 @@ export function SessionsView({
     return (
       <div className="terminal-workspace">
         {workspaceFilePicker}
-        <WorkspaceRecoveryPanel {...recovery} pending={unrestoredWorkspaceSessions}
-          occupied={agents.sessions.map(session => session.workingDirectory)} ready={sessionRestoreComplete} />
+        {storageCallout}
         {closedCallout}
         {workspaceTransferCallout}
         {addCliErrorCallout}
@@ -2141,8 +2146,7 @@ export function SessionsView({
   return (
     <div className="terminal-workspace">
       {workspaceFilePicker}
-      <WorkspaceRecoveryPanel {...recovery} pending={unrestoredWorkspaceSessions}
-        occupied={agents.sessions.map(session => session.workingDirectory)} ready={sessionRestoreComplete} />
+      {storageCallout}
       {closedCallout}
       {workspaceTransferCallout}
       {addCliErrorCallout}
