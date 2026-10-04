@@ -4,6 +4,19 @@
 
 ---
 
+## [2026.10.4](https://github.com/NickYCLin/lattice-term/compare/v2026.10.3...v2026.10.4) (2026-10-04)
+
+
+### 🚀 新增功能
+
+* **sessions:** 點已存對話時顯示正在接續 ([1d12eb9](https://github.com/NickYCLin/lattice-term/commit/1d12eb9b76dd6962f8c9400c25793308ef8330c0))
+
+
+### 🛠️ 問題修正
+
+* **projects:** 清掉舊匯入捷徑留下的空專案 ([c39fdb9](https://github.com/NickYCLin/lattice-term/commit/c39fdb92fd502b04b582104d3eb0983c5adc7870))
+* **sessions:** 拿掉工作階段頁的已存專案與復原區塊 ([c8cfd74](https://github.com/NickYCLin/lattice-term/commit/c8cfd740cf78a04aaaae916681009617b8f2a26b))
+
 ## [2026.10.3](https://github.com/NickYCLin/lattice-term/compare/v2026.10.1...v2026.10.3) (2026-10-03)
 
 
