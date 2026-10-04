@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { LOCAL_PROJECTS_KEY, parseLocalProjects, updateLocalProjects } from "./localProjects";
+import {
+  DORMANT_PROJECT_CLEANUP_KEY, LOCAL_PROJECTS_KEY, parseLocalProjects,
+  pruneDormantProjectDirectories, updateLocalProjects,
+} from "./localProjects";
 
 function storage() {
   const values = new Map<string, string>();
@@ -32,5 +35,15 @@ describe("independent project catalog", () => {
       getItem: () => ++reads === 1 ? null : '{"version":1,"directories":["/other"]}',
       setItem: () => { throw new Error("must not write"); },
     }, ["/new"])).toThrow("changed");
+  });
+  it("drops folders only used by old imported shortcuts, once", () => {
+    const db = storage();
+    updateLocalProjects(db, ["/old/a", "/shared", "/mine"]);
+    expect(pruneDormantProjectDirectories(db, ["/old/a/", "/shared"], ["/shared"])).toBe(true);
+    expect(parseLocalProjects(db.getItem(LOCAL_PROJECTS_KEY))).toEqual(["/shared", "/mine"]);
+    expect(db.getItem(DORMANT_PROJECT_CLEANUP_KEY)).toBe("1");
+    updateLocalProjects(db, ["/old/a"]);
+    expect(pruneDormantProjectDirectories(db, ["/old/a"], [])).toBe(false);
+    expect(parseLocalProjects(db.getItem(LOCAL_PROJECTS_KEY))).toContain("/old/a");
   });
 });

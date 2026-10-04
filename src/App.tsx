@@ -92,7 +92,9 @@ import {
   type SavedAgentSession,
 } from "./app/workspaceSessionPersistence";
 import type { WorkspaceRetryResult } from "./app/workspaceRecovery";
-import { projectDirectoryKey, useLocalProjects } from "./app/localProjects";
+import {
+  projectDirectoryKey, pruneDormantProjectDirectories, useLocalProjects,
+} from "./app/localProjects";
 import { NativeHistoryContext, useNativeConversations } from "./app/useNativeConversations";
 import { loadAuthPref } from "./app/authPreferences";
 import {
@@ -407,7 +409,18 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [chatWorkspaceSessionId, setChatWorkspaceSessionId] = useState<string | null>(null);
   const [terminalMounted, setTerminalMounted] = useState(false);
-  const [initialWorkspaceSnapshot] = useState(() => loadWorkspaceSessionSnapshot(window.localStorage));
+  const [initialWorkspaceSnapshot] = useState(() => {
+    const loaded = loadWorkspaceSessionSnapshot(window.localStorage);
+    const sessions = loaded?.sessions ?? [];
+    try {
+      pruneDormantProjectDirectories(
+        window.localStorage,
+        savedAgentWorkingDirectories(sessions.filter(isDormantNativeHistory)),
+        savedAgentWorkingDirectories(sessions.filter(entry => !isDormantNativeHistory(entry))),
+      );
+    } catch { /* an unreadable catalog is reported by useLocalProjects */ }
+    return loaded;
+  });
   const storedSessionSnapshotRef = useRef(initialWorkspaceSnapshot);
   // Legacy imported-history shortcuts stay with each assistant's own
   // conversation list; keeping them here only produced empty projects.
