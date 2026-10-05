@@ -6399,7 +6399,7 @@ pub fn gemini_proxy_auth_status() -> GeminiProxyAuth {
     GeminiProxyAuth {
         reaches_proxy: selected_type
             .as_deref()
-            .map_or(true, gemini_auth_reaches_proxy),
+            .is_none_or(gemini_auth_reaches_proxy),
         selected_type,
     }
 }
