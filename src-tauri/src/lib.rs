@@ -57,6 +57,7 @@ pub mod transcript;
 pub mod tunnel;
 pub mod vault;
 pub mod vnc;
+mod voice_typing;
 
 use crate::agent::{
     AgentBroadcastOutcome, AgentDefinition, AgentLaunchPlan, AgentLaunchPlanDraft,
@@ -1755,6 +1756,14 @@ async fn agent_chat_paste_files(
     })
     .await
     .map_err(|error| format!("Clipboard operation did not complete: {error}"))?
+}
+
+/// Opens the system dictation panel for the focused chat input.
+#[tauri::command]
+async fn start_voice_typing() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(crate::voice_typing::start)
+        .await
+        .map_err(|error| format!("Voice typing did not start: {error}"))?
 }
 
 /// Saves an explicitly pasted chat image for later sends and queued turns.
@@ -5073,6 +5082,7 @@ pub fn run() {
             agent_send,
             agent_broadcast,
             agent_enqueue,
+            start_voice_typing,
             agent_clear_queue,
             agent_set_queue_dependency,
             agent_set_max_active_sessions,

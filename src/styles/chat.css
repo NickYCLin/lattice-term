@@ -1153,6 +1153,120 @@ button.chat-chip:hover {
   height: 2rem;
 }
 
+.session-composer__box .chat-attachments {
+  margin-bottom: var(--space-2);
+}
+
+.session-composer__more {
+  position: relative;
+  flex: none;
+}
+
+.session-composer__icon {
+  display: inline-grid;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.session-composer__icon:hover:not(:disabled),
+.session-composer__icon[aria-expanded="true"],
+.session-composer__icon.is-active {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.session-composer__icon:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.session-composer__menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 12rem;
+  flex-direction: column;
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-2);
+}
+
+.session-composer__menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-composer__menu button:hover:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+.session-composer__menu button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.session-composer__voice {
+  display: inline-grid;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 82%, var(--surface-solid));
+  color: var(--surface-solid);
+  cursor: pointer;
+}
+
+.session-composer__voice:hover:not(:disabled) {
+  background: var(--text);
+}
+
+.session-composer__voice.is-active {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  animation: session-voice-pulse 1.6s ease-in-out infinite;
+}
+
+.session-composer__voice:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-faint);
+  cursor: default;
+}
+
+@keyframes session-voice-pulse {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-composer__voice.is-active {
+    animation: none;
+  }
+}
+
 /* Automations --------------------------------------------------------- */
 
 .automation-form {

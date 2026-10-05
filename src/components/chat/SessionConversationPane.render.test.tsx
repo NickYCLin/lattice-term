@@ -1,6 +1,7 @@
 /**
  * Static renders of the session chat composer: the project and machine
- * strip, the access indicator, the model label and the round send button.
+ * strip, the access indicator, the model label, the attach menu, dictation
+ * and the voice conversation button that stands in for send while empty.
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -24,7 +25,10 @@ describe("SessionConversationPane composer", () => {
     expect(html).toContain("這台電腦");
     expect(html).toContain('placeholder="想做什麼都可以"');
     expect(html).toContain("claude-opus-4-5");
-    expect(html).toMatch(/class="chat-send"[^>]*disabled=""[^>]*aria-label="傳送"/);
+    expect(html).toContain('aria-label="新增檔案和更多內容"');
+    expect(html).toMatch(/class="session-composer__icon" disabled=""[^>]*aria-label="這個平台沒有可用的語音辨識，暫時無法聽寫"/);
+    expect(html).toMatch(/class="session-composer__voice" disabled=""/);
+    expect(html).not.toContain('class="chat-send"');
   });
 
   it("marks an unsandboxed session as full file access", () => {

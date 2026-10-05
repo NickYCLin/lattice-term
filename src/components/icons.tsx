@@ -272,6 +272,19 @@ export const SendIcon: Glyph = (props) => (
   </Icon>
 );
 
+export const MicIcon: Glyph = (props) => (
+  <Icon {...props}>
+    <rect x="5.75" y="1.75" width="4.5" height="8" rx="2.25" />
+    <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.25" />
+  </Icon>
+);
+
+export const WaveformIcon: Glyph = (props) => (
+  <Icon {...props}>
+    <path d="M2.5 6.5v3M5.25 4.5v7M8 2.5v11M10.75 4.5v7M13.5 6.5v3" />
+  </Icon>
+);
+
 export const FolderIcon: Glyph = (props) => (
   <Icon {...props}>
     <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.5 1.5h4.9A1.5 1.5 0 0 1 14 6v6.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-8z" />
