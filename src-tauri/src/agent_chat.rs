@@ -4374,4 +4374,125 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             "the finished turn was not released"
         );
     }
+
+    fn proxy_request(definition_id: &str, workdir: &Path) -> ChatTurnRequest {
+        ChatTurnRequest {
+            cli_proxy_base_url: Some("http://127.0.0.1:9/prefix".into()),
+            cli_proxy_id: None,
+            browser_enabled: false,
+            thread_id: "proxy-thread".into(),
+            turn_id: "proxy-turn".into(),
+            definition_id: definition_id.into(),
+            working_directory: workdir.display().to_string(),
+            prompt: "hi".into(),
+            permission: ChatPermission::ReadOnly,
+            model: Some("proxy-model".into()),
+            effort: None,
+            native_session_id: None,
+            profile_config_path: None,
+            attachments: vec![],
+            mentions: vec![],
+        }
+    }
+
+    #[test]
+    fn a_cli_that_cannot_follow_the_proxy_is_refused_before_it_starts() {
+        let workdir = tempfile::tempdir().expect("tempdir");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let result = tauri::async_runtime::block_on(send(
+            Arc::new(RecordingSink(tx)),
+            Arc::new(AgentChatRegistry::new()),
+            proxy_request("antigravity", workdir.path()),
+        ));
+        assert_eq!(result, Err(crate::agent::PROXY_UNSUPPORTED_CLI.to_string()));
+        assert!(rx.try_recv().is_err(), "nothing may run for a refused CLI");
+    }
+
+    /// Runs one real turn through a configured CLIProxyAPI with the local
+    /// login hidden from the CLI: Claude Code and Codex get an empty config
+    /// folder, Gemini CLI is told to use an API key in the working folder.
+    /// The proxy key is not a vendor key, so a reply can only come from the
+    /// proxy. Set `LATTICETERM_PROXY_E2E_KEEP_LOGIN=1` to keep the local
+    /// login as the app does, with a model only the proxy serves. Run with
+    /// `LATTICETERM_PROXY_E2E_URL=<address> LATTICETERM_PROXY_E2E_ID=<id>
+    /// LATTICETERM_PROXY_E2E_MODEL=<model> LATTICETERM_CHAT_E2E=claude
+    /// cargo test a_real_proxy_turn -- --ignored`. Gemini CLI renames some
+    /// flash models on its own (`gemini-3-flash` becomes `gemini-3.8-flash`),
+    /// so pick a Gemini model whose name the CLI passes through unchanged.
+    #[test]
+    #[ignore]
+    fn a_real_proxy_turn_answers_without_the_local_login() {
+        let definition_id =
+            std::env::var("LATTICETERM_CHAT_E2E").unwrap_or_else(|_| "claude".to_string());
+        let base_url = std::env::var("LATTICETERM_PROXY_E2E_URL").expect("proxy address");
+        let proxy_id = std::env::var("LATTICETERM_PROXY_E2E_ID").ok();
+        let model = std::env::var("LATTICETERM_PROXY_E2E_MODEL").expect("proxy model");
+        let workdir = tempfile::tempdir().expect("tempdir");
+        let empty_profile = tempfile::tempdir().expect("tempdir");
+        if definition_id == "gemini" {
+            let settings = workdir.path().join(".gemini");
+            std::fs::create_dir_all(&settings).expect("settings folder");
+            std::fs::write(
+                settings.join("settings.json"),
+                r#"{"security":{"auth":{"selectedType":"gemini-api-key"}}}"#,
+            )
+            .expect("settings");
+        }
+        let mut request = proxy_request(&definition_id, workdir.path());
+        request.cli_proxy_base_url = Some(base_url);
+        request.cli_proxy_id = proxy_id;
+        request.model = Some(model.clone());
+        request.prompt = "Reply with exactly the word OK and nothing else.".into();
+        request.thread_id = format!("proxy-e2e-{definition_id}");
+        let keep_login = std::env::var_os("LATTICETERM_PROXY_E2E_KEEP_LOGIN").is_some();
+        if definition_id != "gemini" && !keep_login {
+            request.profile_config_path = Some(empty_profile.path().display().to_string());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let registry = Arc::new(AgentChatRegistry::new());
+        tauri::async_runtime::block_on(send(
+            Arc::new(RecordingSink(tx)),
+            Arc::clone(&registry),
+            request,
+        ))
+        .expect("turn starts");
+
+        let mut events = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(240);
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(remaining) {
+                Ok(event) => {
+                    let finished = matches!(event, ChatEvent::Finished { .. });
+                    events.push(event);
+                    if finished {
+                        break;
+                    }
+                }
+                Err(_) => panic!("no Finished event within the deadline; got {events:?}"),
+            }
+        }
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                ChatEvent::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        match events.last() {
+            Some(ChatEvent::Finished { error, .. }) => {
+                assert!(error.is_none(), "turn failed: {error:?}; events {events:?}")
+            }
+            other => panic!("unexpected final event {other:?}"),
+        }
+        assert!(
+            text.contains("OK"),
+            "reply text was {text:?}; events {events:?}"
+        );
+        let reported = events.iter().find_map(|event| match event {
+            ChatEvent::Started { model, .. } => model.clone(),
+            _ => None,
+        });
+        println!("{definition_id} via proxy, requested {model}, reported {reported:?}");
+    }
 }
