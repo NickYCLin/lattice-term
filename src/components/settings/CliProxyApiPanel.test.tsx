@@ -22,6 +22,9 @@ describe("CLIProxyAPI settings", () => {
     expect(html).not.toContain("settings.cliProxy.");
     expect(html).toContain(locale === "zh-TW" ? "不會寫入助理設定檔" : "without writing the key to CLI configuration files");
     expect(html).toContain(locale === "zh-TW" ? "之後不會再顯示" : "never shows it again");
+    // Claude and Gemini models start their own CLI, not Codex.
+    expect(html).toContain("Claude Code");
+    expect(html).toContain("Gemini CLI");
     expect(html).toContain("http://127.0.0.1:8317");
   });
 

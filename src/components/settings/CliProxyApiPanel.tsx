@@ -148,6 +148,57 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   </div>;
 }
 
+interface GeminiAuth { selectedType: string | null; reachesProxy: boolean }
+
+/**
+ * Gemini CLI only follows the proxy when it signs in with an API key, and its
+ * settings file outranks anything passed at launch. Changing that file is the
+ * person's call, so it happens only from this button.
+ */
+function GeminiSignIn() {
+  const { t } = useI18n();
+  const [auth, setAuth] = useState<GeminiAuth | null>(null);
+  const [switched, setSwitched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let current = true;
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<GeminiAuth>("cliproxy_gemini_auth"))
+      .then((next) => { if (current) setAuth(next); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, []);
+
+  const useApiKey = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const next = await invoke<GeminiAuth>("cliproxy_gemini_use_api_key");
+      setAuth(next);
+      setSwitched(next.reachesProxy);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (switched) return <p>{t("settings.cliProxy.geminiSwitched")}</p>;
+  if (!auth || auth.reachesProxy) return null;
+  return <div className="cli-proxy-entry">
+    <p>{t("settings.cliProxy.geminiAuth", { type: auth.selectedType ?? "" })}</p>
+    {error && <p role="alert">{error}</p>}
+    <div>
+      <button type="button" className="button" disabled={busy} onClick={useApiKey}>
+        {t("settings.cliProxy.geminiUseApiKey")}</button>
+    </div>
+    <p className="field__hint">{t("settings.cliProxy.geminiUseApiKeyHint")}</p>
+  </div>;
+}
+
 /** Read once while the page is being built: the list is small and the picker
  * elsewhere reads the same storage, so there is nothing to wait for. */
 function savedProxies(): readonly CliProxyEndpoint[] {
@@ -186,6 +237,7 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
     <div className="setting__text">
       <p>{t("settings.cliProxy.boundary")}</p>
       {!available ? <p>{t("settings.cliProxy.desktopOnly")}</p> : <>
+        <GeminiSignIn />
         {proxies.length === 0 && <p>{t("settings.cliProxy.empty")}</p>}
         {proxies.map((endpoint) => (
           <ProxyEntry

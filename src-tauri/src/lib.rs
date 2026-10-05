@@ -3166,6 +3166,21 @@ async fn cliproxy_key_exists(proxy_id: Option<String>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn cliproxy_gemini_auth() -> Result<crate::agent::GeminiProxyAuth, String> {
+    tauri::async_runtime::spawn_blocking(crate::agent::gemini_proxy_auth_status)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Runs only from an explicit button press on the settings page.
+#[tauri::command]
+async fn cliproxy_gemini_use_api_key() -> Result<crate::agent::GeminiProxyAuth, String> {
+    tauri::async_runtime::spawn_blocking(crate::agent::use_gemini_api_key_sign_in)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn cliproxy_probe(base_url: String) -> Result<crate::cliproxy::ProxyProbe, String> {
     crate::cliproxy::probe(&base_url).await
 }
@@ -5132,6 +5147,8 @@ pub fn run() {
             cliproxy_forget_key,
             cliproxy_key_exists,
             cliproxy_probe,
+            cliproxy_gemini_auth,
+            cliproxy_gemini_use_api_key,
             cliproxy_models,
             vault_status,
             vault_create,

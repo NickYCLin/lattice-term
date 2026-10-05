@@ -6353,12 +6353,103 @@ fn gemini_proxy_auth_error(
     let selected = workspace_settings
         .and_then(gemini_auth_type_from_json)
         .or_else(|| user_settings.and_then(gemini_auth_type_from_json))?;
-    if selected.eq_ignore_ascii_case("gemini-api-key") || selected.eq_ignore_ascii_case("gateway") {
+    if gemini_auth_reaches_proxy(&selected) {
         return None;
     }
     Some(format!(
-        "Gemini CLI 目前用「{selected}」登入，這種方式不會經過 CLIProxyAPI。請先在 Gemini CLI 執行 /auth 改選「Use Gemini API Key」，或把 settings.json 的 security.auth.selectedType 改成 gemini-api-key，再重新開啟。"
+        "Gemini CLI 目前用「{selected}」登入，這種方式不會經過 CLIProxyAPI。請到設定頁 CLIProxyAPI 區塊按「改用 API 金鑰登入」，或在 Gemini CLI 執行 /auth 改選「Use Gemini API Key」，再重新開啟。"
     ))
+}
+
+fn gemini_auth_reaches_proxy(selected: &str) -> bool {
+    selected.eq_ignore_ascii_case("gemini-api-key") || selected.eq_ignore_ascii_case("gateway")
+}
+
+/// The Gemini CLI sign-in method as the settings page needs to show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeminiProxyAuth {
+    pub selected_type: Option<String>,
+    pub reaches_proxy: bool,
+}
+
+pub fn gemini_proxy_auth_status() -> GeminiProxyAuth {
+    let selected_type = read_account_file(&[".gemini", "settings.json"])
+        .as_deref()
+        .and_then(gemini_auth_type_from_json);
+    GeminiProxyAuth {
+        reaches_proxy: selected_type
+            .as_deref()
+            .map_or(true, gemini_auth_reaches_proxy),
+        selected_type,
+    }
+}
+
+/// Switches the saved Gemini CLI sign-in to the API key method, which is the
+/// only one that follows `GOOGLE_GEMINI_BASE_URL`. The command line has no
+/// flag for this and the settings file always wins over the environment, so
+/// the file has to change; only that one value is rewritten.
+pub fn use_gemini_api_key_sign_in() -> Result<GeminiProxyAuth, String> {
+    let path = user_home_directory()
+        .ok_or("找不到使用者資料夾，無法修改 Gemini CLI 設定。")?
+        .join(".gemini")
+        .join("settings.json");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(gemini_proxy_auth_status())
+        }
+        Err(error) => return Err(format!("讀不到 Gemini CLI 設定：{error}")),
+    };
+    if let Some(next) = gemini_settings_with_api_key_sign_in(&raw)? {
+        crate::durable_file::atomic_write_private(&path, next.as_bytes())
+            .map_err(|error| format!("寫入 Gemini CLI 設定失敗：{error}"))?;
+    }
+    Ok(gemini_proxy_auth_status())
+}
+
+/// Replaces the quoted sign-in value in place so comments, key order and
+/// formatting stay as the person left them. Anything ambiguous is refused
+/// rather than guessed at.
+fn gemini_settings_with_api_key_sign_in(raw: &str) -> Result<Option<String>, String> {
+    const MANUAL: &str = "Gemini CLI 設定檔的格式無法安全地自動修改，請在 Gemini CLI 執行 /auth 改選「Use Gemini API Key」。";
+    let Some(selected) = gemini_auth_type_from_json(raw) else {
+        return Ok(None);
+    };
+    if gemini_auth_reaches_proxy(&selected) {
+        return Ok(None);
+    }
+    let document = serde_json::from_str::<serde_json::Value>(raw).map_err(|_| MANUAL)?;
+    let key = if document
+        .pointer("/security/auth/selectedType")
+        .is_some_and(serde_json::Value::is_string)
+    {
+        "\"selectedType\""
+    } else {
+        "\"selectedAuthType\""
+    };
+    let mut found = raw.match_indices(key);
+    let (key_start, _) = found.next().ok_or(MANUAL)?;
+    if found.next().is_some() {
+        return Err(MANUAL.into());
+    }
+    let after_key = &raw[key_start + key.len()..];
+    let after_colon = after_key.trim_start().strip_prefix(':').ok_or(MANUAL)?;
+    let value = after_colon.trim_start();
+    let quoted = format!("\"{selected}\"");
+    if !value.starts_with(&quoted) {
+        return Err(MANUAL.into());
+    }
+    let value_start = raw.len() - value.len();
+    let next = format!(
+        "{}\"gemini-api-key\"{}",
+        &raw[..value_start],
+        &raw[value_start + quoted.len()..]
+    );
+    if gemini_auth_type_from_json(&next).as_deref() != Some("gemini-api-key") {
+        return Err(MANUAL.into());
+    }
+    Ok(Some(next))
 }
 
 fn migrate_deprecated_google_consumer_request(
@@ -9138,6 +9229,34 @@ session id: 0199aa11-"
         // Unset: Gemini CLI asks which method to use, and the API key path
         // already points at the proxy.
         assert!(gemini_proxy_auth_error(None, None).is_none());
+    }
+
+    #[test]
+    fn gemini_sign_in_switch_rewrites_only_the_selected_type() {
+        let raw = "{\n  \"general\": {\"vimMode\": true},\n  \"security\": {\n    \"auth\": {\n      \"selectedType\" : \"oauth-personal\"\n    }\n  },\n  \"ui\": {\"theme\": \"Dracula\"}\n}\n";
+        let next = gemini_settings_with_api_key_sign_in(raw).unwrap().unwrap();
+        assert_eq!(
+            next,
+            raw.replace("\"oauth-personal\"", "\"gemini-api-key\"")
+        );
+
+        let legacy = r#"{"selectedAuthType":"oauth-personal","theme":"Default"}"#;
+        assert_eq!(
+            gemini_settings_with_api_key_sign_in(legacy)
+                .unwrap()
+                .unwrap(),
+            r#"{"selectedAuthType":"gemini-api-key","theme":"Default"}"#
+        );
+
+        let ready = r#"{"security":{"auth":{"selectedType":"gemini-api-key"}}}"#;
+        assert_eq!(gemini_settings_with_api_key_sign_in(ready).unwrap(), None);
+        assert_eq!(gemini_settings_with_api_key_sign_in("{}").unwrap(), None);
+    }
+
+    #[test]
+    fn gemini_sign_in_switch_refuses_an_ambiguous_file() {
+        let nested = r#"{"security":{"auth":{"selectedType":"oauth-personal"}},"mcpServers":{"x":{"selectedType":"other"}}}"#;
+        assert!(gemini_settings_with_api_key_sign_in(nested).is_err());
     }
 
     #[test]
