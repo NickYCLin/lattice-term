@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSessionConversation } from "../../app/useSessionConversation";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
+import { AlertIcon, DesktopIcon, FolderIcon, SendIcon, ShieldIcon } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
@@ -11,6 +12,10 @@ const stateLabel: Record<AgentLifecycle, MessageKey> = {
   idle: "agents.state.idle",
   done: "agents.state.done",
 };
+
+function folderName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
 
 export function SessionConversationPane({ session, agents, onOpenTerminal }: {
   session: AgentSessionSummary;
@@ -40,6 +45,20 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
     if (node && outputPinned.current) node.scrollTop = node.scrollHeight;
   }, [conversation.output]);
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
+  const blocked = Boolean(session.closedReason) || conversation.sending;
+  const canSend = Boolean(draft.trim()) && !blocked;
+  async function submit(event?: FormEvent) {
+    event?.preventDefault();
+    if (!canSend) return;
+    const submitted = draft;
+    if (await conversation.send(submitted)) setDraft(current => current === submitted ? "" : current);
+  }
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    void submit();
+  }
+  const accessHint = `${t(session.sandboxed ? "agents.sandbox.hint" : "sessionChat.access.fullHint")}\n${t("sessionChat.approval")}`;
   return <>
     <header className="chat-header">
       <div className="session-chat__title">
@@ -102,26 +121,44 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
         )}
       </div>
     </div>
-    <form className="chat-composer" onSubmit={async (event) => {
-      event.preventDefault();
-      const submitted = draft;
-      if (await conversation.send(submitted)) setDraft(current => current === submitted ? "" : current);
-    }}>
+    <form className="chat-composer session-composer" onSubmit={submit}>
       {session.closedReason && <p role="status">{t("sessionChat.closed")}</p>}
       {conversation.sendError && <p role="alert">{conversation.sendError}</p>}
       {conversation.queued !== null && !working && <p role="status">{t("sessionChat.accepted")}</p>}
-      <label className="chat-composer__box">
-        <textarea className="chat-composer__input" value={draft}
-          aria-label={t("sessionChat.input")}
-          disabled={Boolean(session.closedReason) || conversation.sending}
-          placeholder={t("sessionChat.input")} onChange={event => setDraft(event.target.value)} />
-      </label>
-      <div className="chat-composer__row">
-        <p className="chat-composer__hint">{t("sessionChat.approval")}</p>
-        <button type="submit" className="button button--primary"
-          disabled={!draft.trim() || Boolean(session.closedReason) || conversation.sending}>
-          {t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
-        </button>
+      <div className="session-composer__frame">
+        <div className="session-composer__context">
+          <span className="session-composer__place" title={session.workingDirectory}>
+            <FolderIcon size={14} />
+            <span>{folderName(session.workingDirectory)}</span>
+          </span>
+          <span className="session-composer__place">
+            <DesktopIcon size={14} />
+            <span>{t("chat.delegate.machine.local")}</span>
+          </span>
+        </div>
+        <div className="chat-composer__box session-composer__box">
+          <textarea className="chat-composer__input" value={draft} rows={2}
+            aria-label={t("sessionChat.input")}
+            aria-keyshortcuts="Enter"
+            disabled={blocked}
+            placeholder={t("sessionChat.placeholder")}
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={onKeyDown} />
+          <div className="session-composer__toolbar">
+            <span className={`session-composer__access${session.sandboxed ? " is-sandboxed" : ""}`} title={accessHint}>
+              {session.sandboxed ? <ShieldIcon size={14} /> : <AlertIcon size={14} />}
+              {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
+            </span>
+            <span className="session-composer__model" title={t("sessionChat.model")}>
+              {session.model || session.label}
+            </span>
+            <button type="submit" className="chat-send" disabled={!canSend}
+              aria-label={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
+              title={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}>
+              <SendIcon />
+            </button>
+          </div>
+        </div>
       </div>
     </form>
   </>;
