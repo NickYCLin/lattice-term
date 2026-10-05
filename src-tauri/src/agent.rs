@@ -6339,8 +6339,27 @@ fn resolve_launch(
 
 /// CLIs that can be pointed at CLIProxyAPI. Codex takes the endpoint as
 /// config overrides; Claude Code and Gemini CLI take it from the environment.
-fn proxy_capable(definition_id: &str) -> bool {
+pub(crate) fn proxy_capable(definition_id: &str) -> bool {
     matches!(definition_id, "codex" | "claude" | "gemini")
+}
+
+/// Any other CLI keeps its own login and endpoint; starting it with a proxy
+/// model would spend that account instead of the proxy.
+pub(crate) const PROXY_UNSUPPORTED_CLI: &str =
+    "這個 CLI 無法確保對話都經過 CLIProxyAPI，為避免用到它自己帳號的額度，已停止啟動。";
+
+/// Refuse a Gemini CLI that would sign in with anything other than an API key,
+/// reading the user settings and the ones in the working folder.
+pub(crate) fn check_gemini_proxy_auth(working_directory: &Path) -> Result<(), String> {
+    let workspace_settings =
+        std::fs::read_to_string(working_directory.join(".gemini").join("settings.json")).ok();
+    match gemini_proxy_auth_error(
+        read_account_file(&[".gemini", "settings.json"]).as_deref(),
+        workspace_settings.as_deref(),
+    ) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 /// Gemini CLI only sends requests to `GOOGLE_GEMINI_BASE_URL` when it signs
@@ -6903,21 +6922,15 @@ pub fn launch_with_replay(
     };
     let proxy_target = if proxy_capable(&definition_id) {
         crate::cliproxy::launch::base_from_arguments(&arguments)?
+    } else if crate::cliproxy::launch::names_saved_proxy(&arguments) {
+        return Err(PROXY_UNSUPPORTED_CLI.into());
     } else {
         None
     };
     if proxy_target.is_some() && definition_id != "codex" {
         arguments = crate::cliproxy::launch::without_saved_arguments(arguments);
         if definition_id == "gemini" {
-            let workspace_settings =
-                std::fs::read_to_string(working_directory.join(".gemini").join("settings.json"))
-                    .ok();
-            if let Some(error) = gemini_proxy_auth_error(
-                read_account_file(&[".gemini", "settings.json"]).as_deref(),
-                workspace_settings.as_deref(),
-            ) {
-                return Err(error);
-            }
+            check_gemini_proxy_auth(&working_directory)?;
         }
     }
     if resumed_provider

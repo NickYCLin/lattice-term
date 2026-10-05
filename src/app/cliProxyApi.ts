@@ -25,6 +25,21 @@ export const CLI_PROXY_DEFAULT_ID = "default";
  * nobody can read. */
 export const CLI_PROXY_LIMIT = 8;
 
+/** The CLIs that can be held to the proxy: Codex through its provider
+ * settings, Claude Code and Gemini CLI through their environment. */
+export function cliProxyCapable(definitionId: string): definitionId is "codex" | "claude" | "gemini" {
+  return definitionId === "codex" || definitionId === "claude" || definitionId === "gemini";
+}
+
+/** The CLI that matches a proxy model's vendor, so the program on screen and
+ * the model that answers are the same family. Without that CLI installed, or
+ * for any other vendor, Codex answers; it reaches the proxy the same way. */
+export function cliProxyAgentFor(model: string, installed?: readonly string[]): "codex" | "claude" | "gemini" {
+  const id = model.toLowerCase();
+  const family = id.startsWith("claude-") ? "claude" : id.startsWith("gemini-") ? "gemini" : "codex";
+  return family === "codex" || !installed || installed.includes(family) ? family : "codex";
+}
+
 const PROVIDER = "latticeterm_cliproxyapi";
 const MAX_BASE_URL_LENGTH = 256;
 const MAX_LABEL_LENGTH = 64;

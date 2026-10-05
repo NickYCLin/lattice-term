@@ -55,7 +55,7 @@ import {
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
-import { accountModelKey, accountModelOptions, accountModelTargets, hasChatModels, validCliProxyModel } from "../app/accountModels";
+import { accountModelKey, accountModelOptions, accountModelTargets, cliProxyAgentFor, hasChatModels, validCliProxyModel } from "../app/accountModels";
 import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
@@ -698,10 +698,13 @@ function ThreadPane({
   const accountModels = useAccountModels(modelTargets, settingsOpen);
   const cliProxySettings = useCliProxySettings();
   const { lists: cliProxyModels, reload: reloadCliProxyModels } = useCliProxyModelLists(cliProxySettings, settingsOpen);
+  // The picker lists each proxy once under Codex; which CLI then answers
+  // follows the chosen model, so the picker compares against that entry.
+  const pickerValue = thread.provider ? { ...thread, definitionId: "codex" } : thread;
   const modelOptions = accountModelOptions(modelTargets, accountModels, {
     defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, thread, cliProxySettings.proxies);
-  const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(thread));
+  }, pickerValue, cliProxySettings.proxies);
+  const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(pickerValue));
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
@@ -1003,13 +1006,21 @@ function ThreadPane({
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             <AccountModelField
               options={modelOptions}
-              value={thread}
+              value={pickerValue}
               disabled={settingsLocked}
               allowCliProxyApi
               proxyModels={cliProxyModels}
               onReloadProxyModels={reloadCliProxyModels}
               onChange={({ definitionId, accountProfileId, model, provider, proxyId }) => {
-                if (hasChatModels(definitionId)) chat.updateThread(thread.id, { definitionId, accountProfileId, model, provider, proxyId });
+                // A proxy model runs on the CLI of its own vendor when that CLI
+                // is installed; a Codex account folder means nothing to it.
+                const agent = provider ? cliProxyAgentFor(model, installed) : definitionId;
+                if (!hasChatModels(agent)) return;
+                chat.updateThread(thread.id, {
+                  definitionId: agent,
+                  accountProfileId: provider && agent !== "codex" ? null : accountProfileId,
+                  model, provider, proxyId,
+                });
               }}
             />
             {(activeProfileSignedOut || activeProfileMissing) && (

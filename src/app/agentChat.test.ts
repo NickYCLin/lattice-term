@@ -385,7 +385,9 @@ describe("storage", () => {
     saveStoredThreads(storage, [proxy]);
     expect(loadStoredThreads(storage)[0]).toMatchObject({ provider: "cliproxyapi", model: "proxy-model", nativeSessionId: "proxy-native" });
     saveStoredThreads(storage, [{ ...proxy, definitionId: "claude" }]);
-    expect(loadStoredThreads(storage)[0].provider).toBeUndefined();
+    expect(loadStoredThreads(storage)[0].provider).toBe("cliproxyapi");
+    saveStoredThreads(storage, [{ ...proxy, definitionId: "antigravity" }]);
+    expect(loadStoredThreads(storage)[0]?.provider).toBeUndefined();
   });
 
   it("drops entries that are not threads", () => {

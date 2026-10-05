@@ -4,6 +4,7 @@ import type { AccountProfileStatuses } from "./useAccountProfileStatus";
 import {
   CLI_PROXY_DEFAULT_ID,
   CLI_PROXY_NAME,
+  cliProxyAgentFor,
   cliProxyIdFromArguments,
   cliProxyLabel,
   cliProxyLaunchArguments,
@@ -139,14 +140,7 @@ export function accountModelOptions(
   });
 }
 
-/** The CLI that matches a proxy model's vendor, so the program on screen and
- * the model that answers are the same family. Anything else stays on Codex. */
-export function cliProxyAgentFor(model: string): "codex" | "claude" | "gemini" {
-  const id = model.toLowerCase();
-  if (id.startsWith("claude-")) return "claude";
-  if (id.startsWith("gemini-")) return "gemini";
-  return "codex";
-}
+export { cliProxyAgentFor };
 
 /** Resolve the selected identity at launch time. A missing account must not
  * silently fall back to the default login or reuse another account's session. */
@@ -154,6 +148,7 @@ export function accountModelLaunchSettings(
   selection: AccountModelSelection,
   profiles: readonly ChatAccountProfile[],
   proxies: readonly CliProxyEndpoint[] = [],
+  installed?: readonly string[],
 ): Pick<AgentLaunchRequest, "definitionId" | "profileConfigPath" | "arguments"> {
   const profile = selection.accountProfileId === null ? null : profilesFor(profiles, selection.definitionId).find((entry) => entry.id === selection.accountProfileId);
   if (selection.accountProfileId !== null && !profile) throw new Error("account-model:missing-account");
@@ -170,7 +165,7 @@ export function accountModelLaunchSettings(
   if (!endpoint) throw new Error("account-model:missing-proxy");
   // The saved marker is the same for every CLI; the backend turns it into
   // Codex overrides or Claude/Gemini environment variables.
-  const definitionId = cliProxyAgentFor(selection.model);
+  const definitionId = cliProxyAgentFor(selection.model, installed);
   return {
     definitionId,
     // A Codex account folder means nothing to Claude Code or Gemini CLI.

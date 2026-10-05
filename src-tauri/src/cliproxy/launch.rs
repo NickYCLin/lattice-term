@@ -246,6 +246,18 @@ pub fn check_resume_alias(
     Ok(())
 }
 
+/// Whether the arguments carry a saved proxy marker at all, including ones
+/// that `base_from_arguments` would reject. Used to stop CLIs that cannot be
+/// held to the proxy from starting with it.
+pub fn names_saved_proxy(arguments: &[String]) -> bool {
+    arguments.windows(2).any(|pair| {
+        (pair[0] == "-c" || pair[0] == "--config")
+            && pair[1]
+                .strip_prefix("model_provider=")
+                .is_some_and(|name| saved_provider_id(name).is_some())
+    })
+}
+
 pub fn base_from_arguments(arguments: &[String]) -> Result<Option<ProxyTarget>, String> {
     let overrides: Vec<&str> = arguments
         .windows(2)
@@ -380,6 +392,22 @@ mod tests {
         assert!(keyless
             .agent_environment("claude")
             .contains(&("ANTHROPIC_AUTH_TOKEN", Some(NO_KEY_PLACEHOLDER))));
+    }
+
+    #[test]
+    fn a_saved_marker_is_recognised_without_parsing_the_address() {
+        assert!(names_saved_proxy(&saved_arguments(
+            "http://localhost:8317",
+            Some("work")
+        )));
+        assert!(!names_saved_proxy(&[
+            "-c".to_string(),
+            "model_provider=openai".to_string()
+        ]));
+        assert!(!names_saved_proxy(&[
+            "--model".to_string(),
+            "x".to_string()
+        ]));
     }
 
     #[test]

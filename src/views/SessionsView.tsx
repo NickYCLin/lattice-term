@@ -916,7 +916,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies),
+        ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies, installedAgents.map((definition) => definition.id)),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -1095,7 +1095,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.proxies),
+        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.proxies, installedAgents.map((definition) => definition.id)),
         resumeSessionId: null,
         groupId: null,
         seedInput: null,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { accountModelKey, accountModelLaunchSettings, accountModelOptions, cliProxyAgentFor, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
 import { cliProxyLaunchArguments, type CliProxyEndpoint } from "./cliProxyApi";
 import { fakeDefinition } from "./testFixtures/agentApis";
-import { selectThreadModel } from "./agentChat";
+import { loadStoredThreads, selectThreadModel } from "./agentChat";
 import { fakeThread } from "./testFixtures/agentApis";
 
 const profile = { id: "b", definitionId: "codex" as const, name: "B 帳號", configDirectory: "/profiles/b" };
@@ -94,6 +94,9 @@ describe("account-aware model choices", () => {
     expect(cliProxyAgentFor("gpt-5.6-sol")).toBe("codex");
     expect(cliProxyAgentFor("qwen3-coder")).toBe("codex");
     expect(cliProxyAgentFor("my-claude-alias")).toBe("codex");
+    // Without the vendor's CLI the proxy model still answers, through Codex.
+    expect(cliProxyAgentFor("claude-sonnet-4-5", ["codex", "gemini"])).toBe("codex");
+    expect(cliProxyAgentFor("gemini-2.5-pro", ["codex", "gemini"])).toBe("gemini");
     const selection = { definitionId: "codex", accountProfileId: "b", model: "gpt-5.6-sol", provider: "cliproxyapi" as const };
     expect(accountModelLaunchSettings(selection, [profile], proxies)).toMatchObject({ definitionId: "codex", profileConfigPath: "/profiles/b" });
     expect(accountModelLaunchSettings({ ...selection, accountProfileId: null, model: "gemini-2.5-pro" }, [profile], proxies)).toMatchObject({ definitionId: "gemini", profileConfigPath: null });
@@ -129,6 +132,18 @@ describe("account-aware model choices", () => {
     const native = selectThreadModel(next, { definitionId: "codex", accountProfileId: null, model: "" });
     expect(native.provider).toBeUndefined();
     expect(native.nativeSessionId).toBeNull();
+  });
+
+  it("keeps a chat on the proxy when a proxy model moves it to Claude Code or Gemini CLI", () => {
+    const original = fakeThread({ nativeSessionId: "native-a" });
+    const claude = selectThreadModel(original, { definitionId: "claude", accountProfileId: null, model: "claude-sonnet-4-5", provider: "cliproxyapi", proxyId: "work" });
+    expect(claude).toMatchObject({ definitionId: "claude", provider: "cliproxyapi", proxyId: "work", nativeSessionId: null });
+    const gemini = selectThreadModel(claude, { definitionId: "gemini", accountProfileId: null, model: "gemini-2.5-pro", provider: "cliproxyapi", proxyId: "work" });
+    expect(gemini).toMatchObject({ definitionId: "gemini", provider: "cliproxyapi" });
+    const restored = loadStoredThreads({ getItem: () => JSON.stringify([gemini]) } as Pick<Storage, "getItem">);
+    expect(restored[0]).toMatchObject({ definitionId: "gemini", provider: "cliproxyapi", proxyId: "work" });
+    // Antigravity cannot be held to the proxy, so it never keeps the marker.
+    expect(selectThreadModel(original, { definitionId: "antigravity", accountProfileId: null, model: "x", provider: "cliproxyapi" }).provider).toBeUndefined();
   });
 
   it("labels running Windows sessions without changing their stored CLI name", () => {

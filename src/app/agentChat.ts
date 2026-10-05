@@ -10,7 +10,7 @@
 export type ChatDefinitionId = "claude" | "codex" | "gemini" | "antigravity";
 
 import { restoreQueuedInputs, type QueuedChatInput } from "./chatInputQueue";
-import { validCliProxyId } from "./cliProxyApi";
+import { cliProxyCapable, validCliProxyId } from "./cliProxyApi";
 
 /** What the CLI may do during a turn; see `ChatPermission` in Rust. */
 export type ChatPermission = "ask" | "readOnly" | "workspaceWrite" | "full";
@@ -567,7 +567,7 @@ export function selectThreadModel(
   const next = selection.definitionId !== thread.definitionId
     ? { ...handoffThread(thread, selection.definitionId, selection.model, now), accountProfileId: selection.accountProfileId }
     : handoffThreadAccount(thread, selection.accountProfileId, now);
-  const provider = selection.definitionId === "codex" ? selection.provider : undefined;
+  const provider = cliProxyCapable(selection.definitionId) ? selection.provider : undefined;
   const proxyId = provider ? selection.proxyId : undefined;
   // Another proxy is another upstream account: the native conversation of the
   // previous one cannot be resumed against it.
@@ -980,9 +980,9 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
       ),
       title: typeof thread.title === "string" ? thread.title : "",
       browserEnabled: supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
-      provider: thread.definitionId === "codex" && thread.provider === "cliproxyapi" ? "cliproxyapi" : undefined,
+      provider: cliProxyCapable(thread.definitionId) && thread.provider === "cliproxyapi" ? "cliproxyapi" : undefined,
       proxyId:
-        thread.definitionId === "codex" && thread.provider === "cliproxyapi" && typeof thread.proxyId === "string" && validCliProxyId(thread.proxyId)
+        cliProxyCapable(thread.definitionId) && thread.provider === "cliproxyapi" && typeof thread.proxyId === "string" && validCliProxyId(thread.proxyId)
           ? thread.proxyId
           : undefined,
       archived: thread.archived === true,

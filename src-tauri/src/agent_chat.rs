@@ -1478,8 +1478,13 @@ fn send_with_retry<S: ChatSink>(
         let working_directory = validate_working_directory(&request.working_directory)?;
         let profile_config_directory =
             profile_config_directory(dialect, request.profile_config_path.as_deref())?;
-        if request.cli_proxy_base_url.is_some() && dialect != Dialect::Codex {
-            return Err("CLIProxyAPI requires Codex.".into());
+        if request.cli_proxy_base_url.is_some() {
+            if !crate::agent::proxy_capable(&request.definition_id) {
+                return Err(crate::agent::PROXY_UNSUPPORTED_CLI.into());
+            }
+            if dialect == Dialect::Gemini {
+                crate::agent::check_gemini_proxy_auth(&working_directory)?;
+            }
         }
         if request.cli_proxy_base_url.is_some() && model.is_none() {
             return Err("Select a CLIProxyAPI model first.".into());
@@ -1541,6 +1546,15 @@ fn send_with_retry<S: ChatSink>(
 
         let mut command = headless_command(&executable);
         apply_profile_environment(&mut command, dialect, profile_config_directory.as_deref());
+        command.env_remove(crate::cliproxy::launch::KEY_ENV);
+        if let Some(proxy) = proxy.as_ref() {
+            for (variable, value) in proxy.agent_environment(&request.definition_id) {
+                match value {
+                    Some(value) => command.env(variable, value),
+                    None => command.env_remove(variable),
+                };
+            }
+        }
         command.args(turn_arguments(
             dialect,
             &working_directory,
