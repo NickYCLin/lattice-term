@@ -6,6 +6,7 @@ import { isProxyConversation, nativeConversationProxy, type LocalConversation } 
 import { useCliProxySettings } from "../../app/useCliProxyApi";
 import { nativeConversationKey, useNativeHistory, type NativeMessageSnapshot } from "../../app/useNativeConversations";
 import { useI18n } from "../../i18n/context";
+import { chatProjectKey } from "../../app/chatProjects";
 
 function directoryKey(path: string) {
   return path.replace(/[\\/]+$/, "") || path;
@@ -37,7 +38,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   }))), [chat.threads]);
   const rows = useMemo(() => (history?.entries ?? []).filter(entry =>
     !entry.archived && !known.has(nativeConversationKey(entry)) &&
-    (projectFilter === null || directoryKey(entry.workingDirectory) === projectFilter)), [history?.entries, known, projectFilter]);
+    (projectFilter === null || chatProjectKey(entry.workingDirectory) === projectFilter)), [history?.entries, known, projectFilter]);
   if (!history) return null;
 
   async function open(entry: LocalConversation) {

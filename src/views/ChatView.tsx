@@ -1,6 +1,7 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { desktopChatAccess } from "../app/desktopChat";
 import { NativeConversationRows } from "../components/chat/NativeConversationRows";
+import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
@@ -77,7 +78,7 @@ import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
-import { chatProjects, projectName } from "../app/chatProjects";
+import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -176,14 +177,15 @@ export function ChatView({
     [agents.catalog, agents.sessions, t],
   );
   // Shelved threads leave the tree and wait in their own list below it.
-  const projects = useMemo(() => chatProjects(chat.threads), [chat.threads]);
+  const nativeHistory = useNativeHistory();
+  const projects = useMemo(() => chatProjectsWithHistory(chat.threads, nativeHistory?.entries ?? []),
+    [chat.threads, nativeHistory?.entries]);
   const listedThreads = useMemo(
     () =>
       chat.threads.filter(
         (thread) =>
           !thread.shelvedAt &&
-          (projectFilter === null ||
-            (thread.workingDirectory.replace(/[\\/]+$/, "") || thread.workingDirectory) === projectFilter),
+          (projectFilter === null || chatProjectKey(thread.workingDirectory) === projectFilter),
       ),
     [chat.threads, projectFilter],
   );
