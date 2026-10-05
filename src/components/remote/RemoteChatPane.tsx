@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
 import { REMOTE_ATTACHMENT_CHUNK, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
-import { CloseIcon, ImageFileIcon, PlusIcon, RefreshIcon } from "../icons";
+import { CloseIcon, ImageFileIcon, PlusIcon, RefreshIcon, SendIcon, StopIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { readRemoteImage as readImage, type PickedImage } from "./remoteImage";
 import "./RemoteChatPane.css";
@@ -144,12 +144,15 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
           </li>)}
         </ul>}
         {uploading && <p role="status" className="muted remote-chat-uploading">{t("remote.chat.uploading", { current: uploading.index + 1, count: images.length, percent: uploading.percent })}</p>}
-        <textarea className="input" aria-label={t("remote.chat.message")} placeholder={t("remote.chat.message")} rows={2} maxLength={16384} value={draft} onChange={e => setDrafts(value => ({ ...value, [selected]: e.target.value }))} />
-        <div className="remote-chat-actions"><span role="status" className="remote-chat-status"><ActivityPill activity={remoteThreadActivity(current.thread)} /></span>
-          <input ref={picker} type="file" accept="image/*" multiple hidden onChange={event => { void pick(event.target.files); event.target.value = ""; }} />
-          {!current.thread.runningTurnId && <button type="button" className="button button--secondary button--sm remote-chat-attach" disabled={busy || images.length >= MAX_IMAGES} title={t("remote.chat.attachImage")} onClick={() => picker.current?.click()}><ImageFileIcon size={15} />{t("remote.chat.attachImage")}</button>}
-          {current.thread.runningTurnId && <button type="button" className="button button--secondary button--sm" disabled={busy} onClick={() => { void act({ kind: "stop", threadId: selected, turnId: current.thread.runningTurnId! }); }}>{t("remote.chat.stop")}</button>}
-          {(!current.thread.runningTurnId || current.thread.canSteer) && <button type="submit" className="button button--primary button--sm" disabled={busy || (!draft.trim() && (current.thread.runningTurnId !== null || !images.length)) || new TextEncoder().encode(draft).length > 16384}>{current.thread.runningTurnId ? t("chat.steer.send") : t("remote.chat.send")}</button>}
+        <div className="remote-chat-card">
+          <textarea className="remote-chat-card__input" aria-label={t("remote.chat.message")} placeholder={t("remote.chat.message")} rows={2} maxLength={16384} value={draft} onChange={e => setDrafts(value => ({ ...value, [selected]: e.target.value }))} />
+          <div className="remote-chat-card__toolbar">
+            <input ref={picker} type="file" accept="image/*" multiple hidden onChange={event => { void pick(event.target.files); event.target.value = ""; }} />
+            {!current.thread.runningTurnId && <button type="button" className="remote-chat-card__icon remote-chat-attach" disabled={busy || images.length >= MAX_IMAGES} title={t("remote.chat.attachImage")} aria-label={t("remote.chat.attachImage")} onClick={() => picker.current?.click()}><ImageFileIcon size={18} /></button>}
+            <span role="status" className="remote-chat-status"><ActivityPill activity={remoteThreadActivity(current.thread)} /></span>
+            {current.thread.runningTurnId && <button type="button" className="remote-chat-card__round remote-chat-card__round--stop" disabled={busy} title={t("remote.chat.stop")} aria-label={t("remote.chat.stop")} onClick={() => { void act({ kind: "stop", threadId: selected, turnId: current.thread.runningTurnId! }); }}><StopIcon size={16} /></button>}
+            {(!current.thread.runningTurnId || current.thread.canSteer) && <button type="submit" className="remote-chat-card__round" title={current.thread.runningTurnId ? t("chat.steer.send") : t("remote.chat.send")} aria-label={current.thread.runningTurnId ? t("chat.steer.send") : t("remote.chat.send")} disabled={busy || (!draft.trim() && (current.thread.runningTurnId !== null || !images.length)) || new TextEncoder().encode(draft).length > 16384}><SendIcon size={16} /></button>}
+          </div>
         </div>
       </form>
     </> : <p role="status">{t("remote.chat.loading")}</p>}

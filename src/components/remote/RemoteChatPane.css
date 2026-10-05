@@ -28,14 +28,22 @@
 .remote-chat-message .remote-chat-actions { margin-top: 8px; }
 .remote-chat-message .remote-chat-actions > span { flex: 0; }
 .remote-chat-composer { display: grid; gap: 8px; position: sticky; bottom: 0; background: var(--surface); padding-top: 4px; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
-.remote-chat-images { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; overflow-x: auto; }
+.remote-chat-images { display: flex; gap: 8px; margin: 0; padding: 6px 6px 0 0; list-style: none; overflow-x: auto; }
 .remote-chat-images li { position: relative; flex: 0 0 auto; }
 .remote-chat-images img { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 .remote-chat-images button { position: absolute; top: -6px; inset-inline-end: -6px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; }
 .remote-chat-uploading { margin: 0; font-size: var(--text-sm); }
-.remote-chat-attach { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
-.remote-chat-composer textarea { resize: vertical; font-size: 16px; min-height: 3rem; }
-.remote-chat-status { display: flex; }
+.remote-chat-card { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-sunken); padding: 10px 8px 6px 14px; }
+.remote-chat-card:focus-within { border-color: var(--accent); }
+.remote-chat-card__input { width: 100%; min-height: 2.75rem; max-height: 40vh; field-sizing: content; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 1.45; padding: 0; }
+.remote-chat-card__toolbar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.remote-chat-status { display: flex; flex: 1; min-width: 0; }
+.remote-chat-card__icon, .remote-chat-card__round { display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
+.remote-chat-card__icon { background: transparent; color: var(--text-muted); }
+.remote-chat-card__icon:disabled { color: var(--text-faint); cursor: default; }
+.remote-chat-card__round { width: 40px; height: 40px; background: var(--accent); color: var(--text-on-accent); }
+.remote-chat-card__round--stop { background: var(--text); color: var(--surface); }
+.remote-chat-card__round:disabled { background: var(--surface-active); color: var(--text-faint); cursor: default; }
 .remote-workspace--chat { display: block; }
 .remote-workspace--chat > :not(.remote-chat-pane) { display: none; }
 @media (max-width: 600px) { .remote-chat-pane, .remote-cli-pane { padding: 8px 10px; } .remote-chat-pane .button, .remote-cli-pane .button { min-height: 44px; } .remote-pane-header__icon { width: 44px; } }
