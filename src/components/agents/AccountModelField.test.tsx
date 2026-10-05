@@ -1,12 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { accountModelKey, type AccountModelOption } from "../../app/accountModels";
+import { accountModelKey, accountModelSourceKey, type AccountModelOption } from "../../app/accountModels";
 import { AccountModelField } from "./AccountModelField";
 
 const normal: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "gpt-5.6", label: "Codex · GPT-5.6", disabled: false };
 const proxy: AccountModelOption = { definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: "default", label: "工作代理", disabled: false };
 const spare: AccountModelOption = { ...proxy, proxyId: "7f3a91", label: "備援代理" };
+const attr = (key: string) => key.replace(/"/g, "&quot;");
 
 describe("Fleet account model picker", () => {
   it("puts every proxy account before native models without changing the selection", () => {
@@ -19,9 +20,25 @@ describe("Fleet account model picker", () => {
     expect(group).toContain(teamProxy.label);
     expect(group).not.toContain(normal.label);
     expect(html.indexOf("</optgroup>")).toBeLessThan(html.indexOf(normal.label));
-    expect(html.match(/<option /g)).toHaveLength(4);
-    expect(html).toContain(`value="${accountModelKey(normal).replace(/"/g, "&quot;")}" selected=""`);
-    expect(html).toContain(`value="${accountModelKey(teamNormal).replace(/"/g, "&quot;")}" disabled=""`);
+    // Four sources, plus the one model the selected source offers.
+    expect(html.match(/<option /g)).toHaveLength(5);
+    expect(html).toContain(`value="${attr(accountModelSourceKey(normal))}" selected=""`);
+    expect(html).toContain(`value="${attr(accountModelSourceKey(teamNormal))}" disabled=""`);
+    expect(html).toContain(`value="${attr(accountModelKey(normal))}" selected=""`);
+  });
+
+  it("lists each source once and only that source's models in the second menu", () => {
+    const mini = { ...normal, model: "gpt-5.6-mini", label: "Codex · GPT-5.6 mini", sourceLabel: "Codex", modelLabel: "GPT-5.6 mini" };
+    const main = { ...normal, sourceLabel: "Codex", modelLabel: "GPT-5.6" };
+    const claude: AccountModelOption = { definitionId: "claude", accountProfileId: null, model: "opus", label: "Claude Code · Opus", sourceLabel: "Claude Code", modelLabel: "Opus", disabled: false };
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[main, mini, claude]} value={mini} onChange={vi.fn()} /></I18nProvider>);
+    const [sourceMenu, modelMenu] = [...html.matchAll(/<select[^>]*>(.*?)<\/select>/g)].map((match) => match[1]);
+    expect(sourceMenu.match(/>Codex</g)).toHaveLength(1);
+    expect(sourceMenu).toContain("Claude Code");
+    expect(modelMenu).toContain("GPT-5.6 mini");
+    expect(modelMenu).toContain(`value="${attr(accountModelKey(mini))}" selected=""`);
+    expect(modelMenu).not.toContain("Opus");
+    expect(modelMenu).not.toContain("Codex · ");
   });
 
   it("shows a proxy model ID only for the selected proxy option", () => {
@@ -30,7 +47,9 @@ describe("Fleet account model picker", () => {
     const html = render({ ...proxy, model: "gpt-5.6-sol" });
     expect(html).toContain("CLIProxyAPI 模型 ID");
     expect(html).toContain('value="gpt-5.6-sol"');
-    expect(html).toContain(`value="${accountModelKey(proxy).replace(/"/g, "&quot;")}" selected=""`);
+    expect(html).toContain(`value="${attr(accountModelSourceKey(proxy))}" selected=""`);
+    // A proxy source picks its model from the proxy, not from a native list.
+    expect(html.match(/<select /g)).toHaveLength(1);
   });
 
   it("offers the proxy's own models and keeps typing one available", () => {

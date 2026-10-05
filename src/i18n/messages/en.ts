@@ -1608,6 +1608,7 @@ export const en: Messages = {
   "chat.model.handoff": "Changing assistants starts a new native conversation and safely hands over recent context.",
   "chat.accountProfile": "Account",
   "accountModel.choose": "Choose a model",
+  "accountModel.source": "Source",
   "terminal.proxy.model": "CLIProxyAPI model ID",
   "terminal.proxy.hint": "Uses the proxy address and key from Settings. claude-* models run in Claude Code, gemini-* in Gemini CLI, and the rest in Codex. No CLI configuration needed.",
   "settings.cliProxy.title": "CLIProxyAPI",

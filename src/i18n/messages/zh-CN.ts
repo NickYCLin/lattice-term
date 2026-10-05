@@ -1283,6 +1283,7 @@ export const messages: Messages = {
   "chat.model.handoff": "切换不同助理会创建新的原生对话，并安全转交近期脉络。",
   "chat.accountProfile": "使用帐号",
   "accountModel.choose": "选择模型",
+  "accountModel.source": "来源",
   "terminal.proxy.model": "CLIProxyAPI 模型 ID",
   "terminal.proxy.hint": "使用设置页的代理地址与密钥启动所选模型：claude-* 用 Claude Code、gemini-* 用 Gemini CLI，其余用 Codex，无需另改 CLI 配置。",
   "settings.cliProxy.title": "CLIProxyAPI",

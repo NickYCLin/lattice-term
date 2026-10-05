@@ -33,6 +33,10 @@ export interface AccountModelTarget {
 
 export interface AccountModelOption extends AccountModelSelection {
   label: string;
+  /** The account, CLI or proxy half of the label, shown in the source picker. */
+  sourceLabel?: string;
+  /** The model half of the label, shown once a source is chosen. */
+  modelLabel?: string;
   disabled: boolean;
 }
 
@@ -48,6 +52,16 @@ export function accountModelKey(selection: AccountModelSelection): string {
     selection.provider ?? null,
     selection.provider ? selection.proxyId ?? CLI_PROXY_DEFAULT_ID : null,
     selection.provider ? "" : selection.model,
+  ]);
+}
+
+/** Groups options that share an account, CLI and proxy, whatever the model. */
+export function accountModelSourceKey(selection: AccountModelSelection): string {
+  return JSON.stringify([
+    selection.definitionId,
+    selection.accountProfileId,
+    selection.provider ?? null,
+    selection.provider ? selection.proxyId ?? CLI_PROXY_DEFAULT_ID : null,
   ]);
 }
 
@@ -106,11 +120,15 @@ export function accountModelOptions(
     if (!selected?.provider && selected?.definitionId === target.definitionId && selected.accountProfileId === target.accountProfileId && selected.model && !choices.some((choice) => choice.value === selected.model)) {
       choices.push({ value: selected.model, label: selected.model, description: null, isDefault: false });
     }
+    const signedOut = target.signedOut ? `（${labels.signedOut}）` : "";
+    const sourceLabel = [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel].filter(Boolean).join(" · ") + signedOut;
     const options: AccountModelOption[] = choices.map((choice) => ({
       definitionId: target.definitionId,
       accountProfileId: target.accountProfileId,
       model: choice.value,
-      label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + (target.signedOut ? `（${labels.signedOut}）` : ""),
+      label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + signedOut,
+      sourceLabel,
+      modelLabel: choice.label,
       disabled: target.signedOut,
     }));
     // One entry per configured proxy; the picker already groups them under
@@ -132,6 +150,7 @@ export function accountModelOptions(
           provider: "cliproxyapi",
           proxyId: endpoint.id,
           label: [cliProxyLabel(endpoint), target.accountProfileId !== null ? target.accountName : null].filter(Boolean).join(" · "),
+          sourceLabel: [cliProxyLabel(endpoint), target.accountProfileId !== null ? target.accountName : null].filter(Boolean).join(" · "),
           disabled: false,
         });
       }

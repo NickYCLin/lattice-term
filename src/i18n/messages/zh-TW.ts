@@ -1542,6 +1542,7 @@ export const zhTW = {
   "chat.model.handoff": "切換不同助理會建立新的原生對話，並安全轉交近期脈絡。",
   "chat.accountProfile": "使用帳號",
   "accountModel.choose": "選擇模型",
+  "accountModel.source": "來源",
   "terminal.proxy.model": "CLIProxyAPI 模型 ID",
   "terminal.proxy.hint": "使用設定頁的代理位址與金鑰啟動所選模型：claude-* 用 Claude Code、gemini-* 用 Gemini CLI，其餘用 Codex，不需要另改助理設定。",
   "settings.cliProxy.title": "CLIProxyAPI",

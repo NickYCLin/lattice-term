@@ -1263,6 +1263,7 @@ export const messages: Messages = {
   "chat.model.handoff": "アシスタントの変更は、新しいネイティブな会話と、最新のコンテキスト上で安全に手元に始まります。",
   "chat.accountProfile": "会員アカウント",
   "accountModel.choose": "モデルを選ぶ",
+  "accountModel.source": "提供元",
   "terminal.proxy.model": "CLIProxyAPI モデル ID",
   "terminal.proxy.hint": "設定画面のプロキシ URL とキーを使います。claude-* は Claude Code、gemini-* は Gemini CLI、それ以外は Codex で起動します。CLI の設定変更は不要です。",
   "settings.cliProxy.title": "CLIProxyAPI",

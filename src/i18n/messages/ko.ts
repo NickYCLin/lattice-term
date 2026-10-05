@@ -1259,6 +1259,7 @@ export const messages: Messages = {
   "chat.model.handoff": "Changing Assistants는 새로운 네이티브 대화를 시작하고 최근의 상황에 따라 안전하게 손을 시작합니다.",
   "chat.accountProfile": "계정",
   "accountModel.choose": "모델 선택",
+  "accountModel.source": "제공처",
   "terminal.proxy.model": "CLIProxyAPI 모델 ID",
   "terminal.proxy.hint": "설정의 프록시 주소와 키를 사용합니다. claude-* 모델은 Claude Code, gemini-*는 Gemini CLI, 나머지는 Codex에서 실행합니다. CLI 설정을 따로 바꿀 필요가 없습니다.",
   "settings.cliProxy.title": "CLIProxyAPI",
