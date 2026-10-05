@@ -2713,7 +2713,13 @@ fn parse_gemini(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
             if str_field(value, "status") == Some("success") {
                 state.error = None;
             } else if state.error.is_none() {
-                state.error = Some("Gemini CLI reported an error.".to_string());
+                let message = value
+                    .get("error")
+                    .and_then(|error| str_field(error, "message"))
+                    .map(str::trim)
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or("Gemini CLI reported an error.");
+                state.error = Some(truncate(message, 2048));
             }
         }
         _ => {}
@@ -3981,6 +3987,23 @@ mod tests {
         assert_eq!(state.duration_ms, Some(1200));
         assert!(state.turn_complete);
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn gemini_error_result_keeps_the_upstream_message() {
+        let raw = r#"{"type":"init","session_id":"s","model":"gemini-3.8-flash-high"}
+{"type":"result","status":"error","error":{"type":"Error","message":"[API Error: Verify your account to continue.]"},"stats":{"input_tokens":0,"output_tokens":0,"duration_ms":0}}"#;
+        let (state, _) = lines(Dialect::Gemini, raw);
+        assert_eq!(
+            state.error.as_deref(),
+            Some("[API Error: Verify your account to continue.]")
+        );
+
+        let (state, _) = lines(Dialect::Gemini, r#"{"type":"result","status":"error"}"#);
+        assert_eq!(
+            state.error.as_deref(),
+            Some("Gemini CLI reported an error.")
+        );
     }
 
     #[test]
