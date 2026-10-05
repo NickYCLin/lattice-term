@@ -245,6 +245,25 @@ describe("AgentsView", () => {
     expect(markup).toContain(">背景<");
   });
 
+  it("does not offer making one agent wait for another", () => {
+    const markup = render(fakeAgentApi({ sessions: [
+      fakeSession({ sessionId: "a", label: "第一個" }),
+      fakeSession({ sessionId: "b", label: "第二個" }),
+    ] }));
+    expect(markup).not.toContain("不等其他 Agent");
+    expect(markup).not.toContain("agent-session-row__wait");
+    expect(markup.match(/class="agent-session-row"/g)).toHaveLength(2);
+  });
+
+  it("keeps an earlier wait visible so it can still be cleared", () => {
+    const markup = render(fakeAgentApi({ sessions: [
+      fakeSession({ sessionId: "a", label: "第一個" }),
+      fakeSession({ sessionId: "b", label: "第二個", waitsFor: "a" }),
+    ] }));
+    expect(markup).toContain("等待 第一個");
+    expect(markup).toContain('aria-label="不等其他 Agent"');
+  });
+
   it("offers explicit MCP sharing for an existing foreground session without relaunching", () => {
     const markup = render(fakeAgentApi({ sessions: [fakeSession({ detached: false, label: "Existing proxy" })] }));
     expect(markup).toContain("Existing proxy");

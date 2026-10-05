@@ -46,10 +46,7 @@ import {
   TrashIcon,
   TransferIcon,
 } from "../components/icons";
-import {
-  ACTIVE_SESSION_LIMIT_CHOICES,
-  queueDependencyCandidates,
-} from "../app/agentPacing";
+import { ACTIVE_SESSION_LIMIT_CHOICES } from "../app/agentPacing";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 
@@ -1581,7 +1578,7 @@ export function AgentsView({
             <span className="eyebrow">{t("agents.running.eyebrow")}</span>
             <h3>{t("agents.running.title")}</h3>
           </div>
-          <label className="field agents-pacing__limit">
+          <label className="agents-pacing__limit" title={t("agents.pacing.hint")}>
             <span className="field__label">{t("agents.pacing.limit")}</span>
             <select
               className="select"
@@ -1603,7 +1600,6 @@ export function AgentsView({
                 </option>
               ))}
             </select>
-            <small className="field__optional">{t("agents.pacing.hint")}</small>
           </label>
         </div>
         {pacingError && (
@@ -1615,71 +1611,107 @@ export function AgentsView({
           <p className="agents-running__empty">{t("agents.running.empty")}</p>
         ) : (
           <div className="agent-session-list">
-            {agents.sessions.map((session) => (
-              <article className="agent-session-row" key={session.sessionId}>
-                <span
-                  className={`agent-state-dot state-${session.state}`}
-                  aria-hidden="true"
-                />
-                <div className="agent-session-row__main">
-                  <strong>
-                    {session.label}
-                    {session.detached && (
-                      <span className="agents-sandbox__badge">{t("agents.detached.badge")}</span>
-                    )}
-                    {sharedWithMcp.has(session.sessionId) && (
-                      <>
-                        <span className="agents-sandbox__badge">
-                          {t(!daemon.status.mcpOutputScopes || sharedWithMcp.get(session.sessionId)?.readOutput !== false
-                            ? "agents.mcp.badge.output" : "agents.mcp.badge.metadata")}
+            {agents.sessions.map((session) => {
+              const mcpEntry = sharedWithMcp.get(session.sessionId);
+              const activity = mcpEntry ? describeMcpActivity(mcpEntry) : null;
+              // Waiting on another agent is no longer offered, but a wait set
+              // earlier must stay visible and removable or its prompts stall.
+              const waitsFor = session.waitsFor
+                ? agents.sessions.find((other) => other.sessionId === session.waitsFor)?.label ?? session.waitsFor
+                : null;
+              return (
+                <article className="agent-session-row" key={session.sessionId}>
+                  <span
+                    className={`agent-state-dot state-${session.state}`}
+                    aria-hidden="true"
+                  />
+                  <div className="agent-session-row__main">
+                    <strong>
+                      {session.label}
+                      {session.detached && (
+                        <span className="agents-sandbox__badge">{t("agents.detached.badge")}</span>
+                      )}
+                      {mcpEntry && (
+                        <>
+                          <span className="agents-sandbox__badge">
+                            {t(!daemon.status.mcpOutputScopes || mcpEntry.readOutput !== false
+                              ? "agents.mcp.badge.output" : "agents.mcp.badge.metadata")}
+                          </span>
+                          {mcpEntry.control && (
+                            <span className="agents-sandbox__badge">{t("agents.mcp.badge.control")}</span>
+                          )}
+                        </>
+                      )}
+                    </strong>
+                    <div className="agent-session-row__meta">
+                      <span className="mono agent-session-row__path" title={session.workingDirectory}>
+                        {displayPath(session.workingDirectory)}
+                      </span>
+                      {waitsFor && (
+                        <span className="agent-session-row__wait">
+                          {t("agents.pacing.waitsFor")} {waitsFor}
+                          <button
+                            type="button"
+                            aria-label={t("agents.pacing.none")}
+                            title={t("agents.pacing.none")}
+                            onClick={() => {
+                              setPacingError(null);
+                              agents
+                                .setQueueDependency(session.sessionId, null)
+                                .catch((reason: unknown) => setPacingError(String(reason)));
+                            }}
+                          >
+                            ×
+                          </button>
                         </span>
-                        {sharedWithMcp.get(session.sessionId)?.control && (
-                          <span className="agents-sandbox__badge">{t("agents.mcp.badge.control")}</span>
-                        )}
-                      </>
-                    )}
-                  </strong>
-                  <span className="mono">{displayPath(session.workingDirectory)}</span>
-                  <div className="agent-session-row__controls">
-                  {(() => {
-                    const candidates = queueDependencyCandidates(
-                      agents.sessions,
-                      session.sessionId,
-                    );
-                    if (candidates.length === 0 && !session.waitsFor) return null;
-                    return (
-                      <label className="agents-pacing__follow">
-                        <span className="field__label">{t("agents.pacing.waitsFor")}</span>
-                        <select
-                          className="select"
-                          value={session.waitsFor ?? ""}
-                          onChange={(event) => {
-                            const target = event.currentTarget.value || null;
-                            setPacingError(null);
-                            agents
-                              .setQueueDependency(session.sessionId, target)
-                              .catch((reason: unknown) => setPacingError(String(reason)));
-                          }}
+                      )}
+                      {session.tokenUsage && (
+                        <span
+                          className="agent-token-usage"
+                          title={t("agents.usage.breakdown", {
+                            input: tokenNumber.format(session.tokenUsage.inputTokens),
+                            output: tokenNumber.format(session.tokenUsage.outputTokens),
+                            cacheRead: tokenNumber.format(
+                              session.tokenUsage.cacheReadTokens,
+                            ),
+                            cacheWrite: tokenNumber.format(
+                              session.tokenUsage.cacheWriteTokens,
+                            ),
+                            reasoning: tokenNumber.format(
+                              session.tokenUsage.reasoningTokens,
+                            ),
+                          })}
                         >
-                          <option value="">{t("agents.pacing.none")}</option>
-                          {candidates.map((candidate) => (
-                            <option key={candidate.sessionId} value={candidate.sessionId}>
-                              {candidate.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    );
-                  })()}
-                  {(
+                          {t("agents.usage.summary", {
+                            tokens: compactTokenNumber.format(
+                              session.tokenUsage.totalTokens,
+                            ),
+                            calls: tokenNumber.format(session.tokenUsage.apiCalls),
+                          })}
+                        </span>
+                      )}
+                      {activity && <span className="agents-mcp__activity">{activity}</span>}
+                    </div>
+                  </div>
+                  <div className="agent-session-row__actions">
+                    <span
+                      className={`badge ${stateTone(session)}`}
+                      title={t(
+                        session.stateSource === "integration"
+                          ? "agents.state.source.integration"
+                          : "agents.state.source.heuristic",
+                      )}
+                    >
+                      {t(stateKey(session))}
+                    </span>
                     <label className="agents-mcp__toggle">
                       <span className="field__label">{t("agents.mcp.access")}</span>
                       <select
                         className="select"
-                        value={mcpAccessOf(sharedWithMcp.get(session.sessionId))}
+                        value={mcpAccessOf(mcpEntry)}
                         // An old background service cannot take new shares,
                         // but an existing one must stay revocable.
-                        disabled={!sharedWithMcp.has(session.sessionId)
+                        disabled={!mcpEntry
                           && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes)}
                         onChange={(event) =>
                           setMcpAccess(session.sessionId, event.currentTarget.value as McpAccess)
@@ -1690,72 +1722,27 @@ export function AgentsView({
                         <option value="full">{t("agents.mcp.access.full")}</option>
                       </select>
                     </label>
-                  )}
-                  </div>
-                  {(() => {
-                    const entry = sharedWithMcp.get(session.sessionId);
-                    const activity = entry ? describeMcpActivity(entry) : null;
-                    return activity ? (
-                      <span className="agents-mcp__activity">{activity}</span>
-                    ) : null;
-                  })()}
-                  {session.tokenUsage && (
-                    <span
-                      className="agent-token-usage"
-                      title={t("agents.usage.breakdown", {
-                        input: tokenNumber.format(session.tokenUsage.inputTokens),
-                        output: tokenNumber.format(session.tokenUsage.outputTokens),
-                        cacheRead: tokenNumber.format(
-                          session.tokenUsage.cacheReadTokens,
-                        ),
-                        cacheWrite: tokenNumber.format(
-                          session.tokenUsage.cacheWriteTokens,
-                        ),
-                        reasoning: tokenNumber.format(
-                          session.tokenUsage.reasoningTokens,
-                        ),
-                      })}
+                    <button
+                      type="button"
+                      className="button button--ghost button--sm"
+                      onClick={() => onOpen(session.sessionId)}
                     >
-                      {t("agents.usage.summary", {
-                        tokens: compactTokenNumber.format(
-                          session.tokenUsage.totalTokens,
-                        ),
-                        calls: tokenNumber.format(session.tokenUsage.apiCalls),
-                      })}
-                    </span>
-                  )}
-                </div>
-                <div className="agent-session-row__status">
-                  <span className={`badge ${stateTone(session)}`}>
-                    {t(stateKey(session))}
-                  </span>
-                  <span className="agent-state-source">
-                    {t(
-                      session.stateSource === "integration"
-                        ? "agents.state.source.integration"
-                        : "agents.state.source.heuristic",
-                    )}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="button button--ghost button--sm"
-                  onClick={() => onOpen(session.sessionId)}
-                >
-                  <TerminalIcon size={13} />
-                  {t("agents.open")}
-                </button>
-                <button
-                  type="button"
-                  className="icon-button icon-button--sm icon-button--danger"
-                  onClick={() => setPendingStop(session)}
-                  aria-label={t("agents.stop")}
-                  data-tooltip={t("agents.stop")}
-                >
-                  <StopIcon size={12} />
-                </button>
-              </article>
-            ))}
+                      <TerminalIcon size={13} />
+                      {t("agents.open")}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button icon-button--sm icon-button--danger"
+                      onClick={() => setPendingStop(session)}
+                      aria-label={t("agents.stop")}
+                      data-tooltip={t("agents.stop")}
+                    >
+                      <StopIcon size={12} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
