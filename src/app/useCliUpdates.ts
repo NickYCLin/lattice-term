@@ -11,6 +11,12 @@ export interface CliUpdate {
   updatable?: boolean;
 }
 
+function needsAttention(items: CliUpdate[]) {
+  return items.some(
+    (item) => item.status === "available" || item.status === "error",
+  );
+}
+
 export function useCliUpdates(enabled: boolean) {
   const checked = useRef(false);
   const checking = useRef(false);
@@ -22,15 +28,18 @@ export function useCliUpdates(enabled: boolean) {
   const [dismissed, setDismissed] = useState(false);
   const [updated, setUpdated] = useState<string[]>([]);
 
-  const check = useCallback(async () => {
-    if (checking.current) return;
+  const check = useCallback(async (): Promise<CliUpdate[] | null> => {
+    if (checking.current) return null;
     checking.current = true;
     setBusy(true);
     setError(false);
     try {
-      setItems(await invoke<CliUpdate[]>("agent_check_updates"));
+      const next = await invoke<CliUpdate[]>("agent_check_updates");
+      setItems(next);
+      return next;
     } catch {
       setError(true);
+      return null;
     } finally {
       checking.current = false;
       setBusy(false);
@@ -48,7 +57,8 @@ export function useCliUpdates(enabled: boolean) {
         setUpdated((current) =>
           current.includes(label) ? current : [...current, label],
         );
-        await check();
+        const refreshed = await check();
+        if (refreshed && !needsAttention(refreshed)) setDismissed(true);
         return true;
       } catch (err) {
         setUpdateError(err instanceof Error ? err.message : String(err));
@@ -89,7 +99,10 @@ export function useCliUpdates(enabled: boolean) {
         ]);
       }
       if (failures.length > 0) setUpdateError(failures.join("\n"));
-      await check();
+      const refreshed = await check();
+      if (failures.length === 0 && refreshed && !needsAttention(refreshed)) {
+        setDismissed(true);
+      }
     } finally {
       setUpdating(null);
     }
@@ -115,9 +128,7 @@ export function useCliUpdates(enabled: boolean) {
       !dismissed &&
       (error ||
         updated.length > 0 ||
-        items.some(
-          (item) => item.status === "available" || item.status === "error",
-        )),
+        needsAttention(items)),
     dismiss: () => setDismissed(true),
   };
 }

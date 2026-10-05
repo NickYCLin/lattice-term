@@ -93,7 +93,7 @@ it("keeps updating the rest when one CLI fails and reports what changed", async 
   }
 });
 
-it("stays open after everything is updated so the result is visible", async () => {
+it("closes the card once every CLI is updated", async () => {
   const root = createRoot(installFakeDom() as unknown as Element);
   let api!: ReturnType<typeof useCliUpdates>;
   function Probe() {
@@ -106,13 +106,39 @@ it("stays open after everything is updated so the result is visible", async () =
       { id: "codex", label: "Codex", currentVersion: "1.0.0", latestVersion: "1.1.0", status: "available", sourceUrl: "", updatable: true },
     ]);
     await act(async () => { await api.check(); });
+    expect(api.visible).toBe(true);
     invoke.mockResolvedValueOnce("ok").mockResolvedValueOnce([
       { id: "codex", label: "Codex", currentVersion: "1.1.0", latestVersion: "1.1.0", status: "current", sourceUrl: "", updatable: true },
     ]);
     await act(async () => { await api.updateCli("codex"); });
     expect(api.updated).toEqual(["Codex"]);
+    expect(api.visible).toBe(false);
+  } finally {
+    await act(async () => { root.unmount(); });
+    vi.clearAllMocks();
+  }
+});
+
+it("stays open while another CLI still has an update", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useCliUpdates>;
+  function Probe() {
+    api = useCliUpdates(false);
+    return null;
+  }
+  const item = (id: string, label: string, status: CliUpdate["status"]): CliUpdate => ({
+    id, label, currentVersion: "1.0.0", latestVersion: "1.1.0", status, sourceUrl: "", updatable: true,
+  });
+  try {
+    await act(async () => { root.render(<Probe />); });
+    invoke.mockResolvedValueOnce([item("codex", "Codex", "available"), item("claude", "Claude Code", "available")]);
+    await act(async () => { await api.check(); });
+    invoke.mockResolvedValueOnce("ok").mockResolvedValueOnce([item("codex", "Codex", "current"), item("claude", "Claude Code", "available")]);
+    await act(async () => { await api.updateCli("codex"); });
     expect(api.visible).toBe(true);
-    await act(async () => { api.dismiss(); });
+    invoke.mockResolvedValueOnce("ok").mockResolvedValueOnce([item("codex", "Codex", "current"), item("claude", "Claude Code", "current")]);
+    await act(async () => { await api.updateAll(); });
+    expect(api.updated).toEqual(["Codex", "Claude Code"]);
     expect(api.visible).toBe(false);
   } finally {
     await act(async () => { root.unmount(); });
