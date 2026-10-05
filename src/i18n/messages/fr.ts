@@ -2069,6 +2069,7 @@ export const messages: Messages = {
   "history.directoryMissing": "Le répertoire de travail d'origine n'existe plus. Vous pouvez lire cet historique, mais restaurez ce dossier avant de continuer.",
   "history.archive": "Export en lecture seule",
   "history.archiveHint": "Cet export cloud importé manuellement est en lecture seule. Il n'est pas synchronisé et ne peut pas reprendre la conversation d'origine. Continuez dans l'application d'origine.",
+  "history.cursorReadOnly": "Ceci est une conversation Cursor locale. Elle est en lecture seule ici ; poursuivez-la dans Cursor.",
   "history.importExport": "Sélectionnez un conversations.json exporté (8 Mo maximum ; traité localement)",
   "history.importArchive": "Importer la conversation sélectionnée (lecture seule)",
   "history.exportTooLarge": "L'export dépasse 8 Mo ; divisez-le d'abord.",

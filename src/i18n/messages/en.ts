@@ -107,6 +107,7 @@ export const en: Messages = {
   "history.directoryMissing": "The original working directory is gone. You can read this history, but restore that folder before continuing.",
   "history.archive": "Read-only export",
   "history.archiveHint": "This manually imported cloud export is read-only. It is not synchronized and cannot resume the original conversation. Continue in the original app.",
+  "history.cursorReadOnly": "This is a local Cursor conversation. It is read-only here; continue it in Cursor.",
   "history.importExport": "Select an exported conversations.json (up to 8 MB; processed locally)",
   "history.importArchive": "Import selected conversation (read-only)",
   "history.exportTooLarge": "The export exceeds 8 MB; split it first.",

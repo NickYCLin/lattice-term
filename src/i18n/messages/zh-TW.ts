@@ -104,6 +104,7 @@ export const zhTW = {
   "history.directoryMissing": "原工作目錄已不存在；仍可閱讀紀錄，但要接續請先還原該資料夾。",
   "history.archive": "唯讀匯出檔",
   "history.archiveHint": "這是手動匯入的雲端對話備份，只能閱讀；不會同步，也無法以原對話 ID 接續。請在原應用程式繼續對話。",
+  "history.cursorReadOnly": "這是本機 Cursor 的對話紀錄，只能在這裡閱讀；要接續請回到 Cursor。",
   "history.importExport": "選擇手動匯出的 conversations.json（最多 8 MB；本機處理）",
   "history.importArchive": "匯入選取的對話（唯讀）",
   "history.exportTooLarge": "匯出檔超過 8 MB，請先拆分。",

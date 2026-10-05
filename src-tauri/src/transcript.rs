@@ -46,6 +46,8 @@ pub enum TranscriptKind {
     Claude,
     /// `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session>.jsonl`
     Codex,
+    /// `~/.cursor/projects/<workspace-slug>/agent-transcripts/<id>/<id>.jsonl`
+    Cursor,
     /// `~/.gemini/tmp/<project-hash>/chats/session-*.jsonl`
     Gemini,
 }
@@ -56,6 +58,7 @@ impl TranscriptKind {
             "antigravity" => Some(Self::Antigravity),
             "claude" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
+            "cursor" => Some(Self::Cursor),
             "gemini" => Some(Self::Gemini),
             _ => None,
         }
@@ -945,6 +948,13 @@ fn history_root_with_archive(
     profile: Option<&Path>,
     archived: bool,
 ) -> Option<PathBuf> {
+    if kind == TranscriptKind::Cursor {
+        // Cursor has no account profiles and no archive folder.
+        if profile.is_some() || archived {
+            return None;
+        }
+        return cursor_root();
+    }
     let name = match kind {
         TranscriptKind::Codex if archived => "archived_sessions",
         TranscriptKind::Codex => "sessions",
@@ -980,6 +990,9 @@ fn history_root_with_archive(
 }
 
 fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
+    if kind == TranscriptKind::Cursor {
+        return first_line_preview(visible_user_text(&cursor_first_user_text(path)?));
+    }
     if kind == TranscriptKind::Gemini {
         return gemini_turns(path)?
             .iter()
@@ -1217,7 +1230,9 @@ fn push_history_entry(
     // Keep readable history even when its project has since moved;
     // only the resume actions need a still-existing directory.
     let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
-    let resumable = canonical.is_some() && !options.archived;
+    // Cursor's agent transcripts are written by the editor; its CLI keeps
+    // separate chats, so these can be read here but not resumed.
+    let resumable = canonical.is_some() && !options.archived && kind != TranscriptKind::Cursor;
     let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd.trim_start_matches(r"\\?\")));
     let Ok(metadata) = fs::symlink_metadata(&path) else {
         return Ok(());
@@ -1231,6 +1246,7 @@ fn push_history_entry(
         TranscriptKind::Antigravity => "antigravity",
         TranscriptKind::Claude => "claude",
         TranscriptKind::Codex => "codex",
+        TranscriptKind::Cursor => "cursor",
         TranscriptKind::Gemini => "gemini",
     };
     result.push((
@@ -1482,7 +1498,24 @@ fn collect_local_conversations(
             TranscriptKind::Claude,
             TranscriptKind::Gemini,
             TranscriptKind::Antigravity,
+            TranscriptKind::Cursor,
         ] {
+            if kind == TranscriptKind::Cursor {
+                if let Some(root) = history_root(kind, None) {
+                    scan_cursor_conversations(
+                        &root,
+                        &cursor_workspace_folders(),
+                        &mut entries,
+                        HistoryScanOptions {
+                            all,
+                            archived: false,
+                            retained,
+                        },
+                        &mut incomplete,
+                    )?;
+                }
+                continue;
+            }
             if kind == TranscriptKind::Antigravity {
                 if let Some(root) = history_root(kind, None) {
                     scan_antigravity_conversations(
@@ -1680,6 +1713,7 @@ pub fn read_local_conversation_snapshot(
             is_gemini_session(path) && read_gemini_session_id(path).as_deref() == Some(session_id)
         }),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
+        TranscriptKind::Cursor => cursor_transcript(&root, session_id),
     }
     .ok_or("The local conversation is no longer available.")?;
     let mut snapshot = read_conversation_snapshot(&path, kind)?;
@@ -1720,6 +1754,7 @@ pub fn read_session_conversation(
         TranscriptKind::Claude => locate_claude_in(&root, working_directory, Some(session_id)),
         TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
+        TranscriptKind::Cursor => cursor_transcript(&root, session_id),
     }
     .ok_or("The session conversation is not available yet.")?;
     read_conversation_messages(&path, kind)
@@ -1813,6 +1848,12 @@ fn read_conversation_snapshot(
             TranscriptKind::Antigravity => {
                 if let Some((role, text)) = antigravity_turn(value) {
                     push(role, text.trim().to_string());
+                }
+                return;
+            }
+            TranscriptKind::Cursor => {
+                if let Some((role, text)) = cursor_turn(value) {
+                    push(role, text);
                 }
                 return;
             }
@@ -2038,6 +2079,328 @@ fn locate_antigravity(working_directory: &str, captured: Option<&str>) -> Option
     locate_antigravity_in(&root, working_directory, captured)
 }
 
+/// Cursor wraps what the person typed in `<user_query>` and sends rules,
+/// git status, and skills as separate user rows. Only the typed query and
+/// the assistant's text are conversation content.
+fn cursor_turn(value: &Value) -> Option<(&'static str, String)> {
+    let role = match value.get("role").and_then(Value::as_str)? {
+        "user" => "user",
+        "assistant" => "assistant",
+        _ => return None,
+    };
+    let text = content_text(value.get("message")?.get("content")?);
+    let text = if role == "user" {
+        cursor_user_query(&text)?
+    } else {
+        text
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| (role, text.to_string()))
+}
+
+fn cursor_user_query(text: &str) -> Option<String> {
+    const OPEN: &str = "<user_query>";
+    const CLOSE: &str = "</user_query>";
+    let mut queries = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN) {
+        let body = &rest[start + OPEN.len()..];
+        let end = body.find(CLOSE).unwrap_or(body.len());
+        queries.push(body[..end].trim());
+        rest = &body[(end + CLOSE.len()).min(body.len())..];
+    }
+    if !queries.is_empty() {
+        return Some(queries.join("\n"));
+    }
+    // Rows that start with a tag and carry no query are injected context.
+    let text = text.trim();
+    (!text.starts_with('<')).then(|| text.to_string())
+}
+
+fn cursor_first_user_text(path: &Path) -> Option<String> {
+    let file = open_regular_transcript(path)?;
+    let mut reader = BufReader::new(file).take(MAX_TRANSCRIPT_FILE_BYTES + 1);
+    let mut line = Vec::new();
+    for _ in 0..64 {
+        if !read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES).ok()?? {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if let Some(("user", text)) = cursor_turn(&value) {
+            if !visible_user_text(&text).is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn parse_cursor(path: &Path, max_chars: usize) -> Option<String> {
+    if max_chars == 0 {
+        return None;
+    }
+    let mut out = String::new();
+    let mut truncated = false;
+    let skipped_oversized = visit_transcript_rows(path, |value| {
+        if let Some((role, text)) = cursor_turn(value) {
+            push_turn(&mut out, role, &text);
+            truncated |= trim_tail(&mut out, max_chars);
+        }
+    })?;
+    finish_transcript(out, truncated || skipped_oversized)
+}
+
+const MAX_CURSOR_PROJECTS: usize = 4096;
+const MAX_CURSOR_WORKSPACE_FILE_BYTES: u64 = 64 * 1024;
+
+fn cursor_root() -> Option<PathBuf> {
+    fs::canonicalize(home()?.join(".cursor").join("projects")).ok()
+}
+
+fn is_cursor_transcript(path: &Path) -> bool {
+    let Some(id) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".jsonl"))
+    else {
+        return false;
+    };
+    let parent = path.parent();
+    antigravity_conversation_id(id)
+        && parent
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            == Some(id)
+        && parent
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            == Some("agent-transcripts")
+}
+
+/// Resolves `<root>/<project>/agent-transcripts/<id>/<id>.jsonl` for one
+/// exact conversation ID and keeps the canonical result inside the root.
+fn cursor_transcript(root: &Path, id: &str) -> Option<PathBuf> {
+    if !antigravity_conversation_id(id) {
+        return None;
+    }
+    let root = fs::canonicalize(root).ok()?;
+    for project in fs::read_dir(&root)
+        .ok()?
+        .flatten()
+        .take(MAX_CURSOR_PROJECTS)
+    {
+        if !project.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let candidate = project
+            .path()
+            .join("agent-transcripts")
+            .join(id)
+            .join(format!("{id}.jsonl"));
+        if let Some(path) = fs::canonicalize(candidate)
+            .ok()
+            .filter(|path| path.starts_with(&root) && path.is_file())
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Cursor names a project folder after its workspace path: the drive letter
+/// is lower-cased and every run of other non-alphanumeric characters,
+/// including CJK text, becomes one hyphen.
+fn cursor_slug(path: &str) -> String {
+    let path = path.trim_start_matches(r"\\?\");
+    let mut slug = String::new();
+    for (index, character) in path.chars().enumerate() {
+        if character.is_ascii_alphanumeric() {
+            let drive = index == 0 && path[1..].starts_with(':');
+            slug.push(if drive {
+                character.to_ascii_lowercase()
+            } else {
+                character
+            });
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.trim_matches('-').to_string()
+}
+
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = text.get(index + 1..index + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// Converts a local `file://` workspace URI from Cursor's workspace storage
+/// to a filesystem path. Remote and WSL workspaces are skipped.
+fn cursor_folder_path(uri: &str) -> Option<String> {
+    let path = percent_decode(uri.strip_prefix("file:///")?)?;
+    if path.contains('\0') {
+        return None;
+    }
+    let bytes = path.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return Some(path.replace('/', "\\"));
+    }
+    Some(format!("/{path}"))
+}
+
+fn cursor_workspace_folders() -> HashMap<String, String> {
+    let mut folders = HashMap::new();
+    let Some(storage) =
+        dirs::config_dir().map(|dir| dir.join("Cursor").join("User").join("workspaceStorage"))
+    else {
+        return folders;
+    };
+    let Ok(entries) = fs::read_dir(storage) else {
+        return folders;
+    };
+    for entry in entries.flatten().take(MAX_CURSOR_PROJECTS) {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let Some(file) = open_regular_transcript(&entry.path().join("workspace.json")) else {
+            continue;
+        };
+        let mut raw = String::new();
+        if file
+            .take(MAX_CURSOR_WORKSPACE_FILE_BYTES + 1)
+            .read_to_string(&mut raw)
+            .is_err()
+            || raw.len() as u64 > MAX_CURSOR_WORKSPACE_FILE_BYTES
+        {
+            continue;
+        }
+        let Some(path) = serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|value| value.get("folder")?.as_str().and_then(cursor_folder_path))
+        else {
+            continue;
+        };
+        // Distinct paths can share a lossy slug; keep the first rather than
+        // guessing, since the path is only shown beside read-only history.
+        folders.entry(cursor_slug(&path)).or_insert(path);
+    }
+    folders
+}
+
+/// Lists Cursor agent transcripts that hold at least one typed message.
+/// The transcript rows carry no workspace path, so it comes from the
+/// editor's workspace storage when a folder maps to the project slug.
+fn scan_cursor_conversations(
+    root: &Path,
+    folders: &HashMap<String, String>,
+    result: &mut Vec<(LocalConversation, PathBuf)>,
+    options: HistoryScanOptions,
+    incomplete: &mut bool,
+) -> Result<(), String> {
+    let projects = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            if error.kind() != io::ErrorKind::NotFound {
+                *incomplete = true;
+            }
+            return Ok(());
+        }
+    };
+    let mut visited = 0usize;
+    for project in projects {
+        let Ok(project) = project else {
+            *incomplete = true;
+            continue;
+        };
+        if !project.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let slug = project.file_name().to_string_lossy().into_owned();
+        let Ok(chats) = fs::read_dir(project.path().join("agent-transcripts")) else {
+            continue;
+        };
+        for chat in chats {
+            let Ok(chat) = chat else {
+                *incomplete = true;
+                continue;
+            };
+            visited += 1;
+            if visited > HISTORY_MAX_ENTRIES {
+                *incomplete = true;
+                return if options.all {
+                    Err(
+                        "Local history exceeds the scan limit; no conversations were opened."
+                            .into(),
+                    )
+                } else {
+                    Ok(())
+                };
+            }
+            if !chat.file_type().is_ok_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            let id = chat.file_name().to_string_lossy().into_owned();
+            if !antigravity_conversation_id(&id) {
+                continue;
+            }
+            let path = chat.path().join(format!("{id}.jsonl"));
+            if !fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
+                || cursor_first_user_text(&path).is_none()
+            {
+                continue;
+            }
+            let cwd = folders.get(&slug).cloned().unwrap_or_default();
+            push_history_entry(
+                TranscriptKind::Cursor,
+                HistoryCandidate { path, id, cwd },
+                None,
+                &options,
+                result,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn locate_cursor_in(
+    root: &Path,
+    working_directory: &str,
+    captured: Option<&str>,
+) -> Option<PathBuf> {
+    let root = fs::canonicalize(root).ok()?;
+    if let Some(transcript) = captured.and_then(|id| cursor_transcript(&root, id)) {
+        return Some(transcript);
+    }
+    let cwd = fs::canonicalize(working_directory).ok()?;
+    let project = fs::canonicalize(
+        root.join(cursor_slug(&cwd.to_string_lossy()))
+            .join("agent-transcripts"),
+    )
+    .ok()
+    .filter(|dir| dir.starts_with(&root))?;
+    newest_matching_with_limits(&project, MAX_TRANSCRIPT_SEARCH_ENTRIES, 1, |path| {
+        is_cursor_transcript(path) && cursor_first_user_text(path).is_some()
+    })
+}
+
+fn locate_cursor(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
+    locate_cursor_in(&cursor_root()?, working_directory, captured)
+}
+
 /// Reads the source CLI's most relevant conversation and returns it as plain,
 /// role-labelled text capped at `max_chars`, or `None` when nothing is found.
 pub fn export(
@@ -2084,6 +2447,10 @@ pub fn export(
         TranscriptKind::Gemini => {
             let path = locate_gemini(working_directory, captured_session_id)?;
             parse_gemini(&path, max_chars)
+        }
+        TranscriptKind::Cursor => {
+            let path = locate_cursor(working_directory, captured_session_id)?;
+            parse_cursor(&path, max_chars)
         }
     }
 }
@@ -2815,6 +3182,167 @@ mod tests {
         assert_eq!(located_history, fs::canonicalize(&transcript2).unwrap());
     }
 
+    fn cursor_row(role: &str, text: &str) -> String {
+        serde_json::json!({
+            "role": role,
+            "message": { "content": [{ "type": "text", "text": text }] }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn cursor_turn_keeps_typed_queries_and_drops_injected_context() {
+        let query = serde_json::json!({
+            "role": "user",
+            "message": { "content": [{
+                "type": "text",
+                "text": "<attached_files>a.rs</attached_files>\n<user_query>\n修好登入\n</user_query>"
+            }]}
+        });
+        assert_eq!(cursor_turn(&query), Some(("user", "修好登入".to_string())));
+        let context = serde_json::json!({
+            "role": "user",
+            "message": { "content": [{ "type": "text", "text": "<git_status>\nclean\n</git_status>" }] }
+        });
+        assert_eq!(cursor_turn(&context), None);
+        let plain = serde_json::json!({
+            "role": "user",
+            "message": { "content": "plain question" }
+        });
+        assert_eq!(
+            cursor_turn(&plain),
+            Some(("user", "plain question".to_string()))
+        );
+        let answer = serde_json::json!({
+            "role": "assistant",
+            "message": { "content": [
+                { "type": "text", "text": "first" },
+                { "type": "tool_use", "name": "Read" },
+                { "type": "text", "text": "second" }
+            ]}
+        });
+        assert_eq!(
+            cursor_turn(&answer),
+            Some(("assistant", "first\nsecond".to_string()))
+        );
+        assert_eq!(
+            cursor_turn(&serde_json::json!({ "role": "system", "message": { "content": "x" } })),
+            None
+        );
+    }
+
+    #[test]
+    fn cursor_slug_matches_cursor_project_folders() {
+        assert_eq!(
+            cursor_slug(r"D:\project\112-114桃園出流管制\regflow"),
+            "d-project-112-114-regflow"
+        );
+        assert_eq!(
+            cursor_slug(r"\\?\D:\project\NetZeroFastTrack"),
+            "d-project-NetZeroFastTrack"
+        );
+        assert_eq!(cursor_slug("/home/me/my app"), "home-me-my-app");
+        assert_eq!(
+            cursor_folder_path("file:///d%3A/project/112-114%E6%A1%83%E5%9C%92/regflow").as_deref(),
+            Some(r"d:\project\112-114桃園\regflow")
+        );
+        assert_eq!(
+            cursor_folder_path("file:///home/me/app").as_deref(),
+            Some("/home/me/app")
+        );
+        assert_eq!(cursor_folder_path("vscode-remote://wsl+Ubuntu/home"), None);
+        assert_eq!(cursor_folder_path("file:///d%3/bad"), None);
+    }
+
+    #[test]
+    fn cursor_transcripts_are_listed_read_only_and_resolved_exactly() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let workspace_path = fs::canonicalize(workspace.path()).unwrap();
+        let slug = cursor_slug(&workspace_path.to_string_lossy());
+        let id = "0199aa11-bb22-4c33-8d44-ee55ff667788";
+        let chat = root.path().join(&slug).join("agent-transcripts").join(id);
+        fs::create_dir_all(&chat).unwrap();
+        let transcript = chat.join(format!("{id}.jsonl"));
+        fs::write(
+            &transcript,
+            [
+                cursor_row("user", "<agent_skills>skills</agent_skills>"),
+                cursor_row("user", "<user_query>看一下 README</user_query>"),
+                cursor_row("assistant", "README 已更新"),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let context_id = "11111111-2222-3333-4444-555555555555";
+        let context_chat = root
+            .path()
+            .join(&slug)
+            .join("agent-transcripts")
+            .join(context_id);
+        fs::create_dir_all(&context_chat).unwrap();
+        fs::write(
+            context_chat.join(format!("{context_id}.jsonl")),
+            cursor_row("user", "<git_status>clean</git_status>"),
+        )
+        .unwrap();
+        let mismatched = root
+            .path()
+            .join(&slug)
+            .join("agent-transcripts")
+            .join("22222222-3333-4444-5555-666666666666");
+        fs::create_dir_all(&mismatched).unwrap();
+        fs::write(
+            mismatched.join(format!("{id}.jsonl")),
+            cursor_row("user", "wrong folder"),
+        )
+        .unwrap();
+
+        let folders =
+            HashMap::from([(slug.clone(), workspace_path.to_string_lossy().into_owned())]);
+        let mut entries = Vec::new();
+        let mut incomplete = false;
+        scan_cursor_conversations(
+            root.path(),
+            &folders,
+            &mut entries,
+            HistoryScanOptions {
+                all: true,
+                archived: false,
+                retained: 10,
+            },
+            &mut incomplete,
+        )
+        .unwrap();
+        assert!(!incomplete);
+        assert_eq!(entries.len(), 1);
+        let (entry, path) = &entries[0];
+        assert_eq!(entry.definition_id, "cursor");
+        assert_eq!(entry.native_session_id, id);
+        assert!(!entry.resumable);
+        assert_eq!(entry.working_directory, workspace_path.to_string_lossy());
+        assert_eq!(
+            history_preview(path, TranscriptKind::Cursor).as_deref(),
+            Some("看一下 README")
+        );
+
+        let canonical = fs::canonicalize(&transcript).unwrap();
+        assert_eq!(cursor_transcript(root.path(), id), Some(canonical.clone()));
+        assert_eq!(cursor_transcript(root.path(), "../outside"), None);
+        assert_eq!(
+            cursor_transcript(root.path(), "22222222-3333-4444-5555-666666666666"),
+            None
+        );
+        assert_eq!(
+            locate_cursor_in(root.path(), workspace_path.to_str().unwrap(), None),
+            Some(canonical.clone())
+        );
+        let text = parse_cursor(&canonical, 5000).unwrap();
+        assert!(text.contains("【使用者】\n看一下 README"));
+        assert!(text.contains("【助理】\nREADME 已更新"));
+        assert!(!text.contains("skills"));
+    }
+
     #[test]
     fn codex_transcript_skips_oversized_rows_and_rejects_oversized_files() {
         let directory = tempfile::tempdir().unwrap();
@@ -3342,7 +3870,7 @@ pub fn session_usage(
         TranscriptKind::Codex => {
             codex_usage(&locate_codex(working_directory, Some(captured_session_id))?)
         }
-        TranscriptKind::Gemini | TranscriptKind::Antigravity => None,
+        TranscriptKind::Gemini | TranscriptKind::Antigravity | TranscriptKind::Cursor => None,
     }
 }
 
@@ -3360,6 +3888,41 @@ mod usage_tests {
         let usage = session_usage(TranscriptKind::Claude, &directory, &session).expect("usage");
         println!("{usage:?}");
         assert!(usage.api_calls > 0 && usage.output_tokens > 0);
+    }
+
+    /// Lists what this machine's own history yields per CLI; depends on local
+    /// data. `cargo test --lib real_history_counts -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_history_counts() {
+        let entries = list_local_conversations_with_options(&[], true, false).unwrap();
+        let mut counts = std::collections::BTreeMap::new();
+        for entry in &entries {
+            let count: &mut (usize, usize) = counts.entry(entry.definition_id.clone()).or_default();
+            count.0 += 1;
+            count.1 += usize::from(entry.resumable);
+        }
+        println!("definition -> (listed, resumable): {counts:?}");
+        let cursor_with_cwd = entries
+            .iter()
+            .filter(|entry| entry.definition_id == "cursor" && !entry.working_directory.is_empty())
+            .count();
+        println!("cursor entries with a mapped workspace: {cursor_with_cwd}");
+        for entry in entries
+            .iter()
+            .filter(|entry| entry.definition_id == "cursor")
+            .take(3)
+        {
+            let messages =
+                read_local_conversation(&entry.definition_id, &entry.native_session_id, None, &[])
+                    .unwrap();
+            println!(
+                "cursor {} messages={} titled={}",
+                entry.native_session_id,
+                messages.len(),
+                !entry.title.is_empty()
+            );
+        }
     }
 
     #[test]

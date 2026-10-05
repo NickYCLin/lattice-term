@@ -2069,6 +2069,7 @@ export const messages: Messages = {
   "history.directoryMissing": "원래 작업 디렉터리가 없습니다. 기록은 읽을 수 있지만 계속하려면 해당 폴더를 복원하세요.",
   "history.archive": "읽기 전용 내보내기",
   "history.archiveHint": "수동으로 가져온 클라우드 내보내기는 읽기 전용입니다. 동기화되지 않으며 원래 대화를 이어갈 수 없습니다. 원래 앱에서 계속하세요.",
+  "history.cursorReadOnly": "로컬 Cursor 대화입니다. 여기서는 읽기 전용이며, 이어서 하려면 Cursor에서 계속하세요.",
   "history.importExport": "내보낸 conversations.json 선택(최대 8MB, 로컬에서 처리)",
   "history.importArchive": "선택한 대화 가져오기(읽기 전용)",
   "history.exportTooLarge": "내보내기 파일이 8MB를 넘습니다. 먼저 나누세요.",

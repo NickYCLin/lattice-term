@@ -2069,6 +2069,7 @@ export const messages: Messages = {
   "history.directoryMissing": "Das ursprüngliche Arbeitsverzeichnis fehlt. Sie können den Verlauf lesen, müssen den Ordner aber wiederherstellen, bevor Sie fortfahren.",
   "history.archive": "Schreibgeschützter Export",
   "history.archiveHint": "Dieser manuell importierte Cloud-Export ist schreibgeschützt. Er wird nicht synchronisiert und kann die ursprüngliche Unterhaltung nicht fortsetzen. Fahren Sie in der ursprünglichen App fort.",
+  "history.cursorReadOnly": "Dies ist eine lokale Cursor-Unterhaltung. Sie ist hier schreibgeschützt; setzen Sie sie in Cursor fort.",
   "history.importExport": "Exportierte conversations.json auswählen (bis 8 MB; lokal verarbeitet)",
   "history.importArchive": "Ausgewählte Unterhaltung importieren (schreibgeschützt)",
   "history.exportTooLarge": "Der Export ist größer als 8 MB; teilen Sie ihn zuerst auf.",

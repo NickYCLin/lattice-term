@@ -305,7 +305,8 @@ const FALLBACK_CATALOG: AgentDefinition[] = FALLBACK_CATALOG_SOURCE.map(
       id === "codex" ||
       id === "claude" ||
       id === "gemini" ||
-      id === "antigravity",
+      id === "antigravity" ||
+      id === "cursor",
     installed: false,
     installedPath: null,
     consumerOauthDeprecated: id === "gemini",

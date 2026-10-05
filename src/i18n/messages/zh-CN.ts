@@ -8,6 +8,7 @@ export const messages: Messages = {
   "history.directoryMissing": "原工作目录已不存在；仍可阅读记录，但需先恢复该文件夹才能继续。",
   "history.archive": "只读导出文件",
   "history.archiveHint": "这是手动导入的云端对话备份，仅供阅读；不会同步，也无法用原对话 ID 继续。请在原应用中继续对话。",
+  "history.cursorReadOnly": "这是本机 Cursor 的对话记录，只能在这里阅读；要继续请回到 Cursor。",
   "history.importExport": "选择导出的 conversations.json（最多 8 MB；本地处理）",
   "history.importArchive": "导入选中的对话（只读）",
   "history.exportTooLarge": "导出文件超过 8 MB，请先拆分。",

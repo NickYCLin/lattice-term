@@ -2073,6 +2073,7 @@ export const messages: Messages = {
   "history.directoryMissing": "元の作業ディレクトリがありません。履歴は読めますが、続けるにはそのフォルダーを復元してください。",
   "history.archive": "読み取り専用エクスポート",
   "history.archiveHint": "手動でインポートしたクラウドのエクスポートは読み取り専用です。同期されず、元の会話を再開することもできません。元のアプリで続けてください。",
+  "history.cursorReadOnly": "ローカルの Cursor の会話です。ここでは読み取り専用です。続きは Cursor で行ってください。",
   "history.importExport": "エクスポートした conversations.json を選択（最大 8 MB、ローカルで処理）",
   "history.importArchive": "選択した会話をインポート（読み取り専用）",
   "history.exportTooLarge": "エクスポートが 8 MB を超えています。先に分割してください。",

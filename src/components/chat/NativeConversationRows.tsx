@@ -32,6 +32,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   const { t } = useI18n();
   const [opening, setOpening] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ key: string; detail: string } | null>(null);
+  const [reading, setReading] = useState<{ key: string; snapshot: NativeMessageSnapshot } | null>(null);
   const inFlight = useRef(false);
   const known = useMemo(() => new Set(chat.threads.filter(thread => thread.nativeSessionId).map(thread => nativeConversationKey({
     definitionId: thread.definitionId, profileId: thread.accountProfileId ?? null, nativeSessionId: thread.nativeSessionId!,
@@ -44,6 +45,10 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   async function open(entry: LocalConversation) {
     if (inFlight.current || !history) return;
     const key = nativeConversationKey(entry);
+    if (reading?.key === key) {
+      setReading(null);
+      return;
+    }
     inFlight.current = true;
     setOpening(key);
     setFailed(null);
@@ -52,6 +57,12 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
         definitionId: entry.definitionId, nativeSessionId: entry.nativeSessionId,
         profileId: entry.profileId, profiles: JSON.parse(history.profileKey),
       });
+      // Cursor keeps editor chats that no CLI here can continue, so they are
+      // shown in place rather than becoming a thread with a composer.
+      if (entry.definitionId === "cursor") {
+        setReading({ key, snapshot });
+        return;
+      }
       const proxy = isProxyConversation(entry) ? nativeConversationProxy(entry, proxies) : undefined;
       chat.importNativeConversation({
         definitionId: entry.definitionId,
@@ -77,6 +88,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
         const key = nativeConversationKey(entry);
         return <li key={key}>
           <button type="button" className="chat-thread" disabled={opening !== null} aria-busy={opening === key}
+            aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
             title={entry.workingDirectory} onClick={() => void open(entry)}>
             <span>
               <span className="chat-thread__title">{entry.title || t("chat.untitled")}</span>
@@ -88,6 +100,12 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
             </span>
           </button>
           {failed?.key === key && <p className="chat-native-rows__error" role="alert">{t("history.stale")} {failed.detail}</p>}
+          {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>
+            <p className="chat-native-rows__hint">{t("history.cursorReadOnly")}</p>
+            {reading.snapshot.truncated && <p className="chat-native-rows__hint">{t("history.truncated")}</p>}
+            {reading.snapshot.messages.map((message, index) =>
+              <p key={index} className={`chat-native-rows__message chat-native-rows__message--${message.role}`}>{message.text}</p>)}
+          </div>}
         </li>;
       })}
     </ul>}
