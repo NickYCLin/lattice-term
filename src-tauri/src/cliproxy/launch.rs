@@ -132,6 +132,8 @@ impl ProxyLaunch {
         match definition_id {
             "claude" => vec![
                 ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_CODE_OAUTH_TOKEN", None),
+                ("ANTHROPIC_CUSTOM_HEADERS", None),
                 ("CLAUDE_CODE_USE_BEDROCK", None),
                 ("CLAUDE_CODE_USE_VERTEX", None),
                 ("CLAUDE_CODE_USE_FOUNDRY", None),
@@ -361,6 +363,8 @@ mod tests {
         assert!(claude.contains(&("ANTHROPIC_BASE_URL", Some("http://127.0.0.1:8317/prefix"))));
         assert!(claude.contains(&("ANTHROPIC_AUTH_TOKEN", Some("fixture-secret"))));
         assert!(claude.contains(&("ANTHROPIC_API_KEY", None)));
+        assert!(claude.contains(&("CLAUDE_CODE_OAUTH_TOKEN", None)));
+        assert!(claude.contains(&("ANTHROPIC_CUSTOM_HEADERS", None)));
         let gemini = proxy.agent_environment("gemini");
         assert!(gemini.contains(&(
             "GOOGLE_GEMINI_BASE_URL",
