@@ -24,6 +24,27 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 
+const AGENT_METADATA = /(^|\n)[ \t]*<oai-mem-citation>[\s\S]*?(?:<\/oai-mem-citation>[ \t]*|$)/g;
+const FENCED_SEGMENT = /(^|\n)[ \t]*(```+|~~~+)[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|$)/g;
+
+/**
+ * Removes bookkeeping blocks a CLI appends for its own client, such as
+ * Codex memory citations, which are not meant to be read. Fenced code is
+ * left untouched so a reply that explains the format still shows it.
+ */
+export function stripAgentMetadata(source: string): string {
+  if (!source.includes("<oai-mem-citation>")) return source;
+  let result = "";
+  let last = 0;
+  for (const match of source.matchAll(FENCED_SEGMENT)) {
+    result += source.slice(last, match.index).replace(AGENT_METADATA, "$1");
+    result += match[0];
+    last = match.index + match[0].length;
+  }
+  result += source.slice(last).replace(AGENT_METADATA, "$1");
+  return result.trimEnd();
+}
+
 export function parseInline(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
   let buffer = "";
@@ -67,7 +88,7 @@ export function parseInline(text: string): InlineNode[] {
 }
 
 export function parseMarkdown(source: string): MarkdownBlock[] {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  const lines = stripAgentMetadata(source.replace(/\r\n?/g, "\n")).split("\n");
   const blocks: MarkdownBlock[] = [];
   let paragraph: string[] = [];
   let list: { ordered: boolean; items: string[] } | null = null;

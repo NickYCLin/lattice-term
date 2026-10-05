@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { stripAgentMetadata } from "../../app/chatMarkdown";
 import { REMOTE_ATTACHMENT_CHUNK, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
 import { CloseIcon, ImageFileIcon, PlusIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
@@ -121,7 +122,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
         {current.before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(current.before)}>{t("remote.chat.older")}</button>}
         {before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(null)}>{t("remote.chat.latest")}</button>}
         {current.items.map(item => <article className={`remote-chat-message remote-chat-message--${item.type}`} key={item.id}>
-          <small>{t(`remote.chat.item.${item.type}`)}</small><pre>{item.text}</pre>
+          <small>{t(`remote.chat.item.${item.type}`)}</small><pre>{stripAgentMetadata(item.text)}</pre>
           {item.truncated && <small>{t("remote.chat.truncated")}</small>}
           {item.pending && item.requestId && current.thread.runningTurnId && !item.truncated && <div className="remote-chat-actions">
             {[false, true].map(allow => <button key={String(allow)} className={allow ? "button button--primary button--sm" : "button button--secondary button--sm"} disabled={busy} onClick={() => { void act({ kind: "respond", threadId: selected, turnId: current.thread.runningTurnId!, requestId: item.requestId!, allow }); }}>{allow ? t("remote.chat.approve") : t("remote.chat.deny")}</button>)}
