@@ -4,6 +4,40 @@
 
 ---
 
+## [2026.10.6](https://github.com/NickYCLin/lattice-term/compare/v2026.10.5...v2026.10.6) (2026-10-05)
+
+
+### 🚀 新增功能
+
+* **chat:** 工作階段輸入框加入附件、聽寫與語音對話 ([4a477a6](https://github.com/NickYCLin/lattice-term/commit/4a477a6012ec66a68965a437da652b948212e973))
+* **cliproxy:** 依模型改用對應的助理 CLI 啟動 ([0522018](https://github.com/NickYCLin/lattice-term/commit/052201865569ae2bfda09292cf412607ddfce55c))
+* **cliproxy:** 對話頁代理模型改用同家 CLI 執行 ([fcc9f3d](https://github.com/NickYCLin/lattice-term/commit/fcc9f3d75defafad4aaf67aa835652f51e57455f))
+* **cliproxy:** 設定頁可一鍵讓 Gemini CLI 走代理 ([81d876b](https://github.com/NickYCLin/lattice-term/commit/81d876bfab3e8c165f4be34c37d73680745b12cb))
+* **history:** 讀取 Cursor 本機對話紀錄 ([0bbc321](https://github.com/NickYCLin/lattice-term/commit/0bbc321522bc0a92fda68f266d2afe0f23e1d887))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 專案清單也列出只在 Codex 開過的資料夾 ([2337dba](https://github.com/NickYCLin/lattice-term/commit/2337dbae14752d4be6706adad6929d30d2defc58))
+* **chat:** 隱藏 Codex 回覆結尾的記憶引用標籤 ([3a4fec2](https://github.com/NickYCLin/lattice-term/commit/3a4fec2c97533f2ba8ba72144205b730dd1b8777))
+* **cli-updates:** 助理都更新完就自動關掉更新卡片 ([5fa6b78](https://github.com/NickYCLin/lattice-term/commit/5fa6b78722bb184c31f5e5cea44735a344039667))
+* **cliproxy:** 修正 Gemini 登入狀態判斷被 clippy 擋下 ([0687792](https://github.com/NickYCLin/lattice-term/commit/068779290407bbde8a224d5786e6902c78d522c6))
+* **cliproxy:** 走代理時不讓 Claude 帶上訂閱登入 ([6d8e84d](https://github.com/NickYCLin/lattice-term/commit/6d8e84d6fb751370895b10813af9321a23857f50))
+* **cliproxy:** 顯示 Gemini CLI 回報的實際錯誤原因 ([d5d146c](https://github.com/NickYCLin/lattice-term/commit/d5d146c352158c9c8ad247483c54a6673ee6747d))
+* **remote:** 手機資料夾路徑拿掉 Windows 前綴 ([9eca28a](https://github.com/NickYCLin/lattice-term/commit/9eca28a9f4474682c6f6f649827e37706d5e9122))
+
+
+### 🎨 介面與視覺調整
+
+* **agents:** 重新設計執行中 Agent 列表並移除等待選單 ([2f97f04](https://github.com/NickYCLin/lattice-term/commit/2f97f042f57080c5ecf0abe126b2079995e94652))
+* **chat:** 工作階段輸入框改成卡片式設計 ([d37b0eb](https://github.com/NickYCLin/lattice-term/commit/d37b0eb03dfc87d487259c22ec7bdd0204983f49))
+* **remote:** 手機對話頁輸入框改成跟桌面一樣的卡片 ([98a69cc](https://github.com/NickYCLin/lattice-term/commit/98a69cce34c3dedf6075cb58734ca189d4ac9c8d))
+
+
+### 🧹 架構優化
+
+* **agents:** 模型選單拆成先選來源再選模型 ([2be71b1](https://github.com/NickYCLin/lattice-term/commit/2be71b1dd34148140de4befa2073f453ca9c2606))
+
 ## [2026.10.5](https://github.com/NickYCLin/lattice-term/compare/v2026.10.3...v2026.10.5) (2026-10-04)
 
 
