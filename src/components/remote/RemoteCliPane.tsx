@@ -4,6 +4,7 @@ import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSession
 import type { ThemeId } from "../../app/themes";
 import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOperation, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
 import { REMOTE_ATTACHMENT_CHUNK } from "../../app/remoteChat";
+import { displayPath } from "../../app/displayPath";
 import { ImageFileIcon, KeyboardIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
@@ -51,7 +52,7 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
         const card = remoteCliCard(item, t("terminal.model.pending"));
         return <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
           <strong>{card.title}</strong>{card.detail && <span>{card.detail}</span>}
-          {(item.directory || item.project) && <span className="remote-card-path">{t("remote.cli.folder", { path: item.directory || item.project || "" })}</span>}
+          {(item.directory || item.project) && <span className="remote-card-path">{t("remote.cli.folder", { path: displayPath(item.directory || item.project || "") })}</span>}
           <span className="remote-card-meta">
             {isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
             <small>{[card.place, item.detached ? t("remote.cli.background") : t("remote.cli.desktop")].filter(Boolean).join(" · ")}</small>
@@ -122,7 +123,7 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   }
   return <>
     <div className="remote-cli-heading"><strong>{card.title}</strong>{card.detail && <small>{card.detail}</small>}
-      {(selected.directory || selected.project) && <small className="remote-cli-heading__path" title={selected.directory || selected.project}>{t("remote.cli.folder", { path: selected.directory || selected.project || "" })}</small>}
+      {(selected.directory || selected.project) && <small className="remote-cli-heading__path" title={displayPath(selected.directory || selected.project || "")}>{t("remote.cli.folder", { path: displayPath(selected.directory || selected.project || "") })}</small>}
     </div>
     <p className="muted" role={problem ? "alert" : "status"}>{problem ? t("remote.cli.error") : ready ? t("remote.cli.ready") : t("remote.cli.loading")}</p>
     {truncated && <p className="muted">{t("remote.cli.truncated")}</p>}

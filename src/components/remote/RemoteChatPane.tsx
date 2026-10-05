@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
+import { displayPath } from "../../app/displayPath";
 import { REMOTE_ATTACHMENT_CHUNK, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
 import { CloseIcon, ImageFileIcon, PlusIcon, RefreshIcon, SendIcon, StopIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
@@ -112,12 +113,12 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
         const card = remoteThreadCard(thread, t("remote.chat.untitled"), t("terminal.model.pending"));
         return <button className="remote-chat-thread" key={thread.id} onClick={() => { setSelected(thread.id); setPage(null); setBefore(null); setProblem(null); }}>
           <strong className="remote-chat-thread__title">{card.title}</strong>{card.detail && <span>{card.detail}</span>}
-          {thread.directory && <span className="remote-card-path">{t("remote.cli.folder", { path: thread.directory })}</span>}
+          {thread.directory && <span className="remote-card-path">{t("remote.cli.folder", { path: displayPath(thread.directory) })}</span>}
           <span className="remote-card-meta"><ActivityPill activity={remoteThreadActivity(thread)} />{card.place && <small>{card.place}</small>}</span>
         </button>;
       })}
     </div> : current ? <>
-      <div className="remote-chat-heading"><strong>{heading!.title}</strong><small>{heading!.detail}</small>{current.thread.directory && <small className="remote-chat-heading__path">{t("remote.cli.folder", { path: current.thread.directory })}</small>}</div>
+      <div className="remote-chat-heading"><strong>{heading!.title}</strong><small>{heading!.detail}</small>{current.thread.directory && <small className="remote-chat-heading__path">{t("remote.cli.folder", { path: displayPath(current.thread.directory) })}</small>}</div>
       <div className="remote-chat-messages" aria-label={t("remote.chat.messages")}>
         {current.before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(current.before)}>{t("remote.chat.older")}</button>}
         {before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(null)}>{t("remote.chat.latest")}</button>}
