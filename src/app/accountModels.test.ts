@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountModelKey, accountModelLaunchSettings, accountModelOptions, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
+import { accountModelKey, accountModelLaunchSettings, accountModelOptions, cliProxyAgentFor, accountModelTargetKey, accountModelTargets, accountSessionLabel, hasChatModels, validCliProxyModel } from "./accountModels";
 import { cliProxyLaunchArguments, type CliProxyEndpoint } from "./cliProxyApi";
 import { fakeDefinition } from "./testFixtures/agentApis";
 import { selectThreadModel } from "./agentChat";
@@ -49,7 +49,7 @@ describe("account-aware model choices", () => {
     expect(shared.map((option) => option.label)).toEqual(["A 帳號 · OpenAI Codex · GPT-5.6", "B 帳號 · OpenAI Codex · GPT-5.6"]);
     expect(new Set(shared.map(accountModelKey)).size).toBe(2);
     expect(options.some((option) => option.accountProfileId === "b" && option.model === "a-only")).toBe(false);
-    expect(accountModelLaunchSettings(shared[1], [profile])).toEqual({ profileConfigPath: "/profiles/b", arguments: ["--model", "gpt-5.6"] });
+    expect(accountModelLaunchSettings(shared[1], [profile])).toEqual({ definitionId: "codex", profileConfigPath: "/profiles/b", arguments: ["--model", "gpt-5.6"] });
     expect(accountModelLaunchSettings(shared[0], [profile]).profileConfigPath).toBeNull();
   });
 
@@ -76,14 +76,27 @@ describe("account-aware model choices", () => {
     expect(accountModelKey(selection)).toBe(accountModelKey(legacy[2]));
     expect(legacy[2].label).toBe("工作代理 · B 帳號");
     expect(accountModelKey(selection)).not.toBe(accountModelKey(proxyOptions[1]));
+    // A Claude model runs in Claude Code; the Codex account folder is dropped.
     expect(accountModelLaunchSettings(selection, [profile], proxies)).toEqual({
-      profileConfigPath: "/profiles/b", arguments: ["-c", "model_provider=latticeterm_cliproxyapi", "-c", 'model_providers.latticeterm_cliproxyapi.base_url="http://localhost:8317/v1"', "--model", "claude-sonnet-4-5"],
+      definitionId: "claude", profileConfigPath: null, arguments: ["-c", "model_provider=latticeterm_cliproxyapi", "-c", 'model_providers.latticeterm_cliproxyapi.base_url="http://localhost:8317/v1"', "--model", "claude-sonnet-4-5"],
     });
     // A second proxy launches against its own address, under its own marker.
     expect(accountModelLaunchSettings({ ...proxyOptions[1], model: "claude-sonnet-4-5" }, [profile], proxies).arguments)
       .toEqual([...cliProxyLaunchArguments("https://proxy.example", "7f3a91"), "--model", "claude-sonnet-4-5"]);
     expect(() => accountModelLaunchSettings({ ...selection, proxyId: "removed" }, [profile], proxies)).toThrow("missing-proxy");
     expect(accountModelLaunchSettings({ ...selection, provider: undefined }, [profile]).arguments).toEqual(["--model", "claude-sonnet-4-5"]);
+  });
+
+  it("runs each proxy model in the CLI of the same vendor", () => {
+    expect(cliProxyAgentFor("claude-sonnet-4-5")).toBe("claude");
+    expect(cliProxyAgentFor("Claude-Opus-4-1")).toBe("claude");
+    expect(cliProxyAgentFor("gemini-2.5-pro")).toBe("gemini");
+    expect(cliProxyAgentFor("gpt-5.6-sol")).toBe("codex");
+    expect(cliProxyAgentFor("qwen3-coder")).toBe("codex");
+    expect(cliProxyAgentFor("my-claude-alias")).toBe("codex");
+    const selection = { definitionId: "codex", accountProfileId: "b", model: "gpt-5.6-sol", provider: "cliproxyapi" as const };
+    expect(accountModelLaunchSettings(selection, [profile], proxies)).toMatchObject({ definitionId: "codex", profileConfigPath: "/profiles/b" });
+    expect(accountModelLaunchSettings({ ...selection, accountProfileId: null, model: "gemini-2.5-pro" }, [profile], proxies)).toMatchObject({ definitionId: "gemini", profileConfigPath: null });
   });
 
   it("rejects empty, suspicious or unsupported proxy model selections before launch", () => {

@@ -1592,7 +1592,7 @@ export const en: Messages = {
   "chat.accountProfile": "Account",
   "accountModel.choose": "Choose a model",
   "terminal.proxy.model": "CLIProxyAPI model ID",
-  "terminal.proxy.hint": "Uses the proxy address and key from Settings to run this model through Codex. No CLI configuration needed.",
+  "terminal.proxy.hint": "Uses the proxy address and key from Settings. claude-* models run in Claude Code, gemini-* in Gemini CLI, and the rest in Codex. No CLI configuration needed.",
   "settings.cliProxy.title": "CLIProxyAPI",
   "settings.cliProxy.hint": "Enter your proxy address and key, then select CLIProxyAPI models in Fleet or Chat.",
   "settings.cliProxy.add": "Add a proxy",

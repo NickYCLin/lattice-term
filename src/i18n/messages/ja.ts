@@ -1264,7 +1264,7 @@ export const messages: Messages = {
   "chat.accountProfile": "会員アカウント",
   "accountModel.choose": "モデルを選ぶ",
   "terminal.proxy.model": "CLIProxyAPI モデル ID",
-  "terminal.proxy.hint": "設定画面のプロキシ URL とキーを使い、Codex でモデルを起動します。CLI の設定変更は不要です。",
+  "terminal.proxy.hint": "設定画面のプロキシ URL とキーを使います。claude-* は Claude Code、gemini-* は Gemini CLI、それ以外は Codex で起動します。CLI の設定変更は不要です。",
   "settings.cliProxy.title": "CLIProxyAPI",
   "settings.cliProxy.hint": "プロキシ URL とキーを入力すると、Fleet とチャットで CLIProxyAPI のモデルを選べます。",
   "settings.cliProxy.add": "プロキシを追加",

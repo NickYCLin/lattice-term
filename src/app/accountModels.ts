@@ -139,18 +139,27 @@ export function accountModelOptions(
   });
 }
 
+/** The CLI that matches a proxy model's vendor, so the program on screen and
+ * the model that answers are the same family. Anything else stays on Codex. */
+export function cliProxyAgentFor(model: string): "codex" | "claude" | "gemini" {
+  const id = model.toLowerCase();
+  if (id.startsWith("claude-")) return "claude";
+  if (id.startsWith("gemini-")) return "gemini";
+  return "codex";
+}
+
 /** Resolve the selected identity at launch time. A missing account must not
  * silently fall back to the default login or reuse another account's session. */
 export function accountModelLaunchSettings(
   selection: AccountModelSelection,
   profiles: readonly ChatAccountProfile[],
   proxies: readonly CliProxyEndpoint[] = [],
-): Pick<AgentLaunchRequest, "profileConfigPath" | "arguments"> {
+): Pick<AgentLaunchRequest, "definitionId" | "profileConfigPath" | "arguments"> {
   const profile = selection.accountProfileId === null ? null : profilesFor(profiles, selection.definitionId).find((entry) => entry.id === selection.accountProfileId);
   if (selection.accountProfileId !== null && !profile) throw new Error("account-model:missing-account");
   const profileConfigPath = profile?.configDirectory ?? null;
   if (!selection.provider) {
-    return { profileConfigPath, arguments: selection.model ? ["--model", selection.model] : [] };
+    return { definitionId: selection.definitionId, profileConfigPath, arguments: selection.model ? ["--model", selection.model] : [] };
   }
   if (selection.provider !== "cliproxyapi" || selection.definitionId !== "codex") throw new Error("account-model:unsupported-provider");
   if (!validCliProxyModel(selection.model)) throw new Error("account-model:invalid-proxy-model");
@@ -159,8 +168,13 @@ export function accountModelLaunchSettings(
   const wanted = selection.proxyId ?? CLI_PROXY_DEFAULT_ID;
   const endpoint = proxies.find((candidate) => candidate.id === wanted);
   if (!endpoint) throw new Error("account-model:missing-proxy");
+  // The saved marker is the same for every CLI; the backend turns it into
+  // Codex overrides or Claude/Gemini environment variables.
+  const definitionId = cliProxyAgentFor(selection.model);
   return {
-    profileConfigPath,
+    definitionId,
+    // A Codex account folder means nothing to Claude Code or Gemini CLI.
+    profileConfigPath: definitionId === "codex" ? profileConfigPath : null,
     arguments: [...cliProxyLaunchArguments(endpoint.baseUrl, endpoint.id), "--model", selection.model],
   };
 }

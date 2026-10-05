@@ -6064,7 +6064,7 @@ fn normalize_resume_session_id(
         ));
     }
     let can_resume = arguments.is_empty()
-        || (spec.id == "codex"
+        || (proxy_capable(spec.id)
             && crate::cliproxy::launch::base_from_arguments(arguments)?.is_some());
     if !can_resume {
         return Err(
@@ -6337,11 +6337,39 @@ fn resolve_launch(
     ))
 }
 
+/// CLIs that can be pointed at CLIProxyAPI. Codex takes the endpoint as
+/// config overrides; Claude Code and Gemini CLI take it from the environment.
+fn proxy_capable(definition_id: &str) -> bool {
+    matches!(definition_id, "codex" | "claude" | "gemini")
+}
+
+/// Gemini CLI only sends requests to `GOOGLE_GEMINI_BASE_URL` when it signs
+/// in with an API key. Any other saved method (Google login, Vertex AI)
+/// would quietly talk to Google, so refuse instead of starting it.
+fn gemini_proxy_auth_error(
+    user_settings: Option<&str>,
+    workspace_settings: Option<&str>,
+) -> Option<String> {
+    let selected = workspace_settings
+        .and_then(gemini_auth_type_from_json)
+        .or_else(|| user_settings.and_then(gemini_auth_type_from_json))?;
+    if selected.eq_ignore_ascii_case("gemini-api-key") || selected.eq_ignore_ascii_case("gateway") {
+        return None;
+    }
+    Some(format!(
+        "Gemini CLI 目前用「{selected}」登入，這種方式不會經過 CLIProxyAPI。請先在 Gemini CLI 執行 /auth 改選「Use Gemini API Key」，或把 settings.json 的 security.auth.selectedType 改成 gemini-api-key，再重新開啟。"
+    ))
+}
+
 fn migrate_deprecated_google_consumer_request(
     request: &AgentLaunchRequest,
     deprecated: bool,
 ) -> Result<AgentLaunchRequest, String> {
-    if request.definition_id != "gemini" || !deprecated {
+    // A proxy launch never uses the Google login, so it has nothing to migrate.
+    if request.definition_id != "gemini"
+        || !deprecated
+        || crate::cliproxy::launch::base_from_arguments(&request.arguments)?.is_some()
+    {
         return Ok(request.clone());
     }
     if (!request.arguments.is_empty() || request.resume_session_id.is_some())
@@ -6782,11 +6810,25 @@ pub fn launch_with_replay(
     } else {
         None
     };
-    let proxy_target = if definition_id == "codex" {
+    let proxy_target = if proxy_capable(&definition_id) {
         crate::cliproxy::launch::base_from_arguments(&arguments)?
     } else {
         None
     };
+    if proxy_target.is_some() && definition_id != "codex" {
+        arguments = crate::cliproxy::launch::without_saved_arguments(arguments);
+        if definition_id == "gemini" {
+            let workspace_settings =
+                std::fs::read_to_string(working_directory.join(".gemini").join("settings.json"))
+                    .ok();
+            if let Some(error) = gemini_proxy_auth_error(
+                read_account_file(&[".gemini", "settings.json"]).as_deref(),
+                workspace_settings.as_deref(),
+            ) {
+                return Err(error);
+            }
+        }
+    }
     if resumed_provider
         .as_deref()
         .is_some_and(crate::cliproxy::launch::is_managed_provider)
@@ -6801,7 +6843,7 @@ pub fn launch_with_replay(
         })
         .transpose()?;
     let mut proxy_catalog = None;
-    if let (Some(proxy), Some(target)) = (&proxy, &proxy_target) {
+    if let (true, Some(proxy), Some(target)) = (definition_id == "codex", &proxy, &proxy_target) {
         arguments = proxy.configure_arguments(arguments);
         if let Some(provider) = resumed_provider.as_deref() {
             let config_home = profile_config_path
@@ -7053,8 +7095,16 @@ pub fn launch_with_replay(
         }
     }
     command.env_remove(crate::cliproxy::launch::KEY_ENV);
-    if let Some(key) = proxy.as_ref().and_then(|proxy| proxy.key()) {
-        command.env(crate::cliproxy::launch::KEY_ENV, key);
+    if let Some(proxy) = proxy.as_ref() {
+        if let Some(key) = proxy.key().filter(|_| definition_id == "codex") {
+            command.env(crate::cliproxy::launch::KEY_ENV, key);
+        }
+        for (variable, value) in proxy.agent_environment(&definition_id) {
+            match value {
+                Some(value) => command.env(variable, value),
+                None => command.env_remove(variable),
+            }
+        }
     }
     if let Some(profile_config_path) = profile_config_path.as_deref() {
         if definition_id == "codex" {
@@ -9076,6 +9126,46 @@ session id: 0199aa11-"
     }
 
     #[test]
+    fn gemini_proxy_launch_requires_api_key_sign_in() {
+        let oauth = r#"{"security":{"auth":{"selectedType":"oauth-personal"}}}"#;
+        let api_key = r#"{"security":{"auth":{"selectedType":"gemini-api-key"}}}"#;
+        assert!(gemini_proxy_auth_error(Some(oauth), None)
+            .unwrap()
+            .contains("oauth-personal"));
+        assert!(gemini_proxy_auth_error(Some(api_key), None).is_none());
+        assert!(gemini_proxy_auth_error(Some(oauth), Some(api_key)).is_none());
+        assert!(gemini_proxy_auth_error(Some(api_key), Some(oauth)).is_some());
+        // Unset: Gemini CLI asks which method to use, and the API key path
+        // already points at the proxy.
+        assert!(gemini_proxy_auth_error(None, None).is_none());
+    }
+
+    #[test]
+    fn gemini_proxy_launch_is_not_moved_to_antigravity() {
+        let mut arguments = crate::cliproxy::launch::saved_arguments("http://localhost:8317", None);
+        arguments.extend(["--model".to_string(), "gemini-2.5-pro".to_string()]);
+        let request = AgentLaunchRequest {
+            definition_id: "gemini".to_string(),
+            label: String::new(),
+            executable: String::new(),
+            arguments,
+            resume_session_id: None,
+            group_id: None,
+            seed_input: None,
+            restore_existing_session: false,
+            profile_config_path: None,
+            sandbox: false,
+            detached: false,
+            working_directory: std::env::current_dir().unwrap().display().to_string(),
+            cols: 120,
+            rows: 32,
+        };
+        let unchanged = migrate_deprecated_google_consumer_request(&request, true).unwrap();
+        assert_eq!(unchanged.definition_id, "gemini");
+        assert_eq!(unchanged.arguments, request.arguments);
+    }
+
+    #[test]
     fn explicit_gemini_arguments_require_a_manual_antigravity_restart() {
         let request = AgentLaunchRequest {
             definition_id: "gemini".to_string(),
@@ -10777,7 +10867,14 @@ model = "gpt-5.3-codex"
             Some("native-proxy")
         );
         let claude = AGENTS.iter().find(|spec| spec.id == "claude");
-        assert!(normalize_resume_session_id(claude, Some("native-proxy"), &arguments).is_err());
+        assert_eq!(
+            normalize_resume_session_id(claude, Some("native-proxy"), &arguments)
+                .unwrap()
+                .as_deref(),
+            Some("native-proxy")
+        );
+        let opencode = AGENTS.iter().find(|spec| spec.id == "opencode");
+        assert!(normalize_resume_session_id(opencode, Some("native-proxy"), &arguments).is_err());
         assert!(normalize_resume_session_id(
             codex,
             Some("native-proxy"),

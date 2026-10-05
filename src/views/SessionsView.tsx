@@ -913,9 +913,9 @@ export function SessionsView({
     }
     try {
       const session = await agents.launch({
-        definitionId: selection.definitionId,
         label: "",
         executable: "",
+        // Proxy models may switch to Claude Code or Gemini CLI.
         ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies),
         resumeSessionId: null,
         groupId: group.groupId,
@@ -1092,9 +1092,9 @@ export function SessionsView({
     setNewProjectError(null);
     try {
       const launched = await agents.launch({
-        definitionId: definition.id,
         label: "",
         executable: "",
+        // Proxy models may switch to Claude Code or Gemini CLI.
         ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.proxies),
         resumeSessionId: null,
         groupId: null,

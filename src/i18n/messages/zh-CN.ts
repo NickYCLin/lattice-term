@@ -1283,7 +1283,7 @@ export const messages: Messages = {
   "chat.accountProfile": "使用帐号",
   "accountModel.choose": "选择模型",
   "terminal.proxy.model": "CLIProxyAPI 模型 ID",
-  "terminal.proxy.hint": "使用设置页的代理地址与密钥，通过 Codex 启动所选模型，无需另改 CLI 配置。",
+  "terminal.proxy.hint": "使用设置页的代理地址与密钥启动所选模型：claude-* 用 Claude Code、gemini-* 用 Gemini CLI，其余用 Codex，无需另改 CLI 配置。",
   "settings.cliProxy.title": "CLIProxyAPI",
   "settings.cliProxy.hint": "填写代理地址与密钥后，即可在 Fleet 与对话页选择 CLIProxyAPI 模型。",
   "settings.cliProxy.add": "新增代理",

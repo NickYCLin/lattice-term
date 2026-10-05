@@ -1260,7 +1260,7 @@ export const messages: Messages = {
   "chat.accountProfile": "계정",
   "accountModel.choose": "모델 선택",
   "terminal.proxy.model": "CLIProxyAPI 모델 ID",
-  "terminal.proxy.hint": "설정의 프록시 주소와 키로 Codex에서 모델을 실행합니다. CLI 설정을 따로 바꿀 필요가 없습니다.",
+  "terminal.proxy.hint": "설정의 프록시 주소와 키를 사용합니다. claude-* 모델은 Claude Code, gemini-*는 Gemini CLI, 나머지는 Codex에서 실행합니다. CLI 설정을 따로 바꿀 필요가 없습니다.",
   "settings.cliProxy.title": "CLIProxyAPI",
   "settings.cliProxy.hint": "프록시 주소와 키를 입력하면 Fleet과 채팅에서 CLIProxyAPI 모델을 선택할 수 있습니다.",
   "settings.cliProxy.add": "프록시 추가",

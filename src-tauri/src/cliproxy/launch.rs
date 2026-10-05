@@ -6,6 +6,9 @@ use zeroize::Zeroizing;
 
 pub const PROVIDER: &str = "latticeterm_cliproxyapi";
 pub const KEY_ENV: &str = "LATTICETERM_CLI_PROXY_API_KEY";
+/// Sent when the proxy has no saved key. A fixed placeholder keeps Claude
+/// Code from sending the user's own Anthropic login to the proxy instead.
+const NO_KEY_PLACEHOLDER: &str = "latticeterm-cliproxyapi";
 
 /// Which configured proxy a saved launch belongs to. The marker of the proxy
 /// that predates multiple entries carries no identifier, so restoring an
@@ -117,19 +120,41 @@ impl ProxyLaunch {
         &self.provider
     }
 
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Claude Code and Gemini CLI read the endpoint and key from the
+    /// environment. `None` removes a variable that would route the session
+    /// elsewhere or put a different credential in front of the proxy.
+    pub fn agent_environment(&self, definition_id: &str) -> Vec<(&'static str, Option<&str>)> {
+        let key = Some(self.key().unwrap_or(NO_KEY_PLACEHOLDER));
+        match definition_id {
+            "claude" => vec![
+                ("ANTHROPIC_API_KEY", None),
+                ("CLAUDE_CODE_USE_BEDROCK", None),
+                ("CLAUDE_CODE_USE_VERTEX", None),
+                ("CLAUDE_CODE_USE_FOUNDRY", None),
+                ("ANTHROPIC_BASE_URL", Some(self.base_url.as_str())),
+                ("ANTHROPIC_AUTH_TOKEN", key),
+            ],
+            "gemini" => vec![
+                ("GOOGLE_API_KEY", None),
+                ("GOOGLE_GENAI_USE_GCA", None),
+                ("GOOGLE_GENAI_USE_VERTEXAI", None),
+                ("GEMINI_DEFAULT_AUTH_TYPE", None),
+                ("GOOGLE_GEMINI_BASE_URL", Some(self.base_url.as_str())),
+                ("GEMINI_API_KEY", key),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
     /// Saved metadata uses a stable marker; the actual process must only see
     /// its fresh provider name, including when resuming a native conversation.
     pub fn configure_arguments(&self, arguments: Vec<String>) -> Vec<String> {
         let mut configured = self.arguments();
-        let mut iter = arguments.into_iter();
-        while let Some(argument) = iter.next() {
-            if argument == "-c" || argument == "--config" {
-                // base_from_arguments already accepted only our two overrides.
-                iter.next();
-            } else {
-                configured.push(argument);
-            }
-        }
+        configured.extend(without_saved_arguments(arguments));
         configured
     }
 
@@ -257,6 +282,22 @@ pub fn base_from_arguments(arguments: &[String]) -> Result<Option<ProxyTarget>, 
     super::normalize_base_url(root).map(|base_url| Some(ProxyTarget { base_url, id }))
 }
 
+/// Drop the saved proxy marker. Only call after `base_from_arguments`
+/// accepted the arguments, which guarantees every `-c` is one of ours. Claude
+/// Code would otherwise read `-c` as `--continue`.
+pub fn without_saved_arguments(arguments: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::with_capacity(arguments.len());
+    let mut iter = arguments.into_iter();
+    while let Some(argument) = iter.next() {
+        if argument == "-c" || argument == "--config" {
+            iter.next();
+        } else {
+            kept.push(argument);
+        }
+    }
+    kept
+}
+
 /// The arguments LatticeTerm stores for a saved launch; the running process
 /// receives the fresh provider name built in `arguments` instead.
 pub fn saved_arguments(base_url: &str, proxy_id: Option<&str>) -> Vec<String> {
@@ -311,6 +352,48 @@ mod tests {
             base_url: "http://127.0.0.1:8317/prefix".into(),
             key: key.map(|s| Zeroizing::new(s.into())),
         }
+    }
+
+    #[test]
+    fn claude_and_gemini_receive_the_proxy_through_their_own_variables() {
+        let proxy = launch(Some("fixture-secret"));
+        let claude = proxy.agent_environment("claude");
+        assert!(claude.contains(&("ANTHROPIC_BASE_URL", Some("http://127.0.0.1:8317/prefix"))));
+        assert!(claude.contains(&("ANTHROPIC_AUTH_TOKEN", Some("fixture-secret"))));
+        assert!(claude.contains(&("ANTHROPIC_API_KEY", None)));
+        let gemini = proxy.agent_environment("gemini");
+        assert!(gemini.contains(&(
+            "GOOGLE_GEMINI_BASE_URL",
+            Some("http://127.0.0.1:8317/prefix")
+        )));
+        assert!(gemini.contains(&("GEMINI_API_KEY", Some("fixture-secret"))));
+        assert!(gemini.contains(&("GOOGLE_GENAI_USE_GCA", None)));
+        assert!(proxy.agent_environment("codex").is_empty());
+
+        // Without a saved key the user's own Anthropic login must not be
+        // forwarded to the proxy.
+        let keyless = launch(None);
+        assert!(keyless
+            .agent_environment("claude")
+            .contains(&("ANTHROPIC_AUTH_TOKEN", Some(NO_KEY_PLACEHOLDER))));
+    }
+
+    #[test]
+    fn saved_marker_is_removed_before_claude_reads_dash_c() {
+        let mut arguments = saved_arguments("http://localhost:8317", Some("work"));
+        arguments.extend(["--model".to_string(), "claude-sonnet-4-5".to_string()]);
+        assert_eq!(
+            base_from_arguments(&arguments)
+                .unwrap()
+                .unwrap()
+                .id
+                .as_deref(),
+            Some("work")
+        );
+        assert_eq!(
+            without_saved_arguments(arguments),
+            vec!["--model".to_string(), "claude-sonnet-4-5".to_string()]
+        );
     }
 
     #[test]

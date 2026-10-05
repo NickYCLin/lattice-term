@@ -1526,7 +1526,7 @@ export const zhTW = {
   "chat.accountProfile": "使用帳號",
   "accountModel.choose": "選擇模型",
   "terminal.proxy.model": "CLIProxyAPI 模型 ID",
-  "terminal.proxy.hint": "使用設定頁的代理位址與金鑰，透過 Codex 啟動所選模型，不需要另改助理設定。",
+  "terminal.proxy.hint": "使用設定頁的代理位址與金鑰啟動所選模型：claude-* 用 Claude Code、gemini-* 用 Gemini CLI，其餘用 Codex，不需要另改助理設定。",
   "settings.cliProxy.title": "CLIProxyAPI",
   "settings.cliProxy.hint": "填入代理位址與金鑰後，即可在 Fleet 與對話頁選擇 CLIProxyAPI 模型。",
   "settings.cliProxy.add": "新增代理",
