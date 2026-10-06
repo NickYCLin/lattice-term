@@ -2073,7 +2073,7 @@ export const messages: Messages = {
   "sessionChat.chooseAnother": "サイドバーから別のセッションまたは会話を選択してください。",
   "sessionChat.accepted": "メッセージはこのセッションに受け付けられました。処理中の場合はキューに入り、返信は元の会話から同期されます。",
   "sessionChat.input": "このセッションにメッセージを送信",
-  "sessionChat.approval": "Claude Code の権限確認はここで許可・拒否できます。その他の CLI 操作は端末を開いて対応してください。",
+  "sessionChat.approval": "Claude Code と Codex の権限確認はここで許可・拒否できます。その他の CLI 操作は端末を開いて対応してください。",
   "sessionChat.send": "送信",
   "sessionChat.sending": "送信中…",
   "sessionChat.placeholder": "何でも頼めます",

@@ -2069,7 +2069,7 @@ export const messages: Messages = {
   "sessionChat.chooseAnother": "Wählen Sie in der Seitenleiste eine andere Session oder Unterhaltung.",
   "sessionChat.accepted": "Nachricht von dieser Session angenommen. Beschäftigte Sessions reihen sie ein; Antworten werden aus der ursprünglichen Unterhaltung synchronisiert.",
   "sessionChat.input": "Nachricht an diese Session senden",
-  "sessionChat.approval": "Berechtigungsabfragen von Claude Code können Sie hier erlauben oder ablehnen; für andere CLI-Interaktionen öffnen Sie das Terminal.",
+  "sessionChat.approval": "Berechtigungsabfragen von Claude Code und Codex können Sie hier erlauben oder ablehnen; für andere CLI-Interaktionen öffnen Sie das Terminal.",
   "sessionChat.send": "Senden",
   "sessionChat.sending": "Wird gesendet…",
   "sessionChat.placeholder": "Was soll erledigt werden?",

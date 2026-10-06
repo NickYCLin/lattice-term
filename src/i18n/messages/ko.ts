@@ -2069,7 +2069,7 @@ export const messages: Messages = {
   "sessionChat.chooseAnother": "사이드바에서 다른 세션이나 대화를 선택하세요.",
   "sessionChat.accepted": "이 세션이 메시지를 받았습니다. 바쁜 세션은 대기열에 넣으며, 답장은 원래 대화에서 동기화됩니다.",
   "sessionChat.input": "이 세션에 메시지 보내기",
-  "sessionChat.approval": "Claude Code 권한 요청은 여기서 허용하거나 거부할 수 있습니다. 기타 CLI 상호작용은 터미널을 열어 처리하세요.",
+  "sessionChat.approval": "Claude Code와 Codex 권한 요청은 여기서 허용하거나 거부할 수 있습니다. 기타 CLI 상호작용은 터미널을 열어 처리하세요.",
   "sessionChat.send": "보내기",
   "sessionChat.sending": "보내는 중…",
   "sessionChat.placeholder": "무엇이든 요청하세요",

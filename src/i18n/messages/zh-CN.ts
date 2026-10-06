@@ -2093,7 +2093,7 @@ export const messages: Messages = {
   "sessionChat.chooseAnother": "请从左侧选择另一个工作阶段或对话。",
   "sessionChat.accepted": "消息已交给此工作阶段；忙碌时会排队，回复会从原对话同步。",
   "sessionChat.input": "向此工作阶段发送消息",
-  "sessionChat.approval": "Claude Code 请求权限时可以直接在这里允许或拒绝；其他交互请打开终端处理。",
+  "sessionChat.approval": "Claude Code 或 Codex 请求权限时可以直接在这里允许或拒绝；其他交互请打开终端处理。",
   "sessionChat.send": "发送",
   "sessionChat.sending": "发送中…",
   "sessionChat.placeholder": "想做什么都可以",

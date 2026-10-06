@@ -91,7 +91,7 @@ export const zhTW = {
   "sessionChat.chooseAnother": "請從左側選擇另一個工作階段或對話。",
   "sessionChat.accepted": "訊息已交給這個工作階段；忙碌時會排隊，回覆會從原對話同步。",
   "sessionChat.input": "傳送訊息到這個工作階段",
-  "sessionChat.approval": "Claude Code 要求權限時可以直接在這裡允許或拒絕；其他互動請開啟終端機處理。",
+  "sessionChat.approval": "Claude Code 或 Codex 要求權限時可以直接在這裡允許或拒絕；其他互動請開啟終端機處理。",
   "sessionChat.working": "助理正在回覆…",
   "sessionChat.workingQueued": "助理正在回覆…（還有 {count} 則訊息排隊）",
   "sessionChat.attention": "助理可能在等你確認或輸入，請到終端機處理。",

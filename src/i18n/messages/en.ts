@@ -94,7 +94,7 @@ export const en: Messages = {
   "sessionChat.chooseAnother": "Choose another session or conversation from the sidebar.",
   "sessionChat.accepted": "Message accepted by this session. Busy sessions queue it; replies sync from the original conversation.",
   "sessionChat.input": "Send a message to this session",
-  "sessionChat.approval": "Claude Code permission prompts can be allowed or denied right here; open Terminal for other CLI interactions.",
+  "sessionChat.approval": "Claude Code and Codex permission prompts can be allowed or denied right here; open Terminal for other CLI interactions.",
   "sessionChat.working": "The assistant is replying…",
   "sessionChat.workingQueued": "The assistant is replying… ({count} more queued)",
   "sessionChat.attention": "The assistant may be waiting for your confirmation or input. Open the terminal to continue.",

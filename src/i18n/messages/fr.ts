@@ -2069,7 +2069,7 @@ export const messages: Messages = {
   "sessionChat.chooseAnother": "Choisissez une autre session ou conversation dans la barre latérale.",
   "sessionChat.accepted": "Message accepté par cette session. Les sessions occupées le mettent en file d'attente ; les réponses sont synchronisées depuis la conversation d'origine.",
   "sessionChat.input": "Envoyer un message à cette session",
-  "sessionChat.approval": "Les demandes d'autorisation de Claude Code peuvent être acceptées ou refusées ici ; ouvrez le terminal pour les autres interactions de la CLI.",
+  "sessionChat.approval": "Les demandes d'autorisation de Claude Code et Codex peuvent être acceptées ou refusées ici ; ouvrez le terminal pour les autres interactions de la CLI.",
   "sessionChat.send": "Envoyer",
   "sessionChat.sending": "Envoi…",
   "sessionChat.placeholder": "Demandez ce que vous voulez",

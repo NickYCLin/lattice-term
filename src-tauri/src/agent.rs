@@ -968,6 +968,9 @@ struct AgentSessionEntry {
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     capture: Mutex<CaptureState>,
     model_capture: Mutex<ModelCaptureState>,
+    /// Codex's approval dialog, read from the screen so the chat page can
+    /// answer it with the dialog's own keys.
+    codex_prompt: Mutex<approval::CodexPromptScan>,
     output: Mutex<OutputBuffer>,
     startup_gate: StartupGate,
     completion_gate: Mutex<CompletionReadiness>,
@@ -2476,6 +2479,39 @@ impl AgentRegistry {
         Some(found)
     }
 
+    fn scan_for_codex_approval(&self, session_id: &str, bytes: &[u8]) {
+        let Ok(entry) = self.get(session_id) else {
+            return;
+        };
+        let is_codex = entry
+            .summary
+            .lock()
+            .is_ok_and(|summary| summary.definition_id == "codex");
+        if !is_codex {
+            return;
+        }
+        let Some(event) = entry
+            .codex_prompt
+            .lock()
+            .ok()
+            .and_then(|mut scan| scan.feed(bytes))
+        else {
+            return;
+        };
+        match event {
+            approval::CodexPrompt::Opened(ask) => {
+                if let Ok(request_id) = random_report_token() {
+                    self.approvals
+                        .open_keyed(session_id, ask, request_id, approval::CODEX_KEYS);
+                }
+            }
+            approval::CodexPrompt::Closed => {
+                self.approvals
+                    .settle(session_id, None, approval::ApprovalDecision::Withdrawn);
+            }
+        }
+    }
+
     fn scan_for_model(&self, session_id: &str, bytes: &[u8]) -> Option<String> {
         let entry = self.get(session_id).ok()?;
         let found = entry.model_capture.lock().ok()?.feed(bytes)?;
@@ -2528,15 +2564,29 @@ impl AgentRegistry {
     /// Answers the named prompt. `false` when it was already answered,
     /// withdrawn or replaced.
     pub fn answer_approval(&self, session_id: &str, request_id: &str, allow: bool) -> bool {
-        self.approvals.settle(
-            session_id,
-            Some(request_id),
-            if allow {
+        let Some(pending) = self.approvals.take(session_id, request_id) else {
+            return false;
+        };
+        let Some(keys) = pending.keys() else {
+            pending.settle(if allow {
                 approval::ApprovalDecision::Allow
             } else {
                 approval::ApprovalDecision::Deny
-            },
-        )
+            });
+            return true;
+        };
+        // The dialog is still on screen: nothing answered it or redrew it
+        // away since it was read. Press the key it offers for this answer.
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        let Ok(mut writer) = entry.writer.lock() else {
+            return false;
+        };
+        writer
+            .write_all(if allow { keys.allow } else { keys.deny })
+            .and_then(|_| writer.flush())
+            .is_ok()
     }
 
     fn update_reported_state(
@@ -7701,6 +7751,7 @@ pub fn launch_with_replay(
             enabled: capture_enabled,
             buffer: String::new(),
         }),
+        codex_prompt: Mutex::new(approval::CodexPromptScan::default()),
         model_capture: Mutex::new(ModelCaptureState {
             definition_id: summary.definition_id.clone(),
             enabled: true,
@@ -7861,6 +7912,7 @@ pub fn launch_with_replay(
                     {
                         reader_sink.captured(&reader_id, &native_id);
                     }
+                    reader_registry.scan_for_codex_approval(&reader_id, bytes);
                     if let Some(model) = reader_registry.scan_for_model(&reader_id, bytes) {
                         reader_sink.model(&reader_id, &model);
                     }
@@ -12804,6 +12856,15 @@ notify = ["notify.exe", "turn-ended"]"#,
             asking.join().unwrap().unwrap(),
             approval::ApprovalDecision::Withdrawn
         );
+
+        // A Codex-style dialog is answered by pressing its key, exactly once.
+        assert!(registry
+            .approvals
+            .open_keyed(&id, ask(), "keyed".into(), approval::CODEX_KEYS));
+        assert_eq!(registry.pending_approval(&id).unwrap().request_id, "keyed");
+        assert!(registry.answer_approval(&id, "keyed", true));
+        assert!(registry.pending_approval(&id).is_none());
+        assert!(!registry.answer_approval(&id, "keyed", true));
         registry.stop_all();
     }
 
