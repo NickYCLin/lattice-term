@@ -7,6 +7,13 @@ export interface SessionConversationMessage {
   text: string;
 }
 
+/** A permission prompt the CLI shows in its terminal right now. */
+export interface SessionApprovalRequest {
+  requestId: string;
+  toolName: string;
+  summary: string;
+}
+
 /** One reader and the existing prompt queue, both addressed to the same PTY. */
 export function useSessionConversation(sessionId: string, agents: AgentApi) {
   const [messages, setMessages] = useState<SessionConversationMessage[]>([]);
@@ -18,6 +25,47 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   const [sending, setSending] = useState(false);
   const [queued, setQueued] = useState<number | null>(null);
   const sendingRef = useRef(false);
+  const [approval, setApproval] = useState<SessionApprovalRequest | null>(null);
+  const [answering, setAnswering] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
+
+  // A prompt is short-lived and may be answered in the terminal at any
+  // moment, so it is read more often than the transcript.
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    setApproval(null);
+    async function read() {
+      try {
+        const next = await invoke<SessionApprovalRequest | null>("agent_session_approval", { sessionId });
+        if (!disposed) setApproval((current) =>
+          current?.requestId === next?.requestId ? current : next ?? null);
+      } catch {
+        if (!disposed) setApproval(null);
+      } finally {
+        if (!disposed) timer = setTimeout(() => void read(), 1000);
+      }
+    }
+    void read();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [sessionId]);
+
+  async function answer(allow: boolean): Promise<void> {
+    if (!approval || answering) return;
+    setAnswering(true);
+    setAnswerError(null);
+    try {
+      const accepted = await invoke<boolean>("agent_answer_approval", {
+        sessionId, requestId: approval.requestId, allow,
+      });
+      if (!accepted) setAnswerError("answered-elsewhere");
+      setApproval(null);
+    } catch (reason) {
+      setAnswerError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAnswering(false);
+    }
+  }
 
   const { onOutputTail } = agents;
   useEffect(() => {
@@ -77,5 +125,8 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     }
   }
   const acknowledge = useCallback(() => setQueued(null), []);
-  return { messages, readError, loading, slow, output, sendError, sending, queued, send, acknowledge };
+  return {
+    messages, readError, loading, slow, output, sendError, sending, queued, send, acknowledge,
+    approval, answering, answerError, answer,
+  };
 }

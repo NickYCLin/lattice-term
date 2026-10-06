@@ -40,7 +40,7 @@ describe("SessionConversationPane composer", () => {
     const html = render({ sandboxed: false });
     expect(html).toContain('class="session-composer__access"');
     expect(html).toContain("完整檔案存取");
-    expect(html).toContain("若助理等待權限確認或其他互動，請開啟終端機處理。");
+    expect(html).toContain("Claude Code 要求權限時可以直接在這裡允許或拒絕；其他互動請開啟終端機處理。");
   });
 
   it("marks a sandboxed session and falls back to the CLI name without a model", () => {

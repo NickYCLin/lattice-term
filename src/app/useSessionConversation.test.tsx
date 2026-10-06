@@ -12,8 +12,14 @@ it("reads the selected session, rejects stale reads and sends only through that 
   vi.useFakeTimers();
   const root = createRoot(installFakeDom() as unknown as Element);
   let finish!: (value: SessionConversationMessage[]) => void;
-  invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
-    .mockResolvedValue([{ role: "assistant", text: "second session" }]);
+  let conversationReads = 0;
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") return Promise.resolve(null);
+    conversationReads += 1;
+    return conversationReads === 1
+      ? new Promise(resolve => { finish = resolve; })
+      : Promise.resolve([{ role: "assistant", text: "second session" }]);
+  });
   const enqueue = vi.fn().mockRejectedValueOnce(new Error("CLI is waiting for approval")).mockResolvedValue(0);
   const agents = fakeAgentApi({ enqueue });
   let api!: ReturnType<typeof useSessionConversation>;
@@ -28,7 +34,8 @@ it("reads the selected session, rejects stale reads and sends only through that 
     await act(async () => { expect(await api.send("hello")).toBe(true); });
     expect(enqueue.mock.calls).toEqual([["second", "hello"], ["second", "hello"]]);
     expect(agents.launch).not.toHaveBeenCalled();
-    expect(invoke.mock.calls.every(([command]) => command === "agent_session_conversation")).toBe(true);
+    expect(invoke.mock.calls.every(([command]) =>
+      command === "agent_session_conversation" || command === "agent_session_approval")).toBe(true);
     await act(async () => { root.unmount(); });
     const reads = invoke.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
@@ -43,7 +50,10 @@ it("shows live output during a slow transcript read and preserves the actual rea
   let output!: (text: string) => void;
   const unsubscribe = vi.fn();
   const agents = fakeAgentApi({ onOutputTail: (_id, handler) => { output = handler; return unsubscribe; } });
-  invoke.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  invoke.mockImplementation((command: string) => command === "agent_session_approval"
+    ? Promise.resolve(null)
+    : new Promise((_resolve, fail) => { reject = fail; }));
+  const conversationReads = () => invoke.mock.calls.filter(([command]) => command === "agent_session_conversation").length;
   let api!: ReturnType<typeof useSessionConversation>;
   function Probe() { api = useSessionConversation("selected", agents); return null; }
   try {
@@ -51,12 +61,37 @@ it("shows live output during a slow transcript read and preserves the actual rea
     await act(async () => { output("\x1b[31mWorking on files\x1b[0m"); await vi.advanceTimersByTimeAsync(8000); });
     expect(api.slow).toBe(true);
     expect(api.output).toBe("Working on files");
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(conversationReads()).toBe(1);
     await act(async () => { reject(new Error("The account directory is unavailable.")); });
     expect(api.readError).toBe("The account directory is unavailable.");
     expect(api.loading).toBe(false);
     expect(api.output).toBe("Working on files");
     await act(async () => { root.unmount(); });
     expect(unsubscribe).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("answers the terminal's permission prompt by its own id", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const prompt = { requestId: "r1", toolName: "Bash", summary: "mkdir build" };
+  let waiting: typeof prompt | null = prompt;
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") return Promise.resolve(waiting);
+    if (command === "agent_answer_approval") { waiting = null; return Promise.resolve(true); }
+    return Promise.resolve([]);
+  });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    expect(api.approval).toEqual(prompt);
+    await act(async () => { await api.answer(true); });
+    expect(invoke).toHaveBeenCalledWith("agent_answer_approval", { sessionId: "selected", requestId: "r1", allow: true });
+    expect(api.approval).toBeNull();
+    expect(api.answerError).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(api.approval).toBeNull();
+    await act(async () => { root.unmount(); });
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
 });

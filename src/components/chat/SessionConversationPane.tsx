@@ -294,7 +294,32 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
               : t("sessionChat.working")}
           </p>
         )}
-        {attention && (
+        {conversation.approval ? (
+          <div className="chat-card chat-card--approval chat-approval--pending" role="group"
+            aria-label={t("chat.approval.title")}>
+            <div className="chat-card__head">
+              <span className="chat-card__label">{conversation.approval.toolName}</span>
+              <code className="chat-card__summary" title={conversation.approval.summary}>
+                {conversation.approval.summary}
+              </code>
+              <span className="chat-card__state">{t("chat.approval.title")}</span>
+            </div>
+            <p className="chat-notice">{t("sessionChat.permission.hint")}</p>
+            <div className="chat-card__actions">
+              <button type="button" className="button button--primary button--sm"
+                disabled={conversation.answering} onClick={() => void conversation.answer(true)}>
+                {t("chat.approval.allow")}
+              </button>
+              <button type="button" className="button button--secondary button--sm"
+                disabled={conversation.answering} onClick={() => void conversation.answer(false)}>
+                {t("chat.approval.deny")}
+              </button>
+              <button type="button" className="button button--ghost button--sm" onClick={onOpenTerminal}>
+                {t("sessionChat.terminal")}
+              </button>
+            </div>
+          </div>
+        ) : attention && (
           <div className="session-chat__activity is-attention" role="status">
             <span>{t("sessionChat.attention")}</span>
             <button type="button" className="button button--secondary" onClick={onOpenTerminal}>
@@ -307,6 +332,9 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
     <form className="chat-composer session-composer" onSubmit={submit}>
       {session.closedReason && <p role="status">{t("sessionChat.closed")}</p>}
       {conversation.sendError && <p role="alert">{conversation.sendError}</p>}
+      {conversation.answerError && <p role="alert">{conversation.answerError === "answered-elsewhere"
+        ? t("sessionChat.permission.gone")
+        : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
       {conversation.queued !== null && !working && <p role="status">{t("sessionChat.accepted")}</p>}
       {notice && <p role="status">{notice}</p>}
       <div className="session-composer__frame">
