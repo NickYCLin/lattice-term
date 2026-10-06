@@ -1775,17 +1775,18 @@ pub(crate) fn codex_session_provider(
     Ok(read_codex_session_meta(&path).and_then(|meta| meta.model_provider))
 }
 
-/// Whether a thread Codex just reported is the interactive conversation
-/// itself rather than one of its subagents. `None` when its record cannot
+/// Whether a thread Codex just reported is a conversation a person holds,
+/// from a terminal, the chat page or Codex Desktop, rather than a subagent. `None` when its record cannot
 /// be found yet; the reporter runs with the Codex process's own
 /// environment, so `CODEX_HOME` already names the right account.
-pub(crate) fn codex_thread_is_main(thread_id: &str) -> Option<bool> {
+pub(crate) fn codex_thread_is_conversation(thread_id: &str) -> Option<bool> {
     let root = history_root(TranscriptKind::Codex, None)?;
     let path = locate_codex_in(&root, "", Some(thread_id))?;
-    read_codex_session_meta(&path).map(|meta| meta.source_is_known_main_cli)
+    read_codex_session_meta(&path).map(|meta| meta.source_is_interactive)
 }
 
-/// The newest main-CLI Codex thread of this project and account that went
+/// The newest Codex conversation of this project and account, whether it
+/// was held in a terminal, on the chat page or in Codex Desktop, that went
 /// through the same kind of provider, for a saved tab whose id was never
 /// reported. Codex's own `resume --last` cannot find a proxy thread, because
 /// each proxied process registers its provider under a fresh name.
@@ -1817,7 +1818,7 @@ fn latest_codex_thread_in(
             .model_provider
             .as_deref()
             .is_some_and(crate::cliproxy::launch::is_managed_provider);
-        meta.source_is_known_main_cli
+        meta.source_is_interactive
             && proxied == through_proxy
             && meta.id.as_ref().is_some_and(|id| {
                 !id.is_empty() && !id.starts_with('-') && !taken.iter().any(|seen| seen == id)
@@ -2669,21 +2670,32 @@ mod tests {
         let other = directory.path().join("other");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&other).unwrap();
+        let write_from =
+            |name: &str, id: &str, cwd: &Path, provider: &str, source: Value, modified: u64| {
+                let path = root.join(format!("2026/10/05/rollout-{name}.jsonl"));
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let meta = serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": id,
+                        "cwd": cwd.to_string_lossy(),
+                        "source": source,
+                        "originator": "codex-tui",
+                        "model_provider": provider,
+                    }
+                });
+                fs::write(&path, format!("{meta}\n")).unwrap();
+                set_modified(&path, modified);
+            };
         let write = |name: &str, id: &str, cwd: &Path, provider: &str, modified: u64| {
-            let path = root.join(format!("2026/10/05/rollout-{name}.jsonl"));
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let meta = serde_json::json!({
-                "type": "session_meta",
-                "payload": {
-                    "id": id,
-                    "cwd": cwd.to_string_lossy(),
-                    "source": "cli",
-                    "originator": "codex-tui",
-                    "model_provider": provider,
-                }
-            });
-            fs::write(&path, format!("{meta}\n")).unwrap();
-            set_modified(&path, modified);
+            write_from(
+                name,
+                id,
+                cwd,
+                provider,
+                Value::String("cli".into()),
+                modified,
+            )
         };
         write("native", "native-thread", &cwd, "openai", 10);
         write(
@@ -2707,18 +2719,41 @@ mod tests {
             "latticeterm_cliproxyapi_v2_default_cc",
             40,
         );
+        // A subagent's own record is never the conversation to resume.
+        write_from(
+            "guardian",
+            "guardian",
+            &cwd,
+            "latticeterm_cliproxyapi_v2_default_dd",
+            serde_json::json!({"subagent": {"other": "guardian"}}),
+            50,
+        );
+        let cwd_path = cwd.clone();
         let cwd = cwd.to_str().unwrap();
 
         assert_eq!(
             latest_codex_thread_in(&root, cwd, true, &[]).as_deref(),
             Some("proxy-new")
         );
+        // A conversation held on the chat page or in Codex Desktop counts too.
+        write_from(
+            "desktop",
+            "desktop-thread",
+            &cwd_path,
+            "openai",
+            Value::String("appServer".into()),
+            60,
+        );
+        assert_eq!(
+            latest_codex_thread_in(&root, cwd, false, &[]).as_deref(),
+            Some("desktop-thread")
+        );
         assert_eq!(
             latest_codex_thread_in(&root, cwd, true, &["proxy-new".to_string()]).as_deref(),
             Some("proxy-old")
         );
         assert_eq!(
-            latest_codex_thread_in(&root, cwd, false, &[]).as_deref(),
+            latest_codex_thread_in(&root, cwd, false, &["desktop-thread".to_string()]).as_deref(),
             Some("native-thread")
         );
     }

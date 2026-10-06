@@ -4554,7 +4554,8 @@ fn codex_notification_thread_id(notification: &CodexNotificationKind) -> Option<
     let thread_id = is_uuid_shaped(&characters).then(|| thread_id.to_ascii_lowercase())?;
     // A subagent finishing its own turn must not replace the conversation
     // the tab will resume.
-    (crate::transcript::codex_thread_is_main(&thread_id) != Some(false)).then_some(thread_id)
+    (crate::transcript::codex_thread_is_conversation(&thread_id) != Some(false))
+        .then_some(thread_id)
 }
 
 /// Handle the tiny reporter subcommand before Tauri starts.
