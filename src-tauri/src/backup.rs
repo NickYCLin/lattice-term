@@ -595,7 +595,9 @@ mod tests {
         let encrypted =
             create_encrypted_backup("9.9.9", 123, files.clone(), local.clone(), PASSWORD).unwrap();
         assert!(!encrypted.contains("connections.json"));
-        assert!(!encrypted.contains("dark"));
+        // Ciphertext is random base64, so a bare word like "dark" can show up
+        // by chance; quotes and colons never appear in base64.
+        assert!(!encrypted.contains(r#""theme":"dark""#));
 
         let opened = open_encrypted_backup(&encrypted, PASSWORD).unwrap();
         assert_eq!(opened.created_at, 123);
