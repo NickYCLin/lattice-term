@@ -61,6 +61,9 @@ describe("account-aware model choices", () => {
     const ownKey = { ...duplicate, cliProxy: { id: "team", sameKey: false } };
     expect(accountModelTargets([definition], [profile], { b: ownKey }, "預設帳號")
       .map((target) => target.accountName)).toEqual(["A 帳號", "B 帳號（CLIProxyAPI）"]);
+    const viaProxy = accountModelOptions(accountModelTargets([definition], [profile], { b: ownKey }, "預設帳號"), {}, labels)
+      .filter((option) => option.accountProfileId === "b");
+    expect(viaProxy.every((option) => option.viaCliProxy)).toBe(true);
   });
 
   it("distinguishes identical models from A and B using only each account's discovery", () => {

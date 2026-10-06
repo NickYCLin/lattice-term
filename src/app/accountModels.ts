@@ -31,6 +31,8 @@ export interface AccountModelTarget {
   cliLabel: string;
   signedOut: boolean;
   showAccount: boolean;
+  /** A profile configured by hand to reach a CLIProxyAPI server. */
+  viaCliProxy?: boolean;
 }
 
 export interface AccountModelOption extends AccountModelSelection {
@@ -40,6 +42,8 @@ export interface AccountModelOption extends AccountModelSelection {
   /** The model half of the label, shown once a source is chosen. */
   modelLabel?: string;
   disabled: boolean;
+  /** Listed with the CLIProxyAPI sources, though its models come from its CLI. */
+  viaCliProxy?: boolean;
 }
 
 export function hasChatModels(id: string): id is ChatDefinitionId {
@@ -123,6 +127,7 @@ export function accountModelTargets(
           signedOut: statuses[profile.id]?.state === "signedOut",
           showAccount: false,
           accountKnown: Boolean(email),
+          viaCliProxy: Boolean(statuses[profile.id]?.cliProxy),
         };
       }),
     ];
@@ -163,6 +168,7 @@ export function accountModelOptions(
       sourceLabel,
       modelLabel: choice.label,
       disabled: target.signedOut,
+      ...(target.viaCliProxy ? { viaCliProxy: true } : {}),
     }));
     // One entry per configured proxy; the picker already groups them under
     // the proxy's own heading, so the option names the proxy, not the CLI.

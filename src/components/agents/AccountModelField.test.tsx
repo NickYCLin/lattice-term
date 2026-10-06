@@ -27,6 +27,17 @@ describe("Fleet account model picker", () => {
     expect(html).toContain(`value="${attr(accountModelKey(normal))}" selected=""`);
   });
 
+  it("lists an account pointed at a proxy under the proxy heading but keeps its own models", () => {
+    const viaProxy = { ...normal, accountProfileId: "api", label: "Codex API（CLIProxyAPI） · Codex · GPT-5.6",
+      sourceLabel: "Codex API（CLIProxyAPI） · Codex", modelLabel: "GPT-5.6", viaCliProxy: true };
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy, viaProxy]} value={viaProxy} allowCliProxyApi onChange={vi.fn()} /></I18nProvider>);
+    const group = html.match(/<optgroup label="CLIProxyAPI">(.*?)<\/optgroup>/)?.[1];
+    expect(group).toContain("Codex API（CLIProxyAPI） · Codex");
+    expect(group).not.toContain(normal.label);
+    // It is still an ordinary account: its model menu comes from the CLI.
+    expect(html).toContain(`value="${attr(accountModelKey(viaProxy))}" selected=""`);
+  });
+
   it("lists each source once and only that source's models in the second menu", () => {
     const mini = { ...normal, model: "gpt-5.6-mini", label: "Codex · GPT-5.6 mini", sourceLabel: "Codex", modelLabel: "GPT-5.6 mini" };
     const main = { ...normal, sourceLabel: "Codex", modelLabel: "GPT-5.6" };

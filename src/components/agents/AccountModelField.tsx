@@ -57,6 +57,9 @@ interface AccountModelSource {
   key: string;
   label: string;
   proxy: boolean;
+  /** Shown under the CLIProxyAPI heading: the proxy itself, or an account
+   * whose CLI was pointed at it by hand. */
+  underProxy: boolean;
   disabled: boolean;
   options: AccountModelOption[];
 }
@@ -69,6 +72,7 @@ function accountModelSources(options: readonly AccountModelOption[]): AccountMod
       key,
       label: option.sourceLabel ?? option.label,
       proxy: option.provider === "cliproxyapi",
+      underProxy: option.provider === "cliproxyapi" || option.viaCliProxy === true,
       disabled: true,
       options: [],
     };
@@ -100,8 +104,8 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
   const listFor = (proxyId: string | undefined): CliProxyModelList =>
     proxyModels[proxyId ?? CLI_PROXY_DEFAULT_ID] ?? { state: "idle" };
   const sources = accountModelSources(options);
-  const proxySources = sources.filter((source) => source.proxy);
-  const nativeSources = sources.filter((source) => !source.proxy);
+  const proxySources = sources.filter((source) => source.underProxy);
+  const nativeSources = sources.filter((source) => !source.underProxy);
   const sourceKey = value ? accountModelSourceKey(value) : "";
   const source = sources.find((entry) => entry.key === sourceKey);
   const selectedKey = value ? accountModelKey(value) : "";
