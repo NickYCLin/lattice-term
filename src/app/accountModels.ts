@@ -109,7 +109,10 @@ export function accountModelTargets(
         accountKnown: Boolean(definition.account.label),
       },
       ...named.map((profile) => {
-        const email = statuses[profile.id]?.label;
+        // A profile pointed at a proxy is not an OpenAI login, whatever its
+        // CLI is called; say where it actually goes.
+        const email = statuses[profile.id]?.label ||
+          (statuses[profile.id]?.cliProxy ? CLI_PROXY_NAME : null);
         return {
           definitionId: definition.id,
           accountProfileId: profile.id,
