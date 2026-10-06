@@ -52,6 +52,7 @@ import type { AgentAutomationsApi } from "../app/useAgentAutomations";
 import { AutomationPane, describeSchedule } from "../components/chat/AutomationPane";
 import type { AgentApi, AgentDefinition } from "../app/useAgentSessions";
 import { displayPath } from "../app/displayPath";
+import { hasDesktopBackend } from "../app/nativeRuntime";
 import {
   profileCapable,
   profilesFor,
@@ -816,7 +817,24 @@ function ThreadPane({
     if (!next) { setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return false; }
     attachmentsRef.current = next;
     setAttachments(next);
+    void keepImagePreviews(next.filter(file => file.isImage && !file.preview && paths.includes(file.path)));
     return true;
+  }
+
+  /** Thumbnails need the picture inside a folder the preview may read. */
+  async function keepImagePreviews(images: readonly ChatAttachment[]) {
+    if (images.length === 0 || !hasDesktopBackend()) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    for (const image of images) {
+      const preview = await invoke<string | null>("agent_chat_keep_image_preview", {
+        threadId: thread.id,
+        path: image.path,
+      }).catch(() => null);
+      if (!preview || !mounted.current) continue;
+      const next = attachmentsRef.current.map(file => file.path === image.path ? { ...file, preview } : file);
+      attachmentsRef.current = next;
+      setAttachments(next);
+    }
   }
 
   async function pasteImage() {
@@ -1514,7 +1532,7 @@ function ChatItemView({
             )}
             {item.attachments?.some((attachment) => attachment.isImage) && (
               <ChatImageStrip
-                paths={item.attachments.filter((attachment) => attachment.isImage).map((attachment) => attachment.path)}
+                paths={item.attachments.filter((attachment) => attachment.isImage).map((attachment) => attachment.preview ?? attachment.path)}
                 workingDirectory={workingDirectory}
                 threadId={threadId}
                 captions={false}

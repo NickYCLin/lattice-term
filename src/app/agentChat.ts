@@ -217,6 +217,11 @@ export interface ChatAttachment {
   path: string;
   name: string;
   isImage: boolean;
+  /**
+   * A copy of a picture from outside the conversation's folders, kept only
+   * for its thumbnail. The message always sends `path`.
+   */
+  preview?: string;
 }
 
 export type ChatItem =

@@ -1755,6 +1755,31 @@ async fn agent_broadcast(
     Ok(outcomes)
 }
 
+/// Keeps a copy of a picture the user attached from elsewhere in the
+/// conversation folder, only so its thumbnail can be shown; the message still
+/// sends the original path. Returns the copy, or `None` for a non-image.
+#[tauri::command]
+async fn agent_chat_keep_image_preview(
+    app: AppHandle,
+    thread_id: String,
+    path: String,
+) -> Result<Option<String>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+    let directory = crate::agent_chat::general_chat_directory(&data_dir, &thread_id)?;
+    blocking(move || {
+        Ok(crate::chat_images::store(
+            &directory,
+            &[crate::chat_images::ToolImage::File(path.into())],
+        )
+        .into_iter()
+        .next())
+    })
+    .await
+}
+
 /// A thumbnail of an image in a conversation, from its working folder or,
 /// for pasted pictures and tool screenshots, the thread's own folder.
 #[tauri::command]
@@ -5190,6 +5215,7 @@ pub fn run() {
             agent_chat_paste_image,
             agent_chat_paste_files,
             chat_image_preview,
+            agent_chat_keep_image_preview,
             agent_export_transcript,
             agent_session_conversation,
             agent_session_approval,
