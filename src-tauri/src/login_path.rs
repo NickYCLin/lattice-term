@@ -135,6 +135,8 @@ mod tests {
         assert_eq!(extract_marked_path(&format!("{START}{END}")), None);
     }
 
+    // These PATH values use the Unix separator this module is built for.
+    #[cfg(unix)]
     #[test]
     fn puts_the_shell_path_first_without_duplicates_or_relative_entries() {
         let merged = merge_paths(
@@ -155,6 +157,7 @@ mod tests {
         assert!(!path.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_the_current_path_when_the_shell_gives_nothing() {
         let merged = merge_paths(None, OsStr::new("/usr/bin:/bin"), &[]);

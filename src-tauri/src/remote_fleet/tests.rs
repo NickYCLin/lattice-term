@@ -238,7 +238,7 @@ fn a_blank_workspace_means_the_home_folder_but_never_the_root() {
         launch: false,
     };
     let access = Access::new(paths.clone(), &grant("   ")).unwrap();
-    let home = dirs::home_dir().unwrap().canonicalize().unwrap();
+    let home = crate::agent::plain_win32_path(dirs::home_dir().unwrap().canonicalize().unwrap());
     assert_eq!(std::path::Path::new(access.directory()), home.as_path());
     assert!(Access::new(paths, &grant("/")).is_err());
 }

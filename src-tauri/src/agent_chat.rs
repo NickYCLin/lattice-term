@@ -3522,7 +3522,8 @@ mod tests {
         let prompt = prompt_with_attachments("inspect these", &attachments);
         assert!(prompt.contains("<latticeterm-attachments>"));
         assert!(prompt.contains("untrusted reference"));
-        assert!(prompt.contains(&image.display().to_string()));
+        // Paths travel JSON-encoded, so a Windows path has escaped separators.
+        assert!(prompt.contains(&serde_json::to_string(&attachments[0].path).unwrap()));
 
         let params = codex_server::turn_params(
             "thread",
