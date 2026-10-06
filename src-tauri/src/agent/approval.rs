@@ -32,7 +32,7 @@ pub(super) struct ApprovalAsk {
 }
 
 /// A question the chat page can answer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentApprovalRequest {
     pub request_id: String,

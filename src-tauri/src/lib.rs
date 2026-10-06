@@ -1940,30 +1940,36 @@ async fn agent_paste_clipboard_image(
     .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?
 }
 
-/// A permission prompt this session's CLI is waiting on, if the chat page
-/// can answer it. Background-service sessions answer in their terminal.
+/// A permission prompt this session's CLI is waiting on, if any. Background
+/// sessions are asked through the service that runs them.
 #[tauri::command]
-fn agent_session_approval(
+async fn agent_session_approval(
     session_id: String,
     registry: State<'_, Arc<AgentRegistry>>,
-) -> Option<crate::agent::AgentApprovalRequest> {
+    daemon: State<'_, AppDaemon>,
+) -> Result<Option<crate::agent::AgentApprovalRequest>, String> {
     if crate::agent_daemon::owns(&session_id) {
-        return None;
+        return Ok(daemon.pending_approval(&session_id).await);
     }
-    registry.pending_approval(&session_id)
+    Ok(registry.pending_approval(&session_id))
 }
 
 /// Allows or denies one permission prompt. `false` when it was already
 /// answered in the terminal or replaced by a newer one.
 #[tauri::command]
-fn agent_answer_approval(
+async fn agent_answer_approval(
     session_id: String,
     request_id: String,
     allow: bool,
     registry: State<'_, Arc<AgentRegistry>>,
-) -> bool {
-    !crate::agent_daemon::owns(&session_id)
-        && registry.answer_approval(&session_id, &request_id, allow)
+    daemon: State<'_, AppDaemon>,
+) -> Result<bool, String> {
+    if crate::agent_daemon::owns(&session_id) {
+        return Ok(daemon
+            .answer_approval(&session_id, &request_id, allow)
+            .await);
+    }
+    Ok(registry.answer_approval(&session_id, &request_id, allow))
 }
 
 /// Reads structured messages from this session's exact native conversation.

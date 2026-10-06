@@ -1236,6 +1236,18 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         }
         Request::Sessions => to_value(&detached_list(registry)),
         Request::Snapshots => to_value(&registry.output_snapshots()),
+        Request::PendingApproval { session_id } => {
+            to_value(&registry.pending_approval(&session_id))
+        }
+        Request::AnswerApproval {
+            session_id,
+            request_id,
+            allow,
+        } => Ok(json!(registry.answer_approval(
+            &session_id,
+            &request_id,
+            allow
+        ))),
         Request::StageImage { session_id, png } => {
             if registry.session_summary(&session_id).is_none() {
                 return Err("Agent session no longer exists.".to_string());
@@ -2255,6 +2267,30 @@ mod observer_transport_tests {
             "never complete a revoked JSON reply"
         );
         assert!(sink.is_shared("session"));
+    }
+
+    #[test]
+    fn only_the_desktop_reads_and_answers_permission_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        let pending = Request::PendingApproval {
+            session_id: "agent-bg-missing".into(),
+        };
+        let answer = || Request::AnswerApproval {
+            session_id: "agent-bg-missing".into(),
+            request_id: "r1".into(),
+            allow: true,
+        };
+        assert_eq!(
+            dispatch_as(&context, ClientRole::Desktop, "desktop", pending).unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            dispatch_as(&context, ClientRole::Desktop, "desktop", answer()).unwrap(),
+            json!(false)
+        );
+        // An MCP client may watch a shared session, never approve for it.
+        assert!(dispatch_as(&context, ClientRole::Observer, "client", answer()).is_err());
     }
 
     #[test]

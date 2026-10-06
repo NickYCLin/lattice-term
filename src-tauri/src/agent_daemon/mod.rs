@@ -478,6 +478,16 @@ pub enum Request {
     },
     Sessions,
     Snapshots,
+    /// The permission prompt one session's CLI is waiting on, if any.
+    PendingApproval {
+        session_id: String,
+    },
+    /// Allows or denies that prompt. Desktop only: observers never answer.
+    AnswerApproval {
+        session_id: String,
+        request_id: String,
+        allow: bool,
+    },
     /// A pasted image, already encoded as PNG; the daemon owns the temp file
     /// so it lives and dies with the PTY like a desktop-staged one.
     StageImage {

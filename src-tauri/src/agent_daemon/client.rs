@@ -314,6 +314,39 @@ impl DaemonClient {
             .find(|summary| summary.session_id == session_id)
     }
 
+    /// The permission prompt a background session waits on; none when the
+    /// service is gone or predates this request.
+    pub async fn pending_approval(
+        &self,
+        session_id: &str,
+    ) -> Option<crate::agent::AgentApprovalRequest> {
+        let value = self
+            .request(
+                false,
+                Request::PendingApproval {
+                    session_id: session_id.to_string(),
+                },
+            )
+            .await
+            .ok()?;
+        serde_json::from_value(value).ok().flatten()
+    }
+
+    pub async fn answer_approval(&self, session_id: &str, request_id: &str, allow: bool) -> bool {
+        self.request(
+            false,
+            Request::AnswerApproval {
+                session_id: session_id.to_string(),
+                request_id: request_id.to_string(),
+                allow,
+            },
+        )
+        .await
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    }
+
     pub async fn is_running(&self) -> bool {
         self.attached().await.is_some()
     }
