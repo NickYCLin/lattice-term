@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { hasChatModels } from "../../app/accountModels";
 import type { ChatModelChoice } from "../../app/agentChat";
-import { cliProxyIdFromArguments } from "../../app/cliProxyApi";
+import { cliProxyIdFromArguments, groupCliProxyModels } from "../../app/cliProxyApi";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { modelSwitchRequest, switchesModelInPlace } from "../../app/sessionModelSwitch";
 import type { AgentApi, AgentSessionSummary } from "../../app/useAgentSessions";
@@ -72,7 +72,8 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const choices: Choices = proxyId === null
     ? accountChoices
     : proxyModels.state === "ready"
-      ? { state: "ready", models: proxyModels.models.map(model => ({ value: model.id, label: model.id })) }
+      ? { state: "ready", models: groupCliProxyModels(proxyModels.models).flatMap(group =>
+        group.models.map(model => ({ value: model.id, label: model.id }))) }
       : proxyModels.state === "unavailable"
         ? { state: "unavailable", reason: proxyModels.reason }
         : endpoint

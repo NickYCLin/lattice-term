@@ -132,6 +132,34 @@ describe("cliProxyApi model grouping", () => {
     expect(group.models.map((model) => model.id)).toEqual(["gemini-3.16-pro", "gemini-3.9-pro"]);
   });
 
+  it("keeps a scrambled conversation catalog together by provider and version", () => {
+    const groups = groupCliProxyModels([
+      { id: "gpt-6-astra", ownedBy: "openai" },
+      { id: "claude-haiku-4.5-20251001", ownedBy: "anthropic" },
+      { id: "gpt-image-1.5", ownedBy: "openai" },
+      { id: "claude-opus-4-8", ownedBy: "anthropic" },
+      { id: "gemini-3.1-flash-lite", ownedBy: "google" },
+      { id: "claude-opus-5-5", ownedBy: "anthropic" },
+      { id: "gpt-5.6-terra", ownedBy: "openai" },
+    ]);
+    expect(groups.flatMap(group => group.models.map(model => model.id))).toEqual([
+      "gpt-6-astra", "gpt-5.6-terra", "gpt-image-1.5",
+      "claude-opus-5-5", "claude-opus-4-8", "claude-haiku-4.5-20251001",
+      "gemini-3.1-flash-lite",
+    ]);
+  });
+
+  it("reads hyphenated Claude minor versions without treating release dates as minor versions", () => {
+    const [group] = groupCliProxyModels([
+      { id: "claude-opus-4-20250514", ownedBy: "anthropic" },
+      { id: "claude-opus-4-8", ownedBy: "anthropic" },
+      { id: "claude-opus-4.5", ownedBy: "anthropic" },
+    ]);
+    expect(group.models.map(model => model.id)).toEqual([
+      "claude-opus-4-8", "claude-opus-4.5", "claude-opus-4-20250514",
+    ]);
+  });
+
   it("parks unversioned models and unbranded models at the end", () => {
     const groups = groupCliProxyModels([
       { id: "mystery", ownedBy: null },

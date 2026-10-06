@@ -256,7 +256,8 @@ export function groupCliProxyModels(models: readonly CliProxyModel[]): CliProxyM
 }
 
 function dottedVersions(id: string): number[][] {
-  return (id.match(/\d+(?:\.\d+)*/g) ?? []).map((version) => version.split(".").map(Number));
+  const normalized = id.replace(/^(claude-(?:opus|sonnet|haiku)-\d+)-(\d{1,2})(?=-|$)/i, "$1.$2");
+  return (normalized.match(/\d+(?:\.\d+)*/g) ?? []).map((version) => version.split(".").map(Number));
 }
 
 function compareModelStrength(first: string, second: string): number {
