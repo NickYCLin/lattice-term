@@ -9,6 +9,12 @@ export interface SessionConversationMessage {
   tool?: { callId: string; name: string | null; kind: "call" | "result" };
 }
 
+export interface SessionConversationSnapshot {
+  availability: "waitingForIdentity" | "waitingForTranscript" | "ready";
+  messages: SessionConversationMessage[];
+  truncated: boolean;
+}
+
 /** A permission prompt the CLI shows in its terminal right now. */
 export interface SessionApprovalRequest {
   requestId: string;
@@ -18,7 +24,11 @@ export interface SessionApprovalRequest {
 
 /** One reader and the existing prompt queue, both addressed to the same PTY. */
 export function useSessionConversation(sessionId: string, agents: AgentApi) {
+  const nativeSessionId = agents.sessions.find(session => session.sessionId === sessionId)?.capturedSessionId ?? null;
+  const inFlightReads = useRef(new Map<string, Promise<SessionConversationSnapshot>>());
   const [messages, setMessages] = useState<SessionConversationMessage[]>([]);
+  const [availability, setAvailability] = useState<SessionConversationSnapshot["availability"]>("waitingForIdentity");
+  const [truncated, setTruncated] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false);
@@ -106,14 +116,28 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     setMessages([]);
+    setAvailability(nativeSessionId ? "waitingForTranscript" : "waitingForIdentity");
+    setTruncated(false);
     setReadError(null);
     setLoading(true);
     setSlow(false);
     const slowTimer = setTimeout(() => { if (!disposed) setSlow(true); }, 8000);
     async function read() {
       try {
-        const next = await invoke<SessionConversationMessage[]>("agent_session_conversation", { sessionId });
-        if (!disposed) { setMessages(next); setReadError(null); }
+        const previous = inFlightReads.current.get(sessionId);
+        if (previous) await previous.catch(() => undefined);
+        if (disposed) return;
+        const pending = invoke<SessionConversationSnapshot>("agent_session_conversation_snapshot", { sessionId });
+        inFlightReads.current.set(sessionId, pending);
+        const next = await pending.finally(() => {
+          if (inFlightReads.current.get(sessionId) === pending) inFlightReads.current.delete(sessionId);
+        });
+        if (!disposed) {
+          setMessages(next.messages);
+          setAvailability(next.availability);
+          setTruncated(next.truncated);
+          setReadError(null);
+        }
       } catch (reason) {
         if (!disposed) setReadError(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -124,7 +148,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     }
     void read();
     return () => { disposed = true; clearTimeout(timer); clearTimeout(slowTimer); };
-  }, [sessionId]);
+  }, [sessionId, nativeSessionId]);
 
   async function send(text: string): Promise<boolean> {
     if (!text.trim() || sendingRef.current) return false;
@@ -146,7 +170,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   }
   const acknowledge = useCallback(() => setQueued(null), []);
   return {
-    messages, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
+    messages, availability, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
     approval, answering, answerError, answer,
   };
 }

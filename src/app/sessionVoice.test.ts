@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { dictationMode, speakableText } from "./sessionVoice";
+import { dictationMode, speakableText, spokenSessionReply } from "./sessionVoice";
 
 class FakeRecognition {}
+
+describe("spoken session replies", () => {
+  it("speaks ordinary assistant text, not a user's input or an absent reply", () => {
+    expect(spokenSessionReply({ role: "assistant", text: "**完成了**" })).toBe("完成了");
+    expect(spokenSessionReply({ role: "user", text: "我的輸入" })).toBeNull();
+    expect(spokenSessionReply()).toBeNull();
+  });
+
+  it("does not read tool arguments or returned output as an assistant reply", () => {
+    for (const kind of ["call", "result"]) {
+      expect(spokenSessionReply({ role: "assistant", text: "工具內容", tool: { callId: "id", name: "exec", kind } })).toBeNull();
+    }
+  });
+});
 
 describe("dictation mode", () => {
   it("uses system voice typing on Windows even when the web view has a recogniser", () => {

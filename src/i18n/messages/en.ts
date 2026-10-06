@@ -9,6 +9,10 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "sessionChat.waitingIdentity": "This session's native conversation ID is not available yet. Terminal output is shown below; another conversation in the same directory will not be substituted.",
+  "sessionChat.codexIdentityHint": "The current Codex integration usually captures the ID after the first turn finishes, then reads that conversation's native record.",
+  "sessionChat.waitingTranscript": "The native conversation ID is known, but its local record is not readable yet. Terminal output is shown below while the reader retries.",
+  "sessionChat.truncated": "Only the most recent 300 messages and tool records, up to 256 KiB of text, are shown. Earlier or oversized content has been omitted; the original record has not been deleted.",
   "sessionChat.tool": "Tool",
   "sessionChat.toolInput": "Call input",
   "sessionChat.toolOutput": "Returned output",

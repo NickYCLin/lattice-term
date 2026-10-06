@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn session_snapshot_distinguishes_pending_identity_and_exact_record() {
+    let home = tempfile::tempdir().unwrap();
+    fixture(home.path(), "other", 1);
+    let missing_id =
+        read_session_conversation_snapshot("codex", "", None, Some(home.path())).unwrap();
+    assert_eq!(
+        missing_id.availability,
+        SessionConversationAvailability::WaitingForIdentity
+    );
+    assert!(missing_id.messages.is_empty());
+    let missing_record =
+        read_session_conversation_snapshot("codex", "", Some("selected"), Some(home.path()))
+            .unwrap();
+    assert_eq!(
+        missing_record.availability,
+        SessionConversationAvailability::WaitingForTranscript
+    );
+    assert!(missing_record.messages.is_empty());
+    fixture(home.path(), "selected", 1);
+    let ready =
+        read_session_conversation_snapshot("codex", "", Some("selected"), Some(home.path()))
+            .unwrap();
+    assert_eq!(ready.availability, SessionConversationAvailability::Ready);
+    assert_eq!(ready.messages[0].text, "selected message 0");
+    assert!(!ready.truncated);
+    assert!(read_session_conversation_snapshot(
+        "codex",
+        "",
+        Some("selected"),
+        Some(&home.path().join("missing-account"))
+    )
+    .is_err());
+}
+
+#[test]
+fn session_snapshot_reports_waiting_before_the_account_has_any_transcripts() {
+    let home = tempfile::tempdir().unwrap();
+    let snapshot =
+        read_session_conversation_snapshot("codex", "", Some("selected"), Some(home.path()))
+            .unwrap();
+    assert_eq!(
+        snapshot.availability,
+        SessionConversationAvailability::WaitingForTranscript
+    );
+    assert!(snapshot.messages.is_empty());
+}
+
+#[test]
 fn session_tools_follow_exact_identity_without_changing_history_or_handoff() {
     let home = tempfile::tempdir().unwrap();
     let path = fixture(home.path(), "tools", 1);
@@ -82,6 +130,11 @@ fn session_tool_snapshots_keep_existing_count_and_text_limits() {
         read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, true).unwrap();
     assert!(snapshot.truncated);
     assert_eq!(snapshot.messages.len(), HISTORY_MAX_MESSAGES);
+    assert!(
+        read_session_conversation_snapshot("codex", "", Some("bounded"), Some(home.path()))
+            .unwrap()
+            .truncated
+    );
     assert_eq!(
         snapshot.messages[0].tool.as_ref().unwrap().call_id,
         "call-1"

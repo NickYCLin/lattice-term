@@ -1743,17 +1743,60 @@ pub fn read_session_conversation(
     session_id: Option<&str>,
     profile_directory: Option<&Path>,
 ) -> Result<Vec<LocalConversationMessage>, String> {
+    let snapshot = read_session_conversation_snapshot(
+        definition_id,
+        working_directory,
+        session_id,
+        profile_directory,
+    )?;
+    if snapshot.availability == SessionConversationAvailability::WaitingForTranscript {
+        return Err("The session conversation is not available yet.".into());
+    }
+    Ok(snapshot.messages)
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionConversationAvailability {
+    WaitingForIdentity,
+    WaitingForTranscript,
+    Ready,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionConversationSnapshot {
+    pub availability: SessionConversationAvailability,
+    pub messages: Vec<LocalConversationMessage>,
+    pub truncated: bool,
+}
+
+pub fn read_session_conversation_snapshot(
+    definition_id: &str,
+    working_directory: &str,
+    session_id: Option<&str>,
+    profile_directory: Option<&Path>,
+) -> Result<SessionConversationSnapshot, String> {
+    let waiting = |availability| SessionConversationSnapshot {
+        availability,
+        messages: Vec::new(),
+        truncated: false,
+    };
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
-        return Ok(Vec::new());
+        return Ok(waiting(SessionConversationAvailability::WaitingForIdentity));
     };
     let kind = TranscriptKind::from_definition(definition_id)
         .ok_or("This CLI does not support conversation view.")?;
     if profile_directory.is_some_and(|path| !path.is_absolute() || !path.is_dir()) {
         return Err("The account directory is unavailable.".into());
     }
-    let root = history_root(kind, profile_directory)
+    let Some(root) = history_root(kind, profile_directory)
         .or_else(|| history_root_with_archive(kind, profile_directory, true))
-        .ok_or("The conversation directory is unavailable.")?;
+    else {
+        return Ok(waiting(
+            SessionConversationAvailability::WaitingForTranscript,
+        ));
+    };
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
             .or_else(|| {
@@ -1765,9 +1808,18 @@ pub fn read_session_conversation(
         TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
-    }
-    .ok_or("The session conversation is not available yet.")?;
-    read_conversation_snapshot_with_tools(&path, kind, true).map(|snapshot| snapshot.messages)
+    };
+    let Some(path) = path else {
+        return Ok(waiting(
+            SessionConversationAvailability::WaitingForTranscript,
+        ));
+    };
+    let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
+    Ok(SessionConversationSnapshot {
+        availability: SessionConversationAvailability::Ready,
+        messages: snapshot.messages,
+        truncated: snapshot.truncated,
+    })
 }
 
 /// The provider comes only from the exact native record in this account,

@@ -5,7 +5,7 @@ import {
   sessionPromptWithAttachments, splitSessionAttachments,
 } from "../../app/chatAttachments";
 import { useFileDrop } from "../../app/fileDrop";
-import { speak, speakableText, speechSynthesisAvailable, stopSpeaking, useDictation } from "../../app/sessionVoice";
+import { speak, spokenSessionReply, speechSynthesisAvailable, stopSpeaking, useDictation } from "../../app/sessionVoice";
 import { useSessionConversation } from "../../app/useSessionConversation";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { localeCatalog } from "../../i18n/catalog";
@@ -230,8 +230,9 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     if (messages.length <= spokenThrough.current) return;
     const last = messages[messages.length - 1];
     spokenThrough.current = messages.length;
-    if (last?.role !== "assistant") return;
-    void speak(speakableText(last.text), speechLang).then(() => {
+    const reply = spokenSessionReply(last);
+    if (!reply) return;
+    void speak(reply, speechLang).then(() => {
       if (voiceActiveRef.current && mounted.current && dictation.mode === "browser") void dictation.start();
     });
   }, [voiceActive, working, conversation.messages, speechLang, dictation]);
@@ -267,8 +268,14 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           : conversation.messages.length === 0 ? <p role="status">{t(
             session.closedReason ? "sessionChat.closed"
               : conversation.slow ? "sessionChat.slow"
-              : conversation.loading ? "common.loading" : "sessionChat.waiting",
+              : conversation.loading ? "common.loading"
+              : conversation.availability === "waitingForIdentity" ? "sessionChat.waitingIdentity"
+              : conversation.availability === "waitingForTranscript" ? "sessionChat.waitingTranscript"
+              : "sessionChat.waiting",
           )}</p> : null}
+        {conversation.truncated && <p role="status">{t("sessionChat.truncated")}</p>}
+        {supported && session.definitionId === "codex" && !conversation.loading && !conversation.readError
+          && conversation.availability === "waitingForIdentity" && <p>{t("sessionChat.codexIdentityHint")}</p>}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
         {conversation.messages.map((message, index) => {
           if (message.tool) {

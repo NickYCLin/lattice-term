@@ -106,6 +106,10 @@ export function useDictation({ lang, onText, onError }: {
 }
 
 /** Markdown reduced to what is worth hearing; code is skipped, not spelled out. */
+export function spokenSessionReply(message?: { role: string; text: string; tool?: unknown }): string | null {
+  return message?.role === "assistant" && !message.tool ? speakableText(message.text) : null;
+}
+
 export function speakableText(markdown: string, limit = 1500): string {
   const text = markdown
     .replace(/```[\s\S]*?(```|$)/g, " ")

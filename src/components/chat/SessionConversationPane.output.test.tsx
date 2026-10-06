@@ -7,6 +7,7 @@ import type { SessionConversationMessage } from "../../app/useSessionConversatio
 const { conversation } = vi.hoisted(() => ({
   conversation: {
     messages: [] as SessionConversationMessage[],
+    availability: "ready" as "waitingForIdentity" | "waitingForTranscript" | "ready", truncated: false,
     readError: null, loading: false, slow: false, output: "Working", outputError: null,
     sendError: null, sending: false, queued: null, send: vi.fn(), acknowledge: vi.fn(),
     approval: null, answering: false, answerError: null, answer: vi.fn(),
@@ -15,18 +16,38 @@ const { conversation } = vi.hoisted(() => ({
 vi.mock("../../app/useSessionConversation", () => ({ useSessionConversation: () => conversation }));
 const { SessionConversationPane } = await import("./SessionConversationPane");
 
-function render(state: "working" | "needsAttention" | "done") {
+function render(state: "working" | "needsAttention" | "done", definitionId = "codex") {
   return renderToStaticMarkup(<I18nProvider locale="zh-TW">
-    <SessionConversationPane session={fakeSession({ state })} agents={fakeAgentApi()}
+    <SessionConversationPane session={fakeSession({ state, definitionId })} agents={fakeAgentApi()}
       onOpenTerminal={() => {}} onSessionReplaced={() => {}} />
   </I18nProvider>);
 }
 
 describe("session chat output disclosure", () => {
-  beforeEach(() => { conversation.messages = []; });
+  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; });
 
   it("keeps the readable fallback visible before native messages arrive", () => {
     expect(render("working")).toContain('class="session-chat__output" open=""');
+  });
+
+  it("distinguishes a missing native ID from a record that is not readable yet", () => {
+    conversation.availability = "waitingForIdentity";
+    expect(render("working")).toContain("尚未取得此工作階段的原生對話 ID");
+    expect(render("working")).toContain("不會借用同資料夾的其他對話");
+    expect(render("working")).toContain("通常在首輪完成後取得 ID");
+    expect(render("working", "claude")).not.toContain("通常在首輪完成後取得 ID");
+    conversation.availability = "waitingForTranscript";
+    expect(render("working")).toContain("已取得原生對話 ID");
+    expect(render("working")).not.toContain("尚未取得此工作階段的原生對話 ID");
+  });
+
+  it("discloses omitted records even when some native messages are visible", () => {
+    conversation.messages = [{ role: "assistant", text: "最近的回覆" }];
+    conversation.truncated = true;
+    const html = render("done");
+    expect(html).toContain("300 筆訊息與工具紀錄");
+    expect(html).toContain("原始紀錄沒有刪除");
+    expect(html).toContain("最近的回覆");
   });
 
   it("puts native messages first and stops expanding the terminal on every working turn", () => {

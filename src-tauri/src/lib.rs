@@ -2026,6 +2026,21 @@ async fn agent_session_conversation(
     registry: State<'_, Arc<AgentRegistry>>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<Vec<crate::transcript::LocalConversationMessage>, String> {
+    let snapshot = agent_session_conversation_snapshot(session_id, registry, daemon).await?;
+    if snapshot.availability
+        == crate::transcript::SessionConversationAvailability::WaitingForTranscript
+    {
+        return Err("The session conversation is not available yet.".into());
+    }
+    Ok(snapshot.messages)
+}
+
+#[tauri::command]
+async fn agent_session_conversation_snapshot(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<crate::transcript::SessionConversationSnapshot, String> {
     let summary = if crate::agent_daemon::owns(&session_id) {
         daemon.session_summary(&session_id).await
     } else {
@@ -2033,7 +2048,7 @@ async fn agent_session_conversation(
     }
     .ok_or("The session is no longer available.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::read_session_conversation(
+        crate::transcript::read_session_conversation_snapshot(
             &summary.definition_id,
             &summary.working_directory,
             summary.captured_session_id.as_deref(),
@@ -5218,6 +5233,7 @@ pub fn run() {
             agent_chat_keep_image_preview,
             agent_export_transcript,
             agent_session_conversation,
+            agent_session_conversation_snapshot,
             agent_session_approval,
             agent_answer_approval,
             agent_import_memory_handoff,
