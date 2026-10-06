@@ -1191,6 +1191,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     onRetryWorkspaceSession={retryWorkspaceSession}
                     onDiscardWorkspaceSession={discardWorkspaceSession}
                     retryingWorkspace={retryingWorkspace}
+                    onOpenInChat={(sessionId) => {
+                      setChatWorkspaceSessionId(sessionId);
+                      setView("chat");
+                    }}
                   />
                 </div>
               </Suspense>

@@ -158,6 +158,13 @@ export interface AgentChatApi {
   /** Moves a thread out of the main list, or back into it. */
   shelveThread: (id: string, shelved: boolean) => void;
   /**
+   * Hand the conversation to a terminal session: end the chat page's own
+   * process for it so only the terminal writes the transcript.
+   */
+  continueInSession: (id: string) => Promise<void>;
+  /** Apply what the terminal added, once the thread is back on this page. */
+  updateThreadFromSession: (id: string, update: (thread: ChatThread) => ChatThread) => void;
+  /**
    * Starts a new thread from an earlier point of `id`, up to and including
    * `throughItemId`, and opens it. `suffix` marks its title as a branch.
    */
@@ -601,6 +608,20 @@ export function useAgentChat(
     }
   }, [changeThreads]);
 
+  const continueInSession = useCallback(async (id: string) => {
+    if (hasDesktopBackend()) {
+      const { invoke } = await core();
+      await invoke("agent_chat_close", { threadId: id });
+    }
+    changeThreads((current) => current.map((thread) =>
+      thread.id === id ? { ...thread, continuedInSession: true } : thread));
+  }, [changeThreads]);
+
+  const updateThreadFromSession = useCallback((id: string, apply: (thread: ChatThread) => ChatThread) => {
+    changeThreads((current) => current.map((thread) =>
+      thread.id === id && thread.continuedInSession ? apply(thread) : thread));
+  }, [changeThreads]);
+
   const branch = useCallback((id: string, throughItemId: string, suffix: string) => {
     const source = threadsRef.current.find((thread) => thread.id === id);
     const thread = source ? branchThread(source, throughItemId, suffix) : null;
@@ -940,6 +961,8 @@ export function useAgentChat(
       handoffThreadAccount: handoffAccount,
       removeThread: remove,
       shelveThread: shelve,
+      continueInSession,
+      updateThreadFromSession,
       branchThread: branch,
       delegate,
       delegateRemote,
@@ -972,6 +995,8 @@ export function useAgentChat(
       handoffAccount,
       remove,
       shelve,
+      continueInSession,
+      updateThreadFromSession,
       branch,
       delegate,
       delegateRemote,

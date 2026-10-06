@@ -44,6 +44,20 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("offers the terminal for a conversation and shows the terminal while it holds it", () => {
+    const thread = fakeThread({ nativeSessionId: "thread-1", workingDirectory: "/work/project" });
+    const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+    expect(render(chat)).toContain("在終端機繼續");
+
+    const running = fakeAgentApi({
+      sessions: [fakeSession({ sessionId: "terminal", definitionId: "codex", capturedSessionId: "thread-1",
+        groupLabel: "Terminal conversation" })],
+    });
+    const markup = render(chat, running);
+    expect(markup).toContain("與工作階段頁共用同一個助理");
+    expect(markup).not.toContain("在終端機繼續");
+  });
+
   it("renders an existing workspace session in Chat without creating another conversation", () => {
     const agents = fakeAgentApi({ sessions: [fakeSession({ sessionId: "shared", groupLabel: "Shared project" })] });
     const chat = fakeChatApi();

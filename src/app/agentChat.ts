@@ -281,6 +281,11 @@ export interface ChatThread {
   /** The conversation that handed this one a subtask, if any. */
   delegatedFrom?: string | null;
   /**
+   * The conversation went on in a terminal session. What was said there is
+   * read back from the CLI's transcript the next time the thread is opened.
+   */
+  continuedInSession?: boolean;
+  /**
    * A subtask that runs on another machine's Agent Fleet instead of here.
    * The conversation is a local mirror: its items come from reading that
    * session's output, and nothing is ever started on this computer.
@@ -991,6 +996,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           ? thread.shelvedAt
           : null,
       delegatedFrom: typeof thread.delegatedFrom === "string" ? thread.delegatedFrom : null,
+      continuedInSession: thread.continuedInSession === true,
       remote: storedRemoteDelegation(thread.remote),
       model: typeof thread.model === "string" ? thread.model : "",
       effort: typeof thread.effort === "string" && /^[a-z]{1,16}$/.test(thread.effort) ? thread.effort : null,

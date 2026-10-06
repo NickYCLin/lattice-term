@@ -1609,6 +1609,18 @@ fn agent_chat_stop(
     registry.stop_expected(&thread_id, expected_turn_id.as_deref())
 }
 
+/// The folder a chat without a project runs in, so the same conversation
+/// can continue in a terminal session from the place it started.
+#[tauri::command]
+fn agent_chat_general_directory(app: AppHandle, thread_id: String) -> Result<String, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
+    crate::agent_chat::general_chat_directory(&data_dir, &thread_id)
+        .map(|path| path.display().to_string())
+}
+
 /// Ends everything serving a thread: its running turn and, for Codex, the
 /// server kept alive between turns. Called when a thread is deleted.
 #[tauri::command]
@@ -5115,6 +5127,7 @@ pub fn run() {
             agent_chat_steer,
             agent_chat_stop,
             agent_chat_close,
+            agent_chat_general_directory,
             agent_chat_delete_native_conversation,
             agent_chat_respond,
             agent_chat_models,

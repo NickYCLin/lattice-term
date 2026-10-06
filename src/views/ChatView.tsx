@@ -5,6 +5,8 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
+import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
+import type { NativeMessageSnapshot } from "../app/useNativeConversations";
 /**
  * Chat mode: talk to a local agent CLI in a message thread.
  *
@@ -180,14 +182,17 @@ export function ChatView({
   const nativeHistory = useNativeHistory();
   const projects = useMemo(() => chatProjectsWithHistory(chat.threads, nativeHistory?.entries ?? []),
     [chat.threads, nativeHistory?.entries]);
+  // While a terminal session runs a thread's conversation, that session is
+  // the one entry for it; two entries would invite two writers.
   const listedThreads = useMemo(
     () =>
       chat.threads.filter(
         (thread) =>
           !thread.shelvedAt &&
+          !liveSessionForThread(thread, agents.sessions) &&
           (projectFilter === null || chatProjectKey(thread.workingDirectory) === projectFilter),
       ),
-    [chat.threads, projectFilter],
+    [agents.sessions, chat.threads, projectFilter],
   );
   const shelvedThreads = useMemo(
     () =>
@@ -218,6 +223,66 @@ export function ChatView({
     (id) => agents.catalog.find((definition) => definition.id === id)?.installed,
   );
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
+  const activeLiveSession = active ? liveSessionForThread(active, agents.sessions) : undefined;
+  const shownSession = selectedSession ?? activeLiveSession;
+  const { proxies } = useCliProxySettings();
+  const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
+  const handingOff = useRef(false);
+
+  async function continueInSession(thread: ChatThread) {
+    if (handingOff.current) return;
+    handingOff.current = true;
+    setHandoffProblem(null);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const directory = thread.workingDirectory ||
+        await invoke<string>("agent_chat_general_directory", { threadId: thread.id });
+      const request = sessionLaunchForThread(thread, directory, agents.catalog, accountProfiles, proxies);
+      if (!request) throw new Error(t("chat.continueInSession.unavailable"));
+      await chat.continueInSession(thread.id);
+      const launched = await agents.launch(request);
+      if (launched.closedReason) throw new Error(launched.closedReason);
+      try {
+        await agents.rename(launched.sessionId, thread.title || request.label);
+      } catch {
+        // The terminal is already running the conversation.
+      }
+      onOpenSession(launched.sessionId);
+    } catch (reason) {
+      setHandoffProblem(t("chat.continueInSession.failed", {
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
+    } finally {
+      handingOff.current = false;
+    }
+  }
+
+  // Once the terminal is done, read back what was said there.
+  const catchingUp = useRef(new Set<string>());
+  useEffect(() => {
+    if (!active?.continuedInSession || !active.nativeSessionId || activeLiveSession ||
+      catchingUp.current.has(active.id)) return;
+    const thread = active;
+    catchingUp.current.add(thread.id);
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const snapshot = await invoke<NativeMessageSnapshot>("agent_chat_local_history_snapshot", {
+          definitionId: thread.definitionId,
+          nativeSessionId: thread.nativeSessionId,
+          profileId: thread.accountProfileId,
+          profiles: accountProfiles.map(({ id, definitionId, configDirectory }) =>
+            ({ profileId: id, definitionId, configDirectory })),
+        });
+        chat.updateThreadFromSession(thread.id, (current) =>
+          appendSessionTurns(current, snapshot, t("chat.continuedInSession.notice")));
+      } catch {
+        // Try again the next time the thread is opened.
+      } finally {
+        catchingUp.current.delete(thread.id);
+      }
+    })();
+  }, [accountProfiles, active, activeLiveSession, chat, t]);
 
   function startThread(workingDirectory = "") {
     setSelectedSessionId(null);
@@ -572,9 +637,9 @@ export function ChatView({
               {t("desktopBackend.required.body")}
             </Callout>
           </div>
-        ) : selectedSession ? (
-          <SessionConversationPane key={selectedSession.sessionId} session={selectedSession}
-            agents={agents} onOpenTerminal={() => onOpenSession(selectedSession.sessionId)} />
+        ) : shownSession ? (
+          <SessionConversationPane key={shownSession.sessionId} session={shownSession}
+            agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)} />
         ) : selectedSessionId ? (
           <EmptyState icon={<ChatIcon />} title={t("sessionChat.closed")}
             description={t("sessionChat.chooseAnother")} />
@@ -613,6 +678,10 @@ export function ChatView({
             accountProfiles={accountProfiles}
             theme={theme}
             onDelete={() => setPendingDelete(active)}
+            continueInSession={sessionLaunchForThread(active, active.workingDirectory || "general",
+              agents.catalog, accountProfiles, proxies) && !active.archived
+              ? () => void continueInSession(active) : undefined}
+            handoffProblem={handoffProblem}
           />
         )}
       </div>
@@ -650,6 +719,8 @@ function ThreadPane({
   accountProfiles,
   theme,
   onDelete,
+  continueInSession,
+  handoffProblem,
 }: {
   thread: ChatThread;
   chat: AgentChatApi;
@@ -660,6 +731,9 @@ function ThreadPane({
   accountProfiles: readonly ChatAccountProfile[];
   theme: ThemeId;
   onDelete: () => void;
+  /** Present when the conversation can go on in a terminal session. */
+  continueInSession?: () => void;
+  handoffProblem?: string | null;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
@@ -981,6 +1055,17 @@ function ThreadPane({
                 <TerminalIcon />
               </button>
             )}
+            {continueInSession && (
+              <button
+                type="button"
+                className="button button--ghost button--sm"
+                onClick={continueInSession}
+                disabled={running || pendingInputs.length > 0}
+                title={t("chat.continueInSession.hint")}
+              >
+                {t("chat.continueInSession")}
+              </button>
+            )}
             <button
               type="button"
               className="button button--ghost button--sm"
@@ -1142,6 +1227,7 @@ function ThreadPane({
           </Callout>
         )}
         {notice && <Callout tone="danger">{notice}</Callout>}
+        {handoffProblem && <Callout tone="danger">{handoffProblem}</Callout>}
       </header>
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>

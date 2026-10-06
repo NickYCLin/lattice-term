@@ -99,6 +99,7 @@ import { WorkspaceImportDialog } from "../components/sessions/WorkspaceImportDia
 import type { WorkspaceRecoveryProps } from "../app/workspaceRecovery";
 import {
   AgentIcon,
+  ChatIcon,
   CloseIcon,
   EditIcon,
   FolderIcon,
@@ -259,6 +260,7 @@ export function SessionsView({
   unrestoredWorkspaceSessions,
   mobile = false,
   visible = true,
+  onOpenInChat,
   ...recovery
 }: {
   agents: AgentApi;
@@ -275,6 +277,8 @@ export function SessionsView({
   unrestoredWorkspaceSessions: readonly SavedWorkspaceSession[];
   mobile?: boolean;
   visible?: boolean;
+  /** Show this terminal's conversation on the chat page. */
+  onOpenInChat?: (sessionId: string) => void;
 } & WorkspaceRecoveryProps) {
   const { t, tag } = useI18n();
   const sessionTabsId = useId();
@@ -2307,6 +2311,17 @@ export function SessionsView({
                         <FolderIcon size={12} />
                       </button>
                   </PathDropZone>
+                      {onOpenInChat && (
+                        <button
+                          type="button"
+                          className="icon-button icon-button--sm"
+                          onClick={() => onOpenInChat(active.sessionId)}
+                          aria-label={t("terminal.openInChat")}
+                          data-tooltip={t("terminal.openInChat")}
+                        >
+                          <ChatIcon size={12} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="icon-button icon-button--sm"
