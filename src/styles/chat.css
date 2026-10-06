@@ -524,7 +524,9 @@ button.chat-chip:hover {
 .chat-settings {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  /* Top, not bottom: the source and folder fields carry hints underneath,
+     and bottom alignment pushed their labels and controls out of line. */
+  align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--line);
