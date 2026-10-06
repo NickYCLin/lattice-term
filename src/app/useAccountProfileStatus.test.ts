@@ -30,10 +30,13 @@ describe("account profile status", () => {
       if (args.definitionId === "claude") throw new Error("unreadable");
       return { state: "signedIn", label: "me@example.com", method: "ChatGPT" };
     });
-    const statuses = await readAccountProfileStatuses(profiles);
+    const statuses = await readAccountProfileStatuses(profiles, [
+      { id: "team", baseUrl: "http://10.0.0.5:8317" },
+    ]);
     expect(invoke).toHaveBeenCalledWith("agent_account_profile_status", {
       definitionId: "codex",
       configDirectory: "/p/work",
+      proxies: [{ id: "team", baseUrl: "http://10.0.0.5:8317" }],
     });
     expect(statuses.work).toEqual({ state: "signedIn", label: "me@example.com", method: "ChatGPT" });
     expect(statuses.home.state).toBe("unknown");

@@ -39,6 +39,17 @@ describe("account-aware model choices", () => {
     expect(options.find((option) => option.accountProfileId === null)?.disabled).toBe(true);
   });
 
+  it("lists a profile that repeats a proxy's address and key only once", () => {
+    const duplicate = { ...status, method: "CLIProxyAPI", cliProxy: { id: "team", sameKey: true } };
+    expect(accountModelTargets([definition], [profile], { b: duplicate }, "預設帳號")
+      .map((target) => target.accountProfileId)).toEqual([null]);
+    expect(accountModelTargets([definition], [profile], { b: duplicate }, "預設帳號", "b")
+      .map((target) => target.accountProfileId)).toEqual([null, "b"]);
+    const ownKey = { ...duplicate, cliProxy: { id: "team", sameKey: false } };
+    expect(accountModelTargets([definition], [profile], { b: ownKey }, "預設帳號")
+      .map((target) => target.accountProfileId)).toEqual([null, "b"]);
+  });
+
   it("distinguishes identical models from A and B using only each account's discovery", () => {
     const targets = accountModelTargets([definition], [profile], { b: status }, "預設帳號");
     const lists = Object.fromEntries(targets.map((target) => [accountModelTargetKey(target), {

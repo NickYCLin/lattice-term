@@ -694,7 +694,7 @@ function ThreadPane({
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
   const { statuses: profileStatuses } = useAccountProfileStatus(accountProfiles);
-  const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"));
+  const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"), thread.accountProfileId);
   const accountModels = useAccountModels(modelTargets, settingsOpen);
   const cliProxySettings = useCliProxySettings();
   const { lists: cliProxyModels, reload: reloadCliProxyModels } = useCliProxyModelLists(cliProxySettings, settingsOpen);

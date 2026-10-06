@@ -69,6 +69,8 @@ export interface AgentAccountInfo {
   /** Email/account label only. Authentication tokens never enter the WebView. */
   label: string | null;
   method: string | null;
+  /** An account profile set up by hand to reach a configured CLIProxyAPI. */
+  cliProxy?: { id: string; sameKey: boolean };
 }
 
 export interface AgentInstallDefinition {

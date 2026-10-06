@@ -514,7 +514,8 @@ export function SessionsView({
   );
   const accountProfiles = useChatAccountProfiles();
   const { statuses: accountStatuses } = useAccountProfileStatus(accountProfiles);
-  const modelTargets = accountModelTargets(installedAgents, accountProfiles, accountStatuses, t("accountModel.defaultAccount"));
+  const modelTargets = accountModelTargets(installedAgents, accountProfiles, accountStatuses, t("accountModel.defaultAccount"),
+    (addCliFor ? selectedAddModel : selectedProjectModel)?.accountProfileId ?? null);
   const modelLists = useAccountModels(modelTargets, newProjectDirectory !== null || addCliFor !== null);
   // The proxy is only asked while a launcher is open, and only when the
   // user has pointed Settings at one.

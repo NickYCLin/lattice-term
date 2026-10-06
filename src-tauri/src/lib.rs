@@ -1436,12 +1436,27 @@ fn agent_account_profile_directory(
 async fn agent_account_profile_status(
     definition_id: String,
     config_directory: String,
+    proxies: Option<Vec<crate::agent::ConfiguredProxy>>,
 ) -> Result<crate::agent::AgentAccountInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::agent::account_profile_status(
-            &definition_id,
-            std::path::Path::new(&config_directory),
-        )
+        let directory = std::path::Path::new(&config_directory);
+        let mut info = crate::agent::account_profile_status(&definition_id, directory);
+        if info.state == crate::agent::AgentAccountState::SignedIn {
+            info.cli_proxy = crate::agent::account_profile_proxy(
+                &definition_id,
+                directory,
+                proxies.as_deref().unwrap_or_default(),
+                |proxy| {
+                    let base_url = crate::cliproxy::normalize_base_url(&proxy.base_url).ok()?;
+                    crate::credentials::load_cli_proxy_key(Some(&proxy.id), &base_url).ok()
+                },
+            );
+            if info.cli_proxy.is_some() {
+                // The profile's key belongs to the proxy, not to OpenAI.
+                info.method = Some("CLIProxyAPI".to_string());
+            }
+        }
+        info
     })
     .await
     .map_err(|error| format!("Account profile status did not complete: {error}"))

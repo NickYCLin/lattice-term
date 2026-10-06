@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use zeroize::Zeroizing;
 
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -267,6 +268,9 @@ pub struct AgentAccountInfo {
     pub state: AgentAccountState,
     pub label: Option<String>,
     pub method: Option<String>,
+    /// Set for an account profile that is configured to reach a CLIProxyAPI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_proxy: Option<ProfileProxyMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -571,6 +575,67 @@ pub fn account_profile_status(definition_id: &str, directory: &Path) -> AgentAcc
         return account_info(AgentAccountState::SignedIn, None, Some("Claude.ai"));
     }
     info
+}
+
+/// A configured CLIProxyAPI the WebView asks about: its id and address only.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfiguredProxy {
+    pub id: String,
+    pub base_url: String,
+}
+
+/// Which configured proxy a Codex profile actually talks to. `same_key`
+/// means it is the very same source as that proxy entry, only set up by
+/// hand in the profile; the key itself never leaves the backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileProxyMatch {
+    pub id: String,
+    pub same_key: bool,
+}
+
+pub fn account_profile_proxy(
+    definition_id: &str,
+    directory: &Path,
+    proxies: &[ConfiguredProxy],
+    load_key: impl Fn(&ConfiguredProxy) -> Option<Zeroizing<String>>,
+) -> Option<ProfileProxyMatch> {
+    if definition_id != "codex" || proxies.is_empty() || !directory.is_absolute() {
+        return None;
+    }
+    let read = |name: &str| {
+        let path = directory.join(name);
+        let metadata = std::fs::metadata(&path).ok()?;
+        (metadata.is_file() && metadata.len() <= ACCOUNT_FILE_LIMIT)
+            .then(|| std::fs::read_to_string(&path).ok())
+            .flatten()
+    };
+    let config = read("config.toml")?.parse::<toml::Table>().ok()?;
+    let endpoint = config.get("openai_base_url")?.as_str()?;
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    let proxy = proxies.iter().find(|proxy| {
+        crate::cliproxy::normalize_base_url(&proxy.base_url)
+            .is_ok_and(|base| format!("{base}/v1") == endpoint)
+    })?;
+    let profile_key = read("auth.json")
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|document| {
+            document
+                .get("OPENAI_API_KEY")
+                .and_then(serde_json::Value::as_str)
+                .map(|key| Zeroizing::new(key.to_string()))
+        });
+    let same_key = match (profile_key, load_key(proxy)) {
+        (Some(profile_key), Some(proxy_key)) => {
+            !profile_key.is_empty() && profile_key.as_bytes() == proxy_key.as_bytes()
+        }
+        _ => false,
+    };
+    Some(ProfileProxyMatch {
+        id: proxy.id.clone(),
+        same_key,
+    })
 }
 
 /// Removal that copes with Windows refusing a delete for a read-only file or
@@ -4628,6 +4693,7 @@ fn account_info(
         state,
         label,
         method: method.map(str::to_string),
+        cli_proxy: None,
     }
 }
 
@@ -8927,6 +8993,59 @@ mod tests {
         let legacy: AgentLaunchPlan =
             serde_json::from_str(&json.replace(",\"detached\":true", "")).unwrap();
         assert!(!legacy.detached);
+    }
+
+    #[test]
+    fn account_profile_proxy_recognizes_a_hand_configured_proxy() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let profile = root.path().join("codex");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(
+            profile.join("config.toml"),
+            "openai_base_url = \"http://10.0.0.5:8317/v1/\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            profile.join("auth.json"),
+            r#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-team"}"#,
+        )
+        .unwrap();
+        let proxies = [
+            ConfiguredProxy {
+                id: "other".into(),
+                base_url: "http://10.0.0.9:8317".into(),
+            },
+            ConfiguredProxy {
+                id: "team".into(),
+                base_url: "http://10.0.0.5:8317".into(),
+            },
+        ];
+        let key = |value: &'static str| {
+            move |_: &ConfiguredProxy| Some(Zeroizing::new(value.to_string()))
+        };
+
+        assert_eq!(
+            account_profile_proxy("codex", &profile, &proxies, key("sk-team")),
+            Some(ProfileProxyMatch {
+                id: "team".into(),
+                same_key: true
+            })
+        );
+        assert_eq!(
+            account_profile_proxy("codex", &profile, &proxies, key("sk-other")),
+            Some(ProfileProxyMatch {
+                id: "team".into(),
+                same_key: false
+            })
+        );
+        assert_eq!(
+            account_profile_proxy("codex", &profile, &proxies[..1], key("sk-team")),
+            None
+        );
+        assert_eq!(
+            account_profile_proxy("claude", &profile, &proxies, key("sk-team")),
+            None
+        );
     }
 
     #[test]

@@ -74,9 +74,14 @@ export function accountModelTargets(
   profiles: readonly ChatAccountProfile[],
   statuses: AccountProfileStatuses,
   defaultAccount: string,
+  keepProfileId: string | null = null,
 ): AccountModelTarget[] {
   return definitions.flatMap((definition) => {
-    const named = profilesFor(profiles, definition.id);
+    // A profile configured by hand with a proxy's own address and key is
+    // that proxy entry again; offering both reads as two different sources.
+    // One already in use stays selectable.
+    const named = profilesFor(profiles, definition.id).filter((profile) =>
+      profile.id === keepProfileId || !statuses[profile.id]?.cliProxy?.sameKey);
     const targets = [
       {
         definitionId: definition.id,
