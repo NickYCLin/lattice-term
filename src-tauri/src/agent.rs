@@ -1130,31 +1130,37 @@ fn prompt_grant_matches(entry: &AgentSessionEntry, epoch: Option<u64>) -> bool {
 
 #[derive(Default)]
 struct StagedAgentImages {
-    files: Vec<tempfile::TempPath>,
+    /// Oldest first, each with its size.
+    files: std::collections::VecDeque<(tempfile::TempPath, u64)>,
     total_bytes: u64,
 }
 
 impl StagedAgentImages {
+    /// Keeps the most recent pastes within the limits. A CLI reads a pasted
+    /// image when it is pasted or sent, so a long session that keeps pasting
+    /// screenshots drops its oldest files instead of refusing every new one.
     fn add(&mut self, file: tempfile::NamedTempFile) -> Result<PathBuf, String> {
         let bytes = file
             .as_file()
             .metadata()
             .map_err(|error| format!("Cannot inspect the staged clipboard image: {error}"))?
             .len();
-        let total_bytes = self
-            .total_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| "Staged clipboard image storage is too large.".to_string())?;
-        if self.files.len() >= MAX_STAGED_IMAGES_PER_SESSION {
-            return Err("This agent session has too many staged clipboard images.".to_string());
+        if bytes > MAX_STAGED_IMAGE_BYTES_PER_SESSION {
+            return Err("The pasted image is too large.".to_string());
         }
-        if total_bytes > MAX_STAGED_IMAGE_BYTES_PER_SESSION {
-            return Err("This agent session's staged clipboard images are too large.".to_string());
+        while self.files.len() >= MAX_STAGED_IMAGES_PER_SESSION
+            || self.total_bytes + bytes > MAX_STAGED_IMAGE_BYTES_PER_SESSION
+        {
+            let Some((oldest, size)) = self.files.pop_front() else {
+                break;
+            };
+            self.total_bytes -= size;
+            drop(oldest);
         }
 
         let path = file.path().to_path_buf();
-        self.files.push(file.into_temp_path());
-        self.total_bytes = total_bytes;
+        self.files.push_back((file.into_temp_path(), bytes));
+        self.total_bytes += bytes;
         Ok(path)
     }
 
@@ -13374,22 +13380,23 @@ notify = ["notify.exe", "turn-ended"]"#,
     }
 
     #[test]
-    fn staged_clipboard_images_have_a_per_session_count_limit() {
+    fn a_long_session_keeps_pasting_by_dropping_its_oldest_images() {
         let mut images = StagedAgentImages::default();
         let mut paths = Vec::new();
         for _ in 0..MAX_STAGED_IMAGES_PER_SESSION {
             let file = tempfile::NamedTempFile::new().unwrap();
             paths.push(images.add(file).unwrap());
         }
-        let rejected = tempfile::NamedTempFile::new().unwrap();
-        let rejected_path = rejected.path().to_path_buf();
-
-        assert!(images.add(rejected).is_err());
-        assert!(!rejected_path.exists());
-        assert!(paths.iter().all(|path| path.exists()));
+        // One past the limit still pastes; only the oldest file goes.
+        let newest = images.add(tempfile::NamedTempFile::new().unwrap()).unwrap();
+        assert!(newest.exists());
+        assert!(!paths[0].exists());
+        assert!(paths[1..].iter().all(|path| path.exists()));
+        assert_eq!(images.files.len(), MAX_STAGED_IMAGES_PER_SESSION);
 
         images.clear();
         assert!(paths.iter().all(|path| !path.exists()));
+        assert!(!newest.exists());
     }
 
     #[cfg(unix)]
