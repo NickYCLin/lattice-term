@@ -7,6 +7,7 @@ import { useCliProxySettings } from "../../app/useCliProxyApi";
 import { nativeConversationKey, useNativeHistory, type NativeMessageSnapshot } from "../../app/useNativeConversations";
 import { useI18n } from "../../i18n/context";
 import { chatProjectKey } from "../../app/chatProjects";
+import { displayPath } from "../../app/displayPath";
 
 function directoryKey(path: string) {
   return path.replace(/[\\/]+$/, "") || path;
@@ -89,7 +90,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
         return <li key={key}>
           <button type="button" className="chat-thread" disabled={opening !== null} aria-busy={opening === key}
             aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
-            title={entry.workingDirectory} onClick={() => void open(entry)}>
+            title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
             <span>
               <span className="chat-thread__title">{entry.title || t("chat.untitled")}</span>
               <span className="chat-thread__meta">

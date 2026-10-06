@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { mentionedImagePaths } from "../../app/chatImages";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
+import { displayPath } from "../../app/displayPath";
 
 /**
  * Thumbnails of images on disk. The backend only reads them from the
@@ -60,7 +61,7 @@ export function ChatImageStrip({
           >
             <img src={image.url} alt={image.path} loading="lazy" />
           </button>
-          {captions && <figcaption title={image.path}>{image.path}</figcaption>}
+          {captions && <figcaption title={displayPath(image.path)}>{displayPath(image.path)}</figcaption>}
         </figure>
       ))}
     </div>

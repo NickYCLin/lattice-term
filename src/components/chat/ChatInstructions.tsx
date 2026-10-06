@@ -142,7 +142,7 @@ export function ChatInstructions({
                     : "chat.instructions.project",
               )}
             </span>
-            <code className="chat-card__summary" title={file.path}>
+            <code className="chat-card__summary" title={displayPath(file.path)}>
               {displayPath(file.path)}
             </code>
           </summary>
@@ -180,7 +180,7 @@ export function ChatInstructions({
         <p className="chat-settings__hint chat-instructions__missing">
           {t("chat.instructions.missing")}{" "}
           {missing.map((file) => (
-            <code key={file.path} title={file.path}>
+            <code key={file.path} title={displayPath(file.path)}>
               {displayPath(file.path)}
             </code>
           ))}
@@ -206,7 +206,7 @@ export function ChatInstructions({
               type="button"
               className="button button--ghost button--sm"
               onClick={() => setEditing(file.path)}
-              title={file.path}
+              title={displayPath(file.path)}
             >
               {t("chat.instructions.create", { path: displayPath(file.path) })}
             </button>

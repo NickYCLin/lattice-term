@@ -542,7 +542,7 @@ export function ChatView({
                 <button
                   type="button"
                   className={`chat-thread${projectFilter === project.directory ? " is-active" : ""}`}
-                  title={project.directory}
+                  title={displayPath(project.directory)}
                   onClick={() => {
                     setProjectFilter(project.directory);
                     setMode("threads");
@@ -1005,7 +1005,7 @@ function ThreadPane({
                   <SettingsIcon />
                   {modelLabel}
                 </button>}
-                {!thread.archived && <span className="chat-chip" title={thread.workingDirectory}>
+                {!thread.archived && <span className="chat-chip" title={displayPath(thread.workingDirectory)}>
                   <FolderIcon />
                   {thread.workingDirectory
                     ? directoryName(thread.workingDirectory)
@@ -1160,7 +1160,7 @@ function ThreadPane({
                     {t("chat.directory.clear")}
                   </button>
                 )}
-                <span className="chat-directory__path" title={thread.workingDirectory}>
+                <span className="chat-directory__path" title={displayPath(thread.workingDirectory)}>
                   {thread.workingDirectory
                     ? displayPath(thread.workingDirectory)
                     : t("chat.directory.none")}
@@ -1328,7 +1328,7 @@ function ThreadPane({
           {attachments.length > 0 && (
             <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
               {attachments.map((attachment) => (
-                <span className="chat-attachment" key={attachment.path} title={attachment.path}>
+                <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
                   {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
                   <span>{attachment.name}</span>
                   <button
@@ -1504,7 +1504,7 @@ function ChatItemView({
             {item.attachments && item.attachments.length > 0 && (
               <div className="chat-attachments chat-attachments--sent">
                 {item.attachments.map((attachment) => (
-                  <span className="chat-attachment" key={attachment.path} title={attachment.path}>
+                  <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
                     {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
                     <span>{attachment.name}</span>
                   </span>

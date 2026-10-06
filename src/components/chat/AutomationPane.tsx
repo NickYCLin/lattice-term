@@ -413,7 +413,7 @@ function AutomationForm({
                   <FolderIcon />
                   {t("chat.directory.choose")}
                 </button>
-                <span className="chat-directory__path" title={draft.workingDirectory}>
+                <span className="chat-directory__path" title={displayPath(draft.workingDirectory)}>
                   {draft.workingDirectory
                     ? displayPath(draft.workingDirectory)
                     : t("chat.directory.none")}

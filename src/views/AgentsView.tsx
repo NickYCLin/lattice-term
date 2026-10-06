@@ -1644,7 +1644,7 @@ export function AgentsView({
                       )}
                     </strong>
                     <div className="agent-session-row__meta">
-                      <span className="mono agent-session-row__path" title={session.workingDirectory}>
+                      <span className="mono agent-session-row__path" title={displayPath(session.workingDirectory)}>
                         {displayPath(session.workingDirectory)}
                       </span>
                       {waitsFor && (

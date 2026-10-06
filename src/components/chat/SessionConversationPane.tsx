@@ -16,6 +16,7 @@ import {
   ShieldIcon, WaveformIcon,
 } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { displayPath } from "../../app/displayPath";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -39,7 +40,7 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   onRemove?: () => void;
   removeLabel?: string;
 }) {
-  return <span className="chat-attachment" title={attachment.path}>
+  return <span className="chat-attachment" title={displayPath(attachment.path)}>
     {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
     <span>{attachment.name}</span>
     {onRemove && <button type="button" className="chat-attachment__remove" onClick={onRemove}
@@ -339,7 +340,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
       {notice && <p role="status">{notice}</p>}
       <div className="session-composer__frame">
         <div className="session-composer__context">
-          <span className="session-composer__place" title={session.workingDirectory}>
+          <span className="session-composer__place" title={displayPath(session.workingDirectory)}>
             <FolderIcon size={14} />
             <span>{folderName(session.workingDirectory)}</span>
           </span>

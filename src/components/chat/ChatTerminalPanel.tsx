@@ -74,7 +74,7 @@ export function ChatTerminalPanel({
     <section className="chat-terminal" aria-label={t("chat.terminal")}>
       <header className="chat-terminal__head">
         <span className="chat-card__label">{t("chat.terminal")}</span>
-        <code className="chat-terminal__path" title={workingDirectory}>
+        <code className="chat-terminal__path" title={displayPath(workingDirectory)}>
           {workingDirectory ? displayPath(workingDirectory) : "~"}
         </code>
         <button
