@@ -1,5 +1,100 @@
 use super::*;
 
+#[test]
+fn session_tools_follow_exact_identity_without_changing_history_or_handoff() {
+    let home = tempfile::tempdir().unwrap();
+    let path = fixture(home.path(), "tools", 1);
+    fixture(home.path(), "other", 1);
+    let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    for payload in [
+        serde_json::json!({"type":"function_call","call_id":"exec-1","name":"exec_command","arguments":"{\"command\":\"npm test\"}"}),
+        serde_json::json!({"type":"function_call_output","call_id":"exec-1","output":"Exit code: 1\nfailed"}),
+        serde_json::json!({"type":"custom_tool_call","call_id":"patch-1","name":"apply_patch","input":"*** Begin Patch\n*** End Patch"}),
+        serde_json::json!({"type":"custom_tool_call_output","call_id":"patch-1","name":"apply_patch","output":[{"type":"input_text","text":"patched"},{"type":"input_image","image_url":"private-image"}]}),
+    ] {
+        writeln!(
+            file,
+            "\n{}",
+            serde_json::json!({"type":"response_item","payload":payload})
+        )
+        .unwrap();
+    }
+    let messages =
+        read_session_conversation("codex", "", Some("tools"), Some(home.path())).unwrap();
+    assert_eq!(messages.len(), 5);
+    assert_eq!(
+        messages[1].tool.as_ref().unwrap().name.as_deref(),
+        Some("exec_command")
+    );
+    assert_eq!(messages[2].tool.as_ref().unwrap().call_id, "exec-1");
+    assert_eq!(messages[2].tool.as_ref().unwrap().kind, "result");
+    assert_eq!(messages[2].text, "Exit code: 1\nfailed");
+    assert_eq!(messages[3].tool.as_ref().unwrap().kind, "call");
+    assert_eq!(messages[4].text, "patched");
+    assert_eq!(
+        read_conversation_snapshot(&path, TranscriptKind::Codex)
+            .unwrap()
+            .messages
+            .len(),
+        1
+    );
+    assert!(!parse_codex(&path, 10_000).unwrap().contains("npm test"));
+    assert_eq!(
+        read_session_conversation("codex", "", Some("other"), Some(home.path()))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn session_tool_parser_rejects_unknown_rows_and_invalid_shapes() {
+    for row in [
+        serde_json::json!({"type":"event_msg","payload":{"type":"function_call","call_id":"id","name":"exec","arguments":"input"}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"reasoning","call_id":"id","name":"exec","arguments":"private"}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"function_call","call_id":"","name":"exec","arguments":"input"}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"function_call","call_id":"id","name":"exec\ncommand","arguments":"input"}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"function_call","call_id":"id","name":"exec","arguments":{"command":"input"}}}),
+        serde_json::json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"id","output":{"unknown":"private"}}}),
+    ] {
+        assert!(codex_conversation_tool(&row).is_none());
+    }
+    let row = serde_json::json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"id","output":""}});
+    assert!(codex_conversation_tool(&row).is_some());
+}
+
+#[test]
+fn session_tool_snapshots_keep_existing_count_and_text_limits() {
+    let home = tempfile::tempdir().unwrap();
+    let path = fixture(home.path(), "bounded", 0);
+    let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+    for index in 0..=HISTORY_MAX_MESSAGES {
+        writeln!(
+            file,
+            "\n{}",
+            serde_json::json!({"type":"response_item","payload":{
+                "type":"function_call_output","call_id":format!("call-{index}"),"output":"output"
+            }})
+        )
+        .unwrap();
+    }
+    let snapshot =
+        read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, true).unwrap();
+    assert!(snapshot.truncated);
+    assert_eq!(snapshot.messages.len(), HISTORY_MAX_MESSAGES);
+    assert_eq!(
+        snapshot.messages[0].tool.as_ref().unwrap().call_id,
+        "call-1"
+    );
+    writeln!(file, "\n{}", serde_json::json!({"type":"response_item","payload":{
+        "type":"function_call_output","call_id":"huge","output":"x".repeat(HISTORY_MAX_TEXT_BYTES + 1)
+    }})).unwrap();
+    let snapshot =
+        read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, true).unwrap();
+    assert!(snapshot.truncated);
+    assert!(snapshot.messages.is_empty());
+}
+
 fn fixture(home: &Path, id: &str, count: usize) -> PathBuf {
     let path = home.join(format!("sessions/rollout-{id}.jsonl"));
     fs::create_dir_all(path.parent().unwrap()).unwrap();

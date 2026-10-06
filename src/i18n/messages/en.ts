@@ -9,6 +9,9 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "sessionChat.tool": "Tool",
+  "sessionChat.toolInput": "Call input",
+  "sessionChat.toolOutput": "Returned output",
   "workspace.recovery.title": "Saved projects and recovery",
   "workspace.recovery.legacy": "Previously imported history ({count})",
   "workspace.recovery.legacyHint": "These older shortcuts do not indicate running or resumable sessions. Conversations kept by each CLI appear directly in the conversation list. Removing a shortcut does not delete the original conversation.",

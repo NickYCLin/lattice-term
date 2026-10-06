@@ -909,6 +909,16 @@ pub struct LocalConversation {
 pub struct LocalConversationMessage {
     pub role: &'static str,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ConversationTool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationTool {
+    pub call_id: String,
+    pub name: Option<String>,
+    pub kind: &'static str,
 }
 
 const HISTORY_MAX_PROFILES: usize = 24;
@@ -1757,7 +1767,7 @@ pub fn read_session_conversation(
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
     }
     .ok_or("The session conversation is not available yet.")?;
-    read_conversation_messages(&path, kind)
+    read_conversation_snapshot_with_tools(&path, kind, true).map(|snapshot| snapshot.messages)
 }
 
 /// The provider comes only from the exact native record in this account,
@@ -1840,42 +1850,49 @@ pub struct LocalConversationSnapshot {
     pub archived: Option<bool>,
 }
 
-fn read_conversation_messages(
-    path: &Path,
-    kind: TranscriptKind,
-) -> Result<Vec<LocalConversationMessage>, String> {
-    read_conversation_snapshot(path, kind).map(|snapshot| snapshot.messages)
-}
-
 fn read_conversation_snapshot(
     path: &Path,
     kind: TranscriptKind,
 ) -> Result<LocalConversationSnapshot, String> {
+    read_conversation_snapshot_with_tools(path, kind, false)
+}
+
+fn read_conversation_snapshot_with_tools(
+    path: &Path,
+    kind: TranscriptKind,
+    include_tools: bool,
+) -> Result<LocalConversationSnapshot, String> {
     let mut messages = Vec::new();
     let mut bytes = 0;
     let mut truncated = false;
-    let mut push = |role: &'static str, text: String| {
+    let mut push = |role: &'static str, text: String, tool: Option<ConversationTool>| {
         let text = if role == "user" {
             visible_user_text(&text).to_string()
         } else {
             text
         };
-        if text.is_empty() {
+        if text.is_empty() && tool.is_none() {
             return;
         }
-        bytes += text.len();
-        messages.push(LocalConversationMessage { role, text });
+        let tool_bytes = tool.as_ref().map_or(0, |tool| {
+            tool.call_id.len() + tool.name.as_ref().map_or(0, String::len)
+        });
+        bytes += text.len() + tool_bytes;
+        messages.push(LocalConversationMessage { role, text, tool });
         while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
             truncated = true;
             let removed: LocalConversationMessage = messages.remove(0);
             bytes -= removed.text.len();
+            bytes -= removed.tool.as_ref().map_or(0, |tool| {
+                tool.call_id.len() + tool.name.as_ref().map_or(0, String::len)
+            });
         }
     };
     if kind == TranscriptKind::Gemini {
         for (role, text) in
             gemini_turns(path).ok_or("The local conversation could not be read safely.")?
         {
-            push(role, text);
+            push(role, text, None);
         }
         return Ok(LocalConversationSnapshot {
             messages,
@@ -1886,6 +1903,12 @@ fn read_conversation_snapshot(
     let incomplete = visit_transcript_rows(path, |value| {
         let (role, content) = match kind {
             TranscriptKind::Codex => {
+                if include_tools {
+                    if let Some((text, tool)) = codex_conversation_tool(value) {
+                        push("assistant", text, Some(tool));
+                        return;
+                    }
+                }
                 let Some(payload) = value.get("payload") else {
                     return;
                 };
@@ -1903,13 +1926,13 @@ fn read_conversation_snapshot(
             }
             TranscriptKind::Antigravity => {
                 if let Some((role, text)) = antigravity_turn(value) {
-                    push(role, text.trim().to_string());
+                    push(role, text.trim().to_string(), None);
                 }
                 return;
             }
             TranscriptKind::Cursor => {
                 if let Some((role, text)) = cursor_turn(value) {
-                    push(role, text);
+                    push(role, text, None);
                 }
                 return;
             }
@@ -1920,7 +1943,7 @@ fn read_conversation_snapshot(
             Some("assistant") => "assistant",
             _ => return,
         };
-        push(role, content.map(content_text).unwrap_or_default());
+        push(role, content.map(content_text).unwrap_or_default(), None);
     })
     .ok_or("The local conversation could not be read safely.")?;
     Ok(LocalConversationSnapshot {
@@ -1928,6 +1951,50 @@ fn read_conversation_snapshot(
         truncated: truncated || incomplete,
         archived: None,
     })
+}
+
+fn codex_conversation_tool(value: &Value) -> Option<(String, ConversationTool)> {
+    if value.get("type")?.as_str()? != "response_item" {
+        return None;
+    }
+    let payload = value.get("payload")?;
+    let (kind, field) = match payload.get("type")?.as_str()? {
+        "function_call" => ("call", "arguments"),
+        "custom_tool_call" => ("call", "input"),
+        "function_call_output" | "custom_tool_call_output" => ("result", "output"),
+        _ => return None,
+    };
+    let call_id = payload.get("call_id")?.as_str()?;
+    if call_id.is_empty() || call_id.len() > 256 || call_id.chars().any(char::is_control) {
+        return None;
+    }
+    let name = if let Some(name) = payload.get("name").and_then(Value::as_str) {
+        if name.is_empty() || name.len() > 256 || name.chars().any(char::is_control) {
+            return None;
+        }
+        Some(name.to_string())
+    } else {
+        if kind == "call" {
+            return None;
+        }
+        None
+    };
+    let content = payload.get(field)?;
+    let text = if let Some(text) = content.as_str() {
+        text.to_string()
+    } else if kind == "result" && content.is_array() {
+        content_text(content)
+    } else {
+        return None;
+    };
+    Some((
+        text,
+        ConversationTool {
+            call_id: call_id.to_string(),
+            name,
+            kind,
+        },
+    ))
 }
 
 fn is_gemini_session(path: &Path) -> bool {

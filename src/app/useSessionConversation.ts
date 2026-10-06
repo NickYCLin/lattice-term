@@ -6,6 +6,7 @@ import { renderTerminalPreview } from "./terminalPreview";
 export interface SessionConversationMessage {
   role: "user" | "assistant";
   text: string;
+  tool?: { callId: string; name: string | null; kind: "call" | "result" };
 }
 
 /** A permission prompt the CLI shows in its terminal right now. */

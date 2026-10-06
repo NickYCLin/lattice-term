@@ -2351,6 +2351,17 @@ button.chat-diff__line.is-commentable:focus-visible {
 }
 .session-chat__diagnostic { overflow-wrap: anywhere; color: var(--warn); }
 
+.session-chat__tool {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.session-chat__tool summary { cursor: pointer; overflow-wrap: anywhere; }
+.session-chat__tool summary span { margin-left: 12px; color: var(--text-muted); }
+.session-chat__tool-id { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--text-muted); }
+.session-chat__tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+
 @media (prefers-reduced-motion: reduce) {
   .session-chat__pulse {
     animation: none;

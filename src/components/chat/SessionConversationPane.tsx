@@ -271,6 +271,19 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           )}</p> : null}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
         {conversation.messages.map((message, index) => {
+          if (message.tool) {
+            const tool = message.tool;
+            const name = tool.name ?? conversation.messages.slice(0, index).reverse()
+              .find(candidate => candidate.tool?.kind === "call" && candidate.tool.callId === tool.callId)
+              ?.tool?.name;
+            return <details key={index} className="session-chat__tool">
+              <summary>{name ?? t("sessionChat.tool")}
+                <span>{t(tool.kind === "call" ? "sessionChat.toolInput" : "sessionChat.toolOutput")}</span>
+              </summary>
+              <code className="session-chat__tool-id">{tool.callId}</code>
+              <pre>{message.text}</pre>
+            </details>;
+          }
           const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
           return <div key={index} className={`chat-msg chat-msg--${message.role}`}>
