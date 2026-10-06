@@ -4551,7 +4551,10 @@ fn is_codex_turn_complete_notification(payload: &OsStr) -> bool {
 fn codex_notification_thread_id(notification: &CodexNotificationKind) -> Option<String> {
     let thread_id = notification.thread_id.as_deref()?;
     let characters: Vec<char> = thread_id.chars().collect();
-    is_uuid_shaped(&characters).then(|| thread_id.to_ascii_lowercase())
+    let thread_id = is_uuid_shaped(&characters).then(|| thread_id.to_ascii_lowercase())?;
+    // A subagent finishing its own turn must not replace the conversation
+    // the tab will resume.
+    (crate::transcript::codex_thread_is_main(&thread_id) != Some(false)).then_some(thread_id)
 }
 
 /// Handle the tiny reporter subcommand before Tauri starts.
@@ -6994,15 +6997,27 @@ fn codex_resume_accepts(arguments: &[String]) -> bool {
 /// A restored Codex tab whose thread id was never reported (an older save,
 /// or an app closed during the first turn) still names an exact thread,
 /// like every other restore, instead of opening a blank conversation.
+///
+/// Older versions also read ids off the screen and could keep a native
+/// thread the conversation merely displayed on a CLIProxyAPI tab. Such a
+/// thread cannot be resumed through the proxy, so the tab's own latest
+/// proxy thread takes its place.
 fn adopt_latest_codex_thread(
     request: &mut AgentLaunchRequest,
     registry: &AgentRegistry,
 ) -> Result<(), String> {
-    if request.definition_id != "codex"
-        || !request.restore_existing_session
-        || request.resume_session_id.is_some()
-    {
+    if request.definition_id != "codex" || !request.restore_existing_session {
         return Ok(());
+    }
+    let profile = profile_config_directory("codex", request.profile_config_path.as_deref())?;
+    if let Some(saved) = request.resume_session_id.as_deref() {
+        let proxied_tab =
+            crate::cliproxy::launch::base_from_arguments(&request.arguments)?.is_some();
+        let native_thread = crate::transcript::codex_session_provider(saved, profile.as_deref())?
+            .is_some_and(|provider| !crate::cliproxy::launch::is_managed_provider(&provider));
+        if !(proxied_tab && native_thread) {
+            return Ok(());
+        }
     }
     let mut arguments = request.arguments.clone();
     if arguments.len() >= 2 && arguments[0] == "resume" && arguments[1] == "--last" {
@@ -7014,7 +7029,6 @@ fn adopt_latest_codex_thread(
     if !through_proxy && !codex_resume_accepts(&arguments) {
         return Ok(());
     }
-    let profile = profile_config_directory("codex", request.profile_config_path.as_deref())?;
     // Two saved tabs of one project must not both reopen the same thread.
     let taken: Vec<String> = registry
         .list()

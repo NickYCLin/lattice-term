@@ -1775,6 +1775,16 @@ pub(crate) fn codex_session_provider(
     Ok(read_codex_session_meta(&path).and_then(|meta| meta.model_provider))
 }
 
+/// Whether a thread Codex just reported is the interactive conversation
+/// itself rather than one of its subagents. `None` when its record cannot
+/// be found yet; the reporter runs with the Codex process's own
+/// environment, so `CODEX_HOME` already names the right account.
+pub(crate) fn codex_thread_is_main(thread_id: &str) -> Option<bool> {
+    let root = history_root(TranscriptKind::Codex, None)?;
+    let path = locate_codex_in(&root, "", Some(thread_id))?;
+    read_codex_session_meta(&path).map(|meta| meta.source_is_known_main_cli)
+}
+
 /// The newest main-CLI Codex thread of this project and account that went
 /// through the same kind of provider, for a saved tab whose id was never
 /// reported. Codex's own `resume --last` cannot find a proxy thread, because
