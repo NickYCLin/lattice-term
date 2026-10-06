@@ -2086,6 +2086,8 @@ export const messages: Messages = {
   "sessionChat.model.failed": "모델을 바꾸지 못했습니다: {detail}",
   "sessionChat.more": "파일 및 기타 항목 추가",
   "sessionChat.dictation": "받아쓰기",
+  "sessionChat.dictation.local": "로컬 받아쓰기 (최대 12초, 마이크를 다시 누르면 인식 시작)",
+  "sessionChat.voice.startedLocal": "로컬 음성 대화: 최대 12초 녹음 후 인식하여 전송합니다. 마이크로 녹음을 종료하고 파형으로 대화를 종료합니다. 오디오는 업로드되지 않습니다.",
   "sessionChat.dictation.system": "받아쓰기(Windows 음성 입력을 엽니다. Win+H를 눌러도 됩니다)",
   "sessionChat.dictation.unavailable": "이 플랫폼에서는 음성 인식을 사용할 수 없어 받아쓰기를 쓸 수 없습니다",
   "sessionChat.voice.start": "새 음성 대화 시작",

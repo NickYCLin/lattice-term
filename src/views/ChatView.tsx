@@ -1,4 +1,5 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { useChatClipboardFallback } from "../app/chatClipboard";
 import { desktopChatAccess } from "../app/desktopChat";
 import { NativeConversationRows } from "../components/chat/NativeConversationRows";
 import { useNativeHistory } from "../app/useNativeConversations";
@@ -28,7 +29,7 @@ import {
   type ClipboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteContainsImage } from "../app/chatAttachments";
+import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths } from "../app/chatAttachments";
 import {
   defaultPermission,
   effortChoices,
@@ -837,7 +838,7 @@ function ThreadPane({
     }
   }
 
-  async function pasteImage() {
+  async function pasteImage(silent = false) {
     if (pastingImageRef.current || steeringRef.current) return;
     if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
       setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return;
@@ -858,20 +859,17 @@ function ThreadPane({
       const path = await invoke<string | null>("agent_chat_paste_image", { threadId: thread.id });
       if (!mounted.current) return;
       if (path) addAttachments([path]);
-      else setNotice(t("chat.attachment.clipboardEmpty"));
+      else if (!silent) setNotice(t("chat.attachment.clipboardEmpty"));
     } catch (reason) {
-      if (mounted.current) setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
+      if (mounted.current && !silent) setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
     } finally {
       pastingImageRef.current = false;
       if (mounted.current) setPastingImage(false);
     }
   }
 
-  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!pasteContainsImage(event.clipboardData.items) && !pasteContainsFiles(event.clipboardData.items)) return;
-    event.preventDefault();
-    void pasteImage();
-  }
+  const clipboard = useChatClipboardFallback(thread.id, () => { void pasteImage(true); });
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) { clipboard.onPaste(event); }
 
   async function chooseAttachments(kind: "image" | "file") {
     setNotice(null);
@@ -969,6 +967,7 @@ function ThreadPane({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    clipboard.onKeyDown(event.nativeEvent);
     // Enter while an input method is composing picks a candidate; it must
     // not send half a sentence.
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;

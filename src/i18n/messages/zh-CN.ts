@@ -2110,6 +2110,8 @@ export const messages: Messages = {
   "sessionChat.model.failed": "切换模型失败：{detail}",
   "sessionChat.more": "添加文件和更多内容",
   "sessionChat.dictation": "听写",
+  "sessionChat.dictation.local": "本机听写（最长录音 12 秒，再按麦克风可提前识别）",
+  "sessionChat.voice.startedLocal": "本机语音对话：每次录音最长 12 秒，识别后自动发送；按麦克风可提前结束录音，按波形可结束对话。音频不会上传。",
   "sessionChat.dictation.system": "听写（打开 Windows 语音输入，也可以按 Win+H）",
   "sessionChat.dictation.unavailable": "这个平台没有可用的语音识别，暂时无法听写",
   "sessionChat.voice.start": "开始新的语音对话",

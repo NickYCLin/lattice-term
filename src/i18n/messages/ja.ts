@@ -2090,6 +2090,8 @@ export const messages: Messages = {
   "sessionChat.model.failed": "モデルを変更できませんでした：{detail}",
   "sessionChat.more": "ファイルなどを追加",
   "sessionChat.dictation": "音声入力",
+  "sessionChat.dictation.local": "ローカル音声入力（最大12秒、マイクを再度押すと認識を開始）",
+  "sessionChat.voice.startedLocal": "ローカル音声会話：最大12秒録音し、認識後に送信します。マイクで録音を終了、波形で会話を終了します。音声はアップロードされません。",
   "sessionChat.dictation.system": "音声入力（Windows の音声入力を開きます。Win+H でも開けます）",
   "sessionChat.dictation.unavailable": "このプラットフォームでは音声認識を利用できないため、音声入力は使えません",
   "sessionChat.voice.start": "新しい音声会話を開始",

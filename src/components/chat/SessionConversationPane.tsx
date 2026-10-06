@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
 import {
-  CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, pasteContainsFiles, pasteContainsImage,
+  CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths,
   sessionPromptWithAttachments, splitSessionAttachments,
 } from "../../app/chatAttachments";
 import { useFileDrop } from "../../app/fileDrop";
@@ -19,6 +19,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
 import { switchesModelInPlace } from "../../app/sessionModelSwitch";
 import { SessionModelPicker } from "./SessionModelPicker";
+import { useChatClipboardFallback } from "../../app/chatClipboard";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -67,7 +68,9 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const [notice, setNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pasting, setPasting] = useState(false);
+  const pastingRef = useRef(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const voiceActiveRef = useRef(false);
   const spokenThrough = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -140,13 +143,14 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       if (mounted.current) setNotice(t("chat.attachment.failed", { detail: errorText(reason) }));
     }
   }
-  async function pasteAttachments() {
+  async function pasteAttachments(silent = false) {
     setMenuOpen(false);
-    if (pasting) return;
+    if (pastingRef.current) return;
     if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
       setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
       return;
     }
+    pastingRef.current = true;
     setPasting(true);
     setNotice(null);
     try {
@@ -160,18 +164,16 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       const path = await invoke<string | null>("agent_chat_paste_image", { threadId: session.sessionId });
       if (!mounted.current) return;
       if (path) addAttachments([path]);
-      else setNotice(t("chat.attachment.clipboardEmpty"));
+      else if (!silent) setNotice(t("chat.attachment.clipboardEmpty"));
     } catch (reason) {
-      if (mounted.current) setNotice(t("chat.attachment.failed", { detail: errorText(reason) }));
+      if (mounted.current && !silent) setNotice(t("chat.attachment.failed", { detail: errorText(reason) }));
     } finally {
+      pastingRef.current = false;
       if (mounted.current) setPasting(false);
     }
   }
-  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!pasteContainsImage(event.clipboardData.items) && !pasteContainsFiles(event.clipboardData.items)) return;
-    event.preventDefault();
-    void pasteAttachments();
-  }
+  const clipboard = useChatClipboardFallback(session.sessionId, () => { void pasteAttachments(true); });
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) { clipboard.onPaste(event); }
   const { dragging } = useFileDrop({
     ref: boxRef,
     disabled: blocked,
@@ -197,7 +199,11 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const dictation = useDictation({
     lang: speechLang,
     onText: text => setDraft(current => current.trim() ? `${current.trimEnd()} ${text}` : text),
-    onError: detail => setNotice(t("sessionChat.voice.failed", { detail })),
+    onError: detail => {
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      setNotice(t("sessionChat.voice.failed", { detail }));
+    },
   });
   const voiceAvailable = dictation.mode !== null;
   function startDictation() {
@@ -209,21 +215,28 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     voiceActiveRef.current = true;
     setVoiceActive(true);
     spokenThrough.current = conversation.messages.length;
-    setNotice(t(dictation.mode === "system" ? "sessionChat.voice.startedSystem" : "sessionChat.voice.started"));
+    setNotice(t(dictation.mode === "system" ? "sessionChat.voice.startedSystem"
+      : dictation.mode === "local" ? "sessionChat.voice.startedLocal" : "sessionChat.voice.started"));
     startDictation();
   }
   function stopVoice() {
     voiceActiveRef.current = false;
     setVoiceActive(false);
-    dictation.stop();
+    dictation.stop(true);
     stopSpeaking();
+    setSpeaking(false);
     setNotice(null);
   }
   useEffect(() => {
-    if (!voiceActive || !draft.trim() || blocked) return;
+    if (!voiceActive || !draft.trim() || blocked || dictation.listening) return;
     const timer = setTimeout(() => void submitRef.current(), VOICE_SEND_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [voiceActive, draft, blocked]);
+  }, [voiceActive, draft, blocked, dictation.listening]);
+  useEffect(() => {
+    if (!voiceActive || blocked || working || speaking || draft.trim() || dictation.listening || dictation.mode === "system") return;
+    const timer = setTimeout(() => { void dictation.start(); }, 300);
+    return () => clearTimeout(timer);
+  }, [voiceActive, blocked, working, speaking, draft, dictation.listening, dictation.mode, dictation.start]);
   useEffect(() => {
     if (!voiceActive || working) return;
     const messages = conversation.messages;
@@ -232,15 +245,19 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     spokenThrough.current = messages.length;
     const reply = spokenSessionReply(last);
     if (!reply) return;
+    dictation.stop(true);
+    setSpeaking(true);
     void speak(reply, speechLang).then(() => {
-      if (voiceActiveRef.current && mounted.current && dictation.mode === "browser") void dictation.start();
+      if (mounted.current) setSpeaking(false);
     });
   }, [voiceActive, working, conversation.messages, speechLang, dictation]);
   const dictationTitle = !voiceAvailable ? t("sessionChat.dictation.unavailable")
-    : dictation.mode === "system" ? t("sessionChat.dictation.system") : t("sessionChat.dictation");
+    : dictation.mode === "system" ? t("sessionChat.dictation.system")
+      : dictation.mode === "local" ? t("sessionChat.dictation.local") : t("sessionChat.dictation");
   const voiceTitle = !voiceAvailable ? t("sessionChat.voice.unavailable")
     : speechSynthesisAvailable() ? t("sessionChat.voice.start") : t("sessionChat.voice.startSilent");
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    clipboard.onKeyDown(event.nativeEvent);
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submit();
@@ -422,7 +439,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <button type="button" className={`session-composer__icon${dictation.listening ? " is-active" : ""}`}
               disabled={!voiceAvailable || blocked} aria-label={dictationTitle} title={dictationTitle}
-              aria-pressed={dictation.mode === "browser" ? dictation.listening : undefined}
+              aria-pressed={dictation.mode !== "system" ? dictation.listening : undefined}
               onClick={() => dictation.listening ? dictation.stop() : startDictation()}>
               <MicIcon />
             </button>

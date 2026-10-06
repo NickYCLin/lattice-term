@@ -2086,6 +2086,8 @@ export const messages: Messages = {
   "sessionChat.model.failed": "No se pudo cambiar de modelo: {detail}",
   "sessionChat.more": "Añadir archivos y más",
   "sessionChat.dictation": "Dictar",
+  "sessionChat.dictation.local": "Dictado local (hasta 12 segundos; pulse el micrófono de nuevo para transcribir)",
+  "sessionChat.voice.startedLocal": "Conversación de voz local: graba hasta 12 segundos, transcribe y envía. El micrófono termina la grabación y la onda termina la conversación. El audio no se sube.",
   "sessionChat.dictation.system": "Dictar (abre la escritura por voz de Windows; también puedes pulsar Win+H)",
   "sessionChat.dictation.unavailable": "El reconocimiento de voz no está disponible en esta plataforma, así que no se puede dictar",
   "sessionChat.voice.start": "Iniciar una nueva conversación de voz",

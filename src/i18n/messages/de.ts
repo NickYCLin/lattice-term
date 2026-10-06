@@ -2086,6 +2086,8 @@ export const messages: Messages = {
   "sessionChat.model.failed": "Modell konnte nicht gewechselt werden: {detail}",
   "sessionChat.more": "Dateien und mehr hinzufügen",
   "sessionChat.dictation": "Diktieren",
+  "sessionChat.dictation.local": "Lokales Diktieren (bis zu 12 Sekunden; Mikrofon erneut drücken zum Erkennen)",
+  "sessionChat.voice.startedLocal": "Lokales Sprachgespräch: bis zu 12 Sekunden aufnehmen, dann erkennen und senden. Mikrofon beendet die Aufnahme, Wellenform beendet das Gespräch. Audio bleibt auf diesem Computer.",
   "sessionChat.dictation.system": "Diktieren (öffnet die Windows-Spracheingabe; alternativ Win+H drücken)",
   "sessionChat.dictation.unavailable": "Auf dieser Plattform ist keine Spracherkennung verfügbar, daher ist Diktieren nicht möglich",
   "sessionChat.voice.start": "Neues Sprachgespräch starten",

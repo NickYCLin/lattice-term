@@ -115,6 +115,8 @@ export const zhTW = {
   "sessionChat.model.failed": "換模型失敗：{detail}",
   "sessionChat.more": "新增檔案和更多內容",
   "sessionChat.dictation": "聽寫",
+  "sessionChat.dictation.local": "本機聽寫（最長錄音 12 秒，再按麥克風可提早辨識）",
+  "sessionChat.voice.startedLocal": "本機語音對話：每次錄音最長 12 秒，辨識後自動送出；按麥克風可提早結束錄音，按波形可結束對話。音訊不會上傳。",
   "sessionChat.dictation.system": "聽寫（開啟 Windows 語音輸入，也可以按 Win+H）",
   "sessionChat.dictation.unavailable": "這個平台沒有可用的語音辨識，暫時無法聽寫",
   "sessionChat.voice.start": "開始新的語音對話",

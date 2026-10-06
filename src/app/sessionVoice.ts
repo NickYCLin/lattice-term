@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { hasDesktopBackend } from "./nativeRuntime";
 
 /**
  * Dictation for the session composer.
@@ -8,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  * which types into the focused input. Elsewhere the browser recogniser is
  * used when the web view provides one.
  */
-export type DictationMode = "system" | "browser" | null;
+export type DictationMode = "system" | "browser" | "local" | null;
 
 interface Recognition {
   lang: string;
@@ -51,20 +52,68 @@ export function useDictation({ lang, onText, onError }: {
   onText: (text: string) => void;
   onError: (detail: string) => void;
 }) {
-  const mode = useMemo(() => dictationMode(), []);
+  const browserMode = useMemo(() => dictationMode(), []);
+  const [localAvailable, setLocalAvailable] = useState(false);
+  const mode = browserMode ?? (localAvailable ? "local" : null);
   const [listening, setListening] = useState(false);
   const recognition = useRef<Recognition | null>(null);
+  const localRequest = useRef<string | null>(null);
+  const mounted = useRef(true);
   const latest = useRef({ onText, onError });
   latest.current = { onText, onError };
-  useEffect(() => () => recognition.current?.abort(), []);
+  useEffect(() => {
+    mounted.current = true;
+    if (!browserMode && hasDesktopBackend()) {
+      void import("@tauri-apps/api/core").then(({ invoke }) => invoke<boolean>("local_dictation_available"))
+        .then(available => { if (mounted.current) setLocalAvailable(available); }).catch(() => undefined);
+    }
+    return () => {
+      mounted.current = false;
+      recognition.current?.abort();
+      const requestId = localRequest.current;
+      localRequest.current = null;
+      if (requestId) void import("@tauri-apps/api/core")
+        .then(({ invoke }) => invoke("local_dictation_stop", { requestId, cancel: true })).catch(() => undefined);
+    };
+  }, [browserMode]);
 
-  const stop = useCallback(() => {
-    recognition.current?.abort();
+  const stop = useCallback((cancel = false) => {
+    const requestId = localRequest.current;
+    if (requestId) {
+      if (cancel) { localRequest.current = null; setListening(false); }
+      void import("@tauri-apps/api/core")
+        .then(({ invoke }) => invoke("local_dictation_stop", { requestId, cancel })).catch(reason => {
+          if (mounted.current) latest.current.onError(reason instanceof Error ? reason.message : String(reason));
+        });
+      return;
+    }
+    const previous = recognition.current;
     recognition.current = null;
+    previous?.abort();
     setListening(false);
   }, []);
 
   const start = useCallback(async () => {
+    if (mode === "local") {
+      if (localRequest.current) return;
+      const requestId = crypto.randomUUID();
+      localRequest.current = requestId;
+      setListening(true);
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        if (!mounted.current || localRequest.current !== requestId) return;
+        const text = await invoke<string>("local_dictation_start", { requestId, lang });
+        if (mounted.current && localRequest.current === requestId && text) latest.current.onText(text);
+      } catch (reason) {
+        if (mounted.current && localRequest.current === requestId) latest.current.onError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        if (localRequest.current === requestId) {
+          localRequest.current = null;
+          if (mounted.current) setListening(false);
+        }
+      }
+      return;
+    }
     if (mode === "system") {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
@@ -81,14 +130,17 @@ export function useDictation({ lang, onText, onError }: {
     next.continuous = false;
     next.interimResults = false;
     next.onresult = event => {
+      if (!mounted.current || recognition.current !== next) return;
       const text = Array.from(event.results).map(result => result[0]?.transcript ?? "").join("").trim();
       if (text) latest.current.onText(text);
     };
     next.onerror = event => {
+      if (!mounted.current || recognition.current !== next) return;
       if (event.error && event.error !== "aborted" && event.error !== "no-speech") latest.current.onError(event.error);
     };
     next.onend = () => {
-      if (recognition.current === next) recognition.current = null;
+      if (!mounted.current || recognition.current !== next) return;
+      recognition.current = null;
       setListening(false);
     };
     recognition.current = next;

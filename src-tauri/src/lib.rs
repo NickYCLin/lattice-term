@@ -1840,6 +1840,29 @@ async fn start_voice_typing() -> Result<(), String> {
         .map_err(|error| format!("Voice typing did not start: {error}"))?
 }
 
+#[tauri::command]
+fn local_dictation_available() -> bool {
+    crate::voice_typing::local_available()
+}
+
+#[tauri::command]
+async fn local_dictation_start(
+    state: State<'_, crate::voice_typing::DictationState>,
+    request_id: String,
+    lang: String,
+) -> Result<String, String> {
+    crate::voice_typing::dictate(&state, request_id, lang).await
+}
+
+#[tauri::command]
+fn local_dictation_stop(
+    state: State<'_, crate::voice_typing::DictationState>,
+    request_id: String,
+    cancel: bool,
+) -> Result<(), String> {
+    state.stop(&request_id, cancel)
+}
+
 /// Saves an explicitly pasted chat image for later sends and queued turns.
 #[tauri::command]
 async fn agent_chat_paste_image(
@@ -5048,6 +5071,7 @@ pub fn run() {
             let agent_plans = FileAgentPlanStore::open(&dir).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(agent_plans));
             app.manage(McpPlanSync::default());
+            app.manage(crate::voice_typing::DictationState::default());
             app.manage(Mutex::new(AgentTerminalHistoryStore::open(&dir)));
 
             // A trust store that cannot be read is carried as a reason rather
@@ -5204,6 +5228,9 @@ pub fn run() {
             agent_broadcast,
             agent_enqueue,
             start_voice_typing,
+            local_dictation_available,
+            local_dictation_start,
+            local_dictation_stop,
             agent_clear_queue,
             agent_set_queue_dependency,
             agent_set_max_active_sessions,
