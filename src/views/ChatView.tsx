@@ -5,6 +5,7 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
+import { useFittingTabs } from "../components/chat/useFittingTabs";
 import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
 import type { NativeMessageSnapshot } from "../app/useNativeConversations";
 /**
@@ -159,6 +160,7 @@ export function ChatView({
     chat.setActiveThreadId(id);
   }
   const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
+  const modeTabs = useFittingTabs<HTMLDivElement>();
   // A project picked in the projects tab narrows the conversation list to it.
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
@@ -342,16 +344,17 @@ export function ChatView({
     <section className="chat-view" aria-label={t("chat.title")}>
       <aside className="chat-threads">
         <div className="chat-threads__header">
-          <div className="chat-mode" role="tablist">
+          <div ref={modeTabs.ref} className={`chat-mode${modeTabs.compact ? " is-compact" : ""}`} role="tablist">
             <button
               type="button"
               role="tab"
               aria-selected={mode === "threads"}
               className={`chat-mode__tab${mode === "threads" ? " is-active" : ""}`}
               onClick={() => setMode("threads")}
+              title={t("chat.title")}
             >
               <ChatIcon />
-              {t("chat.title")}
+              <span className="chat-mode__label">{t("chat.title")}</span>
             </button>
             <button
               type="button"
@@ -359,9 +362,10 @@ export function ChatView({
               aria-selected={mode === "projects"}
               className={`chat-mode__tab${mode === "projects" ? " is-active" : ""}`}
               onClick={() => setMode("projects")}
+              title={t("chat.projects")}
             >
               <FolderIcon />
-              {t("chat.projects")}
+              <span className="chat-mode__label">{t("chat.projects")}</span>
             </button>
             <button
               type="button"
@@ -369,9 +373,10 @@ export function ChatView({
               aria-selected={mode === "automations"}
               className={`chat-mode__tab${mode === "automations" ? " is-active" : ""}`}
               onClick={() => setMode("automations")}
+              title={t("automation.title")}
             >
               <ClockIcon />
-              {t("automation.title")}
+              <span className="chat-mode__label">{t("automation.title")}</span>
               {automations.unreadCount > 0 && (
                 <span className="chat-mode__badge" aria-label={t("automation.unread", { count: automations.unreadCount })}>
                   {automations.unreadCount}
@@ -1086,7 +1091,6 @@ function ThreadPane({
             </button>
           </div>
         </div>
-        <ChatMcpAccess thread={thread} />
         {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             <AccountModelField
@@ -1195,6 +1199,7 @@ function ThreadPane({
               {t(permissionHintKey[thread.permission])}
               {profileCapable(thread.definitionId) ? ` ${t("chat.accountProfile.hint")}` : ""}
             </p>
+            <ChatMcpAccess thread={thread} />
             {(thread.definitionId === "claude" ||
               thread.definitionId === "codex" ||
               thread.definitionId === "gemini") && (

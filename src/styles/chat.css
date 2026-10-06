@@ -30,17 +30,25 @@
 
 .chat-mode {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   gap: var(--space-1);
   padding: 2px;
   border-radius: var(--radius-pill);
   background: var(--surface-active);
 }
 
+/* Three tabs share the sidebar's width in every language. When their labels
+   do not fit (useFittingTabs), only the selected tab keeps its label and
+   the others show their icon, named by the tooltip; a label never wraps. */
 .chat-mode__tab {
   display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  white-space: nowrap;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -50,6 +58,25 @@
   transition:
     background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease);
+}
+
+.chat-mode__tab > svg {
+  flex-shrink: 0;
+}
+
+.chat-mode__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-mode.is-compact .chat-mode__tab:not(.is-active) .chat-mode__label {
+  max-width: 0;
+}
+
+/* Even the one remaining label gives way before the row overflows. */
+.chat-mode.is-compact .chat-mode__tab.is-active {
+  flex-shrink: 1;
 }
 
 .chat-mode__tab:hover {
@@ -506,6 +533,19 @@ button.chat-chip:hover {
 }
 
 .chat-settings__browser { flex: 1 0 100%; align-items: flex-start; }
+.chat-mcp-access {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.chat-mcp-access legend { float: left; margin-right: var(--space-2); padding: 0; }
+.chat-mcp-access .chat-settings__hint { margin-top: calc(var(--space-1) * -1); }
 .chat-settings__browser > span:last-child { display: grid; gap: var(--space-1); }
 .chat-settings__browser small { color: var(--text-muted); }
 .chat-question { display: grid; gap: var(--space-3); padding: var(--space-4); }

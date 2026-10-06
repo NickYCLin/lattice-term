@@ -15,11 +15,21 @@ export function ChatMcpAccess({ thread }: { thread: ChatThread }) {
     try { await access.share(thread, read, control); }
     catch { setError(t("chat.mcpAccess.failed")); }
   }
+  // Lives in the thread's settings panel with the other per-conversation
+  // choices, drawn like them.
   return <fieldset className="chat-mcp-access" disabled={!access.nonce || access.pending.has(thread.id)}>
-    <legend>{t("chat.mcpAccess.title")}</legend>
-    <label><input type="checkbox" checked={grant?.read ?? false} onChange={event => { void change(event.target.checked, grant?.control ?? false); }} />{t("chat.mcpAccess.read")}</label>{" "}
-    <label><input type="checkbox" checked={grant?.control ?? false} onChange={event => { void change(grant?.read ?? false, event.target.checked); }} />{t("chat.mcpAccess.control")}</label>
-    <p className="field__hint">{t("chat.mcpAccess.hint")}</p>
+    <legend className="field__label">{t("chat.mcpAccess.title")}</legend>
+    <label className="checkbox">
+      <input type="checkbox" checked={grant?.read ?? false} onChange={event => { void change(event.target.checked, grant?.control ?? false); }} />
+      <span className="checkbox__box" aria-hidden="true">✓</span>
+      <span>{t("chat.mcpAccess.read")}</span>
+    </label>
+    <label className="checkbox">
+      <input type="checkbox" checked={grant?.control ?? false} onChange={event => { void change(grant?.read ?? false, event.target.checked); }} />
+      <span className="checkbox__box" aria-hidden="true">✓</span>
+      <span>{t("chat.mcpAccess.control")}</span>
+    </label>
+    <p className="chat-settings__hint">{t("chat.mcpAccess.hint")}</p>
     {error && <p role="alert">{error}</p>}
   </fieldset>;
 }
