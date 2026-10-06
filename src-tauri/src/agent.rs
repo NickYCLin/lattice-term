@@ -18,10 +18,13 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use zeroize::Zeroizing;
 
+mod approval;
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod codex_input_profile;
 mod codex_resume;
+
+pub use approval::AgentApprovalRequest;
 #[cfg(any(windows, test))]
 mod conpty_startup;
 
@@ -1763,6 +1766,9 @@ struct ReporterMessage {
     hermes_event: Option<HermesReporterEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     usage: Option<AgentUsageReport>,
+    /// A permission prompt the chat page may answer; the reply waits for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approval: Option<approval::ApprovalAsk>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -2088,6 +2094,8 @@ fn agent_session_limit_reached(session_count: usize) -> bool {
 #[derive(Default)]
 pub struct AgentRegistry {
     sessions: Mutex<HashMap<String, Arc<AgentSessionEntry>>>,
+    /// Permission prompts the chat page can answer, one per session.
+    approvals: approval::Approvals,
     counter: AtomicU64,
     /// How many sessions may be working before queued prompts wait their
     /// turn. `UNLIMITED_ACTIVE_SESSIONS` keeps every queue independent.
@@ -2201,8 +2209,7 @@ impl AgentRegistry {
                     let _ = std::thread::Builder::new()
                         .name("latticeterm-report-client".to_string())
                         .spawn(move || {
-                            let _permit = permit;
-                            handle_report_connection(stream, &registry, sink.as_ref());
+                            handle_report_connection(stream, &registry, sink.as_ref(), permit);
                         });
                 }
             })
@@ -2249,6 +2256,8 @@ impl AgentRegistry {
 
     fn remove(&self, session_id: &str) -> Option<Arc<AgentSessionEntry>> {
         let entry = self.sessions.lock().ok()?.remove(session_id)?;
+        self.approvals
+            .settle(session_id, None, approval::ApprovalDecision::Withdrawn);
         entry.stopping.store(true, Ordering::Release);
         entry.startup_gate.cancel();
         if let Ok(mut images) = entry.staged_images.lock() {
@@ -2496,6 +2505,38 @@ impl AgentRegistry {
             .map_err(|error| error.to_string())?
             .append(bytes);
         Ok(offset)
+    }
+
+    fn open_approval(
+        &self,
+        session_id: &str,
+        token: &str,
+        ask: approval::ApprovalAsk,
+    ) -> Result<Arc<approval::PendingApproval>, String> {
+        let entry = self.get(session_id)?;
+        if entry.report_token.as_deref() != Some(token) {
+            return Err("Reporter authentication failed.".to_string());
+        }
+        self.approvals.open(session_id, ask, random_report_token()?)
+    }
+
+    /// The permission prompt this session's chat view may answer now.
+    pub fn pending_approval(&self, session_id: &str) -> Option<AgentApprovalRequest> {
+        self.approvals.current(session_id)
+    }
+
+    /// Answers the named prompt. `false` when it was already answered,
+    /// withdrawn or replaced.
+    pub fn answer_approval(&self, session_id: &str, request_id: &str, allow: bool) -> bool {
+        self.approvals.settle(
+            session_id,
+            Some(request_id),
+            if allow {
+                approval::ApprovalDecision::Allow
+            } else {
+                approval::ApprovalDecision::Deny
+            },
+        )
     }
 
     fn update_reported_state(
@@ -3044,7 +3085,12 @@ fn read_report_payload(stream: &mut TcpStream, timeout: Duration) -> std::io::Re
     }
 }
 
-fn handle_report_connection(mut stream: TcpStream, registry: &AgentRegistry, sink: &dyn AgentSink) {
+fn handle_report_connection(
+    mut stream: TcpStream,
+    registry: &AgentRegistry,
+    sink: &dyn AgentSink,
+    permit: ReporterPermit,
+) {
     let _ = stream.set_write_timeout(Some(REPORT_TIMEOUT));
     let payload = match read_report_payload(&mut stream, REPORT_TIMEOUT) {
         Ok(payload) => payload,
@@ -3057,6 +3103,35 @@ fn handle_report_connection(mut stream: TcpStream, registry: &AgentRegistry, sin
         write_report_response(&mut stream, false);
         return;
     };
+    if let Some(ask) = message.approval.clone() {
+        let only_approval = message.state.is_none()
+            && message.native_session_id.is_none()
+            && message.copilot_event.is_none()
+            && message.hermes_event.is_none()
+            && message.usage.is_none();
+        let opened = if only_approval {
+            registry.open_approval(&message.session_id, &message.token, ask)
+        } else {
+            Err("Reporter message must contain exactly one update.".to_string())
+        };
+        let Ok(pending) = opened else {
+            write_report_response(&mut stream, false);
+            return;
+        };
+        // A question can wait for minutes; it must not hold one of the few
+        // slots ordinary state reports use.
+        drop(permit);
+        let decision = pending.wait(approval::WAIT);
+        registry.approvals.settle(
+            &message.session_id,
+            Some(pending.request_id()),
+            approval::ApprovalDecision::Withdrawn,
+        );
+        let _ = stream.set_write_timeout(Some(REPORT_TIMEOUT));
+        let _ = stream.write_all(decision.response_line());
+        let _ = stream.flush();
+        return;
+    }
     let update = match (
         message.state,
         message.native_session_id.as_deref(),
@@ -3107,6 +3182,14 @@ fn handle_report_connection(mut stream: TcpStream, registry: &AgentRegistry, sin
             state,
             captured,
         })) => {
+            if state != AgentLifecycle::NeedsAttention {
+                // The CLI moved on, however the prompt was answered.
+                registry.approvals.settle(
+                    &message.session_id,
+                    None,
+                    approval::ApprovalDecision::Withdrawn,
+                );
+            }
             if changed {
                 sink.state(&message.session_id, state, AgentStateSource::Integration);
                 // The only path that releases a queued prompt. Every
@@ -3173,6 +3256,7 @@ fn send_report_once(
         copilot_event: copilot_event.cloned(),
         hermes_event: hermes_event.cloned(),
         usage: None,
+        approval: None,
     })
     .map_err(|error| format!("Cannot encode the agent state: {error}"))?;
     if payload.len() as u64 > MAX_REPORT_BYTES {
@@ -3219,6 +3303,7 @@ fn send_usage_once(
         copilot_event: None,
         hermes_event: None,
         usage: Some(usage.clone()),
+        approval: None,
     })
     .map_err(|error| format!("Cannot encode the agent usage: {error}"))?;
     if payload.len() as u64 > MAX_REPORT_BYTES {
@@ -3462,6 +3547,10 @@ fn claude_reporter_arguments(
         "args": ["agent-claude-hook"],
         "timeout": 5
     });
+    // A permission prompt waits for an answer from the chat page while the
+    // terminal dialog stays usable; give it Claude Code's own hook limit.
+    let mut approval_handler = handler.clone();
+    approval_handler["timeout"] = serde_json::json!(600);
     let hook = |matcher: Option<&str>| {
         let mut value = serde_json::json!({ "hooks": [handler.clone()] });
         if let Some(matcher) = matcher {
@@ -3472,7 +3561,7 @@ fn claude_reporter_arguments(
     let settings = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [hook(None)],
-            "PermissionRequest": [hook(None)],
+            "PermissionRequest": [{ "hooks": [approval_handler] }],
             "PermissionDenied": [hook(None)],
             "PostToolUse": [hook(None)],
             "PostToolUseFailure": [hook(None)],
@@ -4044,6 +4133,10 @@ struct ClaudeHookPayload {
     background_tasks: Vec<serde_json::Value>,
     #[serde(default)]
     session_crons: Vec<serde_json::Value>,
+    #[serde(default)]
+    tool_name: Option<String>,
+    #[serde(default)]
+    tool_input: Option<serde_json::Value>,
 }
 
 fn lifecycle_from_claude_hook(payload: &ClaudeHookPayload) -> Option<AgentLifecycle> {
@@ -4112,7 +4205,82 @@ fn report_claude_hook_from_stdin() -> Result<(), String> {
     if let Some((state, native_session_id)) = report_from_claude_hook_payload(&payload)? {
         report_from_environment_with_native_session(state, native_session_id.as_deref())?;
     }
+    if let Some(ask) = claude_approval_ask(&payload) {
+        // The terminal dialog is already open; this only offers the chat page
+        // the same choice. No answer leaves the dialog to decide.
+        let decision =
+            ask_approval_from_environment(ask).unwrap_or(approval::ApprovalDecision::Withdrawn);
+        if let Some(output) = decision.claude_hook_output() {
+            println!("{output}");
+        }
+    }
     Ok(())
+}
+
+fn claude_approval_ask(raw: &[u8]) -> Option<approval::ApprovalAsk> {
+    let payload: ClaudeHookPayload = serde_json::from_slice(raw).ok()?;
+    if payload.hook_event_name != "PermissionRequest" {
+        return None;
+    }
+    Some(approval::ApprovalAsk {
+        tool_name: payload.tool_name.unwrap_or_default(),
+        summary: approval::summarize_tool_input(payload.tool_input.as_ref()),
+    })
+}
+
+fn ask_approval_from_environment(
+    ask: approval::ApprovalAsk,
+) -> Result<approval::ApprovalDecision, String> {
+    let address: SocketAddr = std::env::var("LATTICETERM_AGENT_REPORT_ADDR")
+        .map_err(|_| "Agent reporter environment is unavailable.".to_string())?
+        .parse()
+        .map_err(|_| "Agent reporter address is invalid.".to_string())?;
+    if !address.ip().is_loopback() {
+        return Err("The agent reporter address must be loopback-only.".to_string());
+    }
+    let session_id = std::env::var("LATTICETERM_AGENT_SESSION")
+        .map_err(|_| "Agent reporter session is unavailable.".to_string())?;
+    let token = std::env::var("LATTICETERM_AGENT_REPORT_TOKEN")
+        .map_err(|_| "Agent reporter token is unavailable.".to_string())?;
+    ask_approval(address, session_id, token, ask)
+}
+
+fn ask_approval(
+    address: SocketAddr,
+    session_id: String,
+    token: String,
+    ask: approval::ApprovalAsk,
+) -> Result<approval::ApprovalDecision, String> {
+    let mut stream = TcpStream::connect_timeout(&address, REPORT_TIMEOUT)
+        .map_err(|error| format!("Cannot reach the local agent reporter: {error}"))?;
+    stream
+        .set_write_timeout(Some(REPORT_TIMEOUT))
+        .and_then(|_| stream.set_read_timeout(Some(approval::WAIT + REPORT_TIMEOUT)))
+        .map_err(|error| format!("Cannot configure the agent reporter: {error}"))?;
+    let payload = serde_json::to_vec(&ReporterMessage {
+        session_id,
+        token,
+        state: None,
+        native_session_id: None,
+        copilot_event: None,
+        hermes_event: None,
+        usage: None,
+        approval: Some(ask),
+    })
+    .map_err(|error| format!("Cannot encode the permission prompt: {error}"))?;
+    if payload.len() as u64 > MAX_REPORT_BYTES {
+        return Err("The permission prompt is too large.".to_string());
+    }
+    stream
+        .write_all(&payload)
+        .and_then(|_| stream.shutdown(Shutdown::Write))
+        .map_err(|error| format!("Cannot send the permission prompt: {error}"))?;
+    let mut response = String::new();
+    stream
+        .take(16)
+        .read_to_string(&mut response)
+        .map_err(|error| format!("Cannot read the permission answer: {error}"))?;
+    Ok(approval::ApprovalDecision::from_response(&response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -7806,6 +7974,12 @@ fn send_bytes(
         }
     }
     send_bytes_locked(sink, registry, session_id, bytes)?;
+    if approval::answers_terminal_prompt(bytes) {
+        // Answered in the terminal: the chat page's question is gone.
+        registry
+            .approvals
+            .settle(session_id, None, approval::ApprovalDecision::Withdrawn);
+    }
     Ok(())
 }
 
@@ -11658,6 +11832,11 @@ notify = ["notify.exe", "turn-ended"]"#,
         ] {
             assert_eq!(settings["hooks"][event][0]["hooks"][0], *stop);
         }
+        // Only the permission prompt may wait for an answer from the chat page.
+        assert_eq!(stop["timeout"], 5);
+        let permission = &settings["hooks"]["PermissionRequest"][0]["hooks"][0];
+        assert_eq!(permission["args"], stop["args"]);
+        assert_eq!(permission["timeout"], 600);
         assert_eq!(&arguments[2..], &["--model", "sonnet"]);
 
         let explicit = vec!["--settings=/tmp/claude.json".to_string()];
@@ -12516,6 +12695,115 @@ notify = ["notify.exe", "turn-ended"]"#,
         assert_ne!(registry.list()[0].state, AgentLifecycle::Done);
         assert!(!registry.settle_silent_working(&session.session_id));
 
+        registry.stop_all();
+    }
+
+    #[test]
+    fn only_a_claude_permission_request_becomes_a_question() {
+        let ask = claude_approval_ask(
+            br#"{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"mkdir build","description":"d"}}"#,
+        )
+        .unwrap();
+        assert_eq!(ask.tool_name, "Bash");
+        assert_eq!(ask.summary, "mkdir build");
+        assert!(
+            claude_approval_ask(br#"{"hook_event_name":"PostToolUse","tool_name":"Bash"}"#)
+                .is_none()
+        );
+        assert!(claude_approval_ask(b"not json").is_none());
+    }
+
+    #[test]
+    fn a_permission_prompt_waits_for_the_chat_page_or_the_terminal() {
+        let sink: Arc<dyn AgentSink> = Arc::new(TestSink::default());
+        let registry = AgentRegistry::with_local_reporter(sink.clone()).unwrap();
+        #[cfg(unix)]
+        let (executable, arguments) = ("/bin/cat".to_string(), Vec::new());
+        #[cfg(windows)]
+        let (executable, arguments) = ("cmd.exe".to_string(), vec!["/Q".to_string()]);
+        let session = launch(
+            sink.clone(),
+            registry.clone(),
+            AgentLaunchRequest {
+                definition_id: "custom".to_string(),
+                label: "Approval test".to_string(),
+                executable,
+                arguments,
+                resume_session_id: None,
+                group_id: None,
+                seed_input: None,
+                restore_existing_session: false,
+                profile_config_path: None,
+                sandbox: false,
+                detached: false,
+                working_directory: std::env::current_dir().unwrap().display().to_string(),
+                cols: 80,
+                rows: 24,
+            },
+        )
+        .unwrap();
+        let id = session.session_id.clone();
+        let (address, token) = registry.reporter_credentials(&id).unwrap();
+        let ask = || approval::ApprovalAsk {
+            tool_name: "Bash".into(),
+            summary: "mkdir build".into(),
+        };
+        let wait_for_question = |registry: &AgentRegistry| {
+            for _ in 0..200 {
+                if let Some(request) = registry.pending_approval(&id) {
+                    return request;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the question never arrived");
+        };
+
+        // A forged token is refused outright.
+        assert_eq!(
+            ask_approval(address, id.clone(), "wrong".into(), ask()).unwrap(),
+            approval::ApprovalDecision::Withdrawn
+        );
+        assert!(registry.pending_approval(&id).is_none());
+
+        // Answered on the chat page.
+        let asking = {
+            let (id, token) = (id.clone(), token.clone());
+            std::thread::spawn(move || ask_approval(address, id, token, ask()))
+        };
+        let request = wait_for_question(&registry);
+        assert_eq!(request.summary, "mkdir build");
+        assert!(registry.answer_approval(&id, &request.request_id, true));
+        assert_eq!(
+            asking.join().unwrap().unwrap(),
+            approval::ApprovalDecision::Allow
+        );
+        assert!(!registry.answer_approval(&id, &request.request_id, false));
+
+        // Answered in the terminal: Enter withdraws the chat page's question.
+        let asking = {
+            let (id, token) = (id.clone(), token.clone());
+            std::thread::spawn(move || ask_approval(address, id, token, ask()))
+        };
+        wait_for_question(&registry);
+        send(sink.as_ref(), &registry, &id, &encode(b"\r")).unwrap();
+        assert_eq!(
+            asking.join().unwrap().unwrap(),
+            approval::ApprovalDecision::Withdrawn
+        );
+        assert!(registry.pending_approval(&id).is_none());
+
+        // The CLI reporting that it moved on withdraws it as well.
+        let asking = {
+            let (id, token) = (id.clone(), token.clone());
+            std::thread::spawn(move || ask_approval(address, id, token, ask()))
+        };
+        wait_for_question(&registry);
+        send_report_with_native_session(address, &id, &token, AgentLifecycle::Working, None)
+            .unwrap();
+        assert_eq!(
+            asking.join().unwrap().unwrap(),
+            approval::ApprovalDecision::Withdrawn
+        );
         registry.stop_all();
     }
 

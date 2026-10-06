@@ -1940,6 +1940,32 @@ async fn agent_paste_clipboard_image(
     .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?
 }
 
+/// A permission prompt this session's CLI is waiting on, if the chat page
+/// can answer it. Background-service sessions answer in their terminal.
+#[tauri::command]
+fn agent_session_approval(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> Option<crate::agent::AgentApprovalRequest> {
+    if crate::agent_daemon::owns(&session_id) {
+        return None;
+    }
+    registry.pending_approval(&session_id)
+}
+
+/// Allows or denies one permission prompt. `false` when it was already
+/// answered in the terminal or replaced by a newer one.
+#[tauri::command]
+fn agent_answer_approval(
+    session_id: String,
+    request_id: String,
+    allow: bool,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> bool {
+    !crate::agent_daemon::owns(&session_id)
+        && registry.answer_approval(&session_id, &request_id, allow)
+}
+
 /// Reads structured messages from this session's exact native conversation.
 #[tauri::command]
 async fn agent_session_conversation(
@@ -5138,6 +5164,8 @@ pub fn run() {
             chat_image_preview,
             agent_export_transcript,
             agent_session_conversation,
+            agent_session_approval,
+            agent_answer_approval,
             agent_import_memory_handoff,
             agent_write_handoff_file,
             agent_resize,
