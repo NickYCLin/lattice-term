@@ -1212,7 +1212,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               />
             )}
             <Suspense fallback={null}>
-              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} completionNotification={preferences.chatCompletionNotification} onChange={setChatRuntime} />
+              <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} completionNotification={preferences.chatCompletionNotification} onChange={setChatRuntime} sessions={agents.sessions} />
             </Suspense>
             {view === "chat" && chatRuntime && (
               <ChatView

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread } from "./chatSessionHandoff";
+import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread, threadsHeldBySessions } from "./chatSessionHandoff";
 import { fakeDefinition, fakeSession, fakeThread } from "./testFixtures/agentApis";
 
 const codex = fakeDefinition({ installed: true, resumeSupported: true, installedPath: "C:\\npm\\codex.cmd" });
@@ -44,6 +44,15 @@ describe("chat and terminal share one conversation", () => {
     expect(liveSessionForThread(thread, [{ ...live, closedReason: "exited" }])).toBeUndefined();
     expect(liveSessionForThread(thread, [{ ...live, definitionId: "claude" }])).toBeUndefined();
     expect(liveSessionForThread({ ...thread, nativeSessionId: null }, [live])).toBeUndefined();
+  });
+
+  it("hands a conversation over once a terminal resumed it, but never cuts off a chat turn", () => {
+    const live = fakeSession({ definitionId: "codex", capturedSessionId: "thread-1" });
+    const idle = fakeThread({ id: "idle", nativeSessionId: "thread-1" });
+    const busy = fakeThread({ id: "busy", nativeSessionId: "thread-1", runningTurnId: "turn" });
+    const moved = fakeThread({ id: "moved", nativeSessionId: "thread-1", continuedInSession: true });
+    const other = fakeThread({ id: "other", nativeSessionId: "thread-2" });
+    expect(threadsHeldBySessions([idle, busy, moved, other], [live])).toEqual(["idle"]);
   });
 
   it("adds only what was said in the terminal, once", () => {

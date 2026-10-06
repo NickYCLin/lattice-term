@@ -12,7 +12,9 @@
 import { useDesktopChatHost } from "./useDesktopChatHost";
 import { useRemoteChatHost } from "./useRemoteChatHost";
 import type { RemoteHostStatus } from "./useRemoteHost";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { threadsHeldBySessions } from "./chatSessionHandoff";
+import type { AgentSessionSummary } from "./useAgentSessions";
 import type { NotificationSoundChoice } from "./notificationSounds";
 import { useAgentAutomations, type AgentAutomationsApi } from "./useAgentAutomations";
 import { useAgentChat, type AgentChatApi } from "./useAgentChat";
@@ -29,6 +31,7 @@ export function ChatRuntime({
   completionNotification = false,
   onChange,
   remoteHost,
+  sessions = [],
 }: {
   locale: string;
   remoteHost?: RemoteHostStatus | null;
@@ -36,11 +39,21 @@ export function ChatRuntime({
   completionVolume?: number;
   completionNotification?: boolean;
   onChange: (api: ChatRuntimeApi) => void;
+  /** Terminal sessions, so a conversation one of them resumed leaves chat. */
+  sessions?: readonly AgentSessionSummary[];
 }) {
   const chat = useAgentChat(completionSound, completionVolume, completionNotification);
   useRemoteChatHost(chat, remoteHost ?? null);
   useDesktopChatHost(chat);
   const automations = useAgentAutomations(chat, locale);
+  const handingOver = useRef(new Set<string>());
+  useEffect(() => {
+    for (const id of threadsHeldBySessions(chat.threads, sessions)) {
+      if (handingOver.current.has(id)) continue;
+      handingOver.current.add(id);
+      void chat.continueInSession(id).catch(() => {}).finally(() => handingOver.current.delete(id));
+    }
+  }, [chat, sessions]);
   useEffect(() => {
     onChange({ chat, automations });
   }, [chat, automations, onChange]);

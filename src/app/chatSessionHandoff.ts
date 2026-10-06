@@ -22,6 +22,22 @@ export function liveSessionForThread(
 }
 
 /**
+ * Threads whose conversation a running terminal took over by any route: the
+ * chat page's button, a restored tab or a retried one. Each is handed over
+ * once so only the terminal writes the transcript. A turn running on the
+ * chat page is never cut off for it.
+ */
+export function threadsHeldBySessions(
+  threads: readonly ChatThread[],
+  sessions: readonly AgentSessionSummary[],
+): string[] {
+  return threads
+    .filter((thread) => !thread.continuedInSession && !thread.runningTurnId && !thread.remote &&
+      liveSessionForThread(thread, sessions))
+    .map((thread) => thread.id);
+}
+
+/**
  * Launch settings that resume a chat thread's conversation in a terminal,
  * with the same account and proxy. `null` when the CLI cannot resume by id
  * or the thread has no conversation yet.
