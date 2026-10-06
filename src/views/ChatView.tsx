@@ -644,7 +644,8 @@ export function ChatView({
           </div>
         ) : shownSession ? (
           <SessionConversationPane key={shownSession.sessionId} session={shownSession}
-            agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)} />
+            agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)}
+            onSessionReplaced={setSelectedSessionId} />
         ) : selectedSessionId ? (
           <EmptyState icon={<ChatIcon />} title={t("sessionChat.closed")}
             description={t("sessionChat.chooseAnother")} />

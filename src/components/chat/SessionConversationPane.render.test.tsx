@@ -12,7 +12,7 @@ import { SessionConversationPane } from "./SessionConversationPane";
 function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
-      <SessionConversationPane session={fakeSession(overrides)} agents={fakeAgentApi()} onOpenTerminal={() => {}} />
+      <SessionConversationPane session={fakeSession(overrides)} agents={fakeAgentApi()} onOpenTerminal={() => {}} onSessionReplaced={() => {}} />
     </I18nProvider>,
   );
 }

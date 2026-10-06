@@ -1179,14 +1179,47 @@ button.chat-chip:hover {
   font-weight: 500;
 }
 
-.session-composer__model {
+.session-composer__model-picker {
+  position: relative;
   min-width: 0;
   margin-left: auto;
+}
+
+.session-composer__model {
+  display: block;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
   overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
   color: var(--text-muted);
+  font: inherit;
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-composer__model:hover:not(:disabled),
+.session-composer__model[aria-expanded="true"] {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.session-composer__model:disabled {
+  cursor: default;
+}
+
+.session-composer__menu--end {
+  right: 0;
+  left: auto;
+  max-height: min(22rem, 60vh);
+  overflow-y: auto;
+}
+
+.session-composer__menu [aria-checked="true"] {
+  color: var(--accent);
 }
 
 .session-composer__toolbar .chat-send {

@@ -17,6 +17,8 @@ import {
 } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
+import { switchesModelInPlace } from "../../app/sessionModelSwitch";
+import { SessionModelPicker } from "./SessionModelPicker";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -48,10 +50,12 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   </span>;
 }
 
-export function SessionConversationPane({ session, agents, onOpenTerminal }: {
+export function SessionConversationPane({ session, agents, onOpenTerminal, onSessionReplaced }: {
   session: AgentSessionSummary;
   agents: AgentApi;
   onOpenTerminal: () => void;
+  /** The session was resumed under a new id, e.g. on another model. */
+  onSessionReplaced: (sessionId: string) => void;
 }) {
   const { t, locale } = useI18n();
   const speechLang = localeCatalog.find(entry => entry.id === locale)?.tag ?? locale;
@@ -392,9 +396,9 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
               {session.sandboxed ? <ShieldIcon size={14} /> : <AlertIcon size={14} />}
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
-            <span className="session-composer__model" title={t("sessionChat.model")}>
-              {session.model || session.label}
-            </span>
+            <SessionModelPicker session={session} agents={agents}
+              disabled={Boolean(session.closedReason) || (working && !switchesModelInPlace(session))}
+              onNotice={setNotice} onReplaced={onSessionReplaced} />
             <button type="button" className={`session-composer__icon${dictation.listening ? " is-active" : ""}`}
               disabled={!voiceAvailable || blocked} aria-label={dictationTitle} title={dictationTitle}
               aria-pressed={dictation.mode === "browser" ? dictation.listening : undefined}

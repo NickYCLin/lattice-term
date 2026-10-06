@@ -6379,7 +6379,7 @@ fn normalize_resume_session_id(
             spec.label
         ));
     }
-    let can_resume = arguments.is_empty()
+    let can_resume = only_a_model_choice(arguments)
         || (proxy_capable(spec.id)
             && crate::cliproxy::launch::base_from_arguments(arguments)?.is_some());
     if !can_resume {
@@ -7204,10 +7204,11 @@ fn has_actionable_attention_prompt(text: &str) -> bool {
     })
 }
 
-/// A native restore by id carries no startup flags, the same as restoring a
-/// saved id. Only a plain model choice may be dropped for it; any other flag
-/// keeps the tab's original launch rather than being silently discarded.
-fn codex_resume_accepts(arguments: &[String]) -> bool {
+/// Nothing, or just `--model X` / `-m X`. A native restore by id carries no
+/// other startup flags: resuming a conversation on another model is the one
+/// change it allows, and any other flag keeps the tab's original launch
+/// rather than being silently discarded.
+fn only_a_model_choice(arguments: &[String]) -> bool {
     match arguments {
         [] => true,
         [flag, model] => (flag == "--model" || flag == "-m") && !model.starts_with('-'),
@@ -7247,7 +7248,7 @@ fn adopt_latest_codex_thread(
         return Ok(());
     }
     let through_proxy = crate::cliproxy::launch::base_from_arguments(&arguments)?.is_some();
-    if !through_proxy && !codex_resume_accepts(&arguments) {
+    if !through_proxy && !only_a_model_choice(&arguments) {
         return Ok(());
     }
     // Two saved tabs of one project must not both reopen the same thread.
@@ -10496,14 +10497,12 @@ model = "gpt-5.3-codex"
                 .map(|value| value.to_string())
                 .collect::<Vec<_>>()
         };
-        assert!(codex_resume_accepts(&[]));
-        assert!(codex_resume_accepts(&args(&["--model", "gpt-6"])));
-        assert!(codex_resume_accepts(&args(&["-m", "gpt-6"])));
-        assert!(!codex_resume_accepts(&args(&["--model", "--yolo"])));
-        assert!(!codex_resume_accepts(&args(&["--yolo"])));
-        assert!(!codex_resume_accepts(&args(&[
-            "--model", "gpt-6", "--yolo"
-        ])));
+        assert!(only_a_model_choice(&[]));
+        assert!(only_a_model_choice(&args(&["--model", "gpt-6"])));
+        assert!(only_a_model_choice(&args(&["-m", "gpt-6"])));
+        assert!(!only_a_model_choice(&args(&["--model", "--yolo"])));
+        assert!(!only_a_model_choice(&args(&["--yolo"])));
+        assert!(!only_a_model_choice(&args(&["--model", "gpt-6", "--yolo"])));
     }
 
     #[test]
@@ -10609,6 +10608,23 @@ model = "gpt-5.3-codex"
         )
         .unwrap_err()
         .contains("cannot be combined"));
+        // Switching a running conversation to another model resumes it.
+        assert_eq!(
+            normalize_resume_session_id(
+                Some(codex),
+                Some("session-42"),
+                &["--model".to_string(), "gpt-6".to_string()],
+            )
+            .unwrap()
+            .as_deref(),
+            Some("session-42")
+        );
+        assert!(normalize_resume_session_id(
+            Some(codex),
+            Some("session-42"),
+            &["--model".to_string(), "--yolo".to_string()],
+        )
+        .is_err());
         assert!(normalize_resume_session_id(
             Some(codex),
             Some(&"x".repeat(MAX_RESUME_SESSION_ID_BYTES + 1)),
@@ -11493,10 +11509,17 @@ model = "gpt-5.3-codex"
         );
         let opencode = AGENTS.iter().find(|spec| spec.id == "opencode");
         assert!(normalize_resume_session_id(opencode, Some("native-proxy"), &arguments).is_err());
+        // A native session may resume on another model, but nothing else.
         assert!(normalize_resume_session_id(
             codex,
             Some("native-proxy"),
             &["--model".into(), "native-model".into()]
+        )
+        .is_ok());
+        assert!(normalize_resume_session_id(
+            codex,
+            Some("native-proxy"),
+            &["--model".into(), "native-model".into(), "--yolo".into()]
         )
         .is_err());
     }

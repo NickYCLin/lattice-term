@@ -22,7 +22,7 @@ describe("SessionConversationPane permission prompt", () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="zh-TW">
         <SessionConversationPane session={fakeSession({ state: "needsAttention" })} agents={fakeAgentApi()}
-          onOpenTerminal={() => {}} />
+          onOpenTerminal={() => {}} onSessionReplaced={() => {}} />
       </I18nProvider>,
     );
     expect(html).toContain("chat-card--approval");
