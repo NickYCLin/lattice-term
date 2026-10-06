@@ -1132,6 +1132,13 @@ struct OpenCodeReporterPlugin {
     config_content: String,
 }
 
+/// Folder-trust dialogs the user must answer before a startup seed may be
+/// typed: Codex's question and Claude Code's selector option.
+const STARTUP_TRUST_PROMPTS: [&[u8]; 2] = [
+    b"Do you trust the contents of this directory?",
+    b"Yes, I trust this folder",
+];
+
 #[derive(Debug, Default)]
 struct StartupReadiness {
     saw_output: bool,
@@ -1159,13 +1166,15 @@ impl StartupReadiness {
         // new project needs an explicit trust decision. Treating that first
         // mode switch as the chat prompt can paste startup instructions into
         // the selector; Codex then exits successfully instead of opening the
-        // session. Keep the seed behind the dialog until the user submits a
-        // choice and fresh prompt output has settled.
-        if self
-            .control_window
-            .windows(b"Do you trust the contents of this directory?".len())
-            .any(|window| window == b"Do you trust the contents of this directory?")
-        {
+        // session. Claude Code's folder-trust selector defaults to "No, exit",
+        // so a seed's Enter there ends the process. Keep the seed behind
+        // either dialog until the user submits a choice and fresh prompt
+        // output has settled.
+        if STARTUP_TRUST_PROMPTS.iter().any(|prompt| {
+            self.control_window
+                .windows(prompt.len())
+                .any(|window| window == *prompt)
+        }) {
             self.interactive_gate_open = true;
             self.prompt_ready = false;
         }
@@ -9423,6 +9432,21 @@ session id: 0199aa11-"
             answered_at + STARTUP_SEED_MIN_WAIT - Duration::from_millis(1)
         ));
         assert!(readiness.should_deliver(started_at, answered_at + STARTUP_SEED_MIN_WAIT));
+    }
+
+    #[test]
+    fn startup_seed_does_not_answer_claude_folder_trust_with_its_default() {
+        let started_at = Instant::now();
+        let mut readiness = StartupReadiness::default();
+        readiness.observe(
+            b"\x1b[1mQuick safety check\x1b[22m\r\n\x1b[36m> No, exit\x1b[39m\r\n  Yes, I trust this folder\r\n",
+            started_at + Duration::from_millis(400),
+        );
+
+        assert!(!readiness.should_deliver(
+            started_at,
+            started_at + STARTUP_SEED_TIMEOUT + Duration::from_secs(1)
+        ));
     }
 
     #[test]
