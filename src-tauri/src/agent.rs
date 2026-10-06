@@ -4466,13 +4466,27 @@ fn forward_codex_notification(encoded: &str, payload: &OsStr) {
 struct CodexNotificationKind {
     #[serde(rename = "type")]
     kind: String,
+    #[serde(rename = "thread-id", default)]
+    thread_id: Option<String>,
 }
 
-fn is_codex_turn_complete_notification(payload: &OsStr) -> bool {
+fn codex_turn_complete_notification(payload: &OsStr) -> Option<CodexNotificationKind> {
     payload
         .to_str()
         .and_then(|raw| serde_json::from_str::<CodexNotificationKind>(raw).ok())
-        .is_some_and(|notification| notification.kind == "agent-turn-complete")
+        .filter(|notification| notification.kind == "agent-turn-complete")
+}
+
+fn is_codex_turn_complete_notification(payload: &OsStr) -> bool {
+    codex_turn_complete_notification(payload).is_some()
+}
+
+/// The thread that just finished a turn is what `codex resume` needs. Codex
+/// prints its id only on exit, which a closed application never reaches.
+fn codex_notification_thread_id(notification: &CodexNotificationKind) -> Option<String> {
+    let thread_id = notification.thread_id.as_deref()?;
+    let characters: Vec<char> = thread_id.chars().collect();
+    is_uuid_shaped(&characters).then(|| thread_id.to_ascii_lowercase())
 }
 
 /// Handle the tiny reporter subcommand before Tauri starts.
@@ -4517,8 +4531,11 @@ where
             return Some(2);
         };
         forward_codex_notification(&encoded, payload.as_ref());
-        if is_codex_turn_complete_notification(payload.as_ref()) {
-            report_from_environment(AgentLifecycle::Done)
+        if let Some(notification) = codex_turn_complete_notification(payload.as_ref()) {
+            report_from_environment_with_native_session(
+                AgentLifecycle::Done,
+                codex_notification_thread_id(&notification).as_deref(),
+            )
         } else {
             Ok(())
         }
@@ -6949,6 +6966,13 @@ pub fn launch_with_replay(
     {
         return Err("這個對話使用 CLIProxyAPI。請從「外部對話」選取原本的 CLIProxyAPI 連線後再恢復，原始紀錄仍保留。".into());
     }
+    if resumed_provider
+        .as_deref()
+        .is_some_and(|provider| !crate::cliproxy::launch::is_managed_provider(provider))
+        && proxy_target.is_some()
+    {
+        return Err("這個對話不是透過 CLIProxyAPI 建立的，無法改用 CLIProxyAPI 恢復。請從「外部對話」以原本的帳號開啟，原始紀錄仍保留。".into());
+    }
     let proxy = proxy_target
         .as_ref()
         .map(|target| {
@@ -7310,9 +7334,12 @@ pub fn launch_with_replay(
 
     // Only CLIs whose resume shape is verified get automatic id capture;
     // for the rest a captured id would be a guess nothing can use.
+    // Codex's turn notification names its thread. Scanning the screen as
+    // well can pick up an unrelated id the conversation merely displays.
     let capture_enabled = AGENTS
         .iter()
-        .any(|agent| agent.id == definition_id && agent.resume_recipe.is_some());
+        .any(|agent| agent.id == definition_id && agent.resume_recipe.is_some())
+        && !(definition_id == "codex" && integrated_completion);
 
     let group_id = request
         .group_id
@@ -11291,6 +11318,19 @@ model = "gpt-5.3-codex"
             r#"{"type":"tool-complete"}"#,
         )));
         assert!(!is_codex_turn_complete_notification(OsStr::new("not-json")));
+        let with_thread = codex_turn_complete_notification(OsStr::new(
+            r#"{"type":"agent-turn-complete","thread-id":"01A10ABD-5836-7110-A3E7-910FFFC8E5A6"}"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            codex_notification_thread_id(&with_thread).as_deref(),
+            Some("01a10abd-5836-7110-a3e7-910fffc8e5a6")
+        );
+        let unusable = codex_turn_complete_notification(OsStr::new(
+            r#"{"type":"agent-turn-complete","thread-id":"--last"}"#,
+        ))
+        .unwrap();
+        assert_eq!(codex_notification_thread_id(&unusable), None);
         assert_eq!(
             run_reporter_cli(["agent-notify", "", r#"{"type":"tool-complete"}"#]),
             Some(0),
