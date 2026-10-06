@@ -6914,6 +6914,59 @@ fn has_actionable_attention_prompt(text: &str) -> bool {
     })
 }
 
+/// A native restore by id carries no startup flags, the same as restoring a
+/// saved id. Only a plain model choice may be dropped for it; any other flag
+/// keeps the tab's original launch rather than being silently discarded.
+fn codex_resume_accepts(arguments: &[String]) -> bool {
+    match arguments {
+        [] => true,
+        [flag, model] => (flag == "--model" || flag == "-m") && !model.starts_with('-'),
+        _ => false,
+    }
+}
+
+/// A restored Codex tab whose thread id was never reported (an older save,
+/// or an app closed during the first turn) still names an exact thread,
+/// like every other restore, instead of opening a blank conversation.
+fn adopt_latest_codex_thread(
+    request: &mut AgentLaunchRequest,
+    registry: &AgentRegistry,
+) -> Result<(), String> {
+    if request.definition_id != "codex"
+        || !request.restore_existing_session
+        || request.resume_session_id.is_some()
+    {
+        return Ok(());
+    }
+    let mut arguments = request.arguments.clone();
+    if arguments.len() >= 2 && arguments[0] == "resume" && arguments[1] == "--last" {
+        arguments.drain(..2);
+    } else if arguments.iter().any(|argument| argument == "resume") {
+        return Ok(());
+    }
+    let through_proxy = crate::cliproxy::launch::base_from_arguments(&arguments)?.is_some();
+    if !through_proxy && !codex_resume_accepts(&arguments) {
+        return Ok(());
+    }
+    let profile = profile_config_directory("codex", request.profile_config_path.as_deref())?;
+    // Two saved tabs of one project must not both reopen the same thread.
+    let taken: Vec<String> = registry
+        .list()
+        .into_iter()
+        .filter_map(|session| session.captured_session_id)
+        .collect();
+    if let Some(thread_id) = crate::transcript::latest_codex_thread(
+        &request.working_directory,
+        profile.as_deref(),
+        through_proxy,
+        &taken,
+    ) {
+        request.arguments = if through_proxy { arguments } else { Vec::new() };
+        request.resume_session_id = Some(thread_id);
+    }
+    Ok(())
+}
+
 pub fn launch(
     sink: Arc<dyn AgentSink>,
     registry: Arc<AgentRegistry>,
@@ -6930,6 +6983,7 @@ pub fn launch_with_replay(
 ) -> Result<AgentSessionSummary, String> {
     let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
+    adopt_latest_codex_thread(&mut request, &registry)?;
     let size = validated_size(request.cols, request.rows)?;
     let launch_arguments = request.arguments.clone();
     let (definition_id, label, executable, mut arguments, working_directory) =
@@ -10070,6 +10124,24 @@ model = "gpt-5.3-codex"
         std::fs::write(node.join("npm.cmd"), "@echo off").expect("npm shim");
         let found = find_npm_in(&[empty, node]).expect("npm");
         assert!(found.ends_with("npm.cmd"));
+    }
+
+    #[test]
+    fn codex_resume_keeps_only_a_model_choice() {
+        let args = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert!(codex_resume_accepts(&[]));
+        assert!(codex_resume_accepts(&args(&["--model", "gpt-6"])));
+        assert!(codex_resume_accepts(&args(&["-m", "gpt-6"])));
+        assert!(!codex_resume_accepts(&args(&["--model", "--yolo"])));
+        assert!(!codex_resume_accepts(&args(&["--yolo"])));
+        assert!(!codex_resume_accepts(&args(&[
+            "--model", "gpt-6", "--yolo"
+        ])));
     }
 
     #[test]

@@ -567,11 +567,15 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 rows: 32,
               });
               restoredAgents.push(launched);
-              if (attemptedContinuation && launched.closedReason && !saved.groupKey.startsWith("native:")) {
-                // A provider can reject an expired native conversation id.
-                // Its latest-conversation flag can fail in the same way when
-                // the project has no compatible history. Keep the diagnostic
-                // tab, then give the project a fresh interactive CLI.
+              if (
+                attemptedContinuation && launched.closedReason &&
+                saved.resumeSessionId === null && !saved.groupKey.startsWith("native:")
+              ) {
+                // A latest-conversation flag can fail when the project has no
+                // compatible history. Keep the diagnostic tab, then give the
+                // project a fresh interactive CLI. A tab that names its exact
+                // conversation stays retryable below instead: replacing it
+                // with a blank chat would drop the link to that history.
                 try {
                   const fallback = await agents.launch({
                     definitionId: saved.definitionId,
@@ -591,7 +595,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   });
                   restoredAgents.push(fallback);
                   if (fallback.closedReason) {
-                    unrestored.push({ ...saved, resumeSessionId: null });
+                    unrestored.push(saved);
                   } else if (!renamedGroups.has(saved.groupKey)) {
                     renamedGroups.add(saved.groupKey);
                     try {
@@ -602,9 +606,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                     }
                   }
                 } catch {
-                  // Do not retry the same known-bad native id on the next
-                  // restart. Keep a fresh launch intent for a later retry.
-                  unrestored.push({ ...saved, resumeSessionId: null });
+                  unrestored.push(saved);
                 }
                 continue;
               }

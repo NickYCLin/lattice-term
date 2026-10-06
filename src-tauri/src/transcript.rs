@@ -1775,6 +1775,51 @@ pub(crate) fn codex_session_provider(
     Ok(read_codex_session_meta(&path).and_then(|meta| meta.model_provider))
 }
 
+/// The newest main-CLI Codex thread of this project and account that went
+/// through the same kind of provider, for a saved tab whose id was never
+/// reported. Codex's own `resume --last` cannot find a proxy thread, because
+/// each proxied process registers its provider under a fresh name.
+pub(crate) fn latest_codex_thread(
+    working_directory: &str,
+    profile_directory: Option<&Path>,
+    through_proxy: bool,
+    taken: &[String],
+) -> Option<String> {
+    let root = history_root(TranscriptKind::Codex, profile_directory)?;
+    latest_codex_thread_in(&root, working_directory, through_proxy, taken)
+}
+
+fn latest_codex_thread_in(
+    sessions_root: &Path,
+    working_directory: &str,
+    through_proxy: bool,
+    taken: &[String],
+) -> Option<String> {
+    let expected_cwd = fs::canonicalize(working_directory).ok()?;
+    let path = newest_matching(sessions_root, |path| {
+        if !is_codex_rollout(path) {
+            return false;
+        }
+        let Some(meta) = read_codex_session_meta(path) else {
+            return false;
+        };
+        let proxied = meta
+            .model_provider
+            .as_deref()
+            .is_some_and(crate::cliproxy::launch::is_managed_provider);
+        meta.source_is_known_main_cli
+            && proxied == through_proxy
+            && meta.id.as_ref().is_some_and(|id| {
+                !id.is_empty() && !id.starts_with('-') && !taken.iter().any(|seen| seen == id)
+            })
+            && meta
+                .cwd
+                .and_then(|cwd| fs::canonicalize(cwd).ok())
+                .is_some_and(|cwd| cwd == expected_cwd)
+    })?;
+    read_codex_session_meta(&path).and_then(|meta| meta.id)
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConversationSnapshot {
@@ -2604,6 +2649,68 @@ mod tests {
         ];
         fs::write(path, rows.join("\n")).unwrap();
         set_modified(path, modified);
+    }
+
+    #[test]
+    fn latest_codex_thread_matches_project_provider_kind_and_skips_open_threads() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("sessions");
+        let cwd = directory.path().join("workspace");
+        let other = directory.path().join("other");
+        fs::create_dir_all(&cwd).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let write = |name: &str, id: &str, cwd: &Path, provider: &str, modified: u64| {
+            let path = root.join(format!("2026/10/05/rollout-{name}.jsonl"));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let meta = serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "id": id,
+                    "cwd": cwd.to_string_lossy(),
+                    "source": "cli",
+                    "originator": "codex-tui",
+                    "model_provider": provider,
+                }
+            });
+            fs::write(&path, format!("{meta}\n")).unwrap();
+            set_modified(&path, modified);
+        };
+        write("native", "native-thread", &cwd, "openai", 10);
+        write(
+            "proxy-old",
+            "proxy-old",
+            &cwd,
+            "latticeterm_cliproxyapi_v2_default_aa",
+            20,
+        );
+        write(
+            "proxy-new",
+            "proxy-new",
+            &cwd,
+            "latticeterm_cliproxyapi_v2_default_bb",
+            30,
+        );
+        write(
+            "elsewhere",
+            "elsewhere",
+            &other,
+            "latticeterm_cliproxyapi_v2_default_cc",
+            40,
+        );
+        let cwd = cwd.to_str().unwrap();
+
+        assert_eq!(
+            latest_codex_thread_in(&root, cwd, true, &[]).as_deref(),
+            Some("proxy-new")
+        );
+        assert_eq!(
+            latest_codex_thread_in(&root, cwd, true, &["proxy-new".to_string()]).as_deref(),
+            Some("proxy-old")
+        );
+        assert_eq!(
+            latest_codex_thread_in(&root, cwd, false, &[]).as_deref(),
+            Some("native-thread")
+        );
     }
 
     #[test]
