@@ -482,13 +482,27 @@ describe("workspace session persistence", () => {
     expect(agentRestoreArguments(codex)).toEqual(["resume", "--last"]);
   });
 
-  it("retains proxy connection metadata when resuming a native Codex session", () => {
-    const launchArguments = [...cliProxyLaunchArguments("http://localhost:8317"), "--model", "proxy-model"];
-    const saved = snapshotLiveWorkspaceSessions([agent({ launchArguments, capturedSessionId: "proxy-native" })], [], "agent-live-1").sessions[0];
+  it.each(["codex", "claude", "gemini"])("restores %s through the same proxy after saving and reloading", (definitionId) => {
+    const launchArguments = [...cliProxyLaunchArguments("http://localhost:8317", "7f3a91"), "--model", "proxy-model"];
+    const target = storage();
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([
+      agent({ definitionId, launchArguments, capturedSessionId: "proxy-native", profileConfigPath: "C:\\fixture-account" }),
+    ], [], "agent-live-1"));
+    const saved = loadWorkspaceSessionSnapshot(target)!.sessions[0];
     expect(saved.kind).toBe("agent");
     if (saved.kind !== "agent") return;
     expect(saved.resumeSessionId).toBe("proxy-native");
-    expect(agentRestoreArguments(saved)).toEqual(launchArguments);
+    expect(saved.profileConfigPath).toBe("C:\\fixture-account");
+    const restored = agentRestoreArguments(saved);
+    expect(restored).toEqual(launchArguments);
+    expect(restored).not.toBe(saved.launchArguments);
+    // A second restart must retain routing too; no key is stored in the snapshot.
+    saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([
+      agent({ definitionId, launchArguments: restored, capturedSessionId: saved.resumeSessionId }),
+    ], [], "agent-live-1"));
+    const again = loadWorkspaceSessionSnapshot(target)!.sessions[0];
+    if (again.kind !== "agent") throw new Error("Expected agent session");
+    expect(agentRestoreArguments(again)).toEqual(launchArguments);
   });
 
   it("also recognises a session started through a second proxy", () => {

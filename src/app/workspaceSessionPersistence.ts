@@ -475,7 +475,7 @@ export function agentRestoreArguments(session: SavedAgentSession): string[] {
   if (session.resumeSessionId) {
     // The native conversation does not retain our process-local provider/key.
     // Restore public proxy metadata; the desktop reloads the bound credential.
-    return session.definitionId === "codex" && launchedThroughCliProxy(session.launchArguments)
+    return launchedThroughCliProxy(session.launchArguments)
       ? [...session.launchArguments] : [];
   }
   const launchArguments = agentFreshLaunchArguments(session);
