@@ -4542,10 +4542,6 @@ fn codex_turn_complete_notification(payload: &OsStr) -> Option<CodexNotification
         .filter(|notification| notification.kind == "agent-turn-complete")
 }
 
-fn is_codex_turn_complete_notification(payload: &OsStr) -> bool {
-    codex_turn_complete_notification(payload).is_some()
-}
-
 /// The thread that just finished a turn is what `codex resume` needs. Codex
 /// prints its id only on exit, which a closed application never reaches.
 fn codex_notification_thread_id(notification: &CodexNotificationKind) -> Option<String> {
@@ -11518,13 +11514,14 @@ model = "gpt-5.3-codex"
 
     #[test]
     fn codex_completion_requires_the_documented_notification_type() {
-        assert!(is_codex_turn_complete_notification(OsStr::new(
+        assert!(codex_turn_complete_notification(OsStr::new(
             r#"{"type":"agent-turn-complete","turn-id":"turn-1"}"#,
-        )));
-        assert!(!is_codex_turn_complete_notification(OsStr::new(
-            r#"{"type":"tool-complete"}"#,
-        )));
-        assert!(!is_codex_turn_complete_notification(OsStr::new("not-json")));
+        ))
+        .is_some());
+        assert!(
+            codex_turn_complete_notification(OsStr::new(r#"{"type":"tool-complete"}"#,)).is_none()
+        );
+        assert!(codex_turn_complete_notification(OsStr::new("not-json")).is_none());
         let with_thread = codex_turn_complete_notification(OsStr::new(
             r#"{"type":"agent-turn-complete","thread-id":"01A10ABD-5836-7110-A3E7-910FFFC8E5A6"}"#,
         ))

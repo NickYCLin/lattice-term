@@ -122,6 +122,7 @@ fn merge_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::ffi::OsStr;
 
     #[test]
