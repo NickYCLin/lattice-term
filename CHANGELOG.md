@@ -4,6 +4,52 @@
 
 ---
 
+## [2026.10.7](https://github.com/NickYCLin/lattice-term/compare/v2026.10.6...v2026.10.7) (2026-10-06)
+
+
+### 🚀 新增功能
+
+* **agents:** Claude 的權限確認可以交給對話頁回覆 ([42741e2](https://github.com/NickYCLin/lattice-term/commit/42741e214578265d643dec833673ce108eb51a8e))
+* **agents:** Codex 的權限確認也能在對話頁回覆 ([2728cd4](https://github.com/NickYCLin/lattice-term/commit/2728cd429a431ac7cf0d38fd22027fbd42805f8e))
+* **agents:** 背景服務的工作階段也能從對話頁回覆權限 ([ef4fb4f](https://github.com/NickYCLin/lattice-term/commit/ef4fb4fc05db9ee4c5ffb7a4c511ff4f810c3698))
+* **chat:** 對話裡的圖片直接顯示出來 ([2fcd8a8](https://github.com/NickYCLin/lattice-term/commit/2fcd8a8bd3ccdb34809256b14cfa868e9349681f))
+* **chat:** 對話頁直接允許或拒絕終端機裡的權限請求 ([b2b7458](https://github.com/NickYCLin/lattice-term/commit/b2b74582165eaa9b79df160edafab41deba95cc6))
+* **chat:** 對話頁與終端機工作階段可以互相接續同一段對話 ([e5ffbc5](https://github.com/NickYCLin/lattice-term/commit/e5ffbc5fafeea3a183eded2ff803a325586937e6))
+* **chat:** 工作階段輸入框可以直接換模型 ([bb155c7](https://github.com/NickYCLin/lattice-term/commit/bb155c7152849eaa22cc48e2bb647089a3e02103))
+* **chat:** 從其他位置附加的圖片也能看到縮圖 ([14bb256](https://github.com/NickYCLin/lattice-term/commit/14bb2568755359a50f33f1fc53018f8de1e4ee13))
+* **chat:** 顯示 Codex 工作階段的工具紀錄 ([1d75db4](https://github.com/NickYCLin/lattice-term/commit/1d75db4cd17ac1e19a68ffd47e161633bde19a89))
+* **web:** 用 iPhone／iPad 掃 QR 後直接開啟 App Store ([7ad79b7](https://github.com/NickYCLin/lattice-term/commit/7ad79b71dff09c6e8cefdba1c427bc279473eff1))
+
+
+### 🛠️ 問題修正
+
+* **agents:** Codex 對話 ID 排除子代理並修正誤記的 ID ([edf1b9e](https://github.com/NickYCLin/lattice-term/commit/edf1b9e7eccc54ffa5e6b2ae4048983824bcbbf6))
+* **agents:** 同一個帳號只列一次，知道帳號就顯示 ([1faf6b4](https://github.com/NickYCLin/lattice-term/commit/1faf6b4b78131ced0104f5242d1bc9f8b877759f))
+* **agents:** 帳號選單顯示 API Key 登入的設定檔身分 ([8a58764](https://github.com/NickYCLin/lattice-term/commit/8a58764e4d88b49ee0e8e7748c9275d8d36d2f4a))
+* **agents:** 恢復 Codex 時一定接回原本那段對話 ([236d410](https://github.com/NickYCLin/lattice-term/commit/236d41081531cf5e7a50ac3eadeba8fa552c0b75))
+* **agents:** 恢復分頁時也接得回對話頁和 Codex Desktop 的對話 ([2a74824](https://github.com/NickYCLin/lattice-term/commit/2a7482403cc470951b4f0e6e8589c7ae2c700848))
+* **agents:** 啟動指令要等 Claude 信任資料夾選完再送 ([12a3a83](https://github.com/NickYCLin/lattice-term/commit/12a3a83a635c8a7619b8a524abbd61e820dff99c))
+* **agents:** 用 Codex 回合通知記下對話 ID ([2486545](https://github.com/NickYCLin/lattice-term/commit/24865459e308dd33b01784e3e0b55e48f1c5fefa))
+* **agents:** 移除只剩測試在用的 Codex 通知判斷函式 ([340c9b7](https://github.com/NickYCLin/lattice-term/commit/340c9b710f0a01ffdb3a15898e34cb632dafaa92))
+* **agents:** 連到 CLIProxyAPI 的帳號設定檔不再重複列出 ([af6353a](https://github.com/NickYCLin/lattice-term/commit/af6353a3ee90ae4687e26ff70f29092b7c9c6d44))
+* **agents:** 連到 CLIProxyAPI 的帳號設定檔放進 CLIProxyAPI 群組 ([b3d54b4](https://github.com/NickYCLin/lattice-term/commit/b3d54b4bf44f02731317b1d8d3ff08c1354b92db))
+* **agents:** 連到 CLIProxyAPI 的帳號設定檔標出實際去處 ([cd470ea](https://github.com/NickYCLin/lattice-term/commit/cd470ea73fa88ceb2bb12c42b69989057849c31f))
+* **agents:** 避免記憶交接被終端回覆打斷 ([3591078](https://github.com/NickYCLin/lattice-term/commit/3591078b231b9c96b78b0b829887abbf8a0d8834))
+* **agents:** 長時間的工作階段也能一直貼上圖片 ([2b4f735](https://github.com/NickYCLin/lattice-term/commit/2b4f7359ab2325ee8e8d27c2f94f7ade97ced6c6))
+* **chat:** 修正對話頁終端輸出重複堆字 ([e574dec](https://github.com/NickYCLin/lattice-term/commit/e574deca318f018cae9f1b4ed102fde420b4a914))
+* **chat:** 分清對話等待與紀錄省略狀態 ([84f30d4](https://github.com/NickYCLin/lattice-term/commit/84f30d461fa2aa78e45233d69a5edb58683553e5))
+* **chat:** 對話設定列的欄位改成頂部對齊 ([8f97a32](https://github.com/NickYCLin/lattice-term/commit/8f97a32bcb92051f857f1c30d829920aaa276e31))
+* **chat:** 對話頁 MCP 分享移進設定面板，分頁不再被擠出去 ([3a125eb](https://github.com/NickYCLin/lattice-term/commit/3a125eba57e5b0069c241abf8ed33a72f69048fc))
+* **chat:** 滑鼠提示的路徑不再出現 \?\ 前綴 ([340ca4b](https://github.com/NickYCLin/lattice-term/commit/340ca4b0ad0e9fd220ce60bb77a38dd17a8242c2))
+* **chat:** 終端機接手對話時，對話頁一律讓出 ([8f49cc4](https://github.com/NickYCLin/lattice-term/commit/8f49cc4dffed070b1b38e6a5c533db2190f98dde))
+* **ci:** iPad 截圖卡住時改用已寫完的檔案辨識 ([9de6715](https://github.com/NickYCLin/lattice-term/commit/9de671583f08c197050ef5535672e45e3f97fa5b))
+* **sessions:** 重開 Claude 時保留代理連線設定 ([7e81cc4](https://github.com/NickYCLin/lattice-term/commit/7e81cc4a54dee107cb6ae8d01feaa2f6cc700cd1))
+
+
+### 🎨 介面與視覺調整
+
+* **chat:** 拿掉對話頁常駐的「開啟終端機」大按鈕 ([a82ac24](https://github.com/NickYCLin/lattice-term/commit/a82ac2420686178cb1e26eb7692e542dc48ef459))
+
 ## [2026.10.6](https://github.com/NickYCLin/lattice-term/compare/v2026.10.5...v2026.10.6) (2026-10-05)
 
 
