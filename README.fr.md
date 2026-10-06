@@ -8,6 +8,10 @@ Utilisez vos assistants habituels pour écrire du code, vérifier des modificati
 
 Le cœur de l’application de bureau est open source sous licence [MPL-2.0](LICENSE), pour Windows, macOS et Linux.
 
+![Discussion dans LatticeTerm : à gauche, les conversations rangées par dossier ; à droite, les notes et tâches d’un projet d’exemple](docs/assets/chat-workspace.fr.png)
+
+*Aperçu de l’interface de développement avec des projets fictifs et une conversation d’exemple préparée. Consultez les notes de version pour connaître les fonctions de votre installateur.*
+
 ## Fonctionnalités
 
 - **Agent Fleet** : lancez vos outils IA locaux en ligne de commande (CLI) dans des terminaux indépendants et classez les sessions par projet et dossier.

@@ -8,6 +8,10 @@ Use seus assistentes habituais para escrever código, revisar alterações ou or
 
 O núcleo do aplicativo para desktop é de código aberto sob a licença [MPL-2.0](LICENSE), para Windows, macOS e Linux.
 
+![Conversa no LatticeTerm: à esquerda, conversas organizadas em pastas; à direita, notas e tarefas de um projeto de exemplo](docs/assets/chat-workspace.pt-BR.png)
+
+*Prévia da interface de desenvolvimento com projetos fictícios e uma conversa de exemplo preparada. Consulte as notas da versão para ver os recursos do seu instalador.*
+
 ## Recursos
 
 - **Agent Fleet**: execute ferramentas locais de IA de linha de comando (CLIs) em terminais independentes e organize as sessões por projeto e pasta.

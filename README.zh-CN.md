@@ -8,6 +8,10 @@
 
 桌面核心采用 [MPL-2.0 许可证](LICENSE)，支持 Windows、macOS 和 Linux。
 
+![LatticeTerm 对话界面：左侧按文件夹整理不同助手的对话，右侧阅读示例笔记与待办事项](docs/assets/chat-workspace.zh-CN.png)
+
+*开发版界面预览，使用虚构项目与预先编写的示例对话；实际功能以下载版本的更新说明为准。*
+
 ## 功能
 
 - **Agent Fleet**：在独立终端中运行本地 AI CLI，按项目和文件夹整理会话。

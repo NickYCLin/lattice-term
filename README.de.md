@@ -8,6 +8,10 @@ Nutze deine gewohnten KI-Assistenten, um Code zu schreiben, Änderungen zu prüf
 
 Der Desktop-Kern ist Open Source unter [MPL-2.0](LICENSE) und läuft auf Windows, macOS und Linux.
 
+![LatticeTerm-Chat: links die Gespräche nach Ordnern sortiert, rechts Notizen und Aufgaben eines Beispielprojekts](docs/assets/chat-workspace.de.png)
+
+*Vorschau der Entwicklungsoberfläche mit fiktiven Projekten und einem vorbereiteten Beispielgespräch. Welche Funktionen deine Version enthält, steht in den Versionshinweisen.*
+
 ## Funktionen
 
 - **Agent Fleet**: Führe lokale KI-Kommandozeilenprogramme (CLIs) in getrennten Terminals aus und ordne die Sitzungen in Projekten und Ordnern.

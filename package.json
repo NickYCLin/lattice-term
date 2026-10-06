@@ -27,6 +27,7 @@
     "actions:check": "node scripts/check-github-actions-pinning.mjs",
     "version:sync-lock": "node scripts/sync-cargo-lock-version.mjs",
     "version:check": "node scripts/check-version-sync.mjs",
+    "screenshots:product": "node scripts/product-screenshots/capture.mjs",
     "release:normalize-changelog": "node scripts/normalize-release-changelog.mjs",
     "check": "npm run version:check && npm run actions:check && npm run test && npm run build",
     "preview": "vite preview",

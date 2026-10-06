@@ -8,6 +8,10 @@ Usa tus asistentes habituales para escribir código, revisar cambios u organizar
 
 El núcleo de escritorio es de código abierto bajo la licencia [MPL-2.0](LICENSE), para Windows, macOS y Linux.
 
+![Chat de LatticeTerm: a la izquierda, conversaciones organizadas en carpetas; a la derecha, notas y tareas de un proyecto de ejemplo](docs/assets/chat-workspace.es.png)
+
+*Vista previa de la interfaz de desarrollo con proyectos ficticios y una conversación de ejemplo preparada. Consulta las notas de la versión para ver las funciones de tu instalador.*
+
 ## Funciones
 
 - **Agent Fleet**: ejecuta herramientas de IA de línea de comandos (CLI) locales en terminales independientes y organiza las sesiones en proyectos y carpetas.
