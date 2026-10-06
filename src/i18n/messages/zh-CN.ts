@@ -579,7 +579,7 @@ export const messages: Messages = {
   "settings.mobile.qrAlt": "行动版安装说明的 QR Code",
   "settings.mobile.scan": "拿手机相机扫这个 QR：",
   "settings.mobile.android": "Android：正式版有附安装档时会自动下载（安装时需允许「未知来源」）；还没有时页面会显示准备中。",
-  "settings.mobile.ios": "iPhone／iPad：已在 App Store 上架，点此前往下载。",
+  "settings.mobile.ios": "iPhone／iPad：扫描后会直接打开 App Store；在电脑上也可以点此前往。",
   "update.prompt.title": "有新版本可以更新",
   "update.prompt.versions": "目前版本 {current}，最新版本 {version}",
   "update.prompt.later": "稍后再说",

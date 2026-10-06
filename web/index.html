@@ -99,6 +99,7 @@
       // One link for everyone: sniff the device and route to the right build.
       var REPO = "NickYCLin/lattice-term";
       var RELEASES = "https://github.com/" + REPO + "/releases/latest";
+      var APP_STORE = "https://apps.apple.com/app/latticeterm/id6808952335";
 
       var statusEl = document.getElementById("status");
       var spinnerEl = document.getElementById("spinner");
@@ -152,10 +153,12 @@
             actionsEl.appendChild(button("前往發布頁", RELEASES, true));
           });
       } else if (isIOS) {
+        // Safari hands an apps.apple.com link straight to the App Store app.
         stopSpinner();
-        statusEl.textContent = "iPhone／iPad 已可下載";
-        hintEl.textContent =
-          "請從 App Store 安裝 LatticeTerm，不需要測試邀請。";
+        statusEl.textContent = "正在開啟 App Store…";
+        hintEl.textContent = "若沒有自動開啟，請點下方按鈕。";
+        actionsEl.appendChild(button("從 App Store 下載", APP_STORE));
+        window.location.replace(APP_STORE);
       } else {
         stopSpinner();
         statusEl.textContent = "行動版安裝說明與桌面版下載";

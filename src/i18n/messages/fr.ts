@@ -559,7 +559,7 @@ export const messages: Messages = {
   "settings.mobile.qrAlt": "Code QR pour les instructions d'installation mobiles",
   "settings.mobile.scan": "Scannez ce QR avec votre appareil photo :",
   "settings.mobile.android": "Android: télécharge le dernier installateur lorsqu'une version inclut un (permettre à des sources inconnues d'installer); sinon la page dit qu'elle est encore en préparation.",
-  "settings.mobile.ios": "iPhone / iPad: disponible sur l'App Store. Ouvert au téléchargement.",
+  "settings.mobile.ios": "iPhone / iPad : le scan ouvre directement l’App Store. Sur ordinateur, ouvrez ce lien.",
   "update.prompt.title": "Une nouvelle version est disponible",
   "update.prompt.versions": "Version actuelle {current}, dernière version {version}",
   "update.prompt.later": "Plus tard",

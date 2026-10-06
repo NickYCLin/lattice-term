@@ -559,7 +559,7 @@ export const messages: Messages = {
   "settings.mobile.qrAlt": "모바일 설치 지침의 QR 코드",
   "settings.mobile.scan": "당신의 전화 사진기를 가진 이 QR 검사:",
   "settings.mobile.android": "Android: 릴리스가 포함될 때 최신 설치 프로그램을 다운로드하십시오 ( \"알 수없는 소스\"를 설치하십시오); 그렇지 않으면 페이지는 여전히 준비됩니다.",
-  "settings.mobile.ios": "iPhone / iPad : App Store에서 사용할 수 있습니다. 다운로드 열기.",
+  "settings.mobile.ios": "iPhone / iPad: 스캔하면 App Store가 바로 열립니다. 컴퓨터에서는 이 링크를 여세요.",
   "update.prompt.title": "새로운 버전이 있습니다.",
   "update.prompt.versions": "현재 버전 {current}, 최신 버전 {version}",
   "update.prompt.later": "나중에",

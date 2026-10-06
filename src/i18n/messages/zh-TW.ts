@@ -781,7 +781,7 @@ export const zhTW = {
   "settings.mobile.qrAlt": "行動版安裝說明的 QR Code",
   "settings.mobile.scan": "拿手機相機掃這個 QR：",
   "settings.mobile.android": "Android：正式版有附安裝檔時會自動下載（安裝時需允許「未知來源」）；還沒有時頁面會顯示準備中。",
-  "settings.mobile.ios": "iPhone／iPad：已在 App Store 上架，點此前往下載。",
+  "settings.mobile.ios": "iPhone／iPad：掃描後會直接開啟 App Store；在電腦上也可以點此前往。",
   "update.prompt.title": "有新版本可以更新",
   "update.prompt.versions": "目前版本 {current}，最新版本 {version}",
   "update.prompt.later": "稍後再說",

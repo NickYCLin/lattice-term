@@ -559,7 +559,7 @@ export const messages: Messages = {
   "settings.mobile.qrAlt": "モバイルインストール手順のQRコード",
   "settings.mobile.scan": "お使いの携帯電話のカメラでこのQRをスキャン:",
   "settings.mobile.android": "アンドロイド:リリースに1つ(「未知のソース」がインストールされると)含まれているとき、最新のインストーラをダウンロードします。 そうでなければ、ページはまだ準備中であると言う。",
-  "settings.mobile.ios": "iPhone / iPad:App Storeでご利用いただけます。 開いた へ ダウンロードします。",
+  "settings.mobile.ios": "iPhone / iPad：スキャンすると App Store が直接開きます。パソコンではこのリンクから開けます。",
   "update.prompt.title": "新しいバージョンが利用可能",
   "update.prompt.versions": "現在のバージョン{current}、最新バージョン{version}",
   "update.prompt.later": "後で",
