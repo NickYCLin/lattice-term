@@ -149,6 +149,26 @@ describe("applyChatEvent", () => {
     });
   });
 
+  it("puts the pictures a tool returned on its card", () => {
+    let next = applyChatEvent(
+      running,
+      envelope({ kind: "toolStarted", itemId: "t1", name: "mcp", summary: "browser/screenshot" }),
+    );
+    next = applyChatEvent(
+      next,
+      envelope({ kind: "toolFinished", itemId: "t1", name: null, summary: null, output: "", isError: false }),
+    );
+    next = applyChatEvent(next, envelope({ kind: "toolImages", itemId: "t1", paths: ["/data/agent-image-a.png", ""] }));
+
+    expect(next.items[next.items.length - 1]).toMatchObject({
+      type: "tool",
+      name: "mcp",
+      done: true,
+      images: ["/data/agent-image-a.png"],
+    });
+    expect(applyChatEvent(next, envelope({ kind: "toolImages", itemId: "t1", paths: [] }))).toBe(next);
+  });
+
   it("closes the turn on finished and remembers the CLI's session", () => {
     const next = applyChatEvent(
       running,

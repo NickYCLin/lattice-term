@@ -162,6 +162,8 @@ export type ChatEvent =
       isError: boolean;
       meta?: ToolMeta;
     }
+  /** Pictures a tool returned, already kept in the conversation folder. */
+  | { kind: "toolImages"; itemId: string; paths: string[] }
   | { kind: "notice"; message: string }
   | {
       kind: "approvalRequested";
@@ -231,6 +233,8 @@ export type ChatItem =
       done: boolean;
       /** What the CLI reported about a command beyond its output. */
       meta?: ToolMeta;
+      /** Paths of the pictures the tool returned, shown under its card. */
+      images?: string[];
       assistantDefinitionId?: ChatDefinitionId;
     }
   | { type: "notice"; id: string; text: string }
@@ -819,10 +823,34 @@ export function applyChatEvent(
           isError: event.isError,
           done: true,
           ...(event.meta ? { meta: event.meta } : {}),
+          ...(existing?.type === "tool" && existing.images ? { images: existing.images } : {}),
           assistantDefinitionId: thread.definitionId,
         })),
         updatedAt: now,
       };
+    case "toolImages": {
+      const paths = event.paths.filter((path) => typeof path === "string" && path.length > 0).slice(0, 8);
+      if (paths.length === 0) return thread;
+      return {
+        ...thread,
+        items: upsert(thread.items, scoped(event.itemId), (existing) => ({
+          ...(existing?.type === "tool"
+            ? existing
+            : {
+                type: "tool" as const,
+                id: scoped(event.itemId),
+                name: "tool",
+                summary: "",
+                output: null,
+                isError: false,
+                done: true,
+                assistantDefinitionId: thread.definitionId,
+              }),
+          images: paths,
+        })),
+        updatedAt: now,
+      };
+    }
     case "notice":
       return {
         ...thread,

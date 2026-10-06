@@ -302,6 +302,16 @@ pub enum ChatEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<ToolMeta>,
     },
+    /// Pictures a finished tool handed back, such as a screenshot. Parsers
+    /// fill `images`; the app's sink keeps them in the conversation folder
+    /// and sends only `paths`.
+    ToolImages {
+        item_id: String,
+        #[serde(skip)]
+        images: Vec<crate::chat_images::ToolImage>,
+        #[serde(default)]
+        paths: Vec<String>,
+    },
     /// Something worth showing that does not end the turn.
     Notice {
         message: String,
@@ -340,7 +350,30 @@ pub struct EventSink(pub tauri::AppHandle);
 
 impl ChatSink for EventSink {
     fn event(&self, thread_id: &str, turn_id: &str, event: ChatEvent) {
-        use tauri::Emitter;
+        use tauri::{Emitter, Manager};
+        let event = match event {
+            ChatEvent::ToolImages {
+                item_id, images, ..
+            } => {
+                let paths = self
+                    .0
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .and_then(|data_dir| general_chat_directory(&data_dir, thread_id).ok())
+                    .map(|directory| crate::chat_images::store(&directory, &images))
+                    .unwrap_or_default();
+                if paths.is_empty() {
+                    return;
+                }
+                ChatEvent::ToolImages {
+                    item_id,
+                    images: Vec::new(),
+                    paths,
+                }
+            }
+            event => event,
+        };
         let _ = self.0.emit(
             EVENT_CHAT,
             ChatEventEnvelope {
@@ -2294,6 +2327,14 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                     is_error,
                     meta: None,
                 });
+                let images = content_images(block.get("content"));
+                if !images.is_empty() {
+                    events.push(ChatEvent::ToolImages {
+                        item_id: item_id.to_string(),
+                        images,
+                        paths: Vec::new(),
+                    });
+                }
             }
         }
         Some("control_request") => {
@@ -2455,6 +2496,44 @@ fn content_text(content: Option<&Value>) -> String {
     }
 }
 
+/// Base64 pictures among tool result blocks, in Claude's shape
+/// (`source.data`) or MCP's (`data`).
+fn content_images(content: Option<&Value>) -> Vec<crate::chat_images::ToolImage> {
+    let Some(Value::Array(blocks)) = content else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .filter(|block| str_field(block, "type") == Some("image"))
+        .filter_map(|block| {
+            block
+                .get("source")
+                .and_then(|source| str_field(source, "data"))
+                .or_else(|| str_field(block, "data"))
+        })
+        .map(|data| crate::chat_images::ToolImage::Data(data.to_string()))
+        .collect()
+}
+
+/// A tool result as JSON text, with picture bytes left out: the picture is
+/// shown as an image, and base64 in the card helps nobody.
+fn without_image_data(value: &Value) -> Value {
+    match value {
+        Value::Object(map) if map.get("type").and_then(Value::as_str) == Some("image") => {
+            let mut map = map.clone();
+            map.remove("data");
+            Value::Object(map)
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), without_image_data(value)))
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(values.iter().map(without_image_data).collect()),
+        other => other.clone(),
+    }
+}
+
 /// The events for one app-server (v2, camelCase) thread item.
 fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
     let mut events = Vec::new();
@@ -2577,23 +2656,33 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
             if completed {
                 let failed = str_field(item, "status") == Some("failed")
                     || item.get("error").is_some_and(|error| !error.is_null());
-                let output = item
-                    .get("error")
-                    .filter(|error| !error.is_null())
-                    .or_else(|| item.get("result"))
-                    .map(|output| match output {
-                        Value::String(text) => text.clone(),
-                        other => serde_json::to_string(other).unwrap_or_default(),
-                    })
-                    .unwrap_or_default();
+                let output =
+                    item.get("error")
+                        .filter(|error| !error.is_null())
+                        .or_else(|| item.get("result"))
+                        .map(|output| match output {
+                            Value::String(text) => text.clone(),
+                            other => serde_json::to_string(&without_image_data(other))
+                                .unwrap_or_default(),
+                        })
+                        .unwrap_or_default();
+                let images =
+                    content_images(item.get("result").and_then(|result| result.get("content")));
                 events.push(ChatEvent::ToolFinished {
-                    item_id,
+                    item_id: item_id.clone(),
                     name: Some("mcp".to_string()),
                     summary: Some(truncate(&summary, 200)),
                     output: bounded_output(&output),
                     is_error: failed,
                     meta: None,
                 });
+                if !images.is_empty() {
+                    events.push(ChatEvent::ToolImages {
+                        item_id,
+                        images,
+                        paths: Vec::new(),
+                    });
+                }
             } else {
                 events.push(started("mcp", summary));
             }
@@ -2617,6 +2706,29 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                 });
             } else {
                 events.push(started("web_search", summary));
+            }
+        }
+        // Codex looked at a picture on disk (its view_image tool).
+        Some("imageView") => {
+            let path = str_field(item, "path").unwrap_or_default().to_string();
+            if completed {
+                events.push(ChatEvent::ToolFinished {
+                    item_id: item_id.clone(),
+                    name: Some("view_image".to_string()),
+                    summary: Some(truncate(&path, 200)),
+                    output: String::new(),
+                    is_error: false,
+                    meta: None,
+                });
+                if !path.is_empty() {
+                    events.push(ChatEvent::ToolImages {
+                        item_id,
+                        images: vec![crate::chat_images::ToolImage::File(path.into())],
+                        paths: Vec::new(),
+                    });
+                }
+            } else {
+                events.push(started("view_image", path));
             }
         }
         _ => {}
@@ -3902,6 +4014,65 @@ mod tests {
             [ChatEvent::ToolFinished { output, .. }] => assert!(output.is_empty()),
             other => panic!("unexpected events {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_pictures_are_handed_on_as_images_not_text() {
+        use crate::chat_images::ToolImage;
+        let mut state = TurnState::default();
+        let events = parse_line(
+            Dialect::Claude,
+            &mut state,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"shot taken"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0K"}}]}]}}"#,
+        );
+        match events.as_slice() {
+            [ChatEvent::ToolFinished { output, .. }, ChatEvent::ToolImages {
+                item_id, images, ..
+            }] => {
+                assert_eq!(output, "shot taken");
+                assert_eq!(item_id, "t1");
+                assert_eq!(images, &[ToolImage::Data("iVBORw0K".into())]);
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+
+        let mcp = serde_json::json!({
+            "type": "mcpToolCall", "id": "m1", "server": "browser", "tool": "screenshot",
+            "status": "completed",
+            "result": { "content": [{ "type": "image", "data": "R0lGODlh", "mimeType": "image/gif" }] }
+        });
+        match codex_v2_item_events(&mcp, true).as_slice() {
+            [ChatEvent::ToolFinished { output, .. }, ChatEvent::ToolImages { images, .. }] => {
+                assert!(
+                    !output.contains("R0lGODlh"),
+                    "no base64 in the card: {output}"
+                );
+                assert_eq!(images, &[ToolImage::Data("R0lGODlh".into())]);
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+
+        let viewed = serde_json::json!({ "type": "imageView", "id": "v1", "path": "/w/chart.png" });
+        match codex_v2_item_events(&viewed, true).as_slice() {
+            [ChatEvent::ToolFinished { name, summary, .. }, ChatEvent::ToolImages { images, .. }] =>
+            {
+                assert_eq!(name.as_deref(), Some("view_image"));
+                assert_eq!(summary.as_deref(), Some("/w/chart.png"));
+                assert_eq!(images, &[ToolImage::File("/w/chart.png".into())]);
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
+
+        let sent = serde_json::to_value(ChatEvent::ToolImages {
+            item_id: "t1".into(),
+            images: vec![ToolImage::Data("iVBORw0K".into())],
+            paths: vec!["/data/agent-image-1.png".into()],
+        })
+        .unwrap();
+        assert_eq!(
+            sent,
+            serde_json::json!({ "kind": "toolImages", "itemId": "t1", "paths": ["/data/agent-image-1.png"] })
+        );
     }
 
     #[test]

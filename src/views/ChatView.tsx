@@ -79,7 +79,7 @@ import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
-import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
+import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
 import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
@@ -1264,6 +1264,7 @@ function ThreadPane({
               tag={tag}
               onAnswer={answer}
               workingDirectory={thread.workingDirectory}
+              threadId={thread.id}
               subtask={(childId) => {
                 const child = chat.getThread(childId);
                 if (!child) return null;
@@ -1465,6 +1466,7 @@ function ChatItemView({
   onAnswer,
   onBranch,
   workingDirectory = "",
+  threadId,
   subtask,
 }: {
   item: ChatItem;
@@ -1476,6 +1478,8 @@ function ChatItemView({
   onBranch?: () => void;
   /** Where images a reply mentions may be previewed from. */
   workingDirectory?: string;
+  /** Lets pasted pictures and tool screenshots be shown from the chat's folder. */
+  threadId?: string;
   /** Resolves a delegated subtask for its "finished" note. */
   subtask?: (childId: string) => { title: string; result: string; open: () => void; bringBack: () => void } | null;
 }) {
@@ -1506,6 +1510,14 @@ function ChatItemView({
                   </span>
                 ))}
               </div>
+            )}
+            {item.attachments?.some((attachment) => attachment.isImage) && (
+              <ChatImageStrip
+                paths={item.attachments.filter((attachment) => attachment.isImage).map((attachment) => attachment.path)}
+                workingDirectory={workingDirectory}
+                threadId={threadId}
+                captions={false}
+              />
             )}
           </div>
           {branchButton}
@@ -1587,6 +1599,9 @@ function ChatItemView({
               item.output && <pre className="chat-card__output">{item.output}</pre>
             )}
           </details>
+          {item.images && item.images.length > 0 && (
+            <ChatImageStrip paths={item.images} workingDirectory={workingDirectory} threadId={threadId} captions={false} />
+          )}
           {item.done && !item.isError && (
             <ChatWebSources sources={webSources(item.name, item.output)} />
           )}

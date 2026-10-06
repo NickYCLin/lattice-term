@@ -1755,13 +1755,35 @@ async fn agent_broadcast(
     Ok(outcomes)
 }
 
-/// A thumbnail of an image a reply mentions, from the conversation folder.
+/// A thumbnail of an image in a conversation, from its working folder or,
+/// for pasted pictures and tool screenshots, the thread's own folder.
 #[tauri::command]
 async fn chat_image_preview(
+    app: AppHandle,
     working_directory: String,
     path: String,
+    thread_id: Option<String>,
 ) -> Result<Option<String>, String> {
-    blocking(move || crate::chat_images::preview(&working_directory, &path)).await
+    let chat_directory = match thread_id {
+        Some(thread_id) => {
+            let data_dir = app.path().app_data_dir().map_err(|error| {
+                format!("Cannot locate the application data directory: {error}")
+            })?;
+            Some(crate::agent_chat::general_chat_directory(
+                &data_dir, &thread_id,
+            )?)
+        }
+        None => None,
+    };
+    // A chat without a project runs in its own folder.
+    let working_directory = match &chat_directory {
+        Some(directory) if working_directory.trim().is_empty() => directory.display().to_string(),
+        _ => working_directory,
+    };
+    blocking(move || {
+        crate::chat_images::preview(&working_directory, chat_directory.as_deref(), &path)
+    })
+    .await
 }
 
 /// Files copied in a file manager, as chat attachments: only existing
