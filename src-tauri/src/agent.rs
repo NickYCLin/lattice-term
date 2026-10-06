@@ -10925,6 +10925,7 @@ model = "gpt-5.3-codex"
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn sandbox_arguments_open_only_the_working_directory_and_the_cli_state() {
         let home = Path::new("/home/u");
@@ -15083,6 +15084,7 @@ notify = ["notify.exe", "turn-ended"]"#,
         registry.stop_all();
     }
 
+    #[cfg(unix)]
     #[test]
     fn broadcast_fans_out_to_each_selected_pty() {
         let collector = Arc::new(TestSink::default());
