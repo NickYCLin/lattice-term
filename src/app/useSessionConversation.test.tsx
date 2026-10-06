@@ -1,12 +1,17 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { installFakeDom } from "./testFixtures/hookDom";
 import { fakeAgentApi } from "./testFixtures/agentApis";
 import { useSessionConversation, type SessionConversationMessage } from "./useSessionConversation";
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+const { invoke, renderPreview } = vi.hoisted(() => ({ invoke: vi.fn(), renderPreview: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("./terminalPreview", () => ({ renderTerminalPreview: renderPreview }));
+beforeEach(() => {
+  renderPreview.mockReset().mockImplementation(async (snapshot: string) =>
+    snapshot.replace(/\x1b\[[0-9;]*m/g, ""));
+});
 
 it("reads the selected session, rejects stale reads and sends only through that session's existing queue", async () => {
   vi.useFakeTimers();
@@ -92,6 +97,49 @@ it("answers the terminal's permission prompt by its own id", async () => {
     expect(api.answerError).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(api.approval).toBeNull();
+    await act(async () => { root.unmount(); });
+  } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("ignores late previews from an older output snapshot or a different session", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const pending: Array<(text: string) => void> = [];
+  renderPreview.mockImplementation(() => new Promise<string>(resolve => { pending.push(resolve); }));
+  invoke.mockResolvedValue([]);
+  let output!: (text: string) => void;
+  const agents = fakeAgentApi({ onOutputTail: (_id, handler) => { output = handler; return vi.fn(); } });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe({ id }: { id: string }) { api = useSessionConversation(id, agents); return null; }
+  try {
+    await act(async () => { root.render(<Probe id="first" />); });
+    await act(async () => { output("old frame"); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { output("latest frame"); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { pending[1]("latest frame"); });
+    await act(async () => { pending[0]("old frame"); });
+    expect(api.output).toBe("latest frame");
+    await act(async () => { output("first session pending"); await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { root.render(<Probe id="second" />); });
+    await act(async () => { pending[2]("first session pending"); });
+    expect(api.output).toBe("");
+    await act(async () => { root.unmount(); });
+  } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("reports preview errors without displaying raw control sequences", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  invoke.mockResolvedValue([]);
+  renderPreview.mockRejectedValue(new Error("Preview could not be rendered."));
+  let output!: (text: string) => void;
+  const agents = fakeAgentApi({ onOutputTail: (_id, handler) => { output = handler; return vi.fn(); } });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", agents); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { output("\x1b[1;1HWorking"); await vi.advanceTimersByTimeAsync(100); });
+    expect(api.output).toBe("");
+    expect(api.outputError).toBe("Preview could not be rendered.");
     await act(async () => { root.unmount(); });
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
 });

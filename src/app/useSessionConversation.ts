@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { visibleTerminalText, type AgentApi } from "./useAgentSessions";
+import { MAX_AGENT_OUTPUT_TAIL, type AgentApi } from "./useAgentSessions";
+import { renderTerminalPreview } from "./terminalPreview";
 
 export interface SessionConversationMessage {
   role: "user" | "assistant";
@@ -21,6 +22,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false);
   const [output, setOutput] = useState("");
+  const [outputError, setOutputError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [queued, setQueued] = useState<number | null>(null);
@@ -71,15 +73,32 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let latest = "";
+    let revision = 0;
+    let disposed = false;
     setOutput("");
+    setOutputError(null);
     const unsubscribe = onOutputTail(sessionId, text => {
       latest = text;
+      revision += 1;
       timer ??= setTimeout(() => {
         timer = undefined;
-        setOutput(visibleTerminalText(latest).replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
+        const rendering = revision;
+        void renderTerminalPreview(latest, latest.length >= MAX_AGENT_OUTPUT_TAIL).then(
+          preview => {
+            if (!disposed && rendering === revision) {
+              setOutput(preview);
+              setOutputError(null);
+            }
+          },
+          reason => {
+            if (!disposed && rendering === revision) {
+              setOutputError(reason instanceof Error ? reason.message : String(reason));
+            }
+          },
+        );
       }, 100);
     });
-    return () => { unsubscribe(); clearTimeout(timer); };
+    return () => { disposed = true; unsubscribe(); clearTimeout(timer); };
   }, [sessionId, onOutputTail]);
 
   useEffect(() => {
@@ -126,7 +145,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   }
   const acknowledge = useCallback(() => setQueued(null), []);
   return {
-    messages, readError, loading, slow, output, sendError, sending, queued, send, acknowledge,
+    messages, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
     approval, answering, answerError, answer,
   };
 }

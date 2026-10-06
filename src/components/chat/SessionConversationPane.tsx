@@ -270,14 +270,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
               : conversation.loading ? "common.loading" : "sessionChat.waiting",
           )}</p> : null}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
-        <details className="session-chat__output" open={conversation.messages.length === 0 || working || attention || Boolean(session.closedReason)}>
-          <summary>{t("sessionChat.output")}</summary>
-          <p>{t("sessionChat.outputHint")}</p>
-          <pre ref={outputRef} aria-label={t("sessionChat.output")} onScroll={event => {
-            const node = event.currentTarget;
-            outputPinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
-          }}>{conversation.output || t("sessionChat.noOutput")}</pre>
-        </details>
         {conversation.messages.map((message, index) => {
           const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
@@ -291,6 +283,15 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             </div>
           </div>;
         })}
+        <details className="session-chat__output" open={conversation.messages.length === 0}>
+          <summary>{t("sessionChat.output")}</summary>
+          <p>{t("sessionChat.outputHint")}</p>
+          {conversation.outputError && <p className="session-chat__diagnostic" role="status">{conversation.outputError}</p>}
+          <pre ref={outputRef} aria-label={t("sessionChat.output")} onScroll={event => {
+            const node = event.currentTarget;
+            outputPinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+          }}>{conversation.output || t("sessionChat.noOutput")}</pre>
+        </details>
         {working && (
           <p className="session-chat__activity" role="status">
             <span className="session-chat__pulse" aria-hidden="true" />
