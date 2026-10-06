@@ -1545,6 +1545,44 @@ fn startup_seed_payload(seed: &str) -> Vec<u8> {
     format!("\u{1b}[200~{seed}\u{1b}[201~\r").into_bytes()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum StartupSeedDelivery {
+    Delivered,
+    Waiting,
+    Cancelled,
+}
+
+fn try_deliver_startup_seed(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    payload: &[u8],
+) -> Result<StartupSeedDelivery, String> {
+    let entry = registry.get(session_id)?;
+    let mut input = entry.input.lock().map_err(|error| error.to_string())?;
+    if !input.startup_seed_pending {
+        return Ok(StartupSeedDelivery::Cancelled);
+    }
+    if input.desktop_busy() {
+        return Ok(StartupSeedDelivery::Waiting);
+    }
+    input.startup_seed_pending = false;
+    match send_bytes_locked(sink, registry, session_id, payload) {
+        Ok(()) => Ok(StartupSeedDelivery::Delivered),
+        Err(error) => {
+            input.desktop_editing = true;
+            Err(error)
+        }
+    }
+}
+
+fn startup_seed_notice(sink: &dyn AgentSink, registry: &AgentRegistry, session_id: &str) {
+    let notice = "\r\n[LatticeTerm] 啟動指示／記憶交接未確認送出。請檢查輸入框與交接檔；為避免覆蓋輸入或重複送出，未自動重送。\r\n";
+    if let Ok(offset) = registry.record_output(session_id, notice.as_bytes()) {
+        sink.data(session_id, offset, notice.as_bytes());
+    }
+}
+
 #[derive(Default)]
 struct OutputBuffer {
     bytes: VecDeque<u8>,
@@ -7966,17 +8004,25 @@ pub fn launch_with_replay(
                 return;
             }
             let payload = startup_seed_payload(&seed);
-            if let Ok(entry) = seed_registry.get(&seed_id) {
-                if let Ok(mut input) = entry.input.lock() {
-                    if input.startup_seed_pending && !input.desktop_busy() {
-                        let _ = send_bytes_locked(
-                            seed_sink.as_ref(),
-                            &seed_registry,
-                            &seed_id,
-                            &payload,
-                        );
+            let deadline = Instant::now() + STARTUP_SEED_TIMEOUT;
+            loop {
+                match try_deliver_startup_seed(
+                    seed_sink.as_ref(),
+                    &seed_registry,
+                    &seed_id,
+                    &payload,
+                ) {
+                    Ok(StartupSeedDelivery::Delivered) => return,
+                    Ok(StartupSeedDelivery::Waiting) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(25));
                     }
-                    input.startup_seed_pending = false;
+                    _ => {
+                        if let Ok(mut input) = seed_entry.input.lock() {
+                            input.startup_seed_pending = false;
+                        }
+                        startup_seed_notice(seed_sink.as_ref(), &seed_registry, &seed_id);
+                        return;
+                    }
                 }
             }
         });
@@ -13665,6 +13711,125 @@ notify = ["notify.exe", "turn-ended"]"#,
             std::thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_seed_waits_for_fragmented_terminal_replies_without_losing_the_handoff() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Startup reply fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        let payload = startup_seed_payload("handoff-after-terminal-reply");
+        entry.input.lock().unwrap().startup_seed_pending = true;
+
+        send_bytes(sink.as_ref(), &registry, id, b"\x1b]11;rgb:0000/").unwrap();
+        assert_eq!(
+            try_deliver_startup_seed(sink.as_ref(), &registry, id, &payload).unwrap(),
+            StartupSeedDelivery::Waiting
+        );
+        assert!(entry.input.lock().unwrap().startup_seed_pending);
+        assert!(!collector
+            .session_data
+            .lock()
+            .unwrap()
+            .get(id)
+            .is_some_and(
+                |bytes| String::from_utf8_lossy(bytes).contains("handoff-after-terminal-reply")
+            ));
+
+        send_bytes(sink.as_ref(), &registry, id, b"0000/0000\x1b\\").unwrap();
+        assert_eq!(
+            try_deliver_startup_seed(sink.as_ref(), &registry, id, &payload).unwrap(),
+            StartupSeedDelivery::Delivered
+        );
+        assert!(!entry.input.lock().unwrap().startup_seed_pending);
+        assert_eq!(
+            try_deliver_startup_seed(sink.as_ref(), &registry, id, &payload).unwrap(),
+            StartupSeedDelivery::Cancelled
+        );
+        assert!(received_within(
+            &collector,
+            id,
+            "handoff-after-terminal-reply",
+            Duration::from_secs(3)
+        ));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_seed_preserves_human_input_and_reports_an_unsent_handoff() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Startup human fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        entry.input.lock().unwrap().startup_seed_pending = true;
+        send_bytes(sink.as_ref(), &registry, id, b"my draft").unwrap();
+
+        assert_eq!(
+            try_deliver_startup_seed(
+                sink.as_ref(),
+                &registry,
+                id,
+                &startup_seed_payload("private handoff")
+            )
+            .unwrap(),
+            StartupSeedDelivery::Cancelled
+        );
+        assert!(entry.input.lock().unwrap().desktop_busy());
+        startup_seed_notice(sink.as_ref(), &registry, id);
+        let output = collector.session_data.lock().unwrap()[id].clone();
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains("記憶交接未確認送出"));
+        assert!(!output.contains("private handoff"));
+        registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_seed_write_failure_is_not_retried_into_a_possible_draft() {
+        struct FailingWriter {
+            bytes: Arc<Mutex<Vec<u8>>>,
+        }
+        impl Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.bytes.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::other("fixture flush failure"))
+            }
+        }
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Startup failure fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let _original_writer = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(FailingWriter {
+                bytes: written.clone(),
+            }),
+        );
+        entry.input.lock().unwrap().startup_seed_pending = true;
+        let payload = startup_seed_payload("private handoff");
+        assert!(try_deliver_startup_seed(sink.as_ref(), &registry, id, &payload).is_err());
+        assert!(!entry.input.lock().unwrap().startup_seed_pending);
+        assert!(entry.input.lock().unwrap().desktop_busy());
+        assert_eq!(
+            try_deliver_startup_seed(sink.as_ref(), &registry, id, &payload).unwrap(),
+            StartupSeedDelivery::Cancelled
+        );
+        assert_eq!(*written.lock().unwrap(), payload);
+        registry.stop_all();
     }
 
     #[test]
