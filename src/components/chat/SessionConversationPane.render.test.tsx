@@ -18,6 +18,11 @@ function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
 }
 
 describe("SessionConversationPane composer", () => {
+  it("offers the terminal only while the assistant waits for the user", () => {
+    expect(render({ state: "idle" })).not.toContain("開啟這個工作階段的終端機");
+    expect(render({ state: "needsAttention" })).toContain("開啟這個工作階段的終端機");
+  });
+
   it("shows the project folder, this computer and the session model", () => {
     const html = render({ workingDirectory: "D:\\project\\LatticeTerm", model: "claude-opus-4-5" });
     expect(html).toContain('title="D:\\project\\LatticeTerm"');

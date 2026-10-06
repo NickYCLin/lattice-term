@@ -88,7 +88,7 @@ export const en: Messages = {
   "sessionChat.waiting": "The transcript is not available yet. You can view the terminal output below.",
   "sessionChat.slow": "Reading the transcript is taking longer than expected. Terminal output is still available below.",
   "sessionChat.output": "Recent terminal output",
-  "sessionChat.outputHint": "Shows the latest output from this session. Open its terminal above to type or approve actions.",
+  "sessionChat.outputHint": "Shows the latest output from this session. When the assistant waits for your approval, a button to open its terminal appears here.",
   "sessionChat.noOutput": "No terminal output yet. If this does not change, open the terminal to check startup.",
   "sessionChat.closed": "This session has ended. Restart it in Sessions first.",
   "sessionChat.chooseAnother": "Choose another session or conversation from the sidebar.",

@@ -251,9 +251,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal }: {
         )}
       </div>
       <p>{t("sessionChat.shared")}</p>
-      <button type="button" className="button button--secondary" onClick={onOpenTerminal}>
-        {t("sessionChat.terminal")}
-      </button>
     </header>
     <div ref={messagesRef} className="chat-messages" onScroll={event => {
       const node = event.currentTarget;

@@ -85,7 +85,7 @@ export const zhTW = {
   "sessionChat.waiting": "尚未取得這個工作階段的逐字稿，可先查看下方終端輸出。",
   "sessionChat.slow": "讀取對話紀錄比預期久，下方仍會顯示目前的終端輸出。",
   "sessionChat.output": "最近的終端輸出",
-  "sessionChat.outputHint": "顯示這個工作階段最後一段輸出；需要輸入或確認時，請開啟上方的終端機。",
+  "sessionChat.outputHint": "顯示這個工作階段最後一段輸出；助理等你確認時，會在這裡出現開啟終端機的按鈕。",
   "sessionChat.noOutput": "目前沒有終端輸出。若一直沒有變化，請開啟終端機確認啟動狀況。",
   "sessionChat.closed": "這個工作階段已結束，請先到工作階段頁重新啟動。",
   "sessionChat.chooseAnother": "請從左側選擇另一個工作階段或對話。",
