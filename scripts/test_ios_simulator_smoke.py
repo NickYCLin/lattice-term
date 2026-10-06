@@ -161,6 +161,39 @@ class FailureEvidenceTests(unittest.TestCase):
         self.assertEqual(recognize.call_count, 1)
         self.assertEqual(recognize.call_args.kwargs["timeout"], 45)
 
+    def test_a_finished_capture_whose_command_hangs_is_still_recognized(self):
+        now = [0.0]
+        attempts = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            screenshot = Path(directory) / "capture.png"
+
+            def capture(*args, **kwargs):
+                attempts.append(kwargs["timeout"])
+                # The first hang leaves half a PNG; the second a whole one.
+                body = b"\x89PNG\r\n\x1a\n" + (smoke.PNG_END if len(attempts) == 2 else b"IDAT")
+                screenshot.write_bytes(body)
+                now[0] += kwargs["timeout"]
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+            with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.os, "kill"), \
+                    patch.object(smoke, "simctl", side_effect=capture), \
+                    patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, stdout='["No connections yet", "Add connection"]')) as recognize:
+                result = smoke.wait_for_frontend("owned-device", 123, screenshot, Path("reader"))
+        self.assertTrue(result["renderedStartup"])
+        self.assertEqual(attempts, [60, 60])
+        recognize.assert_called_once()
+
+    def test_an_old_complete_capture_does_not_pass_for_a_new_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            screenshot = Path(directory) / "capture.png"
+            screenshot.write_bytes(b"\x89PNG\r\n\x1a\n" + smoke.PNG_END)
+            self.assertTrue(smoke.finished_capture(screenshot, 0))
+            self.assertFalse(smoke.finished_capture(screenshot, screenshot.stat().st_mtime + 5))
+            self.assertFalse(smoke.finished_capture(Path(directory) / "missing.png", 0))
+
     def test_a_wedged_simulator_stops_in_bounded_time_and_leaves_evidence(self):
         now = [0.0]
         attempts = []

@@ -103,6 +103,24 @@ def frontend_is_visible(texts):
 MAX_CAPTURE_STALLS = 2
 
 
+PNG_END = b"IEND\xaeB`\x82"
+
+
+def finished_capture(screenshot, since):
+    # On loaded runners simctl often writes the whole iPad PNG and then never
+    # exits. A file written during this attempt that ends with the PNG end
+    # chunk is complete, so it is recognized instead of counted as a stall.
+    # A partly written file still is not.
+    try:
+        if screenshot.stat().st_mtime < since:
+            return False
+        with screenshot.open("rb") as image:
+            image.seek(-len(PNG_END), os.SEEK_END)
+            return image.read() == PNG_END
+    except OSError:
+        return False
+
+
 def allow_stall(device_id, stalls):
     if stalls <= MAX_CAPTURE_STALLS:
         return True
@@ -124,15 +142,20 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         # loaded runner. Keep the shared readiness deadline, but do not impose
         # a shorter 20-second cutoff on a capture that is still completing.
         attempt = time.monotonic()
+        # Whole seconds back, for file systems with coarse modification times.
+        written_after = time.time() - 1
         try:
             simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
         except subprocess.TimeoutExpired:
-            stalls += 1
-            if not allow_stall(device_id, stalls):
-                break
             deadline += time.monotonic() - attempt
-            print(f"{device_id}: 截圖指令逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
-            continue
+            if finished_capture(screenshot, written_after):
+                print(f"{device_id}: 截圖已寫完但指令沒有結束，直接辨識這張", flush=True)
+            else:
+                stalls += 1
+                if not allow_stall(device_id, stalls):
+                    break
+                print(f"{device_id}: 截圖指令逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
+                continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
