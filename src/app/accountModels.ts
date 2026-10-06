@@ -26,6 +26,8 @@ export interface AccountModelTarget {
   accountProfileId: string | null;
   configDirectory: string | null;
   accountName: string;
+  /** The profile's own name, which older launches stored in their label. */
+  profileName?: string;
   cliLabel: string;
   signedOut: boolean;
   showAccount: boolean;
@@ -77,11 +79,24 @@ export function accountModelTargets(
   keepProfileId: string | null = null,
 ): AccountModelTarget[] {
   return definitions.flatMap((definition) => {
-    // A profile configured by hand with a proxy's own address and key is
-    // that proxy entry again; offering both reads as two different sources.
-    // One already in use stays selectable.
-    const named = profilesFor(profiles, definition.id).filter((profile) =>
-      profile.id === keepProfileId || !statuses[profile.id]?.cliProxy?.sameKey);
+    // The same login offered twice reads as two different sources. That is
+    // a profile configured by hand with a proxy's own address and key, or a
+    // profile signed in to an account another entry already offers. One
+    // already in use stays selectable.
+    const seen = new Set<string>();
+    const remember = (email: string | null | undefined) => {
+      const key = email?.trim().toLowerCase();
+      if (!key) return false;
+      const repeated = seen.has(key);
+      seen.add(key);
+      return repeated;
+    };
+    remember(definition.account.label);
+    const named = profilesFor(profiles, definition.id).filter((profile) => {
+      const status = statuses[profile.id];
+      const repeated = status?.state === "signedIn" && remember(status.label);
+      return profile.id === keepProfileId || (!repeated && !status?.cliProxy?.sameKey);
+    });
     const targets = [
       {
         definitionId: definition.id,
@@ -91,21 +106,31 @@ export function accountModelTargets(
         cliLabel: definition.label,
         signedOut: definition.account.state === "signedOut",
         showAccount: false,
+        accountKnown: Boolean(definition.account.label),
       },
-      ...named.map((profile) => ({
-        definitionId: definition.id,
-        accountProfileId: profile.id,
-        configDirectory: profile.configDirectory,
-        accountName: profile.name,
-        cliLabel: definition.label,
-        signedOut: statuses[profile.id]?.state === "signedOut",
-        showAccount: false,
-      })),
+      ...named.map((profile) => {
+        const email = statuses[profile.id]?.label;
+        return {
+          definitionId: definition.id,
+          accountProfileId: profile.id,
+          configDirectory: profile.configDirectory,
+          accountName: email && email !== profile.name ? `${profile.name}（${email}）` : profile.name,
+          profileName: profile.name,
+          cliLabel: definition.label,
+          signedOut: statuses[profile.id]?.state === "signedOut",
+          showAccount: false,
+          accountKnown: Boolean(email),
+        };
+      }),
     ];
     // Unknown login state is still selectable; native/keychain-backed logins
     // cannot always be detected from a file. Never hide a usable account.
+    // A known account is always named, even when it is the only one.
     const multiple = targets.filter((target) => !target.signedOut).length > 1;
-    return targets.map((target) => ({ ...target, showAccount: multiple }));
+    return targets.map(({ accountKnown, ...target }) => ({
+      ...target,
+      showAccount: multiple || accountKnown,
+    }));
   });
 }
 
@@ -225,6 +250,8 @@ export function accountSessionLabel(
   const target = targets.find((entry) => entry.definitionId === session.definitionId && accountPathKey(entry.configDirectory) === accountPathKey(session.profileConfigPath));
   if (!target) return session.profileConfigPath ? `${session.label} · ${missing}` : session.label;
   // Earlier account-login launches included the name in the stored label.
-  const label = session.label === `${target.cliLabel} · ${target.accountName}` ? target.cliLabel : session.label;
+  const label = session.label === `${target.cliLabel} · ${target.accountName}` ||
+    session.label === `${target.cliLabel} · ${target.profileName ?? target.accountName}`
+    ? target.cliLabel : session.label;
   return target.showAccount ? `${target.accountName} · ${label}` : label;
 }

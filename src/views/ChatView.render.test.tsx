@@ -135,13 +135,12 @@ describe("ChatView", () => {
     expect(markup).toContain("新對話");
   });
 
-  it("hides the account name when only the default account exists", () => {
+  it("names the default account when it is the only one", () => {
     const thread = fakeThread();
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
     expect(markup).not.toContain("使用帳號");
-    expect(markup).not.toContain("me@example.com");
-    expect(markup).toContain("OpenAI Codex · 預設");
+    expect(markup).toContain("me@example.com · OpenAI Codex · 預設");
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
     // The interface talks about assistants; the CLI is an implementation detail.

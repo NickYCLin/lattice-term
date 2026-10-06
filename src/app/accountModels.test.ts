@@ -24,12 +24,25 @@ describe("account-aware model choices", () => {
     expect(hasChatModels("cursor")).toBe(false);
   });
 
-  it("omits account labels for a sole account, independently for each CLI", () => {
-    const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [], {}, "預設帳號");
-    expect(targets.every((target) => !target.showAccount)).toBe(true);
+  it("names a known account even when it is the only one", () => {
+    const unknown = fakeDefinition({ id: "claude", label: "Claude Code", account: { state: "unknown", label: null, method: null } });
+    const targets = accountModelTargets([definition, unknown], [], {}, "預設帳號");
     expect(accountModelOptions(targets, {}, labels).map((option) => option.label)).toEqual([
-      "OpenAI Codex · 預設模型", "Claude Code · 預設模型",
+      "A 帳號 · OpenAI Codex · 預設模型", "Claude Code · 預設模型",
     ]);
+  });
+
+  it("offers each signed-in account once and names a profile by its email", () => {
+    const same = { ...profile, id: "same", name: "重複" };
+    const other = { ...profile, id: "other", name: "公司" };
+    const statuses = {
+      same: { state: "signedIn" as const, label: "a 帳號", method: "ChatGPT" },
+      other: { state: "signedIn" as const, label: "work@example.com", method: "ChatGPT" },
+    };
+    const targets = accountModelTargets([definition], [same, other], statuses, "預設帳號");
+    expect(targets.map((target) => target.accountName)).toEqual(["A 帳號", "公司（work@example.com）"]);
+    expect(accountModelTargets([definition], [same, other], statuses, "預設帳號", "same")
+      .map((target) => target.accountProfileId)).toEqual([null, "same", "other"]);
   });
 
   it("omits the name when only a named profile is signed in", () => {
@@ -161,7 +174,7 @@ describe("account-aware model choices", () => {
     const targets = accountModelTargets([definition], [{ ...profile, configDirectory: "C:\\profiles\\b" }], {}, "預設帳號");
     expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "\\\\?\\C:\\profiles\\b" }, targets, "已移除")).toBe("B 帳號 · OpenAI Codex");
     expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex", profileConfigPath: "/missing" }, targets, "已移除")).toBe("OpenAI Codex · 已移除");
-    expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex" }, accountModelTargets([definition], [], {}, "預設帳號"), "已移除")).toBe("OpenAI Codex");
+    expect(accountSessionLabel({ definitionId: "codex", label: "OpenAI Codex" }, accountModelTargets([definition], [], {}, "預設帳號"), "已移除")).toBe("A 帳號 · OpenAI Codex");
   });
 
   it("names a proxy-launched session after CLIProxyAPI instead of the CLI account", () => {
