@@ -6,6 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
+  accountProfileIdentity,
   accountProfileOptionKey,
   readAccountProfileStatuses,
 } from "./useAccountProfileStatus";
@@ -51,7 +52,13 @@ describe("account profile status", () => {
     expect(accountProfileOptionKey({ state: "signedOut", label: null, method: null })).toBe(
       "agents.account.option.signedOut",
     );
-    expect(accountProfileOptionKey({ state: "signedIn", label: null, method: "Claude.ai" })).toBe(
+    expect(accountProfileOptionKey({ state: "signedIn", label: null, method: "OpenAI API Key" })).toBe(
+      "agents.account.option.signedInLabeled",
+    );
+    expect(accountProfileIdentity({ state: "signedIn", label: null, method: "OpenAI API Key" })).toBe(
+      "OpenAI API Key",
+    );
+    expect(accountProfileOptionKey({ state: "signedIn", label: null, method: null })).toBe(
       "agents.account.option.signedIn",
     );
     expect(

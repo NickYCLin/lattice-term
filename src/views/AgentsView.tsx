@@ -18,7 +18,7 @@ import {
   saveChatAccountProfiles,
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
-import { accountProfileOptionKey, useAccountProfileStatus } from "../app/useAccountProfileStatus";
+import { accountProfileIdentity, accountProfileOptionKey, useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import type { RemoteApi } from "../app/useRemoteSessions";
 import {
   MAX_AGENT_BROADCAST_TARGETS,
@@ -1039,7 +1039,7 @@ export function AgentsView({
                             <option key={profile.id} value={profile.id}>
                               {t(accountProfileOptionKey(profileStatuses[profile.id]), {
                                 name: profile.name,
-                                label: profileStatuses[profile.id]?.label ?? "",
+                                label: accountProfileIdentity(profileStatuses[profile.id]),
                               })}
                             </option>
                           ))}
