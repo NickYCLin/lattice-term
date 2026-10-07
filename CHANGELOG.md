@@ -4,6 +4,22 @@
 
 ---
 
+## [2026.10.8](https://github.com/NickYCLin/lattice-term/compare/v2026.10.7...v2026.10.8) (2026-10-07)
+
+
+### 🚀 新增功能
+
+* **chat:** 接上本機聽寫並補齊圖片貼上 ([ad22615](https://github.com/NickYCLin/lattice-term/commit/ad2261510dd39d184608c06ce6ccdb78c3aa8dc7))
+* **對話同步:** 共用原生紀錄並補上雙向續聊 ([0e46636](https://github.com/NickYCLin/lattice-term/commit/0e4663620d2b3fd408bd8a8755fe683de1e525ba))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 統一代理模型的排序 ([ba855da](https://github.com/NickYCLin/lattice-term/commit/ba855da91a291a5c9329c1fbf4afee58e6978e39))
+* **對話同步:** 補上終端續聊的鎖定提醒 ([8778599](https://github.com/NickYCLin/lattice-term/commit/87785995fd8931416ba00fcceb32aae488e25c19))
+* **對話:** 統一輸入框並改用快捷鍵貼上 ([abb41e4](https://github.com/NickYCLin/lattice-term/commit/abb41e489070446b548a2d1a496aae73ba97cbc4))
+* **記憶交接:** 修正 Claude 大型附件導致的對話漏讀 ([59bf378](https://github.com/NickYCLin/lattice-term/commit/59bf3786c2ae6e548acdd07cf32f2df4891d75d3))
+
 ## [2026.10.7](https://github.com/NickYCLin/lattice-term/compare/v2026.10.6...v2026.10.7) (2026-10-06)
 
 
