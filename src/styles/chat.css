@@ -1158,6 +1158,7 @@ button.chat-chip:hover {
 
 .session-composer__toolbar {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: var(--space-3);
@@ -1181,12 +1182,14 @@ button.chat-chip:hover {
 
 .session-composer__model-picker {
   position: relative;
-  min-width: 0;
+  flex: 1;
+  min-width: 3rem;
   margin-left: auto;
 }
 
 .session-composer__model {
   display: block;
+  margin-left: auto;
   max-width: 100%;
   padding: var(--space-1) var(--space-2);
   overflow: hidden;
@@ -1276,6 +1279,19 @@ button.chat-chip:hover {
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-2);
+}
+
+.session-composer__menu.session-composer__model-options {
+  right: 0;
+  left: auto;
+  width: min(24rem, calc(100vw - 4rem));
+  max-height: min(24rem, 60vh);
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.session-composer__model-options .field {
+  min-width: 0;
 }
 
 .session-composer__menu button {

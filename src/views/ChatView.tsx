@@ -6,6 +6,8 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
+import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
+import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
 import { useFittingTabs } from "../components/chat/useFittingTabs";
 import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
 import type { NativeMessageSnapshot } from "../app/useNativeConversations";
@@ -60,7 +62,7 @@ import {
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
-import { accountModelKey, accountModelOptions, accountModelTargets, cliProxyAgentFor, hasChatModels, validCliProxyModel } from "../app/accountModels";
+import { accountModelKey, accountModelSourceKey, accountModelOptions, accountModelTargets, cliProxyAgentFor, hasChatModels, validCliProxyModel, type AccountModelSelection } from "../app/accountModels";
 import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
@@ -94,6 +96,8 @@ import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotic
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   AgentIcon,
+  AlertIcon,
+  ShieldIcon,
   ArchiveFileIcon,
   ChatIcon,
   CodeFileIcon,
@@ -105,7 +109,6 @@ import {
   FolderIcon,
   ImageFileIcon,
   PlusIcon,
-  SendIcon,
   SettingsIcon,
   StopIcon,
   TrashIcon,
@@ -755,6 +758,8 @@ function ThreadPane({
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const composerDropRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [steering, setSteering] = useState(false);
   const steeringRef = useRef(false);
   useLayoutEffect(() => {
@@ -777,9 +782,9 @@ function ThreadPane({
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
   const { statuses: profileStatuses } = useAccountProfileStatus(accountProfiles);
   const modelTargets = accountModelTargets(definitions, accountProfiles, profileStatuses, t("accountModel.defaultAccount"), thread.accountProfileId);
-  const accountModels = useAccountModels(modelTargets, settingsOpen);
+  const accountModels = useAccountModels(modelTargets, settingsOpen || modelPickerOpen);
   const cliProxySettings = useCliProxySettings();
-  const { lists: cliProxyModels, reload: reloadCliProxyModels } = useCliProxyModelLists(cliProxySettings, settingsOpen);
+  const { lists: cliProxyModels, reload: reloadCliProxyModels } = useCliProxyModelLists(cliProxySettings, settingsOpen || modelPickerOpen);
   // The picker lists each proxy once under Codex; which CLI then answers
   // follows the chosen model, so the picker compares against that entry.
   const pickerValue = thread.provider ? { ...thread, definitionId: "codex" } : thread;
@@ -1000,7 +1005,24 @@ function ThreadPane({
     }
   }
 
+  function changeModel({ definitionId, accountProfileId, model, provider, proxyId }: AccountModelSelection) {
+    if (settingsLocked) return;
+    const agent = provider ? cliProxyAgentFor(model, installed) : definitionId;
+    if (!hasChatModels(agent)) return;
+    chat.updateThread(thread.id, {
+      definitionId: agent,
+      accountProfileId: provider && agent !== "codex" ? null : accountProfileId,
+      model, provider, proxyId,
+    });
+    if (accountModelSourceKey(pickerValue) === accountModelSourceKey({ definitionId, accountProfileId, model, provider, proxyId })) {
+      setModelPickerOpen(false);
+    }
+  }
+
   const modelLabel = selectedOption?.label ?? (activeProfileMissing ? t("accountModel.missing") : thread.model || t("chat.model.default"));
+  const composerModelLabel = activeProfileMissing ? t("accountModel.missing")
+    : thread.model || thread.reportedModel || selectedOption?.modelLabel || t("chat.model.default");
+  const latestReply = [...thread.items].reverse().find((item): item is Extract<ChatItem, { type: "text" }> => item.type === "text");
 
   return (
     <>
@@ -1118,17 +1140,7 @@ function ThreadPane({
               allowCliProxyApi
               proxyModels={cliProxyModels}
               onReloadProxyModels={reloadCliProxyModels}
-              onChange={({ definitionId, accountProfileId, model, provider, proxyId }) => {
-                // A proxy model runs on the CLI of its own vendor when that CLI
-                // is installed; a Codex account folder means nothing to it.
-                const agent = provider ? cliProxyAgentFor(model, installed) : definitionId;
-                if (!hasChatModels(agent)) return;
-                chat.updateThread(thread.id, {
-                  definitionId: agent,
-                  accountProfileId: provider && agent !== "codex" ? null : accountProfileId,
-                  model, provider, proxyId,
-                });
-              }}
+              onChange={changeModel}
             />
             {(activeProfileSignedOut || activeProfileMissing) && (
               <p className="field__hint chat-settings__warning" role="status">
@@ -1341,109 +1353,95 @@ function ThreadPane({
         />
       )}
 
-      {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer" onSubmit={submit}>
-        <div ref={composerDropRef} className={`chat-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
-          {attachments.length > 0 && (
-            <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
-              {attachments.map((attachment) => (
-                <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
-                  {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
-                  <span>{attachment.name}</span>
-                  <button
-                    type="button"
-                    className="chat-attachment__remove"
-                    onClick={() =>
-                      setAttachments((current) =>
-                        current.filter((candidate) => candidate.path !== attachment.path),
-                      )
-                    }
-                    aria-label={t("chat.attachment.remove", { name: attachment.name })}
-                    disabled={steering}
-                  >
-                    <CloseIcon size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {pendingInputs.length > 0 && (
-            <section className="chat-queue" aria-label={t("chat.queue.title")}>
-              {thread.queueProblem === "storage" && <p role="alert">{t("chat.queue.saveFailed")}</p>}
-              <div className="chat-queue__header">
-                <strong>{t("chat.queue.title")} ({pendingInputs.length})</strong>
-                <span>{t(thread.queuePaused ? "chat.queue.paused" : "chat.queue.hint")}</span>
-                {thread.queuePaused && <button type="button" className="button button--secondary button--sm"
-                  disabled={running || !cliInstalled || activeProfileMissing || activeProfileSignedOut}
-                  onClick={() => chat.resumeQueue(thread.id)}>{t("chat.queue.resume")}</button>}
+      {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer session-composer" onSubmit={submit}>
+        <ConversationComposerFrame workingDirectory={thread.workingDirectory}>
+          <div ref={composerDropRef} className={`chat-composer__box session-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
+            {attachments.length > 0 && (
+              <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
+                {attachments.map((attachment) => (
+                  <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
+                    {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
+                    <span>{attachment.name}</span>
+                    <button
+                      type="button"
+                      className="chat-attachment__remove"
+                      onClick={() =>
+                        setAttachments((current) =>
+                          current.filter((candidate) => candidate.path !== attachment.path),
+                        )
+                      }
+                      aria-label={t("chat.attachment.remove", { name: attachment.name })}
+                      disabled={steering}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </span>
+                ))}
               </div>
-              <ol>{pendingInputs.map(input => <li key={input.id}>
-                <span>{input.prompt || t("chat.attachment.files")}
-                  {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
-                </span>
-                <button type="button" className="button button--ghost button--sm"
-                  disabled={steering || pastingImage}
-                  onClick={() => {
-                    if (!addAttachments(input.attachments.map(file => file.path))) return;
-                    setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
-                    chat.removeQueued(thread.id, input.id);
-                  }}>{t("chat.queue.edit")}</button>
-                <button type="button" className="icon-button icon-button--sm"
-                  aria-label={t("chat.queue.remove")} title={t("chat.queue.remove")}
-                  onClick={() => chat.removeQueued(thread.id, input.id)}><CloseIcon size={12} /></button>
-              </li>)}</ol>
-            </section>
-          )}
-          <textarea
-            className="chat-composer__input"
-            value={draft}
-            readOnly={steering}
-            placeholder={t("chat.composer.placeholder", { assistant })}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            aria-label={t("chat.composer.label")}
-            rows={2}
-          />
-          <div className="chat-composer__row">
-            <span className="chat-composer__hint">
-              {running ? t("chat.queue.shortcut") : thread.nativeSessionId
-                ? t("chat.composer.shortcut")
-                : t("chat.storage.note")}
-            </span>
-            <div className="chat-composer__actions">
-              <button
-                type="button"
-                className="button button--ghost button--sm"
-                onClick={() => void chooseAttachments("image")}
-                disabled={steering || pastingImage}
-                title={t("chat.attachment.images")}
-              >
-                <ImageFileIcon />
-                {t("chat.attachment.images")}
-              </button>
-              <button
-                type="button"
-                className="button button--ghost button--sm"
-                onClick={() => void chooseAttachments("file")}
-                disabled={steering || pastingImage}
-                title={t("chat.attachment.files")}
-              >
-                <FileIcon />
-                {t("chat.attachment.files")}
-              </button>
-              <ChatSkillPicker
-                definitionId={thread.definitionId}
-                workingDirectory={thread.workingDirectory}
-                profileConfigPath={activeProfile?.configDirectory ?? null}
-                disabled={steering}
-                onPick={(text, pick) => {
-                  setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`));
-                  if (pick) setPicks((current) => [...current.filter((entry) => entry.path !== pick.path), pick]);
-                }}
-              />
-              <button type="button" className="button button--ghost button--sm"
-                onClick={() => void pasteImage()} disabled={steering || pastingImage}
-                title={t("chat.attachment.pasteHint")}>{t(pastingImage ? "chat.attachment.pasting" : "chat.attachment.paste")}</button>
+            )}
+            {pendingInputs.length > 0 && (
+              <section className="chat-queue" aria-label={t("chat.queue.title")}>
+                {thread.queueProblem === "storage" && <p role="alert">{t("chat.queue.saveFailed")}</p>}
+                <div className="chat-queue__header">
+                  <strong>{t("chat.queue.title")} ({pendingInputs.length})</strong>
+                  <span>{t(thread.queuePaused ? "chat.queue.paused" : "chat.queue.hint")}</span>
+                  {thread.queuePaused && <button type="button" className="button button--secondary button--sm"
+                    disabled={running || !cliInstalled || activeProfileMissing || activeProfileSignedOut}
+                    onClick={() => chat.resumeQueue(thread.id)}>{t("chat.queue.resume")}</button>}
+                </div>
+                <ol>{pendingInputs.map(input => <li key={input.id}>
+                  <span>{input.prompt || t("chat.attachment.files")}
+                    {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
+                  </span>
+                  <button type="button" className="button button--ghost button--sm"
+                    disabled={steering || pastingImage}
+                    onClick={() => {
+                      if (!addAttachments(input.attachments.map(file => file.path))) return;
+                      setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
+                      chat.removeQueued(thread.id, input.id);
+                    }}>{t("chat.queue.edit")}</button>
+                  <button type="button" className="icon-button icon-button--sm"
+                    aria-label={t("chat.queue.remove")} title={t("chat.queue.remove")}
+                    onClick={() => chat.removeQueued(thread.id, input.id)}><CloseIcon size={12} /></button>
+                </li>)}</ol>
+              </section>
+            )}
+            <textarea
+              ref={inputRef}
+              className="chat-composer__input"
+              value={draft}
+              readOnly={steering}
+              placeholder={t("sessionChat.placeholder")}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              aria-label={t("chat.composer.label")}
+              aria-keyshortcuts="Enter"
+              rows={2}
+            />
+            <div className="session-composer__toolbar">
+              <ComposerAttachments disabled={steering || pastingImage} onChoose={kind => { void chooseAttachments(kind); }}>
+                <ChatSkillPicker
+                  definitionId={thread.definitionId}
+                  workingDirectory={thread.workingDirectory}
+                  profileConfigPath={activeProfile?.configDirectory ?? null}
+                  disabled={steering}
+                  onPick={(text, pick) => {
+                    setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`));
+                    if (pick) setPicks((current) => [...current.filter((entry) => entry.path !== pick.path), pick]);
+                  }}
+                />
+              </ComposerAttachments>
+              <span className={`session-composer__access${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
+                {thread.permission === "full" ? <AlertIcon size={14} /> : <ShieldIcon size={14} />}
+                {t(permissionLabelKey[thread.permission])}
+              </span>
+              <ComposerPopover model label={composerModelLabel} disabled={settingsLocked}
+                open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
+                <AccountModelField options={modelOptions} value={pickerValue} disabled={settingsLocked}
+                  allowCliProxyApi proxyModels={cliProxyModels} onReloadProxyModels={reloadCliProxyModels}
+                  onChange={changeModel} />
+              </ComposerPopover>
               {running && thread.definitionId === "codex" && (
                 <button type="button" className="button button--secondary button--sm"
                   disabled={!canSend} title={t("chat.steer.hint")}
@@ -1459,18 +1457,17 @@ function ThreadPane({
                   {t("chat.stop")}
                 </button>
               )}
-              <button
-                type="submit"
-                className="chat-send"
-                disabled={!canSend}
-                aria-label={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
-                title={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
-              >
-                <SendIcon />
-              </button>
+              <ComposerVoiceControls inputRef={inputRef} draft={draft}
+                hasContent={Boolean(draft.trim()) || attachments.length > 0}
+                blocked={steering || pastingImage || !cliInstalled || activeProfileMissing || activeProfileSignedOut}
+                working={running || pendingInputs.length > 0} sending={steering} canSend={canSend}
+                sendLabel={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
+                replyVersion={latestReply ? `${latestReply.id}:${latestReply.text}` : ""} replyText={latestReply?.text ?? ""}
+                onText={text => setDraft(current => current.trim() ? `${current.trimEnd()} ${text}` : text)}
+                onSubmit={submit} onNotice={setNotice} />
             </div>
           </div>
-        </div>
+        </ConversationComposerFrame>
       </form>}
     </>
   );

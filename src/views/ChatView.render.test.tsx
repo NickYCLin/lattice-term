@@ -44,6 +44,28 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("uses the shared composer with a short model label and actual access", () => {
+    const thread = fakeThread({ workingDirectory: "D:/project/LatticeTerm", model: "gpt-5.6-sol", permission: "readOnly" });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(markup).toContain('class="chat-composer session-composer"');
+    expect(markup).toContain('class="session-composer__frame"');
+    expect(markup).toContain('<span>LatticeTerm</span>');
+    expect(markup).toContain('placeholder="想做什麼都可以"');
+    expect(markup).toContain('class="session-composer__model"');
+    expect(markup).toContain('class="session-composer__voice"');
+    expect(markup).toContain('title="gpt-5.6-sol"');
+    expect(markup).not.toContain("從剪貼簿貼上");
+    const composer = markup.slice(markup.lastIndexOf('<form'));
+    expect(composer).toContain("唯讀");
+    expect(composer).not.toContain("完整檔案存取");
+  });
+
+  it("locks the composer model while a turn is running", () => {
+    const thread = fakeThread({ runningTurnId: "turn-1", model: "gpt-5.6-sol" });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(markup).toMatch(/class="session-composer__model" disabled=""/);
+    expect(markup).toContain("停止");
+  });
   it("offers the terminal for a conversation and shows the terminal while it holds it", () => {
     const thread = fakeThread({ nativeSessionId: "thread-1", workingDirectory: "/work/project" });
     const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
@@ -134,7 +156,7 @@ describe("ChatView", () => {
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
     expect(markup).toContain("一般對話");
     expect(markup).toContain("專案資料夾（選填）");
-    expect(markup).toContain("傳訊息給 OpenAI Codex");
+    expect(markup).toContain('placeholder="想做什麼都可以"');
     expect(markup).not.toContain("先在上方選一個工作目錄");
   });
   let restoreStorage: (() => void) | null = null;

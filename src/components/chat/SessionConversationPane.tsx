@@ -5,15 +5,15 @@ import {
   sessionPromptWithAttachments, splitSessionAttachments,
 } from "../../app/chatAttachments";
 import { useFileDrop } from "../../app/fileDrop";
-import { speak, spokenSessionReply, speechSynthesisAvailable, stopSpeaking, useDictation } from "../../app/sessionVoice";
+import { spokenSessionReply } from "../../app/sessionVoice";
+import { ConversationComposerFrame, ComposerAttachments } from "./ConversationComposer";
+import { ComposerVoiceControls } from "./ComposerVoiceControls";
 import { useSessionConversation } from "../../app/useSessionConversation";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
-import { localeCatalog } from "../../i18n/catalog";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
 import {
-  AlertIcon, CloseIcon, DesktopIcon, FileIcon, FolderIcon, ImageFileIcon, MicIcon, PlusIcon, SendIcon,
-  ShieldIcon, WaveformIcon,
+  AlertIcon, CloseIcon, FileIcon, ImageFileIcon, ShieldIcon,
 } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
@@ -27,12 +27,6 @@ const stateLabel: Record<AgentLifecycle, MessageKey> = {
   idle: "agents.state.idle",
   done: "agents.state.done",
 };
-
-function folderName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
-const VOICE_SEND_DELAY_MS = 2500;
 
 function errorText(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
@@ -58,26 +52,19 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   /** The session was resumed under a new id, e.g. on another model. */
   onSessionReplaced: (sessionId: string) => void;
 }) {
-  const { t, locale } = useI18n();
-  const speechLang = localeCatalog.find(entry => entry.id === locale)?.tag ?? locale;
+  const { t } = useI18n();
   const conversation = useSessionConversation(session.sessionId, agents);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const [notice, setNotice] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [pasting, setPasting] = useState(false);
   const pastingRef = useRef(false);
-  const [voiceActive, setVoiceActive] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const voiceActiveRef = useRef(false);
-  const spokenThrough = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; stopSpeaking(); }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const messagesRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const outputRef = useRef<HTMLPreElement>(null);
@@ -103,7 +90,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const canSend = hasContent && !blocked;
   async function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (!canSend) return;
+    if (!canSend || pastingRef.current) return;
     const submitted = draft;
     const files = attachments;
     if (await conversation.send(sessionPromptWithAttachments(submitted, files))) {
@@ -111,8 +98,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       setAttachments(current => current === files ? [] : current);
     }
   }
-  const submitRef = useRef(submit);
-  submitRef.current = submit;
 
   function addAttachments(paths: readonly string[]): boolean {
     const next = mergeAttachmentPaths(attachmentsRef.current, paths);
@@ -126,7 +111,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     return true;
   }
   async function chooseAttachments(kind: "image" | "file") {
-    setMenuOpen(false);
     setNotice(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -144,7 +128,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     }
   }
   async function pasteAttachments(silent = false) {
-    setMenuOpen(false);
     if (pastingRef.current) return;
     if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
       setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
@@ -180,82 +163,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     onPaths: paths => { addAttachments(paths); },
     onError: reason => setNotice(t("chat.attachment.failed", { detail: errorText(reason) })),
   });
-  useEffect(() => {
-    if (!menuOpen) return;
-    function close(event: PointerEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    }
-    function escape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [menuOpen]);
-
-  const dictation = useDictation({
-    lang: speechLang,
-    onText: text => setDraft(current => current.trim() ? `${current.trimEnd()} ${text}` : text),
-    onError: detail => {
-      voiceActiveRef.current = false;
-      setVoiceActive(false);
-      setNotice(t("sessionChat.voice.failed", { detail }));
-    },
-  });
-  const voiceAvailable = dictation.mode !== null;
-  function startDictation() {
-    inputRef.current?.focus();
-    void dictation.start();
-  }
-  function startVoice() {
-    if (!voiceAvailable || blocked) return;
-    voiceActiveRef.current = true;
-    setVoiceActive(true);
-    spokenThrough.current = conversation.messages.length;
-    setNotice(t(dictation.mode === "system" ? "sessionChat.voice.startedSystem"
-      : dictation.mode === "local" ? "sessionChat.voice.startedLocal" : "sessionChat.voice.started"));
-    startDictation();
-  }
-  function stopVoice() {
-    voiceActiveRef.current = false;
-    setVoiceActive(false);
-    dictation.stop(true);
-    stopSpeaking();
-    setSpeaking(false);
-    setNotice(null);
-  }
-  useEffect(() => {
-    if (!voiceActive || !draft.trim() || blocked || dictation.listening) return;
-    const timer = setTimeout(() => void submitRef.current(), VOICE_SEND_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [voiceActive, draft, blocked, dictation.listening]);
-  useEffect(() => {
-    if (!voiceActive || blocked || working || speaking || draft.trim() || dictation.listening || dictation.mode === "system") return;
-    const timer = setTimeout(() => { void dictation.start(); }, 300);
-    return () => clearTimeout(timer);
-  }, [voiceActive, blocked, working, speaking, draft, dictation.listening, dictation.mode, dictation.start]);
-  useEffect(() => {
-    if (!voiceActive || working) return;
-    const messages = conversation.messages;
-    if (messages.length <= spokenThrough.current) return;
-    const last = messages[messages.length - 1];
-    spokenThrough.current = messages.length;
-    const reply = spokenSessionReply(last);
-    if (!reply) return;
-    dictation.stop(true);
-    setSpeaking(true);
-    void speak(reply, speechLang).then(() => {
-      if (mounted.current) setSpeaking(false);
-    });
-  }, [voiceActive, working, conversation.messages, speechLang, dictation]);
-  const dictationTitle = !voiceAvailable ? t("sessionChat.dictation.unavailable")
-    : dictation.mode === "system" ? t("sessionChat.dictation.system")
-      : dictation.mode === "local" ? t("sessionChat.dictation.local") : t("sessionChat.dictation");
-  const voiceTitle = !voiceAvailable ? t("sessionChat.voice.unavailable")
-    : speechSynthesisAvailable() ? t("sessionChat.voice.start") : t("sessionChat.voice.startSilent");
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     clipboard.onKeyDown(event.nativeEvent);
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -380,17 +287,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
         : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
       {conversation.queued !== null && !working && <p role="status">{t("sessionChat.accepted")}</p>}
       {notice && <p role="status">{notice}</p>}
-      <div className="session-composer__frame">
-        <div className="session-composer__context">
-          <span className="session-composer__place" title={displayPath(session.workingDirectory)}>
-            <FolderIcon size={14} />
-            <span>{folderName(session.workingDirectory)}</span>
-          </span>
-          <span className="session-composer__place">
-            <DesktopIcon size={14} />
-            <span>{t("chat.delegate.machine.local")}</span>
-          </span>
-        </div>
+      <ConversationComposerFrame workingDirectory={session.workingDirectory}>
         <div ref={boxRef} className={`chat-composer__box session-composer__box${dragging ? " is-file-dragging" : ""}`}>
           {attachments.length > 0 && (
             <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
@@ -408,28 +305,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             onPaste={onPaste}
             onKeyDown={onKeyDown} />
           <div className="session-composer__toolbar">
-            <div ref={menuRef} className="session-composer__more">
-              <button type="button" className="session-composer__icon" disabled={blocked}
-                aria-haspopup="menu" aria-expanded={menuOpen}
-                aria-label={t("sessionChat.more")} title={t("sessionChat.more")}
-                onClick={() => setMenuOpen(open => !open)}>
-                <PlusIcon />
-              </button>
-              {menuOpen && (
-                <div className="session-composer__menu" role="menu">
-                  <button type="button" role="menuitem" onClick={() => void chooseAttachments("image")}>
-                    <ImageFileIcon size={14} />{t("chat.attachment.images")}
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => void chooseAttachments("file")}>
-                    <FileIcon size={14} />{t("chat.attachment.files")}
-                  </button>
-                  <button type="button" role="menuitem" title={t("chat.attachment.pasteHint")}
-                    disabled={pasting} onClick={() => void pasteAttachments()}>
-                    <PlusIcon size={14} />{t(pasting ? "chat.attachment.pasting" : "chat.attachment.paste")}
-                  </button>
-                </div>
-              )}
-            </div>
+            <ComposerAttachments disabled={blocked || pasting} onChoose={kind => { void chooseAttachments(kind); }} />
             <span className={`session-composer__access${session.sandboxed ? " is-sandboxed" : ""}`} title={accessHint}>
               {session.sandboxed ? <ShieldIcon size={14} /> : <AlertIcon size={14} />}
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
@@ -437,32 +313,16 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             <SessionModelPicker session={session} agents={agents}
               disabled={Boolean(session.closedReason) || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
-            <button type="button" className={`session-composer__icon${dictation.listening ? " is-active" : ""}`}
-              disabled={!voiceAvailable || blocked} aria-label={dictationTitle} title={dictationTitle}
-              aria-pressed={dictation.mode !== "system" ? dictation.listening : undefined}
-              onClick={() => dictation.listening ? dictation.stop() : startDictation()}>
-              <MicIcon />
-            </button>
-            {voiceActive ? (
-              <button type="button" className="session-composer__voice is-active"
-                aria-label={t("sessionChat.voice.stop")} title={t("sessionChat.voice.stop")} onClick={stopVoice}>
-                <WaveformIcon />
-              </button>
-            ) : hasContent || conversation.sending ? (
-              <button type="submit" className="chat-send" disabled={!canSend}
-                aria-label={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
-                title={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}>
-                <SendIcon />
-              </button>
-            ) : (
-              <button type="button" className="session-composer__voice" disabled={!voiceAvailable || blocked}
-                aria-label={voiceTitle} title={voiceTitle} onClick={startVoice}>
-                <WaveformIcon />
-              </button>
-            )}
+            <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
+              blocked={blocked || pasting} working={working} sending={conversation.sending} canSend={canSend}
+              sendLabel={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
+              replyVersion={String(conversation.messages.length)}
+              replyText={spokenSessionReply(conversation.messages[conversation.messages.length - 1]) ?? ""}
+              onText={text => setDraft(current => current.trim() ? `${current.trimEnd()} ${text}` : text)}
+              onSubmit={() => { void submit(); }} onNotice={setNotice} />
           </div>
         </div>
-      </div>
+      </ConversationComposerFrame>
     </form>
   </>;
 }
