@@ -675,7 +675,7 @@ fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
         if read == 0 {
             break;
         }
-        if line.len() > MAX_CODEX_SESSION_META_BYTES {
+        if line.len() as u64 > MAX_CLAUDE_SESSION_META_BYTES {
             return None;
         }
         while matches!(line.last(), Some(b'\n' | b'\r')) {
@@ -3956,6 +3956,76 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn claude_handoff_accepts_large_attachments_before_or_after_main_metadata() {
+        for attachment_first in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let profile = directory.path().join("profile");
+            let cwd = directory.path().join("workspace");
+            let project = profile.join("projects/project");
+            fs::create_dir_all(&project).unwrap();
+            fs::create_dir_all(&cwd).unwrap();
+            let path = project.join("main-session.jsonl");
+            let user = serde_json::json!({
+                "type": "user", "sessionId": "main-session",
+                "cwd": cwd.to_string_lossy(), "isSidechain": false,
+                "message": {"role": "user", "content": "keep this context"},
+            });
+            let attachment = serde_json::json!({
+                "type": "attachment", "sessionId": "main-session",
+                "attachment": {"content": "x".repeat(MAX_CODEX_SESSION_META_BYTES + 4096)},
+            });
+            let rows = if attachment_first {
+                [attachment, user]
+            } else {
+                [user, attachment]
+            };
+            fs::write(&path, rows.map(|row| row.to_string()).join("\n")).unwrap();
+            for captured in [None, Some("main-session")] {
+                let transcript = export(
+                    TranscriptKind::Claude,
+                    cwd.to_str().unwrap(),
+                    captured,
+                    Some(&profile),
+                    60_000,
+                )
+                .expect("large attachments must not hide the main conversation");
+                assert!(transcript.contains("keep this context"));
+                assert!(!transcript.contains(&"x".repeat(4096)));
+            }
+        }
+    }
+
+    #[test]
+    fn claude_metadata_rejects_a_line_exceeding_its_own_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.jsonl");
+        fs::write(
+            &path,
+            "x".repeat(MAX_CLAUDE_SESSION_META_BYTES as usize + 1),
+        )
+        .unwrap();
+        assert!(read_claude_session_meta(&path).is_none());
+    }
+
+    #[test]
+    fn claude_metadata_checks_identity_and_sidechains_on_large_attachments() {
+        for (attachment_id, is_sidechain) in [("different-session", false), ("main-session", true)]
+        {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("main-session.jsonl");
+            write_claude_session(&path, "main-session", directory.path(), false, 10);
+            let attachment = serde_json::json!({
+                "type": "attachment", "sessionId": attachment_id,
+                "isSidechain": is_sidechain,
+                "attachment": {"content": "x".repeat(MAX_CODEX_SESSION_META_BYTES + 4096)},
+            });
+            let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            writeln!(file, "\n{attachment}").unwrap();
+            assert!(read_claude_session_meta(&path).is_none_or(|meta| !meta.is_main));
+        }
     }
 
     #[test]
