@@ -1336,7 +1336,7 @@ export const zhTW = {
   "agents.account.sharedBody": "連結 {name} 已有的本機紀錄，使用原生工具的登入。這個動作不會搬移對話或開啟登入視窗。",
   "agents.account.isolated": "新增獨立帳號",
   "agents.account.shared": "共用原生工具紀錄（雙向）",
-  "agents.account.sharedHint": "共用 Codex 或 Claude Code 的本機紀錄與登入，不複製帳號資料。任一邊續聊後可讀回同一段對話；請等目前回合結束再換邊操作。外部工具是否列出這段對話，仍取決於它支援的來源。原有獨立帳號的對話不會搬移，Claude 一般網頁聊天也不在此範圍。",
+  "agents.account.sharedHint": "共用 Codex 或 Claude Code 的本機紀錄與登入，不複製帳號資料。任一邊續聊後可讀回同一段對話。換邊前請等回合完成；終端裡的原生 CLI 還需正常退出，避免繼續鎖住對話。外部工具是否列出對話，仍取決於它支援的來源。原有獨立帳號的紀錄不會搬移，Claude 一般網頁聊天也不在此範圍。",
   "agents.account.defaultDirectory": "使用原生 CLI 的預設紀錄目錄",
   "agents.account.chooseNativeDirectory": "選擇其他原生紀錄目錄…",
   "agents.account.useDefaultDirectory": "改用預設目錄",

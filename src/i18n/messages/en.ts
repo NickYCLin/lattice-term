@@ -1381,7 +1381,7 @@ export const en: Messages = {
   "agents.account.sharedBody": "Link existing local {name} history using its native sign-in. This does not move conversations or open a sign-in terminal.",
   "agents.account.isolated": "Add isolated account",
   "agents.account.shared": "Share native history (two-way)",
-  "agents.account.sharedHint": "Use the same local history and sign-in as Codex or Claude Code without copying account files. Read back the same conversation after continuing in either client. Finish the current turn before switching clients. Whether another client lists it depends on the sources that client supports. Existing isolated history is not moved, and regular Claude web chats are not included.",
+  "agents.account.sharedHint": "Use the same local history and sign-in as Codex or Claude Code without copying account files. Read back the same conversation after continuing in either client. Finish the current turn before switching, and exit a native terminal CLI normally so it does not keep the conversation locked. Whether another client lists it depends on its supported sources. Existing isolated history is not moved, and regular Claude web chats are not included.",
   "agents.account.defaultDirectory": "Use the native CLI's default history directory",
   "agents.account.chooseNativeDirectory": "Choose another native history directory…",
   "agents.account.useDefaultDirectory": "Use default directory",
