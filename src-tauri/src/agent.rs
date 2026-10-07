@@ -541,6 +541,73 @@ fn account_profile_auth_file(definition_id: &str, directory: &Path) -> Option<Pa
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeAccountDirectory {
+    pub config_directory: String,
+    pub is_default: bool,
+}
+
+fn validate_native_account_directory(definition_id: &str, path: &Path) -> Result<PathBuf, String> {
+    let entries: &[&str] = match definition_id {
+        "codex" => &["config.toml", "auth.json", "sessions", "archived_sessions"],
+        "claude" => &[
+            ".claude.json",
+            ".credentials.json",
+            "settings.json",
+            "projects",
+        ],
+        _ => return Err("Only Codex and Claude Code support shared native history.".into()),
+    };
+    let raw = path
+        .to_str()
+        .ok_or("The native history directory is not valid UTF-8.")?;
+    let directory = profile_config_directory(definition_id, Some(raw))?
+        .ok_or("Select the native CLI's configuration directory.")?;
+    if !entries.iter().any(|name| {
+        let entry = directory.join(name);
+        if *name == "sessions" || *name == "archived_sessions" || *name == "projects" {
+            entry.is_dir()
+        } else {
+            entry.is_file()
+        }
+    }) {
+        return Err("This directory contains no native CLI configuration or history. Open the CLI once, or select its existing configuration directory.".into());
+    }
+    Ok(directory)
+}
+
+pub fn native_account_directory(
+    definition_id: &str,
+    raw: Option<&str>,
+) -> Result<NativeAccountDirectory, String> {
+    let (variable, folder) = match definition_id {
+        "codex" => ("CODEX_HOME", ".codex"),
+        "claude" => ("CLAUDE_CONFIG_DIR", ".claude"),
+        _ => return Err("Only Codex and Claude Code support shared native history.".into()),
+    };
+    let default = std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| user_home_directory().map(|home| home.join(folder)))
+        .ok_or("Cannot locate the native CLI's configuration directory.")?;
+    let path = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default.clone());
+    let directory = validate_native_account_directory(definition_id, &path)?;
+    let is_default = default
+        .canonicalize()
+        .ok()
+        .map(plain_win32_path)
+        .is_some_and(|root| root == directory);
+    Ok(NativeAccountDirectory {
+        config_directory: directory.display().to_string(),
+        is_default,
+    })
+}
+
 const ACCOUNT_FILE_LIMIT: u64 = 256 * 1024;
 
 /// The login state of one account profile, read the same way as the default
@@ -11078,6 +11145,31 @@ model = "gpt-5.3-codex"
                 0o700
             );
         }
+    }
+
+    #[test]
+    fn shared_native_directory_is_validated_without_creating_or_modifying_files() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(validate_native_account_directory("codex", root.path()).is_err());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "model = 'fixture-model'").unwrap();
+        let before = std::fs::read(&config).unwrap();
+        let directory = validate_native_account_directory("codex", root.path()).unwrap();
+        assert_eq!(
+            directory,
+            plain_win32_path(root.path().canonicalize().unwrap())
+        );
+        assert_eq!(std::fs::read(&config).unwrap(), before);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert!(validate_native_account_directory("claude", root.path()).is_err());
+        assert!(validate_native_account_directory("gemini", root.path()).is_err());
+        assert!(validate_native_account_directory("codex", Path::new("relative")).is_err());
+        assert!(validate_native_account_directory("codex", &config).is_err());
+        assert!(validate_native_account_directory("codex", &root.path().join("missing")).is_err());
+        std::fs::create_dir(root.path().join("projects")).unwrap();
+        assert!(validate_native_account_directory("claude", root.path()).is_ok());
+        assert_eq!(std::fs::read(&config).unwrap(), before);
     }
 
     const NPM_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n";

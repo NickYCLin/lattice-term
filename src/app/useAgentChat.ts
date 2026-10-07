@@ -282,7 +282,7 @@ export function useAgentChat(
   }, []);
 
   const nativeHistory = useNativeHistory();
-  const mirror = threads.find(thread => thread.id === activeThreadId && isNativeHistoryMirror(thread));
+  const mirror = threads.find(thread => thread.id === activeThreadId && isNativeHistoryMirror(thread) && !thread.runningTurnId && !thread.pendingInputs?.length);
   const nativeEntry = nativeHistory && mirror
     ? nativeHistory.entries.find(entry => entry.definitionId === mirror.definitionId && entry.profileId === mirror.accountProfileId && entry.nativeSessionId === mirror.nativeSessionId)
       ?? { definitionId: mirror.definitionId, profileId: mirror.accountProfileId, nativeSessionId: mirror.nativeSessionId!,

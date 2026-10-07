@@ -20,6 +20,7 @@ describe("AgentAccountProfileDialog", () => {
     expect(markup).toContain("加入後會開啟終端機");
     expect(markup).toContain("帳號名稱");
     expect(markup).toContain("加入並登入");
+    expect(markup).toContain("共用原生工具紀錄（雙向）");
     expect(markup.match(/<input\b/g)).toHaveLength(1);
     expect(markup).toContain("無需選擇資料夾");
     expect(markup).not.toContain("選擇設定目錄");

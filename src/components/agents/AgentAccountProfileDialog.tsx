@@ -9,13 +9,15 @@ export function AgentAccountProfileDialog({
   onCancel,
 }: {
   agentLabel: string;
-  onSave: (name: string) => Promise<void>;
+  onSave: (name: string, nativeDirectory?: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
+  const [shared, setShared] = useState(false);
+  const [nativeDirectory, setNativeDirectory] = useState("");
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,12 +31,12 @@ export function AgentAccountProfileDialog({
   });
 
   async function save() {
-    if (!trimmedName || savingRef.current) return;
+    if ((!shared && !trimmedName) || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
-      await onSave(trimmedName);
+      await onSave(trimmedName || agentLabel, shared ? nativeDirectory : undefined);
     } catch (reason) {
       setError(t("agents.account.profileFailed", {
         detail: reason instanceof Error ? reason.message : String(reason),
@@ -42,6 +44,18 @@ export function AgentAccountProfileDialog({
     } finally {
       savingRef.current = false;
       setSaving(false);
+    }
+  }
+
+  async function chooseDirectory() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") setNativeDirectory(selected);
+    } catch (reason) {
+      setError(t("agents.account.profileFailed", {
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
     }
   }
 
@@ -70,10 +84,10 @@ export function AgentAccountProfileDialog({
           </span>
           <div>
             <h2 className="dialog__title" id="agent-account-profile-title">
-              {t("agents.account.dialogTitle", { name: agentLabel })}
+              {t(shared ? "agents.account.sharedTitle" : "agents.account.dialogTitle", { name: agentLabel })}
             </h2>
             <p className="dialog__body" id="agent-account-profile-body">
-              {t("agents.account.dialogBody", { name: agentLabel })}
+              {t(shared ? "agents.account.sharedBody" : "agents.account.dialogBody", { name: agentLabel })}
             </p>
           </div>
           <button
@@ -93,8 +107,16 @@ export function AgentAccountProfileDialog({
           void save();
         }}>
           <div className="dialog__stack">
+            <div className="dialog__actions" role="group" aria-label={t("agents.account.storageMode")}>
+              <button type="button" className={shared ? "button button--ghost" : "button button--primary"} aria-pressed={!shared} disabled={saving} onClick={() => setShared(false)}>
+                {t("agents.account.isolated")}
+              </button>
+              <button type="button" className={shared ? "button button--primary" : "button button--ghost"} aria-pressed={shared} disabled={saving} onClick={() => setShared(true)}>
+                {t("agents.account.shared")}
+              </button>
+            </div>
             <label className="field" htmlFor="agent-account-profile-name">
-              <span className="field__label">{t("agents.account.profileName")}</span>
+              <span className="field__label">{t(shared ? "agents.account.linkName" : "agents.account.profileName")}</span>
               <input
                 ref={nameRef}
                 id="agent-account-profile-name"
@@ -113,7 +135,18 @@ export function AgentAccountProfileDialog({
               />
             </label>
 
-            <p className="field__hint">{t("agents.account.profileHint")}</p>
+            {shared ? <>
+              <p className="field__hint">{t("agents.account.sharedHint")}</p>
+              <p className="field__hint">{nativeDirectory || t("agents.account.defaultDirectory")}</p>
+              <div className="dialog__actions">
+                <button type="button" className="button button--ghost" disabled={saving} onClick={() => void chooseDirectory()}>
+                  {t("agents.account.chooseNativeDirectory")}
+                </button>
+                {nativeDirectory && <button type="button" className="button button--ghost" disabled={saving} onClick={() => setNativeDirectory("")}>
+                  {t("agents.account.useDefaultDirectory")}
+                </button>}
+              </div>
+            </> : <p className="field__hint">{t("agents.account.profileHint")}</p>}
 
             {error && <p className="field__error" role="alert">{error}</p>}
           </div>
@@ -130,9 +163,9 @@ export function AgentAccountProfileDialog({
             <button
               type="submit"
               className="button button--primary"
-              disabled={saving || !trimmedName}
+              disabled={saving || (!shared && !trimmedName)}
             >
-              {t(saving ? "agents.account.addingProfile" : "agents.account.saveProfile")}
+              {t(saving ? "agents.account.addingProfile" : shared ? "agents.account.linkRecords" : "agents.account.saveProfile")}
             </button>
           </div>
         </form>

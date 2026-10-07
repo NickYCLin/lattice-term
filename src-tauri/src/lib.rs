@@ -1462,6 +1462,14 @@ async fn agent_account_profile_status(
     .map_err(|error| format!("Account profile status did not complete: {error}"))
 }
 
+#[tauri::command]
+fn agent_account_native_directory(
+    definition_id: String,
+    config_directory: Option<String>,
+) -> Result<crate::agent::NativeAccountDirectory, String> {
+    crate::agent::native_account_directory(&definition_id, config_directory.as_deref())
+}
+
 /// Removes a profile directory LatticeTerm created, login data included.
 #[tauri::command]
 async fn agent_account_profile_remove(
@@ -5242,6 +5250,7 @@ pub fn run() {
             agent_chat_local_history_snapshot,
             agent_chat_local_history_read,
             agent_account_profile_directory,
+            agent_account_native_directory,
             agent_account_profile_status,
             agent_account_profile_remove,
             agent_chat_send,

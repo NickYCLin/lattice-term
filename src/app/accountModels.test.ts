@@ -16,6 +16,14 @@ const proxies: CliProxyEndpoint[] = [
 ];
 
 describe("account-aware model choices", () => {
+  it("keeps a linked native directory selectable even when an isolated account has the same login", () => {
+    const linked = { ...profile, managed: false, name: "Native history" };
+    const targets = accountModelTargets([definition], [linked], {
+      b: { state: "signedIn", label: "A 帳號", method: "ChatGPT" },
+    }, "Default");
+    expect(targets.map(target => target.accountProfileId)).toEqual([null, "b"]);
+    expect(accountModelLaunchSettings({ definitionId: "codex", accountProfileId: "b", model: "" }, [linked]).profileConfigPath).toBe("/profiles/b");
+  });
   it("recognises all supported chat definitions including Antigravity", () => {
     expect(hasChatModels("codex")).toBe(true);
     expect(hasChatModels("claude")).toBe(true);

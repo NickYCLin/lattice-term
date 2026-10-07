@@ -3,9 +3,9 @@
 //! Codex Desktop talks to the same engine over the same JSON-RPC. The server
 //! is started when a turn is sent, given `thread/start` (or `thread/resume`
 //! for a conversation that already exists), and serves that turn and any
-//! follow-up sent soon after. A loaded thread holds Codex's single-writer
+//! follow-up. A loaded thread holds Codex's single-writer
 //! lock, so a conversation shared with Codex Desktop stays locked there for
-//! as long as our server lives. After a minute with nothing in flight the
+//! as long as our server lives. After each completed turn the
 //! server's stdin is closed so it exits on its own and releases the thread;
 //! a later turn resumes it again, at the cost of a slower start. Approvals
 //! travel as server requests on the same channel, whatever the permission
@@ -142,13 +142,12 @@ impl CodexServer {
         });
     }
 
-    /// Releases the server once it has stayed idle for the whole timeout. A
-    /// turn sent in the meantime keeps it, and schedules its own release.
-    async fn release_after_idle(self: Arc<Self>) {
-        tokio::time::sleep(IDLE_TIMEOUT).await;
+    /// Releases a completed turn before notifying the UI, so the next
+    /// client resumes the latest native transcript instead of cached state.
+    async fn release_after_turn(self: &Arc<Self>) {
         {
             let mut state = self.state();
-            if state.exited || !is_idle(&state) || state.last_activity.elapsed() < IDLE_TIMEOUT {
+            if state.exited || !is_idle(&state) {
                 return;
             }
             state.exited = true;
@@ -446,6 +445,7 @@ fn opening_lines(
             "thread/resume"
         }
         None => {
+            thread["ephemeral"] = Value::Bool(false);
             if let Some(model) = model {
                 thread["model"] = Value::String(model.to_string());
             }
@@ -701,6 +701,9 @@ pub(super) async fn send_turn<S: ChatSink>(
                 continue;
             };
             let outcome = handle_line(&reader_server, &value);
+            if outcome.idle {
+                reader_server.release_after_turn().await;
+            }
             for (turn_id, event) in outcome.events {
                 reader_sink.event(&reader_server.thread_id, &turn_id, event);
             }
@@ -708,10 +711,6 @@ pub(super) async fn send_turn<S: ChatSink>(
                 if reader_server.write_line(&reply).await.is_err() {
                     break;
                 }
-            }
-            if outcome.idle {
-                // Keep reading: stdout ends once a released Codex exits.
-                tauri::async_runtime::spawn(Arc::clone(&reader_server).release_after_idle());
             }
         }
         // The server is gone. A turn still in flight ends as an error with
@@ -1459,8 +1458,8 @@ mod tests {
         }
     }
 
-    /// Two real turns on one server: the first opens the thread and asks
-    /// for approval, the second reuses the running server. `LATTICETERM_CHAT_E2E=codex
+    /// Two real turns on one native thread, releasing it between turns.
+    /// `LATTICETERM_CHAT_E2E=codex
     /// cargo test a_real_codex_server -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -1538,7 +1537,7 @@ mod tests {
         assert!(workdir.path().join("probe.txt").exists());
         let first = started.elapsed();
 
-        // Follow-up within the idle minute: same server, thread already open.
+        // The next turn resumes the same native thread from disk.
         let started = Instant::now();
         run_turn(
             "t2",
@@ -1557,8 +1556,8 @@ mod tests {
         assert!(
             servers
                 .get("e2e-codex")
-                .is_some_and(|server| server.running()),
-            "server must stay alive between turns"
+                .is_some_and(|server| server.state().exited),
+            "server must release the thread after each turn"
         );
         assert!(servers.close("e2e-codex"));
     }
@@ -1766,6 +1765,45 @@ mod tests {
         state.queued = None;
         state.pending_rpc.clear();
         state
+    }
+
+    #[test]
+    fn completed_turn_releases_native_history_before_the_next_client_resumes() {
+        tauri::async_runtime::block_on(async {
+            let mut state = steer_ready_state();
+            state.active = None;
+            let server = Arc::new(server_with(state));
+            server.release_after_turn().await;
+            assert!(server.state().exited);
+            assert!(server.stdin.lock().await.is_none());
+            server.release_after_turn().await;
+            assert!(server.stdin.lock().await.is_none());
+        });
+    }
+
+    #[test]
+    fn active_turn_or_pending_steering_keeps_its_native_writer() {
+        tauri::async_runtime::block_on(async {
+            let server = Arc::new(server_with(steer_ready_state()));
+            server.release_after_turn().await;
+            assert!(!server.state().exited);
+            assert!(server.stdin.lock().await.is_some());
+            let (reply, _receipt) = oneshot::channel();
+            {
+                let mut state = server.state();
+                state.active = None;
+                state.pending_steers.insert(
+                    20,
+                    PendingSteer {
+                        codex_turn_id: "native-turn".into(),
+                        reply,
+                    },
+                );
+            }
+            server.release_after_turn().await;
+            assert!(!server.state().exited);
+            assert!(server.stdin.lock().await.is_some());
+        });
     }
 
     #[test]
@@ -2190,6 +2228,9 @@ mod tests {
                 Some("latticeterm_cliproxyapi_fresh"),
             );
             let open: Value = serde_json::from_str(&lines[2]).unwrap();
+            if native.is_none() {
+                assert_eq!(open["params"]["ephemeral"], false);
+            }
             assert_eq!(
                 open["params"]["modelProvider"],
                 "latticeterm_cliproxyapi_fresh"

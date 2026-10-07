@@ -1270,6 +1270,7 @@ function ThreadPane({
           {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("history.textOnly")} · {t("history.stateUnknown")}</p>}
           {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
           {thread.historyTruncated && <p role="status">{t("history.truncated")}</p>}
+          {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
           {thread.items.length === 0 && (
             <div className="chat-welcome">
               <span className="chat-avatar chat-avatar--lg" aria-hidden="true">

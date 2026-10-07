@@ -332,11 +332,21 @@ export function AgentsView({
   async function addAccountProfile(
     definition: AgentDefinition,
     name: string,
+    nativeDirectory?: string,
   ) {
     if (!profileCapable(definition.id)) return;
     const id = crypto.randomUUID();
     const { invoke } = await import("@tauri-apps/api/core");
-    const configDirectory = await invoke<string>("agent_account_profile_directory", {
+    const linked = nativeDirectory === undefined ? null : await invoke<{ configDirectory: string; isDefault: boolean }>("agent_account_native_directory", {
+      definitionId: definition.id,
+      configDirectory: nativeDirectory || null,
+    });
+    if (linked?.isDefault) {
+      setSelectedAccountProfile(current => ({ ...current, [definition.id]: "" }));
+      setAccountProfileDefinition(null);
+      return;
+    }
+    const configDirectory = linked?.configDirectory ?? await invoke<string>("agent_account_profile_directory", {
       definitionId: definition.id,
       profileId: id,
     });
@@ -345,8 +355,14 @@ export function AgentsView({
       definitionId: definition.id,
       name: name.slice(0, 64),
       configDirectory,
-      managed: true,
+      managed: linked === null,
     };
+    const existing = linked && accountProfiles.find(candidate => candidate.definitionId === definition.id && candidate.configDirectory === configDirectory);
+    if (existing) {
+      setSelectedAccountProfile(current => ({ ...current, [definition.id]: existing.id }));
+      setAccountProfileDefinition(null);
+      return;
+    }
     // Persist before opening the terminal, which may unmount the Fleet view.
     const profiles = [...accountProfiles, profile];
     if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
@@ -356,6 +372,7 @@ export function AgentsView({
       [definition.id]: profile.id,
     }));
     setAccountProfileDefinition(null);
+    if (linked) return;
     setLaunching(definition.id);
     setError(null);
     try {
@@ -1867,7 +1884,7 @@ export function AgentsView({
       {accountProfileDefinition && profileCapable(accountProfileDefinition.id) && (
         <AgentAccountProfileDialog
           agentLabel={accountProfileDefinition.label}
-          onSave={(name) => addAccountProfile(accountProfileDefinition, name)}
+          onSave={(name, nativeDirectory) => addAccountProfile(accountProfileDefinition, name, nativeDirectory)}
           onCancel={() => setAccountProfileDefinition(null)}
         />
       )}

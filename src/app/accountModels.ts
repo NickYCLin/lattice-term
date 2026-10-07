@@ -99,7 +99,7 @@ export function accountModelTargets(
     const named = profilesFor(profiles, definition.id).filter((profile) => {
       const status = statuses[profile.id];
       const repeated = status?.state === "signedIn" && remember(status.label);
-      return profile.id === keepProfileId || (!repeated && !status?.cliProxy?.sameKey);
+      return profile.managed === false || profile.id === keepProfileId || (!repeated && !status?.cliProxy?.sameKey);
     });
     const targets = [
       {

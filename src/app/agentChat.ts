@@ -281,6 +281,7 @@ export interface ChatThread {
   archived?: boolean;
   nativeHistorySource?: boolean;
   nativeHistoryArchived?: boolean;
+  nativeSyncPending?: boolean;
   historyTruncated?: boolean;
   /**
    * When the user put this thread away. Unlike `archived` it is still a
@@ -1024,6 +1025,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           ? thread.proxyId
           : undefined,
       archived: thread.archived === true,
+      nativeSyncPending: thread.nativeSyncPending === true,
       shelvedAt:
         typeof thread.shelvedAt === "number" && Number.isFinite(thread.shelvedAt)
           ? thread.shelvedAt
