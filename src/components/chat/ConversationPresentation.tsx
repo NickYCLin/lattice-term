@@ -1,4 +1,15 @@
 import type { ReactNode } from "react";
+import { AgentIcon } from "../icons";
+
+export function ConversationListIdentity({ title, children }: { title: string; children: ReactNode }) {
+  return <span className="chat-thread__identity">
+    <AgentIcon size={13} />
+    <span className="chat-thread__details">
+      <span className="chat-thread__title">{title}</span>
+      <span className="chat-thread__meta">{children}</span>
+    </span>
+  </span>;
+}
 
 export function ConversationIdentity({ assistant, title, children }: {
   assistant: string;

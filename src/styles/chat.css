@@ -109,36 +109,19 @@
   overflow-y: auto;
 }
 
-/* A live session shares the tree with the conversations; the icon and the
-   status dot are what tell the two apart. */
-.chat-session {
+.chat-thread__identity {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
   min-width: 0;
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--ease);
 }
 
-.chat-session:hover,
-.chat-session.is-active,
-.chat-session:focus-visible {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.chat-session > svg:first-child {
+.chat-thread__identity > svg {
   flex: none;
   color: var(--text-faint);
 }
 
-.chat-session__label {
+.chat-thread__details {
   flex: 1;
   min-width: 0;
 }
@@ -186,7 +169,8 @@
   transition: background var(--duration-fast) var(--ease);
 }
 
-.chat-thread:hover {
+.chat-thread:hover,
+.chat-thread:focus-visible {
   background: var(--surface-hover);
 }
 

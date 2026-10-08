@@ -7,7 +7,7 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
-import { ConversationIdentity, ConversationMessage } from "../components/chat/ConversationPresentation";
+import { ConversationIdentity, ConversationListIdentity, ConversationMessage } from "../components/chat/ConversationPresentation";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
 import { useFittingTabs } from "../components/chat/useFittingTabs";
@@ -490,18 +490,14 @@ export function ChatView({
                     }
                   }}
                 >
-                  <span>
-                    <span className="chat-thread__title">
-                      {thread.title || t("chat.untitled")}
-                    </span>
-                    <span className="chat-thread__meta">
+                  <ConversationListIdentity title={thread.title || t("chat.untitled")}>
                       {thread.automationId ? `${t("automation.badge")} · ` : ""}
                       {cliLabel(thread.definitionId)}
+                      {thread.model ? ` · ${thread.model}` : ""}
                       {thread.workingDirectory
                         ? ` · ${directoryName(thread.workingDirectory)}`
                         : ""}
-                    </span>
-                  </span>
+                  </ConversationListIdentity>
                   {thread.runningTurnId ? (
                     <span className="chat-thread__dot" aria-label={t("chat.running")} />
                   ) : thread.unread ? (

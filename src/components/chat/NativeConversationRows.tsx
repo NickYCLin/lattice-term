@@ -8,6 +8,7 @@ import { nativeConversationKey, useNativeHistory, type NativeMessageSnapshot } f
 import { useI18n } from "../../i18n/context";
 import { chatProjectKey } from "../../app/chatProjects";
 import { displayPath } from "../../app/displayPath";
+import { ConversationListIdentity } from "./ConversationPresentation";
 
 function directoryKey(path: string) {
   return path.replace(/[\\/]+$/, "") || path;
@@ -91,14 +92,11 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
           <button type="button" className="chat-thread" disabled={opening !== null} aria-busy={opening === key}
             aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
             title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
-            <span>
-              <span className="chat-thread__title">{entry.title || t("chat.untitled")}</span>
-              <span className="chat-thread__meta">
+            <ConversationListIdentity title={entry.title || t("chat.untitled")}>
                 {agentDisplayName(entry.definitionId)}
                 {entry.profileId ? ` · ${history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId}` : ""}
                 {entry.workingDirectory ? ` · ${directoryName(entry.workingDirectory)}` : ""}
-              </span>
-            </span>
+            </ConversationListIdentity>
           </button>
           {failed?.key === key && <p className="chat-native-rows__error" role="alert">{t("history.stale")} {failed.detail}</p>}
           {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>

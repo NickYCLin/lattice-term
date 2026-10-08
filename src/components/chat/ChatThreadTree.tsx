@@ -22,7 +22,8 @@ import {
 } from "../../app/sessionSidebarLayout";
 import { useI18n } from "../../i18n/context";
 import { ConfirmDialog } from "../overlays/ConfirmDialog";
-import { AgentIcon, ArchiveFileIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
+import { ArchiveFileIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
+import { ConversationListIdentity } from "./ConversationPresentation";
 
 const DRAG_THRESHOLD_PX = 6;
 
@@ -319,7 +320,7 @@ export function ChatThreadTree({
               }}
             >
               <div
-                className={`chat-session is-${row.session.status}${activeSessionId === row.session.sessionId ? " is-active" : ""}`}
+                className={`chat-thread chat-session is-${row.session.status}${activeSessionId === row.session.sessionId ? " is-active" : ""}`}
                 aria-current={activeSessionId === row.session.sessionId ? "true" : undefined}
                 role="button"
                 tabIndex={0}
@@ -331,13 +332,9 @@ export function ChatThreadTree({
                   }
                 }}
               >
-                <AgentIcon size={13} />
-                <span className="chat-session__label">
-                  <span className="chat-thread__title">{row.session.label}</span>
-                  <span className="chat-thread__meta">
-                    {row.session.detail ?? t("terminal.title")}
-                  </span>
-                </span>
+                <ConversationListIdentity title={row.session.label}>
+                  {row.session.detail ?? t("terminal.title")}
+                </ConversationListIdentity>
                 <span className="chat-session__status" aria-hidden="true" />
               </div>
             </div>

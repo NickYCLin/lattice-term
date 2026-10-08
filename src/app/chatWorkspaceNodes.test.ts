@@ -25,7 +25,7 @@ describe("chat workspace projection", () => {
     expect(projection.sessions.get(sessionNodeId)).toMatchObject({
       sessionId: "runtime-1",
       label: "Codex · OpenAI Codex",
-      detail: "gpt-5.6-sol",
+      detail: "OpenAI Codex · gpt-5.6-sol · LatticeTerm",
       status: "done",
     });
     // The project has to be seated before the sessions that point at it.

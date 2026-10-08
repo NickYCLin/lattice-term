@@ -219,7 +219,7 @@ describe("ChatView", () => {
         }),
       ],
     });
-    const thread = fakeThread({ title: "改版討論" });
+    const thread = fakeThread({ title: "改版討論", workingDirectory: "D:/project/LatticeTerm", model: "chat-model" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), agents);
 
     // One tree, one folder column: only the row markup tells the kinds apart.
@@ -229,6 +229,20 @@ describe("ChatView", () => {
     expect(markup).toContain("gpt-5.6-sol");
     expect(markup).toContain("chat-session");
     expect(markup).toContain("改版討論");
+    expect(markup.match(/class="chat-thread__identity"/g)).toHaveLength(2);
+    expect(markup).toContain('class="chat-thread chat-session');
+    expect(markup).toContain('class="chat-thread__meta">OpenAI Codex · gpt-5.6-sol · LatticeTerm</span>');
+    expect(markup).toContain('class="chat-thread__meta">OpenAI Codex · chat-model · LatticeTerm</span>');
+  });
+
+  it("shows one sidebar row when a terminal holds the same native conversation", () => {
+    const thread = fakeThread({ nativeSessionId: "native-same", title: "同一段對話" });
+    const agents = fakeAgentApi({ catalog: [fakeDefinition()], sessions: [fakeSession({
+      label: "OpenAI Codex", capturedSessionId: "native-same", stateSource: "integration",
+    })] });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), agents);
+    expect(markup.match(/class="chat-thread__identity"/g)).toHaveLength(1);
+    expect(markup).not.toContain('class="chat-thread__title">同一段對話</span>');
   });
 
   it("lists a named account with its login state in the thread settings", () => {

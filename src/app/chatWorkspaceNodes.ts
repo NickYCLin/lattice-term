@@ -91,7 +91,7 @@ export function chatWorkspaceProjection(
         label: presentation.hasCustomGroupLabel
           ? `${presentation.groupLabel} · ${memberLabel}`
           : memberLabel,
-        detail: member.model,
+        detail: [definitionLabel, member.model, directoryName(member.workingDirectory, "")].filter(Boolean).join(" · "),
         status: agentGroupSidebarStatus([member]),
       });
       projectMembers.get(projectNodeId)!.push(nodeId);
