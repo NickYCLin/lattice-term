@@ -1,13 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   LINUX_TERMINAL_FONT_FAMILIES,
   TERMINAL_FONT_FAMILIES,
   TERMINAL_FONT_FAMILY,
   TERMINAL_LETTER_SPACING,
   terminalFontFamily,
+  terminalTheme,
 } from "./terminalTheme";
 
 describe("terminal font family", () => {
+  it("gives the scrollbar a visible idle, hover and dragging colour", () => {
+    vi.stubGlobal("document", { documentElement: {} });
+    vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
+    try {
+      const theme = terminalTheme();
+      expect(theme.scrollbarSliderBackground).toBe("#6e7681");
+      expect(theme.scrollbarSliderHoverBackground).toBe("#8b949e");
+      expect(theme.scrollbarSliderActiveBackground).toBe("#b1bac4");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uses concrete Linux monospace families before the generic fallback", () => {
     expect(TERMINAL_FONT_FAMILIES).toContain('"Noto Sans Mono"');
     expect(TERMINAL_FONT_FAMILIES).toContain('"DejaVu Sans Mono"');

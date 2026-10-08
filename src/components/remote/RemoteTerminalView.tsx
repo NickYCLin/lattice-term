@@ -9,6 +9,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { attachTerminalScrollback } from "../terminal/terminalScrollback";
 import "@xterm/xterm/css/xterm.css";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import { TerminalImeFallback } from "../terminal/terminalImeFallback";
@@ -85,6 +86,7 @@ export function RemoteTerminalView({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    const stopScrollback = attachTerminalScrollback(terminal);
     termRef.current = terminal;
     const textarea = terminal.textarea;
     const imePresentation = new TerminalImePresentation(terminal, textarea);
@@ -167,6 +169,7 @@ export function RemoteTerminalView({
       mobileInput.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopScrollback();
       terminal.dispose();
       termRef.current = null;
     };
