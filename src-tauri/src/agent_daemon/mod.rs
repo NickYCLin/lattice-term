@@ -681,7 +681,7 @@ pub struct HelloReply {
 pub(crate) fn event_channel(name: &str) -> Option<&'static str> {
     use crate::agent::{
         EVENT_CAPTURE, EVENT_CLOSED, EVENT_DATA, EVENT_LAUNCHED, EVENT_MODEL, EVENT_QUEUE,
-        EVENT_STATE, EVENT_USAGE,
+        EVENT_STARTUP_INPUT, EVENT_STATE, EVENT_USAGE,
     };
     Some(match name {
         "data" => EVENT_DATA,
@@ -692,6 +692,7 @@ pub(crate) fn event_channel(name: &str) -> Option<&'static str> {
         "model" => EVENT_MODEL,
         "usage" => EVENT_USAGE,
         "queue" => EVENT_QUEUE,
+        "startup-input" => EVENT_STARTUP_INPUT,
         _ => return None,
     })
 }

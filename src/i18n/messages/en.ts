@@ -1082,6 +1082,13 @@ export const en: Messages = {
   "terminal.handoff.directOrBrief": "Every supported CLI receives context through a one-time brief, preserving its existing memory and settings.",
   "terminal.handoff.unsupported": "This CLI's conversation can't be exported",
   "terminal.handoff.closed": "This session has ended. You can still open a new CLI.",
+  "terminal.startupInput.unconfirmedTitle": "Startup instructions or handoff were not confirmed sent",
+  "terminal.startupInput.unconfirmedBody": "Check the assistant input and handoff file. LatticeTerm did not retry to avoid overwriting your input or sending twice. This notice stays outside the terminal and is not sent to the assistant.",
+  "terminal.handoff.waitingForIdentity": "The assistant has not reported this session's conversation ID. No new assistant was opened, and another conversation in the project will not be substituted. Start a conversation in the original assistant, then try again.",
+  "terminal.handoff.waitingForTranscript": "This conversation ID has no readable history file in the current account yet; it may not be written or may have moved. No new assistant was opened. Check the original conversation and account, then retry once its history is available.",
+  "terminal.handoff.noReadableMessages": "The conversation record has no readable handoff content. It may have no sent messages yet, or the file could not be parsed. No new assistant was opened. Check that the original conversation has content, then retry.",
+  "terminal.handoff.accountUnavailable": "The original session's account history directory is unavailable or unsupported by this assistant. No new assistant was opened, and the default account will not be substituted. Check the original account settings.",
+  "terminal.handoff.sessionUnavailable": "The original session is no longer available, so its conversation cannot be identified. No new assistant was opened. Retry from a session that still owns the original conversation.",
   "terminal.handoff.exportFailedTitle": "Could not carry the current memory",
   "terminal.handoff.exportFailed":
     "No conversation file for this CLI was found under its account history, so no new CLI was opened. A session that has just started, or one whose account or working directory has changed, may not match a file yet. Waiting for the current task to finish does not help. Clear “Carry current memory into the new CLI” to open a clean one, or add the CLI from the pane that holds the conversation.",

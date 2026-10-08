@@ -340,6 +340,7 @@ describe("agent session transport", () => {
     guard.observeCaptured("agent-starting", "native-session-id");
     guard.observeModel({ sessionId: "agent-starting", model: "gpt-5.6-sol" });
     guard.observeUsage({ sessionId: "agent-starting", tokenUsage });
+    guard.observeStartupInputUnconfirmed("agent-starting");
 
     const events = attempt.finish();
     const initial = {
@@ -367,6 +368,7 @@ describe("agent session transport", () => {
       capturedSessionId: "native-session-id",
       model: "gpt-5.6-sol",
       tokenUsage,
+      startupInputUnconfirmed: true,
     });
     expect(
       applyAgentRestoreLaunchEvents(

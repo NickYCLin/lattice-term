@@ -1056,6 +1056,13 @@ export const zhTW = {
   "terminal.handoff.directOrBrief": "所有支援的助理都會透過一次性交接檔收到脈絡，保留各自原有的記憶與設定。",
   "terminal.handoff.unsupported": "目前這個助理無法匯出對話",
   "terminal.handoff.closed": "這個工作階段已結束，仍可直接加開新的助理。",
+  "terminal.startupInput.unconfirmedTitle": "啟動指示或記憶交接未確認送出",
+  "terminal.startupInput.unconfirmedBody": "請檢查助理輸入框與交接檔。為避免覆蓋你的輸入或重複送出，LatticeTerm 沒有自動重送；此提示不會寫入終端或送給助理。",
+  "terminal.handoff.waitingForIdentity": "助理尚未回報這個工作階段的對話 ID，現在不能確認要帶入哪段記憶。未開啟新助理，也不會改讀同專案的其他對話；請先在原助理開始對話，再重試。",
+  "terminal.handoff.waitingForTranscript": "目前帳號尚未找到這個對話 ID 的紀錄檔，可能尚未寫入或已移動。未開啟新助理；請確認原對話與帳號，待紀錄可讀後重試。",
+  "terminal.handoff.noReadableMessages": "這份對話紀錄目前沒有可讀的交接內容，可能尚未送出訊息，或檔案無法解析。未開啟新助理；請先確認原對話有內容，再重試。",
+  "terminal.handoff.accountUnavailable": "原工作階段的帳號紀錄目錄不可用，或這個助理不支援帳號目錄。未開啟新助理，也不會改讀預設帳號；請確認原帳號設定。",
+  "terminal.handoff.sessionUnavailable": "原工作階段已不存在，無法確認要交接的對話。未開啟新助理；請從仍可讀取原對話的工作階段重試。",
   "terminal.handoff.exportFailedTitle": "無法帶入目前記憶",
   "terminal.handoff.exportFailed":
     "在這個帳號的紀錄目錄裡找不到這個助理的對話檔，因此沒有開啟新的助理。剛開沒多久、換過帳號或改過工作目錄的工作階段，都可能還對不上檔案；等目前工作跑完並不會改變這件事。可以取消「將目前記憶帶到新助理」開一個乾淨的，或改從真正有那段對話的分頁加開。",

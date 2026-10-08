@@ -911,6 +911,14 @@
   padding: var(--space-3);
 }
 
+.agent-startup-notice {
+  flex: none;
+  min-height: 0;
+  max-height: 30%;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+}
+
 @media (max-width: 76rem) {
   .agents-hero {
     grid-template-columns: 1fr;

@@ -35,6 +35,7 @@ pub const EVENT_CAPTURE: &str = "agent://capture";
 pub const EVENT_MODEL: &str = "agent://model";
 pub const EVENT_USAGE: &str = "agent://usage";
 pub const EVENT_QUEUE: &str = "agent://queue";
+pub const EVENT_STARTUP_INPUT: &str = "agent://startup-input";
 /// A session somebody other than this window started (an MCP client through
 /// the background service); the payload is its summary.
 pub const EVENT_LAUNCHED: &str = "agent://launched";
@@ -376,6 +377,8 @@ pub struct AgentSessionSummary {
     /// Prompts waiting for this session to finish its current turn.
     #[serde(default)]
     pub queued_prompts: usize,
+    #[serde(default)]
+    pub startup_input_unconfirmed: bool,
     /// Another session whose turn must end before this one's queue moves.
     /// `None` means only this session's own turn gates it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -920,6 +923,7 @@ pub trait AgentSink: Send + Sync + 'static {
     fn usage(&self, session_id: &str, token_usage: &AgentTokenUsage);
     /// How many prompts are now waiting for this session.
     fn queue(&self, session_id: &str, queued_prompts: usize);
+    fn startup_input_unconfirmed(&self, _session_id: &str) {}
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -932,6 +936,13 @@ struct AgentSessionIdCaptured {
 pub struct EventSink(pub AppHandle);
 
 impl AgentSink for EventSink {
+    fn startup_input_unconfirmed(&self, session_id: &str) {
+        let _ = self.0.emit(
+            EVENT_STARTUP_INPUT,
+            serde_json::json!({ "sessionId": session_id }),
+        );
+    }
+
     fn data(&self, session_id: &str, offset: u64, bytes: &[u8]) {
         let result = self.0.emit(
             EVENT_DATA,
@@ -1644,10 +1655,18 @@ fn try_deliver_startup_seed(
 }
 
 fn startup_seed_notice(sink: &dyn AgentSink, registry: &AgentRegistry, session_id: &str) {
-    let notice = "\r\n[LatticeTerm] 啟動指示／記憶交接未確認送出。請檢查輸入框與交接檔；為避免覆蓋輸入或重複送出，未自動重送。\r\n";
-    if let Ok(offset) = registry.record_output(session_id, notice.as_bytes()) {
-        sink.data(session_id, offset, notice.as_bytes());
+    let Ok(entry) = registry.get(session_id) else {
+        return;
+    };
+    let Ok(mut summary) = entry.summary.lock() else {
+        return;
+    };
+    if summary.startup_input_unconfirmed {
+        return;
     }
+    summary.startup_input_unconfirmed = true;
+    drop(summary);
+    sink.startup_input_unconfirmed(session_id);
 }
 
 #[derive(Default)]
@@ -7832,6 +7851,7 @@ pub fn launch_with_replay(
         process_id,
         token_usage: None,
         queued_prompts: 0,
+        startup_input_unconfirmed: false,
         waits_for: None,
         // A session launched as a native resume already knows its id; a
         // fresh announcement in the output still overwrites it.
@@ -9529,9 +9549,14 @@ mod tests {
         models: Mutex<Vec<(String, String)>>,
         usages: Mutex<Vec<(String, AgentTokenUsage)>>,
         queues: Mutex<Vec<(String, usize)>>,
+        startup_notices: Mutex<Vec<String>>,
     }
 
     impl AgentSink for TestSink {
+        fn startup_input_unconfirmed(&self, session_id: &str) {
+            self.startup_notices.lock().unwrap().push(session_id.into());
+        }
+
         fn data(&self, session_id: &str, offset: u64, bytes: &[u8]) {
             self.data.lock().unwrap().extend_from_slice(bytes);
             self.chunks
@@ -13875,10 +13900,9 @@ notify = ["notify.exe", "turn-ended"]"#,
         );
         assert!(entry.input.lock().unwrap().desktop_busy());
         startup_seed_notice(sink.as_ref(), &registry, id);
-        let output = collector.session_data.lock().unwrap()[id].clone();
-        let output = String::from_utf8_lossy(&output);
-        assert!(output.contains("記憶交接未確認送出"));
-        assert!(!output.contains("private handoff"));
+        assert!(registry.list()[0].startup_input_unconfirmed);
+        assert_eq!(*collector.startup_notices.lock().unwrap(), vec![id.clone()]);
+        assert!(!String::from_utf8_lossy(&collector.data.lock().unwrap()).contains("[LatticeTerm]"));
         registry.stop_all();
     }
 
@@ -14492,6 +14516,26 @@ notify = ["notify.exe", "turn-ended"]"#,
         fn drop(&mut self) {
             self.registry.stop_all();
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_warning_is_idempotent_and_does_not_write_terminal_output_or_input() {
+        let fixture = CodexSubmitFixture::new(None);
+        startup_seed_notice(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        startup_seed_notice(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        assert!(fixture.registry.list()[0].startup_input_unconfirmed);
+        assert_eq!(
+            *fixture.sink.startup_notices.lock().unwrap(),
+            vec![fixture.id.clone()]
+        );
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert!(
+            !String::from_utf8_lossy(&fixture.sink.data.lock().unwrap()).contains("[LatticeTerm]")
+        );
+        assert!(!fixture.registry.output_snapshots().iter().any(|snapshot| {
+            String::from_utf8_lossy(&decode(&snapshot.base64).unwrap()).contains("[LatticeTerm]")
+        }));
     }
 
     #[cfg(windows)]

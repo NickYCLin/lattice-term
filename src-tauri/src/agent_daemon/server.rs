@@ -684,6 +684,7 @@ fn observer_summary(summary: AgentSessionSummary) -> AgentSessionSummary {
         state_source: summary.state_source,
         token_usage: summary.token_usage,
         queued_prompts: summary.queued_prompts,
+        startup_input_unconfirmed: summary.startup_input_unconfirmed,
         // Which local session another one follows is the user's own
         // orchestration, not something an observer needs to act.
         waits_for: None,
@@ -2062,6 +2063,10 @@ fn observer_event(name: &str, payload: &Value) -> Option<Value> {
 }
 
 impl AgentSink for DaemonSink {
+    fn startup_input_unconfirmed(&self, session_id: &str) {
+        self.broadcast("startup-input", json!({ "sessionId": session_id }));
+    }
+
     fn data(&self, session_id: &str, offset: u64, bytes: &[u8]) {
         self.broadcast(
             "data",

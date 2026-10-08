@@ -110,6 +110,8 @@ import {
   TransferIcon,
 } from "../components/icons";
 import { AgentTerminalPane } from "../components/agents/AgentTerminalPane";
+import { AgentStartupNotice } from "../components/agents/AgentStartupNotice";
+import { handoffExportFailureKey } from "../app/conversationHandoff";
 import { HostMetricsPanel } from "../components/connections/HostMetricsPanel";
 import { useSessionHostMetrics } from "../app/useHostMetrics";
 import { RemotePane } from "../components/remote/RemotePane";
@@ -908,10 +910,10 @@ export function SessionsView({
             transcript: pastedHandoffTail(transcript),
           });
         }
-      } catch {
+      } catch (reason) {
         setAddCliError({
           title: t("terminal.handoff.exportFailedTitle"),
-          body: t("terminal.handoff.exportFailed"),
+          body: t(handoffExportFailureKey(reason)),
         });
         return;
       }
@@ -2596,6 +2598,8 @@ export function SessionsView({
                   </span>
                 )}
               </div>
+              <AgentStartupNotice unconfirmed={group.members.some(member =>
+                member.sessionId === memberId && member.startupInputUnconfirmed)} />
               <div className="cli-panes">
                 {group.members.map((member, memberIndex) => (
                   <div

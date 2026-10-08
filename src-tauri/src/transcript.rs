@@ -2123,11 +2123,6 @@ fn locate_gemini_in(
     })
 }
 
-fn locate_gemini(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
-    let root = home()?.join(".gemini").join("tmp");
-    locate_gemini_in(&root, working_directory, captured)
-}
-
 fn antigravity_conversation_id(value: &str) -> bool {
     value.len() == 36
         && value.chars().enumerate().all(|(index, character)| {
@@ -2139,6 +2134,7 @@ fn antigravity_conversation_id(value: &str) -> bool {
         })
 }
 
+#[cfg(test)]
 fn path_matches_workspace(candidate: &str, expected_cwd: &Path) -> bool {
     let candidate_raw = candidate.trim_start_matches(r"\\?\");
     let candidate_path = PathBuf::from(candidate_raw);
@@ -2178,6 +2174,7 @@ fn antigravity_transcript(root: &Path, id: &str) -> Option<PathBuf> {
         .filter(|path| path.starts_with(&root) && path.is_file())
 }
 
+#[cfg(test)]
 fn locate_antigravity_in(
     root: &Path,
     working_directory: &str,
@@ -2247,11 +2244,6 @@ fn locate_antigravity_in(
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "logs")
     })
-}
-
-fn locate_antigravity(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
-    let root = home()?.join(".gemini").join("antigravity-cli");
-    locate_antigravity_in(&root, working_directory, captured)
 }
 
 /// Cursor wraps what the person typed in `<user_query>` and sends rules,
@@ -2334,6 +2326,7 @@ fn cursor_root() -> Option<PathBuf> {
     fs::canonicalize(home()?.join(".cursor").join("projects")).ok()
 }
 
+#[cfg(test)]
 fn is_cursor_transcript(path: &Path) -> bool {
     let Some(id) = path
         .file_name()
@@ -2551,6 +2544,7 @@ fn scan_cursor_conversations(
     Ok(())
 }
 
+#[cfg(test)]
 fn locate_cursor_in(
     root: &Path,
     working_directory: &str,
@@ -2572,62 +2566,50 @@ fn locate_cursor_in(
     })
 }
 
-fn locate_cursor(working_directory: &str, captured: Option<&str>) -> Option<PathBuf> {
-    locate_cursor_in(&cursor_root()?, working_directory, captured)
-}
-
-/// Reads the source CLI's most relevant conversation and returns it as plain,
-/// role-labelled text capped at `max_chars`, or `None` when nothing is found.
+/// Reads only the source session's exact conversation from its account history.
+/// Returns role-labelled text capped at `max_chars` or a specific refusal code.
 pub fn export(
     kind: TranscriptKind,
     working_directory: &str,
     captured_session_id: Option<&str>,
     profile_directory: Option<&Path>,
     max_chars: usize,
-) -> Option<String> {
-    // A missing or malformed account root must not fall back to somebody
-    // else's default history, including when no native id was captured yet.
-    if let Some(profile) = profile_directory {
-        if !profile.is_absolute() || !profile.is_dir() {
-            return None;
-        }
+) -> Result<String, &'static str> {
+    if profile_directory.is_some_and(|profile| !profile.is_absolute() || !profile.is_dir()) {
+        return Err("handoff.accountUnavailable");
     }
-    match kind {
-        TranscriptKind::Antigravity => {
-            let path = locate_antigravity(working_directory, captured_session_id)?;
-            parse_antigravity(&path, max_chars)
-        }
-        TranscriptKind::Claude => {
-            let path = match profile_directory {
-                Some(profile) => locate_claude_in(
-                    &profile.join("projects"),
-                    working_directory,
-                    captured_session_id,
-                ),
-                None => locate_claude(working_directory, captured_session_id),
-            }?;
-            parse_claude(&path, max_chars)
-        }
-        TranscriptKind::Codex => {
-            let path = match profile_directory {
-                Some(profile) => locate_codex_in(
-                    &profile.join("sessions"),
-                    working_directory,
-                    captured_session_id,
-                ),
-                None => locate_codex(working_directory, captured_session_id),
-            }?;
-            parse_codex(&path, max_chars)
-        }
-        TranscriptKind::Gemini => {
-            let path = locate_gemini(working_directory, captured_session_id)?;
-            parse_gemini(&path, max_chars)
-        }
-        TranscriptKind::Cursor => {
-            let path = locate_cursor(working_directory, captured_session_id)?;
-            parse_cursor(&path, max_chars)
-        }
+    if profile_directory.is_some()
+        && !matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude)
+    {
+        return Err("handoff.accountUnavailable");
     }
+    let session_id = captured_session_id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or("handoff.waitingForIdentity")?;
+    let root = history_root(kind, profile_directory)
+        .or_else(|| history_root_with_archive(kind, profile_directory, true))
+        .ok_or("handoff.waitingForTranscript")?;
+    let path = match kind {
+        TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
+            .or_else(|| {
+                history_root_with_archive(kind, profile_directory, true).and_then(|archive| {
+                    locate_codex_in(&archive, working_directory, Some(session_id))
+                })
+            }),
+        TranscriptKind::Claude => locate_claude_in(&root, working_directory, Some(session_id)),
+        TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
+        TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
+        TranscriptKind::Cursor => cursor_transcript(&root, session_id),
+    }
+    .ok_or("handoff.waitingForTranscript")?;
+    let text = match kind {
+        TranscriptKind::Codex => parse_codex(&path, max_chars),
+        TranscriptKind::Claude => parse_claude(&path, max_chars),
+        TranscriptKind::Gemini => parse_gemini(&path, max_chars),
+        TranscriptKind::Antigravity => parse_antigravity(&path, max_chars),
+        TranscriptKind::Cursor => parse_cursor(&path, max_chars),
+    };
+    text.ok_or("handoff.noReadableMessages")
 }
 
 #[cfg(test)]
@@ -3071,6 +3053,123 @@ mod tests {
     }
 
     #[test]
+    fn handoff_requires_identity_and_never_guesses_another_project_conversation() {
+        let home = tempfile::tempdir().unwrap();
+        for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
+            assert_eq!(
+                export(kind, "", None, Some(home.path()), 5000),
+                Err("handoff.waitingForIdentity")
+            );
+            assert_eq!(
+                export(kind, "", Some(""), Some(home.path()), 5000),
+                Err("handoff.waitingForIdentity")
+            );
+        }
+        write_codex_rollout(
+            &home.path().join("sessions/rollout-other.jsonl"),
+            "other",
+            home.path(),
+            serde_json::json!("cli"),
+            "codex_cli_rs",
+            1,
+        );
+        assert_eq!(
+            export(
+                TranscriptKind::Codex,
+                home.path().to_str().unwrap(),
+                Some("missing"),
+                Some(home.path()),
+                5000
+            ),
+            Err("handoff.waitingForTranscript")
+        );
+    }
+
+    #[test]
+    fn handoff_reads_the_exact_archived_codex_thread_without_active_history() {
+        let home = tempfile::tempdir().unwrap();
+        write_codex_rollout(
+            &home.path().join("archived_sessions/rollout-archived.jsonl"),
+            "archived",
+            home.path(),
+            serde_json::json!("appServer"),
+            "desktop",
+            1,
+        );
+        assert!(export(
+            TranscriptKind::Codex,
+            "changed-workspace",
+            Some("archived"),
+            Some(home.path()),
+            5000
+        )
+        .unwrap()
+        .contains("archived"));
+        fs::create_dir(home.path().join("sessions")).unwrap();
+        assert!(export(
+            TranscriptKind::Codex,
+            "changed-workspace",
+            Some("archived"),
+            Some(home.path()),
+            5000
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn handoff_distinguishes_unwritten_records_from_records_without_messages() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(
+            export(
+                TranscriptKind::Codex,
+                "",
+                Some("empty"),
+                Some(home.path()),
+                5000
+            ),
+            Err("handoff.waitingForTranscript")
+        );
+        let path = home.path().join("sessions/rollout-empty.jsonl");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, serde_json::json!({"type":"session_meta","payload":{"id":"empty","source":"cli","cwd":home.path()}}).to_string()).unwrap();
+        assert_eq!(
+            export(
+                TranscriptKind::Codex,
+                "",
+                Some("empty"),
+                Some(home.path()),
+                5000
+            ),
+            Err("handoff.noReadableMessages")
+        );
+    }
+
+    #[test]
+    fn handoff_rejects_unsupported_account_roots_for_other_clis() {
+        let home = tempfile::tempdir().unwrap();
+        for kind in [
+            TranscriptKind::Gemini,
+            TranscriptKind::Antigravity,
+            TranscriptKind::Cursor,
+        ] {
+            assert_eq!(
+                export(kind, "", Some("known"), Some(home.path()), 5000),
+                Err("handoff.accountUnavailable")
+            );
+        }
+        assert_eq!(
+            export(
+                TranscriptKind::Codex,
+                "",
+                Some("known"),
+                Some(Path::new("relative")),
+                5000
+            ),
+            Err("handoff.accountUnavailable")
+        );
+    }
+
+    #[test]
     fn account_profile_exports_never_cross_into_another_accounts_history() {
         let directory = tempfile::tempdir().unwrap();
         let cwd = directory.path();
@@ -3094,7 +3193,14 @@ mod tests {
             );
         }
         for kind in [TranscriptKind::Codex, TranscriptKind::Claude] {
-            let text = export(kind, cwd.to_str().unwrap(), None, Some(&b), 5000).unwrap();
+            let text = export(
+                kind,
+                cwd.to_str().unwrap(),
+                Some("session-b"),
+                Some(&b),
+                5000,
+            )
+            .unwrap();
             assert!(text.contains("session-b"));
             assert!(!text.contains("session-a"));
             assert!(export(
@@ -3104,7 +3210,7 @@ mod tests {
                 Some(&b),
                 5000
             )
-            .is_none());
+            .is_err());
             assert!(export(
                 kind,
                 cwd.to_str().unwrap(),
@@ -3112,7 +3218,7 @@ mod tests {
                 Some(&directory.path().join("missing")),
                 5000
             )
-            .is_none());
+            .is_err());
         }
     }
 
@@ -3983,7 +4089,7 @@ mod tests {
                 [user, attachment]
             };
             fs::write(&path, rows.map(|row| row.to_string()).join("\n")).unwrap();
-            for captured in [None, Some("main-session")] {
+            for captured in [Some("main-session")] {
                 let transcript = export(
                     TranscriptKind::Claude,
                     cwd.to_str().unwrap(),

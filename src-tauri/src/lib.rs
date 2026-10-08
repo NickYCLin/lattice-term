@@ -2115,11 +2115,11 @@ async fn agent_export_transcript(
         registry.session_summary(&session_id)
     };
     let Some(summary) = summary else {
-        return Ok(None);
+        return Err("handoff.sessionUnavailable".into());
     };
     let Some(kind) = crate::transcript::TranscriptKind::from_definition(&summary.definition_id)
     else {
-        return Ok(None);
+        return Err("handoff.unsupported".into());
     };
     // Transcript discovery can walk a large, user-owned CLI history.  It
     // must never occupy Tauri's command worker and make unrelated sessions,
@@ -2137,7 +2137,9 @@ async fn agent_export_transcript(
         )
     })
     .await
-    .map_err(|error| format!("Transcript export task did not complete: {error}"))
+    .map_err(|error| format!("Transcript export task did not complete: {error}"))?
+    .map(Some)
+    .map_err(str::to_string)
 }
 
 /// Persists an opt-in handoff only when the target CLI has a documented,

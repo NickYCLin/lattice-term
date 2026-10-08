@@ -115,6 +115,7 @@ export interface AgentSessionSummary {
   launchArguments: string[];
   /** True when this process was recreated from the persisted workspace. */
   restoreExistingSession?: boolean;
+  startupInputUnconfirmed?: boolean;
   workingDirectory: string;
   state: AgentLifecycle;
   stateSource: AgentStateSource;
@@ -441,6 +442,7 @@ export interface AgentLaunchEventSnapshot {
   capturedSessionIds: ReadonlyMap<string, string>;
   models: ReadonlyMap<string, string>;
   usages: ReadonlyMap<string, AgentTokenUsage>;
+  startupInputUnconfirmed?: ReadonlySet<string>;
 }
 
 interface MutableAgentLaunchEvents {
@@ -449,6 +451,7 @@ interface MutableAgentLaunchEvents {
   capturedSessionIds: Map<string, string>;
   models: Map<string, string>;
   usages: Map<string, AgentTokenUsage>;
+  startupInputUnconfirmed: Set<string>;
 }
 
 function emptyAgentLaunchEvents(): MutableAgentLaunchEvents {
@@ -458,6 +461,7 @@ function emptyAgentLaunchEvents(): MutableAgentLaunchEvents {
     capturedSessionIds: new Map(),
     models: new Map(),
     usages: new Map(),
+    startupInputUnconfirmed: new Set(),
   };
 }
 
@@ -470,6 +474,7 @@ function cloneAgentLaunchEvents(
     capturedSessionIds: new Map(events.capturedSessionIds),
     models: new Map(events.models),
     usages: new Map(events.usages),
+    startupInputUnconfirmed: new Set(events.startupInputUnconfirmed),
   };
 }
 
@@ -529,6 +534,12 @@ export class AgentLaunchRaceGuard {
     }
   }
 
+  observeStartupInputUnconfirmed(sessionId: string) {
+    for (const attempt of this.activeAttempts) {
+      attempt.startupInputUnconfirmed.add(sessionId);
+    }
+  }
+
   observeUsage(event: AgentUsageEvent) {
     for (const attempt of this.activeAttempts) {
       attempt.usages.set(event.sessionId, event.tokenUsage);
@@ -554,6 +565,8 @@ export function applyAgentLaunchEvents(
     ...(capturedSessionId ? { capturedSessionId } : {}),
     ...(model ? { model } : {}),
     ...(tokenUsage ? { tokenUsage } : {}),
+    ...(events.startupInputUnconfirmed?.has(session.sessionId)
+      ? { startupInputUnconfirmed: true } : {}),
   };
 }
 
@@ -831,6 +844,7 @@ export function useAgentSessions(): AgentApi {
     const modelDuringHydration = new Map<string, string>();
     const usageDuringHydration = new Map<string, AgentTokenUsage>();
     const launchedDuringHydration = new Map<string, AgentSessionSummary>();
+    const startupInputDuringHydration = new Set<string>();
 
     function keep(cleanup: () => void): boolean {
       if (disposed) {
@@ -1102,6 +1116,22 @@ export function useAgentSessions(): AgentApi {
 
         // The depth also arrives on the session summary, so a queue event
         // missed during hydration corrects itself on the next snapshot.
+        const stopStartupInput = await listen<{ sessionId: string }>(
+          "agent://startup-input",
+          (event) => {
+            const sessionId = event.payload.sessionId;
+            launchRaceGuard.current.observeStartupInputUnconfirmed(sessionId);
+            if (hydrating) {
+              startupInputDuringHydration.add(sessionId);
+              return;
+            }
+            setSessions(current => current.map(session =>
+              session.sessionId === sessionId
+                ? { ...session, startupInputUnconfirmed: true } : session));
+          },
+        );
+        if (!keep(stopStartupInput)) return;
+
         const stopQueue = await listen<AgentQueueEvent>(
           "agent://queue",
           (event) => {
@@ -1169,6 +1199,7 @@ export function useAgentSessions(): AgentApi {
         const modelSnapshot = snapshotHydrationMap(modelDuringHydration);
         const usageSnapshot = snapshotHydrationMap(usageDuringHydration);
         const launchedSnapshot = snapshotHydrationMap(launchedDuringHydration);
+        const startupInputSnapshot = new Set(startupInputDuringHydration);
         setSessions((current) => {
           let restored = reconcileSessionSnapshot(
             current,
@@ -1187,6 +1218,8 @@ export function useAgentSessions(): AgentApi {
               ...(capturedSessionId ? { capturedSessionId } : {}),
               ...(model ? { model } : {}),
               ...(tokenUsage ? { tokenUsage } : {}),
+              ...(startupInputSnapshot.has(session.sessionId)
+                ? { startupInputUnconfirmed: true } : {}),
             };
           });
         });
