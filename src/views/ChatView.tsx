@@ -6,6 +6,7 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
+import { ConversationIdentity, ConversationMessage } from "../components/chat/ConversationPresentation";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
 import { useFittingTabs } from "../components/chat/useFittingTabs";
@@ -1028,13 +1029,7 @@ function ThreadPane({
     <>
       <header className="chat-header">
         <div className="chat-header__title">
-          <div className="chat-header__identity">
-            <span className="chat-avatar" aria-hidden="true">
-              {assistant.slice(0, 1)}
-            </span>
-            <div>
-              <h2>{thread.title || t("chat.untitled")}</h2>
-              <div className="chat-chips">
+          <ConversationIdentity assistant={assistant} title={thread.title || t("chat.untitled")}>
                 {!thread.archived && <button
                   type="button"
                   className="chat-chip"
@@ -1052,9 +1047,7 @@ function ThreadPane({
                     : t("chat.directory.none")}
                 </span>}
                 {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
-              </div>
-            </div>
-          </div>
+          </ConversationIdentity>
           <div className="chat-composer__actions">
             {!thread.archived && <button
               type="button"
@@ -1514,8 +1507,7 @@ function ChatItemView({
   switch (item.type) {
     case "user":
       return (
-        <div className="chat-msg chat-msg--user">
-          <div className="chat-bubble">
+        <ConversationMessage role="user" assistant={assistant} actions={branchButton}>
             {item.text && <div>{item.text}</div>}
             {item.attachments && item.attachments.length > 0 && (
               <div className="chat-attachments chat-attachments--sent">
@@ -1535,27 +1527,18 @@ function ChatItemView({
                 captions={false}
               />
             )}
-          </div>
-          {branchButton}
-        </div>
+        </ConversationMessage>
       );
     case "text":
       return (
-        <div className="chat-msg chat-msg--assistant">
-          <span className="chat-avatar" aria-hidden="true">
-            {assistant.slice(0, 1)}
-          </span>
-          <div className="chat-msg__body">
-            <span className="chat-msg__name">{assistant}</span>
+        <ConversationMessage role="assistant" assistant={assistant} actions={!streaming && branchButton}>
             <div className={streaming ? "chat-cursor" : undefined}>
               <ChatMarkdown source={item.text} />
             </div>
             {!streaming && workingDirectory && (
               <ChatImagePreviews text={item.text} workingDirectory={workingDirectory} />
             )}
-          </div>
-          {!streaming && branchButton}
-        </div>
+        </ConversationMessage>
       );
     case "reasoning":
       return (

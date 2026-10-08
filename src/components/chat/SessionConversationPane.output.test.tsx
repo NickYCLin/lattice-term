@@ -1,6 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeAgentApi, fakeSession } from "../../app/testFixtures/agentApis";
+import { fakeAgentApi, fakeAutomationsApi, fakeChatApi, fakeSession, fakeThread } from "../../app/testFixtures/agentApis";
+import { ChatView } from "../../views/ChatView";
+import { ConversationMessage } from "./ConversationPresentation";
 import { I18nProvider } from "../../i18n";
 import type { SessionConversationMessage } from "../../app/useSessionConversation";
 
@@ -65,7 +67,7 @@ describe("session chat output disclosure", () => {
       { role: "assistant", text: '<script>alert("test")</script>\nExit code: 1', tool: { callId: "call-1", name: null, kind: "result" } },
     ];
     const html = render("working");
-    expect(html.match(/<details class="session-chat__tool">/g)).toHaveLength(2);
+    expect(html.match(/<details class="chat-card chat-card--tool">/g)).toHaveLength(2);
     expect(html.match(/exec_command/g)).toHaveLength(2);
     expect(html).toContain("呼叫內容");
     expect(html).toContain("回傳內容");
@@ -82,6 +84,39 @@ describe("session chat output disclosure", () => {
     ];
     const html = render("done");
     expect(html.match(/apply_patch/g)).toHaveLength(1);
-    expect(html.match(/<summary>工具/g)).toHaveLength(2);
+    expect(html.match(/chat-card__label">工具/g)).toHaveLength(2);
   });
 });
+  it("renders replies with the same avatar, assistant name and Markdown as built-in chat", () => {
+    const text = "已完成 **測試**";
+    conversation.messages = [{ role: "assistant", text }];
+    const frame = renderToStaticMarkup(<ConversationMessage role="assistant" assistant="OpenAI Codex">
+      <span>message</span>
+    </ConversationMessage>).split('<span>message</span>')[0];
+    const thread = fakeThread({ items: [{ id: "reply", type: "text", text }] });
+    const builtin = renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <ChatView agents={fakeAgentApi()} chat={fakeChatApi({ threads: [thread], activeThreadId: thread.id })}
+        automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+    </I18nProvider>);
+    for (const html of [render("done"), builtin]) {
+      expect(html).toContain(frame);
+      expect(html).toContain('<strong>測試</strong>');
+      expect(html).not.toContain('chat-msg__name">助理');
+    }
+  });
+
+  it("renders user text as the same bubble without an extra role label", () => {
+    const text = "幫我檢查 <script>內容</script>";
+    conversation.messages = [{ role: "user", text }];
+    const bubble = renderToStaticMarkup(<ConversationMessage role="user" assistant="OpenAI Codex">
+      <div>{text}</div>
+    </ConversationMessage>).slice(0, -6);
+    const thread = fakeThread({ items: [{ id: "prompt", type: "user", text, at: 1 }] });
+    const builtin = renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <ChatView agents={fakeAgentApi()} chat={fakeChatApi({ threads: [thread], activeThreadId: thread.id })}
+        automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+    </I18nProvider>);
+    expect(render("done")).toContain(bubble);
+    expect(builtin).toContain(bubble);
+    expect(render("done")).not.toContain('<script>');
+  });

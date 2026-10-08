@@ -8,12 +8,14 @@ import { useFileDrop } from "../../app/fileDrop";
 import { spokenSessionReply } from "../../app/sessionVoice";
 import { ConversationComposerFrame, ComposerAttachments } from "./ConversationComposer";
 import { ComposerVoiceControls } from "./ComposerVoiceControls";
+import { ConversationIdentity, ConversationMessage } from "./ConversationPresentation";
+import { Callout } from "../common/Callout";
 import { useSessionConversation } from "../../app/useSessionConversation";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
 import {
-  AlertIcon, CloseIcon, FileIcon, ImageFileIcon, ShieldIcon,
+  AlertIcon, CloseIcon, FileIcon, FolderIcon, ImageFileIcon, ShieldIcon, TerminalIcon,
 } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
@@ -170,17 +172,34 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     void submit();
   }
   const accessHint = `${t(session.sandboxed ? "agents.sandbox.hint" : "sessionChat.access.fullHint")}\n${t("sessionChat.approval")}`;
+  const assistant = agents.catalog.find(definition => definition.id === session.definitionId)?.label || session.label;
+  const directoryLabel = session.workingDirectory.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
   return <>
     <header className="chat-header">
-      <div className="session-chat__title">
-        <h2>{session.groupLabel || session.label}</h2>
-        {live && (
-          <span className={`session-chat__state is-${session.state}`}>
-            {t(stateLabel[session.state] ?? "agents.state.idle")}
+      <div className="chat-header__title">
+        <ConversationIdentity assistant={assistant} title={session.label || assistant}>
+          <span className="chat-chip">{assistant}{session.model ? ` · ${session.model}` : ""}</span>
+          <span className="chat-chip" title={displayPath(session.workingDirectory)}>
+            <FolderIcon />{directoryLabel || t("chat.directory.none")}
           </span>
-        )}
+          <span className="chat-chip" title={accessHint}>
+            {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
+          </span>
+          {session.groupLabel && session.groupLabel !== session.label && <span className="chat-chip">
+            {t("form.group")} · {session.groupLabel}
+          </span>}
+          {live && <span className={`session-chat__state is-${session.state}`}>
+            {t(stateLabel[session.state] ?? "agents.state.idle")}
+          </span>}
+        </ConversationIdentity>
+        <div className="chat-composer__actions">
+          <button type="button" className="button button--ghost button--sm" onClick={onOpenTerminal}
+            aria-label={t("chat.terminal")} title={t("chat.terminal")}>
+            <TerminalIcon />
+          </button>
+        </div>
       </div>
-      <p>{t("sessionChat.shared")}</p>
+      <Callout tone="info">{t("sessionChat.shared")}</Callout>
     </header>
     <div ref={messagesRef} className="chat-messages" onScroll={event => {
       const node = event.currentTarget;
@@ -207,25 +226,23 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             const name = tool.name ?? conversation.messages.slice(0, index).reverse()
               .find(candidate => candidate.tool?.kind === "call" && candidate.tool.callId === tool.callId)
               ?.tool?.name;
-            return <details key={index} className="session-chat__tool">
-              <summary>{name ?? t("sessionChat.tool")}
-                <span>{t(tool.kind === "call" ? "sessionChat.toolInput" : "sessionChat.toolOutput")}</span>
+            return <details key={index} className="chat-card chat-card--tool">
+              <summary>
+                <span className="chat-card__label">{name ?? t("sessionChat.tool")}</span>
+                <span className="chat-card__summary">{t(tool.kind === "call" ? "sessionChat.toolInput" : "sessionChat.toolOutput")}</span>
               </summary>
-              <code className="session-chat__tool-id">{tool.callId}</code>
-              <pre>{message.text}</pre>
+              <div className="chat-card__text"><code>{tool.callId}</code></div>
+              <pre className="chat-card__output">{message.text}</pre>
             </details>;
           }
           const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
-          return <div key={index} className={`chat-msg chat-msg--${message.role}`}>
-            <div className={message.role === "user" ? "chat-bubble" : "chat-msg__body"}>
-              <span className="chat-msg__name">{t(message.role === "user" ? "history.user" : "history.assistant")}</span>
-              {sent ? sent.text : <ChatMarkdown source={message.text} />}
-              {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
-                {files.map(file => <AttachmentChip key={file.path} attachment={file} />)}
-              </div>}
-            </div>
-          </div>;
+          return <ConversationMessage key={index} role={message.role} assistant={assistant}>
+            {sent ? <div>{sent.text}</div> : <ChatMarkdown source={message.text} />}
+            {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
+              {files.map(file => <AttachmentChip key={file.path} attachment={file} />)}
+            </div>}
+          </ConversationMessage>;
         })}
         <details className="session-chat__output" open={conversation.messages.length === 0}>
           <summary>{t("sessionChat.output")}</summary>

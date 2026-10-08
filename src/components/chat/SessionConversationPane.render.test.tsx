@@ -18,6 +18,27 @@ function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
 }
 
 describe("SessionConversationPane composer", () => {
+  it("uses the sidebar assistant name as the title instead of the group name", () => {
+    const html = render({ definitionId: "codex", label: "OpenAI Codex", groupLabel: "Claude Code",
+      workingDirectory: "D:/project/LatticeTerm", model: "gpt-6.1-sol" });
+    expect(html).toContain('<h2>OpenAI Codex</h2>');
+    expect(html).not.toContain('<h2>Claude Code</h2>');
+    expect(html).toContain('class="chat-header__identity"');
+    expect(html).toContain('class="chat-avatar"');
+    expect(html).toContain('OpenAI Codex · gpt-6.1-sol');
+    expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
+    expect(html).toContain('class="callout callout--info"');
+    expect(html).toContain('aria-label="終端機"');
+    expect(html).not.toContain('session-chat__title');
+  });
+
+  it("keeps a real Claude session labeled as Claude", () => {
+    const html = render({ definitionId: "claude", label: "Claude Code", groupLabel: "Project" });
+    expect(html).toContain('<h2>Claude Code</h2>');
+    expect(html).toContain('class="chat-chip">Claude Code</span>');
+    expect(html).not.toContain('OpenAI Codex');
+  });
+
   it("offers the terminal only while the assistant waits for the user", () => {
     expect(render({ state: "idle" })).not.toContain("開啟這個工作階段的終端機");
     expect(render({ state: "needsAttention" })).toContain("開啟這個工作階段的終端機");
