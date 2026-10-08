@@ -743,6 +743,17 @@ export interface AgentApi {
   ) => () => void;
 }
 
+export function findRunningCodexResumeSession(
+  sessions: readonly AgentSessionSummary[], request: AgentLaunchRequest,
+): AgentSessionSummary | undefined {
+  const nativeId = request.resumeSessionId?.trim();
+  if (request.definitionId !== "codex" || !nativeId) return undefined;
+  const profile = request.profileConfigPath?.trim() || null;
+  return sessions.find(session => session.definitionId === "codex" &&
+    !session.closedReason && session.capturedSessionId?.trim() === nativeId &&
+    (session.profileConfigPath?.trim() || null) === profile);
+}
+
 export function useAgentSessions(): AgentApi {
   const [mode, setMode] = useState<AgentBackendMode>("loading");
   const [maxActiveSessions, setMaxActiveSessionsState] = useState<number | null>(
@@ -1284,6 +1295,8 @@ export function useAgentSessions(): AgentApi {
   }, [applyPlanSnapshot]);
 
   const launch = useCallback(async (request: AgentLaunchRequest) => {
+    const existing = findRunningCodexResumeSession(sessionsRef.current, request);
+    if (existing) return existing;
     const { invoke } = await core();
     const launchedAt = Date.now();
     const attempt = launchRaceGuard.current.begin();

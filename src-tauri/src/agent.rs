@@ -2227,6 +2227,7 @@ fn agent_session_limit_reached(session_count: usize) -> bool {
 #[derive(Default)]
 pub struct AgentRegistry {
     sessions: Mutex<HashMap<String, Arc<AgentSessionEntry>>>,
+    codex_launch: Mutex<()>,
     /// Permission prompts the chat page can answer, one per session.
     approvals: approval::Approvals,
     counter: AtomicU64,
@@ -7340,6 +7341,28 @@ fn only_a_model_choice(arguments: &[String]) -> bool {
     }
 }
 
+fn codex_resume_root(profile: Option<&Path>) -> Option<PathBuf> {
+    let root = profile
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))?;
+    Some(plain_win32_path(root.canonicalize().unwrap_or(root)))
+}
+
+fn active_codex_resume_session(
+    registry: &AgentRegistry,
+    native_session_id: &str,
+    profile: Option<&Path>,
+) -> Option<AgentSessionSummary> {
+    let root = codex_resume_root(profile)?;
+    registry.list().into_iter().find(|session| {
+        session.definition_id == "codex"
+            && session.captured_session_id.as_deref().map(str::trim) == Some(native_session_id)
+            && codex_resume_root(session.profile_config_path.as_deref().map(Path::new))
+                .is_some_and(|existing| existing == root)
+    })
+}
+
 /// A restored Codex tab whose thread id was never reported (an older save,
 /// or an app closed during the first turn) still names an exact thread,
 /// like every other restore, instead of opening a blank conversation.
@@ -7409,13 +7432,35 @@ pub fn launch_with_replay(
 ) -> Result<AgentSessionSummary, String> {
     let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
+    request.definition_id = validate_text(&request.definition_id, "Agent type", 64)?;
+    let codex_launch_guard = if request.definition_id == "codex" {
+        Some(
+            registry
+                .codex_launch
+                .lock()
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        None
+    };
     adopt_latest_codex_thread(&mut request, &registry)?;
     let size = validated_size(request.cols, request.rows)?;
     let launch_arguments = request.arguments.clone();
+    let profile_config_path = profile_config_directory(
+        &request.definition_id,
+        request.profile_config_path.as_deref(),
+    )?;
+    if request.definition_id == "codex" {
+        if let Some(native_id) = request.resume_session_id.as_deref().map(str::trim) {
+            if active_codex_resume_session(&registry, native_id, profile_config_path.as_deref())
+                .is_some()
+            {
+                return Err("這段 Codex 對話已在另一個工作階段開啟，請切換到原工作階段繼續。重新嘗試不會釋放原工作階段的對話鎖。".into());
+            }
+        }
+    }
     let (definition_id, label, executable, mut arguments, working_directory) =
         resolve_launch(&request)?;
-    let profile_config_path =
-        profile_config_directory(&definition_id, request.profile_config_path.as_deref())?;
     let resumed_provider = if definition_id == "codex" {
         request
             .resume_session_id
@@ -7930,6 +7975,7 @@ pub fn launch_with_replay(
         let _ = terminate_agent_entry(entry.as_ref());
         return Err(error);
     }
+    drop(codex_launch_guard);
 
     if let Some(path) = antigravity_capture_path {
         watch_antigravity_conversation_id(
@@ -14536,6 +14582,113 @@ notify = ["notify.exe", "turn-ended"]"#,
         assert!(!fixture.registry.output_snapshots().iter().any(|snapshot| {
             String::from_utf8_lossy(&decode(&snapshot.base64).unwrap()).contains("[LatticeTerm]")
         }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_resume_ownership_requires_the_exact_account_and_native_id() {
+        let fixture = CodexSubmitFixture::new(None);
+        let profile = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        {
+            let mut summary = entry.summary.lock().unwrap();
+            summary.captured_session_id = Some("native-owned-fixture".into());
+            summary.profile_config_path = Some(profile.path().display().to_string());
+        }
+        assert_eq!(
+            active_codex_resume_session(
+                &fixture.registry,
+                "native-owned-fixture",
+                Some(profile.path())
+            )
+            .unwrap()
+            .session_id,
+            fixture.id
+        );
+        assert!(active_codex_resume_session(
+            &fixture.registry,
+            "other-native",
+            Some(profile.path())
+        )
+        .is_none());
+        assert!(active_codex_resume_session(
+            &fixture.registry,
+            "native-owned-fixture",
+            Some(other.path())
+        )
+        .is_none());
+        assert!(
+            active_codex_resume_session(&fixture.registry, "native-owned-fixture", None).is_none()
+        );
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        fixture.registry.stop_all();
+        assert!(active_codex_resume_session(
+            &fixture.registry,
+            "native-owned-fixture",
+            Some(profile.path())
+        )
+        .is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_resume_ownership_matches_a_canonical_profile_alias() {
+        let fixture = CodexSubmitFixture::new(None);
+        let profile = tempfile::tempdir().unwrap();
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        {
+            let mut summary = entry.summary.lock().unwrap();
+            summary.captured_session_id = Some("native-owned-fixture".into());
+            summary.profile_config_path = Some(profile.path().display().to_string());
+        }
+        assert!(active_codex_resume_session(
+            &fixture.registry,
+            "native-owned-fixture",
+            Some(&profile.path().join("."))
+        )
+        .is_some());
+        let guard = fixture.registry.codex_launch.lock().unwrap();
+        assert!(fixture.registry.codex_launch.try_lock().is_err());
+        drop(guard);
+        assert!(fixture.registry.codex_launch.try_lock().is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_resume_duplicate_is_rejected_before_spawning_or_writing() {
+        let fixture = CodexSubmitFixture::new(None);
+        let profile = tempfile::tempdir().unwrap();
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        {
+            let mut summary = entry.summary.lock().unwrap();
+            summary.captured_session_id = Some("native-owned-fixture".into());
+            summary.profile_config_path = Some(profile.path().display().to_string());
+        }
+        let result = launch(
+            fixture.sink.clone(),
+            fixture.registry.clone(),
+            AgentLaunchRequest {
+                definition_id: " codex ".into(),
+                label: "Owned resume fixture".into(),
+                executable: "codex".into(),
+                arguments: Vec::new(),
+                resume_session_id: Some(" native-owned-fixture ".into()),
+                group_id: None,
+                seed_input: None,
+                restore_existing_session: false,
+                profile_config_path: Some(profile.path().display().to_string()),
+                sandbox: false,
+                detached: false,
+                working_directory: profile.path().display().to_string(),
+                cols: 80,
+                rows: 24,
+            },
+        );
+        assert!(result.unwrap_err().contains("已在另一個工作階段開啟"));
+        assert_eq!(fixture.registry.list().len(), 1);
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert!(fixture.registry.codex_launch.try_lock().is_ok());
     }
 
     #[cfg(windows)]
