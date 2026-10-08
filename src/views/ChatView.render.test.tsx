@@ -100,7 +100,7 @@ describe("ChatView", () => {
   it("shows whether a shared session is replying or waiting in the conversation", () => {
     const view = (state: "working" | "needsAttention" | "idle", queuedPrompts = 0) => renderToStaticMarkup(
       <I18nProvider locale="zh-TW">
-        <ChatView agents={fakeAgentApi({ sessions: [fakeSession({ sessionId: "shared", state, queuedPrompts })] })}
+        <ChatView agents={fakeAgentApi({ sessions: [fakeSession({ sessionId: "shared", state, queuedPrompts, stateSource: "integration" })] })}
           chat={fakeChatApi()} automations={fakeAutomationsApi()}
           workspaceSessionId="shared" onSelectWorkspaceSession={() => {}} onOpenSession={() => {}} />
       </I18nProvider>,

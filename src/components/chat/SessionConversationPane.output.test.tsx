@@ -11,22 +11,43 @@ const { conversation } = vi.hoisted(() => ({
     messages: [] as SessionConversationMessage[],
     availability: "ready" as "waitingForIdentity" | "waitingForTranscript" | "ready", truncated: false,
     readError: null, loading: false, slow: false, output: "Working", outputError: null,
-    sendError: null, sending: false, queued: null, send: vi.fn(), acknowledge: vi.fn(),
+    sendError: null, sending: false, queued: null as number | null, send: vi.fn(), acknowledge: vi.fn(),
     approval: null, answering: false, answerError: null, answer: vi.fn(),
   },
 }));
 vi.mock("../../app/useSessionConversation", () => ({ useSessionConversation: () => conversation }));
 const { SessionConversationPane } = await import("./SessionConversationPane");
 
-function render(state: "working" | "needsAttention" | "done", definitionId = "codex") {
+function render(state: "working" | "needsAttention" | "done", definitionId = "codex", overrides: Parameters<typeof fakeSession>[0] = {}) {
   return renderToStaticMarkup(<I18nProvider locale="zh-TW">
-    <SessionConversationPane session={fakeSession({ state, definitionId })} agents={fakeAgentApi()}
+    <SessionConversationPane session={fakeSession({ state, definitionId, ...overrides })} agents={fakeAgentApi()}
       onOpenTerminal={() => {}} onSessionReplaced={() => {}} />
   </I18nProvider>);
 }
 
 describe("session chat output disclosure", () => {
-  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; });
+  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; });
+
+  it("does not report a queued prompt as sent after a heuristic completion", () => {
+    conversation.queued = 1;
+    const html = render("done", "codex", { queuedPrompts: 1, stateSource: "heuristic" });
+    expect(html).toContain("還有 1 則訊息排隊，尚未送到助理");
+    expect(html).toContain("正在等助理回報就緒");
+    expect(html).not.toContain("訊息已送出");
+  });
+
+  it("keeps the backend queue count visible after the local acknowledgment resets", () => {
+    const html = render("done", "codex", { queuedPrompts: 2, stateSource: "integration" });
+    expect(html).toContain("還有 2 則訊息排隊，尚未送到助理");
+    expect(html).not.toContain("訊息已送出");
+    expect(html).not.toContain("正在等助理回報就緒");
+  });
+
+  it("reports delivery only for an immediate send with no backend queue", () => {
+    conversation.queued = 0;
+    expect(render("done", "codex", { stateSource: "integration" })).toContain("訊息已送出");
+    expect(render("done", "codex", { stateSource: "integration", queuedPrompts: 1 })).not.toContain("訊息已送出");
+  });
 
   it("keeps the readable fallback visible before native messages arrive", () => {
     expect(render("working")).toContain('class="session-chat__output" open=""');

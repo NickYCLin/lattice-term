@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { installFakeDom } from "./testFixtures/hookDom";
 import { fakeAgentApi, fakeSession } from "./testFixtures/agentApis";
 import { useSessionConversation, type SessionConversationMessage, type SessionConversationSnapshot } from "./useSessionConversation";
+import { SESSION_PROMPT_NOT_READY } from "./sessionConversationReadiness";
 
 function snapshot(messages: SessionConversationMessage[] = []): SessionConversationSnapshot {
   return { availability: "ready", messages, truncated: false };
@@ -15,6 +16,33 @@ vi.mock("./terminalPreview", () => ({ renderTerminalPreview: renderPreview }));
 beforeEach(() => {
   renderPreview.mockReset().mockImplementation(async (snapshot: string) =>
     snapshot.replace(/\x1b\[[0-9;]*m/g, ""));
+});
+
+it.each(["idle", "done"] as const)("keeps a restored %s prompt out of the queue until readiness is confirmed", async state => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_approval" ? null : snapshot()));
+  const enqueue = vi.fn().mockResolvedValue(0);
+  let agents = fakeAgentApi({ enqueue, sessions: [fakeSession({ sessionId: "restored", state,
+    stateSource: "heuristic", restoreExistingSession: true })] });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("restored", agents); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { expect(await api.send("這是保留的草稿")).toBe(false); });
+    expect(api.sendError).toBe(SESSION_PROMPT_NOT_READY);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(agents.send).not.toHaveBeenCalled();
+    expect(agents.launch).not.toHaveBeenCalled();
+    agents = { ...agents, sessions: [fakeSession({ sessionId: "restored", state,
+      stateSource: "integration", restoreExistingSession: true })] };
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { expect(await api.send("這是保留的草稿")).toBe(true); });
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith("restored", "這是保留的草稿");
+    expect(api.sendError).toBeNull();
+    expect(api.queued).toBe(0);
+    await act(async () => { root.unmount(); });
+  } finally { vi.useRealTimers(); vi.clearAllMocks(); }
 });
 
 it("reads the selected session, rejects stale reads and sends only through that session's existing queue", async () => {

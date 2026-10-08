@@ -11,6 +11,7 @@ import { ComposerVoiceControls } from "./ComposerVoiceControls";
 import { ConversationIdentity, ConversationMessage } from "./ConversationPresentation";
 import { Callout } from "../common/Callout";
 import { useSessionConversation } from "../../app/useSessionConversation";
+import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "../../app/sessionConversationReadiness";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
@@ -74,10 +75,12 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
+  const waitingForReady = sessionNeedsReadyConfirmation(session);
+  const queuedCount = Math.max(session.queuedPrompts, conversation.queued ?? 0);
   const { acknowledge } = conversation;
   useEffect(() => {
     acknowledge();
-  }, [session.state, acknowledge]);
+  }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
   useLayoutEffect(() => {
     const node = messagesRef.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
@@ -89,7 +92,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
   const blocked = Boolean(session.closedReason) || conversation.sending;
   const hasContent = Boolean(draft.trim()) || attachments.length > 0;
-  const canSend = hasContent && !blocked;
+  const canSend = hasContent && !blocked && !waitingForReady;
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend || pastingRef.current) return;
@@ -189,7 +192,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             {t("form.group")} · {session.groupLabel}
           </span>}
           {live && <span className={`session-chat__state is-${session.state}`}>
-            {t(stateLabel[session.state] ?? "agents.state.idle")}
+            {t(waitingForReady ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}
         </ConversationIdentity>
         <div className="chat-composer__actions">
@@ -298,11 +301,20 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     </div>
     <form className="chat-composer session-composer" onSubmit={submit}>
       {session.closedReason && <p role="status">{t("sessionChat.closed")}</p>}
-      {conversation.sendError && <p role="alert">{conversation.sendError}</p>}
+      {conversation.sendError && conversation.sendError !== SESSION_PROMPT_NOT_READY && <p role="alert">{conversation.sendError}</p>}
       {conversation.answerError && <p role="alert">{conversation.answerError === "answered-elsewhere"
         ? t("sessionChat.permission.gone")
         : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
-      {conversation.queued !== null && !working && <p role="status">{t("sessionChat.accepted")}</p>}
+      {waitingForReady && <Callout tone="warn" actions={
+        <button type="button" className="button button--secondary button--sm" onClick={onOpenTerminal}>
+          {t("sessionChat.terminal")}
+        </button>
+      }>{t("sessionChat.notReady")}</Callout>}
+      {queuedCount > 0 && <div role="status">
+        <p>{t("sessionChat.queued", { count: queuedCount })}</p>
+        {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
+      </div>}
+      {conversation.queued === 0 && queuedCount === 0 && !working && !waitingForReady && <p role="status">{t("sessionChat.accepted")}</p>}
       {notice && <p role="status">{notice}</p>}
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
         <div ref={boxRef} className={`chat-composer__box session-composer__box${dragging ? " is-file-dragging" : ""}`}>
@@ -328,10 +340,10 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
             <SessionModelPicker session={session} agents={agents}
-              disabled={Boolean(session.closedReason) || (working && !switchesModelInPlace(session))}
+              disabled={Boolean(session.closedReason) || waitingForReady || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
-              blocked={blocked || pasting} working={working} sending={conversation.sending} canSend={canSend}
+              blocked={blocked || pasting || waitingForReady} working={working} sending={conversation.sending} canSend={canSend}
               sendLabel={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
               replyVersion={String(conversation.messages.length)}
               replyText={spokenSessionReply(conversation.messages[conversation.messages.length - 1]) ?? ""}
