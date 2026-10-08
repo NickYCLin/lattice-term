@@ -49,6 +49,16 @@ describe("session chat output disclosure", () => {
     expect(render("done", "codex", { stateSource: "integration", queuedPrompts: 1 })).not.toContain("訊息已送出");
   });
 
+  it("keeps delivery and queue notices in a separate centered composer region", () => {
+    conversation.queued = 0;
+    const delivered = render("done", "codex", { stateSource: "integration" });
+    expect(delivered).toMatch(/session-composer__notices"><p role="status">訊息已送出[^<]*<\/p><\/div><div class="session-composer__frame">/);
+    const queued = render("done", "codex", { stateSource: "integration", queuedPrompts: 2 });
+    expect(queued).toMatch(/session-composer__notices"><div role="status"><p>還有 2 則訊息排隊/);
+    conversation.queued = null;
+    expect(render("working")).toContain('<div class="session-composer__notices"></div>');
+  });
+
   it("keeps the readable fallback visible before native messages arrive", () => {
     expect(render("working")).toContain('class="session-chat__output" open=""');
   });

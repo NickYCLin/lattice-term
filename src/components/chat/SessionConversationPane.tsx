@@ -295,22 +295,24 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       </div>
     </div>
     <form className="chat-composer session-composer" onSubmit={submit}>
-      {session.closedReason && <p role="status">{t("sessionChat.closed")}</p>}
-      {conversation.sendError && conversation.sendError !== SESSION_PROMPT_NOT_READY && <p role="alert">{conversation.sendError}</p>}
-      {conversation.answerError && <p role="alert">{conversation.answerError === "answered-elsewhere"
-        ? t("sessionChat.permission.gone")
-        : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
-      {waitingForReady && <Callout tone="warn" actions={
-        <button type="button" className="button button--secondary button--sm" onClick={onOpenTerminal}>
-          {t("sessionChat.terminal")}
-        </button>
-      }>{t("sessionChat.notReady")}</Callout>}
-      {queuedCount > 0 && <div role="status">
-        <p>{t("sessionChat.queued", { count: queuedCount })}</p>
-        {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
-      </div>}
-      {conversation.queued === 0 && queuedCount === 0 && !working && !waitingForReady && <p role="status">{t("sessionChat.accepted")}</p>}
-      {notice && <p role="status">{notice}</p>}
+      <div className="session-composer__notices">
+        {session.closedReason && <p role="status">{t("sessionChat.closed")}</p>}
+        {conversation.sendError && conversation.sendError !== SESSION_PROMPT_NOT_READY && <p role="alert">{conversation.sendError}</p>}
+        {conversation.answerError && <p role="alert">{conversation.answerError === "answered-elsewhere"
+          ? t("sessionChat.permission.gone")
+          : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
+        {waitingForReady && <Callout tone="warn" actions={
+          <button type="button" className="button button--secondary button--sm" onClick={onOpenTerminal}>
+            {t("sessionChat.terminal")}
+          </button>
+        }>{t("sessionChat.notReady")}</Callout>}
+        {queuedCount > 0 && <div role="status">
+          <p>{t("sessionChat.queued", { count: queuedCount })}</p>
+          {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
+        </div>}
+        {conversation.queued === 0 && queuedCount === 0 && !working && !waitingForReady && <p role="status">{t("sessionChat.accepted")}</p>}
+        {notice && <p role="status">{notice}</p>}
+      </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
         <div ref={boxRef} className={`chat-composer__box session-composer__box${dragging ? " is-file-dragging" : ""}`}>
           {attachments.length > 0 && (

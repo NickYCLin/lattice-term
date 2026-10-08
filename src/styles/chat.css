@@ -1092,23 +1092,52 @@ button.chat-chip:hover {
   cursor: default;
 }
 
-/* Session composer: project strip tucked behind a rounded input card. */
+.session-composer {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 60%;
+}
 
 .session-composer__frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
   max-width: 52rem;
   margin: 0 auto;
 }
 
+.session-composer__notices {
+  display: grid;
+  min-height: 0;
+  max-height: 8rem;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 52rem;
+  margin: 0 auto var(--space-3);
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.session-composer__notices:empty {
+  display: none;
+}
+
 .session-composer__context {
   display: flex;
+  flex: none;
   min-width: 0;
   align-items: center;
   gap: var(--space-4);
-  margin: 0 var(--space-3) calc(-1 * var(--space-3));
-  padding: var(--space-2) var(--space-4) calc(var(--space-2) + var(--space-3));
-  border: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line-strong);
   border-bottom: 0;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 1.25rem 1.25rem 0 0;
   background: var(--surface-sunken);
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -1125,6 +1154,10 @@ button.chat-chip:hover {
   flex: none;
 }
 
+.session-composer__place:last-child {
+  flex: none;
+}
+
 .session-composer__place > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1133,12 +1166,17 @@ button.chat-chip:hover {
 
 .session-composer__box {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
   max-width: none;
   padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
-  border-radius: 1.25rem;
+  border-radius: 0 0 1.25rem 1.25rem;
 }
 
 .session-composer__box .chat-composer__input {
+  flex: 0 1 auto;
   min-height: 2.75rem;
   field-sizing: content;
   resize: none;
@@ -1146,6 +1184,7 @@ button.chat-chip:hover {
 
 .session-composer__toolbar {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   min-width: 0;
   align-items: center;
@@ -1217,6 +1256,13 @@ button.chat-chip:hover {
   flex: none;
   width: 2rem;
   height: 2rem;
+}
+
+.session-composer__box .chat-attachments,
+.session-composer__box .chat-queue {
+  min-height: 0;
+  max-height: 6rem;
+  overflow-y: auto;
 }
 
 .session-composer__box .chat-attachments {
