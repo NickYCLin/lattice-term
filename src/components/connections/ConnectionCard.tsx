@@ -3,7 +3,7 @@
  *
  * The card body opens the details panel; the star and the action buttons sit
  * above it as siblings, so nothing is nested inside another control. When the
- * current package has no matching session engine, the footer states the exact
+ * current package has no matching session engine, the card states the exact
  * platform boundary instead of offering a button that cannot work.
  */
 
@@ -72,13 +72,16 @@ export function ConnectionCard({
         onClick={onSelect}
         aria-pressed={selected}
         aria-label={t("row.details", { name: profile.name })}
+        title={[profile.name, connectionTarget(profile), ...profile.tags].join("\n")}
       />
 
       <div className="connection-card__head">
-        <ProtocolTile protocol={profile.protocol} />
+        <ProtocolTile protocol={profile.protocol} size="sm" />
         <span className="connection-card__text">
-          <span className="connection-card__name truncate">{profile.name}</span>
-          <span className="connection-card__target mono truncate">
+          <span className="connection-card__name truncate" title={profile.name}>
+            {profile.name}
+          </span>
+          <span className="connection-card__target mono truncate" title={connectionTarget(profile)}>
             {connectionTarget(profile)}
           </span>
           {linked.length > 0 && (
@@ -89,23 +92,6 @@ export function ConnectionCard({
             </span>
           )}
         </span>
-        <button
-          type="button"
-          className="icon-button icon-button--sm"
-          onClick={onToggleFavorite}
-          aria-pressed={profile.favorite}
-          aria-label={
-            profile.favorite
-              ? t("row.removeFavorite", { name: profile.name })
-              : t("row.addFavorite", { name: profile.name })
-          }
-        >
-          <StarIcon
-            size={15}
-            filled={profile.favorite}
-            className={profile.favorite ? "is-favorite" : undefined}
-          />
-        </button>
       </div>
 
       <div className="connection-card__meta">
@@ -120,15 +106,19 @@ export function ConnectionCard({
             {findProtocol(route.profile.protocol).acronym}
           </span>
         ))}
-        {profile.tags.slice(0, 2).map((tag) => (
-          <TagChip key={tag} label={tag} />
-        ))}
-        {profile.tags.length > 2 && (
-          <span className="badge badge--tag">+{profile.tags.length - 2}</span>
-        )}
+        <span className="connection-card__tags" title={profile.tags.join("、")}>
+          {profile.tags.slice(0, 1).map((tag) => (
+            <TagChip key={tag} label={tag} />
+          ))}
+          {profile.tags.length > 1 && (
+            <span className="badge badge--tag connection-card__tag-count">
+              +{profile.tags.length - 1}
+            </span>
+          )}
+        </span>
       </div>
 
-      <div className="connection-card__foot">
+      <div className="connection-card__primary">
         {linked.length > 0 && connectable.length > 0 ? (
           <span className="connection-card__routes">
             {connectable.map((route) => (
@@ -178,8 +168,27 @@ export function ConnectionCard({
             )}
           </span>
         )}
+      </div>
 
+      <div className="connection-card__foot">
         <div className="connection-card__actions">
+          <button
+            type="button"
+            className="icon-button icon-button--sm"
+            onClick={onToggleFavorite}
+            aria-pressed={profile.favorite}
+            aria-label={
+              profile.favorite
+                ? t("row.removeFavorite", { name: profile.name })
+                : t("row.addFavorite", { name: profile.name })
+            }
+          >
+            <StarIcon
+              size={15}
+              filled={profile.favorite}
+              className={profile.favorite ? "is-favorite" : undefined}
+            />
+          </button>
           <button
             type="button"
             className="icon-button icon-button--sm"
