@@ -11,6 +11,7 @@ import { ComposerVoiceControls } from "./ComposerVoiceControls";
 import { ConversationIdentity, ConversationMessage } from "./ConversationPresentation";
 import { Callout } from "../common/Callout";
 import { useSessionConversation } from "../../app/useSessionConversation";
+import { useConversationDraft } from "../../app/useConversationDraft";
 import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "../../app/sessionConversationReadiness";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
@@ -57,13 +58,11 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
 }) {
   const { t } = useI18n();
   const conversation = useSessionConversation(session.sessionId, agents);
-  const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
+  const { draft, setDraft, attachments, setAttachments, pasting, setPasting,
+    addAttachmentPaths, readDraft } = useConversationDraft("session", session.sessionId);
   const [notice, setNotice] = useState<string | null>(null);
-  const [pasting, setPasting] = useState(false);
   const pastingRef = useRef(false);
+  pastingRef.current = pasting;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
@@ -105,14 +104,12 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   }
 
   function addAttachments(paths: readonly string[]): boolean {
-    const next = mergeAttachmentPaths(attachmentsRef.current, paths);
+    const next = addAttachmentPaths(paths);
     if (!next) {
-      setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
+      if (mounted.current) setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
       return false;
     }
-    attachmentsRef.current = next;
-    setAttachments(next);
-    setNotice(null);
+    if (mounted.current) setNotice(null);
     return true;
   }
   async function chooseAttachments(kind: "image" | "file") {
@@ -134,7 +131,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   }
   async function pasteAttachments(silent = false) {
     if (pastingRef.current) return;
-    if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
+    if (readDraft().attachments.length >= CHAT_ATTACHMENT_LIMIT) {
       setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
       return;
     }
@@ -144,20 +141,18 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const files = await invoke<string[]>("agent_chat_paste_files");
-      if (!mounted.current) return;
       if (files.length > 0) {
         addAttachments(files);
         return;
       }
       const path = await invoke<string | null>("agent_chat_paste_image", { threadId: session.sessionId });
-      if (!mounted.current) return;
       if (path) addAttachments([path]);
-      else if (!silent) setNotice(t("chat.attachment.clipboardEmpty"));
+      else if (mounted.current && !silent) setNotice(t("chat.attachment.clipboardEmpty"));
     } catch (reason) {
       if (mounted.current && !silent) setNotice(t("chat.attachment.failed", { detail: errorText(reason) }));
     } finally {
       pastingRef.current = false;
-      if (mounted.current) setPasting(false);
+      setPasting(false);
     }
   }
   const clipboard = useChatClipboardFallback(session.sessionId, () => { void pasteAttachments(true); });

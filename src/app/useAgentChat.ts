@@ -1,6 +1,7 @@
 import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
 import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
 import { dismissNativeConversation } from "./nativeConversationDismissals";
+import { removeConversationDraft } from "./useConversationDraft";
 /**
  * Chat threads with an agent CLI, kept in the WebView and driven by the
  * Rust chat runner.
@@ -579,6 +580,7 @@ export function useAgentChat(
         .catch(() => {});
     }
     const remaining = threadsRef.current.filter((thread) => thread.id !== id);
+    removeConversationDraft("thread", id);
     // A delete is a deliberate destructive action. Persist it immediately so
     // closing or reloading the window cannot restore the thread during the
     // normal delayed-save window used for streaming replies.

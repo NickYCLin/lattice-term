@@ -5,7 +5,22 @@ import { I18nProvider } from "../../i18n";
 import { ComposerAttachments, ComposerPopover } from "./ConversationComposer";
 import { ComposerVoiceControls } from "./ComposerVoiceControls";
 import { ChatView } from "../../views/ChatView";
-import { fakeAgentApi, fakeAutomationsApi, fakeChatApi, fakeDefinition, fakeThread } from "../../app/testFixtures/agentApis";
+import { fakeAgentApi, fakeAutomationsApi, fakeChatApi, fakeDefinition, fakeSession, fakeThread } from "../../app/testFixtures/agentApis";
+import { SessionConversationPane } from "./SessionConversationPane";
+import { desktopChatAccess } from "../../app/desktopChat";
+import { removeConversationDraft } from "../../app/useConversationDraft";
+
+const clipboard = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: clipboard.invoke, convertFileSrc: (path: string) => path }));
+const sessionConversation = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn() }));
+vi.mock("../../app/useSessionConversation", () => ({
+  useSessionConversation: () => ({
+    messages: [], availability: "ready", truncated: false, readError: null, loading: false,
+    slow: false, output: "", outputError: null, sendError: null, sending: false, queued: null,
+    send: sessionConversation.send, acknowledge: sessionConversation.acknowledge,
+    approval: null, answering: false, answerError: null, answer: vi.fn(),
+  }),
+}));
 
 const voice = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), speak: vi.fn(), stopSpeaking: vi.fn(), listening: false }));
 vi.mock("../../app/sessionVoice", () => ({
@@ -13,6 +28,7 @@ vi.mock("../../app/sessionVoice", () => ({
   speechSynthesisAvailable: () => true,
   speak: voice.speak,
   stopSpeaking: voice.stopSpeaking,
+  spokenSessionReply: () => "",
 }));
 
 class HostNode {
@@ -82,13 +98,108 @@ function installHostDom() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  clipboard.invoke.mockReset().mockResolvedValue(null);
+  sessionConversation.send.mockReset().mockResolvedValue(true);
   voice.listening = false;
   voice.start.mockReset();
   voice.stop.mockReset();
   voice.stopSpeaking.mockReset();
   voice.speak.mockReset().mockResolvedValue(undefined);
 });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  for (const kind of ["thread", "session"] as const) {
+    for (const id of ["t1", "composer-draft-a", "composer-draft-b"]) removeConversationDraft(kind, id);
+  }
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+function inputProps(container: HostNode) {
+  const node = allNodes(container).find(candidate => candidate.tagName === "TEXTAREA")!;
+  const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
+  return (node as unknown as Record<string, {
+    value: string;
+    onChange: (event: { target: { value: string } }) => void;
+    onPaste: (event: { clipboardData: { items: { kind: string; type: string }[]; getData: () => string }; preventDefault: () => void }) => void;
+  }>)[key];
+}
+
+it.each(["thread", "session"] as const)("keeps unsent text, files and screenshots in the %s composer after switching pages", async kind => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const threads = [fakeThread({ id: "composer-draft-a" }), fakeThread({ id: "composer-draft-b" })];
+  const chat = fakeChatApi({ threads, activeThreadId: threads[0].id });
+  const agents = fakeAgentApi({ catalog: [fakeDefinition()] });
+  const renderComposer = (id: string) => {
+    chat.activeThreadId = id;
+    root.render(<I18nProvider locale="zh-TW">{kind === "thread"
+      ? <ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+      : <SessionConversationPane key={id} session={fakeSession({ sessionId: id, stateSource: "integration" })}
+        agents={agents} onOpenTerminal={() => {}} onSessionReplaced={() => {}} />}</I18nProvider>);
+  };
+  clipboard.invoke.mockImplementation(async (command: string) => {
+    if (command === "agent_chat_paste_files") return ["C:/drafts/notes.txt", "C:/drafts/screenshot.png"];
+    if (command === "agent_chat_keep_image_preview") return "C:/drafts/preview.png";
+    return null;
+  });
+  try {
+    await act(async () => renderComposer(threads[0].id));
+    await act(async () => inputProps(container).onChange({ target: { value: "尚未送出的說明" } }));
+    const preventDefault = vi.fn();
+    await act(async () => inputProps(container).onPaste({
+      clipboardData: { items: [{ kind: "file", type: "image/png" }], getData: () => "" }, preventDefault,
+    }));
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("screenshot.png");
+    expect(container.textContent).toContain("notes.txt");
+    await act(async () => renderComposer(threads[1].id));
+    expect(inputProps(container).value).toBe("");
+    expect(container.textContent).not.toContain("screenshot.png");
+    if (kind === "thread") expect(desktopChatAccess.drafts.has(threads[0].id)).toBe(true);
+    await act(async () => root.render(null));
+    await act(async () => renderComposer(threads[0].id));
+    expect(inputProps(container).value).toBe("尚未送出的說明");
+    expect(container.textContent).toContain("screenshot.png");
+    expect(container.textContent).toContain("notes.txt");
+    expect(chat.send).not.toHaveBeenCalled();
+    expect(sessionConversation.send).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each(["thread", "session"] as const)("keeps a delayed screenshot paste on its original %s composer", async kind => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const threads = [fakeThread({ id: "composer-draft-a" }), fakeThread({ id: "composer-draft-b" })];
+  const chat = fakeChatApi({ threads, activeThreadId: threads[0].id });
+  const agents = fakeAgentApi({ catalog: [fakeDefinition()] });
+  let finishPaste!: (path: string) => void;
+  const pending = new Promise<string>(resolve => { finishPaste = resolve; });
+  const renderComposer = (id: string) => {
+    chat.activeThreadId = id;
+    root.render(<I18nProvider locale="zh-TW">{kind === "thread"
+      ? <ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+      : <SessionConversationPane key={id} session={fakeSession({ sessionId: id, stateSource: "integration" })}
+        agents={agents} onOpenTerminal={() => {}} onSessionReplaced={() => {}} />}</I18nProvider>);
+  };
+  clipboard.invoke.mockImplementation(async (command: string) => {
+    if (command === "agent_chat_paste_files") return [];
+    if (command === "agent_chat_paste_image") return pending;
+    if (command === "agent_chat_keep_image_preview") return "C:/drafts/preview.png";
+    return null;
+  });
+  try {
+    await act(async () => renderComposer(threads[0].id));
+    await act(async () => inputProps(container).onPaste({
+      clipboardData: { items: [{ kind: "file", type: "image/png" }], getData: () => "" }, preventDefault: vi.fn(),
+    }));
+    await act(async () => renderComposer(threads[1].id));
+    await act(async () => finishPaste("C:/drafts/screenshot.png"));
+    expect(container.textContent).not.toContain("screenshot.png");
+    await act(async () => renderComposer(threads[0].id));
+    expect(container.textContent).toContain("screenshot.png");
+    expect(clipboard.invoke).toHaveBeenCalledWith("agent_chat_paste_image", { threadId: threads[0].id });
+  } finally { await act(async () => root.unmount()); }
+});
 
 it("offers files and images under plus, without a clipboard action", async () => {
   const container = installHostDom();

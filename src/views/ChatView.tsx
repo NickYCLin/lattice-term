@@ -1,5 +1,6 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { useChatClipboardFallback } from "../app/chatClipboard";
+import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
 import { NativeConversationRows } from "../components/chat/NativeConversationRows";
 import { useNativeHistory } from "../app/useNativeConversations";
@@ -32,7 +33,7 @@ import {
   type ClipboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths } from "../app/chatAttachments";
+import { CHAT_ATTACHMENT_LIMIT } from "../app/chatAttachments";
 import {
   defaultPermission,
   effortChoices,
@@ -46,7 +47,6 @@ import {
   mentionsInPrompt,
   type ChatDefinitionId,
   type ChatAttachment,
-  type ChatMention,
   type ChatItem,
   type ChatPermission,
   type ChatThread,
@@ -748,25 +748,25 @@ function ThreadPane({
   handoffProblem?: string | null;
 }) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState("");
+  const { draft, setDraft, attachments, setAttachments, picks, setPicks,
+    pasting: pastingImage, setPasting: setPastingImage, steering, setSteering,
+    addAttachmentPaths, readDraft } = useConversationDraft("thread", thread.id);
   const [notice, setNotice] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [picks, setPicks] = useState<ChatMention[]>([]);
-  const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
-  const [pastingImage, setPastingImage] = useState(false);
   const pastingImageRef = useRef(false);
+  pastingImageRef.current = pastingImage;
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const composerDropRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [steering, setSteering] = useState(false);
   const steeringRef = useRef(false);
+  steeringRef.current = steering;
   useLayoutEffect(() => {
     if (draft.length || attachments.length || pastingImage || steering) desktopChatAccess.drafts.add(thread.id);
     else desktopChatAccess.drafts.delete(thread.id);
-    return () => { desktopChatAccess.drafts.delete(thread.id); };
+    return () => {
+      if (!conversationDraftHasInput("thread", thread.id)) desktopChatAccess.drafts.delete(thread.id);
+    };
   }, [thread.id, draft, attachments, pastingImage, steering]);
   const fresh = threadIsFresh(thread);
   const [settingsOpen, setSettingsOpen] = useState(fresh);
@@ -814,16 +814,15 @@ function ThreadPane({
 
   useEffect(() => {
     setNotice(null);
-    setAttachments([]);
-    setPicks([]);
   }, [thread.id]);
 
   function addAttachments(paths: readonly string[]): boolean {
     if (steeringRef.current) return false;
-    const next = mergeAttachmentPaths(attachmentsRef.current, paths);
-    if (!next) { setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return false; }
-    attachmentsRef.current = next;
-    setAttachments(next);
+    const next = addAttachmentPaths(paths);
+    if (!next) {
+      if (mounted.current) setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
+      return false;
+    }
     void keepImagePreviews(next.filter(file => file.isImage && !file.preview && paths.includes(file.path)));
     return true;
   }
@@ -837,16 +836,14 @@ function ThreadPane({
         threadId: thread.id,
         path: image.path,
       }).catch(() => null);
-      if (!preview || !mounted.current) continue;
-      const next = attachmentsRef.current.map(file => file.path === image.path ? { ...file, preview } : file);
-      attachmentsRef.current = next;
-      setAttachments(next);
+      if (!preview) continue;
+      setAttachments(current => current.map(file => file.path === image.path ? { ...file, preview } : file));
     }
   }
 
   async function pasteImage(silent = false) {
     if (pastingImageRef.current || steeringRef.current) return;
-    if (attachmentsRef.current.length >= CHAT_ATTACHMENT_LIMIT) {
+    if (readDraft().attachments.length >= CHAT_ATTACHMENT_LIMIT) {
       setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT })); return;
     }
     pastingImageRef.current = true;
@@ -857,20 +854,18 @@ function ThreadPane({
       // Files copied in a file manager come first: their clipboard entry can
       // also carry an icon image that is not what the user meant to paste.
       const files = await invoke<string[]>("agent_chat_paste_files");
-      if (!mounted.current) return;
       if (files.length > 0) {
         addAttachments(files);
         return;
       }
       const path = await invoke<string | null>("agent_chat_paste_image", { threadId: thread.id });
-      if (!mounted.current) return;
       if (path) addAttachments([path]);
-      else if (!silent) setNotice(t("chat.attachment.clipboardEmpty"));
+      else if (mounted.current && !silent) setNotice(t("chat.attachment.clipboardEmpty"));
     } catch (reason) {
       if (mounted.current && !silent) setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
     } finally {
       pastingImageRef.current = false;
-      if (mounted.current) setPastingImage(false);
+      setPastingImage(false);
     }
   }
 
