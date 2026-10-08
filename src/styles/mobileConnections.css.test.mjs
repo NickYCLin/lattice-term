@@ -6,6 +6,7 @@ const connectionStyles = readFileSync(
   "utf8",
 );
 const shellStyles = readFileSync(new URL("./shell.css", import.meta.url), "utf8");
+const mobileStyles = readFileSync(new URL("./mobile.css", import.meta.url), "utf8");
 const overlayStyles = readFileSync(
   new URL("./overlays.css", import.meta.url),
   "utf8",
@@ -36,6 +37,15 @@ describe("mobile connection layout", () => {
   it("keeps the advanced drawer section visible inside a short viewport", () => {
     expect(overlayStyles).toMatch(
       /\.connection-advanced\s*\{[^}]*flex:\s*none;/s,
+    );
+  });
+
+  it("preserves a full title row after the late mobile overrides load", () => {
+    expect(mobileStyles).toMatch(
+      /@media \(max-width: 42rem\)\s*\{\s*\.app--mobile \.view-header__text\s*\{\s*flex: 1 1 0;/,
+    );
+    expect(mobileStyles).toMatch(
+      /@media \(max-width: 42rem\)[\s\S]*?\.app--mobile \.view-header__actions\s*\{[^}]*width: 100%;[^}]*flex-basis: 100%;[^}]*margin-left: 0;/,
     );
   });
 

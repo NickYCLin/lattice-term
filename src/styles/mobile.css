@@ -20,6 +20,14 @@
 .app--mobile .view-header__description { display: none; }
 .app--mobile .view-header__text { flex: 1 1 auto; }
 .app--mobile .view-header__actions { width: auto; }
+@media (max-width: 42rem) {
+  .app--mobile .view-header__text { flex: 1 1 0; }
+  .app--mobile .view-header__actions {
+    width: 100%;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
 .app--mobile[data-view="terminal"] > .workspace > .view-header { display: none; }
 .app--mobile[data-view="terminal"] .workspace__content { padding: 0; }
 
