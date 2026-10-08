@@ -1453,6 +1453,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         <RemoteConnectFlow
           profile={connectTarget}
           remote={remote}
+          vault={vault}
           onRelayAddressChanged={(relayAddress) => {
             // The device moved to a new relay. Keep the saved entry pointing
             // at the address that just worked, and let the remembered

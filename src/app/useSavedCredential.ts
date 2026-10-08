@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConnectionProfile } from "../domain/connection";
 import { hasDesktopBackend } from "./nativeRuntime";
 
@@ -243,6 +243,7 @@ export function useSavedCredential(
   profileId: string,
   kind: CredentialKind,
 ) {
+  const readGeneration = useRef(0);
   const [state, setState] = useState<SavedCredentialState>({
     mode: "loading",
     provider: null,
@@ -250,22 +251,22 @@ export function useSavedCredential(
   });
 
   const refresh = useCallback(async () => {
+    const generation = ++readGeneration.current;
     setState({ mode: "loading", provider: null, detail: null });
-    setState(await readState(profileId, kind));
+    const next = await readState(profileId, kind);
+    if (generation === readGeneration.current) setState(next);
   }, [kind, profileId]);
 
   useEffect(() => {
-    let cancelled = false;
-    void readState(profileId, kind).then((next) => {
-      if (!cancelled) setState(next);
-    });
+    void refresh();
     return () => {
-      cancelled = true;
+      readGeneration.current += 1;
     };
-  }, [kind, profileId]);
+  }, [refresh]);
 
   const remove = useCallback(async () => {
     await removeCredential(profileId, kind);
+    readGeneration.current += 1;
     setState((current) => ({
       mode: "missing",
       provider: current.provider ?? "System credential store",

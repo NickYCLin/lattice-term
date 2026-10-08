@@ -4,6 +4,8 @@ import { normalizeViewerPairingToken } from "../../app/pairingToken";
 import { relayConnectFollowUp } from "../../app/relayAddressRecovery";
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import { useSavedCredential } from "../../app/useSavedCredential";
+import type { VaultApi } from "../../app/useVault";
+import { CredentialVaultAccess } from "../vault/CredentialVaultAccess";
 import {
   connectionTarget,
   isRelayProfile,
@@ -24,12 +26,14 @@ import { useModalFocus } from "../overlays/modalFocus";
 export function RemoteConnectFlow({
   profile,
   remote,
+  vault,
   onConnected,
   onRelayAddressChanged,
   onCancel,
 }: {
   profile: ConnectionProfile;
   remote: RemoteApi;
+  vault?: VaultApi;
   onConnected: (sessionId: string) => void;
   /** Persists a corrected relay address back onto the saved entry. */
   onRelayAddressChanged?: (relayAddress: string) => void;
@@ -38,6 +42,8 @@ export function RemoteConnectFlow({
   const { t } = useI18n();
   const relay = isRelayProfile(profile);
   const savedCredential = useSavedCredential(profile.id, "latticePairingCode");
+  const vaultUnavailable = vault?.backend === "vault" && vault.status !== null && vault.status.state !== "unlocked";
+  const storageReady = !vaultUnavailable && (savedCredential.state.mode === "missing" || savedCredential.state.mode === "saved");
   const [pairingCode, setPairingCode] = useState("");
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
@@ -65,12 +71,16 @@ export function RemoteConnectFlow({
   }, [busy]);
 
   useEffect(() => {
-    if (relay && savedCredential.state.mode === "saved") {
+    if (vault?.backend === "vault") void savedCredential.refresh();
+  }, [vault?.backend, vault?.status?.state, savedCredential.refresh]);
+
+  useEffect(() => {
+    if (relay && !vaultUnavailable && savedCredential.state.mode === "saved") {
       setUseSavedPairingCode(true);
     } else if (savedCredential.state.mode !== "loading") {
       setUseSavedPairingCode(false);
     }
-  }, [relay, savedCredential.state.mode]);
+  }, [relay, vaultUnavailable, savedCredential.state.mode]);
 
   useEffect(() => {
     if (!useSavedPairingCode) codeRef.current?.focus();
@@ -91,7 +101,7 @@ export function RemoteConnectFlow({
     if (
       !shouldConnectWithoutAsking({
         relay,
-        credentialMode: savedCredential.state.mode,
+        credentialMode: vaultUnavailable ? "unavailable" : savedCredential.state.mode,
         useSavedPairingCode,
         busy,
         failed: problem !== null,
@@ -105,7 +115,7 @@ export function RemoteConnectFlow({
     void connect();
     // connect is stable for this dialog's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [relay, busy, problem, relayUnreachable, useSavedPairingCode, savedCredential.state.mode]);
+  }, [relay, busy, problem, relayUnreachable, useSavedPairingCode, vaultUnavailable, savedCredential.state.mode]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,6 +123,11 @@ export function RemoteConnectFlow({
   }
 
   async function connect() {
+    if (vault?.busy) return;
+    if (useSavedPairingCode && !storageReady) {
+      setProblem(t("vault.encrypted.lockedWarnBody"));
+      return;
+    }
     if (!useSavedPairingCode && !normalizedToken) {
       setProblem(t(relay ? "remote.connect.relayCodeInvalid" : "remote.connect.codeInvalid"));
       return;
@@ -128,7 +143,7 @@ export function RemoteConnectFlow({
       useSavedPairingCode,
       legacyPairing: false,
       rememberPairingCode:
-        relay && !useSavedPairingCode && rememberPairingCode,
+        relay && storageReady && !useSavedPairingCode && rememberPairingCode,
       // A remembered device has no address of its own; the relay finds it by
       // identity, exactly as the connect-by-ID dialog does.
       ...(relay ? { deviceId: profile.deviceId, relayAddress: attempted } : {}),
@@ -228,7 +243,7 @@ export function RemoteConnectFlow({
             </Callout>
           )}
 
-          {relay && savedCredential.state.mode === "saved" && (
+          {relay && !vaultUnavailable && savedCredential.state.mode === "saved" && (
             <Callout tone="security" title={t("remote.connect.savedCodeTitle")}>
               <div className="credential-choice">
                 <label className="checkbox">
@@ -262,7 +277,11 @@ export function RemoteConnectFlow({
             </Callout>
           )}
 
-          {relay && savedCredential.state.mode === "unavailable" && (
+          {relay && vaultUnavailable && vault && (
+            <CredentialVaultAccess vault={vault} disabled={busy} onReady={savedCredential.refresh} />
+          )}
+
+          {relay && !vaultUnavailable && savedCredential.state.mode === "unavailable" && (
             <Callout tone="warn" title={t("credential.unavailable.title")}>
               {t(
                 savedCredential.state.runtimeUnavailable
@@ -325,7 +344,7 @@ export function RemoteConnectFlow({
 
           {relay &&
             !useSavedPairingCode &&
-            savedCredential.state.mode === "missing" && (
+            storageReady && (
               <label className="checkbox">
                 <input
                   type="checkbox"
@@ -340,7 +359,7 @@ export function RemoteConnectFlow({
                 </span>
                 <ShieldIcon size={13} />
                 {t("remote.connect.rememberCode", {
-                  provider: savedCredential.state.provider,
+                  provider: savedCredential.state.provider ?? t("vault.encrypted.title"),
                 })}
               </label>
             )}
@@ -354,7 +373,7 @@ export function RemoteConnectFlow({
             >
               {t("common.cancel")}
             </button>
-            <button type="submit" className="button button--primary" disabled={busy}>
+            <button type="submit" className="button button--primary" disabled={busy || vault?.busy}>
               {busy ? t("remote.connect.connecting") : t("remote.connect.submit")}
             </button>
           </div>
