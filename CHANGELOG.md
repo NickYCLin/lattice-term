@@ -4,6 +4,15 @@
 
 ---
 
+## [2026.10.10](https://github.com/NickYCLin/lattice-term/compare/v2026.10.9...v2026.10.10) (2026-10-09)
+
+
+### 🛠️ 問題修正
+
+* **remote:** 主機先清理對話清單的路徑前綴 ([451a9ca](https://github.com/NickYCLin/lattice-term/commit/451a9cad1c730d6ff6a620f0adb619407c40776f))
+* **交接:** 大型對話改讀末段而非判定紀錄遺失 ([ba5d336](https://github.com/NickYCLin/lattice-term/commit/ba5d336109c29c5d798dcacaf75463e233c6d9b1))
+* **終端:** 移除多餘的原生空捲軸 ([b64de17](https://github.com/NickYCLin/lattice-term/commit/b64de17bdfb7b44e0e989cca4338174aea1e20a1))
+
 ## [2026.10.9](https://github.com/NickYCLin/lattice-term/compare/v2026.10.8...v2026.10.9) (2026-10-09)
 
 
