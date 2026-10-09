@@ -60,7 +60,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "release-please": "17.11.2",
     "typescript": "~7.0.2",
-    "vite": "^8.3.0",
+    "vite": "^8.3.2",
     "vitest": "^5.0.3"
   }
 }
