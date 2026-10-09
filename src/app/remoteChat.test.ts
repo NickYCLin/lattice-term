@@ -4,6 +4,35 @@ import { fakeChatApi } from "./testFixtures/agentApis";
 import { performRemoteChat, RemoteUploads, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
 function thread() { return createThread({ definitionId: "codex", workingDirectory: "/work", permission: "ask", model: "" }, "thread", 1); }
 describe("Remote conversation projection", () => {
+  it.each([
+    ["\\\\?\\D:\\project\\sample", "D:\\project\\sample"],
+    ["\\\\?\\UNC\\server\\share\\project", "\\\\server\\share\\project"],
+    ["D:\\project\\sample", "D:\\project\\sample"],
+    ["/work/project?name", "/work/project?name"],
+  ])("formats host paths for list and detail without changing the stored directory: %s", async (workingDirectory, expected) => {
+    const value = { ...thread(), workingDirectory };
+    const chat = fakeChatApi({ threads: [value], getThread: () => value });
+    expect(remoteThread(value).directory).toBe(expected);
+    const list = await performRemoteChat(chat, [], { kind: "list" });
+    expect(list).toEqual([expect.objectContaining({ id: value.id, directory: expected })]);
+    const page = await performRemoteChat(chat, [], { kind: "read", threadId: value.id, before: null });
+    expect(page).toMatchObject({ thread: { id: value.id, directory: expected } });
+    expect(value.workingDirectory).toBe(workingDirectory);
+  });
+  it.each([
+    "\\\\?\\D:\\project\\sample",
+    "\\\\?\\UNC\\server\\share\\project",
+  ])("keeps the original host directory when sending or creating a conversation: %s", async (workingDirectory) => {
+    const value = { ...thread(), workingDirectory };
+    const create = vi.fn(() => ({ ...value, id: "new" }));
+    const chat = fakeChatApi({ threads: [value], getThread: () => value, createThread: create });
+    await performRemoteChat(chat, [], { kind: "list" });
+    await performRemoteChat(chat, [], { kind: "send", threadId: value.id, text: "接續處理" });
+    expect(chat.send).toHaveBeenCalledWith(value.id, "接續處理", [], null);
+    await performRemoteChat(chat, [], { kind: "create", templateId: value.id });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory, activate: false }));
+    expect(value.workingDirectory).toBe(workingDirectory);
+  });
   it("keeps a full list of worst-case conversations within the wire budget", async () => {
     const hostile = "\u0001\"".repeat(2000);
     const threads = Array.from({ length: 60 }, (_, i) => ({ ...thread(), id: `${i}`.padStart(36, "0"), title: hostile, workingDirectory: hostile, model: hostile, runningTurnId: "t".repeat(64), provider: "cliproxyapi" as const }));

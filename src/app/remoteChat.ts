@@ -4,6 +4,7 @@ import type { AgentChatApi } from "./useAgentChat";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
 import { agentDisplayName } from "./agentNames";
 import { CLI_PROXY_NAME } from "./cliProxyApi";
+import { displayPath } from "./displayPath";
 import type { RemoteCard } from "./remoteCli";
 export type RemoteChatOperation =
   | { kind: "list" }
@@ -51,7 +52,7 @@ function clipForJson(text: string, bytes: number): string {
   return result;
 }
 export function remoteThread(thread: ChatThread): RemoteChatThread {
-  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(thread.workingDirectory, 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt, model: clipForJson(thread.model ?? "", 64), proxy: thread.provider === "cliproxyapi",
+  return { id: thread.id, title: clipForJson(thread.title, 200), agent: thread.definitionId, directory: clipForJson(displayPath(thread.workingDirectory), 600), runningTurnId: thread.runningTurnId, updatedAt: thread.updatedAt, model: clipForJson(thread.model ?? "", 64), proxy: thread.provider === "cliproxyapi",
     canSteer: thread.definitionId === "codex" && !!thread.runningTurnId && !thread.pendingInputs?.length && !thread.items.some(item => item.type === "approval" && item.decision === "pending"),
     awaitingApproval: !!thread.runningTurnId && thread.items.some(item => item.type === "approval" && item.decision === "pending"),
   };
