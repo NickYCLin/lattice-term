@@ -4089,18 +4089,16 @@ mod tests {
                 [user, attachment]
             };
             fs::write(&path, rows.map(|row| row.to_string()).join("\n")).unwrap();
-            for captured in [Some("main-session")] {
-                let transcript = export(
-                    TranscriptKind::Claude,
-                    cwd.to_str().unwrap(),
-                    captured,
-                    Some(&profile),
-                    60_000,
-                )
-                .expect("large attachments must not hide the main conversation");
-                assert!(transcript.contains("keep this context"));
-                assert!(!transcript.contains(&"x".repeat(4096)));
-            }
+            let transcript = export(
+                TranscriptKind::Claude,
+                cwd.to_str().unwrap(),
+                Some("main-session"),
+                Some(&profile),
+                60_000,
+            )
+            .expect("large attachments must not hide the main conversation");
+            assert!(transcript.contains("keep this context"));
+            assert!(!transcript.contains(&"x".repeat(4096)));
         }
     }
 
