@@ -77,6 +77,9 @@ export function terminalTheme(): Record<string, string> {
     cursor: accent,
     cursorAccent: background,
     selectionBackground: "rgba(88, 166, 255, 0.30)",
+    scrollbarSliderBackground: "#6e7681",
+    scrollbarSliderHoverBackground: "#8b949e",
+    scrollbarSliderActiveBackground: "#b1bac4",
     // A GitHub-dark-style palette: every colour is tuned to stay legible on the
     // dark background above, including a black that never collapses into it.
     black: "#484f58",
