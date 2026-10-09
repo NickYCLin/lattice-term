@@ -13,6 +13,7 @@ import {
 } from "./terminalTheme";
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
+import { attachTerminalScrollback } from "./terminalScrollback";
 
 /** The byte stream behind one terminal: an agent PTY or a plain local shell. */
 export interface PtyTerminalIo {
@@ -68,6 +69,7 @@ export function PtyTerminal({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    const stopScrollback = attachTerminalScrollback(terminal);
     terminalRef.current = terminal;
     const textarea = terminal.textarea;
     const imePresentation = new TerminalImePresentation(
@@ -175,6 +177,7 @@ export function PtyTerminal({
       imePresentation.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopScrollback();
       terminal.dispose();
       terminalRef.current = null;
     };
