@@ -17,7 +17,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
@@ -29,6 +29,7 @@ const MAX_CODEX_SESSION_META_BYTES: usize = 256 * 1024;
 const MAX_CLAUDE_SESSION_META_BYTES: u64 = 512 * 1024;
 const MAX_CLAUDE_SESSION_META_LINES: usize = 64;
 const MAX_TRANSCRIPT_FILE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_TRANSCRIPT_TAIL_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TRANSCRIPT_LINE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TRANSCRIPT_SEARCH_DEPTH: usize = 32;
 const MAX_TRANSCRIPT_SEARCH_ENTRIES: usize = 50_000;
@@ -249,6 +250,11 @@ fn newest_matching_with_limits(
 /// Opens a regular transcript without following a final symlink, then checks
 /// the opened handle rather than trusting path metadata that can race.
 fn open_regular_transcript(path: &Path) -> Option<fs::File> {
+    let file = open_regular_transcript_handle(path)?;
+    (file.metadata().ok()?.len() <= MAX_TRANSCRIPT_FILE_BYTES).then_some(file)
+}
+
+fn open_regular_transcript_handle(path: &Path) -> Option<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -257,7 +263,7 @@ fn open_regular_transcript(path: &Path) -> Option<fs::File> {
     options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
     let file = options.open(path).ok()?;
     let metadata = file.metadata().ok()?;
-    (metadata.is_file() && metadata.len() <= MAX_TRANSCRIPT_FILE_BYTES).then_some(file)
+    metadata.is_file().then_some(file)
 }
 
 /// Keeps only the last `max_chars` characters without allowing the assembled
@@ -355,12 +361,34 @@ fn read_bounded_line<R: BufRead>(
 /// independent caps; malformed rows are ignored as before, while oversized
 /// rows are reported so the handoff can disclose that earlier content was cut.
 fn visit_transcript_rows(path: &Path, mut visit: impl FnMut(&Value)) -> Option<bool> {
-    let file = open_regular_transcript(path)?;
+    let mut file = open_regular_transcript_handle(path)?;
+    let bytes = file.metadata().ok()?.len();
+    let tail_offset = if bytes > MAX_TRANSCRIPT_FILE_BYTES {
+        bytes.saturating_sub(MAX_TRANSCRIPT_TAIL_BYTES)
+    } else {
+        0
+    };
+    let mut partial_row = false;
+    if tail_offset > 0 {
+        file.seek(SeekFrom::Start(tail_offset - 1)).ok()?;
+        let mut previous = [0];
+        file.read_exact(&mut previous).ok()?;
+        partial_row = previous[0] != b'\n';
+    }
+    file.seek(SeekFrom::Start(tail_offset)).ok()?;
+    let budget = if tail_offset > 0 {
+        MAX_TRANSCRIPT_TAIL_BYTES
+    } else {
+        MAX_TRANSCRIPT_FILE_BYTES
+    };
     // The handle may grow after metadata was checked. A `Take` cap keeps the
     // actual read bounded; one sentinel byte lets us detect and reject growth.
-    let mut reader = BufReader::new(file).take(MAX_TRANSCRIPT_FILE_BYTES + 1);
+    let mut reader = BufReader::new(file).take(budget + 1);
     let mut line = Vec::new();
-    let mut skipped_oversized = false;
+    let mut skipped_oversized = tail_offset > 0;
+    if partial_row {
+        read_bounded_line(&mut reader, &mut line, 0).ok()?;
+    }
     loop {
         match read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES).ok()? {
             None => break,
@@ -660,7 +688,7 @@ struct ClaudeSessionMeta {
 /// prefix rather than trusting the lossy project-directory slug, which can
 /// collide for distinct paths.
 fn read_claude_session_meta(path: &Path) -> Option<ClaudeSessionMeta> {
-    let file = open_regular_transcript(path)?;
+    let file = open_regular_transcript_handle(path)?;
     let mut reader = BufReader::new(file).take(MAX_CLAUDE_SESSION_META_BYTES + 1);
     let mut line = Vec::new();
     let mut session_id = None;
@@ -775,7 +803,7 @@ struct CodexSessionMeta {
 /// bounded prefix so a malformed history cannot allocate an unbounded buffer
 /// merely while LatticeTerm is deciding which transcript belongs to a pane.
 fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
-    let file = open_regular_transcript(path)?;
+    let file = open_regular_transcript_handle(path)?;
     let mut reader = BufReader::new(file).take((MAX_CODEX_SESSION_META_BYTES + 2) as u64);
     let mut line = Vec::with_capacity(MAX_CODEX_SESSION_META_BYTES.min(8 * 1024));
     reader.read_until(b'\n', &mut line).ok()?;
@@ -3721,7 +3749,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_transcript_skips_oversized_rows_and_rejects_oversized_files() {
+    fn codex_transcript_skips_oversized_rows_and_empty_large_files() {
         let directory = tempfile::tempdir().unwrap();
         let transcript = directory.path().join("rollout-streamed.jsonl");
         let valid = serde_json::json!({
@@ -3747,6 +3775,116 @@ mod tests {
         let file = fs::File::create(&too_large).unwrap();
         file.set_len(MAX_TRANSCRIPT_FILE_BYTES + 1).unwrap();
         assert_eq!(parse_codex(&too_large, 5_000), None);
+    }
+
+    #[test]
+    fn handoff_reads_the_recent_tail_of_large_codex_and_claude_records() {
+        use std::io::{Seek, SeekFrom};
+
+        let home = tempfile::tempdir().unwrap();
+        let records = [
+            (
+                TranscriptKind::Codex,
+                home.path().join("sessions/rollout-large.jsonl"),
+                serde_json::json!({"type":"session_meta","payload":{"id":"large","source":"cli","cwd":home.path()}}),
+                serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"最近的 Codex 回覆"}]}}),
+                "最近的 Codex 回覆",
+            ),
+            (
+                TranscriptKind::Claude,
+                home.path().join("projects/project/large.jsonl"),
+                serde_json::json!({"type":"user","sessionId":"large","cwd":home.path(),"isSidechain":false,"message":{"role":"user","content":"早期的 Claude 訊息"}}),
+                serde_json::json!({"type":"assistant","sessionId":"large","cwd":home.path(),"isSidechain":false,"message":{"role":"assistant","content":"最近的 Claude 回覆"}}),
+                "最近的 Claude 回覆",
+            ),
+        ];
+        for (kind, path, metadata, latest, expected) in records {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let mut file = fs::File::create(&path).unwrap();
+            writeln!(file, "{metadata}").unwrap();
+            file.set_len(MAX_TRANSCRIPT_FILE_BYTES + 1).unwrap();
+            file.seek(SeekFrom::End(0)).unwrap();
+            writeln!(file, "\n{latest}").unwrap();
+            drop(file);
+
+            let text = export(kind, "", Some("large"), Some(home.path()), 5000).unwrap();
+            assert!(text.contains(expected));
+            assert!(text.contains("更早的對話已略過"));
+            assert!(!text.contains("早期的 Claude 訊息"));
+            let definition_id = match kind {
+                TranscriptKind::Codex => "codex",
+                TranscriptKind::Claude => "claude",
+                _ => unreachable!(),
+            };
+            let snapshot = read_session_conversation_snapshot(
+                definition_id,
+                "",
+                Some("large"),
+                Some(home.path()),
+            )
+            .unwrap();
+            assert!(matches!(
+                snapshot.availability,
+                SessionConversationAvailability::Ready
+            ));
+            assert!(snapshot.truncated);
+            assert!(snapshot
+                .messages
+                .iter()
+                .any(|message| message.text == expected));
+            assert_eq!(
+                export(kind, "", Some("missing"), Some(home.path()), 5000),
+                Err("handoff.waitingForTranscript")
+            );
+        }
+    }
+
+    #[test]
+    fn large_transcript_tail_preserves_rows_at_the_byte_boundary() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("rollout-boundary.jsonl");
+        let bytes = MAX_TRANSCRIPT_FILE_BYTES + 1024;
+        let offset = bytes - MAX_TRANSCRIPT_TAIL_BYTES;
+        let mut file = fs::File::create(&path).unwrap();
+        file.set_len(bytes).unwrap();
+        file.seek(SeekFrom::Start(offset - 1)).unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "{}", serde_json::json!({"boundary":"完整的中文訊息"})).unwrap();
+        drop(file);
+
+        let mut rows = Vec::new();
+        assert_eq!(
+            visit_transcript_rows(&path, |row| rows.push(row.clone())),
+            Some(true)
+        );
+        assert_eq!(rows, vec![serde_json::json!({"boundary":"完整的中文訊息"})]);
+    }
+
+    #[test]
+    fn large_transcript_tail_does_not_parse_a_fragment_as_a_new_row() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("rollout-fragment.jsonl");
+        let bytes = MAX_TRANSCRIPT_FILE_BYTES + 1024;
+        let offset = bytes - MAX_TRANSCRIPT_TAIL_BYTES;
+        let mut file = fs::File::create(&path).unwrap();
+        file.set_len(bytes).unwrap();
+        file.seek(SeekFrom::Start(offset - 1)).unwrap();
+        write!(file, "x").unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"fragment":"不能當成完整訊息"})
+        )
+        .unwrap();
+        writeln!(file, "{}", serde_json::json!({"complete":"最新訊息"})).unwrap();
+        drop(file);
+
+        let mut rows = Vec::new();
+        assert_eq!(
+            visit_transcript_rows(&path, |row| rows.push(row.clone())),
+            Some(true)
+        );
+        assert_eq!(rows, vec![serde_json::json!({"complete":"最新訊息"})]);
     }
 
     #[test]
