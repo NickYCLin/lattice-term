@@ -13,6 +13,18 @@ const overlayStyles = readFileSync(
 );
 
 describe("mobile connection layout", () => {
+  it("packs desktop cards into two rows without shrinking mobile touch targets", () => {
+    expect(connectionStyles).toMatch(
+      /\.connection-card\s*\{[^}]*grid-template-areas:\s*"head primary" "meta foot";/s,
+    );
+    expect(connectionStyles).toMatch(
+      /\.app--mobile \.connection-card\s*\{[^}]*grid-template-areas:\s*"head primary" "meta meta" "foot foot";/s,
+    );
+    expect(mobileStyles).toMatch(
+      /\.app--mobile \.icon-button--sm\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/s,
+    );
+  });
+
   it("uses a shrinkable single-column grid without desktop gutters", () => {
     expect(connectionStyles).toMatch(
       /\.app--mobile \.connection-grid,[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
@@ -23,6 +35,9 @@ describe("mobile connection layout", () => {
   });
 
   it("lets narrow header and toolbar actions wrap instead of overflowing", () => {
+    expect(connectionStyles).toMatch(
+      /\.connections__tools\s*\{[^}]*flex-wrap:\s*wrap;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
+    );
     expect(connectionStyles).toMatch(
       /\.app--mobile \.connections__toolbar\s*\{[^}]*flex-wrap:\s*wrap;/s,
     );

@@ -3657,6 +3657,20 @@ fn codex_reporter_arguments_with_forward(
     arguments
 }
 
+fn codex_scrollback_arguments(mut arguments: Vec<String>) -> Vec<String> {
+    let options_end = arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(arguments.len());
+    if !arguments[..options_end]
+        .iter()
+        .any(|argument| argument == "--no-alt-screen")
+    {
+        arguments.insert(0, "--no-alt-screen".to_string());
+    }
+    arguments
+}
+
 // LatticeTerm checks and updates every CLI once at app launch. Sessions it
 // starts must not repeat that work with their own startup update prompts or
 // background self-updates; an explicit user override still wins.
@@ -7564,6 +7578,7 @@ pub fn launch_with_replay(
             arguments = crate::agent_mcp::prepend_codex_arguments(arguments, mcp);
         }
         arguments = codex_update_check_arguments(arguments);
+        arguments = codex_scrollback_arguments(arguments);
     } else if definition_id == "antigravity" {
         // Antigravity does not expose a new interactive conversation id on
         // stdout. Its process-scoped log does, so use an isolated temporary
@@ -12053,6 +12068,30 @@ notify = ["notify.exe", "turn-ended"]"#,
                 None,
             ),
             arguments
+        );
+    }
+
+    #[test]
+    fn codex_sessions_preserve_terminal_scrollback() {
+        for arguments in [
+            Vec::new(),
+            vec!["resume".to_string(), "session-id".to_string()],
+            vec!["fork".to_string(), "session-id".to_string()],
+            vec!["-c".to_string(), "model_provider=proxy".to_string()],
+        ] {
+            let adapted = codex_scrollback_arguments(arguments.clone());
+            assert_eq!(adapted[0], "--no-alt-screen");
+            assert_eq!(adapted[1..], arguments);
+            assert_eq!(codex_scrollback_arguments(adapted.clone()), adapted);
+        }
+    }
+
+    #[test]
+    fn codex_scrollback_does_not_confuse_a_prompt_with_an_option() {
+        let arguments = vec!["--".to_string(), "--no-alt-screen".to_string()];
+        assert_eq!(
+            codex_scrollback_arguments(arguments),
+            ["--no-alt-screen", "--", "--no-alt-screen"]
         );
     }
 
