@@ -4,6 +4,27 @@
 
 ---
 
+## [2026.10.9](https://github.com/NickYCLin/lattice-term/compare/v2026.10.8...v2026.10.9) (2026-10-09)
+
+
+### 🚀 新增功能
+
+* **連線:** 縮小主機卡片並支援群組收合 ([0860719](https://github.com/NickYCLin/lattice-term/commit/08607194f12746428edf2be9539e2a843e8f2046))
+
+
+### 🛠️ 問題修正
+
+* **交接:** 依原對話讀取記憶並移出終端警告 ([7af9dad](https://github.com/NickYCLin/lattice-term/commit/7af9dade35e48a79a1fd413b317f717efd11f7bf))
+* **側欄:** 統一工作階段與對話列的展示 ([e44ea28](https://github.com/NickYCLin/lattice-term/commit/e44ea2853e101e8a87f8c8f5b38f3dada7f38e69))
+* **對話:** 修正輸入區錯位與短視窗溢出 ([cb87235](https://github.com/NickYCLin/lattice-term/commit/cb872355f15fe3055b0ef44b9ccab3f479b4d641))
+* **對話:** 切換畫面時保留文字與截圖草稿 ([05d1eac](https://github.com/NickYCLin/lattice-term/commit/05d1eac1c49aab985d43386bee8a27127b99fd12))
+* **對話:** 統一工作階段與內建對話的外觀 ([9c1cbf1](https://github.com/NickYCLin/lattice-term/commit/9c1cbf1558ad38351f97c08a9a99c11085403311))
+* **對話:** 顯示還原就緒狀態並保留未送出的草稿 ([b401bc5](https://github.com/NickYCLin/lattice-term/commit/b401bc5c01ad532f2c6d9e179f3e7e9e55aa9ab2))
+* **工作階段:** 避免同一 Codex 對話重複續接 ([a8e0203](https://github.com/NickYCLin/lattice-term/commit/a8e02032ca16083ccf2a139caa160da965ba9d67))
+* **手機:** 讓頁首操作換行並保留標題寬度 ([924ce7c](https://github.com/NickYCLin/lattice-term/commit/924ce7ca92dcb75335fdccfb24ddaa755588c321))
+* **終端:** 保留 Codex 捲動歷史並顯示捲軸 ([c4dd434](https://github.com/NickYCLin/lattice-term/commit/c4dd4349e53c8932a87f16e7fa8e2bf65c249ba3))
+* **配對:** 在連線表單解鎖保管庫並保存配對碼 ([09268df](https://github.com/NickYCLin/lattice-term/commit/09268dff79f44acd24553eaa9f5c54b5492c5619))
+
 ## [2026.10.8](https://github.com/NickYCLin/lattice-term/compare/v2026.10.7...v2026.10.8) (2026-10-07)
 
 
