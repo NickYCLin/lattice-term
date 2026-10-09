@@ -41,6 +41,17 @@ function renderCard(
 }
 
 describe("connection card runtime capability", () => {
+  it("separates the primary action from compact management controls", () => {
+    const markup = renderCard({ onConnect: vi.fn() });
+    expect(markup).toContain('class="connection-card__primary"');
+    expect(markup).toContain('protocol-tile--sm');
+    const footer = markup.slice(markup.indexOf('class="connection-card__foot"'));
+    expect(footer).toContain("加入常用");
+    expect(footer).not.toContain("connection-card__go");
+    expect(markup).toContain('title="Office PC');
+    expect(markup).toContain('title="operator@desktop.example.com:3389"');
+  });
+
   it("offers the live action when the package supports the protocol", () => {
     const markup = renderCard({ onConnect: vi.fn() });
 
