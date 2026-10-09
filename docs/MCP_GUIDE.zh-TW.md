@@ -133,6 +133,21 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 
 ### 疑難排解
 
+先分清楚錯誤來自 AI 用戶端、LatticeTerm MCP，還是被操作的應用程式。
+看到 Codex 回 `unsupported call: tool_searchtool_search_tool`，表示工具探索
+在 Codex 內部路由就遭拒絕，不等於 LatticeTerm 背景服務停止或配對失敗。
+應先確認原始工具呼叫與用戶端版本，再用正常 MCP 連線核對
+`initialize`、`tools/list`、`get_capabilities` 是否成功；只有這些檢查通過，
+才能判定伺服器可達。Codex 的一般 function 呼叫與原生 tool search 呼叫
+是不同型態，伺服器無法替用戶端修正尚未送出的探索要求。
+不要因此自動降版、換模型、修改帳號設定或中斷正在執行的工作。
+
+已保存的連線不代表已連上；用 `list_saved_connections` 確認
+`connected`，再依使用者的連線要求呼叫 `connect_saved_connection`。
+螢幕、輸入、檔案、命令及 Fleet 權限仍分開檢查，不會因為 MCP 連線正常
+就全部開放。Chrome 回報其他擴充功能介面阻擋自動操作時，應先處理該介面；
+這不是 LatticeTerm MCP 的配對或工具探索錯誤。
+
 | 狀況 | 原因 | 處理方式 |
 | --- | --- | --- |
 | AI 說沒有 latticeterm 工具、「無法使用 MCP」 | 這個對話是在加入設定之前開的，或設定寫在別的 scope／設定檔 | 開新的對話或重開 AI 工具；Codex 用 `codex mcp list`、Claude Code 用 `claude mcp list` 確認有 `latticeterm` |
