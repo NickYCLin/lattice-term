@@ -73,4 +73,40 @@ describe("ConnectionsView", () => {
     expect(markup).toContain("bastion.example.com");
     expect(markup).not.toContain("還沒有任何連線");
   });
+
+  it("renders expanded native groups that can be collapsed with the keyboard", () => {
+    const markup = render([profile]);
+    expect(markup).toContain('<details class="connection-group" open="">');
+    expect(markup).toContain('<summary class="connection-group__title">');
+    expect(markup).toContain('class="connection-group__count">1</span>');
+  });
+
+  it("does not show an empty group left behind by folded machine routes", () => {
+    const profiles = [
+      { ...profile, group: "第一組", machineId: "same-machine" },
+      { ...profile, id: "p2", group: "第二組", machineId: "same-machine" },
+    ];
+    const workspace = workspaceWith(profiles);
+    workspace.visibleGroups = profiles.map((entry) => ({
+      name: entry.group,
+      profiles: [entry],
+    }));
+    const markup = renderToStaticMarkup(
+      <I18nProvider locale="zh-TW">
+        <ConnectionsView
+          workspace={workspace}
+          onCreate={vi.fn()}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onConnect={vi.fn()}
+          supportedProtocols={["ssh"]}
+          backendAvailable
+          mobile={false}
+        />
+      </I18nProvider>,
+    );
+    expect(markup.match(/<details /g)).toHaveLength(1);
+    expect(markup).toContain("第一組");
+    expect(markup).not.toContain("第二組");
+  });
 });

@@ -1,0 +1,5 @@
+.terminal-pane .xterm.has-scrollback .xterm-scrollable-element > .xterm-scrollbar.xterm-vertical {
+  opacity: 1;
+  pointer-events: auto;
+  transition: none;
+}

@@ -23,6 +23,7 @@ import {
 } from "./terminalTheme";
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
+import { attachTerminalScrollback } from "./terminalScrollback";
 import { KeyboardIcon } from "../icons";
 
 export function TerminalPane({
@@ -80,6 +81,7 @@ export function TerminalPane({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    const stopScrollback = attachTerminalScrollback(terminal);
 
     termRef.current = terminal;
     fitRef.current = fit;
@@ -185,6 +187,7 @@ export function TerminalPane({
       imePresentation.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopScrollback();
       terminal.dispose();
       termRef.current = null;
       fitRef.current = null;

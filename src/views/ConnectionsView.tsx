@@ -26,6 +26,7 @@ import type { MessageKey } from "../i18n/context";
 import { ConnectionCard } from "../components/connections/ConnectionCard";
 import { Callout, EmptyState } from "../components/common/Callout";
 import {
+  ChevronRightIcon,
   ConnectionsIcon,
   ExportIcon,
   ImportIcon,
@@ -356,70 +357,80 @@ export function ConnectionsView({
             }
           />
         ) : (
-          visibleGroups.map((group) => (
-            <section className="connection-group" key={group.name}>
-              <h2 className="connection-group__title">
-                <span className="eyebrow">
-                  {group.name === UNGROUPED
-                    ? t("connections.ungrouped")
-                    : group.name}
-                </span>
-                <span className="connection-group__count">
-                  {group.profiles.filter((profile) => cardFor.has(profile.id)).length}
-                </span>
-              </h2>
-              <ul className="connection-grid">
-                {group.profiles
-                  .filter((profile) => cardFor.has(profile.id))
-                  .map((profile) => {
-                    const linked = cardFor.get(profile.id) ?? [];
-                    return (
-                  <ConnectionCard
-                    key={profile.id}
-                    profile={profile}
-                    linked={linked.map((peer) => ({
-                      profile: peer,
-                      onConnect: canConnectProtocol(
-                        peer.protocol,
-                        supportedProtocols,
-                      )
-                        ? () => onConnect(peer)
-                        : undefined,
-                    }))}
-                    selected={
-                      profile.id === selectedId ||
-                      linked.some((peer) => peer.id === selectedId)
-                    }
-                    onSelect={() =>
-                      setSelectedId(
-                        profile.id === selectedId ? null : profile.id,
-                      )
-                    }
-                    onEdit={() => onEdit(profile.id)}
-                    onDuplicate={() => duplicateProfile(profile.id)}
-                    onDelete={() => onDelete(profile.id)}
-                    onToggleFavorite={() => toggleFavorite(profile.id)}
-                    onConnect={
-                      canConnectProtocol(
-                        profile.protocol,
-                        supportedProtocols,
-                      )
-                        ? () => onConnect(profile)
-                        : undefined
-                    }
-                    unavailableReason={
-                      !backendAvailable
-                        ? "backend-required"
-                        : mobile
-                          ? "desktop-only"
-                          : "runtime-unsupported"
-                    }
-                  />
-                    );
-                  })}
-              </ul>
-            </section>
-          ))
+          visibleGroups
+            .filter((group) =>
+              group.profiles.some((profile) => cardFor.has(profile.id)),
+            )
+            .map((group) => (
+              <details
+                className="connection-group"
+                key={group.name + ":" + filterActive}
+                open
+              >
+                <summary className="connection-group__title">
+                  <ChevronRightIcon size={12} />
+                  <h2 className="eyebrow">
+                    {group.name === UNGROUPED
+                      ? t("connections.ungrouped")
+                      : group.name}
+                  </h2>
+                  <span className="connection-group__count">
+                    {group.profiles.filter((profile) => cardFor.has(profile.id))
+                      .length}
+                  </span>
+                </summary>
+                <ul className="connection-grid">
+                  {group.profiles
+                    .filter((profile) => cardFor.has(profile.id))
+                    .map((profile) => {
+                      const linked = cardFor.get(profile.id) ?? [];
+                      return (
+                        <ConnectionCard
+                          key={profile.id}
+                          profile={profile}
+                          linked={linked.map((peer) => ({
+                            profile: peer,
+                            onConnect: canConnectProtocol(
+                              peer.protocol,
+                              supportedProtocols,
+                            )
+                              ? () => onConnect(peer)
+                              : undefined,
+                          }))}
+                          selected={
+                            profile.id === selectedId ||
+                            linked.some((peer) => peer.id === selectedId)
+                          }
+                          onSelect={() =>
+                            setSelectedId(
+                              profile.id === selectedId ? null : profile.id,
+                            )
+                          }
+                          onEdit={() => onEdit(profile.id)}
+                          onDuplicate={() => duplicateProfile(profile.id)}
+                          onDelete={() => onDelete(profile.id)}
+                          onToggleFavorite={() => toggleFavorite(profile.id)}
+                          onConnect={
+                            canConnectProtocol(
+                              profile.protocol,
+                              supportedProtocols,
+                            )
+                              ? () => onConnect(profile)
+                              : undefined
+                          }
+                          unavailableReason={
+                            !backendAvailable
+                              ? "backend-required"
+                              : mobile
+                                ? "desktop-only"
+                                : "runtime-unsupported"
+                          }
+                        />
+                      );
+                    })}
+                </ul>
+              </details>
+            ))
         )}
       </div>
     </div>
