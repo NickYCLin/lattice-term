@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.10.11](https://github.com/NickYCLin/lattice-term/compare/v2026.10.10...v2026.10.11) (2026-10-10)
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 支援 Codex 0.162.1 並補上傳訊診斷 ([8f9dafb](https://github.com/NickYCLin/lattice-term/commit/8f9dafbfd49b6b88169c3572b93f01af5d32d634))
+* **mcp:** 改用 Codex 原生佇列傳訊 ([d5c11ba](https://github.com/NickYCLin/lattice-term/commit/d5c11ba26516b8e0de0ebacbb6af148c0004f912))
+
 ## [2026.10.10](https://github.com/NickYCLin/lattice-term/compare/v2026.10.9...v2026.10.10) (2026-10-09)
 
 
