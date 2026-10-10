@@ -19,6 +19,8 @@ use tauri::{AppHandle, Emitter};
 use zeroize::Zeroizing;
 
 mod approval;
+#[cfg(windows)]
+mod codex_control;
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod codex_input_profile;
@@ -1039,6 +1041,8 @@ struct AgentSessionEntry {
     codex_input_profile: Option<CodexInputAttestation>,
     #[cfg(windows)]
     codex_input_profile_unavailable: Option<codex_input_profile::UnavailableReason>,
+    #[cfg(windows)]
+    codex_control: Option<Arc<codex_control::CodexControl>>,
     #[cfg(all(windows, test))]
     codex_input_profile_test_supported: AtomicBool,
     stopping: AtomicBool,
@@ -2975,6 +2979,8 @@ impl AgentRegistry {
             Some(serde_json::json!({
                 "verified": verified,
                 "reason": reason,
+                "transport": if entry.codex_control.is_some() { "app_server_queue" } else { "terminal" },
+                "versionPinned": entry.codex_control.is_none(),
                 "supportedVersions": codex_input_profile::SUPPORTED_VERSIONS
             }))
         }
@@ -3250,9 +3256,17 @@ fn terminate_agent_entry(entry: &AgentSessionEntry) -> Result<(), String> {
     let result = entry
         .killer
         .lock()
-        .map_err(|error| error.to_string())?
-        .kill();
-    result.map_err(|error| format!("Cannot stop the agent process: {error}"))
+        .map_err(|error| error.to_string())
+        .and_then(|mut killer| {
+            killer
+                .kill()
+                .map_err(|error| format!("Cannot stop the agent process: {error}"))
+        });
+    #[cfg(windows)]
+    if let Some(control) = entry.codex_control.as_ref() {
+        control.shutdown();
+    }
+    result
 }
 
 pub(crate) fn random_report_token() -> Result<String, String> {
@@ -7864,7 +7878,8 @@ pub fn launch_with_replay(
     }
 
     #[cfg(windows)]
-    let (codex_input_profile, codex_input_profile_unavailable) = if definition_id == "codex"
+    let (codex_input_profile, codex_input_profile_unavailable, codex_control) = if definition_id
+        == "codex"
         && program == executable.as_os_str()
         && prefix_args.is_empty()
         && seed_preserves_codex_input_profile(request.seed_input.as_deref())
@@ -7877,15 +7892,35 @@ pub fn launch_with_replay(
             environment: final_codex_launch_environment(&command, &launch_environment),
             arguments: command.get_argv().iter().skip(1).cloned().collect(),
         };
-        match codex_input_profile::inspect(&context) {
-            Ok(profile) => (Some(CodexInputAttestation { context, profile }), None),
-            Err(reason) => (None, Some(reason)),
+        match codex_control::CodexControl::start(&context) {
+            Ok((control, profile)) => {
+                let argv = command.get_argv_mut();
+                let position = argv
+                    .iter()
+                    .position(|argument| argument == "--")
+                    .unwrap_or(argv.len());
+                argv.splice(
+                    position..position,
+                    [OsString::from("--remote"), control.endpoint()],
+                );
+                integrated_completion = true;
+                (
+                    Some(CodexInputAttestation { context, profile }),
+                    None,
+                    Some(Arc::new(control)),
+                )
+            }
+            Err(_) => match codex_input_profile::inspect(&context) {
+                Ok(profile) => (Some(CodexInputAttestation { context, profile }), None, None),
+                Err(reason) => (None, Some(reason), None),
+            },
         }
     } else {
         (
             None,
             (definition_id == "codex")
                 .then_some(codex_input_profile::UnavailableReason::UnsupportedLaunch),
+            None,
         )
     };
 
@@ -8013,6 +8048,8 @@ pub fn launch_with_replay(
         codex_input_profile,
         #[cfg(windows)]
         codex_input_profile_unavailable,
+        #[cfg(windows)]
+        codex_control,
         #[cfg(all(windows, test))]
         codex_input_profile_test_supported: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
@@ -8033,6 +8070,11 @@ pub fn launch_with_replay(
         return Err(error);
     }
     drop(codex_launch_guard);
+
+    #[cfg(windows)]
+    if entry.codex_control.is_some() {
+        watch_codex_control(session_id.clone(), Arc::clone(&registry), Arc::clone(&sink));
+    }
 
     if let Some(path) = antigravity_capture_path {
         watch_antigravity_conversation_id(
@@ -8575,6 +8617,85 @@ fn rejects_interrupted_desktop_input(input: &AgentInputControl, ticket: u64, byt
     ticket <= input.rejected_desktop_through && !is_terminal_status_reply(bytes)
 }
 
+#[cfg(windows)]
+fn watch_codex_control(session_id: String, registry: Arc<AgentRegistry>, sink: Arc<dyn AgentSink>) {
+    std::thread::spawn(move || {
+        let Ok(entry) = registry.get(&session_id) else {
+            return;
+        };
+        let Some(control) = entry.codex_control.as_ref() else {
+            return;
+        };
+        let mut expected = entry
+            .summary
+            .lock()
+            .ok()
+            .and_then(|summary| summary.captured_session_id.clone());
+        let ready_deadline = Instant::now() + Duration::from_secs(30);
+        let mut observed_state = false;
+        loop {
+            if entry.stopping.load(Ordering::Acquire)
+                || !registry
+                    .get(&session_id)
+                    .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
+            {
+                control.shutdown();
+                return;
+            }
+            if let Ok(input) = entry.input.try_lock() {
+                let result = control.snapshot(expected.as_deref());
+                let next = match result {
+                    Ok(Some(snapshot)) => {
+                        observed_state = true;
+                        expected = Some(snapshot.thread_id.clone());
+                        let state = match snapshot.state {
+                            codex_control::State::Idle => AgentLifecycle::Idle,
+                            codex_control::State::Working => AgentLifecycle::Working,
+                            codex_control::State::NeedsAttention => AgentLifecycle::NeedsAttention,
+                        };
+                        Some((state, Some(snapshot.thread_id)))
+                    }
+                    Ok(None) => None,
+                    Err(_) if !observed_state && Instant::now() < ready_deadline => None,
+                    Err(_) => {
+                        entry
+                            .mcp_input_profile_invalidated
+                            .store(true, Ordering::Release);
+                        Some((AgentLifecycle::NeedsAttention, None))
+                    }
+                };
+                let mut changed = false;
+                let mut captured = None;
+                if let Some((state, thread_id)) = next {
+                    if let Ok(mut summary) = entry.summary.lock() {
+                        changed = summary.state != state
+                            || summary.state_source != AgentStateSource::Integration;
+                        summary.state = state;
+                        summary.state_source = AgentStateSource::Integration;
+                        if let Some(thread_id) = thread_id {
+                            if summary.captured_session_id.as_deref() != Some(thread_id.as_str()) {
+                                summary.captured_session_id = Some(thread_id.clone());
+                                captured = Some(thread_id);
+                            }
+                        }
+                    }
+                    drop(input);
+                    if let Some(thread_id) = captured {
+                        sink.captured(&session_id, &thread_id);
+                    }
+                    if changed {
+                        sink.state(&session_id, state, AgentStateSource::Integration);
+                    }
+                    if state == AgentLifecycle::Idle {
+                        deliver_next_queued_and_waiting(sink.as_ref(), &registry, &session_id);
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
 fn needs_codex_mcp_submit(
     windows: bool,
     definition_id: &str,
@@ -8656,6 +8777,51 @@ fn send_prompt_bytes_locked(
     let entry = registry.get(session_id)?;
     if !prompt_grant_matches(&entry, grant) || entry.stopping.load(Ordering::Acquire) {
         return Err("This session is not under active MCP control.".to_string());
+    }
+    #[cfg(windows)]
+    if let (Some(control), Some(_)) = (entry.codex_control.as_ref(), grant) {
+        require_mcp_input_profile(&entry, "codex")?;
+        let thread_id = entry
+            .summary
+            .lock()
+            .map_err(|error| error.to_string())?
+            .captured_session_id
+            .clone()
+            .ok_or_else(|| codex_control::CONTROL_UNAVAILABLE.to_string())?;
+        let text = bytes
+            .strip_prefix(b"\x1b[200~")
+            .and_then(|bytes| bytes.strip_suffix(b"\x1b[201~\r"))
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .ok_or_else(|| "The MCP prompt has invalid framing.".to_string())?;
+        let result = control.send(&thread_id, text, || {
+            registry
+                .get(session_id)
+                .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
+                && !entry.stopping.load(Ordering::Acquire)
+                && prompt_grant_matches(&entry, grant)
+                && mcp_input_profile_valid(&entry)
+        });
+        if let Err(error) = result {
+            if error == codex_control::CONTROL_OUTCOME_UNKNOWN {
+                entry
+                    .mcp_input_profile_invalidated
+                    .store(true, Ordering::Release);
+            }
+            return Err(error);
+        }
+        {
+            let mut summary = entry.summary.lock().map_err(|error| error.to_string())?;
+            summary.state = AgentLifecycle::Working;
+            summary.state_source = AgentStateSource::Integration;
+        }
+        sink.state(
+            session_id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        entry.startup_gate.observe_input(bytes);
+        registry.mark_model_input(session_id, bytes);
+        return Ok(());
     }
     let codex_submit = {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;

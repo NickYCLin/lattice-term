@@ -21,6 +21,23 @@ const VERSION: u32 = 2;
 const MAX_BYTES: u64 = 256 * 1024;
 const DROP_FLUSH: Duration = Duration::from_millis(250);
 
+#[cfg(windows)]
+pub(crate) fn create_private_runtime_directory(path: &Path) -> Result<File, String> {
+    check_path(path).map_err(|_| "The runtime directory path is unsafe.")?;
+    if path
+        .try_exists()
+        .map_err(|_| "Cannot inspect the private runtime directory.")?
+    {
+        return Err("The private runtime directory already exists.".into());
+    }
+    create_private_directory(path).map_err(|_| "Cannot create the private runtime directory.")?;
+    let handle = windows::open_runtime_directory(path)
+        .map_err(|_| "Cannot open the private runtime directory.")?;
+    check_private(&handle, true)
+        .map_err(|_| "The runtime directory is not private to this user.")?;
+    Ok(handle)
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct DiskHistory {
@@ -729,6 +746,15 @@ mod windows {
             .map_err(|_| Reason::UnsafePath)
     }
 
+    pub(super) fn open_runtime_directory(path: &Path) -> Result<File, Reason> {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(path)
+            .map_err(|_| Reason::UnsafePath)
+    }
+
     fn information(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, Reason> {
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
         if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
@@ -1400,6 +1426,27 @@ mod tests {
             check_private(&open_directory(&directory).unwrap(), true),
             Err(Reason::UnsafePath)
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_runtime_directory_is_private_and_never_replaces_existing_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let private = directory.path().join("private");
+        let handle = create_private_runtime_directory(&private).unwrap();
+        check_private(&handle, true).unwrap();
+        assert!(create_private_runtime_directory(&private).is_err());
+        assert!(fs::rename(&private, directory.path().join("moved")).is_err());
+        drop(handle);
+        let existing = directory.path().join("existing");
+        fs::create_dir(&existing).unwrap();
+        fs::write(existing.join("keep.txt"), "keep").unwrap();
+        assert!(create_private_runtime_directory(&existing).is_err());
+        assert_eq!(
+            fs::read_to_string(existing.join("keep.txt")).unwrap(),
+            "keep"
+        );
+        assert!(create_private_runtime_directory(Path::new("relative/private")).is_err());
     }
 
     #[cfg(windows)]

@@ -7,6 +7,8 @@ use std::path::Path;
 
 #[path = "audit_store.rs"]
 mod store;
+#[cfg(windows)]
+pub(crate) use store::create_private_runtime_directory;
 pub use store::FlushHandle;
 
 pub const HISTORY_LIMIT: usize = 256;

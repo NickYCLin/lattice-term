@@ -181,9 +181,11 @@ B 階段工具的語意：
 
 提示文字的第一個字元也不可是 ASCII `?`：預設快捷鍵會在空輸入框切換說明並消耗該字元。一般內文或句尾的問號仍可使用，不會被改字；依據見 [Codex 的空輸入框快捷鍵處理](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/bottom_pane/chat_composer.rs#L3849)。
 
-目前只核准 Codex 0.153.4 與 0.162.1 的原生執行檔、預設快捷鍵與 Vim 關閉的設定組合。LatticeTerm 在新 CLI 啟動前，沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用，但 `-p`／`--profile` 命名設定目前不支援。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。無法確認的版本、啟動方式、設定來源或自訂按鍵，一律不開放自動送指示，CLI 本身仍正常啟動。這不是對執行檔發行者的簽章驗證。
+Windows 的新 Codex 工作階段會先檢查原生 CLI 是否支援遠端終端、原生佇列與對應通訊協定，再讓終端和 MCP 共用同一個原生 app-server。這條路徑依能力驗證，不以版本號白名單判斷，CLI 更新或 alpha 標記本身不會直接擋住傳訊。服務使用僅限目前使用者存取的本機 socket 目錄，不接到全域 daemon，也不在既有工作階段旁偷偷重開一份對話。MCP 只向同一服務裡已載入、身分與工作目錄吻合的原對話送出 `thread/queue/add`，核對 `clientUserMessageId` 回執後，讓原生佇列以原子閒置檢查自行開始回合；不把文字寫進終端輸入框，也不把工作中的回合當作可插入指示的目標。服務已關閉、身分不符、等待確認或原生佇列未清空時不送；送出結果無法確認時不自動重試，也不退回 PTY 再送一次。
 
-這個資格只適用於同一個未被人工操作的 CLI 程序。人工輸入或排隊會先使資格失效，再進原有終端通道；不攔住人工操作，也不因重新勾選控制權就恢復自動送出。完整、嚴格白名單的終端查詢回覆不算人工輸入；未知或分段回覆採保守失效。入隊或派送前重驗發現設定來源或執行檔改變時也會失效；這不是檔案即時監看，不在既有 TUI 上猜測重新載入後的按鍵。
+能力或啟動方式無法確認時，CLI 仍可使用原有終端方式啟動；這個相容路徑才限於已驗證的 Codex 0.153.4 與 0.162.1。兩條路徑目前都保留預設快捷鍵、Vim 關閉及設定來源檢查。LatticeTerm 沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；能力檢查不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用，但 `-p`／`--profile` 命名設定目前不支援。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。這不是對執行檔發行者的簽章驗證。
+
+這個資格只適用於同一個未被人工操作的 CLI 程序。人工輸入或排隊會先使資格失效，再進原有終端通道；不攔住人工操作，也不因重新勾選控制權就恢復自動送出。完整、嚴格白名單的終端查詢回覆不算人工輸入；未知或分段回覆採保守失效。入隊或派送前重驗發現設定來源或執行檔改變時也會失效；這不是檔案即時監看，不在既有 TUI 上猜測重新載入後的按鍵。 原生通訊路徑只排除 Codex 自行寫入的 `tui.screen_reader_detection_done` 布林值與 `tui.model_availability_nux` 顯示次數紀錄；快捷鍵、Vim、模型、提供者、工具、權限及其他設定仍須一致。舊終端路徑不適用這個顯示紀錄例外。
 
 失效時仍可依原授權讀取輸出、清除 MCP 佇列或結束工作階段；不自動重啟 CLI、不丟掉對話。若要準備受控 worker，請在核准的啟動參數中提供初始提示，先完成一次官方回合，再交給 MCP；不要先在終端手動送字來取得就緒。初始提示也須符合前述單行與特殊字元限制，否則 CLI 仍啟動，但不取得自動輸入資格。既有 resume、啟動指示與歷史還原沒有被默默改成新對話，但不能把尚未取得官方就緒的畫面當成可派工。
 
@@ -517,7 +519,7 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 
 阻擋原因分為 `control_not_granted`、`input_profile_unsupported`、`desktop_editing`、`desktop_paste_incomplete`、`desktop_escape_incomplete`、`startup_seed_pending`、`integration_not_reported`、`lifecycle_not_ready`、`queued_prompts_pending`。`lastInputKind` 僅回傳輸入種類，不回傳草稿、按鍵內容或回報憑證。遇到 `not_ready` 先讀這些原因，不應反覆要求使用者送相同提示或自動清除輸入。
 
-Windows Codex 另有 `promptReadiness.inputProfile`，回傳 `verified`、`reason` 與 `supportedVersions`。其他平台或 CLI 為 `null`。原因只包含固定代碼，不帶出帳號環境、啟動參數或設定內容：
+Windows Codex 另有 `promptReadiness.inputProfile`，回傳 `verified`、`reason`、`transport`、`versionPinned` 與 `supportedVersions`。`transport: "app_server_queue"` 搭配 `versionPinned: false` 表示以原生通訊能力驗證；`transport: "terminal"` 搭配 `versionPinned: true` 才使用固定版本相容路徑。`supportedVersions` 保留舊終端路徑的版本清單，不限制原生介面的 CLI 版本。其他平台或 CLI 為 `null`。原因只包含固定代碼，不帶出帳號環境、啟動參數或設定內容：
 
 | reason | 意義 |
 | --- | --- |

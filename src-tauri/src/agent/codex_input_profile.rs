@@ -104,6 +104,7 @@ pub(crate) struct SupportedProfile {
     context_digest: [u8; 32],
     executable: Stamp,
     sources: BTreeMap<PathBuf, Stamp>,
+    display_config: Option<PathBuf>,
 }
 
 impl SupportedProfile {
@@ -115,7 +116,11 @@ impl SupportedProfile {
         {
             return Err(UnavailableReason::ConfigurationChanged);
         }
-        if snapshot(&self.sources.keys().cloned().collect())? != self.sources {
+        if snapshot_with_display_state(
+            &self.sources.keys().cloned().collect(),
+            self.display_config.as_deref(),
+        )? != self.sources
+        {
             return Err(UnavailableReason::ConfigurationChanged);
         }
         Ok(())
@@ -126,6 +131,17 @@ impl SupportedProfile {
 /// App-server startup can maintain its normal local runtime/cache files; this
 /// probe never writes configuration or conversation/queue contents.
 pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
+    inspect_with_transport(context, true)
+}
+
+pub(super) fn inspect_protocol(context: &ProbeContext) -> Result<SupportedProfile> {
+    inspect_with_transport(context, false)
+}
+
+fn inspect_with_transport(
+    context: &ProbeContext,
+    terminal_input: bool,
+) -> Result<SupportedProfile> {
     let arguments = probe_arguments(context)?;
     let executable = stamp(&context.native_executable, MAX_BINARY_BYTES)?;
     if !matches!(executable, Stamp::File { .. })
@@ -139,11 +155,22 @@ pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
         return Err(UnavailableReason::UnsupportedLaunch);
     }
     let mut source_paths = fallback_sources(context)?;
-    let before = snapshot(&source_paths)?;
+    let display_config = (!terminal_input)
+        .then(|| user_config_path(context))
+        .transpose()?;
+    let before = snapshot_with_display_state(&source_paths, display_config.as_deref())?;
     let deadline = Instant::now() + TIMEOUT;
-    let version = capture_version(context, deadline)?;
-    validate_version(&version)?;
-    let sources = read_configuration(context, &arguments, &mut source_paths, deadline)?;
+    if terminal_input {
+        let version = capture_version(context, deadline)?;
+        validate_version(&version)?;
+    }
+    let sources = read_configuration(
+        context,
+        &arguments,
+        &mut source_paths,
+        deadline,
+        display_config.as_deref(),
+    )?;
     if before
         .iter()
         .any(|(path, value)| sources.get(path) != Some(value))
@@ -155,6 +182,7 @@ pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
         context_digest: context_digest(context)?,
         executable,
         sources,
+        display_config,
     })
 }
 
@@ -205,7 +233,7 @@ fn environment(context: &ProbeContext, name: &str) -> Result<Option<PathBuf>> {
     Ok(result)
 }
 
-fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
+pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
     if !context.cwd.is_absolute() || context.arguments.len() > 128 {
         return Err(UnavailableReason::UnsupportedLaunch);
     }
@@ -357,7 +385,7 @@ fn validate_configuration(response: &Value) -> Result<()> {
     Ok(())
 }
 
-fn fallback_sources(context: &ProbeContext) -> Result<BTreeSet<PathBuf>> {
+fn user_config_path(context: &ProbeContext) -> Result<PathBuf> {
     let home = match environment(context, "CODEX_HOME")? {
         Some(home) => home,
         None => environment(context, "USERPROFILE")?
@@ -367,7 +395,11 @@ fn fallback_sources(context: &ProbeContext) -> Result<BTreeSet<PathBuf>> {
     if !home.is_absolute() {
         return Err(UnavailableReason::UnverifiableSource);
     }
-    let mut paths = BTreeSet::from([home.join("config.toml"), context.cwd.clone()]);
+    Ok(home.join("config.toml"))
+}
+
+fn fallback_sources(context: &ProbeContext) -> Result<BTreeSet<PathBuf>> {
+    let mut paths = BTreeSet::from([user_config_path(context)?, context.cwd.clone()]);
     // The reported system layer below must match one of these pre-snapshotted
     // sources. ProgramData is only a candidate, not an authority for Codex's
     // Known Folder lookup; a mismatch is unsupported rather than guessed.
@@ -532,6 +564,93 @@ fn validate_file_length(length: u64, max: u64) -> Result<()> {
     }
 }
 
+fn snapshot_with_display_state(
+    paths: &BTreeSet<PathBuf>,
+    display_config: Option<&Path>,
+) -> Result<BTreeMap<PathBuf, Stamp>> {
+    let mut result = snapshot(paths)?;
+    let Some(path) = display_config else {
+        return Ok(result);
+    };
+    let original = result
+        .get(path)
+        .ok_or(UnavailableReason::UnverifiableSource)?;
+    let (canonical, contents) = match original {
+        Stamp::Missing => {
+            let parent = path.parent().ok_or(UnavailableReason::UnverifiableSource)?;
+            let name = path
+                .file_name()
+                .ok_or(UnavailableReason::UnverifiableSource)?;
+            (
+                parent
+                    .canonicalize()
+                    .map_err(|_| UnavailableReason::UnverifiableSource)?
+                    .join(name),
+                String::new(),
+            )
+        }
+        Stamp::File { canonical, .. } => {
+            let file = fs::File::open(path).map_err(|_| UnavailableReason::UnverifiableSource)?;
+            let mut contents = String::new();
+            file.take(MAX_CONFIG_BYTES + 1)
+                .read_to_string(&mut contents)
+                .map_err(|_| UnavailableReason::UnverifiableSource)?;
+            validate_file_length(contents.len() as u64, MAX_CONFIG_BYTES)?;
+            (canonical.clone(), contents)
+        }
+        _ => return Err(UnavailableReason::UnverifiableSource),
+    };
+    let normalized = normalized_display_config(&contents)?;
+    if stamp(path, MAX_CONFIG_BYTES)? != *original {
+        return Err(UnavailableReason::ConfigurationChanged);
+    }
+    result.insert(
+        path.to_owned(),
+        Stamp::File {
+            canonical,
+            digest: Sha256::digest(&normalized).into(),
+            length: normalized.len() as u64,
+        },
+    );
+    Ok(result)
+}
+
+fn normalized_display_config(contents: &str) -> Result<Vec<u8>> {
+    let mut config: toml::Value =
+        toml::from_str(contents).map_err(|_| UnavailableReason::UnverifiableSource)?;
+    let table = config
+        .as_table_mut()
+        .ok_or(UnavailableReason::UnverifiableSource)?;
+    if let Some(tui) = table.get_mut("tui").and_then(toml::Value::as_table_mut) {
+        if tui
+            .get("screen_reader_detection_done")
+            .is_some_and(toml::Value::is_bool)
+        {
+            tui.remove("screen_reader_detection_done");
+        }
+        if tui
+            .get("model_availability_nux")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|models| {
+                models.values().all(|value| {
+                    value
+                        .as_integer()
+                        .is_some_and(|number| (0..=u32::MAX as i64).contains(&number))
+                })
+            })
+        {
+            tui.remove("model_availability_nux");
+        }
+        if tui.is_empty() {
+            table.remove("tui");
+        }
+    }
+    let mut value =
+        serde_json::to_value(config).map_err(|_| UnavailableReason::UnverifiableSource)?;
+    value.sort_all_objects();
+    serde_json::to_vec(&value).map_err(|_| UnavailableReason::UnverifiableSource)
+}
+
 fn snapshot(paths: &BTreeSet<PathBuf>) -> Result<BTreeMap<PathBuf, Stamp>> {
     let mut remaining = MAX_TOTAL_CONFIG_BYTES;
     let mut result = BTreeMap::new();
@@ -546,7 +665,7 @@ fn snapshot(paths: &BTreeSet<PathBuf>) -> Result<BTreeMap<PathBuf, Stamp>> {
 }
 
 #[cfg(windows)]
-fn qualify_local_path(path: &Path) -> Result<()> {
+pub(super) fn qualify_local_path(path: &Path) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
     use std::path::{Component, Prefix};
     use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
@@ -584,7 +703,7 @@ fn qualify_local_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-enum Output {
+pub(super) enum Output {
     Line(Vec<u8>),
     Eof,
     Failed(UnavailableReason),
@@ -629,7 +748,7 @@ fn read_stdout(
 
 type ProbeWrite = (Vec<u8>, Sender<Result<()>>);
 
-struct ProbeChild {
+pub(super) struct ProbeChild {
     child: Child,
     output: Receiver<Output>,
     readers: Vec<thread::JoinHandle<()>>,
@@ -638,7 +757,7 @@ struct ProbeChild {
 }
 
 impl ProbeChild {
-    fn spawn(context: &ProbeContext, arguments: &[OsString]) -> Result<Self> {
+    pub(super) fn spawn(context: &ProbeContext, arguments: &[OsString]) -> Result<Self> {
         let mut command = Command::new(&context.native_executable);
         command
             .args(arguments)
@@ -718,7 +837,7 @@ impl ProbeChild {
         })
     }
 
-    fn send(&mut self, value: Value, deadline: Instant) -> Result<()> {
+    pub(super) fn send(&mut self, value: Value, deadline: Instant) -> Result<()> {
         let mut bytes = serde_json::to_vec(&value).map_err(|_| UnavailableReason::ProbeFailed)?;
         bytes.push(b'\n');
         if bytes.len() > 32 * 1024 {
@@ -739,7 +858,7 @@ impl ProbeChild {
             .map_err(|_| UnavailableReason::TimedOut)?
     }
 
-    fn next(&self, deadline: Instant) -> Result<Output> {
+    pub(super) fn next(&self, deadline: Instant) -> Result<Output> {
         let remaining = deadline
             .checked_duration_since(Instant::now())
             .ok_or(UnavailableReason::TimedOut)?;
@@ -751,7 +870,7 @@ impl ProbeChild {
             })
     }
 
-    fn reply(&self, id: u64, deadline: Instant) -> Result<Value> {
+    pub(super) fn reply(&self, id: u64, deadline: Instant) -> Result<Value> {
         loop {
             match self.next(deadline)? {
                 Output::Line(line) => {
@@ -819,6 +938,7 @@ fn read_configuration(
     arguments: &[OsString],
     paths: &mut BTreeSet<PathBuf>,
     deadline: Instant,
+    display_config: Option<&Path>,
 ) -> Result<BTreeMap<PathBuf, Stamp>> {
     let mut probe = ProbeChild::spawn(context, arguments)?;
     probe.send(
@@ -836,7 +956,7 @@ fn read_configuration(
     let first = probe.reply(2, deadline)?;
     validate_configuration(&first)?;
     collect_sources(&first, paths, &context.native_executable)?;
-    let before = snapshot(paths)?;
+    let before = snapshot_with_display_state(paths, display_config)?;
     // Discover first, then inspect between two complete source snapshots.
     // This closes the ordinary configuration-edit race for discovered files.
     probe.send(json!({"id":3,"method":"config/read","params":{
@@ -846,7 +966,7 @@ fn read_configuration(
     validate_configuration(&second)?;
     let mut after_paths = paths.clone();
     collect_sources(&second, &mut after_paths, &context.native_executable)?;
-    let after = snapshot(&after_paths)?;
+    let after = snapshot_with_display_state(&after_paths, display_config)?;
     if *paths != after_paths || before != after || first.get("layers") != second.get("layers") {
         return Err(UnavailableReason::ConfigurationChanged);
     }
@@ -854,13 +974,13 @@ fn read_configuration(
 }
 
 #[cfg(windows)]
-struct ProcessJob {
+pub(super) struct ProcessJob {
     _handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
 impl ProcessJob {
-    fn attach(child: &Child) -> Result<Self> {
+    pub(super) fn attach(child: &Child) -> Result<Self> {
         use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -892,10 +1012,10 @@ impl ProcessJob {
 }
 
 #[cfg(not(windows))]
-struct ProcessJob;
+pub(super) struct ProcessJob;
 #[cfg(not(windows))]
 impl ProcessJob {
-    fn attach(_: &Child) -> Result<Self> {
+    pub(super) fn attach(_: &Child) -> Result<Self> {
         Err(UnavailableReason::UnsupportedLaunch)
     }
 }
@@ -903,6 +1023,52 @@ impl ProcessJob {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_input_profile_protocol_ignores_only_typed_display_state() {
+        let original = "model = 'owned'\n[tui]\nvim_mode_default = false\n";
+        let hints = "[tui.model_availability_nux]\nowned = 1\n";
+        let updated = format!("{original}screen_reader_detection_done = true\n{hints}");
+        assert_eq!(
+            normalized_display_config(original).unwrap(),
+            normalized_display_config(&updated).unwrap()
+        );
+        for change in [
+            "model = 'other'\n[tui]\nvim_mode_default = false\n",
+            "model = 'owned'\n[tui]\nvim_mode_default = true\n",
+            "model = 'owned'\n[tui.keymap.composer]\nsubmit = []\n",
+            "model = 'owned'\n[tui]\nunknown_control = true\n",
+            "model = 'owned'\n[tui]\nscreen_reader_detection_done = 'untyped'\n",
+            "model = 'owned'\n[tui.model_availability_nux]\nowned = -1\n",
+        ] {
+            assert_ne!(
+                normalized_display_config(original).unwrap(),
+                normalized_display_config(change).unwrap()
+            );
+        }
+        assert!(normalized_display_config("invalid toml!").is_err());
+    }
+
+    #[test]
+    fn codex_input_profile_protocol_display_state_still_guards_sources() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config.toml");
+        let other = directory.path().join("other.toml");
+        let paths = BTreeSet::from([config.clone(), other.clone()]);
+        let before = snapshot_with_display_state(&paths, Some(&config)).unwrap();
+        fs::write(
+            &config,
+            "[tui]\nscreen_reader_detection_done = true\n[tui.model_availability_nux]\nowned = 1\n",
+        )
+        .unwrap();
+        assert!(before == snapshot_with_display_state(&paths, Some(&config)).unwrap());
+        assert!(snapshot(&paths).unwrap() != before);
+        fs::write(&other, "model = 'changed'\n").unwrap();
+        assert!(before != snapshot_with_display_state(&paths, Some(&config)).unwrap());
+        fs::remove_file(&other).unwrap();
+        fs::write(&config, "[tui]\nvim_mode_default = true\n").unwrap();
+        assert!(before != snapshot_with_display_state(&paths, Some(&config)).unwrap());
+    }
 
     fn context(path: &Path, args: &[&str]) -> ProbeContext {
         ProbeContext {
@@ -1094,6 +1260,7 @@ mod tests {
             context_digest: context_digest(&ctx).unwrap(),
             executable: stamp(&ctx.native_executable, MAX_BINARY_BYTES).unwrap(),
             sources: snapshot(&paths).unwrap(),
+            display_config: None,
         };
         profile.revalidate(&ctx).unwrap();
         let mut changed = ctx.clone();

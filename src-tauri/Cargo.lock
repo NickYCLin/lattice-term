@@ -3067,6 +3067,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 1.1.6+spec-1.1.0",
+ "tungstenite",
+ "uds_windows",
  "windows-sys 0.61.2",
  "zbus",
  "zeroize",
