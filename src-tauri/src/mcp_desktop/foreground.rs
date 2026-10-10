@@ -231,7 +231,7 @@ impl DesktopService {
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
                 "state":summary.state,"stateSource":summary.state_source,"queuedPrompts":summary.queued_prompts,
-                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id)},
+                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
                 "configuration":launch_identity(&summary),"readOutput":grant.view.scopes.fleet_read,"control":grant.view.scopes.fleet_control}))
             }
             DesktopAgentAction::Read { cursor, max_bytes } => {

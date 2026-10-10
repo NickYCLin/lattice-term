@@ -181,7 +181,7 @@ B 階段工具的語意：
 
 提示文字的第一個字元也不可是 ASCII `?`：預設快捷鍵會在空輸入框切換說明並消耗該字元。一般內文或句尾的問號仍可使用，不會被改字；依據見 [Codex 的空輸入框快捷鍵處理](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/tui/src/bottom_pane/chat_composer.rs#L3849)。
 
-目前只核准 Codex 0.153.4 的原生執行檔、預設快捷鍵與 Vim 關閉的設定組合。LatticeTerm 在新 CLI 啟動前，沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用，但 `-p`／`--profile` 命名設定目前不支援。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。無法確認的版本、啟動方式、設定來源或自訂按鍵，一律不開放自動送指示，CLI 本身仍正常啟動。這不是對執行檔發行者的簽章驗證。
+目前只核准 Codex 0.153.4 與 0.162.1 的原生執行檔、預設快捷鍵與 Vim 關閉的設定組合。LatticeTerm 在新 CLI 啟動前，沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用，但 `-p`／`--profile` 命名設定目前不支援。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。無法確認的版本、啟動方式、設定來源或自訂按鍵，一律不開放自動送指示，CLI 本身仍正常啟動。這不是對執行檔發行者的簽章驗證。
 
 這個資格只適用於同一個未被人工操作的 CLI 程序。人工輸入或排隊會先使資格失效，再進原有終端通道；不攔住人工操作，也不因重新勾選控制權就恢復自動送出。完整、嚴格白名單的終端查詢回覆不算人工輸入；未知或分段回覆採保守失效。入隊或派送前重驗發現設定來源或執行檔改變時也會失效；這不是檔案即時監看，不在既有 TUI 上猜測重新載入後的按鍵。
 
@@ -516,6 +516,23 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 `desktop_agent` 的 `state` 回傳 `promptReadiness`，包含 `ready`、`blockers`、`lastInputKind` 與 `snapshotOnly=true`。這是觀察當下的快照，送出時仍重新檢查；不會清除草稿、改變權限或把推測狀態升級為正式就緒。
 
 阻擋原因分為 `control_not_granted`、`input_profile_unsupported`、`desktop_editing`、`desktop_paste_incomplete`、`desktop_escape_incomplete`、`startup_seed_pending`、`integration_not_reported`、`lifecycle_not_ready`、`queued_prompts_pending`。`lastInputKind` 僅回傳輸入種類，不回傳草稿、按鍵內容或回報憑證。遇到 `not_ready` 先讀這些原因，不應反覆要求使用者送相同提示或自動清除輸入。
+
+Windows Codex 另有 `promptReadiness.inputProfile`，回傳 `verified`、`reason` 與 `supportedVersions`。其他平台或 CLI 為 `null`。原因只包含固定代碼，不帶出帳號環境、啟動參數或設定內容：
+
+| reason | 意義 |
+| --- | --- |
+| `unsupported_version` | CLI 版本尚未核准；不是 MCP 連線失敗 |
+| `unsupported_launch` | 啟動方式無法完成原生輸入資格檢查 |
+| `custom_keymap_or_vim` | 自訂快捷鍵或 Vim 模式不支援自動輸入 |
+| `unverifiable_configuration_source` | 設定來源無法安全確認 |
+| `configuration_changed` | 檢查期間設定或執行檔變更 |
+| `configuration_probe_failed`、`configuration_probe_timed_out`、`configuration_probe_output_limit` | 唯讀檢查失敗、逾時或超過輸出上限 |
+| `input_or_configuration_changed` | 啟動資格後來失效，重新分享不會恢復 |
+| `launch_profile_not_verified` | 沒有取得有效的啟動資格 |
+
+`integration_not_reported` 是另一個獨立阻擋原因：還沒有收到 CLI 的正式生命週期回報。不能用終端文字推測的「閒置」取代，也不能把 `inputProfile.verified=true` 當成可以立即送出。
+
+版本支援更新只會用於之後由新版 LatticeTerm 啟動並通過檢查的工作階段。既有程序不會被重新驗證、替換或自動重開；已失效的資格也不會恢復。不要為了繼續派工，繞過草稿或人工輸入防護。
 
 
 ## 獨立對話頁的 MCP

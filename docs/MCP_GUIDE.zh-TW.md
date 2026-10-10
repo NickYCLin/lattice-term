@@ -380,9 +380,13 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 | `daemon_unavailable` | 背景服務沒在跑 | 請使用者打開 LatticeTerm 並啟動背景服務 |
 | `failed` | 其他錯誤 | 看 `error` 說明後再決定 |
 
-### Windows Codex 背景工作階段的特別限制
+### Windows Codex 工作階段的特別限制
 
 送給 Windows 上 Codex 背景工作階段的指示必須是**單行**：不能有換行或 Tab，不能出現 `@`、`$`，不能以 `/`、`!` 或 `?` 開頭。被拒時不要自己改寫內容或自動重試，把原因告訴使用者。使用者在那個終端機手動打過字之後，自動送指示會停用，重新授權也不會恢復。
+
+這些輸入資格限制也適用於已分享的前景 Codex 終端。目前核准原生 CLI 0.153.4 與 0.162.1，仍須使用預設快捷鍵並關閉 Vim；其他版本包含 alpha 版不會自動放行。若能讀到對話卻不能送訊息，先查看 `desktop_agent` 的 `state`：`promptReadiness.inputProfile.reason` 會區分未支援版本、自訂按鍵、檢查失敗與資格失效，不要再要求使用者重複分享。
+
+`integration_not_reported` 表示尚無正式的 CLI 空閒／完成回報，與版本資格是不同檢查。更新程式不會替換正在跑的對話，也不會恢復既有程序已失效的輸入資格。
 
 ### 遠端主機的 Agent Fleet
 

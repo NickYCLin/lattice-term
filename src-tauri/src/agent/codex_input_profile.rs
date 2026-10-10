@@ -16,7 +16,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const VERSION: &str = "codex-cli 0.153.4";
+pub(crate) const SUPPORTED_VERSIONS: &[&str] = &["codex-cli 0.153.4", "codex-cli 0.162.1"];
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOTAL_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 // The supported native Windows 0.153.4 executable is about 282 MiB. Keep a
@@ -52,6 +52,19 @@ pub(crate) enum UnavailableReason {
 }
 
 impl UnavailableReason {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::UnsupportedLaunch => "unsupported_launch",
+            Self::UnsupportedVersion => "unsupported_version",
+            Self::UnsupportedSettings => "custom_keymap_or_vim",
+            Self::UnverifiableSource => "unverifiable_configuration_source",
+            Self::ConfigurationChanged => "configuration_changed",
+            Self::ProbeFailed => "configuration_probe_failed",
+            Self::TimedOut => "configuration_probe_timed_out",
+            Self::OutputLimit => "configuration_probe_output_limit",
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn message(self) -> &'static str {
         match self {
@@ -129,9 +142,7 @@ pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
     let before = snapshot(&source_paths)?;
     let deadline = Instant::now() + TIMEOUT;
     let version = capture_version(context, deadline)?;
-    if version.trim() != VERSION {
-        return Err(UnavailableReason::UnsupportedVersion);
-    }
+    validate_version(&version)?;
     let sources = read_configuration(context, &arguments, &mut source_paths, deadline)?;
     if before
         .iter()
@@ -145,6 +156,14 @@ pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
         executable,
         sources,
     })
+}
+
+fn validate_version(version: &str) -> Result<()> {
+    if SUPPORTED_VERSIONS.contains(&version.trim()) {
+        Ok(())
+    } else {
+        Err(UnavailableReason::UnsupportedVersion)
+    }
 }
 
 fn context_digest(context: &ProbeContext) -> Result<[u8; 32]> {
@@ -895,6 +914,35 @@ mod tests {
             ],
             arguments: args.iter().map(OsString::from).collect(),
         }
+    }
+
+    #[test]
+    fn codex_input_profile_only_accepts_qualified_stable_versions() {
+        for version in SUPPORTED_VERSIONS {
+            assert!(validate_version(version).is_ok());
+            assert!(validate_version(&format!("{version}\r\n")).is_ok());
+        }
+        for version in [
+            "codex-cli 0.162.0-alpha.17.2",
+            "codex-cli 0.162.2",
+            "codex-cli 0.153.40",
+            "codex-cli 0.162.1-custom",
+            "codex-cli 0.162.1\nunverified",
+            "",
+        ] {
+            assert_eq!(
+                validate_version(version),
+                Err(UnavailableReason::UnsupportedVersion)
+            );
+        }
+        assert_eq!(
+            UnavailableReason::UnsupportedVersion.code(),
+            "unsupported_version"
+        );
+        assert_eq!(
+            UnavailableReason::UnsupportedSettings.code(),
+            "custom_keymap_or_vim"
+        );
     }
 
     #[test]

@@ -1037,6 +1037,8 @@ struct AgentSessionEntry {
     mcp_input_profile_invalidated: AtomicBool,
     #[cfg(windows)]
     codex_input_profile: Option<CodexInputAttestation>,
+    #[cfg(windows)]
+    codex_input_profile_unavailable: Option<codex_input_profile::UnavailableReason>,
     #[cfg(all(windows, test))]
     codex_input_profile_test_supported: AtomicBool,
     stopping: AtomicBool,
@@ -2948,6 +2950,39 @@ impl AgentRegistry {
             reasons.push("queued_prompts_pending");
         }
         Ok(reasons)
+    }
+
+    pub(crate) fn mcp_input_profile_diagnostic(
+        &self,
+        session_id: &str,
+    ) -> Option<serde_json::Value> {
+        #[cfg(windows)]
+        {
+            let entry = self.get(session_id).ok()?;
+            if entry.summary.lock().ok()?.definition_id != "codex" {
+                return None;
+            }
+            let verified = mcp_input_profile_valid(&entry);
+            let reason = if verified {
+                None
+            } else if let Some(reason) = entry.codex_input_profile_unavailable {
+                Some(reason.code())
+            } else if entry.mcp_input_profile_invalidated.load(Ordering::Acquire) {
+                Some("input_or_configuration_changed")
+            } else {
+                Some("launch_profile_not_verified")
+            };
+            Some(serde_json::json!({
+                "verified": verified,
+                "reason": reason,
+                "supportedVersions": codex_input_profile::SUPPORTED_VERSIONS
+            }))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = session_id;
+            None
+        }
     }
 
     pub(crate) fn mcp_last_input_kind(&self, session_id: &str) -> Option<&'static str> {
@@ -7829,7 +7864,7 @@ pub fn launch_with_replay(
     }
 
     #[cfg(windows)]
-    let codex_input_profile = if definition_id == "codex"
+    let (codex_input_profile, codex_input_profile_unavailable) = if definition_id == "codex"
         && program == executable.as_os_str()
         && prefix_args.is_empty()
         && seed_preserves_codex_input_profile(request.seed_input.as_deref())
@@ -7842,11 +7877,16 @@ pub fn launch_with_replay(
             environment: final_codex_launch_environment(&command, &launch_environment),
             arguments: command.get_argv().iter().skip(1).cloned().collect(),
         };
-        codex_input_profile::inspect(&context)
-            .ok()
-            .map(|profile| CodexInputAttestation { context, profile })
+        match codex_input_profile::inspect(&context) {
+            Ok(profile) => (Some(CodexInputAttestation { context, profile }), None),
+            Err(reason) => (None, Some(reason)),
+        }
     } else {
-        None
+        (
+            None,
+            (definition_id == "codex")
+                .then_some(codex_input_profile::UnavailableReason::UnsupportedLaunch),
+        )
     };
 
     // Configuration preflight may take seconds. The seed's minimum wait and
@@ -7971,6 +8011,8 @@ pub fn launch_with_replay(
         )),
         #[cfg(windows)]
         codex_input_profile,
+        #[cfg(windows)]
+        codex_input_profile_unavailable,
         #[cfg(all(windows, test))]
         codex_input_profile_test_supported: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
@@ -14487,6 +14529,79 @@ notify = ["notify.exe", "turn-ended"]"#,
             MCP_NOT_CONTROLLED
         );
         registry.stop_all();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn codex_mcp_submit_input_profile_diagnostics_preserve_invalidation() {
+        use crate::mcp_desktop::{DesktopAgentAction, DesktopOperation, DesktopService};
+
+        let fixture = CodexSubmitFixture::new(None);
+        let service = Arc::new(
+            DesktopService::new(
+                Arc::new(crate::ssh::SshRegistry::new()),
+                Arc::new(crate::sftp::SftpRegistry::new()),
+            )
+            .with_foreground_agents(fixture.registry.clone(), fixture.sink.clone()),
+        );
+        service
+            .share_foreground(&fixture.id, true, true, true)
+            .await
+            .unwrap();
+        let target = service
+            .targets()
+            .into_iter()
+            .find(|target| target.connected)
+            .unwrap()
+            .id;
+        let operation = DesktopOperation::DesktopAgent {
+            target_id: target,
+            action: DesktopAgentAction::State {},
+        };
+        let state = service
+            .execute("input-profile-test", operation.clone())
+            .await
+            .unwrap();
+        assert_eq!(state["promptReadiness"]["inputProfile"]["verified"], true);
+        assert!(state["promptReadiness"]["inputProfile"]["reason"].is_null());
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        invalidate_mcp_input_profile(&entry, b"human draft");
+        service
+            .share_foreground(&fixture.id, true, true, true)
+            .await
+            .unwrap();
+        assert!(service
+            .execute("input-profile-test", operation)
+            .await
+            .is_err());
+        let regranted_target = service
+            .targets()
+            .into_iter()
+            .find(|target| target.connected)
+            .unwrap()
+            .id;
+        let state = service
+            .execute(
+                "input-profile-test",
+                DesktopOperation::DesktopAgent {
+                    target_id: regranted_target,
+                    action: DesktopAgentAction::State {},
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(state["promptReadiness"]["inputProfile"]["verified"], false);
+        assert_eq!(
+            state["promptReadiness"]["inputProfile"]["reason"],
+            "input_or_configuration_changed"
+        );
+        assert!(state["promptReadiness"]["blockers"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("input_profile_unsupported")));
+        assert!(!mcp_input_profile_valid(&entry));
+        assert!(!state.to_string().contains("human draft"));
+        assert!(fixture.writes.lock().unwrap().is_empty());
     }
 
     #[cfg(windows)]
