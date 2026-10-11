@@ -3,12 +3,12 @@
 
 fn main() {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(code) = latticeterm_lib::agent::run_reporter_cli(arguments.iter()) {
+        std::process::exit(code);
+    }
     // MCP and the reporter start often and inherit PATH from their CLI;
     // the window and the daemon need the user's shell PATH to find CLIs.
-    let helper = matches!(
-        arguments.first().and_then(|a| a.to_str()),
-        Some("mcp" | "agent-report")
-    );
+    let helper = matches!(arguments.first().and_then(|a| a.to_str()), Some("mcp"));
     if !helper {
         latticeterm_lib::login_path::adopt_login_shell_path();
     }
@@ -18,9 +18,6 @@ fn main() {
         std::process::exit(code);
     }
     if let Some(code) = latticeterm_lib::agent_daemon::mcp::run_cli(std::env::args_os().skip(1)) {
-        std::process::exit(code);
-    }
-    if let Some(code) = latticeterm_lib::agent::run_reporter_cli(std::env::args_os().skip(1)) {
         std::process::exit(code);
     }
 

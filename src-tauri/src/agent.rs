@@ -5058,11 +5058,24 @@ where
         let provider = args
             .next()
             .and_then(|value| value.as_ref().to_str().map(str::to_string));
-        if args.next().is_some() || provider.is_none() {
-            eprintln!("agent-fleet-hook accepts exactly one provider");
+        let event = args.next();
+        let event_name = event.as_ref().and_then(|value| value.as_ref().to_str());
+        if args.next().is_some() || provider.is_none() || (event.is_some() && event_name.is_none())
+        {
+            eprintln!("usage: agent-fleet-hook <provider> [antigravity-event]");
             return Some(2);
         }
-        fleet_hooks::report_from_stdin(provider.as_deref().unwrap())
+        fleet_hooks::report_from_stdin(provider.as_deref().unwrap(), event_name)
+    } else if command.as_ref() == OsStr::new("agent-fleet-hook-config") {
+        let provider = args
+            .next()
+            .and_then(|value| value.as_ref().to_str().map(str::to_string));
+        if args.next().is_some() || provider.is_none() {
+            eprintln!("usage: agent-fleet-hook-config <kimi|grok|antigravity>");
+            return Some(2);
+        }
+        fleet_hooks::user_hook_config(provider.as_deref().unwrap())
+            .map(|config| println!("{config}"))
     } else if command.as_ref() == OsStr::new("agent-claude-hook") {
         if args.next().is_some() {
             eprintln!("agent-claude-hook accepts no arguments");
@@ -8680,11 +8693,23 @@ pub(crate) fn mcp_prompt_support() -> Vec<serde_json::Value> {
                 "claude" | "gemini" | "qwen" | "copilot" | "hermes" | "opencode" | "cursor"
                 | "droid" => "launch_hook",
                 "aider" => "attention_only",
+                "antigravity" | "kimi" | "grok" => "user_hook_observer",
                 _ => "not_integrated",
             };
+            let observer_only = matches!(definition.id, "aider" | "antigravity" | "kimi" | "grok");
+            let setup = matches!(definition.id, "antigravity" | "kimi" | "grok").then(|| {
+                serde_json::json!({
+                    "command": "agent-fleet-hook-config",
+                    "provider": definition.id,
+                    "writesAccountSettings": false,
+                    "requiresUserRegistration": true,
+                })
+            });
             serde_json::json!({
                 "definitionId": definition.id,
                 "integration": integration,
+                "automaticPromptSubmission": !observer_only && integration != "not_integrated",
+                "hookConfiguration": setup,
                 "requiresOfficialReadiness": true,
                 "requiresControlGrant": true,
                 "sessionSpecificBlockers": {
@@ -12692,11 +12717,36 @@ notify = ["notify.exe", "turn-ended"]"#,
                 "claude" | "gemini" | "qwen" | "copilot" | "hermes" | "opencode" | "cursor"
                 | "droid" => "launch_hook",
                 "aider" => "attention_only",
-                "antigravity" | "kimi" | "grok" => "not_integrated",
+                "antigravity" | "kimi" | "grok" => "user_hook_observer",
                 _ => panic!("New Fleet CLI needs an explicit MCP support audit"),
             };
             assert_eq!(entry["integration"], expected);
+            let observer_only = matches!(definition.id, "aider" | "antigravity" | "kimi" | "grok");
+            assert_eq!(entry["automaticPromptSubmission"], !observer_only);
+            if matches!(definition.id, "antigravity" | "kimi" | "grok") {
+                assert_eq!(entry["hookConfiguration"]["provider"], definition.id);
+                assert_eq!(entry["hookConfiguration"]["writesAccountSettings"], false);
+                assert_eq!(entry["hookConfiguration"]["requiresUserRegistration"], true);
+            } else {
+                assert!(entry["hookConfiguration"].is_null());
+            }
         }
+    }
+
+    #[test]
+    fn fleet_hook_cli_rejects_extra_arguments_without_launching_the_desktop() {
+        for arguments in [
+            vec!["agent-fleet-hook"],
+            vec!["agent-fleet-hook", "grok", "Stop", "extra"],
+            vec!["agent-fleet-hook-config"],
+            vec!["agent-fleet-hook-config", "kimi", "extra"],
+        ] {
+            assert_eq!(run_reporter_cli(arguments), Some(2));
+        }
+        assert_eq!(
+            run_reporter_cli(["agent-fleet-hook-config", "unsupported"]),
+            Some(1)
+        );
     }
 
     #[test]

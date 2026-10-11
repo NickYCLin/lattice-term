@@ -543,27 +543,79 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 | Cursor Agent | `launch_hook` | 本機 plugin；等 sessionStart／stop |
 | Factory Droid | `launch_hook` | 本次程序 settings；等 SessionStart／Stop／idle_prompt |
 | Aider | `attention_only` | 尚未支援安全自動派送；通知也會出現在確認問題 |
-| Google Antigravity CLI | `not_integrated` | 尚未接入正式就緒回報 |
-| Kimi Code CLI | `not_integrated` | 尚未接入正式就緒回報 |
-| Grok CLI | `not_integrated` | 尚未接入正式就緒回報 |
+| Google Antigravity CLI | `user_hook_observer` | 可自行註冊狀態觀察 hook；尚未支援安全自動派送 |
+| Kimi Code CLI | `user_hook_observer` | 可自行註冊狀態觀察 hook；尚未支援安全自動派送 |
+| Grok CLI | `user_hook_observer` | 可自行註冊狀態觀察 hook；尚未支援安全自動派送 |
 
 尚未支援自動派送的四項仍可手動使用終端，依授權讀取輸出、清除 MCP
 佇列或結束工作階段。不能把「Fleet 清單裡有這個 CLI」說成自動控制已完成。
 沒有會員不影響 adapter 的離線測試；CLI 本身的登入、訂閱、API 額度與工具
 確認仍由原 CLI 處理，LatticeTerm 不跳過它們。
 
+`automaticPromptSubmission` 說明 adapter 是否具備自動派送橋接，不是當下
+的就緒狀態；這三家觀察型 adapter 與 Aider 都是 `false`。有觀察型 hook
+的三項另提供 `hookConfiguration`，列出設定匯出命令與需要自行註冊的條件。
+輸出成功不代表 hook 已安裝，更不代表可自動收取 MCP 指示。
+
 四項缺口不是訂閱檢查失敗：
 
 - Aider 的通知命令會在一般輸入、確認問題都觸發，不能用它宣告可自動送字。
-- Antigravity 目前僅以日誌擷取對話 ID，對話存在不等於輸入框已就緒。
-- Kimi 新版與舊版的設定介面不同，目前查到的新版 hooks 屬於帳號設定，
-  尚未實作保留原設定與原對話的安全載入方式。
+- Antigravity 的 Stop 即使帶 `fullyIdle: true`，其他 Stop hook 仍可要求
+  繼續執行；不能在所有 hook 處理完以前把它當最終完成。對話 ID 與背景
+  任務完成都不等於終端已可接受下一筆輸入。
+- Kimi 新版 Stop 是可阻擋事件，其他 hook 可讓模型繼續；SessionStart
+  只代表啟動或恢復，不是輸入迴圈的就緒通知。新版 TypeScript CLI 的
+  hooks 格式也不能直接套到舊版 Python CLI。
 - Fleet 使用的 Grok CLI 刻意只讀使用者層級 hooks，不載入專案 hooks。
-  不能另換 HOME 複製帳號，或把這項保護繞過後稱為支援。
+  SessionStart 在模型回合內觸發；Stop 回報之後 CLI 還要收尾。這些事件
+  未提供輸入介面的最終就緒確認。不能另換 HOME 複製帳號，或把使用者
+  層級設定限制繞過後稱為支援。
 
 參考來源：[Aider 輸入處理](https://github.com/Aider-AI/aider/blob/main/aider/io.py)、
 [Kimi 設定覆寫](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/overrides.md)、
 [Grok hook 載入](https://github.com/superagent-ai/grok-cli/blob/main/src/hooks/config.ts)。
+
+#### 自行註冊 Kimi、Grok、Antigravity 狀態觀察 hook
+
+使用 LatticeTerm 執行檔預覽設定；此命令只輸出片段，不讀寫帳號設定，
+也不啟動模型、不更換模型或原生對話：
+
+```powershell
+& 'LatticeTerm.exe' agent-fleet-hook-config kimi
+& 'LatticeTerm.exe' agent-fleet-hook-config grok
+& 'LatticeTerm.exe' agent-fleet-hook-config antigravity
+```
+
+請改用本機執行檔的實際路徑。匯出的是執行檔所在平台的 shell 命令；
+Windows 與 Unix 主機要各自匯出，不能直接共用 Windows 的命令。
+
+- **Kimi**：將匯出的 `[[hooks]]` 追加到新版 CLI 的
+  `~/.kimi-code/config.toml`。保留原本所有設定、hooks、登入與工作階段。
+  每項只用官方的 event、command、timeout 欄位；timeout 是秒。
+- **Grok**：Fleet 指定的是 `superagent-ai/grok-cli`。將匯出的
+  `hooks` 內容逐事件合併到 `~/.grok/user-settings.json` 的既有陣列；
+  不要以輸出取代整個檔案或既有 hooks，也不要放入專案設定。
+- **Antigravity**：將匯出的 `latticeterm-session-status` named hook
+  合併到 `~/.gemini/config/hooks.json`，保留其他 named hooks。
+  PreInvocation、PostInvocation、Stop 用直接 handler 陣列；PreToolUse、
+  PostToolUse 用 matcher／hooks 陣列。請勿與 Gemini CLI 的 hooks schema 混用。
+
+設定完成後，以 LatticeTerm 開啟新的該 CLI 工作階段。既有工作階段不會
+被重啟，也不會被換到另一筆對話。runner 只在 Fleet 子程序具有 reporter、
+session、報告位址及 token 四項環境變數時執行；平常直接使用 CLI 時不報告。
+設定只引用環境變數名稱，不含任何 token、帳號資料或本機執行檔路徑。
+觀察失敗不阻擋原 CLI，也不回覆工具允許決策或要求模型繼續。
+
+這三家目前回報 working／needsAttention 與經驗證的原生對話 ID，**不回報
+idle／done**。Kimi 只接受 `client_type: kimi_code_cli`；背景 heartbeat、
+通知文字或子代理完成都不會釋放主佇列。Antigravity 由命令參數指定正式
+事件，拒絕與 payload 衝突的事件；未知 Stop 原因或缺少 fullyIdle 不猜狀態。
+沒有可信的最終輸入就緒事件以前，queued 指示仍不會被自動派送。
+
+官方契約與實作：[Kimi hooks](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/hooks.md)、
+[Kimi Stop continuation](https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/features/externalHooks/agent/agentExternalHooksService.ts)、
+[Grok 模型迴圈](https://github.com/superagent-ai/grok-cli/blob/main/src/agent/agent.ts)、
+[Antigravity hooks](https://antigravity.google/docs/hooks?tab=cli)。
 
 Cursor 與 Droid 先做有界的 `--help` 唯讀檢查，確認各自支援 `--plugin-dir`
 或 `--settings`，不靠固定版本白名單。舊版、檢查失敗或安全模式保留原啟動
