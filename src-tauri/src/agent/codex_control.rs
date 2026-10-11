@@ -4,7 +4,7 @@ use super::codex_input_profile::{
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -139,14 +139,14 @@ impl CodexControl {
         if socket.as_os_str().to_string_lossy().len() > 100 {
             return Err(UnavailableReason::UnsupportedLaunch);
         }
-        let mut arguments = codex_input_profile::probe_arguments(context)?;
+        let mut arguments = profile.configuration_arguments().to_vec();
         arguments.truncate(arguments.len() - 2);
         arguments.extend([
             OsString::from("app-server"),
             OsString::from("--listen"),
             OsString::from(format!("unix://{}", socket.display())),
         ]);
-        let mut command = Command::new(&context.native_executable);
+        let mut command = context.command();
         command
             .args(arguments)
             .current_dir(&context.cwd)
@@ -682,7 +682,7 @@ mod tests {
     fn codex_control_native_metadata_acceptance() {
         let native =
             std::env::var_os("LATTICETERM_TEST_CODEX_NATIVE").expect("set exact native executable");
-        let directory = tempfile::tempdir().unwrap();
+        let directory = native_fixture_directory();
         let home = directory.path().join("home");
         let cwd = directory.path().join("workspace");
         std::fs::create_dir(&home).unwrap();
@@ -693,6 +693,7 @@ mod tests {
         environment.push(("CODEX_HOME".into(), home.as_os_str().to_owned()));
         let context = ProbeContext {
             native_executable: native.into(),
+            launcher: None,
             cwd,
             environment,
             arguments: vec![],
@@ -802,6 +803,80 @@ mod tests {
         .into_iter()
         .map(OsString::from)
         .collect();
+        assert_tui_same_thread(context, fixture, "latticeterm-tui-probe", None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires exact npm CLI; isolated Node TUI, proxy profile and loopback model"]
+    fn codex_control_native_npm_profile_same_thread_acceptance() {
+        let fixture = MockProvider::start();
+        let (_directory, mut context) = model_fixture_context(&fixture);
+        let shim = PathBuf::from(
+            std::env::var_os("LATTICETERM_TEST_CODEX_NPM_SHIM").expect("set exact npm shim"),
+        );
+        let (program, prefix) = super::super::launch_parts(&shim);
+        let (native, launcher) =
+            super::super::codex_launcher::resolve(&shim, &program, &prefix).unwrap();
+        assert_eq!(native, context.native_executable);
+        assert!(launcher.is_some());
+        context.launcher = launcher;
+        context.arguments = ["--no-alt-screen", "--profile", "latticeterm-cliproxyapi"]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+        let home = context
+            .environment
+            .iter()
+            .find(|(key, _)| key == "CODEX_HOME")
+            .unwrap()
+            .1
+            .clone();
+        std::fs::write(PathBuf::from(home).join("latticeterm-cliproxyapi.config.toml"),
+            format!("model='latticeterm-profile-probe'\nmodel_reasoning_effort='medium'\n[projects.{}]\ntrust_level='trusted'\n", toml::Value::String(context.cwd.to_string_lossy().into()))).unwrap();
+        let (original, _) = CodexControl::start(&context).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut client = original.client(deadline).unwrap();
+        let opened = rpc(&mut client, 3, "thread/start", json!({
+            "cwd":context.cwd,"model":"latticeterm-profile-probe","modelProvider":"latticeterm_probe",
+            "approvalPolicy":"on-request","sandbox":"read-only","ephemeral":false
+        }), deadline).unwrap();
+        let thread_id = opened["thread"]["id"].as_str().unwrap().to_owned();
+        drop(client);
+        original
+            .send(&thread_id, "persist the owned fixture thread", || true)
+            .unwrap();
+        let request = fixture
+            .received
+            .recv_timeout(Duration::from_secs(12))
+            .unwrap();
+        assert_eq!(request["model"], "latticeterm-profile-probe");
+        fixture.release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while original.snapshot(Some(&thread_id)).unwrap().unwrap().state != State::Idle {
+            assert!(Instant::now() < deadline, "fixture thread did not finish");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        original.shutdown();
+        drop(original);
+        context
+            .arguments
+            .extend([OsString::from("resume"), OsString::from(&thread_id)]);
+        assert_tui_same_thread(
+            context,
+            fixture,
+            "latticeterm-profile-probe",
+            Some(&thread_id),
+        );
+    }
+
+    #[cfg(windows)]
+    fn assert_tui_same_thread(
+        context: ProbeContext,
+        fixture: MockProvider,
+        expected_model: &str,
+        expected_thread: Option<&str>,
+    ) {
         let (control, profile) = CodexControl::start(&context).unwrap();
         let terminal = NativeTerminal::start(&context, control.endpoint());
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -819,6 +894,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         };
         assert_eq!(snapshot.state, State::Idle);
+        if let Some(expected_thread) = expected_thread {
+            assert_eq!(snapshot.thread_id, expected_thread);
+        }
         profile.revalidate(&context).unwrap();
         let prompt = "same TUI thread native MCP probe";
         control.send(&snapshot.thread_id, prompt, || true).unwrap();
@@ -826,7 +904,7 @@ mod tests {
             .received
             .recv_timeout(Duration::from_secs(12))
             .unwrap();
-        assert_eq!(request["model"], "latticeterm-tui-probe");
+        assert_eq!(request["model"], expected_model);
         assert!(request["input"]
             .as_array()
             .unwrap()
@@ -864,13 +942,16 @@ mod tests {
         assert!(fixture.received.try_recv().is_err());
         drop(terminal);
         control.shutdown();
+        drop(control);
+        drop(fixture);
     }
 
     #[cfg(windows)]
     struct NativeTerminal {
         child: Box<dyn portable_pty::Child + Send + Sync>,
-        _master: Box<dyn portable_pty::MasterPty + Send>,
+        master: Option<Box<dyn portable_pty::MasterPty + Send>>,
         output: std::sync::Arc<Mutex<Vec<u8>>>,
+        job: Option<ProcessJob>,
     }
 
     #[cfg(windows)]
@@ -885,7 +966,13 @@ mod tests {
                     pixel_height: 0,
                 })
                 .unwrap();
-            let mut command = portable_pty::CommandBuilder::new(&context.native_executable);
+            let mut command = if let Some(launcher) = context.launcher.as_ref() {
+                let mut command = portable_pty::CommandBuilder::new(&launcher.program);
+                command.arg(&launcher.entrypoint);
+                command
+            } else {
+                portable_pty::CommandBuilder::new(&context.native_executable)
+            };
             command.env_clear();
             for (key, value) in &context.environment {
                 command.env(key, value);
@@ -895,6 +982,7 @@ mod tests {
             command.args(&context.arguments);
             command.args([OsString::from("--remote"), endpoint]);
             let child = pair.slave.spawn_command(command).unwrap();
+            let job = ProcessJob::attach_pty(child.as_ref()).unwrap();
             drop(pair.slave);
             let mut reader = pair.master.try_clone_reader().unwrap();
             let mut writer = pair.master.take_writer().unwrap();
@@ -920,8 +1008,9 @@ mod tests {
             });
             Self {
                 child,
-                _master: pair.master,
+                master: Some(pair.master),
                 output,
+                job: Some(job),
             }
         }
 
@@ -933,16 +1022,36 @@ mod tests {
     #[cfg(windows)]
     impl Drop for NativeTerminal {
         fn drop(&mut self) {
+            self.master.take();
+            self.job.take();
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
     }
 
     #[cfg(windows)]
+    fn native_fixture_directory() -> tempfile::TempDir {
+        let retain = std::env::var_os("LATTICETERM_TEST_KEEP_CODEX_FIXTURES")
+            .is_some_and(|value| value == "1");
+        let directory = tempfile::Builder::new()
+            .prefix("lt-codex-fixture-")
+            .disable_cleanup(retain)
+            .tempdir()
+            .unwrap();
+        if retain {
+            eprintln!(
+                "owned Codex fixture retained: {}",
+                directory.path().display()
+            );
+        }
+        directory
+    }
+
+    #[cfg(windows)]
     fn model_fixture_context(fixture: &MockProvider) -> (tempfile::TempDir, ProbeContext) {
         let native =
             std::env::var_os("LATTICETERM_TEST_CODEX_NATIVE").expect("set exact native executable");
-        let directory = tempfile::tempdir().unwrap();
+        let directory = native_fixture_directory();
         let home = directory.path().join("home");
         let cwd = directory.path().join("workspace");
         std::fs::create_dir(&home).unwrap();
@@ -996,6 +1105,7 @@ stream_max_retries = 0
         environment.push(("CODEX_HOME".into(), home.as_os_str().to_owned()));
         let context = ProbeContext {
             native_executable: native.into(),
+            launcher: None,
             cwd,
             environment,
             arguments: vec![],

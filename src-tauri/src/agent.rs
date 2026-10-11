@@ -24,6 +24,8 @@ mod codex_control;
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod codex_input_profile;
+#[cfg(windows)]
+mod codex_launcher;
 mod codex_resume;
 
 pub use approval::AgentApprovalRequest;
@@ -7878,51 +7880,58 @@ pub fn launch_with_replay(
     }
 
     #[cfg(windows)]
-    let (codex_input_profile, codex_input_profile_unavailable, codex_control) = if definition_id
-        == "codex"
-        && program == executable.as_os_str()
-        && prefix_args.is_empty()
-        && seed_preserves_codex_input_profile(request.seed_input.as_deref())
-    {
-        // Capture the exact final child environment, including account and
-        // reporter overrides. Keep values local; never log this snapshot.
-        let context = codex_input_profile::ProbeContext {
-            native_executable: executable.clone(),
-            cwd: working_directory.clone(),
-            environment: final_codex_launch_environment(&command, &launch_environment),
-            arguments: command.get_argv().iter().skip(1).cloned().collect(),
-        };
-        match codex_control::CodexControl::start(&context) {
-            Ok((control, profile)) => {
-                let argv = command.get_argv_mut();
-                let position = argv
+    let codex_launch = (definition_id == "codex"
+        && seed_preserves_codex_input_profile(request.seed_input.as_deref()))
+    .then(|| codex_launcher::resolve(&executable, &program, &prefix_args).ok())
+    .flatten();
+    #[cfg(windows)]
+    let (codex_input_profile, codex_input_profile_unavailable, codex_control) =
+        if let Some((native_executable, launcher)) = codex_launch {
+            // Capture the exact final child environment, including account and
+            // reporter overrides. Keep values local; never log this snapshot.
+            let context = codex_input_profile::ProbeContext {
+                native_executable,
+                launcher,
+                cwd: working_directory.clone(),
+                environment: final_codex_launch_environment(&command, &launch_environment),
+                arguments: command
+                    .get_argv()
                     .iter()
-                    .position(|argument| argument == "--")
-                    .unwrap_or(argv.len());
-                argv.splice(
-                    position..position,
-                    [OsString::from("--remote"), control.endpoint()],
-                );
-                integrated_completion = true;
-                (
-                    Some(CodexInputAttestation { context, profile }),
-                    None,
-                    Some(Arc::new(control)),
-                )
+                    .skip(1 + prefix_args.len())
+                    .cloned()
+                    .collect(),
+            };
+            match codex_control::CodexControl::start(&context) {
+                Ok((control, profile)) => {
+                    let argv = command.get_argv_mut();
+                    let position = argv
+                        .iter()
+                        .position(|argument| argument == "--")
+                        .unwrap_or(argv.len());
+                    argv.splice(
+                        position..position,
+                        [OsString::from("--remote"), control.endpoint()],
+                    );
+                    integrated_completion = true;
+                    (
+                        Some(CodexInputAttestation { context, profile }),
+                        None,
+                        Some(Arc::new(control)),
+                    )
+                }
+                Err(_) => match codex_input_profile::inspect(&context) {
+                    Ok(profile) => (Some(CodexInputAttestation { context, profile }), None, None),
+                    Err(reason) => (None, Some(reason), None),
+                },
             }
-            Err(_) => match codex_input_profile::inspect(&context) {
-                Ok(profile) => (Some(CodexInputAttestation { context, profile }), None, None),
-                Err(reason) => (None, Some(reason), None),
-            },
-        }
-    } else {
-        (
-            None,
-            (definition_id == "codex")
-                .then_some(codex_input_profile::UnavailableReason::UnsupportedLaunch),
-            None,
-        )
-    };
+        } else {
+            (
+                None,
+                (definition_id == "codex")
+                    .then_some(codex_input_profile::UnavailableReason::UnsupportedLaunch),
+                None,
+            )
+        };
 
     // Configuration preflight may take seconds. The seed's minimum wait and
     // fallback deadline must begin at the actual PTY launch, not before it.

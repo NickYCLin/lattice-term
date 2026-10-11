@@ -183,7 +183,9 @@ B 階段工具的語意：
 
 Windows 的新 Codex 工作階段會先檢查原生 CLI 是否支援遠端終端、原生佇列與對應通訊協定，再讓終端和 MCP 共用同一個原生 app-server。這條路徑依能力驗證，不以版本號白名單判斷，CLI 更新或 alpha 標記本身不會直接擋住傳訊。服務使用僅限目前使用者存取的本機 socket 目錄，不接到全域 daemon，也不在既有工作階段旁偷偷重開一份對話。MCP 只向同一服務裡已載入、身分與工作目錄吻合的原對話送出 `thread/queue/add`，核對 `clientUserMessageId` 回執後，讓原生佇列以原子閒置檢查自行開始回合；不把文字寫進終端輸入框，也不把工作中的回合當作可插入指示的目標。服務已關閉、身分不符、等待確認或原生佇列未清空時不送；送出結果無法確認時不自動重試，也不退回 PTY 再送一次。
 
-能力或啟動方式無法確認時，CLI 仍可使用原有終端方式啟動；這個相容路徑才限於已驗證的 Codex 0.153.4 與 0.162.1。兩條路徑目前都保留預設快捷鍵、Vim 關閉及設定來源檢查。LatticeTerm 沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；能力檢查不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用，但 `-p`／`--profile` 命名設定目前不支援。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。這不是對執行檔發行者的簽章驗證。
+能力或啟動方式無法確認時，CLI 仍可使用原有終端方式啟動；這個相容路徑才限於已驗證的 Codex 0.153.4 與 0.162.1。兩條路徑目前都保留預設快捷鍵、Vim 關閉及設定來源檢查。LatticeTerm 沿用該次帳號環境與可支援的設定參數，透過官方 `config/read` 唯讀檢查；能力檢查不建立模型回合、不改快捷鍵、不關閉手動貼上的保護。帳號的 `CODEX_HOME` 可分開使用。官方 npm 的 `codex.cmd` 仍透過原 Node 啟動器執行，不繞過套件管理器；檢查會核對 Windows 套件版本、平台與實際原生執行檔，並保留啟動器、Node、套件描述檔與原生執行檔的指紋。設定來源限固定本機磁碟，拒絕網路路徑、junction 與需雲端召回的檔案。這不是對執行檔發行者的簽章驗證。
+
+CLIProxyAPI 使用的 `--profile latticeterm-cliproxyapi[-連線識別]` 可走原生通訊路徑。原 TUI 保留這個參數，app-server 則只帶入已驗證的模型、推理、個性、服務等級與專案信任設定；兩邊使用同一個 `CODEX_HOME`，不複製帳號檔、不修改使用者的預設模型。設定檔會納入來源指紋，正常的 TUI 顯示紀錄例外也適用於這份檔案。若命名設定包含其他欄位、自訂按鍵、Vim、舊式同名 profile，或與專案設定的優先順序無法保持一致，就不取得 MCP 傳訊資格。任意 `--profile` 與舊式 `-p` 仍不支援，不能只刪掉參數後假裝驗證的是原設定。
 
 這個資格只適用於同一個未被人工操作的 CLI 程序。人工輸入或排隊會先使資格失效，再進原有終端通道；不攔住人工操作，也不因重新勾選控制權就恢復自動送出。完整、嚴格白名單的終端查詢回覆不算人工輸入；未知或分段回覆採保守失效。入隊或派送前重驗發現設定來源或執行檔改變時也會失效；這不是檔案即時監看，不在既有 TUI 上猜測重新載入後的按鍵。 原生通訊路徑只排除 Codex 自行寫入的 `tui.screen_reader_detection_done` 布林值與 `tui.model_availability_nux` 顯示次數紀錄；快捷鍵、Vim、模型、提供者、工具、權限及其他設定仍須一致。舊終端路徑不適用這個顯示紀錄例外。
 
@@ -374,6 +376,14 @@ node scripts/verify-mcp-windows.mjs "C:\path\to\lattice-term.exe" report.json --
 腳本建立獨立的暫存資料目錄，以 Windows 內建 shell 建立 ConPTY 工作階段，驗證分享、授權、分頁、排隊、取消、並行重送與背景服務失聯，結束後清理自己建立的程序與檔案。`--external-reporter` 讓驗收程序使用測試工作階段的回報資訊，呼叫真正的 reporter CLI 注入就緒狀態；省略這個選項則由 ConPTY 內的 shell 呼叫。報告會記錄使用哪一種方式，兩者都不是實際 AI 供應商的 hook 驗收。它不安裝程式，也不使用日常的工作階段或帳號。
 
 Windows 測試安裝包工作流程使用 `--external-reporter` 執行這份驗收，報告放在 `LatticeTerm-Windows-MCP-acceptance` artifact；即使驗收失敗，已建好的安裝包仍會保留，方便重跑。這份驗收涵蓋命令列、具名管道與 ConPTY；未操作桌面勾選框或執行真實 AI 回合。macOS 尚未實機驗證。
+
+Codex 原生佇列另有隔離測試，使用真實 CLI／ConPTY，但模型請求只送到測試程序自己的 loopback 服務，不使用日常帳號。設定 `LATTICETERM_TEST_CODEX_NATIVE` 為實際原生執行檔、`LATTICETERM_TEST_CODEX_NPM_SHIM` 為官方 npm 的 `codex.cmd` 路徑後，可執行：
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml codex_control_native_ --lib -- --ignored --test-threads=1
+```
+
+若要保留 Codex 隔離測試檔案供診斷，可先設定 `$env:LATTICETERM_TEST_KEEP_CODEX_FIXTURES='1'`。這只略過該份測試目錄的自動刪除，不略過程序、socket、對話 ID、模型或佇列檢查；測試會印出保留位置。保留模式的通過結果不代表暫存目錄清理也已驗證。
 
 2026-09-08 的 Windows CI 與下載產物各通過 9 項檢查，結果、來源 commit、雜湊及驗證範圍見 [Windows MCP 驗收紀錄](MCP-WINDOWS-ACCEPTANCE.zh-TW.md)。
 

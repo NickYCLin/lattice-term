@@ -34,9 +34,21 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Clone)]
 pub(crate) struct ProbeContext {
     pub native_executable: PathBuf,
+    #[cfg(windows)]
+    pub launcher: Option<super::codex_launcher::Launcher>,
     pub cwd: PathBuf,
     pub environment: Vec<(OsString, OsString)>,
     pub arguments: Vec<OsString>,
+}
+
+impl ProbeContext {
+    pub(super) fn command(&self) -> Command {
+        #[cfg(windows)]
+        if let Some(launcher) = self.launcher.as_ref() {
+            return launcher.command();
+        }
+        Command::new(&self.native_executable)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,21 +116,27 @@ pub(crate) struct SupportedProfile {
     context_digest: [u8; 32],
     executable: Stamp,
     sources: BTreeMap<PathBuf, Stamp>,
-    display_config: Option<PathBuf>,
+    display_configs: Vec<PathBuf>,
+    launch_sources: BTreeMap<PathBuf, Stamp>,
+    configuration_arguments: Vec<OsString>,
 }
 
 impl SupportedProfile {
+    pub(super) fn configuration_arguments(&self) -> &[OsString] {
+        &self.configuration_arguments
+    }
     /// No subprocess or refreshed grant. The owner must latch any failure for
     /// this launch, even if a later file edit restores the old contents.
     pub(crate) fn revalidate(&self, context: &ProbeContext) -> Result<()> {
         if context_digest(context)? != self.context_digest
             || stamp(&context.native_executable, MAX_BINARY_BYTES)? != self.executable
+            || snapshot_launch_sources(context)? != self.launch_sources
         {
             return Err(UnavailableReason::ConfigurationChanged);
         }
         if snapshot_with_display_state(
             &self.sources.keys().cloned().collect(),
-            self.display_config.as_deref(),
+            &self.display_configs,
         )? != self.sources
         {
             return Err(UnavailableReason::ConfigurationChanged);
@@ -142,7 +160,7 @@ fn inspect_with_transport(
     context: &ProbeContext,
     terminal_input: bool,
 ) -> Result<SupportedProfile> {
-    let arguments = probe_arguments(context)?;
+    let launch_sources = snapshot_launch_sources(context)?;
     let executable = stamp(&context.native_executable, MAX_BINARY_BYTES)?;
     if !matches!(executable, Stamp::File { .. })
         || !context.native_executable.is_absolute()
@@ -155,10 +173,17 @@ fn inspect_with_transport(
         return Err(UnavailableReason::UnsupportedLaunch);
     }
     let mut source_paths = fallback_sources(context)?;
-    let display_config = (!terminal_input)
-        .then(|| user_config_path(context))
-        .transpose()?;
-    let before = snapshot_with_display_state(&source_paths, display_config.as_deref())?;
+    let mut display_configs = Vec::new();
+    if !terminal_input {
+        display_configs.push(user_config_path(context)?);
+        display_configs.extend(selected_managed_profile(context)?);
+    }
+    let before = snapshot_with_display_state(&source_paths, &display_configs)?;
+    let arguments = if terminal_input {
+        probe_arguments(context)?
+    } else {
+        protocol_arguments(context)?
+    };
     let deadline = Instant::now() + TIMEOUT;
     if terminal_input {
         let version = capture_version(context, deadline)?;
@@ -169,12 +194,14 @@ fn inspect_with_transport(
         &arguments,
         &mut source_paths,
         deadline,
-        display_config.as_deref(),
+        &display_configs,
     )?;
     if before
         .iter()
         .any(|(path, value)| sources.get(path) != Some(value))
         || stamp(&context.native_executable, MAX_BINARY_BYTES)? != executable
+        || snapshot_launch_sources(context)? != launch_sources
+        || arguments_for_transport(context, terminal_input)? != arguments
     {
         return Err(UnavailableReason::ConfigurationChanged);
     }
@@ -182,7 +209,9 @@ fn inspect_with_transport(
         context_digest: context_digest(context)?,
         executable,
         sources,
-        display_config,
+        display_configs,
+        launch_sources,
+        configuration_arguments: arguments,
     })
 }
 
@@ -206,6 +235,14 @@ fn context_digest(context: &ProbeContext) -> Result<[u8; 32]> {
         Ok(())
     }
     add(&mut hasher, context.native_executable.as_os_str())?;
+    #[cfg(windows)]
+    if let Some(launcher) = context.launcher.as_ref() {
+        add(&mut hasher, launcher.program.as_os_str())?;
+        add(&mut hasher, launcher.entrypoint.as_os_str())?;
+        for source in &launcher.sources {
+            add(&mut hasher, source.as_os_str())?;
+        }
+    }
     add(&mut hasher, context.cwd.as_os_str())?;
     hasher.update((context.arguments.len() as u64).to_le_bytes());
     for argument in &context.arguments {
@@ -234,6 +271,14 @@ fn environment(context: &ProbeContext, name: &str) -> Result<Option<PathBuf>> {
 }
 
 pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
+    arguments_for_transport(context, true)
+}
+
+pub(super) fn protocol_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
+    arguments_for_transport(context, false)
+}
+
+fn arguments_for_transport(context: &ProbeContext, terminal_input: bool) -> Result<Vec<OsString>> {
     if !context.cwd.is_absolute() || context.arguments.len() > 128 {
         return Err(UnavailableReason::UnsupportedLaunch);
     }
@@ -242,7 +287,10 @@ pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
     let mut result = Vec::new();
     let mut index = 0;
     let mut saw_command = false;
+    let mut restoring = false;
+    let mut permission_override = false;
     let mut positional = false;
+    let mut profile_arguments = None;
     while index < context.arguments.len() {
         let argument = context.arguments[index]
             .to_str()
@@ -272,6 +320,11 @@ pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
             Ok(value)
         };
         match argument {
+            "--profile" if !terminal_input && profile_arguments.is_none() => {
+                let name = next()?;
+                let path = managed_profile_path(context, name)?;
+                profile_arguments = Some(managed_profile_arguments(&path)?);
+            }
             "-c" | "--config" => {
                 let value = next()?;
                 // Named legacy profiles are not the same as the new --profile
@@ -307,18 +360,17 @@ pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
                 }
             }
             "-m" | "--model" | "-s" | "--sandbox" | "-a" | "--ask-for-approval" | "--add-dir" => {
+                permission_override |= !matches!(argument, "-m" | "--model");
                 next()?;
             }
-            "--full-auto"
-            | "--dangerously-bypass-approvals-and-sandbox"
-            | "--search"
-            | "--no-alt-screen"
-            | "--last"
-            | "--all"
-            | "--include-non-interactive" => {}
+            "--full-auto" | "--dangerously-bypass-approvals-and-sandbox" => {
+                permission_override = true
+            }
+            "--search" | "--no-alt-screen" | "--last" | "--all" | "--include-non-interactive" => {}
             "--strict-config" => result.push(argument.into()),
             "resume" | "fork" if !saw_command => {
                 saw_command = true;
+                restoring = true;
             }
             value if value.starts_with('-') => return Err(UnavailableReason::UnsupportedLaunch),
             "exec" | "e" | "review" | "app-server" | "mcp-server" | "mcp" | "login" | "logout"
@@ -333,8 +385,202 @@ pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
             }
         }
     }
+    if !terminal_input && restoring && permission_override {
+        return Err(UnavailableReason::UnsupportedLaunch);
+    }
+    if let Some(mut profile_arguments) = profile_arguments {
+        profile_arguments.extend(result);
+        result = profile_arguments;
+    }
+    if result.len() > 256 || result.iter().map(|value| value.len()).sum::<usize>() > 24 * 1024 {
+        return Err(UnavailableReason::UnsupportedLaunch);
+    }
     result.extend([OsString::from("app-server"), OsString::from("--stdio")]);
     Ok(result)
+}
+
+fn snapshot_launch_sources(context: &ProbeContext) -> Result<BTreeMap<PathBuf, Stamp>> {
+    #[cfg(windows)]
+    let mut sources = BTreeMap::new();
+    #[cfg(not(windows))]
+    let sources = BTreeMap::new();
+    #[cfg(windows)]
+    if let Some(launcher) = context.launcher.as_ref() {
+        if launcher.sources.len() > 32 {
+            return Err(UnavailableReason::UnverifiableSource);
+        }
+        sources.insert(
+            launcher.program.clone(),
+            stamp(&launcher.program, MAX_BINARY_BYTES)?,
+        );
+        for path in &launcher.sources {
+            sources.insert(path.clone(), stamp(path, MAX_CONFIG_BYTES)?);
+        }
+        launcher.validate_resolution(&context.native_executable)?;
+    }
+    #[cfg(not(windows))]
+    let _ = context;
+    Ok(sources)
+}
+
+fn managed_profile_path(context: &ProbeContext, name: &str) -> Result<PathBuf> {
+    if name.len() > 128
+        || !(name == "latticeterm-cliproxyapi" || name.starts_with("latticeterm-cliproxyapi-"))
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(UnavailableReason::UnsupportedLaunch);
+    }
+    let base = user_config_path(context)?;
+    let path = base
+        .parent()
+        .ok_or(UnavailableReason::UnverifiableSource)?
+        .join(format!("{name}.config.toml"));
+    #[cfg(windows)]
+    qualify_local_path(&path)?;
+    Ok(path)
+}
+
+fn selected_managed_profile(context: &ProbeContext) -> Result<Option<PathBuf>> {
+    let mut arguments = context.arguments.iter();
+    let mut profile = None;
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("--") => break,
+            Some("--profile") if profile.is_none() => {
+                let name = arguments
+                    .next()
+                    .and_then(|value| value.to_str())
+                    .ok_or(UnavailableReason::UnsupportedLaunch)?;
+                profile = Some(managed_profile_path(context, name)?);
+            }
+            Some("--profile") => return Err(UnavailableReason::UnsupportedLaunch),
+            Some(
+                "-c" | "--config" | "--enable" | "--disable" | "--cd" | "-C" | "-m" | "--model"
+                | "-s" | "--sandbox" | "-a" | "--ask-for-approval" | "--add-dir",
+            ) => {
+                arguments.next();
+            }
+            _ => {}
+        }
+    }
+    Ok(profile)
+}
+
+fn managed_profile_config(path: &Path) -> Result<toml::Table> {
+    if stamp(path, MAX_CONFIG_BYTES)? == Stamp::Missing {
+        return Ok(toml::Table::new());
+    }
+    let file = fs::File::open(path).map_err(|_| UnavailableReason::UnverifiableSource)?;
+    let mut contents = String::new();
+    file.take(MAX_CONFIG_BYTES + 1)
+        .read_to_string(&mut contents)
+        .map_err(|_| UnavailableReason::UnverifiableSource)?;
+    if contents.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(UnavailableReason::UnverifiableSource);
+    }
+    let normalized = normalized_display_config(&contents)?;
+    let config: toml::Table =
+        serde_json::from_slice(&normalized).map_err(|_| UnavailableReason::UnsupportedLaunch)?;
+    for (key, value) in &config {
+        match key.as_str() {
+            "model"
+            | "model_reasoning_effort"
+            | "model_reasoning_summary"
+            | "personality"
+            | "service_tier"
+                if value.is_str() => {}
+            "projects" => {
+                let projects = value
+                    .as_table()
+                    .ok_or(UnavailableReason::UnsupportedLaunch)?;
+                for (path, value) in projects {
+                    if !Path::new(path).is_absolute() {
+                        return Err(UnavailableReason::UnsupportedLaunch);
+                    }
+                    let project = value
+                        .as_table()
+                        .ok_or(UnavailableReason::UnsupportedLaunch)?;
+                    if project.len() != 1
+                        || !project
+                            .get("trust_level")
+                            .and_then(toml::Value::as_str)
+                            .is_some_and(|value| matches!(value, "trusted" | "untrusted"))
+                    {
+                        return Err(UnavailableReason::UnsupportedLaunch);
+                    }
+                }
+            }
+            _ => return Err(UnavailableReason::UnsupportedLaunch),
+        }
+    }
+    Ok(config)
+}
+
+fn managed_profile_arguments(path: &Path) -> Result<Vec<OsString>> {
+    let config = managed_profile_config(path)?;
+    let mut arguments = Vec::new();
+    fn append(arguments: &mut Vec<OsString>, key: String, value: &toml::Value) {
+        if let Some(table) = value.as_table() {
+            for (child, value) in table {
+                append(
+                    arguments,
+                    format!("{key}.{}", toml::Value::String(child.clone())),
+                    value,
+                );
+            }
+        } else {
+            arguments.extend([
+                OsString::from("-c"),
+                OsString::from(format!("{key}={value}")),
+            ]);
+        }
+    }
+    for (key, value) in &config {
+        append(
+            &mut arguments,
+            toml::Value::String(key.clone()).to_string(),
+            value,
+        );
+    }
+    Ok(arguments)
+}
+
+fn validate_managed_profile_layers(context: &ProbeContext, response: &Value) -> Result<()> {
+    let Some(path) = selected_managed_profile(context)? else {
+        return Ok(());
+    };
+    let config = managed_profile_config(&path)?;
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.strip_suffix(".config.toml"))
+        .ok_or(UnavailableReason::UnsupportedLaunch)?;
+    let layers = response
+        .get("layers")
+        .and_then(Value::as_array)
+        .ok_or(UnavailableReason::UnverifiableSource)?;
+    for layer in layers {
+        if layer.pointer("/name/type").and_then(Value::as_str) == Some("project") {
+            if layer
+                .get("config")
+                .and_then(Value::as_object)
+                .is_some_and(|project| config.keys().any(|key| project.contains_key(key)))
+            {
+                return Err(UnavailableReason::UnsupportedLaunch);
+            }
+        }
+        if layer.pointer("/name/type").and_then(Value::as_str) == Some("user")
+            && layer
+                .pointer("/config/profiles")
+                .and_then(Value::as_object)
+                .is_some_and(|profiles| profiles.contains_key(name))
+        {
+            return Err(UnavailableReason::UnsupportedLaunch);
+        }
+    }
+    Ok(())
 }
 
 fn validate_positional(text: &str) -> Result<()> {
@@ -400,6 +646,9 @@ fn user_config_path(context: &ProbeContext) -> Result<PathBuf> {
 
 fn fallback_sources(context: &ProbeContext) -> Result<BTreeSet<PathBuf>> {
     let mut paths = BTreeSet::from([user_config_path(context)?, context.cwd.clone()]);
+    if let Some(path) = selected_managed_profile(context)? {
+        paths.insert(path);
+    }
     // The reported system layer below must match one of these pre-snapshotted
     // sources. ProgramData is only a candidate, not an authority for Codex's
     // Known Folder lookup; a mismatch is unsupported rather than guessed.
@@ -566,52 +815,52 @@ fn validate_file_length(length: u64, max: u64) -> Result<()> {
 
 fn snapshot_with_display_state(
     paths: &BTreeSet<PathBuf>,
-    display_config: Option<&Path>,
+    display_configs: &[PathBuf],
 ) -> Result<BTreeMap<PathBuf, Stamp>> {
     let mut result = snapshot(paths)?;
-    let Some(path) = display_config else {
-        return Ok(result);
-    };
-    let original = result
-        .get(path)
-        .ok_or(UnavailableReason::UnverifiableSource)?;
-    let (canonical, contents) = match original {
-        Stamp::Missing => {
-            let parent = path.parent().ok_or(UnavailableReason::UnverifiableSource)?;
-            let name = path
-                .file_name()
-                .ok_or(UnavailableReason::UnverifiableSource)?;
-            (
-                parent
-                    .canonicalize()
-                    .map_err(|_| UnavailableReason::UnverifiableSource)?
-                    .join(name),
-                String::new(),
-            )
+    for path in display_configs {
+        let original = result
+            .get(path)
+            .ok_or(UnavailableReason::UnverifiableSource)?;
+        let (canonical, contents) = match original {
+            Stamp::Missing => {
+                let parent = path.parent().ok_or(UnavailableReason::UnverifiableSource)?;
+                let name = path
+                    .file_name()
+                    .ok_or(UnavailableReason::UnverifiableSource)?;
+                (
+                    parent
+                        .canonicalize()
+                        .map_err(|_| UnavailableReason::UnverifiableSource)?
+                        .join(name),
+                    String::new(),
+                )
+            }
+            Stamp::File { canonical, .. } => {
+                let file =
+                    fs::File::open(path).map_err(|_| UnavailableReason::UnverifiableSource)?;
+                let mut contents = String::new();
+                file.take(MAX_CONFIG_BYTES + 1)
+                    .read_to_string(&mut contents)
+                    .map_err(|_| UnavailableReason::UnverifiableSource)?;
+                validate_file_length(contents.len() as u64, MAX_CONFIG_BYTES)?;
+                (canonical.clone(), contents)
+            }
+            _ => return Err(UnavailableReason::UnverifiableSource),
+        };
+        let normalized = normalized_display_config(&contents)?;
+        if stamp(path, MAX_CONFIG_BYTES)? != *original {
+            return Err(UnavailableReason::ConfigurationChanged);
         }
-        Stamp::File { canonical, .. } => {
-            let file = fs::File::open(path).map_err(|_| UnavailableReason::UnverifiableSource)?;
-            let mut contents = String::new();
-            file.take(MAX_CONFIG_BYTES + 1)
-                .read_to_string(&mut contents)
-                .map_err(|_| UnavailableReason::UnverifiableSource)?;
-            validate_file_length(contents.len() as u64, MAX_CONFIG_BYTES)?;
-            (canonical.clone(), contents)
-        }
-        _ => return Err(UnavailableReason::UnverifiableSource),
-    };
-    let normalized = normalized_display_config(&contents)?;
-    if stamp(path, MAX_CONFIG_BYTES)? != *original {
-        return Err(UnavailableReason::ConfigurationChanged);
+        result.insert(
+            path.to_owned(),
+            Stamp::File {
+                canonical,
+                digest: Sha256::digest(&normalized).into(),
+                length: normalized.len() as u64,
+            },
+        );
     }
-    result.insert(
-        path.to_owned(),
-        Stamp::File {
-            canonical,
-            digest: Sha256::digest(&normalized).into(),
-            length: normalized.len() as u64,
-        },
-    );
     Ok(result)
 }
 
@@ -758,7 +1007,7 @@ pub(super) struct ProbeChild {
 
 impl ProbeChild {
     pub(super) fn spawn(context: &ProbeContext, arguments: &[OsString]) -> Result<Self> {
-        let mut command = Command::new(&context.native_executable);
+        let mut command = context.command();
         command
             .args(arguments)
             .current_dir(&context.cwd)
@@ -938,7 +1187,7 @@ fn read_configuration(
     arguments: &[OsString],
     paths: &mut BTreeSet<PathBuf>,
     deadline: Instant,
-    display_config: Option<&Path>,
+    display_configs: &[PathBuf],
 ) -> Result<BTreeMap<PathBuf, Stamp>> {
     let mut probe = ProbeChild::spawn(context, arguments)?;
     probe.send(
@@ -955,8 +1204,9 @@ fn read_configuration(
     }}), deadline)?;
     let first = probe.reply(2, deadline)?;
     validate_configuration(&first)?;
+    validate_managed_profile_layers(context, &first)?;
     collect_sources(&first, paths, &context.native_executable)?;
-    let before = snapshot_with_display_state(paths, display_config)?;
+    let before = snapshot_with_display_state(paths, display_configs)?;
     // Discover first, then inspect between two complete source snapshots.
     // This closes the ordinary configuration-edit race for discovered files.
     probe.send(json!({"id":3,"method":"config/read","params":{
@@ -964,9 +1214,10 @@ fn read_configuration(
     }}), deadline)?;
     let second = probe.reply(3, deadline)?;
     validate_configuration(&second)?;
+    validate_managed_profile_layers(context, &second)?;
     let mut after_paths = paths.clone();
     collect_sources(&second, &mut after_paths, &context.native_executable)?;
-    let after = snapshot_with_display_state(&after_paths, display_config)?;
+    let after = snapshot_with_display_state(&after_paths, display_configs)?;
     if *paths != after_paths || before != after || first.get("layers") != second.get("layers") {
         return Err(UnavailableReason::ConfigurationChanged);
     }
@@ -981,7 +1232,21 @@ pub(super) struct ProcessJob {
 #[cfg(windows)]
 impl ProcessJob {
     pub(super) fn attach(child: &Child) -> Result<Self> {
-        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use std::os::windows::io::AsRawHandle;
+        Self::attach_handle(child.as_raw_handle())
+    }
+
+    #[cfg(test)]
+    pub(super) fn attach_pty(child: &dyn portable_pty::Child) -> Result<Self> {
+        Self::attach_handle(
+            child
+                .as_raw_handle()
+                .ok_or(UnavailableReason::ProbeFailed)?,
+        )
+    }
+
+    fn attach_handle(process: std::os::windows::io::RawHandle) -> Result<Self> {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -1002,9 +1267,7 @@ impl ProcessJob {
                 std::mem::size_of_val(&limits) as u32,
             )
         };
-        if configured == 0
-            || unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0
-        {
+        if configured == 0 || unsafe { AssignProcessToJobObject(handle, process) } == 0 {
             return Err(UnavailableReason::ProbeFailed);
         }
         Ok(Self { _handle: owned })
@@ -1055,24 +1318,32 @@ mod tests {
         let config = directory.path().join("config.toml");
         let other = directory.path().join("other.toml");
         let paths = BTreeSet::from([config.clone(), other.clone()]);
-        let before = snapshot_with_display_state(&paths, Some(&config)).unwrap();
+        let before = snapshot_with_display_state(&paths, std::slice::from_ref(&config)).unwrap();
         fs::write(
             &config,
             "[tui]\nscreen_reader_detection_done = true\n[tui.model_availability_nux]\nowned = 1\n",
         )
         .unwrap();
-        assert!(before == snapshot_with_display_state(&paths, Some(&config)).unwrap());
+        assert!(
+            before == snapshot_with_display_state(&paths, std::slice::from_ref(&config)).unwrap()
+        );
         assert!(snapshot(&paths).unwrap() != before);
         fs::write(&other, "model = 'changed'\n").unwrap();
-        assert!(before != snapshot_with_display_state(&paths, Some(&config)).unwrap());
+        assert!(
+            before != snapshot_with_display_state(&paths, std::slice::from_ref(&config)).unwrap()
+        );
         fs::remove_file(&other).unwrap();
         fs::write(&config, "[tui]\nvim_mode_default = true\n").unwrap();
-        assert!(before != snapshot_with_display_state(&paths, Some(&config)).unwrap());
+        assert!(
+            before != snapshot_with_display_state(&paths, std::slice::from_ref(&config)).unwrap()
+        );
     }
 
     fn context(path: &Path, args: &[&str]) -> ProbeContext {
         ProbeContext {
             native_executable: path.join("codex.exe"),
+            #[cfg(windows)]
+            launcher: None,
             cwd: path.to_owned(),
             environment: vec![
                 ("CODEX_HOME".into(), path.as_os_str().to_owned()),
@@ -1166,7 +1437,9 @@ mod tests {
         );
         for args in [
             vec!["--remote", "ws://localhost"],
-            vec!["--profile", "work"],
+            vec!["--profile", "../work"],
+            vec!["--profile", "C:\\work"],
+            vec!["--profile"],
             vec!["--unknown"],
             vec!["-c", "profile=work"],
             vec!["exec", "text"],
@@ -1184,6 +1457,199 @@ mod tests {
         for text in ["Check this?", " ?literal"] {
             assert!(probe_arguments(&context(temp.path(), &[text])).is_ok());
         }
+    }
+
+    #[test]
+    fn codex_input_profile_keeps_permission_overrides_on_the_original_resume_transport() {
+        let temp = tempfile::tempdir().unwrap();
+        for overrides in [
+            vec!["-s", "read-only"],
+            vec!["--sandbox", "workspace-write"],
+            vec!["-a", "on-request"],
+            vec!["--ask-for-approval", "never"],
+            vec!["--add-dir", "owned"],
+            vec!["--full-auto"],
+            vec!["--dangerously-bypass-approvals-and-sandbox"],
+        ] {
+            for command in ["resume", "fork"] {
+                let mut arguments = overrides.clone();
+                arguments.extend([command, "native-id"]);
+                let ctx = context(temp.path(), &arguments);
+                assert_eq!(
+                    protocol_arguments(&ctx),
+                    Err(UnavailableReason::UnsupportedLaunch)
+                );
+                assert!(probe_arguments(&ctx).is_ok());
+                assert_eq!(
+                    ctx.arguments,
+                    arguments.iter().map(OsString::from).collect::<Vec<_>>()
+                );
+            }
+            assert!(protocol_arguments(&context(temp.path(), &overrides)).is_ok());
+        }
+        assert!(protocol_arguments(&context(
+            temp.path(),
+            &["-m", "owned", "resume", "native-id"]
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn codex_input_profile_protocol_preserves_proxy_model_and_cli_precedence() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = context(
+            temp.path(),
+            &[
+                "--profile",
+                "latticeterm-cliproxyapi",
+                "-c",
+                "model='explicit'",
+                "resume",
+                "native-id",
+            ],
+        );
+        let path = selected_managed_profile(&ctx).unwrap().unwrap();
+        fs::write(&path, format!("model='owned-profile'\nmodel_reasoning_effort='medium'\n[projects.{}]\ntrust_level='trusted'\n", toml::Value::String(temp.path().to_string_lossy().into()))).unwrap();
+        let arguments = protocol_arguments(&ctx).unwrap();
+        let model = arguments
+            .iter()
+            .position(|value| value == r#""model"="owned-profile""#)
+            .unwrap();
+        let explicit = arguments
+            .iter()
+            .position(|value| value == "model='explicit'")
+            .unwrap();
+        assert!(model < explicit);
+        assert!(!arguments.iter().any(|value| value == "--profile"));
+        assert!(fallback_sources(&ctx).unwrap().contains(&path));
+        assert_eq!(
+            probe_arguments(&ctx),
+            Err(UnavailableReason::UnsupportedLaunch)
+        );
+        fs::write(&path, "model='owned-profile'\n[tui]\nscreen_reader_detection_done=true\n[tui.model_availability_nux]\nowned=1\n").unwrap();
+        assert!(protocol_arguments(&ctx).is_ok());
+    }
+
+    #[test]
+    fn codex_input_profile_protocol_rejects_unsafe_or_unrepresentable_profiles() {
+        let temp = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["--profile", "work"],
+            vec!["--profile", "latticeterm-cliproxyapi/../other"],
+            vec![
+                "--profile",
+                "latticeterm-cliproxyapi",
+                "--profile",
+                "latticeterm-cliproxyapi",
+            ],
+            vec!["-p", "latticeterm-cliproxyapi"],
+        ] {
+            assert!(protocol_arguments(&context(temp.path(), &args)).is_err());
+        }
+        let ctx = context(temp.path(), &["--profile", "latticeterm-cliproxyapi"]);
+        let path = selected_managed_profile(&ctx).unwrap().unwrap();
+        assert!(protocol_arguments(&ctx).is_ok());
+        for raw in [
+            "[tui]\nvim_mode_default=true",
+            "[tui.keymap]\nsubmit=[]",
+            "model_instructions_file='relative.md'",
+            "[projects.relative]\ntrust_level='trusted'",
+            "model=123",
+            "invalid toml!",
+        ] {
+            fs::write(&path, raw).unwrap();
+            assert!(protocol_arguments(&ctx).is_err());
+        }
+    }
+
+    #[test]
+    fn codex_input_profile_protocol_rejects_project_profile_precedence_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = context(temp.path(), &["--profile", "latticeterm-cliproxyapi"]);
+        let path = selected_managed_profile(&ctx).unwrap().unwrap();
+        fs::write(&path, "model='owned-profile'").unwrap();
+        let response =
+            json!({"layers":[{"name":{"type":"project"},"config":{"model":"project-model"}}]});
+        assert_eq!(
+            validate_managed_profile_layers(&ctx, &response),
+            Err(UnavailableReason::UnsupportedLaunch)
+        );
+        let response =
+            json!({"layers":[{"name":{"type":"project"},"config":{"model_provider":"owned"}}]});
+        assert!(validate_managed_profile_layers(&ctx, &response).is_ok());
+        let response = json!({"layers":[{"name":{"type":"user"},"config":{"profiles":{"latticeterm-cliproxyapi":{}}}}]});
+        assert_eq!(
+            validate_managed_profile_layers(&ctx, &response),
+            Err(UnavailableReason::UnsupportedLaunch)
+        );
+    }
+
+    #[test]
+    fn codex_input_profile_protocol_tracks_base_and_proxy_display_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("config.toml");
+        let profile = temp.path().join("latticeterm-cliproxyapi.config.toml");
+        let paths = BTreeSet::from([base.clone(), profile.clone()]);
+        let display_configs = vec![base.clone(), profile.clone()];
+        let before = snapshot_with_display_state(&paths, &display_configs).unwrap();
+        for path in [&base, &profile] {
+            fs::write(
+                path,
+                "[tui]\nscreen_reader_detection_done=true\n[tui.model_availability_nux]\nowned=1\n",
+            )
+            .unwrap();
+        }
+        assert!(before == snapshot_with_display_state(&paths, &display_configs).unwrap());
+        fs::write(profile, "model='changed'").unwrap();
+        assert!(before != snapshot_with_display_state(&paths, &display_configs).unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn codex_input_profile_attests_node_script_and_package_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut ctx = context(temp.path(), &[]);
+        let (shim, node, script, native) =
+            super::super::codex_launcher::tests::fixture(temp.path());
+        let package = script
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("package.json");
+        ctx.native_executable = native;
+        ctx.launcher = super::super::codex_launcher::resolve(
+            &shim,
+            node.as_os_str(),
+            &[script.clone().into()],
+        )
+        .unwrap()
+        .1;
+        let paths = fallback_sources(&ctx).unwrap();
+        let profile = SupportedProfile {
+            context_digest: context_digest(&ctx).unwrap(),
+            executable: stamp(&ctx.native_executable, MAX_BINARY_BYTES).unwrap(),
+            sources: snapshot(&paths).unwrap(),
+            display_configs: Vec::new(),
+            launch_sources: snapshot_launch_sources(&ctx).unwrap(),
+            configuration_arguments: probe_arguments(&ctx).unwrap(),
+        };
+        profile.revalidate(&ctx).unwrap();
+        for path in [node, script, package, ctx.native_executable.clone()] {
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, "changed").unwrap();
+            assert_eq!(
+                profile.revalidate(&ctx),
+                Err(UnavailableReason::ConfigurationChanged)
+            );
+            fs::write(path, original).unwrap();
+        }
+        let mut changed = ctx.clone();
+        changed.launcher.as_mut().unwrap().entrypoint = temp.path().join("other.js");
+        assert_eq!(
+            profile.revalidate(&changed),
+            Err(UnavailableReason::ConfigurationChanged)
+        );
     }
 
     #[test]
@@ -1260,7 +1726,9 @@ mod tests {
             context_digest: context_digest(&ctx).unwrap(),
             executable: stamp(&ctx.native_executable, MAX_BINARY_BYTES).unwrap(),
             sources: snapshot(&paths).unwrap(),
-            display_config: None,
+            display_configs: Vec::new(),
+            launch_sources: BTreeMap::new(),
+            configuration_arguments: probe_arguments(&ctx).unwrap(),
         };
         profile.revalidate(&ctx).unwrap();
         let mut changed = ctx.clone();
@@ -1335,6 +1803,8 @@ mod tests {
         environment.push(("CODEX_HOME".into(), home.as_os_str().to_owned()));
         let ctx = ProbeContext {
             native_executable: native.into(),
+            #[cfg(windows)]
+            launcher: None,
             cwd: workspace,
             environment,
             arguments: Vec::new(),
