@@ -696,6 +696,11 @@ impl McpServer {
                 "refusedWhileHumanInputUnfinished": true,
                 "cooldownMs": 5000,
             },
+            "promptControl": {
+                "definitions": crate::agent::mcp_prompt_support(),
+                "integrationDoesNotProveSessionReady": true,
+                "heuristicReadinessAccepted": false,
+            },
             "promptTextRestrictions": [{
                 "platform": "windows",
                 "definitionId": "codex",
@@ -3498,6 +3503,18 @@ mod tests {
             .get_capabilities()
             .await
             .unwrap_or_else(|_| panic!("capabilities should be available without a daemon"));
+        assert_eq!(
+            capabilities["promptControl"]["definitions"],
+            json!(crate::agent::mcp_prompt_support())
+        );
+        assert_eq!(
+            capabilities["promptControl"]["integrationDoesNotProveSessionReady"],
+            true
+        );
+        assert_eq!(
+            capabilities["promptControl"]["heuristicReadinessAccepted"],
+            false
+        );
         assert_eq!(
             capabilities["promptTextRestrictions"],
             json!([{

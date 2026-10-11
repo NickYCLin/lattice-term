@@ -523,6 +523,77 @@ PowerShell 的文字 pipeline 轉碼。握手取得的平台若與授權不同�
 
 歡迎在 #180 繼續討論優先順序。
 
+### Fleet CLI 控制支援範圍
+
+`get_capabilities.promptControl.definitions` 列出 Fleet 全部 13 個內建 CLI。
+這份清單說明程式具備的橋接，不代表某個工作階段已登入或已可接收指示。
+分享權限、正式就緒回報與未完成的人工輸入仍各自檢查。
+`sessionSpecificBlockers` 指向 `desktop_agent` 的 `state` 回覆；背景 Fleet
+清單沒有 `promptReadiness.blockers`，不能拿不存在的欄位判斷已經就緒。
+
+| CLI | integration | MCP 自動派送 |
+| --- | --- | --- |
+| OpenAI Codex | `native_or_hook` | 原生介面或相容 hook；Windows 另驗輸入資格 |
+| Claude Code | `launch_hook` | 等正式 SessionStart／Stop |
+| Gemini CLI | `launch_hook` | 等正式 SessionStart／AfterAgent |
+| Qwen Code | `launch_hook` | 等正式 SessionStart／Stop |
+| GitHub Copilot CLI | `launch_hook` | 等正式 lifecycle plugin 回報 |
+| Hermes Agent | `launch_hook` | 等正式 lifecycle plugin 回報 |
+| OpenCode | `launch_hook` | 等正式 plugin 回報 |
+| Cursor Agent | `launch_hook` | 本機 plugin；等 sessionStart／stop |
+| Factory Droid | `launch_hook` | 本次程序 settings；等 SessionStart／Stop／idle_prompt |
+| Aider | `attention_only` | 尚未支援安全自動派送；通知也會出現在確認問題 |
+| Google Antigravity CLI | `not_integrated` | 尚未接入正式就緒回報 |
+| Kimi Code CLI | `not_integrated` | 尚未接入正式就緒回報 |
+| Grok CLI | `not_integrated` | 尚未接入正式就緒回報 |
+
+尚未支援自動派送的四項仍可手動使用終端，依授權讀取輸出、清除 MCP
+佇列或結束工作階段。不能把「Fleet 清單裡有這個 CLI」說成自動控制已完成。
+沒有會員不影響 adapter 的離線測試；CLI 本身的登入、訂閱、API 額度與工具
+確認仍由原 CLI 處理，LatticeTerm 不跳過它們。
+
+四項缺口不是訂閱檢查失敗：
+
+- Aider 的通知命令會在一般輸入、確認問題都觸發，不能用它宣告可自動送字。
+- Antigravity 目前僅以日誌擷取對話 ID，對話存在不等於輸入框已就緒。
+- Kimi 新版與舊版的設定介面不同，目前查到的新版 hooks 屬於帳號設定，
+  尚未實作保留原設定與原對話的安全載入方式。
+- Fleet 使用的 Grok CLI 刻意只讀使用者層級 hooks，不載入專案 hooks。
+  不能另換 HOME 複製帳號，或把這項保護繞過後稱為支援。
+
+參考來源：[Aider 輸入處理](https://github.com/Aider-AI/aider/blob/main/aider/io.py)、
+[Kimi 設定覆寫](https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/overrides.md)、
+[Grok hook 載入](https://github.com/superagent-ai/grok-cli/blob/main/src/hooks/config.ts)。
+
+Cursor 與 Droid 先做有界的 `--help` 唯讀檢查，確認各自支援 `--plugin-dir`
+或 `--settings`，不靠固定版本白名單。舊版、檢查失敗或安全模式保留原啟動
+參數，不硬塞不支援的旗標。Droid 使用者明確指定 `--settings` 時不覆蓋它；
+Cursor 保留原有 plugin。臨時 hook 只存生命週期設定與 runner，不複製帳號
+資料、不改 HOME／工作目錄／模型／原生對話 ID、不更改 managed hooks 政策。
+Droid 的 runtime hooks 依官方設定階層與原有 hooks 累加；設定只加入觀察
+事件，不設定 `hooksDisabled`、`allowManagedHooksOnly` 或工具權限。
+原有 hook 的拒絕與企業政策仍生效；政策未載入本次 hooks 時不會報就緒。
+
+Gemini、Qwen 的 SessionStart 只接受 `startup`、`resume`、`clear`；`compact`、
+未知或缺少來源不作就緒回報。Qwen 同時保留並驗證原生 session ID；
+SessionStart 缺少 ID 不回報就緒。Qwen hook timeout 單位為秒，Gemini 為
+毫秒，兩者都設成五秒。Cursor 子代理完成、逐段回應與未知 stop 狀態不釋放主
+對話的 MCP 佇列；Droid 登入成功不是就緒，權限問題仍回報 needsAttention。
+Cursor reporter 不輸出工具允許決策，保留其他 hook 的拒絕與人工確認。
+
+官方契約來源：[Gemini hooks](https://geminicli.com/docs/hooks/reference/)、
+[Qwen hooks](https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/)、
+[Cursor hooks](https://cursor.com/docs/hooks)、
+[Cursor CLI 參數](https://cursor.com/docs/cli/reference/parameters)、
+[Droid hooks](https://docs.factory.com/harness/hooks)、
+[Droid CLI 參數](https://docs.factory.com/droid-cli/cli-reference)、
+[Droid 設定階層](https://docs.factory.com/enterprise/hierarchical-settings-and-org-control)。
+
+這次測試包含各家事件分類、首輪來源、設定／參數保留、能力清單完整性與
+啟動探測的失敗、逾時與輸出限制，以及 Windows PowerShell runner 的繁中
+stdin 傳遞。這些不是所有供應商的付費
+模型回合驗收，也不代表已安裝的 LatticeTerm 已更新或既有 CLI 已重開。
+
 ### 前景提示就緒診斷
 
 `desktop_agent` 的 `state` 回傳 `promptReadiness`，包含 `ready`、`blockers`、`lastInputKind` 與 `snapshotOnly=true`。這是觀察當下的快照，送出時仍重新檢查；不會清除草稿、改變權限或把推測狀態升級為正式就緒。

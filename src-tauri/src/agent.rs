@@ -27,6 +27,7 @@ mod codex_input_profile;
 #[cfg(windows)]
 mod codex_launcher;
 mod codex_resume;
+mod fleet_hooks;
 
 pub use approval::AgentApprovalRequest;
 #[cfg(any(windows, test))]
@@ -1263,6 +1264,7 @@ enum AgentIntegrationSettings {
     Hermes(HermesReporterPlugin),
     Qwen(tempfile::NamedTempFile),
     OpenCode(OpenCodeReporterPlugin),
+    Fleet(fleet_hooks::LaunchHooks),
 }
 
 struct AntigravityCaptureLog {
@@ -3856,6 +3858,7 @@ fn gemini_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> 
             "enableAutoUpdateNotification": false
         },
         "hooks": {
+            "SessionStart": [hook(Some("startup|resume|clear"))],
             "BeforeAgent": [hook(None)],
             "AfterAgent": [hook(None)],
             "Notification": [hook(Some("ToolPermission"))]
@@ -3944,7 +3947,7 @@ fn qwen_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> se
         "name": "latticeterm-agent-status",
         "type": "command",
         "command": QWEN_REPORTER_COMMAND,
-        "timeout": 5000
+        "timeout": 5
     });
     let hook = |matcher: Option<&str>| {
         let mut value = serde_json::json!({ "hooks": [handler.clone()] });
@@ -3955,6 +3958,7 @@ fn qwen_reporter_settings_value(mcp: Option<&crate::agent_mcp::McpLaunch>) -> se
     };
     let mut settings = serde_json::json!({
         "hooks": {
+            "SessionStart": [hook(Some("startup|resume|clear"))],
             "UserPromptSubmit": [hook(None)],
             "PermissionRequest": [hook(None)],
             "PermissionDenied": [hook(None)],
@@ -4534,6 +4538,8 @@ struct GeminiHookPayload {
     hook_event_name: String,
     session_id: String,
     #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
     notification_type: Option<String>,
 }
 
@@ -4541,6 +4547,9 @@ fn report_from_gemini_hook_payload(raw: &[u8]) -> Result<Option<(AgentLifecycle,
     let payload: GeminiHookPayload =
         serde_json::from_slice(raw).map_err(|_| "Gemini hook payload is invalid.".to_string())?;
     let state = match payload.hook_event_name.as_str() {
+        "SessionStart" if fleet_hooks::prompt_ready_source(payload.source.as_deref()) => {
+            Some(AgentLifecycle::Idle)
+        }
         "BeforeAgent" => Some(AgentLifecycle::Working),
         "AfterAgent" => Some(AgentLifecycle::Done),
         "Notification" if payload.notification_type.as_deref() == Some("ToolPermission") => {
@@ -4578,6 +4587,10 @@ fn report_gemini_hook_from_stdin() -> Result<(), String> {
 struct QwenHookPayload {
     hook_event_name: String,
     #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
     notification_type: Option<String>,
     #[serde(default)]
     background_tasks: Vec<serde_json::Value>,
@@ -4585,10 +4598,15 @@ struct QwenHookPayload {
     crons: Vec<serde_json::Value>,
 }
 
-fn lifecycle_from_qwen_hook_payload(raw: &[u8]) -> Result<Option<AgentLifecycle>, String> {
+fn report_from_qwen_hook_payload(
+    raw: &[u8],
+) -> Result<Option<(AgentLifecycle, Option<String>)>, String> {
     let payload: QwenHookPayload =
         serde_json::from_slice(raw).map_err(|_| "Qwen hook payload is invalid.".to_string())?;
-    Ok(match payload.hook_event_name.as_str() {
+    let state = match payload.hook_event_name.as_str() {
+        "SessionStart" if fleet_hooks::prompt_ready_source(payload.source.as_deref()) => {
+            Some(AgentLifecycle::Idle)
+        }
         "UserPromptSubmit" | "PermissionDenied" | "PostToolUse" | "PostToolUseFailure" => {
             Some(AgentLifecycle::Working)
         }
@@ -4600,7 +4618,25 @@ fn lifecycle_from_qwen_hook_payload(raw: &[u8]) -> Result<Option<AgentLifecycle>
             Some(AgentLifecycle::NeedsAttention)
         }
         _ => None,
-    })
+    };
+    let Some(state) = state else {
+        return Ok(None);
+    };
+    let native_session_id = payload
+        .session_id
+        .map(|session_id| {
+            validate_text(&session_id, "Qwen session id", MAX_RESUME_SESSION_ID_BYTES)
+        })
+        .transpose()?;
+    if payload.hook_event_name == "SessionStart" && native_session_id.is_none() {
+        return Err("Qwen SessionStart is missing its native session ID.".to_string());
+    }
+    Ok(Some((state, native_session_id)))
+}
+
+#[cfg(test)]
+fn lifecycle_from_qwen_hook_payload(raw: &[u8]) -> Result<Option<AgentLifecycle>, String> {
+    Ok(report_from_qwen_hook_payload(raw)?.map(|(state, _)| state))
 }
 
 fn report_qwen_hook_from_stdin() -> Result<(), String> {
@@ -4612,8 +4648,8 @@ fn report_qwen_hook_from_stdin() -> Result<(), String> {
     if payload.len() as u64 > MAX_LIFECYCLE_HOOK_BYTES {
         return Err("Qwen hook payload is too large.".to_string());
     }
-    if let Some(state) = lifecycle_from_qwen_hook_payload(&payload)? {
-        report_from_environment(state)?;
+    if let Some((state, native_session_id)) = report_from_qwen_hook_payload(&payload)? {
+        report_from_environment_with_native_session(state, native_session_id.as_deref())?;
     }
     Ok(())
 }
@@ -5018,6 +5054,15 @@ where
         } else {
             Ok(())
         }
+    } else if command.as_ref() == OsStr::new("agent-fleet-hook") {
+        let provider = args
+            .next()
+            .and_then(|value| value.as_ref().to_str().map(str::to_string));
+        if args.next().is_some() || provider.is_none() {
+            eprintln!("agent-fleet-hook accepts exactly one provider");
+            return Some(2);
+        }
+        fleet_hooks::report_from_stdin(provider.as_deref().unwrap())
     } else if command.as_ref() == OsStr::new("agent-claude-hook") {
         if args.next().is_some() {
             eprintln!("agent-claude-hook accepts no arguments");
@@ -7737,6 +7782,12 @@ pub fn launch_with_replay(
             .ok()
             .flatten()
             .map(AgentIntegrationSettings::Qwen);
+    } else if matches!(definition_id.as_str(), "cursor" | "droid") && reporter.is_some() {
+        integration_settings =
+            fleet_hooks::launch_hooks_if_supported(&executable, &definition_id, &mut arguments)
+                .ok()
+                .flatten()
+                .map(AgentIntegrationSettings::Fleet);
     }
 
     let pair = native_pty_system()
@@ -7875,6 +7926,9 @@ pub fn launch_with_replay(
             }
             AgentIntegrationSettings::OpenCode(plugin) => {
                 command.env("OPENCODE_CONFIG_CONTENT", &plugin.config_content);
+            }
+            AgentIntegrationSettings::Fleet(hooks) => {
+                let _ = hooks.path();
             }
         }
     }
@@ -8615,6 +8669,32 @@ fn turn_interrupt_sequence(definition_id: &str) -> Option<&'static [u8]> {
 /// Whether `cancel_agent_task` may offer `scope: "turn"` for this CLI.
 pub fn supports_turn_interrupt(definition_id: &str) -> bool {
     turn_interrupt_sequence(definition_id).is_some()
+}
+
+pub(crate) fn mcp_prompt_support() -> Vec<serde_json::Value> {
+    AGENTS
+        .iter()
+        .map(|definition| {
+            let integration = match definition.id {
+                "codex" => "native_or_hook",
+                "claude" | "gemini" | "qwen" | "copilot" | "hermes" | "opencode" | "cursor"
+                | "droid" => "launch_hook",
+                "aider" => "attention_only",
+                _ => "not_integrated",
+            };
+            serde_json::json!({
+                "definitionId": definition.id,
+                "integration": integration,
+                "requiresOfficialReadiness": true,
+                "requiresControlGrant": true,
+                "sessionSpecificBlockers": {
+                    "tool": "desktop_agent",
+                    "action": "state",
+                    "path": "promptReadiness.blockers",
+                },
+            })
+        })
+        .collect()
 }
 
 pub const MCP_DRAFT_RECOVERY_ERROR: &str = "MCP submission could not be confirmed. Inspect the visible draft before typing or retrying; pending input was rejected and nothing was automatically retried.";
@@ -12545,6 +12625,115 @@ notify = ["notify.exe", "turn-ended"]"#,
             "session_id": "x".repeat(MAX_RESUME_SESSION_ID_BYTES + 1)
         });
         assert!(report_from_gemini_hook_payload(oversized.to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn fleet_startup_hooks_release_only_real_prompt_ready_sources() {
+        for source in ["startup", "resume", "clear", "compact", "unknown", ""] {
+            let payload = serde_json::json!({
+                "hook_event_name": "SessionStart", "session_id": "native-session", "source": source
+            });
+            let raw = serde_json::to_vec(&payload).unwrap();
+            let expected =
+                fleet_hooks::prompt_ready_source(Some(source)).then_some(AgentLifecycle::Idle);
+            assert_eq!(
+                report_from_gemini_hook_payload(&raw)
+                    .unwrap()
+                    .map(|(state, _)| state),
+                expected
+            );
+            assert_eq!(lifecycle_from_qwen_hook_payload(&raw).unwrap(), expected);
+        }
+        for settings in [
+            gemini_reporter_settings_value(None),
+            qwen_reporter_settings_value(None),
+        ] {
+            assert_eq!(
+                settings["hooks"]["SessionStart"][0]["matcher"],
+                "startup|resume|clear"
+            );
+            assert_eq!(
+                settings["hooks"]["SessionStart"][0]["hooks"][0]["type"],
+                "command"
+            );
+        }
+        assert_eq!(
+            gemini_reporter_settings_value(None)["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+            5000
+        );
+        assert_eq!(
+            qwen_reporter_settings_value(None)["hooks"]["SessionStart"][0]["hooks"][0]["timeout"],
+            5
+        );
+        let missing = br#"{"hook_event_name":"SessionStart","session_id":"native-session"}"#;
+        assert_eq!(report_from_gemini_hook_payload(missing).unwrap(), None);
+        assert_eq!(lifecycle_from_qwen_hook_payload(missing).unwrap(), None);
+    }
+
+    #[test]
+    fn fleet_prompt_support_covers_every_catalog_definition_without_claiming_readiness() {
+        let support = mcp_prompt_support();
+        assert_eq!(support.len(), AGENTS.len());
+        for definition in AGENTS {
+            let entry = support
+                .iter()
+                .find(|entry| entry["definitionId"] == definition.id)
+                .unwrap();
+            assert_eq!(entry["requiresOfficialReadiness"], true);
+            assert_eq!(entry["requiresControlGrant"], true);
+            assert_eq!(entry["sessionSpecificBlockers"]["tool"], "desktop_agent");
+            assert_eq!(entry["sessionSpecificBlockers"]["action"], "state");
+            assert_eq!(
+                entry["sessionSpecificBlockers"]["path"],
+                "promptReadiness.blockers"
+            );
+            let expected = match definition.id {
+                "codex" => "native_or_hook",
+                "claude" | "gemini" | "qwen" | "copilot" | "hermes" | "opencode" | "cursor"
+                | "droid" => "launch_hook",
+                "aider" => "attention_only",
+                "antigravity" | "kimi" | "grok" => "not_integrated",
+                _ => panic!("New Fleet CLI needs an explicit MCP support audit"),
+            };
+            assert_eq!(entry["integration"], expected);
+        }
+    }
+
+    #[test]
+    fn qwen_reporter_preserves_native_session_id_and_rejects_invalid_startup_identity() {
+        let payload = serde_json::json!({
+            "hook_event_name": "SessionStart", "source": "startup", "session_id": "qwen-original",
+            "prompt": "private prompt", "tool_input": {"command": "private command"}
+        });
+        assert_eq!(
+            report_from_qwen_hook_payload(&serde_json::to_vec(&payload).unwrap()).unwrap(),
+            Some((AgentLifecycle::Idle, Some("qwen-original".to_string())))
+        );
+        assert!(report_from_qwen_hook_payload(
+            br#"{"hook_event_name":"SessionStart","source":"startup"}"#
+        )
+        .is_err());
+        for session_id in [
+            String::new(),
+            "bad\nid".to_string(),
+            "x".repeat(MAX_RESUME_SESSION_ID_BYTES + 1),
+        ] {
+            let payload = serde_json::json!({
+                "hook_event_name": "SessionStart", "source": "startup", "session_id": session_id
+            });
+            assert!(report_from_qwen_hook_payload(&serde_json::to_vec(&payload).unwrap()).is_err());
+        }
+        assert_eq!(
+            report_from_qwen_hook_payload(
+                br#"{"hook_event_name":"Stop","session_id":"qwen-original"}"#
+            )
+            .unwrap(),
+            Some((AgentLifecycle::Done, Some("qwen-original".to_string())))
+        );
+        assert_eq!(
+            report_from_qwen_hook_payload(br#"{"hook_event_name":"Stop"}"#).unwrap(),
+            Some((AgentLifecycle::Done, None))
+        );
     }
 
     #[test]

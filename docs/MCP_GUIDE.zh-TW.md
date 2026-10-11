@@ -29,6 +29,23 @@ LatticeTerm 本身可以當成一個 MCP 伺服器。接上之後，外部 AI �
 AI **拿不到**密碼、私鑰或配對碼。連線簿也不會傳出主機位址與帳號；
 AI 只提供已儲存項目的 ID，由 LatticeTerm 使用本機登入資料連線。
 
+### Fleet 各家 CLI 都能自動收指示嗎？
+
+Fleet 的 13 個內建項目都可以手動操作終端；MCP 自動派送則必須有正式
+就緒回報，目前不能說 13 家都完成。Codex、Claude Code、Gemini、Qwen、
+Copilot、Hermes、OpenCode、Cursor、Droid 已有原生或 hook 橋接。
+Aider 的通知無法區分一般輸入與確認問題；Antigravity、Kimi、Grok 尚未
+接入正式就緒回報，所以不讓 AI 用推測閒置狀態硬送文字。
+
+先讀 `get_capabilities.promptControl.definitions` 確認程式支援範圍；對已分享
+的桌面終端，以 `desktop_agent` 的 `state` 讀取 `promptReadiness.blockers`。
+背景 Fleet 的清單不提供這個欄位，傳訊仍會重新檢查就緒條件。
+CLI 未登入、等待人工授權、
+hook 被使用者或公司政策停用，都不是會員方案能自動解決的問題。
+Cursor、Droid 依 `--help` 確認掛鉤能力，不因 CLI 版本更新就直接拒絕；
+不支援旗標的舊版仍照原方式啟動。既有工作階段不會為此被重開。
+完整名單與限制見 [Fleet CLI 控制支援範圍](MCP.zh-TW.md#fleet-cli-控制支援範圍)。
+
 ### 步驟 1：保存連線與登入資料
 
 1. 在 LatticeTerm 保存需要使用的連線與登入資料。
