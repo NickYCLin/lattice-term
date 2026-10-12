@@ -69,7 +69,6 @@ export function PtyTerminal({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
-    const stopScrollback = attachTerminalScrollback(terminal);
     terminalRef.current = terminal;
     const textarea = terminal.textarea;
     const imePresentation = new TerminalImePresentation(
@@ -107,6 +106,7 @@ export function PtyTerminal({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,

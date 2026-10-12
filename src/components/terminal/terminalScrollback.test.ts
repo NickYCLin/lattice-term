@@ -9,6 +9,7 @@ function fakeTerminal() {
   const classes = new Set<string>();
   const terminal = {
     element: {
+      querySelector: vi.fn((_selector: string): unknown => null),
       classList: {
         toggle: (name: string, enabled: boolean) =>
           enabled ? classes.add(name) : classes.delete(name),
@@ -16,7 +17,12 @@ function fakeTerminal() {
       },
     },
     options: { scrollbar: { showScrollbar: true } },
-    buffer: { active: { baseY: 0 } },
+    buffer: { active: { baseY: 0 }, onBufferChange: (callback: () => void) => {
+      events.bufferChanged = callback;
+      return { dispose: vi.fn() };
+    } },
+    onScroll: (callback: () => void) => { events.scrolled = callback; return { dispose: vi.fn() }; },
+    onRender: (callback: () => void) => { events.rendered = callback; return { dispose: vi.fn() }; },
     onWriteParsed: (callback: () => void) => {
       events.parsed = callback;
       return { dispose: parsedDispose };
@@ -30,6 +36,30 @@ function fakeTerminal() {
 }
 
 describe("terminal scrollback visibility", () => {
+  it("refits after font metrics make the screen overlap the scrollbar", () => {
+    const { terminal, events } = fakeTerminal();
+    terminal.element.querySelector.mockImplementation(selector => ({ getBoundingClientRect: () =>
+      selector === ".xterm-screen" ? { right: 600 } : { left: 580, width: 14 } }) as never);
+    const refit = vi.fn();
+    const dispose = attachTerminalScrollback(terminal as unknown as Terminal, refit);
+    events.rendered();
+    expect(refit).toHaveBeenCalledOnce();
+    dispose();
+  });
+
+  it("updates the visibility marker when the active buffer changes or scrolls", () => {
+    const { terminal, events, classes } = fakeTerminal();
+    const dispose = attachTerminalScrollback(terminal as unknown as Terminal);
+    expect(classes.has("has-scrollbar")).toBe(true);
+    terminal.buffer.active.baseY = 10;
+    events.bufferChanged();
+    expect(classes.has("has-scrollback")).toBe(true);
+    terminal.buffer.active.baseY = 0;
+    events.scrolled();
+    expect(classes.has("has-scrollback")).toBe(false);
+    dispose();
+    expect(classes.has("has-scrollbar")).toBe(false);
+  });
   it("keeps the scrollbar visible only when the active buffer has history", () => {
     const { terminal, events, classes } = fakeTerminal();
     attachTerminalScrollback(terminal as unknown as Terminal);

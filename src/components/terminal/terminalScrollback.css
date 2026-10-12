@@ -2,6 +2,27 @@
   overflow: hidden;
 }
 
+.terminal-pane .xterm .xterm-scrollable-element {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 14px;
+}
+
+.terminal-pane .xterm.has-scrollbar .xterm-scrollable-element > .xterm-scrollbar.xterm-vertical {
+  opacity: 1;
+  background: var(--surface-sunken);
+  border-left: 1px solid var(--line);
+  transition: none;
+}
+
+.terminal-pane .xterm:not(.has-scrollback) .xterm-scrollable-element > .xterm-scrollbar.xterm-vertical {
+  pointer-events: none;
+}
+
+.terminal-pane .xterm:not(.has-scrollback) .xterm-scrollable-element > .xterm-scrollbar.xterm-vertical > .xterm-slider {
+  visibility: hidden;
+}
+
 .terminal-pane .xterm.has-scrollback .xterm-scrollable-element > .xterm-scrollbar.xterm-vertical {
   opacity: 1;
   pointer-events: auto;

@@ -81,7 +81,6 @@ export function TerminalPane({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
-    const stopScrollback = attachTerminalScrollback(terminal);
 
     termRef.current = terminal;
     fitRef.current = fit;
@@ -121,6 +120,7 @@ export function TerminalPane({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,

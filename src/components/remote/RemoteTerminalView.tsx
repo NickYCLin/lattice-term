@@ -86,7 +86,6 @@ export function RemoteTerminalView({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
-    const stopScrollback = attachTerminalScrollback(terminal);
     termRef.current = terminal;
     const textarea = terminal.textarea;
     const imePresentation = new TerminalImePresentation(terminal, textarea);
@@ -118,6 +117,7 @@ export function RemoteTerminalView({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     const sendInput = (data: string) => {
       if (viewOnly) return;
