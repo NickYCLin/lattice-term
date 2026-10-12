@@ -1120,12 +1120,27 @@ impl AgentInputControl {
     }
 }
 
+#[derive(Clone)]
 struct QueuedPrompt {
+    id: String,
+    delivery_error: Option<String>,
     bytes: Vec<u8>,
     /// Desktop prompts have no MCP grant; external prompts remember the
     /// exact authorization under which they entered the queue.
     mcp_grant_epoch: Option<u64>,
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedPromptView {
+    id: String,
+    data: String,
+    text: String,
+    editable: bool,
+    delivery_error: Option<String>,
+}
+
+static NEXT_QUEUED_PROMPT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(windows)]
 struct CodexInputAttestation {
@@ -8893,8 +8908,12 @@ fn send_prompt_bytes_locked(
         return Err("This session is not under active MCP control.".to_string());
     }
     #[cfg(windows)]
-    if let (Some(control), Some(_)) = (entry.codex_control.as_ref(), grant) {
-        require_mcp_input_profile(&entry, "codex")?;
+    if let Some(control) = entry.codex_control.as_ref().filter(|_| {
+        grant.is_some() || (bytes.starts_with(b"\x1b[200~") && bytes.ends_with(b"\x1b[201~\r"))
+    }) {
+        if grant.is_some() {
+            require_mcp_input_profile(&entry, "codex")?;
+        }
         let thread_id = entry
             .summary
             .lock()
@@ -8913,10 +8932,10 @@ fn send_prompt_bytes_locked(
                 .is_ok_and(|current| Arc::ptr_eq(&current, &entry))
                 && !entry.stopping.load(Ordering::Acquire)
                 && prompt_grant_matches(&entry, grant)
-                && mcp_input_profile_valid(&entry)
+                && (grant.is_none() || mcp_input_profile_valid(&entry))
         });
         if let Err(error) = result {
-            if error == codex_control::CONTROL_OUTCOME_UNKNOWN {
+            if grant.is_some() && error == codex_control::CONTROL_OUTCOME_UNKNOWN {
                 entry
                     .mcp_input_profile_invalidated
                     .store(true, Ordering::Release);
@@ -9225,6 +9244,10 @@ fn enqueue_locked(
             require_mcp_input_profile(&entry, &definition_id)?;
         }
         queue.push_back(QueuedPrompt {
+            id: NEXT_QUEUED_PROMPT_ID
+                .fetch_add(1, Ordering::Relaxed)
+                .to_string(),
+            delivery_error: None,
             bytes,
             mcp_grant_epoch,
         });
@@ -9233,6 +9256,82 @@ fn enqueue_locked(
     store_queue_depth(registry, session_id, depth);
     sink.queue(session_id, depth);
     Ok(depth)
+}
+
+pub fn queued_prompt_views(
+    registry: &AgentRegistry,
+    session_id: &str,
+) -> Result<Vec<QueuedPromptView>, String> {
+    let entry = registry.get(session_id)?;
+    let queue = entry
+        .queued_prompts
+        .lock()
+        .map_err(|error| error.to_string())?;
+    Ok(queue
+        .iter()
+        .map(|prompt| {
+            let bytes = prompt
+                .bytes
+                .strip_prefix(b"\x1b[200~")
+                .and_then(|bytes| bytes.strip_suffix(b"\x1b[201~\r"))
+                .unwrap_or(&prompt.bytes);
+            QueuedPromptView {
+                id: prompt.id.clone(),
+                data: encode(&prompt.bytes),
+                text: String::from_utf8_lossy(bytes)
+                    .trim_end_matches('\r')
+                    .replace('\r', "\n"),
+                editable: prompt.mcp_grant_epoch.is_none(),
+                delivery_error: prompt.delivery_error.clone(),
+            }
+        })
+        .collect())
+}
+
+pub fn edit_queued_prompt(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    prompt_id: &str,
+    expected_data: &str,
+    data: Option<&str>,
+) -> Result<bool, String> {
+    let expected = decode(expected_data)?;
+    let replacement = data.map(decode).transpose()?;
+    if replacement.as_ref().is_some_and(|bytes| bytes.is_empty()) {
+        return Err("A queued prompt is required.".to_string());
+    }
+    let entry = registry.get(session_id)?;
+    let _input = entry.input.lock().map_err(|error| error.to_string())?;
+    let mut queue = entry
+        .queued_prompts
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let Some(index) = queue.iter().position(|prompt| prompt.id == prompt_id) else {
+        return Ok(false);
+    };
+    let prompt = &queue[index];
+    if prompt.mcp_grant_epoch.is_some() || prompt.bytes != expected {
+        return Err(
+            "The queued prompt changed or belongs to an MCP client. Refresh before editing."
+                .to_string(),
+        );
+    }
+    if replacement.is_some() && prompt.delivery_error.is_some() {
+        return Err("This delivery was not confirmed. Check the original conversation before removing or resending it.".to_string());
+    }
+    if let Some(bytes) = replacement {
+        queue[index].bytes = bytes;
+    } else {
+        queue.remove(index);
+    }
+    let depth = queue.len();
+    drop(queue);
+    store_queue_depth(registry, session_id, depth);
+    sink.queue(session_id, depth);
+    drop(_input);
+    deliver_next_queued(sink, registry, session_id);
+    Ok(true)
 }
 
 /// Drops everything still waiting for this session and reports how many went.
@@ -9296,6 +9395,12 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
             return;
         };
         queue.retain(|prompt| prompt_grant_matches(&entry, prompt.mcp_grant_epoch));
+        if queue
+            .front()
+            .is_some_and(|prompt| prompt.delivery_error.is_some())
+        {
+            return;
+        }
         queue.pop_front()
     };
     let Some(prompt) = next else {
@@ -9308,10 +9413,19 @@ fn deliver_next_queued(sink: &dyn AgentSink, registry: &AgentRegistry, session_i
         .unwrap_or(0);
     store_queue_depth(registry, session_id, depth);
     sink.queue(session_id, depth);
-    // A write that fails means the PTY is gone; the remaining prompts are
-    // dropped with the session rather than retried into a dead terminal.
     let is_mcp = prompt.mcp_grant_epoch.is_some();
+    let retained = (!is_mcp).then(|| prompt.clone());
     if let Err(error) = send_queued_prompt_locked(sink, registry, session_id, prompt, &mut input) {
+        if let Some(mut retained) = retained {
+            retained.delivery_error = Some(error.clone());
+            if let Ok(mut queue) = entry.queued_prompts.lock() {
+                queue.push_front(retained);
+                let depth = queue.len();
+                drop(queue);
+                store_queue_depth(registry, session_id, depth);
+                sink.queue(session_id, depth);
+            }
+        }
         if is_mcp && error != MCP_DRAFT_RECOVERY_ERROR {
             let _ = clear_queue_locked(sink, registry, session_id, true);
             publish_mcp_input_notice(sink, registry, session_id,
@@ -15154,6 +15268,230 @@ notify = ["notify.exe", "turn-ended"]"#,
 
     #[cfg(windows)]
     #[test]
+    fn desktop_queue_edits_keep_failed_deliveries_without_automatic_retries() {
+        struct FailedWriter(Arc<AtomicU64>);
+        impl Write for FailedWriter {
+            fn write(&mut self, _bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Err(std::io::Error::other("delivery failed"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        entry.summary.lock().unwrap().definition_id = "custom".into();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        enqueue(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &encode(b"first\r"),
+        )
+        .unwrap();
+        enqueue(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &encode(b"second\r"),
+        )
+        .unwrap();
+        let before = queued_prompt_views(&fixture.registry, &fixture.id).unwrap();
+        let attempts = Arc::new(AtomicU64::new(0));
+        let original = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(FailedWriter(attempts.clone())),
+        );
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Integration,
+        );
+        deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        let failed = queued_prompt_views(&fixture.registry, &fixture.id).unwrap();
+        assert_eq!(failed[0].id, before[0].id);
+        assert_eq!(failed[0].data, before[0].data);
+        assert!(failed[0].delivery_error.is_some());
+        assert_eq!(failed[1].id, before[1].id);
+        deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        assert_eq!(attempts.load(Ordering::Relaxed), 1);
+        *entry.writer.lock().unwrap() = original;
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &failed[0].id,
+            &failed[0].data,
+            None
+        )
+        .unwrap());
+        assert_eq!(*fixture.writes.lock().unwrap(), vec![b"second\r".to_vec()]);
+        assert!(queued_prompt_views(&fixture.registry, &fixture.id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_queue_edits_preserve_identity_order_and_compare_the_original_payload() {
+        let fixture = CodexSubmitFixture::new(None);
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        let first = encode(b"\x1b[200~first\nattachment.png\x1b[201~\r");
+        let second = encode(b"second\r");
+        enqueue(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &first,
+        )
+        .unwrap();
+        enqueue(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &second,
+        )
+        .unwrap();
+        let original = queued_prompt_views(&fixture.registry, &fixture.id).unwrap();
+        assert_eq!(original[0].text, "first\nattachment.png");
+        assert!(original[0].editable);
+        let replacement = encode(b"\x1b[200~edited\nattachment.png\x1b[201~\r");
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &original[0].id,
+            &original[0].data,
+            Some(&replacement)
+        )
+        .unwrap());
+        let updated = queued_prompt_views(&fixture.registry, &fixture.id).unwrap();
+        assert_eq!(updated[0].id, original[0].id);
+        assert_eq!(updated[1].id, original[1].id);
+        assert_eq!(updated[0].text, "edited\nattachment.png");
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &original[0].id,
+            &original[0].data,
+            Some(&replacement)
+        )
+        .is_err());
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &updated[0].id,
+            &updated[0].data,
+            None
+        )
+        .unwrap());
+        assert!(!edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            &updated[0].id,
+            &updated[0].data,
+            Some(&replacement)
+        )
+        .unwrap());
+        assert_eq!(
+            queued_prompt_views(&fixture.registry, &fixture.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(fixture.writes.lock().unwrap().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_queue_edits_cannot_change_mcp_prompts_or_retry_unknown_deliveries() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        let bytes = b"secret reference\r".to_vec();
+        entry
+            .queued_prompts
+            .lock()
+            .unwrap()
+            .push_back(QueuedPrompt {
+                id: "external".into(),
+                delivery_error: None,
+                bytes: bytes.clone(),
+                mcp_grant_epoch: current_mcp_grant(&entry),
+            });
+        let expected = encode(&bytes);
+        assert!(!queued_prompt_views(&fixture.registry, &fixture.id).unwrap()[0].editable);
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "external",
+            &expected,
+            None
+        )
+        .is_err());
+        entry.queued_prompts.lock().unwrap().clear();
+        entry
+            .queued_prompts
+            .lock()
+            .unwrap()
+            .push_back(QueuedPrompt {
+                id: "unknown".into(),
+                delivery_error: Some("outcome unknown".into()),
+                bytes,
+                mcp_grant_epoch: None,
+            });
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "unknown",
+            &expected,
+            Some(&expected)
+        )
+        .is_err());
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Integration,
+        );
+        deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert_eq!(
+            queued_prompt_views(&fixture.registry, &fixture.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(edit_queued_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "unknown",
+            &expected,
+            None
+        )
+        .unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn codex_resume_ownership_requires_the_exact_account_and_native_id() {
         let fixture = CodexSubmitFixture::new(None);
         let profile = tempfile::tempdir().unwrap();
@@ -15515,6 +15853,8 @@ notify = ["notify.exe", "turn-ended"]"#,
             .lock()
             .unwrap()
             .push_back(QueuedPrompt {
+                id: "desktop-test".to_string(),
+                delivery_error: None,
                 bytes: b"owned desktop prompt\r".to_vec(),
                 mcp_grant_epoch: None,
             });
@@ -15525,11 +15865,18 @@ notify = ["notify.exe", "turn-ended"]"#,
             .lock()
             .unwrap()
             .push_back(QueuedPrompt {
+                id: "mcp-test".to_string(),
+                delivery_error: None,
                 bytes: mcp_prompt_payload("queued MCP prompt").unwrap(),
                 mcp_grant_epoch: current_mcp_grant(&entry),
             });
         deliver_next_queued(fixture.sink.as_ref(), &fixture.registry, &fixture.id);
-        assert_eq!(entry.queued_prompts.lock().unwrap().len(), 1);
+        let queue = entry.queued_prompts.lock().unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].id, "desktop-test");
+        assert!(queue[0].delivery_error.is_some());
+        assert_eq!(queue[1].id, "mcp-test");
+        drop(queue);
         assert!(!String::from_utf8_lossy(&fixture.sink.data.lock().unwrap())
             .contains("A queued MCP prompt could not be delivered safely"));
     }

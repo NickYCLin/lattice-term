@@ -1350,6 +1350,60 @@ async fn agent_enqueue(
     }
 }
 
+#[tauri::command]
+async fn agent_read_queue(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Vec<crate::agent::QueuedPromptView>, String> {
+    if crate::agent_daemon::owns(&session_id) {
+        let value = daemon
+            .request(
+                false,
+                crate::agent_daemon::Request::ReadQueue { session_id },
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| error.to_string())
+    } else {
+        crate::agent::queued_prompt_views(registry.inner(), &session_id)
+    }
+}
+
+#[tauri::command]
+async fn agent_edit_queued_prompt(
+    app: AppHandle,
+    session_id: String,
+    prompt_id: String,
+    expected_data: String,
+    data: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<bool, String> {
+    if crate::agent_daemon::owns(&session_id) {
+        let value = daemon
+            .request(
+                false,
+                crate::agent_daemon::Request::EditQueuedPrompt {
+                    session_id,
+                    prompt_id,
+                    expected_data,
+                    data,
+                },
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| error.to_string())
+    } else {
+        crate::agent::edit_queued_prompt(
+            &crate::agent::EventSink(app),
+            registry.inner(),
+            &session_id,
+            &prompt_id,
+            &expected_data,
+            data.as_deref(),
+        )
+    }
+}
+
 /// Whether the background service starts by itself when the user logs in.
 #[tauri::command]
 async fn agent_daemon_autostart_enabled() -> bool {
@@ -5374,6 +5428,8 @@ pub fn run() {
             agent_send,
             agent_broadcast,
             agent_enqueue,
+            agent_read_queue,
+            agent_edit_queued_prompt,
             start_voice_typing,
             local_dictation_available,
             local_dictation_start,

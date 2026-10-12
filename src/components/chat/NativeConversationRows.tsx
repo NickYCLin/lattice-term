@@ -9,6 +9,7 @@ import { useI18n } from "../../i18n/context";
 import { chatProjectKey } from "../../app/chatProjects";
 import { displayPath } from "../../app/displayPath";
 import { ConversationListIdentity } from "./ConversationPresentation";
+import { FolderIcon } from "../icons";
 
 function directoryKey(path: string) {
   return path.replace(/[\\/]+$/, "") || path;
@@ -42,6 +43,16 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   const rows = useMemo(() => (history?.entries ?? []).filter(entry =>
     !entry.archived && !known.has(nativeConversationKey(entry)) &&
     (projectFilter === null || chatProjectKey(entry.workingDirectory) === projectFilter)), [history?.entries, known, projectFilter]);
+  const groups = useMemo(() => {
+    const grouped = new Map<string, LocalConversation[]>();
+    for (const entry of rows) {
+      const directory = chatProjectKey(entry.workingDirectory);
+      const entries = grouped.get(directory) ?? [];
+      entries.push(entry);
+      grouped.set(directory, entries);
+    }
+    return [...grouped].map(([directory, entries]) => ({ directory, entries }));
+  }, [rows]);
   if (!history) return null;
 
   async function open(entry: LocalConversation) {
@@ -85,8 +96,12 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   }
 
   return <>
-    {rows.length > 0 && <ul className="chat-native-rows">
-      {rows.map(entry => {
+    {groups.map(group => <details key={group.directory} className="chat-native-project" open>
+      <summary title={displayPath(group.directory)}><FolderIcon size={14} />
+        <span>{group.directory ? directoryName(group.directory) : t("chat.directory.none")}</span>
+        <small>{group.entries.length}</small>
+      </summary>
+      <ul className="chat-native-rows">{group.entries.map(entry => {
         const key = nativeConversationKey(entry);
         return <li key={key}>
           <button type="button" className="chat-thread" disabled={opening !== null} aria-busy={opening === key}
@@ -107,7 +122,8 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
           </div>}
         </li>;
       })}
-    </ul>}
+      </ul>
+    </details>)}
     {history.error && <p className="chat-threads__hint" role="alert">{t("history.stale")} {history.error}</p>}
     {history.hasMore && <button type="button" className="button button--ghost button--sm" disabled={history.busy} onClick={history.loadMore}>
       {t("history.loadOlder")}

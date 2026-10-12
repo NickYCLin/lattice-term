@@ -9,6 +9,7 @@ import { fakeAgentApi, fakeAutomationsApi, fakeChatApi, fakeDefinition, fakeSess
 import { SessionConversationPane } from "./SessionConversationPane";
 import { desktopChatAccess } from "../../app/desktopChat";
 import { removeConversationDraft } from "../../app/useConversationDraft";
+import { QueuedPromptEditor } from "./QueuedPromptEditor";
 
 const clipboard = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: clipboard.invoke, convertFileSrc: (path: string) => path }));
@@ -95,6 +96,64 @@ function installHostDom() {
   return container;
 }
 
+it("keeps queue edits after dispatch races and view switches without changing the main draft", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const onSave = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const render = () => root.render(<I18nProvider locale="zh-TW"><QueuedPromptEditor
+    draftId="editor-race" text="原訊息" onSave={onSave} /></I18nProvider>);
+  const buttons = () => allNodes(container).filter(node => node.tagName === "BUTTON");
+  try {
+    await act(async () => render());
+    await act(async () => onClick(buttons()[0])());
+    await act(async () => inputProps(container).onChange({ target: { value: "修改後\n第二行" } }));
+    await act(async () => onClick(buttons().find(node => node.textContent === "儲存")!)());
+    expect(onSave).toHaveBeenCalledExactlyOnceWith("修改後\n第二行");
+    expect(inputProps(container).value).toBe("修改後\n第二行");
+    expect(container.textContent).toContain("這則訊息已送出或被修改。草稿已保留");
+    await act(async () => root.render(null));
+    await act(async () => render());
+    await act(async () => onClick(buttons()[0])());
+    expect(inputProps(container).value).toBe("修改後\n第二行");
+    const preventDefault = vi.fn();
+    const key = Object.keys(allNodes(container).find(node => node.tagName === "TEXTAREA")!).find(name => name.startsWith("__reactProps$"))!;
+    const props = (allNodes(container).find(node => node.tagName === "TEXTAREA")! as unknown as Record<string, { onKeyDown: (event: unknown) => void }>)[key];
+    await act(async () => props.onKeyDown({ key: "Enter", ctrlKey: true, nativeEvent: { isComposing: true }, preventDefault }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    await act(async () => props.onKeyDown({ key: "Enter", ctrlKey: true, nativeEvent: { isComposing: false }, preventDefault }));
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(allNodes(container).some(node => node.tagName === "TEXTAREA")).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    removeConversationDraft("session", "queue:editor-race");
+  }
+});
+
+
+it("does not clear a newer queue draft when an earlier save finishes after leaving the page", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  let finish!: (saved: boolean) => void;
+  const onSave = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  const render = () => root.render(<I18nProvider locale="zh-TW"><QueuedPromptEditor
+    draftId="editor-delayed" text="原訊息" onSave={onSave} /></I18nProvider>);
+  const buttons = () => allNodes(container).filter(node => node.tagName === "BUTTON");
+  try {
+    await act(async () => render());
+    await act(async () => onClick(buttons()[0])());
+    await act(async () => inputProps(container).onChange({ target: { value: "先儲存的內容" } }));
+    await act(async () => onClick(buttons().find(node => node.textContent === "儲存")!)());
+    await act(async () => root.render(null));
+    await act(async () => render());
+    await act(async () => onClick(buttons()[0])());
+    await act(async () => inputProps(container).onChange({ target: { value: "返回後的新草稿" } }));
+    await act(async () => finish(true));
+    expect(inputProps(container).value).toBe("返回後的新草稿");
+  } finally {
+    await act(async () => root.unmount());
+    removeConversationDraft("session", "queue:editor-delayed");
+  }
+});
 
 beforeEach(() => {
   vi.useFakeTimers();

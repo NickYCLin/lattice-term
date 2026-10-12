@@ -1211,6 +1211,23 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         Request::ClearQueue { session_id } => {
             agent::clear_queue(sink, registry, &session_id).map(|dropped| json!(dropped))
         }
+        Request::ReadQueue { session_id } => {
+            to_value(&agent::queued_prompt_views(registry, &session_id)?)
+        }
+        Request::EditQueuedPrompt {
+            session_id,
+            prompt_id,
+            expected_data,
+            data,
+        } => agent::edit_queued_prompt(
+            sink,
+            registry,
+            &session_id,
+            &prompt_id,
+            &expected_data,
+            data.as_deref(),
+        )
+        .map(|changed| json!(changed)),
         Request::SetQueueDependency {
             session_id,
             waits_for,
@@ -2273,6 +2290,28 @@ mod observer_transport_tests {
             "never complete a revoked JSON reply"
         );
         assert!(sink.is_shared("session"));
+    }
+
+    #[test]
+    fn only_the_desktop_reads_and_edits_queued_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        for request in [
+            Request::ReadQueue {
+                session_id: "agent-bg-missing".into(),
+            },
+            Request::EditQueuedPrompt {
+                session_id: "agent-bg-missing".into(),
+                prompt_id: "one".into(),
+                expected_data: "cHJvbXB0".into(),
+                data: None,
+            },
+        ] {
+            assert_eq!(
+                dispatch_as(&context, ClientRole::Observer, "client", request).unwrap_err(),
+                OBSERVER_NOT_ALLOWED
+            );
+        }
     }
 
     #[test]

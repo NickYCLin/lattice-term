@@ -66,6 +66,17 @@ export function enqueueChatInput(thread: ChatThread, input: QueuedChatInput): Ch
   return { ...thread, pendingInputs: [...pending, input], updatedAt: input.createdAt };
 }
 
+export function editQueuedChatInput(thread: ChatThread, expected: QueuedChatInput, prompt: string): ChatThread {
+  const pending = thread.pendingInputs ?? [];
+  const index = pending.findIndex(input => input.id === expected.id);
+  if (index < 0 || JSON.stringify(pending[index]) !== JSON.stringify(expected)) return thread;
+  const replacement = { ...pending[index], prompt };
+  if (restoreQueuedInputs([replacement]).length !== 1) throw new ChatQueueError("invalid");
+  const next = [...pending];
+  next[index] = replacement;
+  return { ...thread, pendingInputs: next };
+}
+
 export function removeQueuedInput(thread: ChatThread, id: string): ChatThread {
   return { ...thread, pendingInputs: (thread.pendingInputs ?? []).filter(item => item.id !== id) };
 }

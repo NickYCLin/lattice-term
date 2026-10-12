@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { createThread, beginTurn, applyChatEvent, failTurn, loadStoredThreads, saveStoredThreads } from "./agentChat";
-import { enqueueChatInput, restoreQueuedInputs, removeQueuedInput, MAX_QUEUED_CHAT_INPUTS } from "./chatInputQueue";
+import { enqueueChatInput, editQueuedChatInput, restoreQueuedInputs, removeQueuedInput, MAX_QUEUED_CHAT_INPUTS } from "./chatInputQueue";
 
 const makeThread = () => createThread({ definitionId: "codex", workingDirectory: "", permission: "ask", model: "" }, "thread-1", 0);
 const input = (id: string) => ({ id, prompt: `Message ${id}`, attachments: [], profileConfigPath: null, createdAt: 1 });
 
 describe("chat input queue", () => {
+  it("edits in place without losing attachments, mentions, identity or order", () => {
+    const queued = { ...input("first"), attachments: [{ path: "/tmp/shot.png", name: "shot.png", isImage: true }],
+      mentions: [{ kind: "skill" as const, name: "test", token: "$test", path: "/tmp/test" }] };
+    const original = enqueueChatInput(enqueueChatInput(makeThread(), queued), input("second"));
+    const updated = editQueuedChatInput(original, queued, "新的\n完整內容");
+    expect(updated.pendingInputs).toEqual([{ ...queued, prompt: "新的\n完整內容" }, input("second")]);
+    expect(editQueuedChatInput(updated, queued, "stale")).toBe(updated);
+    expect(editQueuedChatInput(removeQueuedInput(updated, queued.id), queued, "do not resend").pendingInputs).toEqual([input("second")]);
+    expect(() => editQueuedChatInput(original, queued, "x".repeat(65537))).toThrow("invalid");
+  });
   it("keeps FIFO order, ignores duplicate IDs, and allows removing one message", () => {
     let thread = enqueueChatInput(makeThread(), input("one"));
     thread = enqueueChatInput(thread, input("two"));

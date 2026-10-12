@@ -8,6 +8,7 @@ import {
   applyAgentUsageEvent,
   agentCatalogForDisplay,
   buildAgentBroadcastPayload,
+  buildAgentQueuedPayload,
   claudeSafeModeFallbackRequest,
   codexUpdateRestartRequest,
   decodeAgentPayload,
@@ -519,6 +520,13 @@ describe("agent session transport", () => {
       "Review this change\rReturn risks\r",
     );
     expect(buildAgentBroadcastPayload("   ")).toBe("");
+  });
+
+  it("frames a multiline queued prompt as one paste followed by one submit", () => {
+    expect(buildAgentQueuedPayload("第一行\r\n第二行\n")).toBe("\x1b[200~第一行\n第二行\x1b[201~\r");
+    expect(buildAgentQueuedPayload("/model gpt-test")).toBe("/model gpt-test\r");
+    expect(buildAgentQueuedPayload("   ")).toBe("");
+    expect(() => buildAgentQueuedPayload("hello\x1b[201~")).toThrow("control characters");
   });
 
   it("updates both semantic state and its trusted source", () => {

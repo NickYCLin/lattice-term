@@ -663,6 +663,26 @@ export function buildAgentBroadcastPayload(value: string): string {
   return `${normalized}\r`;
 }
 
+export function buildAgentQueuedPayload(value: string): string {
+  if (!value.trim()) return "";
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) {
+    throw new Error("A queued prompt cannot contain terminal control characters.");
+  }
+  const normalized = value.replace(/\r\n?/g, "\n").trimEnd();
+  if (normalized.startsWith("/") && !normalized.includes("\n")) {
+    return `${normalized}\r`;
+  }
+  return `\x1b[200~${normalized}\x1b[201~\r`;
+}
+
+export interface AgentQueuedPrompt {
+  id: string;
+  data: string;
+  text: string;
+  editable: boolean;
+  deliveryError?: string | null;
+}
+
 export function moveAgentLaunchPlan(
   plans: AgentLaunchPlan[],
   id: string,
@@ -721,6 +741,8 @@ export interface AgentApi {
    * with how many prompts are waiting; zero means it was free and took it.
    */
   enqueue: (sessionId: string, prompt: string) => Promise<number>;
+  readQueue: (sessionId: string) => Promise<AgentQueuedPrompt[]>;
+  editQueuedPrompt: (sessionId: string, prompt: AgentQueuedPrompt, text: string | null) => Promise<boolean>;
   /** Drops everything still waiting, resolving with how many went. */
   clearQueue: (sessionId: string) => Promise<number>;
   /** Makes a session's queue wait for another's turn to end; null unlinks. */
@@ -1534,9 +1556,7 @@ export function useAgentSessions(): AgentApi {
    * and took it at once.
    */
   const enqueue = useCallback(async (sessionId: string, prompt: string) => {
-    // A queued prompt is submitted exactly as a broadcast one is, so the two
-    // paths cannot disagree about line endings or trailing returns.
-    const payload = buildAgentBroadcastPayload(prompt);
+    const payload = buildAgentQueuedPayload(prompt);
     if (!payload) throw new Error("A queued prompt is required.");
     const { invoke } = await core();
     return invoke<number>("agent_enqueue", {
@@ -1548,6 +1568,21 @@ export function useAgentSessions(): AgentApi {
   const clearQueue = useCallback(async (sessionId: string) => {
     const { invoke } = await core();
     return invoke<number>("agent_clear_queue", { sessionId });
+  }, []);
+
+  const readQueue = useCallback(async (sessionId: string) => {
+    const { invoke } = await core();
+    return invoke<AgentQueuedPrompt[]>("agent_read_queue", { sessionId });
+  }, []);
+
+  const editQueuedPrompt = useCallback(async (sessionId: string, prompt: AgentQueuedPrompt, text: string | null) => {
+    const payload = text === null ? null : buildAgentQueuedPayload(text);
+    if (payload === "") throw new Error("A queued prompt is required.");
+    const { invoke } = await core();
+    return invoke<boolean>("agent_edit_queued_prompt", {
+      sessionId, promptId: prompt.id, expectedData: prompt.data,
+      data: payload === null ? null : encodeAgentPayload(new TextEncoder().encode(payload)),
+    });
   }, []);
 
   const setQueueDependency = useCallback(
@@ -1717,6 +1752,8 @@ export function useAgentSessions(): AgentApi {
     writeHandoffFile,
     broadcast,
     enqueue,
+    readQueue,
+    editQueuedPrompt,
     clearQueue,
     setQueueDependency,
     maxActiveSessions,

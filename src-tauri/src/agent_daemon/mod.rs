@@ -453,6 +453,15 @@ pub enum Request {
     ClearQueue {
         session_id: String,
     },
+    ReadQueue {
+        session_id: String,
+    },
+    EditQueuedPrompt {
+        session_id: String,
+        prompt_id: String,
+        expected_data: String,
+        data: Option<String>,
+    },
     SetQueueDependency {
         session_id: String,
         waits_for: Option<String>,

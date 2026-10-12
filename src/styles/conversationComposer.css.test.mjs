@@ -40,9 +40,10 @@ describe("conversation composer layout", () => {
       expect(rule(selector)).toContain("width: 100%;");
     }
     expect(rule(".session-composer__box .chat-composer__input")).toContain("flex: 0 1 auto;");
-    expect(rule(".session-composer__box .chat-queue")).toContain("max-height: 6rem;");
-    expect(rule(".session-composer__box .chat-queue")).toContain("overflow-y: auto;");
-    expect(styles).toContain(".session-composer__box .chat-attachments,\n.session-composer__box .chat-queue {");
+    expect(rule(".session-composer__box .chat-attachments")).toContain("max-height: 6rem;");
+    expect(rule(".session-composer__box .chat-attachments")).toContain("overflow-y: auto;");
+    expect(rule(".session-prompt-queue ol")).toContain("max-height: min(22rem, 40dvh);");
+    expect(styles).not.toContain(".session-composer__box .chat-queue {");
     expect(rule(".session-composer__notices")).toContain("max-height: 8rem;");
     expect(rule(".session-composer__notices")).toContain("overflow-y: auto;");
     expect(rule(".session-composer__toolbar")).toContain("flex: none;");

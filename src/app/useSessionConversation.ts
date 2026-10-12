@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { recordSessionSubmission, reconcileSessionSubmissions, sessionSubmittedPrompts, subscribeSessionSubmissions } from "./sessionSubmittedPrompts";
 import { MAX_AGENT_OUTPUT_TAIL, type AgentApi } from "./useAgentSessions";
 import { renderTerminalPreview } from "./terminalPreview";
 import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "./sessionConversationReadiness";
@@ -25,6 +26,10 @@ export interface SessionApprovalRequest {
 
 /** One reader and the existing prompt queue, both addressed to the same PTY. */
 export function useSessionConversation(sessionId: string, agents: AgentApi) {
+  const selectedSession = useRef(sessionId);
+  selectedSession.current = sessionId;
+  const submitted = useSyncExternalStore(subscribeSessionSubmissions,
+    () => sessionSubmittedPrompts(sessionId), () => sessionSubmittedPrompts(sessionId));
   const nativeSessionId = agents.sessions.find(session => session.sessionId === sessionId)?.capturedSessionId ?? null;
   const inFlightReads = useRef(new Map<string, Promise<SessionConversationSnapshot>>());
   const [messages, setMessages] = useState<SessionConversationMessage[]>([]);
@@ -135,6 +140,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
         });
         if (!disposed) {
           setMessages(next.messages);
+          reconcileSessionSubmissions(sessionId, next.messages);
           setAvailability(next.availability);
           setTruncated(next.truncated);
           setReadError(null);
@@ -164,19 +170,20 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     setQueued(null);
     try {
       const count = await agents.enqueue(sessionId, text);
-      setQueued(count);
+      recordSessionSubmission(sessionId, text, messages);
+      if (selectedSession.current === sessionId) setQueued(count);
       return true;
     } catch (reason) {
-      setSendError(reason instanceof Error ? reason.message : String(reason));
+      if (selectedSession.current === sessionId) setSendError(reason instanceof Error ? reason.message : String(reason));
       return false;
     } finally {
       sendingRef.current = false;
-      setSending(false);
+      if (selectedSession.current === sessionId) setSending(false);
     }
   }
   const acknowledge = useCallback(() => setQueued(null), []);
   return {
-    messages, availability, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
+    messages, submitted, availability, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
     approval, answering, answerError, answer,
   };
 }

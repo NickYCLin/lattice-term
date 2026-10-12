@@ -15,7 +15,7 @@ import { removeConversationDraft } from "./useConversationDraft";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
 import { findCliProxy, loadCliProxySettings } from "./cliProxyApi";
-import { ChatQueueError, enqueueChatInput, removeQueuedInput } from "./chatInputQueue";
+import { ChatQueueError, enqueueChatInput, editQueuedChatInput, removeQueuedInput, type QueuedChatInput } from "./chatInputQueue";
 import { playCompletionSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
   applyChatEvent,
@@ -204,6 +204,7 @@ export interface AgentChatApi {
   steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string, mentions?: readonly ChatMention[]) => Promise<void>;
   enqueue: (id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath?: string | null, mentions?: readonly ChatMention[]) => void;
   removeQueued: (id: string, inputId: string) => void;
+  editQueued: (id: string, expected: QueuedChatInput, prompt: string) => boolean;
   resumeQueue: (id: string) => void;
   /** Answers an approval card; rejects with the reason when it cannot. */
   respond: (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => Promise<void>;
@@ -787,6 +788,19 @@ export function useAgentChat(
   const removeQueued = useCallback((id: string, inputId: string) => {
     changeThreads(current => current.map(thread => thread.id === id ? removeQueuedInput(thread, inputId) : thread));
   }, []);
+  const editQueued = useCallback((id: string, expected: QueuedChatInput, prompt: string) => {
+    const current = threadsRef.current;
+    const thread = current.find(candidate => candidate.id === id);
+    if (!thread) return false;
+    const updated = editQueuedChatInput(thread, expected, prompt);
+    if (updated === thread) return false;
+    const snapshot = current.map(candidate => candidate.id === id ? updated : candidate);
+    if (typeof localStorage !== "undefined" && !saveStoredThreads(localStorage, snapshot)) {
+      throw new ChatQueueError("storage");
+    }
+    changeThreads(() => snapshot);
+    return true;
+  }, []);
   const resumeQueue = useCallback((id: string) => {
     changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: false, queueProblem: null } : thread));
   }, []);
@@ -972,6 +986,7 @@ export function useAgentChat(
       steer,
       enqueue,
       removeQueued,
+      editQueued,
       resumeQueue,
       stop: stopTurn,
       respond,
@@ -1006,6 +1021,7 @@ export function useAgentChat(
       steer,
       enqueue,
       removeQueued,
+      editQueued,
       resumeQueue,
       stopTurn,
       respond,

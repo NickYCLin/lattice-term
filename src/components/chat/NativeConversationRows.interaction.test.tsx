@@ -79,6 +79,29 @@ afterEach(() => {
   invoke.mockReset();
 });
 
+it("automatically groups native conversations by project without importing them", async () => {
+  const container = installHostDom();
+  const entries: LocalConversation[] = [
+    { definitionId: "codex", profileId: null, nativeSessionId: "a", title: "Alpha first", workingDirectory: "D:/work/Alpha", resumable: true, updatedAt: 3 },
+    { definitionId: "claude", profileId: null, nativeSessionId: "b", title: "Beta chat", workingDirectory: "D:/work/Beta", resumable: true, updatedAt: 2 },
+    { definitionId: "codex", profileId: null, nativeSessionId: "c", title: "Alpha second", workingDirectory: "D:/work/Alpha/", resumable: true, updatedAt: 1 },
+  ];
+  const history = { entries, profiles: [], profileKey: "[]", hasMore: false, busy: false, error: null } as unknown as NativeHistory;
+  const chat = fakeChatApi();
+  const root = createRoot(container as unknown as Element);
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><NativeHistoryContext.Provider value={history}>
+    <NativeConversationRows chat={chat} projectFilter={null} onOpened={() => {}} />
+  </NativeHistoryContext.Provider></I18nProvider>));
+  const groups = allNodes(container).filter(node => node.tagName === "DETAILS");
+  expect(groups).toHaveLength(2);
+  expect(groups[0].textContent).toContain("Alpha first");
+  expect(groups[0].textContent).toContain("Alpha second");
+  expect(groups[1].textContent).toContain("Beta chat");
+  expect(chat.importNativeConversation).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
 it("shows a Cursor conversation in place without turning it into a thread", async () => {
   const container = installHostDom();
   const entry: LocalConversation = {

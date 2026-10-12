@@ -426,6 +426,7 @@
 }
 
 .chat-header__identity {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -433,6 +434,7 @@
 }
 
 .chat-header__details {
+  flex: 1;
   min-width: 0;
 }
 
@@ -474,10 +476,11 @@
 }
 
 .chat-chip {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  max-width: 16rem;
+  max-width: min(16rem, 100%);
   padding: 2px var(--space-3);
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
@@ -1080,6 +1083,12 @@ button.chat-chip:hover {
 .chat-queue li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .chat-queue small { display: block; color: var(--text-muted); }
 .chat-queue li > button { flex-shrink: 0; }
+.chat-queue li:has(.chat-queue__editor) { flex-wrap: wrap; }
+.chat-queue li:has(.chat-queue__editor) > span { display: none; }
+.chat-queue__editor { flex: 0 0 100%; min-width: 0; display: grid; gap: var(--space-2); }
+.chat-queue__editor textarea { width: 100%; resize: vertical; white-space: pre-wrap; }
+.session-prompt-queue ol { max-height: min(22rem, 40dvh); }
+.session-chat__receipt { display: block; margin-top: var(--space-2); color: var(--text-muted); }
 
 .chat-send:hover:not(:disabled) {
   background: var(--accent-hover);
@@ -1258,8 +1267,7 @@ button.chat-chip:hover {
   height: 2rem;
 }
 
-.session-composer__box .chat-attachments,
-.session-composer__box .chat-queue {
+.session-composer__box .chat-attachments {
   min-height: 0;
   max-height: 6rem;
   overflow-y: auto;
@@ -1641,6 +1649,13 @@ button.chat-chip:hover {
   padding: 0;
   list-style: none;
 }
+
+.chat-native-project { min-width: 0; margin-block: var(--space-2); }
+.chat-native-project > summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); cursor: pointer; color: var(--text-muted); font-size: var(--text-sm); }
+.chat-native-project > summary > svg,
+.chat-native-project > summary > small { flex-shrink: 0; }
+.chat-native-project > summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-native-project .chat-native-rows { margin-left: var(--space-3); }
 
 .chat-native-rows .chat-thread[aria-busy="true"] {
   opacity: 0.6;
@@ -2326,6 +2341,8 @@ button.chat-diff__line.is-commentable:focus-visible {
   border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: var(--text-xs);
+  white-space: nowrap;
+  line-height: 1.5;
 }
 
 .session-chat__state.is-working {

@@ -11,6 +11,9 @@ import { ComposerVoiceControls } from "./ComposerVoiceControls";
 import { ConversationIdentity, ConversationMessage } from "./ConversationPresentation";
 import { Callout } from "../common/Callout";
 import { useSessionConversation } from "../../app/useSessionConversation";
+import { useSessionPromptQueue } from "../../app/useSessionPromptQueue";
+import { SessionPromptQueue } from "./SessionPromptQueue";
+import { sessionSubmissionsNotQueued } from "../../app/sessionSubmittedPrompts";
 import { useConversationDraft } from "../../app/useConversationDraft";
 import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "../../app/sessionConversationReadiness";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
@@ -58,6 +61,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
 }) {
   const { t } = useI18n();
   const conversation = useSessionConversation(session.sessionId, agents);
+  const queue = useSessionPromptQueue(session.sessionId, agents, !session.closedReason);
   const { draft, setDraft, attachments, setAttachments, pasting, setPasting,
     addAttachmentPaths, readDraft } = useConversationDraft("session", session.sessionId);
   const [notice, setNotice] = useState<string | null>(null);
@@ -83,7 +87,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   useLayoutEffect(() => {
     const node = messagesRef.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
-  }, [conversation.messages, working, attention]);
+  }, [conversation.messages, conversation.submitted, queue.prompts, working, attention]);
   useLayoutEffect(() => {
     const node = outputRef.current;
     if (node && outputPinned.current) node.scrollTop = node.scrollHeight;
@@ -100,6 +104,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     if (await conversation.send(sessionPromptWithAttachments(submitted, files))) {
       setDraft(current => current === submitted ? "" : current);
       setAttachments(current => current === files ? [] : current);
+      void queue.refresh();
     }
   }
 
@@ -242,6 +247,18 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             </div>}
           </ConversationMessage>;
         })}
+        {sessionSubmissionsNotQueued(conversation.submitted ?? [], queue.prompts).map(prompt => {
+          const sent = splitSessionAttachments(prompt.text);
+          const files = mergeAttachmentPaths([], sent.paths) ?? [];
+          return <ConversationMessage key={`submitted-${prompt.id}`} role="user" assistant={assistant}>
+            <div>{sent.text}</div>
+            {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
+              {files.map(file => <AttachmentChip key={file.path} attachment={file} />)}
+            </div>}
+            <small className="session-chat__receipt">{t("sessionChat.awaitingTranscript")}</small>
+          </ConversationMessage>;
+        })}
+        <SessionPromptQueue sessionId={session.sessionId} queue={queue} />
         <details className="session-chat__output" open={conversation.messages.length === 0}>
           <summary>{t("sessionChat.output")}</summary>
           <p>{t("sessionChat.outputHint")}</p>

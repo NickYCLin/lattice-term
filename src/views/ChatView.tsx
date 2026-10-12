@@ -7,6 +7,7 @@ import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
+import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
 import { ConversationIdentity, ConversationListIdentity, ConversationMessage } from "../components/chat/ConversationPresentation";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
@@ -1378,13 +1379,9 @@ function ThreadPane({
                   <span>{input.prompt || t("chat.attachment.files")}
                     {input.attachments.length > 0 && <small>{input.attachments.map(file => file.name).join(", ")}</small>}
                   </span>
-                  <button type="button" className="button button--ghost button--sm"
+                  <QueuedPromptEditor draftId={thread.id + ":" + input.id} text={input.prompt}
                     disabled={steering || pastingImage}
-                    onClick={() => {
-                      if (!addAttachments(input.attachments.map(file => file.path))) return;
-                      setDraft(current => current ? `${current}\n\n${input.prompt}` : input.prompt);
-                      chat.removeQueued(thread.id, input.id);
-                    }}>{t("chat.queue.edit")}</button>
+                    onSave={async text => chat.editQueued(thread.id, input, text)} />
                   <button type="button" className="icon-button icon-button--sm"
                     aria-label={t("chat.queue.remove")} title={t("chat.queue.remove")}
                     onClick={() => chat.removeQueued(thread.id, input.id)}><CloseIcon size={12} /></button>
