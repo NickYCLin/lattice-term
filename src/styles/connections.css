@@ -2136,10 +2136,13 @@
 
 .session-launch-menu__list {
   display: grid;
+  min-width: 0;
   gap: var(--space-1);
 }
 
 .session-launch-menu__list > .button {
+  min-width: 0;
+  max-width: 100%;
   justify-content: flex-start;
 }
 
@@ -2401,6 +2404,11 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   justify-content: center;
+}
+
+.terminal-empty-quick__list > .button {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .session-header__rename {

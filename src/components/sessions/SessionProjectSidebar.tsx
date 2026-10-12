@@ -46,6 +46,8 @@ import {
 import { handleMenuNavigation } from "../overlays/menuNavigation";
 import { useModalFocus } from "../overlays/modalFocus";
 import { SidebarStorageNotice } from "./SidebarStorageNotice";
+import { QuickChatChoices } from "./QuickChatChoices";
+import type { AccountModelOption, AccountModelSelection } from "../../app/accountModels";
 
 export type SessionSidebarKind =
   | "agent"
@@ -131,6 +133,8 @@ export function SessionProjectSidebar({
   onSelect,
   onRemove,
   onQuickLaunch,
+  quickChatModelOptions,
+  onQuickLaunchProxy,
   onExportWorkspace,
   onImportWorkspace,
   onClearWorkspace,
@@ -157,6 +161,8 @@ export function SessionProjectSidebar({
   onSelect: (sessionId: string) => void;
   onRemove: (session: SessionSidebarSessionItem) => void;
   onQuickLaunch: (definition: AgentDefinition) => void;
+  quickChatModelOptions?: readonly AccountModelOption[];
+  onQuickLaunchProxy?: (selection: AccountModelSelection) => void;
   onExportWorkspace: () => void;
   onImportWorkspace: () => void;
   onClearWorkspace: () => void;
@@ -1113,24 +1119,15 @@ export function SessionProjectSidebar({
               <strong className="truncate">{t("terminal.quickChat.hint")}</strong>
             </header>
             <div className="session-launch-menu__list">
-              {installedAgents.map((definition) => (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="button button--ghost button--sm"
-                  key={definition.id}
-                  onClick={() => {
-                    setLaunchMenu(null);
-                    onQuickLaunch(definition);
-                  }}
-                >
-                  <AgentIcon size={11} />
-                  {definition.label}
-                </button>
-              ))}
-              {installedAgents.length === 0 && (
-                <small>{t("terminal.addCli.none")}</small>
-              )}
+              <QuickChatChoices installedAgents={installedAgents} modelOptions={quickChatModelOptions} menu
+                onLaunch={definition => {
+                  setLaunchMenu(null);
+                  onQuickLaunch(definition);
+                }}
+                onLaunchProxy={onQuickLaunchProxy ? selection => {
+                  setLaunchMenu(null);
+                  onQuickLaunchProxy(selection);
+                } : undefined} />
             </div>
           </section>,
           document.body,

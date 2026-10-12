@@ -21,7 +21,6 @@ import {
 } from "../app/sessionSnapshot";
 import type {
   AgentApi,
-  AgentDefinition,
   AgentSessionSummary,
 } from "../app/useAgentSessions";
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
@@ -39,6 +38,7 @@ import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyAp
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
+import { QuickChatChoices } from "../components/sessions/QuickChatChoices";
 import { displayPath } from "../app/displayPath";
 import type { SshApi } from "../app/useSshSessions";
 import type { SftpApi } from "../app/useSftpSessions";
@@ -1782,7 +1782,12 @@ export function SessionsView({
       }}
       onQuickLaunch={(definition) => {
         setMobileTreeOpen(false);
-        void launchQuickChat(definition);
+        void launchQuickChat(defaultModelSelection(definition.id));
+      }}
+      quickChatModelOptions={modelOptions}
+      onQuickLaunchProxy={(selection) => {
+        setMobileTreeOpen(false);
+        void launchQuickChat(selection);
       }}
       onExportWorkspace={() => {
         setMobileTreeOpen(false);
@@ -2083,17 +2088,9 @@ export function SessionsView({
                   <div className="terminal-empty-quick">
                     <small>{t("terminal.empty.quickChat")}</small>
                     <div className="terminal-empty-quick__list">
-                      {installedAgents.map((definition) => (
-                          <button
-                            type="button"
-                            className="button button--ghost button--sm"
-                            key={definition.id}
-                            onClick={() => void launchQuickChat(definition)}
-                          >
-                            <AgentIcon size={12} />
-                            {definition.label}
-                          </button>
-                        ))}
+                      <QuickChatChoices installedAgents={installedAgents} modelOptions={modelOptions}
+                        onLaunch={definition => void launchQuickChat(defaultModelSelection(definition.id))}
+                        onLaunchProxy={selection => void launchQuickChat(selection)} />
                     </div>
                   </div>
                   )}
@@ -2111,11 +2108,12 @@ export function SessionsView({
     );
   }
 
-  async function launchQuickChat(definition: AgentDefinition) {
+  async function launchQuickChat(selection: AccountModelSelection | null) {
+    if (!selection) return;
     try {
       const home = homeDirectory ?? (await homeDir());
       setNewProjectError(null);
-      setSelectedProjectModel(defaultModelSelection(definition.id));
+      setSelectedProjectModel(selection);
       setNewProjectDirectory(home);
     } catch {
       // A failed quick chat leaves the workspace untouched.
