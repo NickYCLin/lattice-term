@@ -562,14 +562,13 @@ fn validate_managed_profile_layers(context: &ProbeContext, response: &Value) -> 
         .and_then(Value::as_array)
         .ok_or(UnavailableReason::UnverifiableSource)?;
     for layer in layers {
-        if layer.pointer("/name/type").and_then(Value::as_str) == Some("project") {
-            if layer
+        if layer.pointer("/name/type").and_then(Value::as_str) == Some("project")
+            && layer
                 .get("config")
                 .and_then(Value::as_object)
                 .is_some_and(|project| config.keys().any(|key| project.contains_key(key)))
-            {
-                return Err(UnavailableReason::UnsupportedLaunch);
-            }
+        {
+            return Err(UnavailableReason::UnsupportedLaunch);
         }
         if layer.pointer("/name/type").and_then(Value::as_str) == Some("user")
             && layer
