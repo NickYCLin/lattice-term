@@ -106,7 +106,7 @@ export function PtyTerminal({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
-    const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
+    const stopScrollback = attachTerminalScrollback(terminal, scheduleFit, true);
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,

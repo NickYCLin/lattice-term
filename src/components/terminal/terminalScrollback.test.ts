@@ -10,6 +10,8 @@ function fakeTerminal() {
   const terminal = {
     element: {
       querySelector: vi.fn((_selector: string): unknown => null),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       classList: {
         toggle: (name: string, enabled: boolean) =>
           enabled ? classes.add(name) : classes.delete(name),
@@ -17,7 +19,9 @@ function fakeTerminal() {
       },
     },
     options: { scrollbar: { showScrollbar: true } },
-    buffer: { active: { baseY: 0 }, onBufferChange: (callback: () => void) => {
+    rows: 20,
+    scrollLines: vi.fn(),
+    buffer: { active: { baseY: 0, type: "normal" as "normal" | "alternate" }, onBufferChange: (callback: () => void) => {
       events.bufferChanged = callback;
       return { dispose: vi.fn() };
     } },
@@ -67,7 +71,7 @@ describe("terminal scrollback visibility", () => {
     terminal.buffer.active.baseY = 40;
     events.parsed();
     expect(classes.has("has-scrollback")).toBe(true);
-    terminal.buffer.active = { baseY: 0 };
+    terminal.buffer.active = { baseY: 0, type: "alternate" };
     events.parsed();
     expect(classes.has("has-scrollback")).toBe(false);
   });
@@ -94,5 +98,81 @@ describe("terminal scrollback visibility", () => {
     expect(parsedDispose).toHaveBeenCalledOnce();
     expect(resizedDispose).toHaveBeenCalledOnce();
     expect(classes.has("has-scrollback")).toBe(false);
+  });
+});
+
+describe("local terminal history wheel", () => {
+  function setup(preferHistoryWheel = true) {
+    const { terminal, events } = fakeTerminal();
+    terminal.buffer.active.baseY = 100;
+    terminal.element.querySelector.mockReturnValue({ getBoundingClientRect: () => ({ height: 240 }) });
+    const dispose = attachTerminalScrollback(terminal as unknown as Terminal, undefined, preferHistoryWheel);
+    const onWheel = terminal.element.addEventListener.mock.calls[0][1] as (event: WheelEvent) => void;
+    const wheel = (overrides: Partial<WheelEvent> = {}) => {
+      const event = { deltaY: -24, deltaMode: 0, altKey: false, ctrlKey: false, shiftKey: false,
+        preventDefault: vi.fn(), stopImmediatePropagation: vi.fn(), ...overrides };
+      onWheel(event as unknown as WheelEvent);
+      return event;
+    };
+    return { terminal, events, dispose, wheel };
+  }
+
+  it("handles history in capture phase before the CLI mouse protocol", () => {
+    const { terminal, dispose, wheel } = setup();
+    const event = wheel();
+    expect(terminal.element.addEventListener).toHaveBeenCalledWith("wheel", expect.any(Function),
+      { capture: true, passive: false });
+    expect(terminal.scrollLines).toHaveBeenCalledWith(-2);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+    dispose();
+    expect(terminal.element.removeEventListener).toHaveBeenCalledWith("wheel", expect.any(Function), true);
+  });
+
+  it.each([{ deltaMode: 1, deltaY: -3, lines: -3 }, { deltaMode: 2, deltaY: 1, lines: 20 },
+    { shiftKey: true, lines: -10 }])("normalizes wheel units and fast scrolling: %j", ({ lines, ...event }) => {
+    const { terminal, wheel } = setup();
+    wheel(event);
+    expect(terminal.scrollLines).toHaveBeenCalledWith(lines);
+  });
+
+  it("accumulates trackpad fractions without forwarding input and resets on direction changes", () => {
+    const { terminal, wheel } = setup();
+    wheel({ deltaY: -5 });
+    wheel({ deltaY: -5 });
+    expect(terminal.scrollLines).not.toHaveBeenCalled();
+    wheel({ deltaY: -5 });
+    expect(terminal.scrollLines).toHaveBeenCalledWith(-1);
+    wheel({ deltaY: 12 });
+    expect(terminal.scrollLines).toHaveBeenLastCalledWith(1);
+  });
+
+  it.each([{ altKey: true }, { ctrlKey: true }, { deltaY: 0 }])("keeps modified and horizontal wheels unchanged: %j", overrides => {
+    const { terminal, wheel } = setup();
+    const event = wheel(overrides);
+    expect(terminal.scrollLines).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("does not intercept SSH, alternate buffers or terminals without history", () => {
+    const remote = setup(false);
+    expect(remote.wheel().preventDefault).not.toHaveBeenCalled();
+    const { terminal, wheel } = setup();
+    terminal.buffer.active.type = "alternate";
+    expect(wheel().preventDefault).not.toHaveBeenCalled();
+    terminal.buffer.active.type = "normal";
+    terminal.buffer.active.baseY = 0;
+    expect(wheel().preventDefault).not.toHaveBeenCalled();
+    expect(terminal.scrollLines).not.toHaveBeenCalled();
+  });
+
+  it("clears partial wheel movement when the buffer changes", () => {
+    const { terminal, events, wheel } = setup();
+    wheel({ deltaY: -10 });
+    terminal.buffer.active.type = "alternate";
+    events.bufferChanged();
+    terminal.buffer.active.type = "normal";
+    wheel({ deltaY: -5 });
+    expect(terminal.scrollLines).not.toHaveBeenCalled();
   });
 });

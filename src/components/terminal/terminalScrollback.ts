@@ -1,9 +1,29 @@
 import type { Terminal } from "@xterm/xterm";
 import "./terminalScrollback.css";
 
-export function attachTerminalScrollback(terminal: Terminal, refit?: () => void): () => void {
+export function attachTerminalScrollback(terminal: Terminal, refit?: () => void, preferHistoryWheel = false): () => void {
   const element = terminal.element;
+  let wheelRemainder = 0;
+  const onWheel = (event: WheelEvent) => {
+    if (!preferHistoryWheel || event.ctrlKey || event.altKey || event.deltaY === 0 ||
+      terminal.buffer.active.type !== "normal" || terminal.buffer.active.baseY === 0) return;
+    const screenHeight = element?.querySelector(".xterm-screen")?.getBoundingClientRect().height;
+    if (!screenHeight || terminal.rows <= 0) return;
+    const cellHeight = screenHeight / terminal.rows;
+    const delta = event.deltaMode === 1 ? event.deltaY :
+      event.deltaMode === 2 ? event.deltaY * terminal.rows : event.deltaY / cellHeight;
+    if (Math.sign(delta) !== Math.sign(wheelRemainder)) wheelRemainder = 0;
+    wheelRemainder += delta * (terminal.options.scrollSensitivity ?? 1) *
+      (event.shiftKey ? terminal.options.fastScrollSensitivity ?? 5 : 1);
+    const lines = Math.trunc(wheelRemainder);
+    wheelRemainder -= lines;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (lines !== 0) terminal.scrollLines(lines);
+  };
+  element?.addEventListener("wheel", onWheel, { capture: true, passive: false });
   const update = () => {
+    if (terminal.buffer.active.type !== "normal" || terminal.buffer.active.baseY === 0) wheelRemainder = 0;
     element?.classList.toggle("has-scrollbar", terminal.options.scrollbar?.showScrollbar !== false);
     element?.classList.toggle(
       "has-scrollback",
@@ -34,6 +54,7 @@ export function attachTerminalScrollback(terminal: Terminal, refit?: () => void)
     bufferChanged.dispose();
     rendered.dispose();
     disposed = true;
+    element?.removeEventListener("wheel", onWheel, true);
     fonts?.removeEventListener("loadingdone", fontsChanged);
     element?.classList.remove("has-scrollback");
     element?.classList.remove("has-scrollbar");
