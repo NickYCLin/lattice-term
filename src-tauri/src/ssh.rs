@@ -344,6 +344,7 @@ pub(crate) struct TrustingHandler {
     pub(crate) port: u16,
     pub(crate) known: Option<HostKeyRecord>,
     pub(crate) verdict: Arc<Mutex<Option<TrustVerdict>>>,
+    pub(crate) disconnect_reason: Option<Arc<Mutex<Option<String>>>>,
 }
 
 impl client::Handler for TrustingHandler {
@@ -397,6 +398,66 @@ impl client::Handler for TrustingHandler {
 
         Ok(accepted)
     }
+
+    async fn disconnected(
+        &mut self,
+        reason: client::DisconnectReason<Self::Error>,
+    ) -> Result<(), Self::Error> {
+        let detail = match &reason {
+            client::DisconnectReason::ReceivedDisconnect(info) => {
+                format!(
+                    "SSH server disconnected ({:?}): {}",
+                    info.reason_code, info.message
+                )
+            }
+            client::DisconnectReason::Error(error) => format!("SSH transport error: {error}"),
+        };
+        if let Some(report) = &self.disconnect_reason {
+            if let Ok(mut slot) = report.lock() {
+                *slot = Some(detail.chars().take(512).collect());
+            }
+        }
+        match reason {
+            client::DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+            client::DisconnectReason::Error(error) => Err(error),
+        }
+    }
+}
+
+fn shell_client_config() -> client::Config {
+    client::Config {
+        inactivity_timeout: Some(Duration::from_secs(3600)),
+        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_max: 3,
+        ..Default::default()
+    }
+}
+
+#[derive(Default)]
+struct ShellCompletion {
+    reason: Option<String>,
+}
+
+impl ShellCompletion {
+    fn observe(&mut self, message: &ChannelMsg) -> bool {
+        match message {
+            ChannelMsg::ExitStatus { exit_status } => {
+                self.reason = Some(format!("exit status {exit_status}"));
+            }
+            ChannelMsg::ExitSignal {
+                signal_name,
+                error_message,
+                ..
+            } => {
+                self.reason = Some(format!(
+                    "SSH shell ended by signal {signal_name:?}: {error_message}"
+                ));
+            }
+            ChannelMsg::Close => return true,
+            _ => {}
+        }
+        false
+    }
 }
 
 /// Turns a recorded verdict into the outcome the interface receives.
@@ -441,17 +502,16 @@ pub async fn connect(
     request: ConnectRequest,
 ) -> ConnectOutcome {
     let verdict = Arc::new(Mutex::new(None));
+    let disconnect_reason = Arc::new(Mutex::new(None));
     let handler = TrustingHandler {
         host: request.hostname.clone(),
         port: request.port,
         known,
         verdict: Arc::clone(&verdict),
+        disconnect_reason: Some(Arc::clone(&disconnect_reason)),
     };
 
-    let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(3600)),
-        ..Default::default()
-    });
+    let config = Arc::new(shell_client_config());
 
     let mut session =
         match client::connect(config, (request.hostname.as_str(), request.port), handler).await {
@@ -550,26 +610,26 @@ pub async fn connect(
     // talks to it through the input queue, so there is no lock to hold across
     // an await and no way for two writers to interleave mid-message.
     tauri::async_runtime::spawn(async move {
-        let mut reason = "closed".to_string();
+        let mut completion = ShellCompletion::default();
 
         loop {
             tokio::select! {
                 incoming = input_rx.recv() => match incoming {
                     Some(ClientInput::Data(bytes)) => {
                         if let Err(error) = channel.data(&bytes[..]).await {
-                            reason = error.to_string();
+                            completion.reason = Some(format!("SSH input failed: {error}"));
                             break;
                         }
                     }
                     Some(ClientInput::Resize { cols, rows }) => {
                         if let Err(error) = channel.window_change(cols, rows, 0, 0).await {
-                            reason = error.to_string();
+                            completion.reason = Some(format!("SSH terminal resize failed: {error}"));
                             break;
                         }
                     }
                     Some(ClientInput::Close) | None => {
                         let _ = channel.eof().await;
-                        reason = "disconnected".to_string();
+                        completion.reason = Some("disconnected".to_string());
                         break;
                     }
                 },
@@ -582,16 +642,28 @@ pub async fn connect(
                         // would in a local shell.
                         sink.data(&pump_id, data);
                     }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        reason = format!("exit status {exit_status}");
+                    Some(message) => {
+                        if completion.observe(&message) {
+                            break;
+                        }
                     }
-                    Some(ChannelMsg::Eof) | None => break,
-                    Some(_) => {}
+                    None => {
+                        if completion.reason.is_none() {
+                            completion.reason = disconnect_reason.lock().ok().and_then(|slot| slot.clone());
+                        }
+                        if completion.reason.is_none() {
+                            completion.reason = Some("SSH transport closed without an exit status".to_string());
+                        }
+                        break;
+                    }
                 }
             }
         }
 
         pump_registry.remove(&pump_id);
+        let reason = completion
+            .reason
+            .unwrap_or_else(|| "SSH shell closed without an exit status".to_string());
         sink.closed(&pump_id, &reason);
     });
 
@@ -666,6 +738,56 @@ pub fn known_record(store: &HostTrustStore, host: &str, port: u16) -> Option<Hos
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_shell_eof_keeps_reading_until_status_and_close() {
+        let mut completion = ShellCompletion::default();
+        assert!(!completion.observe(&ChannelMsg::Eof));
+        assert!(completion.reason.is_none());
+        assert!(!completion.observe(&ChannelMsg::ExitStatus { exit_status: 0 }));
+        assert!(completion.observe(&ChannelMsg::Close));
+        assert_eq!(completion.reason.as_deref(), Some("exit status 0"));
+    }
+
+    #[test]
+    fn ssh_shell_eof_does_not_overwrite_failed_exit_status() {
+        let mut completion = ShellCompletion::default();
+        assert!(!completion.observe(&ChannelMsg::ExitStatus { exit_status: 7 }));
+        assert!(!completion.observe(&ChannelMsg::Eof));
+        assert!(completion.observe(&ChannelMsg::Close));
+        assert_eq!(completion.reason.as_deref(), Some("exit status 7"));
+    }
+
+    #[test]
+    fn ssh_shell_keepalive_is_bounded_without_changing_inactivity_limit() {
+        let config = shell_client_config();
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(30)));
+        assert_eq!(config.keepalive_max, 3);
+        assert_eq!(config.inactivity_timeout, Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn ssh_disconnect_reports_transport_errors_without_swallowing_them() {
+        let report = Arc::new(Mutex::new(None));
+        let mut handler = TrustingHandler {
+            host: "example.test".into(),
+            port: 22,
+            known: None,
+            verdict: Arc::new(Mutex::new(None)),
+            disconnect_reason: Some(Arc::clone(&report)),
+        };
+        let result = tauri::async_runtime::block_on(client::Handler::disconnected(
+            &mut handler,
+            client::DisconnectReason::Error(russh::Error::Disconnect),
+        ));
+        assert!(result.is_err());
+        assert!(report
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .starts_with("SSH transport error:"));
+    }
 
     /// The interface reads these payloads by field name, and a mismatch fails
     /// silently: a session whose id arrives as `session_id` is simply never

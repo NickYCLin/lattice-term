@@ -1054,7 +1054,7 @@ export function SessionsView({
   const closedCallout = latestClosed ? (
     <div className="session-notice">
       <Callout
-        tone="warn"
+        tone={isSuccessfulProcessExit(latestClosed.notice.reason) ? "info" : "warn"}
         title={t(
           isSuccessfulProcessExit(latestClosed.notice.reason)
             ? "terminal.sessionEnded.title"

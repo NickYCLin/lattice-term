@@ -146,7 +146,7 @@ export function shouldClearSessionSelection(
 
 /** Exit code 0 is a completed local process, not a dropped connection. */
 export function isSuccessfulProcessExit(reason: string): boolean {
-  return /Process exited:\s*ExitStatus\s*\{\s*code:\s*0(?:,|\s*})/i.test(
+  return /^exit status 0$/i.test(reason) || /Process exited:\s*ExitStatus\s*\{\s*code:\s*0(?:,|\s*})/i.test(
     reason,
   );
 }

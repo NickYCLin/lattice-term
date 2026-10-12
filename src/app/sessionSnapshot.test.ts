@@ -22,6 +22,10 @@ describe("isSuccessfulProcessExit", () => {
       ),
     ).toBe(false);
     expect(isSuccessfulProcessExit("Connection reset")).toBe(false);
+    expect(isSuccessfulProcessExit("exit status 0")).toBe(true);
+    expect(isSuccessfulProcessExit("exit status 1")).toBe(false);
+    expect(isSuccessfulProcessExit("exit status 01")).toBe(false);
+    expect(isSuccessfulProcessExit("SSH transport error: exit status 0")).toBe(false);
   });
 });
 

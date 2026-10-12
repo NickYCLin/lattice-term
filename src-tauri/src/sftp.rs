@@ -259,6 +259,7 @@ pub async fn connect(
         port: request.port,
         known,
         verdict: Arc::clone(&verdict),
+        disconnect_reason: None,
     };
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(Duration::from_secs(3600)),

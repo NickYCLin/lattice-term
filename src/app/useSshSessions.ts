@@ -11,6 +11,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { HostKeyRecord } from "../domain/security";
 import {
   createSessionClosedNotice,
+  SessionConnectRaceGuard,
+  SessionEventReadinessGate,
   reconcileSessionSnapshot,
   snapshotSessionIds,
   type SessionClosedNotice,
@@ -121,14 +123,18 @@ export function useSshSessions(): SshApi {
   const pendingBytes = useRef(new Map<string, number>());
   const sessionsRef = useRef(sessions);
   const intentionalDisconnects = useRef(new Set<string>());
+  const connectRaceGuard = useRef(new SessionConnectRaceGuard());
+  const eventReadiness = useRef(new SessionEventReadinessGate());
   sessionsRef.current = sessions;
 
   // One listener pair for the whole app, fanned out by session id: a terminal
   // pane mounting must not cost another IPC subscription.
   useEffect(() => {
+    const readinessAttempt = eventReadiness.current.begin();
     const disposers: Array<() => void> = [];
     let cancelled = false;
     let hydrating = true;
+    let listenersReady = false;
     const closedDuringHydration = new Set<string>();
 
     function keep(dispose: () => void): boolean {
@@ -153,6 +159,7 @@ export function useSshSessions(): SshApi {
           "ssh://closed",
           (event) => {
             const sessionId = event.payload.sessionId;
+            connectRaceGuard.current.observeClosed(sessionId, event.payload.reason);
             if (hydrating) closedDuringHydration.add(sessionId);
             const intentional = intentionalDisconnects.current.delete(sessionId);
             if (!intentional) {
@@ -171,6 +178,7 @@ export function useSshSessions(): SshApi {
             }
             pendingOutput.current.delete(sessionId);
             pendingBytes.current.delete(sessionId);
+            sessionsRef.current = sessionsRef.current.filter(session => session.sessionId !== sessionId);
             setSessions((current) =>
               current.filter((session) => session.sessionId !== sessionId),
             );
@@ -208,6 +216,8 @@ export function useSshSessions(): SshApi {
           },
         );
         if (!keep(stopData)) return;
+        readinessAttempt.ready();
+        listenersReady = true;
 
         const existing = await invoke<SessionSummary[]>("ssh_sessions");
         if (!cancelled) {
@@ -220,6 +230,7 @@ export function useSshSessions(): SshApi {
           setHydrated(true);
         }
       } catch {
+        if (!listenersReady) readinessAttempt.fail();
         hydrating = false;
         closedDuringHydration.clear();
         if (!cancelled) setHydrated(true);
@@ -230,27 +241,33 @@ export function useSshSessions(): SshApi {
     void subscribe();
     return () => {
       cancelled = true;
+      readinessAttempt.fail();
       for (const dispose of disposers) dispose();
     };
   }, []);
 
   const connect = useCallback(
     async (request: ConnectRequest): Promise<ConnectOutcome> => {
+      if (!(await eventReadiness.current.wait())) {
+        return { outcome: "failed", stage: "events", detail: "SSH event listeners are unavailable." };
+      }
+      const attempt = connectRaceGuard.current.begin();
       try {
         const { invoke } = await core();
         const outcome = await invoke<ConnectOutcome>("ssh_connect", { request });
 
         if (outcome.outcome === "connected") {
-          setSessions((current) => [
-            ...current,
-            {
-              sessionId: outcome.sessionId,
-              profileId: request.profileId,
-              host: request.hostname,
-              port: request.port,
-              username: request.username,
-            },
-          ]);
+          const summary = { sessionId: outcome.sessionId, profileId: request.profileId,
+            host: request.hostname, port: request.port, username: request.username };
+          const closed = attempt.finish();
+          if (closed.has(outcome.sessionId)) {
+            const reason = closed.get(outcome.sessionId) || "SSH connection closed during startup";
+            setLastClosed(createSessionClosedNotice([summary], summary.sessionId, reason,
+              session => session.username + "@" + session.host));
+            return { outcome: "failed", stage: "channel", detail: reason };
+          }
+          sessionsRef.current = [...sessionsRef.current.filter(session => session.sessionId !== summary.sessionId), summary];
+          setSessions(current => [...current.filter(session => session.sessionId !== summary.sessionId), summary]);
         }
 
         return outcome;
@@ -260,6 +277,8 @@ export function useSshSessions(): SshApi {
           stage: "invoke",
           detail: error instanceof Error ? error.message : String(error),
         };
+      } finally {
+        attempt.cancel();
       }
     },
     [],
