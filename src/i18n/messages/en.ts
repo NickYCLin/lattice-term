@@ -1052,7 +1052,7 @@ export const en: Messages = {
   "terminal.projects.savedRemoveBody": "This conversation has not been started. It will be removed from the sidebar.",
   "terminal.projects.savedStarting": "Resuming this conversation…",
   "terminal.projects.savedStartTitle": "This conversation did not start",
-  "terminal.projects.savedStartBusy": "Another conversation is starting. Click again once it is ready.",
+  "terminal.projects.savedStartBusy": "The assistant list is still loading. Click again once it is ready.",
   "terminal.projects.savedStartLimit": "The limit of assistants running at once has been reached. Close a few and click again; the conversation stays where it is.",
   "terminal.projects.savedStartFailed": "The conversation stays where it is and you can click it again. Reason: {detail}",
   "terminal.projects.syncNative": "Also remove this conversation from {assistant}",

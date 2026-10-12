@@ -92,6 +92,7 @@ import {
   type SavedAgentSession,
 } from "./app/workspaceSessionPersistence";
 import type { WorkspaceRetryResult } from "./app/workspaceRecovery";
+import { createWorkspaceSessionStartup, remainingWorkspaceSessions } from "./app/workspaceSessionStartup";
 import {
   projectDirectoryKey, pruneDormantProjectDirectories, useLocalProjects,
 } from "./app/localProjects";
@@ -432,7 +433,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [unrestoredWorkspaceSessions, setUnrestoredWorkspaceSessions] = useState(
     restoredWorkspaceSessions,
   );
-  const unrestoredSessionsRef = useRef<readonly SavedWorkspaceSession[]>([]);
+  const unrestoredSessionsRef = useRef<readonly SavedWorkspaceSession[]>(restoredWorkspaceSessions);
   const restoreStartedRef = useRef(false);
   const [sessionRestoreComplete, setSessionRestoreComplete] = useState(false);
   const localProjects = useLocalProjects([
@@ -440,7 +441,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       ? unrestoredWorkspaceSessions : restoredWorkspaceSessions),
     ...agents.sessions.map(session => session.workingDirectory),
   ]);
-  const retryingWorkspaceRef = useRef(false);
+  const workspaceStartupRef = useRef(createWorkspaceSessionStartup());
+  const workspaceSelectionRef = useRef(0);
+  const retryingWorkspaceRef = useRef(0);
   const [retryingWorkspace, setRetryingWorkspace] = useState(false);
   const [workspacePersistenceError, setWorkspacePersistenceError] = useState(false);
 
@@ -452,31 +455,36 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   async function retryWorkspaceSession(
     saved: SavedAgentSession, activate = true,
   ): Promise<WorkspaceRetryResult> {
-    if (retryingWorkspaceRef.current || !sessionRestoreComplete) return { status: "busy" };
-    retryingWorkspaceRef.current = true;
+    if (agents.mode === "loading") return { status: "busy" };
+    const selection = activate ? ++workspaceSelectionRef.current : workspaceSelectionRef.current;
+    retryingWorkspaceRef.current += 1;
     setRetryingWorkspace(true);
     try {
-      const launched = await agents.launch({
-        definitionId: saved.definitionId, label: saved.label,
-        executable: saved.executable, arguments: agentRestoreArguments(saved),
-        resumeSessionId: saved.resumeSessionId, groupId: saved.groupKey,
-        seedInput: null, restoreExistingSession: true,
-        profileConfigPath: saved.profileConfigPath ?? null,
-        sandbox: saved.sandbox === true, detached: saved.detached === true,
-        workingDirectory: saved.workingDirectory, cols: 120, rows: 32,
-      });
+      const launched = await launchSavedWorkspaceSession(saved);
       if (launched.closedReason) throw new Error("Session did not start");
       // A label failure must not make a successfully started CLI retryable.
       replacePendingWorkspace(unrestoredSessionsRef.current.filter(entry => entry !== saved));
-      if (activate) setActiveSessionId(launched.sessionId);
+      if (activate && selection === workspaceSelectionRef.current) setActiveSessionId(launched.sessionId);
       try { await agents.rename(launched.sessionId, saved.groupLabel); } catch { /* keep the live CLI */ }
       return { status: "started" };
     } catch (reason) {
       return { status: "failed", detail: reason instanceof Error ? reason.message : String(reason) };
     } finally {
-      retryingWorkspaceRef.current = false;
-      setRetryingWorkspace(false);
+      retryingWorkspaceRef.current -= 1;
+      setRetryingWorkspace(retryingWorkspaceRef.current > 0);
     }
+  }
+
+  function launchSavedWorkspaceSession(saved: SavedAgentSession) {
+    return workspaceStartupRef.current.start(saved, () => agents.launch({
+      definitionId: saved.definitionId, label: saved.label,
+      executable: saved.executable, arguments: agentRestoreArguments(saved),
+      resumeSessionId: saved.resumeSessionId, groupId: saved.groupKey,
+      seedInput: null, restoreExistingSession: true,
+      profileConfigPath: saved.profileConfigPath ?? null,
+      sandbox: saved.sandbox === true, detached: saved.detached === true,
+      workingDirectory: saved.workingDirectory, cols: 120, rows: 32,
+    }));
   }
 
   function discardWorkspaceSession(saved: SavedAgentSession) {
@@ -550,22 +558,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 restoreArguments.some(
                   (argument, index) => argument !== freshArguments[index],
                 );
-              const launched = await agents.launch({
-                definitionId: saved.definitionId,
-                label: saved.label,
-                executable: saved.executable,
-                arguments: restoreArguments,
-                resumeSessionId: saved.resumeSessionId,
-                groupId: saved.groupKey,
-                seedInput: null,
-                restoreExistingSession: true,
-                profileConfigPath: saved.profileConfigPath ?? null,
-                sandbox: saved.sandbox === true,
-                detached: saved.detached === true,
-                workingDirectory: saved.workingDirectory,
-                cols: 120,
-                rows: 32,
-              });
+              const launched = await launchSavedWorkspaceSession(saved);
               restoredAgents.push(launched);
               if (
                 attemptedContinuation && launched.closedReason &&
@@ -616,7 +609,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               }
               if (!renamedGroups.has(saved.groupKey)) {
                 renamedGroups.add(saved.groupKey);
-                await agents.rename(launched.sessionId, saved.groupLabel);
+                await agents.rename(launched.sessionId, saved.groupLabel).catch(() => undefined);
               }
             } catch {
               // A removed directory/CLI or an expired provider entitlement must
@@ -672,7 +665,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           }
         }
 
-        const savedActive = snapshot?.active;
+        const savedActive = workspaceSelectionRef.current === 0 ? snapshot?.active : null;
         if (savedActive?.kind === "agent") {
           const matching = restoredAgents.filter(
             (session) =>
@@ -690,17 +683,19 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           if (match) setActiveSessionId(match.sessionId);
         }
 
-        setUnrestoredWorkspaceSessions(unrestored);
+        const pending = remainingWorkspaceSessions(unrestored, unrestoredSessionsRef.current);
+        setUnrestoredWorkspaceSessions(pending);
         if (
           restoredAgents.length > 0 ||
           restoredSsh.length > 0 ||
-          unrestored.some((session) => session.kind === "agent")
+          pending.some((session) => session.kind === "agent")
         ) {
           setView("terminal");
           setTerminalMounted(true);
         }
-        unrestoredSessionsRef.current = unrestored;
+        unrestoredSessionsRef.current = pending;
       } finally {
+        workspaceStartupRef.current.completeRestoration();
         // Even a provider-specific failure must release persistence so new
         // sessions opened during this run become the next restore snapshot.
         setSessionRestoreComplete(true);

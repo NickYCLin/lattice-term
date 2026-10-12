@@ -1026,7 +1026,7 @@ export const zhTW = {
   "terminal.projects.savedRemoveBody": "這段對話還沒啟動，會從側欄移除。",
   "terminal.projects.savedStarting": "正在接續這段對話…",
   "terminal.projects.savedStartTitle": "這段對話沒有啟動",
-  "terminal.projects.savedStartBusy": "正在啟動另一段對話，等它好了再點一次。",
+  "terminal.projects.savedStartBusy": "助理清單還在載入，完成後再點一次。",
   "terminal.projects.savedStartLimit": "同時執行的助理已經到上限，先關掉幾個再點一次。對話還留在原處。",
   "terminal.projects.savedStartFailed": "對話還留在原處，可以再點一次。原因：{detail}",
   "terminal.projects.syncNative": "一併從 {assistant} 移除這段對話",
