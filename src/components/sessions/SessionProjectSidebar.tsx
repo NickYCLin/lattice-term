@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { AgentDefinition } from "../../app/useAgentSessions";
 import {
   type SessionSidebarStatus,
 } from "../../app/sessionStatus";
@@ -46,8 +45,6 @@ import {
 import { handleMenuNavigation } from "../overlays/menuNavigation";
 import { useModalFocus } from "../overlays/modalFocus";
 import { SidebarStorageNotice } from "./SidebarStorageNotice";
-import { QuickChatChoices } from "./QuickChatChoices";
-import type { AccountModelOption, AccountModelSelection } from "../../app/accountModels";
 
 export type SessionSidebarKind =
   | "agent"
@@ -94,8 +91,6 @@ const TREE_DRAG_THRESHOLD = 5;
 // Sentinel target id for the "move to top level" zone; real node ids always
 // carry a folder:/session:/project prefix so this can never collide.
 const TREE_ROOT_DROP = "__tree-root__";
-// Sentinel launch-menu anchor for quick chats, which have no project row.
-const QUICK_LAUNCH_NODE = "__quick-chat__";
 const WORKSPACE_MANAGE_NODE = "__workspace-manage__";
 
 const statusKeys: Record<Exclude<SessionSidebarStatus, "connected">, MessageKey> = {
@@ -123,7 +118,6 @@ export function SessionProjectSidebar({
   activeSessionId,
   choosingProject,
   chooseError,
-  installedAgents,
   mobileOpen = false,
   onMobileClose,
   onChooseProject,
@@ -133,8 +127,6 @@ export function SessionProjectSidebar({
   onSelect,
   onRemove,
   onQuickLaunch,
-  quickChatModelOptions,
-  onQuickLaunchProxy,
   onExportWorkspace,
   onImportWorkspace,
   onClearWorkspace,
@@ -151,7 +143,6 @@ export function SessionProjectSidebar({
   activeSessionId: string | null;
   choosingProject: boolean;
   chooseError: boolean;
-  installedAgents: AgentDefinition[];
   mobileOpen?: boolean;
   onMobileClose: () => void;
   onChooseProject: () => void;
@@ -160,9 +151,7 @@ export function SessionProjectSidebar({
   onLaunchProject: (workingDirectory: string) => void;
   onSelect: (sessionId: string) => void;
   onRemove: (session: SessionSidebarSessionItem) => void;
-  onQuickLaunch: (definition: AgentDefinition) => void;
-  quickChatModelOptions?: readonly AccountModelOption[];
-  onQuickLaunchProxy?: (selection: AccountModelSelection) => void;
+  onQuickLaunch: () => void;
   onExportWorkspace: () => void;
   onImportWorkspace: () => void;
   onClearWorkspace: () => void;
@@ -853,7 +842,6 @@ export function SessionProjectSidebar({
     return null;
   }
 
-  const quickLaunchOpen = launchMenu?.projectNodeId === QUICK_LAUNCH_NODE;
   const workspaceManageOpen =
     launchMenu?.projectNodeId === WORKSPACE_MANAGE_NODE;
   const menuWidth = Math.min(240, Math.max(200, window.innerWidth - 24));
@@ -922,10 +910,12 @@ export function SessionProjectSidebar({
           <button
             type="button"
             className="icon-button icon-button--sm"
-            onClick={(event) => openLaunchMenu(event, QUICK_LAUNCH_NODE)}
+            onClick={() => {
+              setLaunchMenu(null);
+              onQuickLaunch();
+            }}
             aria-label={t("terminal.quickChat")}
-            aria-haspopup="menu"
-            aria-expanded={launchMenu?.projectNodeId === QUICK_LAUNCH_NODE}
+            aria-haspopup="dialog"
             title={t("terminal.quickChat")}
           >
             <AgentIcon size={12} />
@@ -1093,45 +1083,6 @@ export function SessionProjectSidebar({
         </div>
       </div>
 
-      {quickLaunchOpen &&
-        createPortal(
-          <section
-            ref={launchMenuRef}
-            className="session-launch-menu"
-            style={{ left: menuLeft, top: menuTop, width: menuWidth }}
-            role="menu"
-            aria-label={t("terminal.quickChat")}
-            tabIndex={-1}
-            onKeyDown={(event) =>
-              handleMenuNavigation(event, () => {
-                setLaunchMenu(null);
-                menuAnchorRef.current?.focus();
-              })
-            }
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-                setLaunchMenu(null);
-              }
-            }}
-          >
-            <header>
-              <span className="eyebrow">{t("terminal.quickChat")}</span>
-              <strong className="truncate">{t("terminal.quickChat.hint")}</strong>
-            </header>
-            <div className="session-launch-menu__list">
-              <QuickChatChoices installedAgents={installedAgents} modelOptions={quickChatModelOptions} menu
-                onLaunch={definition => {
-                  setLaunchMenu(null);
-                  onQuickLaunch(definition);
-                }}
-                onLaunchProxy={onQuickLaunchProxy ? selection => {
-                  setLaunchMenu(null);
-                  onQuickLaunchProxy(selection);
-                } : undefined} />
-            </div>
-          </section>,
-          document.body,
-        )}
       {workspaceManageOpen &&
         createPortal(
           <section

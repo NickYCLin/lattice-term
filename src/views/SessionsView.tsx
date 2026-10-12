@@ -452,7 +452,7 @@ export function SessionsView({
     dialogRef: newProjectDialogRef,
     getInitialFocus: () => newProjectCancelRef.current,
     onEscape: closeNewProjectDialog,
-    escapeDisabled: launchingProjectCli !== null,
+    escapeDisabled: launchingProjectCli !== null || choosingProject,
     active: newProjectDirectory !== null,
   });
   useModalFocus({
@@ -550,10 +550,11 @@ export function SessionsView({
         directory: true,
         multiple: false,
         title: t("terminal.projects.choose"),
+        defaultPath: newProjectDirectory || undefined,
       });
       if (typeof selected === "string") {
         setNewProjectDirectory(selected);
-        setSelectedProjectModel(defaultModelSelection());
+        if (newProjectDirectory === null) setSelectedProjectModel(defaultModelSelection());
       }
     } catch (reason) {
       setNewProjectError(reason instanceof Error ? reason.message : String(reason));
@@ -844,7 +845,7 @@ export function SessionsView({
   }
 
   function closeNewProjectDialog() {
-    if (launchingProjectCli) return;
+    if (launchingProjectCli || choosingProject) return;
     setNewProjectDirectory(null);
     setSelectedProjectModel(null);
     setNewProjectError(null);
@@ -1090,7 +1091,7 @@ export function SessionsView({
   ) : null;
 
   async function launchNewProject() {
-    if (!newProjectDirectory || !selectedProjectModel || !projectModelAvailable || launchingProjectCli) return;
+    if (!newProjectDirectory?.trim() || !selectedProjectModel || !projectModelAvailable || launchingProjectCli || choosingProject) return;
     const definition = installedAgents.find(
       (candidate) => candidate.id === selectedProjectModel.definitionId,
     );
@@ -1106,7 +1107,7 @@ export function SessionsView({
         resumeSessionId: null,
         groupId: null,
         seedInput: null,
-        workingDirectory: newProjectDirectory,
+        workingDirectory: newProjectDirectory.trim(),
         cols: 120,
         rows: 32,
       });
@@ -1121,7 +1122,7 @@ export function SessionsView({
     }
   }
 
-  const newProjectDialog = newProjectDirectory ? (
+  const newProjectDialog = newProjectDirectory !== null ? (
     <div
       className="scrim scrim--center"
       role="presentation"
@@ -1145,11 +1146,22 @@ export function SessionsView({
           </h2>
         </header>
         <div className="dialog__stack">
-          <div>
-            <span className="field__label">{t("terminal.projects.directory")}</span>
-            <p className="dialog__body mono project-launcher__path">
-              {displayPath(newProjectDirectory)}
-            </p>
+          <div className="field">
+            <label className="field__label" htmlFor="project-launch-directory">{t("terminal.projects.directory")}</label>
+            <PathDropZone kind="directory" disabled={launchingProjectCli !== null || choosingProject}
+              onSelect={path => setNewProjectDirectory(path)}>
+              <div className="field__input-action">
+                <input id="project-launch-directory" className="input mono" value={newProjectDirectory}
+                  disabled={launchingProjectCli !== null || choosingProject} autoComplete="off"
+                  onChange={event => setNewProjectDirectory(event.currentTarget.value)} />
+                <button type="button" className="button button--secondary field__input-action-button"
+                  disabled={launchingProjectCli !== null || choosingProject}
+                  onClick={() => void chooseProjectDirectory()} aria-label={t("chat.directory.choose")}
+                  title={t("chat.directory.choose")}>
+                  <FolderIcon size={16} />
+                </button>
+              </div>
+            </PathDropZone>
           </div>
           <AccountModelField
             options={modelOptions}
@@ -1171,7 +1183,7 @@ export function SessionsView({
               ref={newProjectCancelRef}
               type="button"
               className="button button--ghost"
-              disabled={launchingProjectCli !== null}
+              disabled={launchingProjectCli !== null || choosingProject}
               onClick={closeNewProjectDialog}
             >
               {t("common.cancel")}
@@ -1179,7 +1191,7 @@ export function SessionsView({
             <button
               type="button"
               className="button button--primary"
-              disabled={launchingProjectCli !== null || !projectModelAvailable}
+              disabled={launchingProjectCli !== null || choosingProject || !newProjectDirectory.trim() || !projectModelAvailable}
               onClick={() => void launchNewProject()}
             >
               {launchingProjectCli
@@ -1733,7 +1745,6 @@ export function SessionsView({
       activeSessionId={active?.sessionId ?? null}
       choosingProject={choosingProject}
       chooseError={Boolean(newProjectError && !newProjectDialog)}
-      installedAgents={installedAgents}
       mobileOpen={mobileTreeOpen}
       onMobileClose={() => setMobileTreeOpen(false)}
       onChooseProject={() => void chooseProjectDirectory()}
@@ -1780,14 +1791,9 @@ export function SessionsView({
             : session,
         );
       }}
-      onQuickLaunch={(definition) => {
+      onQuickLaunch={() => {
         setMobileTreeOpen(false);
-        void launchQuickChat(defaultModelSelection(definition.id));
-      }}
-      quickChatModelOptions={modelOptions}
-      onQuickLaunchProxy={(selection) => {
-        setMobileTreeOpen(false);
-        void launchQuickChat(selection);
+        void launchQuickChat(defaultModelSelection());
       }}
       onExportWorkspace={() => {
         setMobileTreeOpen(false);
@@ -2109,7 +2115,6 @@ export function SessionsView({
   }
 
   async function launchQuickChat(selection: AccountModelSelection | null) {
-    if (!selection) return;
     try {
       const home = homeDirectory ?? (await homeDir());
       setNewProjectError(null);

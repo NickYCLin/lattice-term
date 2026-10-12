@@ -66,7 +66,6 @@ describe("session project sidebar", () => {
           activeSessionId="agent-claude"
           choosingProject={false}
           chooseError={false}
-          installedAgents={[]}
           mobileOpen
           onMobileClose={vi.fn()}
           onChooseProject={vi.fn()}
@@ -140,7 +139,6 @@ describe("session project sidebar", () => {
           activeSessionId={null}
           choosingProject={false}
           chooseError={false}
-          installedAgents={[]}
           mobileOpen={false}
           onMobileClose={vi.fn()}
           onChooseProject={vi.fn()}
@@ -163,5 +161,7 @@ describe("session project sidebar", () => {
 
     expect(markup).toContain("LatticeTerm");
     expect(markup).toContain('aria-label="在這個專案新增工作階段"');
+    expect(markup).toMatch(/aria-label="快速對話" aria-haspopup="dialog"/);
+    expect(markup).not.toContain('role="menu" aria-label="快速對話"');
   });
 });
