@@ -4,6 +4,20 @@
 
 ---
 
+## [2026.10.12](https://github.com/NickYCLin/lattice-term/compare/v2026.10.11...v2026.10.12) (2026-10-12)
+
+
+### 🚀 新增功能
+
+* **mcp:** 補上三種 CLI 的狀態觀察橋接 ([93c32a7](https://github.com/NickYCLin/lattice-term/commit/93c32a7ac88f7d0bc1bfb43feb922ac2cb87fc45))
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 修正發布檢查的 Clippy 錯誤 ([7624d0b](https://github.com/NickYCLin/lattice-term/commit/7624d0b842e633a963b379d87ca3d9b1104f28d0))
+* **mcp:** 支援 npm Codex 與代理設定傳訊 ([0089aa6](https://github.com/NickYCLin/lattice-term/commit/0089aa6c9d72a6ee32ec0dc844ace689c3ae2c90))
+* **mcp:** 補上 Fleet 就緒回報與控制診斷 ([ac3287a](https://github.com/NickYCLin/lattice-term/commit/ac3287a3af27216f50f073fb92ba335a6d1197e5))
+
 ## [2026.10.11](https://github.com/NickYCLin/lattice-term/compare/v2026.10.10...v2026.10.11) (2026-10-10)
 
 
