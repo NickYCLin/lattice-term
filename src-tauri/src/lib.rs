@@ -14,6 +14,7 @@ mod chat_attachments;
 pub mod chat_images;
 pub mod clipboard;
 pub mod cliproxy;
+mod connection_credentials;
 pub mod credentials;
 pub mod desktop_notification;
 pub mod domain;
@@ -540,6 +541,47 @@ async fn mcp_remote_targets(
 struct DesktopConnectionBook(tauri::AppHandle);
 
 impl mcp_desktop::ConnectionBook for DesktopConnectionBook {
+    fn read_credential(&self, profile_id: String) -> mcp_desktop::CredentialReadFuture {
+        let app = self.0.clone();
+        Box::pin(async move {
+            credential_call(move || {
+                let storage = app.state::<AppStorage>();
+                let storage = storage.lock().map_err(|error| error.to_string())?;
+                let profile = storage
+                    .get_profile(&profile_id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "The saved connection does not exist.".to_string())?;
+                let setting = app.state::<AppConnectionBook>();
+                let setting = setting.lock().map_err(|error| error.to_string())?;
+                if !setting.shared()
+                    || !setting.credential_allowed(
+                        &profile.id,
+                        &connection_credentials::binding(&profile)?,
+                    )
+                {
+                    return Err(
+                        "Enable MCP credential access for this connection in the desktop first."
+                            .to_string(),
+                    );
+                }
+                let secret = connection_credentials::load(&profile)?;
+                Ok(serde_json::json!({
+                    "profileId": profile.id,
+                    "name": profile.name,
+                    "protocol": profile.protocol,
+                    "hostname": profile.hostname,
+                    "port": profile.port,
+                    "username": profile.username,
+                    "deviceId": profile.device_id,
+                    "relayAddress": profile.relay_address,
+                    "secret": secret.as_str(),
+                }))
+            })
+            .await
+            .map_err(|_| mcp_desktop::ServiceError::credential_unavailable())
+        })
+    }
+
     fn connect(&self, profile: domain::ConnectionProfile) -> mcp_desktop::ConnectFuture {
         mcp_desktop::connect_from_desktop(self.0.clone(), profile)
     }
@@ -3242,6 +3284,96 @@ fn save_connection_profile(
 }
 
 #[tauri::command]
+async fn save_connection_record(
+    app: AppHandle,
+    profile: ConnectionProfile,
+    credential: Option<connection_credentials::CredentialRecordDraft>,
+) -> Result<(), String> {
+    connection_credentials::validate_profile(&profile)?;
+    credential_call(move || {
+        let storage = app.state::<AppStorage>();
+        let mut storage = storage.lock().map_err(|error| error.to_string())?;
+        let setting = app.state::<AppConnectionBook>();
+        let mut setting = setting.lock().map_err(|error| error.to_string())?;
+        if let Some(credential) = credential {
+            let secret = credential.secret.map(zeroize::Zeroizing::new);
+            if !credential.allow_mcp_read {
+                setting.share_credential(&profile.id, None)?;
+            }
+            let binding = connection_credentials::binding(&profile)?;
+            if let Some(secret) = secret.as_ref() {
+                connection_credentials::store(&profile, secret)?;
+            } else if credential.allow_mcp_read {
+                connection_credentials::load(&profile)?;
+            }
+            storage
+                .insert_profile(profile.clone())
+                .map_err(|error| error.to_string())?;
+            setting.share_credential(
+                &profile.id,
+                credential.allow_mcp_read.then_some(binding.as_str()),
+            )?;
+        } else {
+            storage
+                .insert_profile(profile)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn connection_credential_status(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<connection_credentials::CredentialRecordStatus, String> {
+    credential_call(move || {
+        let storage = app.state::<AppStorage>();
+        let storage = storage.lock().map_err(|error| error.to_string())?;
+        let profile = storage
+            .get_profile(&profile_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The saved connection does not exist.".to_string())?;
+        let (kind, _) = connection_credentials::specification(&profile)?;
+        let setting = app.state::<AppConnectionBook>();
+        let setting = setting.lock().map_err(|error| error.to_string())?;
+        let present = credentials::exists(&profile.id, kind).and_then(|saved| {
+            if saved {
+                connection_credentials::load(&profile).map(|_| true)
+            } else {
+                Ok(false)
+            }
+        });
+        let (saved, detail) = match present {
+            Ok(saved) => (saved, None),
+            Err(error) => (false, Some(error)),
+        };
+        Ok(connection_credentials::CredentialRecordStatus {
+            saved,
+            detail,
+            allow_mcp_read: setting
+                .credential_allowed(&profile.id, &connection_credentials::binding(&profile)?),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn connection_credential_read(app: AppHandle, profile_id: String) -> Result<String, String> {
+    credential_call(move || {
+        let storage = app.state::<AppStorage>();
+        let storage = storage.lock().map_err(|error| error.to_string())?;
+        let profile = storage
+            .get_profile(&profile_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The saved connection does not exist.".to_string())?;
+        connection_credentials::load(&profile).map(|secret| secret.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 fn replace_connection_profiles(
     profiles: Vec<ConnectionProfile>,
     storage: State<'_, AppStorage>,
@@ -3254,6 +3386,7 @@ fn replace_connection_profiles(
 async fn delete_connection_profile(
     id: String,
     storage: State<'_, AppStorage>,
+    setting: State<'_, AppConnectionBook>,
 ) -> Result<bool, String> {
     let credential_kind = {
         let guard = storage.lock().map_err(|e| e.to_string())?;
@@ -3281,6 +3414,10 @@ async fn delete_connection_profile(
     }
 
     let mut guard = storage.lock().map_err(|e| e.to_string())?;
+    setting
+        .lock()
+        .map_err(|error| error.to_string())?
+        .share_credential(&id, None)?;
     guard.delete_profile(&id).map_err(|e| e.to_string())
 }
 
@@ -5335,6 +5472,9 @@ pub fn run() {
             terminal_clipboard_write_text,
             app_restart_safely,
             credential_exists,
+            save_connection_record,
+            connection_credential_status,
+            connection_credential_read,
             credential_delete,
             storage_status,
             list_connection_profiles,

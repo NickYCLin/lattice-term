@@ -3,8 +3,8 @@
  *
  * Keeps the primary task compact: choose a protocol, enter its actual target
  * fields, then save or save-and-connect. Organisation metadata is optional and
- * stays collapsed until requested. Secrets remain in the protocol's connect
- * flow and OS-backed Vault, never in this profile form.
+ * stays collapsed until requested. Secrets use the secure credential backend,
+ * never the exported connection profile.
  */
 
 import { useId, useMemo, useRef, useState } from "react";
@@ -42,6 +42,12 @@ import { AlertIcon, CheckIcon, CloseIcon } from "../icons";
 import { clearValidationError } from "./connectionValidation";
 import { moveRadioGroupFocus } from "./radioNavigation";
 import { useModalFocus } from "./modalFocus";
+import { useConnectionCredentialDraft } from "../../app/useConnectionCredentialDraft";
+import {
+  sameCredentialTarget,
+  supportsCredentialRecord,
+  type ConnectionCredentialDraft,
+} from "../../app/connectionCredentialRecord";
 
 function sameDraft(a: ConnectionDraft, b: ConnectionDraft): boolean {
   return (
@@ -88,7 +94,12 @@ export function ConnectionDrawer({
   supportedProtocols: readonly string[];
   /** Mobile packages show only usable protocols when creating a profile. */
   mobile: boolean;
-  onSave: (draft: ConnectionDraft, connectAfterSave: boolean) => void;
+  onSave: (
+    draft: ConnectionDraft,
+    connectAfterSave: boolean,
+    id: string,
+    credential?: ConnectionCredentialDraft,
+  ) => void | Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -102,6 +113,12 @@ export function ConnectionDrawer({
   const [tagInput, setTagInput] = useState((initial.tags ?? []).join(", "));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [recordId] = useState(() => profile?.id ?? createConnectionProfile(emptyDraft()).id);
+  const credential = useConnectionCredentialDraft(profile);
+  const [showSecret, setShowSecret] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(
     () =>
       (initial.environment ?? "unassigned") !== "unassigned" ||
@@ -115,7 +132,7 @@ export function ConnectionDrawer({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const dirty =
-    !sameDraft(draft, initial) ||
+    credential.dirty || !sameDraft(draft, initial) ||
     parseTags(tagInput).join(",") !== (initial.tags ?? []).join(",");
   const protocolOptions = useMemo(
     () =>
@@ -137,6 +154,7 @@ export function ConnectionDrawer({
   const relayEntry = isRelayProfile(draft);
 
   function requestClose() {
+    if (savingRef.current) return;
     if (dirty) {
       setConfirmDiscard(true);
       return;
@@ -154,6 +172,9 @@ export function ConnectionDrawer({
     next: Partial<ConnectionDraft>,
     changedField?: keyof ValidationErrors,
   ) {
+    if (["hostname", "username", "port", "deviceId", "relayAddress"].some(field => Object.prototype.hasOwnProperty.call(next, field))) {
+      credential.setAllowMcpRead(false);
+    }
     setDraft((current) => ({ ...current, ...next }));
     if (changedField) {
       setErrors((current) => clearValidationError(current, changedField));
@@ -161,6 +182,10 @@ export function ConnectionDrawer({
   }
 
   function selectProtocol(protocol: Protocol) {
+    if (protocol === draft.protocol) return;
+    credential.setSecret("");
+    credential.setAllowMcpRead(false);
+    setShowSecret(false);
     const previousDefault = findProtocol(draft.protocol).defaultPort;
     const nextDefault = findProtocol(protocol).defaultPort;
     // Keep a port the user chose deliberately; move the untouched default.
@@ -175,15 +200,16 @@ export function ConnectionDrawer({
     () =>
       createConnectionProfile(
         protocolDraft({ ...draft, tags: parseTags(tagInput) }),
-        profile?.id ?? "draft",
+        recordId,
       ),
-    [draft, tagInput, profile],
+    [draft, tagInput, recordId],
   );
 
   const duplicate = useMemo(
     () => findDuplicateTarget(profiles, candidate),
     [profiles, candidate],
   );
+  const savedCredentialTarget = sameCredentialTarget(profile, candidate);
 
   /** Validates and opens optional fields when one of them needs attention. */
   function validateNow(): ValidationErrors {
@@ -208,17 +234,37 @@ export function ConnectionDrawer({
     return found;
   }
 
-  function save(connectAfterSave: boolean) {
+  async function save(connectAfterSave: boolean) {
+    if (savingRef.current || credential.loading) return;
     if (Object.keys(validateNow()).length > 0) return;
-    onSave(
-      protocolDraft({ ...draft, tags: parseTags(tagInput) }),
-      connectAfterSave,
-    );
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(
+        protocolDraft({ ...draft, tags: parseTags(tagInput) }),
+        connectAfterSave,
+        recordId,
+        supportsCredentialRecord(candidate) ? credential.credential : undefined,
+      );
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    save(connectSupported);
+    void save(false);
+  }
+
+  async function toggleSecret() {
+    if (!showSecret && credential.saved && savedCredentialTarget && !credential.secret) {
+      await credential.reveal();
+    }
+    setShowSecret(current => !current);
   }
 
   const title = profile ? t("form.editTitle") : t("form.addTitle");
@@ -254,7 +300,7 @@ export function ConnectionDrawer({
           </button>
         </header>
 
-        <form className="drawer__body" id={formId} onSubmit={submit} noValidate>
+        <form className="drawer__body" id={formId} onSubmit={submit} noValidate inert={saving}>
           <section className="form-section">
             <div className="form-section__heading">
               <h3 className="form-section__title">
@@ -498,6 +544,47 @@ export function ConnectionDrawer({
               {t("form.credentialsHint")}
             </p>
 
+            {supportsCredentialRecord(candidate) && (
+              <div className="field">
+                <label className="field__label" htmlFor={`${formId}-secret`}>
+                  {t(draft.protocol === "lattice" ? "form.credential.pairingCode" : "form.credential.password")}
+                  <span className="field__optional">{t("common.optional")}</span>
+                </label>
+                <input
+                  id={`${formId}-secret`}
+                  className="input"
+                  type={showSecret ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={credential.secret}
+                  maxLength={4096}
+                  disabled={!credential.native || credential.loading || saving}
+                  onChange={event => credential.setSecret(event.currentTarget.value)}
+                  placeholder={t(credential.saved && savedCredentialTarget ? "form.credential.keepSaved" : "form.credential.placeholder")}
+                />
+                <div className="drawer__foot-actions">
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    disabled={saving || credential.revealing || !credential.native || credential.loading}
+                    onClick={() => void toggleSecret()}
+                  >
+                    {t(showSecret ? "form.credential.hide" : "form.credential.show")}
+                  </button>
+                  {credential.saved && savedCredentialTarget && <span className="text-faint">{t("form.credential.saved")}</span>}
+                </div>
+                <label className="checkbox">
+                  <input type="checkbox" checked={credential.allowMcpRead} disabled={!credential.native || credential.loading || saving} onChange={event => credential.setAllowMcpRead(event.currentTarget.checked)} />
+                  <span className="checkbox__box" aria-hidden="true"><CheckIcon size={11} /></span>
+                  {t("form.credential.mcpRead")}
+                </label>
+                <p className="connection-form__credential-note">{t("form.credential.mcpWarning")}</p>
+                {draft.protocol === "rdp" && <p className="connection-form__credential-note">{t("form.credential.rdpHint")}</p>}
+                {credential.error && <Callout tone="warn" title={t("form.credential.error")}>{credential.error}</Callout>}
+              </div>
+            )}
+
+            {saveError && <Callout tone="warn" title={t("form.credential.saveFailed")}>{saveError}</Callout>}
+
             {duplicate && (
               <Callout tone="warn" title={t("form.duplicate.title")}>
                 {t("form.duplicate.body", {
@@ -688,19 +775,21 @@ export function ConnectionDrawer({
                 {t("common.cancel")}
               </button>
               <button
-                type="button"
+                type="submit"
+                form={formId}
                 className={`button ${
                   connectSupported ? "button--secondary" : "button--primary"
                 }`}
-                onClick={() => save(false)}
+                disabled={saving || credential.loading}
               >
                 {t("form.submit.saveOnly")}
               </button>
               {connectSupported && (
                 <button
-                  type="submit"
-                  form={formId}
+                  type="button"
                   className="button button--primary"
+                  disabled={saving || credential.loading}
+                  onClick={() => void save(true)}
                 >
                   {t("form.submit.saveAndConnect")}
                 </button>

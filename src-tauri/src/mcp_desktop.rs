@@ -244,10 +244,16 @@ pub struct SavedConnectionView {
 /// the book as unavailable rather than as an empty book.
 pub trait ConnectionBook: Send + Sync {
     fn profiles(&self) -> Vec<ConnectionProfile>;
+    fn read_credential(&self, _profile_id: String) -> CredentialReadFuture {
+        Box::pin(async { Err(ServiceError::credential_unavailable()) })
+    }
     fn connect(&self, _profile: ConnectionProfile) -> ConnectFuture {
         Box::pin(async { Err(ServiceError::unavailable()) })
     }
 }
+
+pub type CredentialReadFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ServiceError>> + Send>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -259,6 +265,9 @@ pub trait ConnectionBook: Send + Sync {
 pub enum DesktopOperation {
     ListConnections,
     ListSavedConnections,
+    ReadSavedCredential {
+        profile_id: String,
+    },
     DesktopChat {
         target_id: String,
         action: DesktopChatAction,
@@ -370,6 +379,7 @@ impl DesktopOperation {
         "desktopChat",
         "listConnections",
         "listSavedConnections",
+        "readSavedCredential",
         "connectSaved",
         "fleet",
         "getMetrics",
@@ -409,6 +419,7 @@ impl DesktopOperation {
             Self::DesktopChat { .. } => "desktopChat",
             Self::ListConnections => "listConnections",
             Self::ListSavedConnections => "listSavedConnections",
+            Self::ReadSavedCredential { .. } => "readSavedCredential",
             Self::ConnectSaved { .. } => "connectSaved",
             Self::Fleet { .. } => "fleet",
             Self::GetMetrics { .. } => "getMetrics",
@@ -430,7 +441,10 @@ impl DesktopOperation {
 
     pub fn target_id(&self) -> Option<&str> {
         match self {
-            Self::ListConnections | Self::ListSavedConnections | Self::ConnectSaved { .. } => None,
+            Self::ListConnections
+            | Self::ListSavedConnections
+            | Self::ReadSavedCredential { .. }
+            | Self::ConnectSaved { .. } => None,
             Self::DesktopChat { target_id, .. }
             | Self::DesktopAgent { target_id, .. }
             | Self::Fleet { target_id, .. }
@@ -483,6 +497,7 @@ impl DesktopOperation {
             // Cancellation/status require ownership of the original operation.
             Self::ListConnections
             | Self::ListSavedConnections
+            | Self::ReadSavedCredential { .. }
             | Self::ConnectSaved { .. }
             | Self::Cancel { .. }
             | Self::ListOperations { .. }
@@ -515,6 +530,9 @@ pub struct ServiceError {
 }
 
 impl ServiceError {
+    pub(crate) fn credential_unavailable() -> Self {
+        Self::new("needs_user_action", "Open this saved connection in LatticeTerm, save its login and enable MCP credential access. Unlock the credential store if needed. No connection attempt is required.")
+    }
     pub(crate) fn new(code: &str, message: &str) -> Self {
         Self {
             code: code.into(),
@@ -1570,6 +1588,22 @@ impl DesktopService {
             let (connections, truncated) = self.saved_connections()?;
             return Ok(json!({ "connections": connections, "truncated": truncated }));
         }
+        if let DesktopOperation::ReadSavedCredential { profile_id } = &operation {
+            if !self.connection_book_shared() {
+                return Err(ServiceError::denied());
+            }
+            if profile_id.is_empty()
+                || profile_id.len() > 128
+                || profile_id.chars().any(char::is_control)
+            {
+                return Err(ServiceError::invalid());
+            }
+            let book = self
+                .book
+                .as_ref()
+                .ok_or_else(ServiceError::credential_unavailable)?;
+            return book.read_credential(profile_id.clone()).await;
+        }
         if let DesktopOperation::ConnectSaved {
             profile_id,
             request_id,
@@ -1783,6 +1817,7 @@ impl DesktopService {
             }
             DesktopOperation::ListConnections
             | DesktopOperation::ListSavedConnections
+            | DesktopOperation::ReadSavedCredential { .. }
             | DesktopOperation::ConnectSaved { .. }
             | DesktopOperation::ListOperations { .. }
             | DesktopOperation::GetMetrics { .. } => {}
@@ -2940,6 +2975,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn credential_reads_need_a_desktop_grant_even_without_a_live_connection() {
+        let service = Arc::new(book_service(vec![book_entry("profile", "offline")]));
+        let operation = DesktopOperation::ReadSavedCredential {
+            profile_id: "profile".into(),
+        };
+        assert_eq!(
+            service
+                .execute("client", operation.clone())
+                .await
+                .unwrap_err()
+                .code,
+            "needs_user_action"
+        );
+        service.share_connection_book(false);
+        assert_eq!(
+            service.execute("client", operation).await.unwrap_err().code,
+            "not_authorized"
+        );
+        assert!(service.targets().is_empty());
+    }
+
+    #[tokio::test]
+    async fn offline_credential_reads_recheck_the_grant_instead_of_caching_the_secret() {
+        struct OfflineBook(Arc<AtomicBool>);
+        impl ConnectionBook for OfflineBook {
+            fn profiles(&self) -> Vec<ConnectionProfile> {
+                vec![book_entry("profile", "offline")]
+            }
+            fn read_credential(&self, profile_id: String) -> CredentialReadFuture {
+                let allowed = Arc::clone(&self.0);
+                Box::pin(async move {
+                    if profile_id != "profile" || !allowed.load(Ordering::Relaxed) {
+                        return Err(ServiceError::credential_unavailable());
+                    }
+                    Ok(json!({"secret":"test-only-password"}))
+                })
+            }
+        }
+        let allowed = Arc::new(AtomicBool::new(true));
+        let service = Arc::new(
+            DesktopService::new(Arc::new(SshRegistry::new()), Arc::new(SftpRegistry::new()))
+                .with_connection_book(Arc::new(OfflineBook(Arc::clone(&allowed)))),
+        );
+        let operation = DesktopOperation::ReadSavedCredential {
+            profile_id: "profile".into(),
+        };
+        assert_eq!(
+            service.execute("client", operation.clone()).await.unwrap()["secret"],
+            "test-only-password"
+        );
+        allowed.store(false, Ordering::Relaxed);
+        assert_eq!(
+            service.execute("client", operation).await.unwrap_err().code,
+            "needs_user_action"
+        );
+        assert!(service.targets().is_empty());
+    }
+
     #[test]
     fn every_operation_kind_is_announced_and_matches_its_wire_tag() {
         let samples = [
@@ -2953,6 +3047,9 @@ mod tests {
             },
             DesktopOperation::ListConnections,
             DesktopOperation::ListSavedConnections,
+            DesktopOperation::ReadSavedCredential {
+                profile_id: "profile".into(),
+            },
             DesktopOperation::ConnectSaved {
                 profile_id: "profile".into(),
                 request_id: "connect".into(),
@@ -3029,7 +3126,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 20);
+        assert_eq!(DesktopOperation::KINDS.len(), 21);
     }
 
     #[test]

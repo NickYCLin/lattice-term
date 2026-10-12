@@ -250,6 +250,7 @@ impl Bridge {
                     if matches!(
                         operation,
                         DesktopOperation::ListSavedConnections
+                            | DesktopOperation::ReadSavedCredential { .. }
                             | DesktopOperation::ConnectSaved { .. }
                     ) {
                         // The book lives in the desktop's profile store, so ask

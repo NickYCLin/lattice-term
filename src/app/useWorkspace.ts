@@ -30,6 +30,7 @@ import {
   type SortOrder,
 } from "../domain/query";
 import { sampleProfiles } from "../domain/samples";
+import { persistConnectionRecord, type ConnectionCredentialDraft } from "./connectionCredentialRecord";
 
 /** `SSH · operator@host:22`, the line shown beside an activity entry. */
 function describe(profile: ConnectionProfile): string {
@@ -160,6 +161,26 @@ export function useWorkspace() {
     },
     [persist, record],
   );
+
+  const saveProfileRecord = useCallback(async (profile: ConnectionProfile, credential?: ConnectionCredentialDraft) => {
+    const existed = profiles.some(entry => entry.id === profile.id);
+    if ("__TAURI_INTERNALS__" in window) {
+      try {
+        await persistConnectionRecord(profile, credential);
+      } catch (reason) {
+        await refreshProfiles().catch(() => undefined);
+        throw reason;
+      }
+    } else if (credential) {
+      throw new Error("Credential storage requires the desktop application.");
+    }
+    setProfiles(current => current.some(entry => entry.id === profile.id)
+      ? current.map(entry => entry.id === profile.id ? profile : entry)
+      : [...current, profile]);
+    setSelectedId(profile.id);
+    record({ kind: existed ? "updated" : "created", subject: profile.name, detail: describe(profile) });
+    return profile;
+  }, [profiles, record, refreshProfiles]);
 
   const updateProfile = useCallback(
     (id: string, draft: ConnectionDraft): ConnectionProfile => {
@@ -418,6 +439,7 @@ export function useWorkspace() {
     setSortOrder,
     setSelectedId,
     addProfile,
+    saveProfileRecord,
     updateProfile,
     duplicateProfile,
     removeProfile,

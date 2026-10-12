@@ -55,8 +55,10 @@ import { useVaultAutoLock } from "./app/useVaultAutoLock";
 import { useWindowTheme } from "./app/useWindowTheme";
 import { useWorkspace } from "./app/useWorkspace";
 import { useCredentialDeleteGuard } from "./app/useSavedCredential";
+import type { ConnectionCredentialDraft } from "./app/connectionCredentialRecord";
 import {
   draftFromProfile,
+  createConnectionProfile,
   type ConnectionDraft,
   type ConnectionProfile,
 } from "./domain/connection";
@@ -760,8 +762,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     resetFilter,
     selected,
     setSelectedId,
-    addProfile,
-    updateProfile,
+    saveProfileRecord,
     duplicateProfile,
     removeProfile,
     loadSamples,
@@ -840,10 +841,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   );
 
   const saveDraft = useCallback(
-    (draft: ConnectionDraft, connectAfterSave: boolean) => {
-      const saved = drawer.profileId
-        ? updateProfile(drawer.profileId, draft)
-        : addProfile(draft);
+    async (
+      draft: ConnectionDraft,
+      connectAfterSave: boolean,
+      id: string,
+      credential?: ConnectionCredentialDraft,
+    ) => {
+      const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential);
       setDrawer({ open: false, profileId: null });
       if (
         connectAfterSave &&
@@ -852,7 +856,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         openConnection(saved);
       }
     },
-    [drawer.profileId, addProfile, openConnection, supportedProtocols, updateProfile],
+    [saveProfileRecord, openConnection, supportedProtocols],
   );
 
 

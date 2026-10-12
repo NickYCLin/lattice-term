@@ -32,6 +32,16 @@ function renderDrawer(
 }
 
 describe("connection drawer", () => {
+  it("offers a masked offline login record and makes only save submit the form", () => {
+    const markup = renderDrawer();
+    expect(markup).toContain('type="password"');
+    expect(markup).toContain('autoComplete="new-password"');
+    expect(markup).toContain("允許 MCP 讀取這筆帳密");
+    expect(markup).toContain("內容可能留在模型的對話紀錄");
+    expect(markup).toMatch(/type="submit"[^>]*form="[^"]+"[^>]*class="button button--secondary"/);
+    expect(markup).toMatch(/type="button"[^>]*class="button button--primary"/);
+  });
+
   it("keeps the primary add flow compact and actionable", () => {
     const markup = renderDrawer();
 
