@@ -54,7 +54,7 @@ export function useSessionPromptQueue(sessionId: string, agents: AgentApi, enabl
       if (changed) replaceSessionSubmission(sessionId, prompt.text, text);
       if (active.current === sessionId && revision === generation.current) {
         await refresh();
-        if (!changed) setError("queue-message-changed");
+        if (!changed && active.current === sessionId && revision === generation.current) setError("queue-message-changed");
       }
       return changed;
     } catch (reason) {
