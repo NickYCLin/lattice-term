@@ -155,6 +155,35 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def test_completed_blank_captures_stay_within_the_stall_budget(self):
+        now = [0.0]
+        attempts = []
+        with tempfile.TemporaryDirectory() as directory:
+            screenshot = Path(directory) / "blank.png"
+
+            def capture(*args, **kwargs):
+                attempts.append(kwargs["timeout"])
+                if len(attempts) > 100:
+                    raise AssertionError("Capture loop did not terminate")
+                screenshot.write_bytes(b"\x89PNG\r\n\x1a\n" + smoke.PNG_END)
+                now[0] += kwargs["timeout"]
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+            def sleep(seconds):
+                now[0] += seconds
+
+            with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke.os, "kill"), \
+                    patch.object(smoke, "simctl", side_effect=capture), \
+                    patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, stdout='["status bar only"]')):
+                with self.assertRaises(RuntimeError):
+                    smoke.wait_for_frontend("owned-device", 123, screenshot, Path("reader"))
+            self.assertLessEqual(now[0], 90 + 2 * 60)
+            self.assertEqual(json.loads(screenshot.with_suffix(".ocr.json").read_text()), ["status bar only"])
+            self.assertTrue(screenshot.is_file())
+
     def test_a_stalled_capture_does_not_spend_the_apps_readiness_budget(self):
         now = [0.0]
         attempts = []

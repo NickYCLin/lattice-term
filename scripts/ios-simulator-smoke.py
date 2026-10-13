@@ -131,6 +131,7 @@ def allow_stall(device_id, stalls):
 def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     started = time.monotonic()
     deadline = started + timeout
+    maximum_deadline = deadline + MAX_CAPTURE_STALLS * 60
     texts = []
     stalls = 0
     while time.monotonic() < deadline:
@@ -147,11 +148,11 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         try:
             simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
         except subprocess.TimeoutExpired:
-            deadline += time.monotonic() - attempt
+            stalls += 1
+            deadline = min(maximum_deadline, deadline + time.monotonic() - attempt)
             if finished_capture(screenshot, written_after):
                 print(f"{device_id}: 截圖已寫完但指令沒有結束，直接辨識這張", flush=True)
             else:
-                stalls += 1
                 if not allow_stall(device_id, stalls):
                     break
                 print(f"{device_id}: 截圖指令逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
@@ -169,7 +170,7 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
             stalls += 1
             if not allow_stall(device_id, stalls):
                 break
-            deadline += time.monotonic() - attempt
+            deadline = min(maximum_deadline, deadline + time.monotonic() - attempt)
             print(f"{device_id}: 截圖辨識逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
             continue
         texts = json.loads(result.stdout)
@@ -178,6 +179,8 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         if frontend_is_visible(texts):
             os.kill(pid, 0)
             return {"renderedStartup": True, "renderWaitSeconds": round(time.monotonic() - started, 1)}
+        if not allow_stall(device_id, stalls):
+            break
         time.sleep(min(3, max(0, deadline - time.monotonic())))
     # Keep the last screenshot and recognized text, so a spinner or render
     # failure is reviewable even when the job fails. A stalled capture used to
