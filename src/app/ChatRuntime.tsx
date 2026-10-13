@@ -14,6 +14,7 @@ import { useRemoteChatHost } from "./useRemoteChatHost";
 import type { RemoteHostStatus } from "./useRemoteHost";
 import { useEffect, useRef } from "react";
 import { threadsHeldBySessions } from "./chatSessionHandoff";
+import { useChatAccountProfiles } from "./useChatAccountProfiles";
 import type { AgentSessionSummary } from "./useAgentSessions";
 import type { NotificationSoundChoice } from "./notificationSounds";
 import { useAgentAutomations, type AgentAutomationsApi } from "./useAgentAutomations";
@@ -43,17 +44,18 @@ export function ChatRuntime({
   sessions?: readonly AgentSessionSummary[];
 }) {
   const chat = useAgentChat(completionSound, completionVolume, completionNotification);
+  const profiles = useChatAccountProfiles();
   useRemoteChatHost(chat, remoteHost ?? null);
   useDesktopChatHost(chat);
   const automations = useAgentAutomations(chat, locale);
   const handingOver = useRef(new Set<string>());
   useEffect(() => {
-    for (const id of threadsHeldBySessions(chat.threads, sessions)) {
+    for (const id of threadsHeldBySessions(chat.threads, sessions, profiles)) {
       if (handingOver.current.has(id)) continue;
       handingOver.current.add(id);
       void chat.continueInSession(id).catch(() => {}).finally(() => handingOver.current.delete(id));
     }
-  }, [chat, sessions]);
+  }, [chat, sessions, profiles]);
   useEffect(() => {
     onChange({ chat, automations });
   }, [chat, automations, onChange]);

@@ -2,7 +2,7 @@ import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { useChatClipboardFallback } from "../app/chatClipboard";
 import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
-import { NativeConversationRows } from "../components/chat/NativeConversationRows";
+import { useNativeConversationList } from "../components/chat/NativeConversationRows";
 import { ConversationReadProgress } from "../components/chat/ConversationReadProgress";
 import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
@@ -69,7 +69,7 @@ import { useAccountModels } from "../app/useAccountModels";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
 import { ChatQueueError } from "../app/chatInputQueue";
-import { chatWorkspaceProjection } from "../app/chatWorkspaceNodes";
+import { chatConversationSidebar } from "../app/chatConversationSidebar";
 import { chatSidebarLayout } from "../app/chatThreadLayout";
 import { moveSessionSidebarNode } from "../app/sessionSidebarLayout";
 import { useSharedSidebarLayout } from "../app/sharedSidebarLayout";
@@ -88,7 +88,7 @@ import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
 import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
-import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
+import { chatProjectsWithHistory, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -179,31 +179,18 @@ export function ChatView({
   const accountProfiles = useChatAccountProfiles();
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
-  const workspace = useMemo(
+  const nativeHistory = useNativeHistory();
+  const nativeConversations = useNativeConversationList({ chat, projectFilter, onOpened: () => setSelectedSessionId(null) });
+  const { workspace, listedThreads } = useMemo(
     () =>
-      chatWorkspaceProjection(
-        agents.sessions,
-        agents.catalog,
-        t("terminal.projects.generalChat"),
-      ),
-    [agents.catalog, agents.sessions, t],
+      chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: chat.threads,
+        history: nativeHistory?.entries ?? [], profiles: nativeHistory?.profiles ?? accountProfiles,
+        generalProjectLabel: t("terminal.projects.generalChat"), projectFilter }),
+    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, projectFilter, t],
   );
   // Shelved threads leave the tree and wait in their own list below it.
-  const nativeHistory = useNativeHistory();
   const projects = useMemo(() => chatProjectsWithHistory(chat.threads, nativeHistory?.entries ?? []),
     [chat.threads, nativeHistory?.entries]);
-  // While a terminal session runs a thread's conversation, that session is
-  // the one entry for it; two entries would invite two writers.
-  const listedThreads = useMemo(
-    () =>
-      chat.threads.filter(
-        (thread) =>
-          !thread.shelvedAt &&
-          !liveSessionForThread(thread, agents.sessions) &&
-          (projectFilter === null || chatProjectKey(thread.workingDirectory) === projectFilter),
-      ),
-    [agents.sessions, chat.threads, projectFilter],
-  );
   const shelvedThreads = useMemo(
     () =>
       chat.threads
@@ -233,7 +220,7 @@ export function ChatView({
     (id) => agents.catalog.find((definition) => definition.id === id)?.installed,
   );
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
-  const activeLiveSession = active ? liveSessionForThread(active, agents.sessions) : undefined;
+  const activeLiveSession = active ? liveSessionForThread(active, agents.sessions, accountProfiles) : undefined;
   const shownSession = selectedSession ?? activeLiveSession;
   const { proxies } = useCliProxySettings();
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
@@ -482,8 +469,9 @@ export function ChatView({
                   ) : null}
                 </div>
               )}
+              renderNativeConversation={nativeConversations.renderEntry}
             />
-            <NativeConversationRows chat={chat} projectFilter={projectFilter} onOpened={() => setSelectedSessionId(null)} />
+            {nativeConversations.footer}
             {chat.layout.folders.length > 0 && (
               <p className="chat-threads__hint">{t("chat.folder.dragHint")}</p>
             )}

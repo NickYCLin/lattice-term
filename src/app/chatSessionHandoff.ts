@@ -5,20 +5,25 @@
  */
 import type { ChatItem, ChatThread } from "./agentChat";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
+import { nativeConversationIdentity } from "./nativeConversationIdentity";
 import { cliProxyLaunchArguments, validCliProxyId, type CliProxyEndpoint, CLI_PROXY_DEFAULT_ID } from "./cliProxyApi";
 import type { NativeMessageSnapshot } from "./useNativeConversations";
 import type { AgentDefinition, AgentLaunchRequest, AgentSessionSummary } from "./useAgentSessions";
 
 /** The running terminal session that holds this thread's conversation now. */
 export function liveSessionForThread(
-  thread: Pick<ChatThread, "definitionId" | "nativeSessionId">,
+  thread: Pick<ChatThread, "definitionId" | "nativeSessionId"> & Partial<Pick<ChatThread, "accountProfileId" | "remote">>,
   sessions: readonly AgentSessionSummary[],
+  profiles: readonly ChatAccountProfile[] = [],
 ): AgentSessionSummary | undefined {
-  if (!thread.nativeSessionId) return undefined;
+  if (!thread.nativeSessionId || thread.remote) return undefined;
+  const identity = nativeConversationIdentity(profiles);
+  const expected = identity.conversation({ definitionId: thread.definitionId,
+    profileId: thread.accountProfileId ?? null, nativeSessionId: thread.nativeSessionId });
+  if (expected === null) return undefined;
   return sessions.find((session) =>
     !session.closedReason &&
-    session.definitionId === thread.definitionId &&
-    session.capturedSessionId === thread.nativeSessionId);
+    identity.session(session) === expected);
 }
 
 /**
@@ -30,10 +35,11 @@ export function liveSessionForThread(
 export function threadsHeldBySessions(
   threads: readonly ChatThread[],
   sessions: readonly AgentSessionSummary[],
+  profiles: readonly ChatAccountProfile[] = [],
 ): string[] {
   return threads
     .filter((thread) => !thread.continuedInSession && !thread.runningTurnId && !thread.remote &&
-      liveSessionForThread(thread, sessions))
+      liveSessionForThread(thread, sessions, profiles))
     .map((thread) => thread.id);
 }
 

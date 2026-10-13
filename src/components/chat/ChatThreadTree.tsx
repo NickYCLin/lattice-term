@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { ChatThread } from "../../app/agentChat";
+import type { LocalConversation } from "../../app/localConversationSessions";
 import {
   chatSidebarRows,
   type ChatSidebarRow,
@@ -38,6 +39,7 @@ export function ChatThreadTree({
   activeThreadId,
   activeSessionId,
   renderThread,
+  renderNativeConversation,
   workspace,
   onSelectThread,
   onOpenSession,
@@ -54,6 +56,7 @@ export function ChatThreadTree({
   activeThreadId: string | null;
   activeSessionId?: string | null;
   renderThread: (thread: ChatThread, active: boolean) => React.ReactNode;
+  renderNativeConversation?: (conversation: LocalConversation) => React.ReactNode;
   workspace?: ChatSidebarWorkspace;
   onSelectThread: (threadId: string) => void;
   onOpenSession?: (sessionId: string) => void;
@@ -83,6 +86,7 @@ export function ChatThreadTree({
     moved: boolean;
   } | null>(null);
   const dropRef = useRef<DropTarget | null>(null);
+  const suppressClick = useRef(false);
   dropRef.current = dropTarget;
 
   const isFolder = (nodeId: string) =>
@@ -109,6 +113,7 @@ export function ChatThreadTree({
 
   function onPointerDown(event: ReactPointerEvent, nodeId: string) {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    suppressClick.current = false;
     if ((event.target as HTMLElement).closest("input, .chat-tree__action")) return;
     press.current = {
       nodeId,
@@ -141,6 +146,7 @@ export function ChatThreadTree({
       const current = press.current;
       if (!current || event.pointerId !== current.pointerId) return;
       press.current = null;
+      suppressClick.current = current.moved;
       const target = dropRef.current;
       setDragging(null);
       setDropTarget(null);
@@ -186,7 +192,12 @@ export function ChatThreadTree({
   }
 
   return (
-    <div className="chat-tree" ref={listRef}>
+    <div className="chat-tree" ref={listRef} onClickCapture={(event) => {
+      if (!suppressClick.current || event.detail === 0) return;
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }}>
       {rows.map((row) => {
         const indent = { paddingLeft: `${row.depth * 0.9}rem` };
         if (row.kind === "folder" || row.kind === "project") {
@@ -195,7 +206,8 @@ export function ChatThreadTree({
             ([nodeId, placement]) =>
               placement.parentId === row.nodeId &&
               (threads.some((thread) => `thread:${thread.id}` === nodeId) ||
-                (workspace?.sessions.has(nodeId) ?? false)),
+                (workspace?.sessions.has(nodeId) ?? false) ||
+                (workspace?.nativeConversations?.has(nodeId) ?? false)),
           ).length;
           const editable = row.kind === "folder";
           return (
@@ -306,6 +318,12 @@ export function ChatThreadTree({
               )}
             </div>
           );
+        }
+        if (row.kind === "native") {
+          return <div key={row.nodeId} className={`chat-tree__row${dragging === row.nodeId ? " is-dragging" : ""}${dropClass(row.nodeId)}`} style={indent} data-node-id={row.nodeId}
+            onPointerDown={(event) => onPointerDown(event, row.nodeId)}>
+            {renderNativeConversation?.(row.conversation)}
+          </div>;
         }
         if (row.kind === "session") {
           return (

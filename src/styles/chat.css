@@ -176,6 +176,12 @@
 
 .chat-thread.is-active {
   background: var(--surface-selected);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.chat-native-entry {
+  width: 100%;
+  min-width: 0;
 }
 
 .chat-thread.is-active::before {

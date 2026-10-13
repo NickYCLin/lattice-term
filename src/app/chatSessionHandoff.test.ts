@@ -6,6 +6,34 @@ const codex = fakeDefinition({ installed: true, resumeSupported: true, installed
 const proxies = [{ id: "team", label: "", baseUrl: "http://10.0.0.5:8317" }];
 
 describe("chat and terminal share one conversation", () => {
+  it("matches the account configuration before selecting or handing off a thread", () => {
+    const profiles = [{ id: "work", definitionId: "codex" as const, name: "公司", configDirectory: "D:/profiles/work" }];
+    const thread = fakeThread({ nativeSessionId: "shared-id", accountProfileId: "work" });
+    const defaultSession = fakeSession({ sessionId: "default", capturedSessionId: "shared-id" });
+    const workSession = fakeSession({ sessionId: "work", capturedSessionId: "shared-id", profileConfigPath: "d:/PROFILES/work/" });
+    expect(liveSessionForThread(thread, [defaultSession, workSession], profiles)).toBe(workSession);
+    expect(liveSessionForThread(thread, [defaultSession], profiles)).toBeUndefined();
+    expect(liveSessionForThread(thread, [workSession], [])).toBeUndefined();
+    expect(liveSessionForThread({ ...thread, accountProfileId: null }, [workSession], profiles)).toBeUndefined();
+    expect(liveSessionForThread(thread, [workSession], [{ ...profiles[0], definitionId: "claude" }])).toBeUndefined();
+    expect(threadsHeldBySessions([thread], [defaultSession], profiles)).toEqual([]);
+    expect(threadsHeldBySessions([thread], [workSession], profiles)).toEqual([thread.id]);
+  });
+
+  it("does not mix case-sensitive POSIX account roots", () => {
+    const profiles = [{ id: "work", definitionId: "codex" as const, name: "公司", configDirectory: "/profiles/Work" }];
+    const thread = fakeThread({ nativeSessionId: "shared-id", accountProfileId: "work" });
+    expect(liveSessionForThread(thread, [fakeSession({ capturedSessionId: "shared-id", profileConfigPath: "/profiles/work" })], profiles)).toBeUndefined();
+  });
+
+  it("never hands a remote conversation to a local session with the same native ID", () => {
+    const thread = fakeThread({ nativeSessionId: "shared-id",
+      remote: { targetId: "remote-host", targetLabel: "遠端", planId: "plan", sessionId: "remote-session", cursor: 0 } });
+    const session = fakeSession({ capturedSessionId: "shared-id" });
+    expect(liveSessionForThread(thread, [session])).toBeUndefined();
+    expect(threadsHeldBySessions([thread], [session])).toEqual([]);
+  });
+
   it("resumes the thread's own conversation with its account and proxy", () => {
     const profile = { id: "work", definitionId: "codex" as const, name: "公司", configDirectory: "C:\\profiles\\work" };
     const native = sessionLaunchForThread(

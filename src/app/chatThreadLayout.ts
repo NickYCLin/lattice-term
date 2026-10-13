@@ -14,6 +14,8 @@ import {
 } from "./sessionSidebarLayout";
 import type { ChatWorkspaceSession } from "./chatWorkspaceNodes";
 import type { ChatThread } from "./agentChat";
+import type { LocalConversation } from "./localConversationSessions";
+import { nativeConversationKey } from "./nativeConversationDismissals";
 
 /** Legacy migration source; new edits use sharedSidebarLayout. */
 export const CHAT_SIDEBAR_LAYOUT_KEY = "latticeterm.chatSidebar.v1";
@@ -37,15 +39,25 @@ export function chatSidebarLayout(
   threads: readonly ChatThread[],
   workspaceNodes: readonly LiveSessionSidebarNode[] = [],
 ): SessionSidebarLayout {
+  const placements = { ...layout.placements };
+  for (const thread of threads) {
+    const nodeId = chatThreadNodeId(thread.id);
+    if (!thread.nativeSessionId || thread.remote) continue;
+    const nativeId = "native:" + nativeConversationKey({ definitionId: thread.definitionId,
+      profileId: thread.accountProfileId ?? null, nativeSessionId: thread.nativeSessionId });
+    if (!placements[nodeId] && placements[nativeId]) placements[nodeId] = placements[nativeId];
+    delete placements[nativeId];
+  }
   return reconcileSessionSidebarLayout(
-    layout,
+    { ...layout, placements },
     [
-      ...Object.entries(layout.placements)
+      ...Object.entries(placements)
         .filter(([id]) => !id.startsWith("thread:") && !id.startsWith("folder:"))
         .map(([id, placement]) => ({ id, defaultParentId: placement.parentId })),
       // Live data wins over the carried-over copy of the same node.
       ...workspaceNodes,
-      ...threads.map((thread) => ({ id: chatThreadNodeId(thread.id), defaultParentId: null })),
+      ...threads.map((thread) => ({ id: chatThreadNodeId(thread.id),
+        defaultParentId: workspaceNodes.find(node => node.id === chatThreadNodeId(thread.id))?.defaultParentId ?? null })),
     ],
   );
 }
@@ -69,11 +81,13 @@ export type ChatSidebarRow =
   | ({ kind: "folder" } & ChatSidebarBranch)
   | ({ kind: "project" } & ChatSidebarBranch)
   | { kind: "thread"; nodeId: string; thread: ChatThread; depth: number }
+  | { kind: "native"; nodeId: string; conversation: LocalConversation; depth: number }
   | { kind: "session"; nodeId: string; session: ChatWorkspaceSession; depth: number };
 
 export interface ChatSidebarWorkspace {
   projects: ReadonlyMap<string, string>;
   sessions: ReadonlyMap<string, ChatWorkspaceSession>;
+  nativeConversations?: ReadonlyMap<string, LocalConversation>;
 }
 
 /**
@@ -108,7 +122,6 @@ export function chatSidebarRows(
       }
       const projectName = workspace?.projects.get(nodeId);
       if (projectName !== undefined) {
-        // A project earns a row only while something inside it is running.
         const inside = walk(nodeId, depth + 1);
         if (inside.length === 0) continue;
         rows.push({ kind: "project", nodeId, name: projectName, depth, collapsed: isCollapsed, empty: false });
@@ -122,9 +135,11 @@ export function chatSidebarRows(
       }
       const session = workspace?.sessions.get(nodeId);
       if (session) rows.push({ kind: "session", nodeId, session, depth });
+      const conversation = workspace?.nativeConversations?.get(nodeId);
+      if (conversation) rows.push({ kind: "native", nodeId, conversation, depth });
       // A node nobody can show — a stale project, or a session that stopped
       // — still lets whatever sits inside it through.
-      else rows.push(...walk(nodeId, depth));
+      if (!session && !conversation) rows.push(...walk(nodeId, depth));
     }
     return rows;
   };

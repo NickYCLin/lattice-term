@@ -44,6 +44,28 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("shows terminal sessions, imported threads and native history under one project", () => {
+    const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "shared-native",
+      title: "終端正在處理", workingDirectory: "/work/app", resumable: true, updatedAt: 1 };
+    const history = { entries: [entry, { ...entry, nativeSessionId: "other-native", title: "尚未開啟的紀錄" }],
+      profiles: [], profileKey: "[]", hasMore: true, busy: false, error: "磁碟暫時忙碌" } as unknown as NativeHistory;
+    const thread = fakeThread({ workingDirectory: "/work/app", title: "獨立對話" });
+    const markup = renderToStaticMarkup(<NativeHistoryContext.Provider value={history}><I18nProvider locale="zh-TW">
+      <ChatView agents={fakeAgentApi({ sessions: [fakeSession({ capturedSessionId: "shared-native", workingDirectory: "/work/app" })] })}
+        chat={fakeChatApi({ threads: [thread] })} automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+    </I18nProvider></NativeHistoryContext.Provider>);
+    expect(markup.match(/class="chat-tree"/g)).toHaveLength(1);
+    expect(markup.match(/data-node-id="project:local:/g)).toHaveLength(1);
+    expect(markup.match(/class="chat-thread__identity"/g)).toHaveLength(3);
+    expect(markup).toContain("終端正在處理");
+    expect(markup).toContain("尚未開啟的紀錄");
+    expect(markup).toContain("獨立對話");
+    expect(markup).toContain("磁碟暫時忙碌");
+    expect(markup).toContain("載入較舊的對話");
+    expect(markup).not.toContain("chat-native-project");
+    expect(markup).toContain('class="chat-folder__count">3</span>');
+  });
+
   it("shows native history progress inside the opened thread instead of a new-chat welcome", () => {
     const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
     const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,

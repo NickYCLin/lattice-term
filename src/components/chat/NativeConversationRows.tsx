@@ -26,7 +26,7 @@ function directoryName(path: string) {
  * are. Nothing is stored until one is opened; from then on it is an ordinary
  * thread whose text follows the CLI's history.
  */
-export function NativeConversationRows({ chat, projectFilter, onOpened }: {
+export function useNativeConversationList({ chat, projectFilter, onOpened }: {
   chat: AgentChatApi;
   projectFilter: string | null;
   onOpened: () => void;
@@ -44,17 +44,6 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   const rows = useMemo(() => (history?.entries ?? []).filter(entry =>
     !entry.archived && !known.has(nativeConversationKey(entry)) &&
     (projectFilter === null || chatProjectKey(entry.workingDirectory) === projectFilter)), [history?.entries, known, projectFilter]);
-  const groups = useMemo(() => {
-    const grouped = new Map<string, LocalConversation[]>();
-    for (const entry of rows) {
-      const directory = chatProjectKey(entry.workingDirectory);
-      const entries = grouped.get(directory) ?? [];
-      entries.push(entry);
-      grouped.set(directory, entries);
-    }
-    return [...grouped].map(([directory, entries]) => ({ directory, entries }));
-  }, [rows]);
-  if (!history) return null;
 
   async function open(entry: LocalConversation, retry = false) {
     if (!history) return;
@@ -95,38 +84,54 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
     }
   }
 
-  return <>
-    {groups.map(group => <details key={group.directory} className="chat-native-project" open>
-      <summary title={displayPath(group.directory)}><FolderIcon size={14} />
-        <span>{group.directory ? directoryName(group.directory) : t("chat.directory.none")}</span>
-        <small>{group.entries.length}</small>
-      </summary>
-      <ul className="chat-native-rows">{group.entries.map(entry => {
-        const key = nativeConversationKey(entry);
-        return <li key={key}>
-          <button type="button" className="chat-thread" disabled={entry.definitionId === "cursor" && opening !== null} aria-busy={opening === key}
-            aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
-            title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
-            <ConversationListIdentity title={entry.title || t("chat.untitled")}>
-                {agentDisplayName(entry.definitionId)}
-                {entry.profileId ? ` · ${history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId}` : ""}
-                {entry.workingDirectory ? ` · ${directoryName(entry.workingDirectory)}` : ""}
-            </ConversationListIdentity>
-          </button>
-          {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>
-            <p className="chat-native-rows__hint">{t("history.cursorReadOnly")}</p>
-            <ConversationReadProgress loading={opening === key} error={failed?.key === key ? failed.detail : null} onRetry={() => void open(entry, true)} />
-            {reading.snapshot?.truncated && <p className="chat-native-rows__hint">{t("history.truncated")}</p>}
-            {reading.snapshot?.messages.map((message, index) =>
-              <p key={index} className={`chat-native-rows__message chat-native-rows__message--${message.role}`}>{message.text}</p>)}
-          </div>}
-        </li>;
-      })}
-      </ul>
-    </details>)}
+  function renderEntry(entry: LocalConversation) {
+    if (!history) return null;
+    const key = nativeConversationKey(entry);
+    return <div className="chat-native-entry">
+      <button type="button" className="chat-thread" disabled={entry.definitionId === "cursor" && opening !== null} aria-busy={opening === key}
+        aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
+        title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
+        <ConversationListIdentity title={entry.title || t("chat.untitled")}>
+            {agentDisplayName(entry.definitionId)}
+            {entry.profileId ? ` · ${history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId}` : ""}
+            {entry.workingDirectory ? ` · ${directoryName(entry.workingDirectory)}` : ""}
+        </ConversationListIdentity>
+      </button>
+      {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>
+        <p className="chat-native-rows__hint">{t("history.cursorReadOnly")}</p>
+        <ConversationReadProgress loading={opening === key} error={failed?.key === key ? failed.detail : null} onRetry={() => void open(entry, true)} />
+        {reading.snapshot?.truncated && <p className="chat-native-rows__hint">{t("history.truncated")}</p>}
+        {reading.snapshot?.messages.map((message, index) =>
+          <p key={index} className={`chat-native-rows__message chat-native-rows__message--${message.role}`}>{message.text}</p>)}
+      </div>}
+    </div>;
+  }
+
+  const footer = history && <>
     {history.error && <p className="chat-threads__hint" role="alert">{t("history.stale")} {history.error}</p>}
     {history.hasMore && <button type="button" className="button button--ghost button--sm" disabled={history.busy} onClick={history.loadMore}>
       {t("history.loadOlder")}
     </button>}
+  </>;
+  return { rows, renderEntry, footer };
+}
+
+export function NativeConversationRows(props: Parameters<typeof useNativeConversationList>[0]) {
+  const { rows, renderEntry, footer } = useNativeConversationList(props);
+  const { t } = useI18n();
+  const groups = new Map<string, LocalConversation[]>();
+  for (const entry of rows) {
+    const directory = chatProjectKey(entry.workingDirectory);
+    groups.set(directory, [...(groups.get(directory) ?? []), entry]);
+  }
+  return <>
+    {[...groups].map(([directory, entries]) => <details key={directory} className="chat-native-project" open>
+      <summary title={displayPath(directory)}><FolderIcon size={14} />
+        <span>{directory ? directoryName(directory) : t("chat.directory.none")}</span>
+        <small>{entries.length}</small>
+      </summary>
+      <ul className="chat-native-rows">{entries.map(entry => <li key={nativeConversationKey(entry)}>{renderEntry(entry)}</li>)}</ul>
+    </details>)}
+    {footer}
   </>;
 }

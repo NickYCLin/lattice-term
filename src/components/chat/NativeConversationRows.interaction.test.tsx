@@ -8,8 +8,56 @@ import { I18nProvider } from "../../i18n";
 import { NativeConversationRows } from "./NativeConversationRows";
 import { SentAttachments } from "./SentAttachments";
 import { ConversationReadProgress } from "./ConversationReadProgress";
+import { ChatThreadTree } from "./ChatThreadTree";
+import { chatConversationSidebar, nativeConversationNodeId } from "../../app/chatConversationSidebar";
+import { chatSidebarLayout } from "../../app/chatThreadLayout";
+import { emptySessionSidebarLayout } from "../../app/sessionSidebarLayout";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+
+it("files native history without opening it on the drag-release click", async () => {
+  const container = installHostDom();
+  const listeners = new Map<string, (event: Partial<PointerEvent>) => void>();
+  const hostDocument = container.ownerDocument;
+  hostDocument.addEventListener = (name: string, listener: (event: Partial<PointerEvent>) => void) => listeners.set(name, listener);
+  hostDocument.removeEventListener = (name: string) => listeners.delete(name);
+  const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "drag-native",
+    title: "待分類的紀錄", workingDirectory: "/work", resumable: true, updatedAt: 1 };
+  const projection = chatConversationSidebar({ sessions: [], definitions: [], threads: [], history: [entry], profiles: [],
+    generalProjectLabel: "一般對話", projectFilter: null });
+  const layout = chatSidebarLayout(emptySessionSidebarLayout, [], projection.workspace.nodes);
+  const projectId = [...projection.workspace.projects.keys()][0];
+  hostDocument.elementFromPoint = () => ({ closest: () => ({ dataset: { nodeId: projectId }, getBoundingClientRect: () => ({ top: 0, height: 100 }) }) });
+  const moved = vi.fn();
+  const opened = vi.fn();
+  const root = createRoot(container as unknown as Element);
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatThreadTree layout={layout} threads={[]}
+    activeThreadId={null} workspace={projection.workspace} renderThread={() => null}
+    renderNativeConversation={() => <button onClick={opened}>待分類的紀錄</button>}
+    onSelectThread={() => {}} onRemoveThread={() => {}} onToggleFolder={() => {}} onRenameFolder={() => {}}
+    onRemoveFolder={() => {}} onCreateFolder={() => {}} onMoveNode={moved} /> </I18nProvider>));
+  const props = (node: HostNode): Record<string, (event: unknown) => void> => {
+    const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
+    return (node as unknown as Record<string, Record<string, (event: unknown) => void>>)[key];
+  };
+  const row = allNodes(container).find(node => node.attributes["data-node-id"] === nativeConversationNodeId(entry))!;
+  const tree = allNodes(container).find(node => node.attributes.class === "chat-tree")!;
+  await act(async () => props(row).onPointerDown({ pointerType: "mouse", button: 0, pointerId: 1, clientX: 0, clientY: 0,
+    target: { closest: () => null } }));
+  await act(async () => listeners.get("pointermove")!({ pointerId: 1, clientX: 20, clientY: 50, preventDefault: () => {} }));
+  await act(async () => listeners.get("pointerup")!({ pointerId: 1 }));
+  expect(moved).toHaveBeenCalledWith(nativeConversationNodeId(entry), projectId, null);
+  const prevented = vi.fn();
+  const stopped = vi.fn();
+  props(tree).onClickCapture({ detail: 1, preventDefault: prevented, stopPropagation: stopped });
+  expect(prevented).toHaveBeenCalledOnce();
+  expect(stopped).toHaveBeenCalledOnce();
+  expect(opened).not.toHaveBeenCalled();
+  const keyboardPrevented = vi.fn();
+  props(tree).onClickCapture({ detail: 0, preventDefault: keyboardPrevented, stopPropagation: vi.fn() });
+  expect(keyboardPrevented).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../../app/useCliProxyApi", () => ({ useCliProxySettings: () => ({ proxies: [] }) }));
 vi.mock("../../app/nativeRuntime", () => ({ hasDesktopBackend: () => true }));

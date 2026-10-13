@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import React, { act } from "react";
 import type { ChatEventEnvelope } from "./agentChat";
+import { fakeSession, fakeThread } from "./testFixtures/agentApis";
 
 let chatListener: ((event: { payload: ChatEventEnvelope }) => void) | null = null;
 const playSound = vi.fn(async () => "disabled");
@@ -80,6 +81,8 @@ function installFakeDom() {
   document.defaultView = globalThis;
   globals.document = document;
   globals.window = globalThis;
+  globals.addEventListener = () => {};
+  globals.removeEventListener = () => {};
   class Stub {}
   for (const name of ["HTMLElement", "Element", "Node", "HTMLIFrameElement", "Event", "Text", "Comment"]) {
     globals[name] = Stub;
@@ -91,6 +94,39 @@ function installFakeDom() {
 }
 
 describe("useAgentAutomations", () => {
+  it("hands off background threads only to a terminal using the same account", async () => {
+    invoke.mockClear();
+    const root = installFakeDom();
+    const previousStorage = globalThis.localStorage;
+    const profile = { id: "work", definitionId: "codex", name: "工作", configDirectory: "D:/profiles/work" };
+    const thread = fakeThread({ id: "account-handoff", nativeSessionId: "shared-id", accountProfileId: "work" });
+    const stored = new Map<string, string>([
+      ["latticeterm.agentChat.v1", JSON.stringify([thread])],
+      ["latticeterm.chatAccountProfiles.v1", JSON.stringify([profile])],
+    ]);
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) });
+    const { createRoot } = await import("react-dom/client");
+    const { ChatRuntime } = await import("./ChatRuntime");
+    type Api = import("./ChatRuntime").ChatRuntimeApi;
+    let api: Api | null = null;
+    const onChange = (next: Api) => { api = next; };
+    const session = fakeSession({ capturedSessionId: "shared-id" });
+    const reactRoot = createRoot(root as unknown as Element);
+    try {
+      await act(async () => { reactRoot.render(React.createElement(ChatRuntime, { locale: "en", sessions: [session], onChange })); });
+      expect((api as unknown as Api).chat.threads[0].continuedInSession).not.toBe(true);
+      expect(invoke.mock.calls.filter(call => call[0] === "agent_chat_close")).toEqual([]);
+      await act(async () => { reactRoot.render(React.createElement(ChatRuntime, { locale: "en",
+        sessions: [{ ...session, profileConfigPath: "D:/profiles/work" }], onChange })); });
+      expect((api as unknown as Api).chat.threads[0].continuedInSession).toBe(true);
+      expect(invoke.mock.calls.filter(call => call[0] === "agent_chat_close")).toHaveLength(1);
+    } finally {
+      await act(async () => reactRoot.unmount());
+      vi.stubGlobal("localStorage", previousStorage);
+    }
+  });
+
   it("removes a conversation from storage immediately", async () => {
     invoke.mockClear();
     const root = installFakeDom();
