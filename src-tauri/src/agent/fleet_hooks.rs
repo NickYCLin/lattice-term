@@ -910,7 +910,13 @@ mod tests {
                     .stderr(Stdio::piped())
                     .spawn()
                     .unwrap();
-                child.stdin.take().unwrap().write_all(&raw).unwrap();
+                if let Err(error) = child.stdin.take().unwrap().write_all(&raw) {
+                    assert!(
+                        missing < environment.len()
+                            && error.kind() == std::io::ErrorKind::BrokenPipe,
+                        "{error}"
+                    );
+                }
                 let output = child.wait_with_output().unwrap();
                 assert!(
                     output.status.success(),
