@@ -4,6 +4,23 @@
 
 ---
 
+## [2026.10.14](https://github.com/NickYCLin/lattice-term/compare/v2026.10.13...v2026.10.14) (2026-10-13)
+
+
+### 🚀 新增功能
+
+* **agents:** 提供終端圖片附件清單與預覽 ([78441e2](https://github.com/NickYCLin/lattice-term/commit/78441e2b436b834fa5b3d5b44ddd63e224ff4d99))
+* **chat:** 可保存專案的新對話預設值 ([4a6a8ec](https://github.com/NickYCLin/lattice-term/commit/4a6a8ec115fa78ce5eeeb58e66ab9106c0f77332))
+* **chat:** 支援免 CLI 代理對話與子任務附件 ([6ce544c](https://github.com/NickYCLin/lattice-term/commit/6ce544c4c597b207cc11a890c3f09349713402bc))
+* **mcp:** 預設開啟連線的檔案與命令功能 ([33ae24d](https://github.com/NickYCLin/lattice-term/commit/33ae24daa404d14ea22086ce1a68e35a35364b7a))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 修正對話側欄重複與帳號誤接手 ([eb68910](https://github.com/NickYCLin/lattice-term/commit/eb68910b653026acb008cde075809fd1601c3912))
+* **rdp:** 說明密碼到期並允許更新已存密碼 ([894aeaf](https://github.com/NickYCLin/lattice-term/commit/894aeaf0fd7b40c9f789440170445e2fe4688f68))
+* **sessions:** 修正工作階段競態與專案路徑 ([a968c94](https://github.com/NickYCLin/lattice-term/commit/a968c94dc3587444fad66c6145f42e9e9f4a31bc))
+
 ## [2026.10.13](https://github.com/NickYCLin/lattice-term/compare/v2026.10.12...v2026.10.13) (2026-10-13)
 
 
