@@ -415,15 +415,42 @@ log "isolated desktop session: $APP_SESSION_PID, window $WINDOW_ID"
 click_local \
   "${LATTICETERM_E2E_TERMINAL_NAV_X:-40}" \
   "${LATTICETERM_E2E_TERMINAL_NAV_Y:-139}"
-AIDER_MATCH=$(wait_for_visible_text "Aider" "02-terminal-empty" 15 --min-x 250 --min-y 100) \
+AIDER_MATCH=$(wait_for_visible_text "Aider" "02-terminal-empty" 15 --min-x 250 --min-y 100 --scale 3) \
   || die "Aider quick-chat button was not visible"
 read -r AIDER_X AIDER_Y _ <<<"$AIDER_MATCH"
 click_local "$AIDER_X" "$AIDER_Y"
+sleep 0.4
+capture_window "$E2E_ROOT/02-after-aider-click.png"
+send_key Escape
+sleep 0.4
+[[ ! -e "$E2E_ROOT/fake-aider.pid" ]] || die "Escape launched an Agent instead of cancelling"
+capture_window "$E2E_ROOT/02-escape-cancelled.png"
+send_key Return
+sleep 0.4
+capture_window "$E2E_ROOT/02-keyboard-reopened.png"
+send_key Return
+sleep 0.4
+[[ ! -e "$E2E_ROOT/fake-aider.pid" ]] || die "the initially focused Cancel button launched an Agent"
+capture_window "$E2E_ROOT/02-button-cancelled.png"
+send_key Return
+sleep 0.4
+send_key Tab
+send_key Return
+send_key Return
 
 wait_for_file "$E2E_ROOT/fake-aider.pid" 10 \
   || die "fake aider was not launched"
 read -r FAKE_AGENT_PID <"$E2E_ROOT/fake-aider.pid"
 pid_has_nonce "$FAKE_AGENT_PID" || die "fake aider PID is not owned by this test"
+FAKE_AGENT_COUNT=0
+for process in /proc/[0-9]*; do
+  candidate=${process##*/}
+  if pid_has_nonce "$candidate" && grep -zFq "$HELPER_DIR/fake_aider.py" "$process/cmdline" 2>/dev/null; then
+    FAKE_AGENT_COUNT=$((FAKE_AGENT_COUNT + 1))
+  fi
+done
+[[ "$FAKE_AGENT_COUNT" == 1 ]] || die "repeated confirmation created $FAKE_AGENT_COUNT fake Agents"
+log "Escape / Cancel / keyboard focus return / repeated confirmation: PASS"
 capture_window "$E2E_ROOT/03-terminal-ready.png"
 log "fake aider PTY: $FAKE_AGENT_PID"
 
@@ -463,7 +490,7 @@ else
   # xterm parsed the line. Its fixed first row can therefore be selected by a
   # calibrated cell coordinate, with the actual clipboard text as the gate.
   COPY_X=${LATTICETERM_E2E_COPY_TARGET_X:-440}
-  COPY_Y=${LATTICETERM_E2E_COPY_TARGET_Y:-214}
+  COPY_Y=${LATTICETERM_E2E_COPY_TARGET_Y:-246}
   log "xterm canvas absent from X11 screenshot; using calibrated first-row cell"
 fi
 
@@ -545,6 +572,9 @@ log "real X11 image -> staged PNG: PASS"
 # not only when the whole test app exits.
 capture_window "$E2E_ROOT/06-before-disconnect.png"
 refresh_window_geometry
+click_local \
+  "${LATTICETERM_E2E_SESSION_CLOSE_X:-$((WINDOW_WIDTH - 30))}" \
+  "${LATTICETERM_E2E_SESSION_CLOSE_Y:-116}"
 click_local \
   "${LATTICETERM_E2E_SESSION_CLOSE_X:-$((WINDOW_WIDTH - 30))}" \
   "${LATTICETERM_E2E_SESSION_CLOSE_Y:-116}"
