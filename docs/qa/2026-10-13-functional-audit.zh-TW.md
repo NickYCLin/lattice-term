@@ -156,3 +156,35 @@ iOS verification workflow，核對完整來源 SHA、run、架構、未簽署旗
 SHA-256，再安全解壓到新的隔離目錄。此模式不建置、不發布、不用 Apple 金鑰，
 證據明確標記 currentBuildAcceptance=false，不冒充目前程式版本的完整驗收。
 實際 CI 與診斷結果以後續交付紀錄為準。
+
+### 最新產物的隔離比較
+
+- 舊產物診斷 run 38441425898 使用來源 run 38425920884、完整 SHA
+  fe497a4a7168452b5d5f1cab2f3cfe9243233288，核對 digest 後三台機型均辨識
+  連線頁且程序存活。只能排除該產物在這些機型必然失敗，不能倒推舊白畫面的唯一原因。
+- 最新程式 28aa51c 的 PR run 38445797824 建置與 unsigned archive 通過，
+  首台 iPhone 17 Pro 卻在 simctl launch 等待 330 秒後逾時，尚未取得 PID。
+  failure.json 的 hostProcesses、simulatorProcesses、webViewLog、simulatorHostLog
+  四項探針均完成；程序清單未見 App 或 WebKit，App／WebKit log 沒有事件。
+  失敗截圖確為 SpringBoard 主畫面，已安裝 LatticeTerm 圖示；不是本輪 App 白畫面。
+  此次尚未執行前端辨識或 OCR，不能歸因於 OCR，也不能宣稱 App 崩潰。
+- 對照 run 38449793865 只下載上述已建置產物，不重新建置、不改驗收門檻。
+  產物來源 90f3cf8e4a83527723605815c13858b5cf6a14ef 的兩個 parents 已核對為
+  main 4a6a8ec 與本輪 28aa51c，與 PR 測試來源一致。
+  iPhone 17 Pro、iPad Pro 13-inch (M5) 都辨識連線頁且程序存活；
+  iPhone 17 Pro Max 在 launch 等待 330 秒後逾時，截圖為 SpringBoard 主畫面。
+  四項程序／log 探針皆完成，未見 App 程序，App／WebKit log 只有標頭；
+  knownGoodOCR 使用本次已通過的 iPhone.png，獨立辨識成功。
+  因此最新兩次失敗都發生在取得 PID 前，不是已重現的前端白畫面或 OCR 失效。
+  不能把這項結果倒推為先前白畫面的根因，也不能把兩台成功當成三台全過。
+- 真阻礙是尚未取得三台都通過的現行產物證據。失敗時的探針與截圖仍可讀，
+  並非證明整個 CoreSimulator 停擺；現有 log 只含最後三分鐘，不足以排除
+  launch 初期的短暫程序退出或系統啟動服務故障。欠缺完整 launch 期間的
+  SpringBoard／RunningBoard 事件與原白畫面當時的 WebKit 啟動證據。
+  不再盲目重跑、不延長驗收期限、不跳過 Pro Max；PR 暫不合併，也不發布。
+- 恢復後再次執行 queue／Windows／sidebar 回歸：3 files、37 tests 通過；
+  Python smoke 25 tests、產物來源測試 1 test 通過。沒有更動現行安裝程式或分享設定。
+- 原始外部審查 queue-race.test.tsx 與 windows-project.test.ts 未改動，
+  直接指向本 checkout 重跑：2 files、12 tests 全部通過。
+  程式 head 28aa51c 的 CI run 38445797762 與 Windows run 38445798033 成功；
+  iOS run 38445797824 與隔離比較 run 38449793865 失敗如上述，不列為通過。
