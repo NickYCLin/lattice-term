@@ -119,3 +119,39 @@ Windows 原生程序與 named-pipe／ConPTY 結果仍以更新後 CI 重跑為�
 透過工作分支 PR 檢查 CI 後合回 main。遠端 commit／CI 結果以交付時的
 GitHub 記錄與最終回報為準。本報告不提前宣稱 CI、安裝版或發布成功。
 不 dispatch 發布、不合併 release PR、不安裝新版本。
+
+## 2026-10-14 獨立審查補修
+
+- coordinator 提供的 queue-race 時序在 repo 再次重現：first 編輯回 false，
+  first refresh 尚未完成時切 second；舊 refresh 返回後仍設定舊衝突錯誤。
+  現在 await 返回後再次檢查 session 與 generation，不重送編輯。
+- Windows 大小寫與斜線方向原本拆成不同專案，磁碟根目錄也被去掉斜線。
+  現在識別鍵統一 Windows 斜線與大小寫，但保留原目錄呈現和既有側欄 node ID；
+  C:/ 與 C: 仍區分，POSIX 大小寫保持不同。
+- Windows 預設改用 v2 正規化鍵，讀取時相容掃描 v1 等價路徑。
+  舊資料不改寫、不刪除；不同預設（含權限）明確報衝突，拒絕套用。
+  明確重新保存優先於舊值，清除以 v2 空值記錄阻止舊值復活。
+  v1 的 C: 無法證明來自絕對根目錄，不擅自把該權限套給 C:/。
+- 新增回歸最初 7 failed／5 passed；修正後針對測試通過。
+  完整 npm run check：224 files／1609 tests、typecheck、production build 通過。
+  沒有重做已通過的 close-focus 修正。
+- coordinator 回報實機 MCP 已使用既有分享，經 capabilities／授權目標／state／read，
+  同一 conversation 為 integration/done/ready=true、queued=0，派送回覆
+  sentImmediately=true、duplicate=false，後續在原對話完成工作。
+  此為 coordinator 提供的實際就緒派工證據，不包含撤權、取消、其他供應商或 GUI 全驗收。
+
+### iOS 啟動診斷
+
+先前 run 38425920884 attempt 2：iPhone 與 iPad 已辨識連線頁，Pro Max
+最後 PNG 為白画面，OCR 僅狀態列，補截圖與系統 log 也逾時。
+不能據此宣稱 App 崩潰，也不能當成只有 OCR 誤判。
+新增失敗診斷各自記錄 host process、模擬器 process、WebKit／App log、
+CoreSimulator host log，及使用已通過 iPhone 圖片的獨立 OCR 探針；
+每項都有個別完成或逾時記錄，不改原機型、畫面要求、90 秒期限或停擺上限。
+Python smoke 25 tests 與來源 digest／架構／SHA／run 驗證測試通過。
+
+workflow_dispatch 可選既有 unsigned 產物做診斷：來源必須是本 repo 已完成的
+iOS verification workflow，核對完整來源 SHA、run、架構、未簽署旗標、
+SHA-256，再安全解壓到新的隔離目錄。此模式不建置、不發布、不用 Apple 金鑰，
+證據明確標記 currentBuildAcceptance=false，不冒充目前程式版本的完整驗收。
+實際 CI 與診斷結果以後續交付紀錄為準。
