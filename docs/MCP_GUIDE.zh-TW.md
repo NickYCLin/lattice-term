@@ -26,8 +26,11 @@ LatticeTerm 本身可以當成一個 MCP 伺服器。接上之後，外部 AI �
 | 開啟儲存的連線 | SSH、SFTP、RDP、VNC、Lattice Remote | 先保存登入資料並完成主機驗證，之後 AI 可直接連 |
 | 遠端主機上的 Agent Fleet | 另一台已裝 LatticeTerm 的主機上的工作區 | 在設定頁另外設定（見[遠端 Fleet](#遠端主機的-agent-fleet)） |
 
-AI **拿不到**密碼、私鑰或配對碼。連線簿也不會傳出主機位址與帳號；
+預設不向 AI 提供密碼、私鑰或配對碼；一般連線簿查詢也不傳出主機位址與帳號。
 AI 只提供已儲存項目的 ID，由 LatticeTerm 使用本機登入資料連線。
+例外是使用者對特定連線明確勾選並保存「允許 MCP 讀取這筆帳密」後，
+`read_saved_connection_credential` 可讀取該筆端點、帳號與密碼或配對碼；
+私鑰不在此讀取範圍。明文可能留在模型對話紀錄，詳見下方逐筆授權說明。
 
 ### Fleet 各家 CLI 都能自動收指示嗎？
 

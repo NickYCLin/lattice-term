@@ -177,11 +177,12 @@ workflow、完整來源 SHA、run、架構、未簽署旗標與 SHA-256，再解
   knownGoodOCR 使用本次已通過的 iPhone.png，獨立辨識成功。
   因此最新兩次失敗都發生在取得 PID 前，不是已重現的前端白畫面或 OCR 失效。
   不能把這項結果倒推為先前白畫面的根因，也不能把兩台成功當成三台全過。
-- 真阻礙是尚未取得三台都通過的現行產物證據。失敗時的探針與截圖仍可讀，
+- 當時的阻礙是尚未取得三台都通過的現行產物證據。失敗時的探針與截圖仍可讀，
   並非證明整個 CoreSimulator 停擺；現有 log 只含最後三分鐘，不足以排除
   launch 初期的短暫程序退出或系統啟動服務故障。欠缺完整 launch 期間的
   SpringBoard／RunningBoard 事件與原白畫面當時的 WebKit 啟動證據。
-  不再盲目重跑、不延長驗收期限、不跳過 Pro Max；PR 暫不合併，也不發布。
+  當時決定不再盲目重跑、不延長驗收期限、不跳過 Pro Max，PR 暫不合併，也不發布。
+  這是上述失敗 run 的歷史狀態，不是目前交付狀態。
 - 恢復後再次執行 queue／Windows／sidebar 回歸：3 files、37 tests 通過；
   Python smoke 25 tests、產物來源測試 1 test 通過。沒有更動現行安裝程式或分享設定。
 - 原始外部審查 queue-race.test.tsx 與 windows-project.test.ts 未改動，
@@ -222,7 +223,47 @@ workflow、完整來源 SHA、run、架構、未簽署旗標與 SHA-256，再解
   這是確定重現的驗收腳本缺陷；run 38445797824／38449793865 在 launch
   330 秒逾時，尚未進入 frontend／OCR，沒有走到本時間預算路徑，兩者不能混為因果。
 
-遠端交付與本次 CI 以 PR #304 最新提交及最後交付回報為準；
-若三台啟動仍未通過，保留 PR，不繞過失敗合併或正式發布。
+PR #304 的 CI 38455552023、Windows 38455552050、iOS 38455552034 均通過後，
+已安全合併至 main a968c94；主線 CI 38459762788 與 iOS 38459762737 也成功。
+coordinator 已獨立核驗主線 artifact 11846876422，三台機型的
+renderedStartup／survivedStartup 均為 true。未繞過檢查，未正式發布或部署。
+後續成功不代表先前間歇 launch 330 秒逾時或白畫面的根因已釐清；
+時間預算修正是把 1320 秒膨脹限制回既定最高 210 秒，不是增加 budget。
 本次完整 npm run check：224 files／1613 tests、typecheck、production build 通過；
 原始外部元件 fixture 7 項通過，verify-ios-app 10 項通過。
+
+## 2026-10-14 文件與隔離 Linux GUI 收尾
+
+- 文件對齊現況：Codex 選項式提問與 MCP elicitation 已有互動卡片，
+  不支援的表單形狀仍只能拒絕；帳密預設不提供，逐筆明確授權是例外，
+  不含私鑰。上述說明依現行程式核對，未查閱真實帳密或修改授權。
+- 二進位來源：原 debug binary 的時間為 10 月 1 日，未採用為本次證據。
+  在 main a968c94 的程式來源執行 cargo build --locked 後，以重新建置的
+  debug binary 與同版 Vite 前端驗收；本輪只有文件與測試 harness 修改。
+  binary SHA-256：
+  `0ab84e81e53f5eef7f9806760bf878b430009652ed07dfdaa7c3dab5c4187517`。
+- 隔離邊界：獨立 Xvfb、私人 D-Bus、HOME／XDG／TMPDIR、合成剪貼簿與
+  假 Aider；不接現行 display、真帳號、設定或保管庫。保留原 PID／nonce
+  清理機制，驗收後逐一核對本輪隔離 HOME 下沒有殘留程序。
+- harness 的三項過時假設已重現：小字 Aider 可見但 OCR 信心僅 0.49，
+  快速啟動現在先顯示確認框，以及第一列座標已移至圖片附件列下方。
+  同張截圖放大三倍後 OCR 信心約 92，保留原門檻並換回原視窗座標；
+  補上確認框鍵盤操作，校準第一列後仍以實際剪貼簿內容判定成功，
+  不以點擊或 OCR 單獨宣稱產品通過。OCR 座標／門檻／邊界回歸 3 項通過。
+- 真實 GUI 路徑通過：Escape 取消、初始焦點的取消按鈕、Enter 返回並
+  重開確認框、重複確認只啟動一個 nonce 相符的假 Agent；Ctrl+V／
+  Ctrl+Shift+V 文字到實際 PTY，Tauri event → xterm parser 的 DSR 回覆，
+  Ctrl+C／Ctrl+Shift+C 選取複製，以及無選取時 Ctrl+C 中斷字元到 PTY。
+  Xvfb 截圖沒有合成 xterm canvas，未將終端輸出截圖列為目視通過。
+- 真實圖片剪貼簿通過：2048×1536 合成圖片轉成 mode 0600 暫存 PNG，
+  像素核對通過；圖片處理時鍵盤／IPC heartbeat 為 180 ms。
+  重複點擊斷線後，假 Agent 與暫存 PNG 均清除，不需關閉整個測試 App。
+- 本機原始 log／截圖保留在 `/tmp/latticeterm-clipboard-e2e.KxHYaJ`；
+  過程中的失敗證據也保留，沒有刪除使用者資料。完整 log 為
+  `/tmp/lattice-gui-closeout-e2e-calibrated.log`，build log 為
+  `/tmp/lattice-gui-closeout-build.log`。
+- 本輪未發現產品缺陷，僅修正文件及驗收 harness。不重做既有 fixture
+  或 iOS／Windows 全量驗收；PR 只等待既有必要檢查，不手動派送平台 CI。
+  未驗真實外部連線、雙工作階段非同步焦點競態、付費供應商登入、
+  安裝版或實機全功能；假 Agent 不代表真供應商驗收。
+  未重啟現行 MCP、改分享／安全設定、碰其他專案、正式發布或部署。
