@@ -413,7 +413,6 @@ export function SessionsView({
     useState<SavedAgentSession | null>(null);
   const [syncNativeRemoval, setSyncNativeRemoval] = useState(true);
   const [nativeSyncError, setNativeSyncError] = useState<string | null>(null);
-  const sessionClose = useSessionClose();
   const [savedStartError, setSavedStartError] = useState<string | null>(null);
   const [removingSession, setRemovingSession] = useState(false);
   const [removeSessionError, setRemoveSessionError] = useState<string | null>(
@@ -1227,6 +1226,7 @@ export function SessionsView({
     sessions.find((session) => session.sessionId === activeSessionId) ??
     sessions[0] ??
     null;
+  const sessionClose = useSessionClose(active?.sessionId ?? null);
   // Live host readings for the active SSH tab, polled only while its files
   // sidebar is on screen.
   const activeSshSessionId =
@@ -2134,7 +2134,7 @@ export function SessionsView({
     await agents.disconnect(sessionId);
     // Closing the visible CLI hands focus to a sibling if the tab still has
     // one, so the whole tab only disappears once its last CLI is gone.
-    if (sessionId === active.sessionId) {
+    if (sessionClose.isCurrent(sessionId)) {
       const sibling = members.find((member) => member.sessionId !== sessionId);
       onSelect(sibling?.sessionId ?? null);
     }
@@ -2150,7 +2150,7 @@ export function SessionsView({
     else if (session.kind === "remote") await remote.disconnect(session.sessionId);
     else if (session.kind === "rdp") await rdp.disconnect(session.sessionId);
     else await vnc.disconnect(session.sessionId);
-    if (session.sessionId === active.sessionId) onSelect(null);
+    if (sessionClose.isCurrent(session.sessionId)) onSelect(null);
   }
 
   async function removeSession(session: SessionRef) {

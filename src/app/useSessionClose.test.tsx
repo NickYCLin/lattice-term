@@ -42,3 +42,26 @@ it("ignores repeated clicks before React rerenders and permits other sessions", 
     expect(api.pending.size).toBe(0);
   } finally { await act(async () => root.unmount()); }
 });
+
+it("does not change the new selection when an earlier close finishes", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useSessionClose>;
+  function Probe({ id }: { id: string }) { api = useSessionClose(id); return null; }
+  let finish!: () => void;
+  const select = vi.fn();
+  try {
+    await act(async () => root.render(<Probe id="first" />));
+    const firstApi = api;
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = firstApi.run("first", async () => {
+        await new Promise<void>(resolve => { finish = resolve; });
+        if (firstApi.isCurrent("first")) select(null);
+      });
+    });
+    await act(async () => root.render(<Probe id="second" />));
+    await act(async () => { finish(); await closing; });
+    expect(select).not.toHaveBeenCalled();
+    expect(api.isCurrent("second")).toBe(true);
+  } finally { await act(async () => root.unmount()); }
+});

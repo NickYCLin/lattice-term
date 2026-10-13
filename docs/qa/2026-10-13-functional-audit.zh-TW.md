@@ -68,7 +68,8 @@
   沒有 catch 或 pending 防護。backend 拒絕時沒有可見提示。
 - 修正：兩個入口統一用 `useSessionClose`；同一 session pending 時不再送第二次，
   顯示可關閉的警告，失敗後可重試；其他 session 仍能獨立關閉。
-- 驗證：新增 hook fixture 兩項，證明錯誤不向外逸出、重試可行，
+  關閉完成時也改檢查最新選取，避免等待期間切頁後仍用舊 active 清除新頁選取。
+- 驗證：新增 hook fixture 三項，證明錯誤不向外逸出、重試可行，
   同一 render 的連按也僅送一次。這是程式入口核對與 fixture 驗證，非真實 GUI 重現。
   刪除確認視窗原有的錯誤處理保持不變。
 
@@ -76,10 +77,11 @@
 
 | 指令／檢查 | 結果 |
 | --- | --- |
-| `npm run check` | 通過：typecheck、i18n／sidecar／版本／Actions 檢查、222 files／1597 tests、production build |
+| `npm run check` | 通過：typecheck、i18n／sidecar／版本／Actions 檢查、222 files／1598 tests、production build |
 | frontend bundle check | 入口約 359 KiB，小於 500 KiB 限制 |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | 通過 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 通過 |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | 通過 |
 | desktop `cargo test --manifest-path src-tauri/Cargo.toml --lib` | 957 passed、38 ignored；ignored 不列為通過 |
 | Remote `cargo test --manifest-path crates/lattice-remote/Cargo.toml --features agent --lib` | 106 passed |
 | RDP／VNC `cargo test --manifest-path crates/lattice-{rdp,vnc}/Cargo.toml` | 分別 6／9 passed；實際分開執行，不傳 `--lib` |

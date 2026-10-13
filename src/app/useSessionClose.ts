@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 
-export function useSessionClose() {
+export function useSessionClose(selectedSessionId: string | null = null) {
+  const selected = useRef(selectedSessionId);
+  selected.current = selectedSessionId;
   const inFlight = useRef(new Set<string>());
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -20,5 +22,6 @@ export function useSessionClose() {
     }
   }
 
-  return { pending, error, dismiss: () => setError(null), run };
+  return { pending, error, dismiss: () => setError(null), run,
+    isCurrent: (sessionId: string) => selected.current === sessionId };
 }
