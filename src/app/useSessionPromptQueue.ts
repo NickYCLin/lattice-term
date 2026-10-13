@@ -47,20 +47,22 @@ export function useSessionPromptQueue(sessionId: string, agents: AgentApi, enabl
   const save = async (prompt: AgentQueuedPrompt, text: string | null): Promise<boolean> => {
     if (saving.current) return false;
     saving.current = true;
-    generation.current += 1;
+    const revision = ++generation.current;
     setEditing(true);
     try {
       const changed = await editQueuedPrompt(sessionId, prompt, text);
       if (changed) replaceSessionSubmission(sessionId, prompt.text, text);
-      await refresh();
-      if (!changed && active.current === sessionId) setError("queue-message-changed");
+      if (active.current === sessionId && revision === generation.current) {
+        await refresh();
+        if (!changed) setError("queue-message-changed");
+      }
       return changed;
     } catch (reason) {
-      if (active.current === sessionId) setError(reason instanceof Error ? reason.message : String(reason));
+      if (active.current === sessionId && revision === generation.current) setError(reason instanceof Error ? reason.message : String(reason));
       throw reason;
     } finally {
       saving.current = false;
-      if (active.current === sessionId) setEditing(false);
+      if (active.current === sessionId && revision === generation.current) setEditing(false);
     }
   };
   return { prompts, error, editing, refresh, save };
