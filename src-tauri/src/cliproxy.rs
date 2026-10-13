@@ -119,7 +119,7 @@ pub fn validate_key(raw: &str) -> Result<String, String> {
 /// user typed could hand the key to a host they did not name. The system
 /// proxy is bypassed for the same reason, and because the usual address is
 /// loopback, where a corporate proxy would only get in the way.
-fn client(timeout: Duration) -> Result<reqwest::Client, String> {
+pub(crate) fn client(timeout: Duration) -> Result<reqwest::Client, String> {
     // `rustls-no-provider` leaves the choice to the process. The application
     // installs `ring` at startup; doing it here as well keeps this module
     // usable on its own and turns a would-be panic into ordinary setup.

@@ -30,6 +30,7 @@ mod browser;
 mod codex_catalog;
 mod codex_server;
 mod elicitation;
+pub mod proxy_chat;
 
 pub const EVENT_CHAT: &str = "agent-chat://event";
 
@@ -416,6 +417,7 @@ struct RunningTurn {
 /// The turns currently running, one per thread at most.
 #[derive(Default)]
 pub struct AgentChatRegistry {
+    proxy_turns: Mutex<HashMap<String, (String, tokio::sync::watch::Sender<bool>)>>,
     running: Mutex<HashMap<String, RunningTurn>>,
     /// Long-lived Codex servers, one per chat thread.
     codex: codex_server::CodexServers,
@@ -467,6 +469,18 @@ impl AgentChatRegistry {
         expected_turn_id: Option<&str>,
     ) -> Result<bool, String> {
         validate_id(thread_id, "thread id")?;
+        let proxy_turns = self
+            .proxy_turns
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some((turn_id, cancel)) = proxy_turns.get(thread_id) {
+            if expected_turn_id.is_some_and(|expected| expected != turn_id) {
+                return Err("The active turn changed.".into());
+            }
+            let _ = cancel.send(true);
+            return Ok(true);
+        }
+        drop(proxy_turns);
         if codex_server::stop_expected(&self.codex, thread_id, expected_turn_id)? {
             return Ok(true);
         }
@@ -489,6 +503,14 @@ impl AgentChatRegistry {
     /// Ends every running turn. Called when the application exits so no CLI
     /// keeps working for a window that is gone.
     pub fn shutdown(&self) {
+        for (_, cancel) in self
+            .proxy_turns
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+        {
+            let _ = cancel.send(true);
+        }
         self.codex.shutdown();
         let mut running = self.lock();
         for turn in running.values_mut() {

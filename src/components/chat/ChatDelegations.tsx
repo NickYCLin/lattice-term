@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { mergeAttachmentPaths, CHAT_ATTACHMENT_LIMIT } from "../../app/chatAttachments";
+import type { ChatAttachment } from "../../app/agentChat";
+import { SentAttachments } from "./SentAttachments";
 import {
   delegationPrompt,
   delegationResult,
@@ -54,8 +58,35 @@ export function ChatDelegations({
   const [planId, setPlanId] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const attachmentGeneration = useRef(0);
   const children = chat.threads.filter((entry) => entry.delegatedFrom === thread.id);
   const target = machines.find((entry) => entry.id === machine);
+
+  async function chooseAttachments(images: boolean) {
+    const generation = attachmentGeneration.current;
+    setProblem("");
+    try {
+      const selected = await open({ multiple: true, ...(images ? { filters: [{ name: t("chat.attachment.images"), extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] } : {}) });
+      const paths = typeof selected === "string" ? [selected] : selected ?? [];
+      if (generation !== attachmentGeneration.current) return;
+      setAttachments(current => {
+        const next = mergeAttachmentPaths(current, paths);
+        if (!next) setProblem(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
+        return next ?? current;
+      });
+    } catch (reason) {
+      if (generation !== attachmentGeneration.current) return;
+      setProblem(t("chat.attachment.failed", { detail: String(reason) }));
+    }
+  }
+
+  useEffect(() => {
+    attachmentGeneration.current += 1;
+    setAttachments([]);
+    setProblem("");
+    return () => { attachmentGeneration.current += 1; };
+  }, [thread.id, composing]);
 
   useEffect(() => {
     if (!composing) return;
@@ -100,9 +131,14 @@ export function ChatDelegations({
             if (!task.trim() || busy) return;
             setProblem("");
             if (!target) {
-              chat.delegate(thread.id, definitionId, task, withContext);
+              chat.delegate(thread.id, definitionId, task, withContext, attachments);
               setTask("");
+              setAttachments([]);
               onCloseComposer();
+              return;
+            }
+            if (attachments.length > 0) {
+              setProblem(t("chat.delegate.remoteAttachments"));
               return;
             }
             setBusy(true);
@@ -174,6 +210,17 @@ export function ChatDelegations({
             <span className="checkbox__box" aria-hidden="true">✓</span>
             <span>{t("chat.delegate.withContext")}</span>
           </label>
+          {!target && <div className="chat-card__actions">
+            <button type="button" className="button button--ghost button--sm" onClick={() => void chooseAttachments(false)}>{t("chat.attachment.files")}</button>
+            <button type="button" className="button button--ghost button--sm" onClick={() => void chooseAttachments(true)}>{t("chat.attachment.images")}</button>
+          </div>}
+          {attachments.length > 0 && <div>
+            <SentAttachments attachments={attachments} workingDirectory={thread.workingDirectory} threadId={thread.id} />
+            {attachments.map(file => <button type="button" className="button button--ghost button--sm" key={file.path}
+              onClick={() => setAttachments(current => current.filter(attachment => attachment.path !== file.path))}>
+              {t("common.delete")} · {file.name}
+            </button>)}
+          </div>}
           {problem && <p className="field__error">{problem}</p>}
           <div className="chat-card__actions">
             <button

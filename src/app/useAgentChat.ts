@@ -15,6 +15,8 @@ import { removeConversationDraft } from "./useConversationDraft";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatCompletionTracker } from "./chatCompletion";
 import { findCliProxy, loadCliProxySettings } from "./cliProxyApi";
+import { proxyChatHistory } from "./proxyChat";
+import { keepChatAttachmentPreviews } from "./chatAttachmentPreviews";
 import { ChatQueueError, enqueueChatInput, editQueuedChatInput, removeQueuedInput, type QueuedChatInput } from "./chatInputQueue";
 import { playCompletionSound, type NotificationSoundChoice } from "./notificationSounds";
 import {
@@ -181,6 +183,7 @@ export interface AgentChatApi {
     definitionId: ChatDefinitionId,
     prompt: string,
     withContext: boolean,
+    attachments?: ChatAttachment[],
   ) => ChatThread | null;
   /**
    * The same, on another machine's Agent Fleet: a saved launch item there is
@@ -670,13 +673,16 @@ export function useAgentChat(
     changeThreads(() => snapshot);
     try {
       const { invoke } = await core();
-      await invoke("agent_chat_send", {
+      if (thread.provider === "cliproxyapi" && !proxy) throw new Error("The selected CLIProxyAPI endpoint no longer exists.");
+      const directProxy = Boolean(proxy && !thread.nativeSessionId);
+      await invoke(directProxy ? "agent_chat_proxy_send" : "agent_chat_send", {
+        ...(directProxy ? { history: proxyChatHistory(thread.items) } : {}),
         request: {
           threadId: thread.id,
           turnId,
           definitionId: thread.definitionId,
           workingDirectory: thread.workingDirectory,
-          browserEnabled: supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
+          browserEnabled: !directProxy && supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
           prompt: promptForTurn(thread, visiblePrompt),
           permission: thread.permission,
           model: thread.model.trim() || null,
@@ -686,7 +692,7 @@ export function useAgentChat(
           cliProxyId: proxy?.id ?? null,
           nativeSessionId: thread.nativeSessionId,
           attachments: attachments.map(({ path }) => ({ path })),
-          mentions: thread.definitionId === "codex"
+          mentions: !directProxy && thread.definitionId === "codex"
             ? mentions.map(({ kind, name, path }) => ({ kind, name, path }))
             : [],
         },
@@ -823,7 +829,7 @@ export function useAgentChat(
   }, [threads, send, changeThreads]);
 
   const delegate = useCallback(
-    (parentId: string, definitionId: ChatDefinitionId, prompt: string, withContext: boolean) => {
+    (parentId: string, definitionId: ChatDefinitionId, prompt: string, withContext: boolean, attachments: readonly ChatAttachment[] = []) => {
       const parent = threadsRef.current.find((thread) => thread.id === parentId);
       const task = prompt.trim();
       if (!parent || !task) return null;
@@ -835,7 +841,9 @@ export function useAgentChat(
           permission: permissionsFor(definitionId).includes(parent.permission)
             ? parent.permission
             : defaultPermission(definitionId),
-          model: "",
+          model: parent.provider && parent.definitionId === definitionId ? parent.model : "",
+          provider: parent.definitionId === definitionId ? parent.provider : undefined,
+          proxyId: parent.definitionId === definitionId ? parent.proxyId : undefined,
           title: threadTitle(`↳ ${task}`),
           accountProfileId: parent.definitionId === definitionId ? parent.accountProfileId : null,
         }),
@@ -843,7 +851,16 @@ export function useAgentChat(
         handoff: transcript ? { sourceDefinitionId: parent.definitionId, transcript } : null,
       };
       changeThreads((current) => [child, ...current]);
-      void send(child.id, task);
+      void keepChatAttachmentPreviews(child.id, attachments).then(
+        files => send(child.id, task, files),
+        reason => {
+          const turnId = crypto.randomUUID();
+          const message = reason instanceof Error ? reason.message : String(reason);
+          changeThreads(current => current.map(entry => entry.id === child.id
+            ? failTurn(beginTurn(entry, task, turnId, Date.now(), attachments), turnId, message)
+            : entry));
+        },
+      );
       return child;
     },
     [changeThreads, send],

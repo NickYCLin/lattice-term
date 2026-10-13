@@ -6,6 +6,8 @@
  */
 
 export const zhTW = {
+  "chat.proxy.direct": "直接透過 CLIProxyAPI 對話，不需要安裝 CLI。可傳送圖片與 UTF-8 文字附件；不執行本機指令、瀏覽器或外掛工具。",
+  "chat.delegate.remoteAttachments": "遠端子任務尚未支援傳送附件，請改用本機子任務或先移除附件。",
   "workspace.recovery.title": "已存專案與復原",
   "workspace.recovery.legacy": "舊版匯入紀錄（{count}）",
   "workspace.recovery.legacyHint": "這些是舊版留下的歷史捷徑，不代表正在執行或仍可續接。各 CLI 保存的對話會直接列在對話清單。移除捷徑不會刪除原始對話。",

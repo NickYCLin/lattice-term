@@ -276,7 +276,7 @@ export function ChatView({
     const definitionId =
       previous && installed.includes(previous.definitionId)
         ? previous.definitionId
-        : (installed[0] ?? chat.supported[0] ?? "claude");
+        : (installed[0] ?? (proxies.length > 0 ? "codex" : chat.supported[0] ?? "claude"));
     chat.createThread({
       definitionId,
       workingDirectory,
@@ -285,8 +285,9 @@ export function ChatView({
           ? previous.permission
           : defaultPermission(definitionId),
       model: previous?.definitionId === definitionId ? previous.model : "",
-      provider: previous?.definitionId === definitionId ? previous.provider : undefined,
-      accountProfileId: previous?.definitionId === definitionId ? previous.accountProfileId : null,
+      provider: proxies.length > 0 && installed.length === 0 ? "cliproxyapi" : previous?.definitionId === definitionId ? previous.provider : undefined,
+      proxyId: previous?.definitionId === definitionId ? previous.proxyId : proxies[0]?.id,
+      accountProfileId: installed.length > 0 && previous?.definitionId === definitionId ? previous.accountProfileId : null,
     });
   }
 
@@ -616,7 +617,7 @@ export function ChatView({
         ) : selectedSessionId ? (
           <EmptyState icon={<ChatIcon />} title={t("sessionChat.closed")}
             description={t("sessionChat.chooseAnother")} />
-        ) : installed.length === 0 && agents.mode === "ready" && !active?.archived ? (
+        ) : installed.length === 0 && proxies.length === 0 && agents.mode === "ready" && !active?.archived ? (
           <EmptyState
             icon={<ChatIcon />}
             title={t("chat.none.title")}
@@ -744,7 +745,8 @@ function ThreadPane({
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
   const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession);
   const settingsLocked = running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
-  const cliInstalled = installed.includes(thread.definitionId);
+  const directProxy = thread.provider === "cliproxyapi" && !thread.nativeSessionId;
+  const cliInstalled = directProxy || installed.includes(thread.definitionId);
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
   const { statuses: profileStatuses } = useAccountProfileStatus(accountProfiles);
@@ -757,10 +759,10 @@ function ThreadPane({
   const pickerValue = thread.provider ? { ...thread, definitionId: "codex" } : thread;
   const modelOptions = accountModelOptions(modelTargets, accountModels, {
     defaultModel: t("chat.model.default"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, pickerValue, cliProxySettings.proxies);
+  }, pickerValue, cliProxySettings.proxies, true);
   const selectedOption = modelOptions.find((option) => accountModelKey(option) === accountModelKey(pickerValue));
-  const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
-  const activeProfileSignedOut = selectedOption?.disabled === true;
+  const activeProfileMissing = !directProxy && thread.accountProfileId !== null && activeProfile === null;
+  const activeProfileSignedOut = !directProxy && selectedOption?.disabled === true;
   const canSend =
     !awaitingHistory &&
     !steering &&
@@ -770,7 +772,7 @@ function ThreadPane({
     (!thread.provider || (findCliProxy(cliProxySettings, thread.proxyId) !== null && validCliProxyModel(thread.model))) &&
     cliInstalled &&
     (draft.trim() !== "" || attachments.length > 0);
-  const assistant = cliLabel(thread.definitionId);
+  const assistant = directProxy ? "CLIProxyAPI" : cliLabel(thread.definitionId);
 
   // Follow the reply as it streams, unless the reader scrolled up to look
   // at something earlier.
@@ -1005,7 +1007,7 @@ function ThreadPane({
                     ? directoryName(thread.workingDirectory)
                     : t("chat.directory.none")}
                 </span>}
-                {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
+                {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : !directProxy && <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
           </ConversationIdentity>
           <div className="chat-composer__actions">
             {!thread.archived && <button
@@ -1052,7 +1054,7 @@ function ThreadPane({
                 <TerminalIcon />
               </button>
             )}
-            {continueInSession && (
+            {continueInSession && !directProxy && (
               <button
                 type="button"
                 className="button button--ghost button--sm"
@@ -1155,7 +1157,7 @@ function ThreadPane({
               <select
                 className="select"
                 value={thread.permission}
-                disabled={settingsLocked}
+                disabled={settingsLocked || directProxy}
                 onChange={(event) =>
                   chat.updateThread(thread.id, {
                     permission: event.target.value as ChatPermission,
@@ -1169,7 +1171,7 @@ function ThreadPane({
                 ))}
               </select>
             </label>
-            {supportsBrowser(thread.definitionId) && (
+            {!directProxy && supportsBrowser(thread.definitionId) && (
               <label className="checkbox chat-settings__browser">
                 <input type="checkbox" checked={thread.browserEnabled === true} disabled={settingsLocked}
                   onChange={(event) => chat.updateThread(thread.id, { browserEnabled: event.target.checked })} />
@@ -1181,8 +1183,8 @@ function ThreadPane({
               {t(permissionHintKey[thread.permission])}
               {profileCapable(thread.definitionId) ? ` ${t("chat.accountProfile.hint")}` : ""}
             </p>
-            <ChatMcpAccess thread={thread} />
-            {(thread.definitionId === "claude" ||
+            {!directProxy && <ChatMcpAccess thread={thread} />}
+            {!directProxy && (thread.definitionId === "claude" ||
               thread.definitionId === "codex" ||
               thread.definitionId === "gemini") && (
               <>
@@ -1200,7 +1202,8 @@ function ThreadPane({
             )}
           </div>
         )}
-        {thread.permission === "full" && !thread.archived && (
+        {directProxy && <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>}
+        {!directProxy && thread.permission === "full" && !thread.archived && (
           <Callout tone="warn">{t("chat.permission.full.hint")}</Callout>
         )}
         {thread.handoff && (
@@ -1285,8 +1288,8 @@ function ThreadPane({
         <ChatDelegations
           thread={thread}
           chat={chat}
-          assistants={definitions.map((definition) => definition.id as ChatDefinitionId)}
-          cliLabel={cliLabel}
+          assistants={Array.from(new Set([...definitions.map((definition) => definition.id as ChatDefinitionId), ...(directProxy ? [thread.definitionId] : [])]))}
+          cliLabel={id => directProxy && id === thread.definitionId ? "CLIProxyAPI" : cliLabel(id)}
           composing={delegating}
           onCloseComposer={() => setDelegating(false)}
           onInsert={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
@@ -1376,24 +1379,24 @@ function ThreadPane({
                   definitionId={thread.definitionId}
                   workingDirectory={thread.workingDirectory}
                   profileConfigPath={activeProfile?.configDirectory ?? null}
-                  disabled={steering}
+                  disabled={steering || directProxy}
                   onPick={(text, pick) => {
                     setDraft((current) => (current && !current.endsWith(" ") ? `${current} ${text}` : `${current}${text}`));
                     if (pick) setPicks((current) => [...current.filter((entry) => entry.path !== pick.path), pick]);
                   }}
                 />
               </ComposerAttachments>
-              <span className={`session-composer__access${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
+              {!directProxy && <span className={`session-composer__access${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
                 {thread.permission === "full" ? <AlertIcon size={14} /> : <ShieldIcon size={14} />}
                 {t(permissionLabelKey[thread.permission])}
-              </span>
+              </span>}
               <ComposerPopover model label={composerModelLabel} disabled={settingsLocked}
                 open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
                 <AccountModelField options={modelOptions} value={pickerValue} disabled={settingsLocked}
                   allowCliProxyApi proxyModels={cliProxyModels} onReloadProxyModels={reloadCliProxyModels}
                   onChange={changeModel} />
               </ComposerPopover>
-              {running && thread.definitionId === "codex" && (
+              {running && !directProxy && thread.definitionId === "codex" && (
                 <button type="button" className="button button--secondary button--sm"
                   disabled={!canSend} title={t("chat.steer.hint")}
                   onClick={() => void steer()}>{t(steering ? "chat.steer.sending" : "chat.steer.send")}</button>

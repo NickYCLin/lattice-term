@@ -1685,6 +1685,22 @@ async fn agent_chat_local_history_snapshot(
 /// Runs one chat turn. Returns once the CLI is running; its reply arrives
 /// as `agent-chat://event` events carrying the same thread and turn ids.
 #[tauri::command]
+async fn agent_chat_proxy_send(
+    app: AppHandle,
+    request: crate::agent_chat::ChatTurnRequest,
+    history: Vec<crate::agent_chat::proxy_chat::ProxyMessage>,
+    registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
+) -> Result<(), String> {
+    crate::agent_chat::proxy_chat::send(
+        Arc::new(crate::agent_chat::EventSink(app)),
+        Arc::clone(registry.inner()),
+        request,
+        history,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn agent_chat_send(
     app: AppHandle,
     mut request: crate::agent_chat::ChatTurnRequest,
@@ -5533,6 +5549,7 @@ pub fn run() {
             agent_account_profile_status,
             agent_account_profile_remove,
             agent_chat_send,
+            agent_chat_proxy_send,
             agent_chat_steer,
             agent_chat_stop,
             agent_chat_close,

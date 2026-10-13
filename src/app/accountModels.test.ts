@@ -16,6 +16,13 @@ const proxies: CliProxyEndpoint[] = [
 ];
 
 describe("account-aware model choices", () => {
+  it("offers configured proxies without an installed CLI or phantom native models", () => {
+    const options = accountModelOptions([], {}, labels, undefined, proxies, true);
+    expect(options).toHaveLength(2);
+    expect(options.every(option => option.provider === "cliproxyapi" && !option.disabled)).toBe(true);
+    expect(options.map(option => option.proxyId)).toEqual(["default", "7f3a91"]);
+    expect(accountModelOptions([], {}, labels, undefined, proxies)).toEqual([]);
+  });
   it("keeps a linked native directory selectable even when an isolated account has the same login", () => {
     const linked = { ...profile, managed: false, name: "Native history" };
     const targets = accountModelTargets([definition], [linked], {

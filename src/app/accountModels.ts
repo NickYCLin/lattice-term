@@ -148,8 +148,12 @@ export function accountModelOptions(
   labels: { defaultModel: string; loading: string; signedOut: string },
   selected?: AccountModelSelection,
   proxies: readonly CliProxyEndpoint[] = [],
+  allowDirectProxy = false,
 ): AccountModelOption[] {
-  return targets.flatMap((target) => {
+  const allTargets = allowDirectProxy && proxies.length > 0 && !targets.some(target => target.definitionId === "codex" && target.accountProfileId === null)
+    ? [...targets, { definitionId: "codex", accountProfileId: null, configDirectory: null, accountName: "", cliLabel: "", signedOut: true, showAccount: false }]
+    : targets;
+  return allTargets.flatMap((target) => {
     const list = lists[accountModelTargetKey(target)];
     const choices = list?.state === "ready" ? [...list.models] : [];
     if (!choices.some((choice) => choice.value === "")) {
@@ -160,7 +164,7 @@ export function accountModelOptions(
     }
     const signedOut = target.signedOut ? `（${labels.signedOut}）` : "";
     const sourceLabel = [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel].filter(Boolean).join(" · ") + signedOut;
-    const options: AccountModelOption[] = choices.map((choice) => ({
+    const options: AccountModelOption[] = target.cliLabel ? choices.map((choice) => ({
       definitionId: target.definitionId,
       accountProfileId: target.accountProfileId,
       model: choice.value,
@@ -169,7 +173,7 @@ export function accountModelOptions(
       modelLabel: choice.label,
       disabled: target.signedOut,
       ...(target.viaCliProxy ? { viaCliProxy: true } : {}),
-    }));
+    })) : [];
     // One entry per configured proxy; the picker already groups them under
     // the proxy's own heading, so the option names the proxy, not the CLI.
     if (target.definitionId === "codex" && (
