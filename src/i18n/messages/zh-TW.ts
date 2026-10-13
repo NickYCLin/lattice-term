@@ -1535,6 +1535,17 @@ export const zhTW = {
   "agents.stop.confirm.body": "這會終止本機助理程序；尚未由助理保存的內容可能會遺失。",
   "agents.stop.confirm.action": "停止",
   "agents.terminal.inputFailed": "Agent 已結束，無法再送出輸入。",
+  "agents.images.title": "圖片附件",
+  "agents.images.refresh": "重新讀取",
+  "agents.images.hint": "終端的 [Image #數字] 是 CLI 文字標記；請點這裡的縮圖查看圖片。清單也包含尚未送出的貼圖。",
+  "agents.images.loading": "正在讀取這個工作階段的圖片…",
+  "agents.images.failed": "圖片讀取失敗，請重新讀取。",
+  "agents.images.waiting": "尚未讀到原生對話紀錄，先列出這個工作階段保存的圖片。",
+  "agents.images.limited": "清單或原生紀錄已達讀取上限，這裡不是完整圖片紀錄。",
+  "agents.images.empty": "尚未找到可查看的圖片。只有圖片標記、沒有圖片內容或仍存在的檔案時，無法還原原圖。",
+  "agents.images.pages": "圖片分頁",
+  "agents.images.previous": "上一頁",
+  "agents.images.next": "下一頁",
 
   // 對話模式 --------------------------------------------------------------
   "chat.mcpAccess.title": "這個對話的 MCP 分享",

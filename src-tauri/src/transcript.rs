@@ -361,6 +361,14 @@ fn read_bounded_line<R: BufRead>(
 /// independent caps; malformed rows are ignored as before, while oversized
 /// rows are reported so the handoff can disclose that earlier content was cut.
 fn visit_transcript_rows(path: &Path, mut visit: impl FnMut(&Value)) -> Option<bool> {
+    visit_transcript_rows_with_limit(path, MAX_TRANSCRIPT_LINE_BYTES, &mut visit)
+}
+
+fn visit_transcript_rows_with_limit(
+    path: &Path,
+    line_limit: usize,
+    mut visit: impl FnMut(&Value),
+) -> Option<bool> {
     let mut file = open_regular_transcript_handle(path)?;
     let bytes = file.metadata().ok()?.len();
     let tail_offset = if bytes > MAX_TRANSCRIPT_FILE_BYTES {
@@ -390,7 +398,7 @@ fn visit_transcript_rows(path: &Path, mut visit: impl FnMut(&Value)) -> Option<b
         read_bounded_line(&mut reader, &mut line, 0).ok()?;
     }
     loop {
-        match read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES).ok()? {
+        match read_bounded_line(&mut reader, &mut line, line_limit).ok()? {
             None => break,
             Some(false) => skipped_oversized = true,
             Some(true) => {
@@ -958,6 +966,9 @@ const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 #[cfg(test)]
 #[path = "transcript/sync_tests.rs"]
 mod sync_tests;
+
+mod images;
+pub use images::{read_session_images, SessionImagesSnapshot};
 
 // A unit test runs on a machine that already has `~/.codex` and `~/.claude`.
 // Scanning those pushes the test's own fixtures past the result cap, so the
@@ -1813,6 +1824,31 @@ pub fn read_session_conversation_snapshot(
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return Ok(waiting(SessionConversationAvailability::WaitingForIdentity));
     };
+    let Some((kind, path)) = session_transcript_path(
+        definition_id,
+        working_directory,
+        session_id,
+        profile_directory,
+    )?
+    else {
+        return Ok(waiting(
+            SessionConversationAvailability::WaitingForTranscript,
+        ));
+    };
+    let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
+    Ok(SessionConversationSnapshot {
+        availability: SessionConversationAvailability::Ready,
+        messages: snapshot.messages,
+        truncated: snapshot.truncated,
+    })
+}
+
+fn session_transcript_path(
+    definition_id: &str,
+    working_directory: &str,
+    session_id: &str,
+    profile_directory: Option<&Path>,
+) -> Result<Option<(TranscriptKind, PathBuf)>, String> {
     let kind = TranscriptKind::from_definition(definition_id)
         .ok_or("This CLI does not support conversation view.")?;
     if profile_directory.is_some_and(|path| !path.is_absolute() || !path.is_dir()) {
@@ -1821,9 +1857,7 @@ pub fn read_session_conversation_snapshot(
     let Some(root) = history_root(kind, profile_directory)
         .or_else(|| history_root_with_archive(kind, profile_directory, true))
     else {
-        return Ok(waiting(
-            SessionConversationAvailability::WaitingForTranscript,
-        ));
+        return Ok(None);
     };
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
@@ -1837,17 +1871,7 @@ pub fn read_session_conversation_snapshot(
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
     };
-    let Some(path) = path else {
-        return Ok(waiting(
-            SessionConversationAvailability::WaitingForTranscript,
-        ));
-    };
-    let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
-    Ok(SessionConversationSnapshot {
-        availability: SessionConversationAvailability::Ready,
-        messages: snapshot.messages,
-        truncated: snapshot.truncated,
-    })
+    Ok(path.map(|path| (kind, path)))
 }
 
 /// The provider comes only from the exact native record in this account,

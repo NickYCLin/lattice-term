@@ -173,11 +173,82 @@ pub fn store(directory: &Path, images: &[ToolImage]) -> Vec<String> {
     paths
 }
 
+pub fn stored_images(directory: &Path, limit: usize) -> Result<(Vec<String>, bool), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("Cannot read the session image folder: {error}"))?;
+    let mut found = Vec::new();
+    let mut truncated = false;
+    for (index, entry) in entries.enumerate() {
+        if index >= 1024 {
+            truncated = true;
+            break;
+        }
+        let entry = entry.map_err(|error| format!("Cannot inspect a session image: {error}"))?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("agent-image-") && !name.starts_with("clipboard-") {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("Cannot inspect a session image: {error}"))?;
+        if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES {
+            continue;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                continue;
+            }
+        }
+        let mut head = [0; 12];
+        let mut file = std::fs::File::open(&path)
+            .map_err(|error| format!("Cannot read a session image: {error}"))?;
+        let read = file.read(&mut head).map_err(|error| error.to_string())?;
+        if mime(&head[..read]).is_none() {
+            continue;
+        }
+        found.push((metadata.modified().ok(), path.display().to_string()));
+    }
+    found.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    truncated |= found.len() > limit;
+    found.truncate(limit);
+    Ok((found.into_iter().map(|(_, path)| path).collect(), truncated))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{preview, store, ToolImage};
+    use super::{preview, store, stored_images, ToolImage};
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    #[test]
+    fn session_gallery_lists_only_owned_regular_images_and_discloses_limits() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["clipboard-one.png", "agent-image-two.png", "unrelated.png"] {
+            std::fs::write(directory.path().join(name), PNG).unwrap();
+        }
+        std::fs::write(
+            directory.path().join("agent-image-fake.png"),
+            b"not an image",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            directory.path().join("unrelated.png"),
+            directory.path().join("agent-image-link.png"),
+        )
+        .unwrap();
+        let (paths, truncated) = stored_images(directory.path(), 64).unwrap();
+        assert_eq!(paths.len(), 2);
+        assert!(!truncated);
+        assert!(paths.iter().all(|path| !path.ends_with("unrelated.png")));
+        let (paths, truncated) = stored_images(directory.path(), 1).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(truncated);
+        assert!(stored_images(&directory.path().join("missing"), 64).is_err());
+    }
 
     #[test]
     fn only_real_images_inside_the_folder_are_previewed() {

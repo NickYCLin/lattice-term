@@ -2051,6 +2051,14 @@ async fn agent_paste_clipboard_image(
     let registry = Arc::clone(registry.inner());
     let clipboard = Arc::clone(clipboard.inner());
     if crate::agent_daemon::owns(&session_id) {
+        if daemon.session_summary(&session_id).await.is_none() {
+            return Err("Agent session no longer exists.".to_string());
+        }
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        let directory = crate::agent_chat::general_chat_directory(&data_dir, &session_id)?;
         // The daemon owns the PTY, so it owns the staged file too; the PNG
         // travels over the socket instead of through a shared temp path.
         let encoded = tauri::async_runtime::spawn_blocking(move || {
@@ -2074,9 +2082,16 @@ async fn agent_paste_clipboard_image(
                     .map_err(|err| format!("Cannot encode the pasted image: {err}"))?;
             }
             use base64::Engine as _;
-            Ok(Some(
-                base64::engine::general_purpose::STANDARD.encode(png_bytes),
-            ))
+            let png = base64::engine::general_purpose::STANDARD.encode(png_bytes);
+            if crate::chat_images::store(
+                &directory,
+                &[crate::chat_images::ToolImage::Data(png.clone())],
+            )
+            .is_empty()
+            {
+                return Err("Cannot keep the pasted image for preview.".into());
+            }
+            Ok(Some(png))
         })
         .await
         .map_err(|error| format!("Clipboard image operation did not complete: {error}"))??;
@@ -2096,6 +2111,12 @@ async fn agent_paste_clipboard_image(
         if registry.session_summary(&session_id).is_none() {
             return Err("Agent session no longer exists.".to_string());
         }
+
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?;
+        let directory = crate::agent_chat::general_chat_directory(&data_dir, &session_id)?;
 
         let Some((width, height, rgba)) = clipboard.read_image_rgba(&app)? else {
             return Ok(None);
@@ -2121,6 +2142,16 @@ async fn agent_paste_clipboard_image(
             png_writer
                 .write_image_data(&rgba)
                 .map_err(|err| format!("Cannot encode the pasted image: {err}"))?;
+        }
+        if crate::chat_images::store(
+            &directory,
+            &[crate::chat_images::ToolImage::File(
+                file.path().to_path_buf(),
+            )],
+        )
+        .is_empty()
+        {
+            return Err("Cannot keep the pasted image for preview.".into());
         }
         let path = registry.stage_clipboard_image(&session_id, file)?;
         Ok(Some(path.to_string_lossy().into_owned()))
@@ -2202,6 +2233,39 @@ async fn agent_session_conversation_snapshot(
     })
     .await
     .map_err(|error| format!("Conversation read did not complete: {error}"))?
+}
+
+#[tauri::command]
+async fn agent_session_images_snapshot(
+    app: AppHandle,
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<crate::transcript::SessionImagesSnapshot, String> {
+    let summary = if crate::agent_daemon::owns(&session_id) {
+        daemon.session_summary(&session_id).await
+    } else {
+        registry.session_summary(&session_id)
+    }
+    .ok_or("The session is no longer available.")?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let directory = crate::agent_chat::general_chat_directory(&data_dir, &session_id)?;
+    blocking(move || {
+        crate::transcript::read_session_images(
+            &summary.definition_id,
+            &summary.working_directory,
+            summary.captured_session_id.as_deref(),
+            summary
+                .profile_config_path
+                .as_deref()
+                .map(std::path::Path::new),
+            &directory,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -5485,6 +5549,7 @@ pub fn run() {
             agent_export_transcript,
             agent_session_conversation,
             agent_session_conversation_snapshot,
+            agent_session_images_snapshot,
             agent_session_approval,
             agent_answer_approval,
             agent_import_memory_handoff,

@@ -2615,6 +2615,7 @@ export function SessionsView({
                   >
                     <AgentTerminalPane
                       sessionId={member.sessionId}
+                      active={visible && groupActive && member.sessionId === memberId}
                       agents={agents}
                       theme={theme}
                     />

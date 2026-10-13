@@ -1604,6 +1604,17 @@ export const en: Messages = {
     "This terminates the local CLI process. Anything the CLI has not saved may be lost.",
   "agents.stop.confirm.action": "Stop",
   "agents.terminal.inputFailed": "The agent has ended and can no longer accept input.",
+  "agents.images.title": "Image attachments",
+  "agents.images.refresh": "Reload",
+  "agents.images.hint": "Terminal [Image #number] labels are CLI text. Click a thumbnail here to view the image. This list also includes unsent pasted images.",
+  "agents.images.loading": "Reading images for this session…",
+  "agents.images.failed": "Could not read the images. Please reload.",
+  "agents.images.waiting": "The native transcript is not available yet. Showing images saved in this session.",
+  "agents.images.limited": "The list or native transcript reached its read limit. This is not a complete image history.",
+  "agents.images.empty": "No viewable images found. An image label alone cannot restore an image without its content or an existing file.",
+  "agents.images.pages": "Image pages",
+  "agents.images.previous": "Previous",
+  "agents.images.next": "Next",
 
   // Chat mode -------------------------------------------------------------
   "chat.mcpAccess.title": "MCP sharing for this conversation",
