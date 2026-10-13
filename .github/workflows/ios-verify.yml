@@ -2,15 +2,6 @@ name: iOS verification
 
 on:
   workflow_dispatch:
-    inputs:
-      reuse_run:
-        description: "診斷用既有 unsigned bundle 的 run ID；留空才建置目前版本"
-        default: ""
-        type: string
-      reuse_sha:
-        description: "既有產物 provenance 的完整來源 SHA；僅診斷，不代表目前版本驗收"
-        default: ""
-        type: string
   push:
     branches: [main]
     paths:
@@ -31,7 +22,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ios-verify-${{ github.ref }}
@@ -75,12 +65,9 @@ jobs:
       - run: npm run ios:check
       - run: python3 scripts/test_verify_ios_app.py
       - run: python3 scripts/test_ios_simulator_smoke.py
-      - run: python3 scripts/test_ios_reuse_bundle.py
       - name: Build the simulator app with bundled frontend assets
-        if: ${{ !inputs.reuse_run }}
         run: npm run ios:simulator:release
       - name: Check the built bundle
-        if: ${{ !inputs.reuse_run }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -96,10 +83,8 @@ jobs:
           (reports / 'simulator.json').write_text(result.stdout)
           PY
       - name: Build an unsigned device archive
-        if: ${{ !inputs.reuse_run }}
         run: npm run ios:device:unsigned
       - name: Check the device SDK and bundled privacy declarations
-        if: ${{ !inputs.reuse_run }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -113,7 +98,6 @@ jobs:
           Path('src-tauri/gen/apple/build/reports/device.json').write_text(result.stdout)
           PY
       - name: Package verified unsigned bundles
-        if: ${{ !inputs.reuse_run }}
         shell: bash
         run: |
           python3 - <<'PY'
@@ -153,20 +137,12 @@ jobs:
           )
           PY
       - name: Save verified bundles and reports
-        if: ${{ !inputs.reuse_run }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ios-unsigned-release-${{ github.sha }}
           path: src-tauri/gen/apple/build/reports
           if-no-files-found: error
           retention-days: 7
-      - name: Retrieve source-verified simulator bundle for diagnosis only
-        if: ${{ inputs.reuse_run }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN: ${{ inputs.reuse_run }}
-          SOURCE_SHA: ${{ inputs.reuse_sha }}
-        run: python3 scripts/ios-reuse-bundle.py
       - name: Verify startup and capture original App Store screenshot candidates
         shell: bash
         run: |
@@ -183,9 +159,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ios-simulator-launch-evidence
-          path: |
-            src-tauri/gen/apple/build/smoke
-            src-tauri/gen/apple/build/diagnostic-source.json
+          path: src-tauri/gen/apple/build/smoke
           if-no-files-found: ignore
           retention-days: 14
       # This job deliberately creates no IPA, uses no Apple credentials,

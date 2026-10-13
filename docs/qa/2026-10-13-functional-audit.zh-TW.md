@@ -149,13 +149,13 @@ GitHub 記錄與最終回報為準。本報告不提前宣稱 CI、安裝版或�
 新增失敗診斷各自記錄 host process、模擬器 process、WebKit／App log、
 CoreSimulator host log，及使用已通過 iPhone 圖片的獨立 OCR 探針；
 每項都有個別完成或逾時記錄，不改原機型、畫面要求、90 秒期限或停擺上限。
-Python smoke 25 tests 與來源 digest／架構／SHA／run 驗證測試通過。
+當時 Python smoke 25 tests 與來源 digest／架構／SHA／run 驗證測試通過。
 
-workflow_dispatch 可選既有 unsigned 產物做診斷：來源必須是本 repo 已完成的
-iOS verification workflow，核對完整來源 SHA、run、架構、未簽署旗標、
-SHA-256，再安全解壓到新的隔離目錄。此模式不建置、不發布、不用 Apple 金鑰，
-證據明確標記 currentBuildAcceptance=false，不冒充目前程式版本的完整驗收。
-實際 CI 與診斷結果以後續交付紀錄為準。
+本輪已執行的既有 unsigned 產物診斷，先核對本 repo 已完成的 verification
+workflow、完整來源 SHA、run、架構、未簽署旗標與 SHA-256，再解壓到隔離目錄。
+當時的證據標記 currentBuildAcceptance=false，不冒充目前版本的完整驗收。
+下列 run 與下載證據保留作為已執行的比較；診斷入口及專用 helper 已撤下，
+不再提供需要額外 Actions scope 的產物下載入口。
 
 ### 最新產物的隔離比較
 
@@ -188,3 +188,41 @@ SHA-256，再安全解壓到新的隔離目錄。此模式不建置、不發布�
   直接指向本 checkout 重跑：2 files、12 tests 全部通過。
   程式 head 28aa51c 的 CI run 38445797762 與 Windows run 38445798033 成功；
   iOS run 38445797824 與隔離比較 run 38449793865 失敗如上述，不列為通過。
+
+## 2026-10-14 收尾審查補修
+
+### 保留元件的篩選一致性
+
+- 獨立 NativeConversationRows fixture 的顯示 Windows 路徑篩選再次重現：
+  6 passed／1 failed。repo 增加顯示路徑與等價路徑案例，修正前 7 passed／1 failed。
+  修正後 8 項通過；比較兩側均使用 chatProjectKey，匯入仍傳原 workingDirectory。
+- 影響只限保留元件及 useNativeConversationList 的 rows 回傳一致性。
+  目前 ChatView 只用該 hook 的 renderEntry／footer，主列表來自 chatConversationSidebar；
+  未使用 rows 或直接 render NativeConversationRows。不是主畫面或安裝版對話消失的重現。
+  coordinator 已驗證主側欄兩個 Windows 篩選案例，不重做該修正。
+
+### 權限與診斷入口
+
+- ios-verify.yml 恢復 main 4a6a8ec 的原始內容，僅 contents: read，
+  撤除本輪新增 workflow-wide actions: read 及 reuse_run／reuse_sha。
+  刪除僅服務該入口的 ios-reuse-bundle.py 與 test_ios_reuse_bundle.py，
+  沒有新增 PAT、secret 或放寬 guard；沒有刪除本機或遠端的診斷證據及使用者資料。
+- 原有 ios-smoke-existing.yml 未修改，其功能及來源限制保留。
+  失敗診斷探針與產物 provenance 保存仍保留，不重做已核實的比較 run。
+
+### 完整截圖逾時的時間預算
+
+- 原始外部虛擬時鐘測試與 repo 新增回歸均重現：每次 screenshot 指令逾時，
+  但完整 PNG 只有狀態列，OCR 成功而前端未就緒，原本 30 次擷取延伸至 1320 秒。
+- 現在完整 PNG 的指令逾時也計入既有停擺次數，並限制總期限不超過
+  90 + 2 × 60 = 210 秒。完整圖片仍會辨識，連線頁可正常通過；
+  尚未就緒時不無限補回期限，失敗 PNG 與 OCR JSON 仍保存。
+  沒有增加 timeout、減少機型或放寬連線頁判定。
+- repo Python smoke 26 項通過，原始外部時間預算測試也通過。
+  這是確定重現的驗收腳本缺陷；run 38445797824／38449793865 在 launch
+  330 秒逾時，尚未進入 frontend／OCR，沒有走到本時間預算路徑，兩者不能混為因果。
+
+遠端交付與本次 CI 以 PR #304 最新提交及最後交付回報為準；
+若三台啟動仍未通過，保留 PR，不繞過失敗合併或正式發布。
+本次完整 npm run check：224 files／1613 tests、typecheck、production build 通過；
+原始外部元件 fixture 7 項通過，verify-ios-app 10 項通過。
