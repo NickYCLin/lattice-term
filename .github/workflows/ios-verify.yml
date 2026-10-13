@@ -75,6 +75,7 @@ jobs:
       - run: npm run ios:check
       - run: python3 scripts/test_verify_ios_app.py
       - run: python3 scripts/test_ios_simulator_smoke.py
+      - run: python3 scripts/test_ios_reuse_bundle.py
       - name: Build the simulator app with bundled frontend assets
         if: ${{ !inputs.reuse_run }}
         run: npm run ios:simulator:release

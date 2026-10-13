@@ -133,7 +133,7 @@ GitHub 記錄與最終回報為準。本報告不提前宣稱 CI、安裝版或�
   明確重新保存優先於舊值，清除以 v2 空值記錄阻止舊值復活。
   v1 的 C: 無法證明來自絕對根目錄，不擅自把該權限套給 C:/。
 - 新增回歸最初 7 failed／5 passed；修正後針對測試通過。
-  完整 npm run check：224 files／1609 tests、typecheck、production build 通過。
+  完整 npm run check：224 files／1610 tests、typecheck、production build 通過。
   沒有重做已通過的 close-focus 修正。
 - coordinator 回報實機 MCP 已使用既有分享，經 capabilities／授權目標／state／read，
   同一 conversation 為 integration/done/ready=true、queued=0，派送回覆
@@ -143,7 +143,7 @@ GitHub 記錄與最終回報為準。本報告不提前宣稱 CI、安裝版或�
 ### iOS 啟動診斷
 
 先前 run 38425920884 attempt 2：iPhone 與 iPad 已辨識連線頁，Pro Max
-最後 PNG 為白画面，OCR 僅狀態列，補截圖與系統 log 也逾時。
+最後 PNG 為白畫面，OCR 僅狀態列，補截圖與系統 log 也逾時。
 不能據此宣稱 App 崩潰，也不能當成只有 OCR 誤判。
 新增失敗診斷各自記錄 host process、模擬器 process、WebKit／App log、
 CoreSimulator host log，及使用已通過 iPhone 圖片的獨立 OCR 探針；

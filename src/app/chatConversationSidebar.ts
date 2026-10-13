@@ -57,6 +57,8 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
     if (existing) return existing;
     let nodeId = /^[a-z]:\//i.test(key) || key.startsWith("//")
       ? agentWorkspaceProjectNodeId(chatProjectDirectory(directory)) : "project:local:" + key;
+    const plain = displayPath(directory.trim());
+    if (/^[a-z]:[\\/]+$/i.test(plain)) nodeId = "project:local:" + plain.slice(0, 2);
     if (workspace.projects.has(nodeId)) nodeId = "project:native:" + key;
     projectIds.set(key, nodeId);
     workspace.projects.set(nodeId, projectName(displayPath(directory)) || generalProjectLabel);

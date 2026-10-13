@@ -26,6 +26,12 @@ function rows(result: ReturnType<typeof sidebar>) {
 }
 
 describe("conversation sidebar identity", () => {
+  it("retains the legacy drive-root sidebar ID while filtering absolute paths", () => {
+    const result = sidebar({ history: [conversation({ workingDirectory: "C:\\" })], projectFilter: "c:/" });
+    expect([...result.workspace.projects.keys()]).toEqual(["project:local:C:"]);
+    expect(result.workspace.nodes.find(node => node.id === nativeConversationNodeId(conversation()))?.defaultParentId)
+      .toBe("project:local:C:");
+  });
   it("shows a running native conversation once under one project", () => {
     const result = sidebar({ sessions: [fakeSession({ capturedSessionId: "native-1" })],
       threads: [fakeThread({ nativeSessionId: "native-1" })], history: [conversation()] });
