@@ -16,6 +16,7 @@ pub mod clipboard;
 pub mod cliproxy;
 mod connection_credentials;
 pub mod credentials;
+mod desktop_autostart;
 pub mod desktop_notification;
 pub mod domain;
 mod durable_file;
@@ -1410,6 +1411,20 @@ async fn agent_daemon_autostart_enabled() -> bool {
     tauri::async_runtime::spawn_blocking(crate::agent_daemon::autostart::enabled)
         .await
         .unwrap_or(false)
+}
+
+#[tauri::command]
+async fn desktop_autostart_enabled() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(crate::desktop_autostart::enabled)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn desktop_set_autostart(enabled: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::desktop_autostart::set(enabled))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Adds or removes the login entry that starts the background service, so
@@ -5262,7 +5277,10 @@ pub fn run() {
             // app moved or updated; it is never created here.
             {
                 let dir = dir.clone();
-                std::thread::spawn(move || crate::agent_daemon::autostart::refresh(&dir));
+                std::thread::spawn(move || {
+                    crate::agent_daemon::autostart::refresh(&dir);
+                    crate::desktop_autostart::refresh();
+                });
             }
             // The credential router and the encrypted vault live in the same
             // directory as the rest of the app's data.
@@ -5439,6 +5457,8 @@ pub fn run() {
             agent_set_max_active_sessions,
             agent_daemon_autostart_enabled,
             agent_daemon_set_autostart,
+            desktop_autostart_enabled,
+            desktop_set_autostart,
             agent_chat_supported,
             agent_chat_local_history,
             agent_chat_local_history_page,

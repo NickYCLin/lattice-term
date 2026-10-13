@@ -56,6 +56,13 @@ function renderSettings(platform: string): string {
 }
 
 describe("Settings updater platform boundary", () => {
+  it("shows Windows desktop startup separately from the background service", () => {
+    const markup = renderSettings("windows");
+    expect(markup).toContain("登入 Windows 後自動開啟 LatticeTerm");
+    expect(markup).toContain("與背景服務的登入啟動各自獨立");
+    expect(renderSettings("ios")).not.toContain("登入 Windows 後自動開啟 LatticeTerm");
+    expect(renderSettings("linux")).not.toContain("登入 Windows 後自動開啟 LatticeTerm");
+  });
   it("shows the common languages as a labelled selection grid", () => {
     const markup = renderSettings("linux");
 

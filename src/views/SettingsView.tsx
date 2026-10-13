@@ -32,6 +32,7 @@ import { ChangelogPanel } from "../components/settings/ChangelogPanel";
 import { PrivacyNotice } from "../components/settings/PrivacyNotice";
 import { RemoteMcpPanel } from "../components/settings/RemoteMcpPanel";
 import { BackgroundServicePanel } from "../components/settings/BackgroundServicePanel";
+import { DesktopStartupPanel } from "../components/settings/DesktopStartupPanel";
 import { CliProxyApiPanel } from "../components/settings/CliProxyApiPanel";
 import {
   clearSensitiveClipboard,
@@ -727,6 +728,7 @@ export function SettingsView({
 
       {usesAppleUpdates && <PrivacyNotice />}
       {!usesAppleUpdates && <BackgroundServicePanel available={desktopBackendAvailable} />}
+      {runtime.summary?.platform === "windows" && <DesktopStartupPanel available={desktopBackendAvailable} />}
       {!usesAppleUpdates && <RemoteMcpPanel available={desktopBackendAvailable} />}
       {!usesAppleUpdates && <CliProxyApiPanel available={desktopBackendAvailable} />}
 
