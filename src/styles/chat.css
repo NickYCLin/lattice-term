@@ -2314,6 +2314,16 @@ button.chat-diff__line.is-commentable:focus-visible {
   gap: var(--space-1, 0.25rem);
 }
 
+.chat-project-defaults {
+  padding: var(--space-2, 0.5rem);
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.chat-project-defaults summary {
+  cursor: pointer;
+}
+
 .chat-projects li .chat-thread {
   flex: 1;
   min-width: 0;

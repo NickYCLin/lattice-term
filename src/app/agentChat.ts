@@ -625,7 +625,7 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId" | "effort">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
@@ -642,6 +642,7 @@ export function createThread(
     permission: settings.permission,
     model: settings.model.trim(),
     accountProfileId: settings.accountProfileId ?? null,
+    effort: settings.effort ?? null,
     nativeSessionId: null,
     reportedModel: null,
     handoff: null,

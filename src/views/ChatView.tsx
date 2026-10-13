@@ -1,4 +1,6 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
+import { clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
 import { useChatClipboardFallback } from "../app/chatClipboard";
 import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
@@ -88,7 +90,7 @@ import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
 import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
-import { chatProjectsWithHistory, projectName } from "../app/chatProjects";
+import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -171,6 +173,17 @@ export function ChatView({
   const modeTabs = useFittingTabs<HTMLDivElement>();
   // A project picked in the projects tab narrows the conversation list to it.
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [projectDefaults, setProjectDefaults] = useState<ProjectDefaults | null>(null);
+  const [projectNotice, setProjectNotice] = useState<string | null>(null);
+  useEffect(() => {
+    setProjectNotice(null);
+    try {
+      setProjectDefaults(projectFilter ? loadChatProjectDefaults(localStorage, projectFilter) : null);
+    } catch {
+      setProjectDefaults(null);
+      setProjectNotice(t("chat.projects.defaults.error"));
+    }
+  }, [projectFilter, t]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -257,15 +270,34 @@ export function ChatView({
   const sessionRead = useContinuedSessionRead(active, Boolean(activeLiveSession), accountProfiles,
     chat.updateThreadFromSession, t("chat.continuedInSession.notice"), t("history.sessionMissing"));
   function startThread(workingDirectory = "") {
+    if (workingDirectory) {
+      try {
+        const defaults = loadChatProjectDefaults(localStorage, workingDirectory);
+        if (defaults) {
+          const unavailable = projectDefaultsUnavailable(defaults, { installed, proxies, profiles: accountProfiles });
+          if (unavailable) {
+            setProjectNotice(t(`chat.projects.defaults.${unavailable}`));
+            return;
+          }
+          setSelectedSessionId(null);
+          setProjectNotice(null);
+          chat.createThread({ ...defaults, workingDirectory });
+          return;
+        }
+      } catch {
+        setProjectNotice(t("chat.projects.defaults.error"));
+        return;
+      }
+    }
     setSelectedSessionId(null);
     // Keep the assistant choice; selecting a project is optional for each chat.
     // Inside a project, its own latest conversation is the better guide:
     // projects tend to keep one assistant, model and permission.
-    const normalized = workingDirectory.replace(/[\\/]+$/, "") || workingDirectory;
+    const normalized = chatProjectKey(workingDirectory);
     const inProject = normalized
       ? chat.threads
           .filter(
-            (thread) => (thread.workingDirectory.replace(/[\\/]+$/, "") || thread.workingDirectory) === normalized,
+            (thread) => !thread.remote && !thread.archived && chatProjectKey(thread.workingDirectory) === normalized,
           )
           .reduce<ChatThread | undefined>(
             (latest, thread) => (!latest || thread.updatedAt > latest.updatedAt ? thread : latest),
@@ -413,6 +445,7 @@ export function ChatView({
         {mode === "threads" ? (
           <div className="chat-threads__list">
             {projectFilter !== null && (
+              <>
               <div className="chat-project-filter">
                 <FolderIcon />
                 <span title={projectFilter}>{projectName(projectFilter)}</span>
@@ -426,6 +459,29 @@ export function ChatView({
                   <CloseIcon />
                 </button>
               </div>
+              <ChatProjectDefaults defaults={projectDefaults} notice={projectNotice}
+                canSave={Boolean(active && !active.remote && !active.archived && !active.runningTurnId
+                  && !active.pendingInputs?.length && chatProjectKey(active.workingDirectory) === chatProjectKey(projectFilter))}
+                onSave={() => {
+                  if (!active || active.remote || active.archived || active.runningTurnId || active.pendingInputs?.length
+                    || chatProjectKey(active.workingDirectory) !== chatProjectKey(projectFilter)) return;
+                  try {
+                    setProjectDefaults(saveChatProjectDefaults(localStorage, projectFilter, active));
+                    setProjectNotice(t("chat.projects.defaults.saved"));
+                  } catch {
+                    setProjectNotice(t("chat.projects.defaults.error"));
+                  }
+                }}
+                onClear={() => {
+                  try {
+                    clearChatProjectDefaults(localStorage, projectFilter);
+                    setProjectDefaults(null);
+                    setProjectNotice(t("chat.projects.defaults.recent"));
+                  } catch {
+                    setProjectNotice(t("chat.projects.defaults.error"));
+                  }
+                }} />
+              </>
             )}
             <SidebarStorageNotice />
             <ChatThreadTree
