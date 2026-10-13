@@ -160,6 +160,7 @@ export function fakeThread(overrides: Partial<ChatThread> = {}): ChatThread {
 
 export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi {
   return {
+    nativeRead: null,
     getThread: (id: string) => overrides.threads?.find(thread => thread.id === id),
     threads: [],
     activeThreadId: null,

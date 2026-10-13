@@ -44,6 +44,35 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("shows native history progress inside the opened thread instead of a new-chat welcome", () => {
+    const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,
+      nativeRead: { threadId: thread.id, ready: false, loading: true, error: null, refresh: () => {} } }));
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain("已等待 0 秒");
+    expect(html).not.toContain('class="chat-welcome"');
+    const unrelated = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,
+      nativeRead: { threadId: "other", ready: false, loading: true, error: null, refresh: () => {} } }));
+    expect(unrelated).not.toContain('role="progressbar"');
+  });
+
+  it("keeps the history read error and retry in the thread", () => {
+    const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,
+      nativeRead: { threadId: thread.id, ready: false, loading: false, error: "disk busy", refresh: () => {} } }));
+    expect(html).toContain("disk busy");
+    expect(html).toContain("重新讀取");
+    expect(html).not.toContain('class="chat-welcome"');
+  });
+
+  it("makes sent image filenames clickable without making ordinary files image previews", () => {
+    const thread = fakeThread({ items: [{ type: "user", id: "sent", at: 1, text: "See attachments", attachments: [
+      { isImage: true, path: "/work/shot.png", name: "shot.png" }, { isImage: false, path: "/work/notes.txt", name: "notes.txt" },
+    ] }] });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(html).toContain('aria-label="查看圖片：shot.png"');
+    expect(html).not.toContain('aria-label="查看圖片：notes.txt"');
+  });
   it("uses the shared composer with a short model label and actual access", () => {
     const thread = fakeThread({ workingDirectory: "D:/project/LatticeTerm", model: "gpt-5.6-sol", permission: "readOnly" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));

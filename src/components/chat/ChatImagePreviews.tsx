@@ -3,6 +3,7 @@ import { mentionedImagePaths } from "../../app/chatImages";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
 import { displayPath } from "../../app/displayPath";
+import { ChatImagePreview } from "./ChatImagePreview";
 
 /**
  * Thumbnails of images on disk. The backend only reads them from the
@@ -22,10 +23,12 @@ export function ChatImageStrip({
 }) {
   const { t } = useI18n();
   const [images, setImages] = useState<{ path: string; url: string }[]>([]);
-  const [enlarged, setEnlarged] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{ path: string; url: string } | null>(null);
   const key = paths.join("\n");
 
   useEffect(() => {
+    setImages([]);
+    setSelected(null);
     const wanted = key ? key.split("\n") : [];
     if ((!workingDirectory && !threadId) || wanted.length === 0 || !hasDesktopBackend()) {
       setImages([]);
@@ -35,6 +38,7 @@ export function ChatImageStrip({
     void import("@tauri-apps/api/core").then(async ({ invoke }) => {
       const found: { path: string; url: string }[] = [];
       for (const path of wanted) {
+        if (cancelled) return;
         const url = await invoke<string | null>("chat_image_preview", {
           workingDirectory,
           path,
@@ -43,7 +47,7 @@ export function ChatImageStrip({
         if (url) found.push({ path, url });
       }
       if (!cancelled) setImages(found);
-    });
+    }).catch(() => { if (!cancelled) setImages([]); });
     return () => {
       cancelled = true;
     };
@@ -53,17 +57,20 @@ export function ChatImageStrip({
   return (
     <div className="chat-images" aria-label={t("chat.images")}>
       {images.map((image) => (
-        <figure key={image.path} className={enlarged === image.path ? "is-enlarged" : undefined}>
+        <figure key={image.path}>
           <button
             type="button"
-            onClick={() => setEnlarged((current) => (current === image.path ? null : image.path))}
-            title={t(enlarged === image.path ? "chat.images.shrink" : "chat.images.enlarge")}
+            onClick={() => setSelected(image)}
+            title={t("chat.images.enlarge")}
+            aria-label={t("chat.images.preview", { name: image.path.split(/[\\/]/).pop() ?? image.path })}
           >
             <img src={image.url} alt={image.path} loading="lazy" />
           </button>
           {captions && <figcaption title={displayPath(image.path)}>{displayPath(image.path)}</figcaption>}
         </figure>
       ))}
+      {selected && <ChatImagePreview path={selected.path} name={selected.path.split(/[\\/]/).pop() ?? selected.path}
+        workingDirectory={workingDirectory} threadId={threadId} initialUrl={selected.url} onClose={() => setSelected(null)} />}
     </div>
   );
 }

@@ -12,6 +12,49 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("./notificationSounds", () => ({ playCompletionSound: async () => "disabled" }));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+it("opens an empty history mirror immediately, blocks sending until read and retries in place", async () => {
+  vi.useFakeTimers();
+  const container = installFakeDom();
+  vi.stubGlobal("addEventListener", () => {});
+  vi.stubGlobal("removeEventListener", () => {});
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+  let finish!: (value: unknown) => void;
+  let fail!: (reason: Error) => void;
+  invoke.mockImplementation(command => command === "agent_chat_local_history_snapshot"
+    ? new Promise((resolve, reject) => { finish = resolve; fail = reject; })
+    : Promise.resolve(command === "agent_chat_supported" ? ["codex"] : undefined));
+  const history = { entries: [], profileKey: "[]" } as unknown as NativeHistory;
+  let chat!: AgentChatApi;
+  function Probe() { chat = useAgentChat(); return null; }
+  const root = createRoot(container as unknown as Element);
+  try {
+    await act(async () => root.render(<NativeHistoryContext.Provider value={history}><Probe /></NativeHistoryContext.Provider>));
+    let thread!: ChatThread;
+    await act(async () => { thread = chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "native",
+      workingDirectory: "/work", title: "Slow conversation", accountProfileId: null, messages: [] }); });
+    expect(chat.activeThreadId).toBe(thread.id);
+    expect(chat.nativeRead).toMatchObject({ threadId: thread.id, ready: false, loading: true });
+    await expect(chat.send(thread.id, "not yet")).rejects.toThrow("Read the conversation history");
+    expect(invoke.mock.calls.some(([command]) => command === "agent_chat_send")).toBe(false);
+    await act(async () => { fail(new Error("disk busy")); });
+    expect(chat.nativeRead).toMatchObject({ ready: false, loading: false, error: "disk busy" });
+    await act(async () => chat.nativeRead!.refresh());
+    await act(async () => { finish({ messages: [{ role: "user", text: "old question" }, { role: "assistant", text: "old reply" }], truncated: false }); });
+    expect(chat.nativeRead).toMatchObject({ ready: true, loading: false, error: null });
+    expect(chat.getThread(thread.id)?.items).toHaveLength(2);
+    await act(async () => { chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "native",
+      workingDirectory: "/work", title: "Slow conversation", accountProfileId: null, messages: [] }); });
+    expect(chat.getThread(thread.id)?.items).toHaveLength(2);
+    const changedHistory = { ...history, profileKey: JSON.stringify([{ profileId: "other", definitionId: "codex", configDirectory: "/another" }]) };
+    await act(async () => root.render(<NativeHistoryContext.Provider value={changedHistory}><Probe /></NativeHistoryContext.Provider>));
+    expect(chat.nativeRead).toMatchObject({ ready: false, loading: true });
+    await expect(chat.send(thread.id, "wait for the new config")).rejects.toThrow("Read the conversation history");
+    expect(chat.getThread(thread.id)?.items).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("polls locally created native conversations and appends external replies without launching a CLI", async () => {
   vi.useFakeTimers();
   const container = installFakeDom();

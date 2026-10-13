@@ -6,10 +6,14 @@ import type { LocalConversation } from "../../app/localConversationSessions";
 import { NativeHistoryContext, type NativeHistory } from "../../app/useNativeConversations";
 import { I18nProvider } from "../../i18n";
 import { NativeConversationRows } from "./NativeConversationRows";
+import { SentAttachments } from "./SentAttachments";
+import { ConversationReadProgress } from "./ConversationReadProgress";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../../app/useCliProxyApi", () => ({ useCliProxySettings: () => ({ proxies: [] }) }));
+vi.mock("../../app/nativeRuntime", () => ({ hasDesktopBackend: () => true }));
+vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
 
 class HostNode {
   nodeType = 1;
@@ -75,8 +79,71 @@ function installHostDom() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   invoke.mockReset();
+});
+
+it("opens a native thread immediately without waiting for a snapshot in the list", async () => {
+  const container = installHostDom();
+  const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "slow",
+    title: "Large history", workingDirectory: "/work", resumable: true, updatedAt: 1 };
+  const history = { entries: [entry], profiles: [], profileKey: "[]" } as unknown as NativeHistory;
+  const chat = fakeChatApi();
+  const opened = vi.fn();
+  const root = createRoot(container as unknown as Element);
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><NativeHistoryContext.Provider value={history}>
+      <NativeConversationRows chat={chat} projectFilter={null} onOpened={opened} />
+    </NativeHistoryContext.Provider></I18nProvider>));
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(chat.importNativeConversation).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: "slow", messages: [] }));
+    expect(opened).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("counts actual waiting time without inventing a percentage and cleans up its timer", async () => {
+  vi.useFakeTimers();
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const retry = vi.fn();
+  const render = (loading: boolean, error: string | null = null) => <I18nProvider locale="zh-TW">
+    <ConversationReadProgress loading={loading} error={error} onRetry={retry} />
+  </I18nProvider>;
+  try {
+    await act(async () => root.render(render(true)));
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(container.textContent).toContain("已等待 9 秒");
+    expect(container.textContent).toContain("無法估算剩餘時間");
+    const progress = allNodes(container).find(node => node.attributes.role === "progressbar")!;
+    expect(progress.attributes["aria-valuenow"]).toBeUndefined();
+    await act(async () => root.render(render(false, "disk busy")));
+    expect(allNodes(container).some(node => node.attributes.role === "progressbar")).toBe(false);
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(retry).toHaveBeenCalledOnce();
+    await act(async () => root.render(render(true)));
+    expect(container.textContent).toContain("已等待 0 秒");
+  } finally { await act(async () => root.unmount()); }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("opens sent images in a dialog using the owning thread and reports missing files", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  invoke.mockResolvedValue(null);
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SentAttachments
+      attachments={[{ isImage: true, name: "shot.png", path: "/work/shot.png" }, { isImage: false, name: "notes.txt", path: "/work/notes.txt" }]}
+      workingDirectory="/work" threadId="owner" /></I18nProvider>));
+    expect(allNodes(container).filter(node => node.tagName === "BUTTON")).toHaveLength(1);
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/work/shot.png", workingDirectory: "/work", threadId: "owner" });
+    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(true);
+    expect(container.textContent).toContain("無法載入圖片");
+    await act(async () => onClick(allNodes(container).find(node => node.attributes["aria-label"] === "關閉")!)());
+    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(false);
+  } finally { await act(async () => root.unmount()); }
 });
 
 it("automatically groups native conversations by project without importing them", async () => {

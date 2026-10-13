@@ -27,6 +27,9 @@ import { displayPath } from "../../app/displayPath";
 import { switchesModelInPlace } from "../../app/sessionModelSwitch";
 import { SessionModelPicker } from "./SessionModelPicker";
 import { useChatClipboardFallback } from "../../app/chatClipboard";
+import { SentAttachments } from "./SentAttachments";
+import { keepChatAttachmentPreviews } from "../../app/chatAttachmentPreviews";
+import { ConversationReadProgress } from "./ConversationReadProgress";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -101,10 +104,21 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     if (!canSend || pastingRef.current) return;
     const submitted = draft;
     const files = attachments;
-    if (await conversation.send(sessionPromptWithAttachments(submitted, files))) {
-      setDraft(current => current === submitted ? "" : current);
-      setAttachments(current => current === files ? [] : current);
-      void queue.refresh();
+    pastingRef.current = true;
+    setPasting(true);
+    try {
+      const saved = await keepChatAttachmentPreviews(session.sessionId, files);
+      const delivered = saved.map(file => file.isImage && file.preview ? { ...file, path: file.preview } : file);
+      if (await conversation.send(sessionPromptWithAttachments(submitted, delivered))) {
+        setDraft(current => current === submitted ? "" : current);
+        setAttachments(current => current === files ? [] : current);
+        void queue.refresh();
+      }
+    } catch (reason) {
+      if (mounted.current) setNotice(t("chat.attachment.failed", { detail: errorText(reason) }));
+    } finally {
+      pastingRef.current = false;
+      setPasting(false);
     }
   }
 
@@ -209,6 +223,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
     }}>
       <div className="chat-messages__inner">
+        {supported && <ConversationReadProgress loading={conversation.loading} />}
         {!supported ? <p>{t("sessionChat.unsupported")}</p>
           : conversation.readError ? <div role="status"><p>{t("sessionChat.readError")}</p><p className="session-chat__diagnostic">{conversation.readError}</p></div>
           : conversation.messages.length === 0 ? <p role="status">{t(
@@ -242,9 +257,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
           return <ConversationMessage key={index} role={message.role} assistant={assistant}>
             {sent ? <div>{sent.text}</div> : <ChatMarkdown source={message.text} />}
-            {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
-              {files.map(file => <AttachmentChip key={file.path} attachment={file} />)}
-            </div>}
+            <SentAttachments attachments={files} workingDirectory={session.workingDirectory} threadId={session.sessionId} />
           </ConversationMessage>;
         })}
         {sessionSubmissionsNotQueued(conversation.submitted ?? [], queue.prompts).map(prompt => {
@@ -252,9 +265,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           const files = mergeAttachmentPaths([], sent.paths) ?? [];
           return <ConversationMessage key={`submitted-${prompt.id}`} role="user" assistant={assistant}>
             <div>{sent.text}</div>
-            {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
-              {files.map(file => <AttachmentChip key={file.path} attachment={file} />)}
-            </div>}
+            <SentAttachments attachments={files} workingDirectory={session.workingDirectory} threadId={session.sessionId} />
             <small className="session-chat__receipt">{t("sessionChat.awaitingTranscript")}</small>
           </ConversationMessage>;
         })}

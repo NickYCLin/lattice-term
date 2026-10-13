@@ -3,6 +3,7 @@ import { useChatClipboardFallback } from "../app/chatClipboard";
 import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
 import { NativeConversationRows } from "../components/chat/NativeConversationRows";
+import { ConversationReadProgress } from "../components/chat/ConversationReadProgress";
 import { useNativeHistory } from "../app/useNativeConversations";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
@@ -12,8 +13,8 @@ import { ConversationIdentity, ConversationListIdentity, ConversationMessage } f
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
 import { useFittingTabs } from "../components/chat/useFittingTabs";
-import { appendSessionTurns, liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
-import type { NativeMessageSnapshot } from "../app/useNativeConversations";
+import { liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
+import { useContinuedSessionRead } from "../app/useContinuedSessionRead";
 /**
  * Chat mode: talk to a local agent CLI in a message thread.
  *
@@ -34,7 +35,8 @@ import {
   type ClipboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CHAT_ATTACHMENT_LIMIT } from "../app/chatAttachments";
+import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, splitSessionAttachments } from "../app/chatAttachments";
+import { keepChatAttachmentPreviews } from "../app/chatAttachmentPreviews";
 import {
   defaultPermission,
   effortChoices,
@@ -47,7 +49,6 @@ import {
   threadIsFresh,
   mentionsInPrompt,
   type ChatDefinitionId,
-  type ChatAttachment,
   type ChatItem,
   type ChatPermission,
   type ChatThread,
@@ -57,7 +58,6 @@ import type { AgentAutomationsApi } from "../app/useAgentAutomations";
 import { AutomationPane, describeSchedule } from "../components/chat/AutomationPane";
 import type { AgentApi, AgentDefinition } from "../app/useAgentSessions";
 import { displayPath } from "../app/displayPath";
-import { hasDesktopBackend } from "../app/nativeRuntime";
 import {
   profileCapable,
   profilesFor,
@@ -86,6 +86,7 @@ import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
+import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
 import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
@@ -266,33 +267,8 @@ export function ChatView({
     }
   }
 
-  // Once the terminal is done, read back what was said there.
-  const catchingUp = useRef(new Set<string>());
-  useEffect(() => {
-    if (!active?.continuedInSession || !active.nativeSessionId || activeLiveSession ||
-      catchingUp.current.has(active.id)) return;
-    const thread = active;
-    catchingUp.current.add(thread.id);
-    void (async () => {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const snapshot = await invoke<NativeMessageSnapshot>("agent_chat_local_history_snapshot", {
-          definitionId: thread.definitionId,
-          nativeSessionId: thread.nativeSessionId,
-          profileId: thread.accountProfileId,
-          profiles: accountProfiles.map(({ id, definitionId, configDirectory }) =>
-            ({ profileId: id, definitionId, configDirectory })),
-        });
-        chat.updateThreadFromSession(thread.id, (current) =>
-          appendSessionTurns(current, snapshot, t("chat.continuedInSession.notice")));
-      } catch {
-        // Try again the next time the thread is opened.
-      } finally {
-        catchingUp.current.delete(thread.id);
-      }
-    })();
-  }, [accountProfiles, active, activeLiveSession, chat, t]);
-
+  const sessionRead = useContinuedSessionRead(active, Boolean(activeLiveSession), accountProfiles,
+    chat.updateThreadFromSession, t("chat.continuedInSession.notice"), t("history.sessionMissing"));
   function startThread(workingDirectory = "") {
     setSelectedSessionId(null);
     // Keep the assistant choice; selecting a project is optional for each chat.
@@ -691,6 +667,7 @@ export function ChatView({
               agents.catalog, accountProfiles, proxies) && !active.archived
               ? () => void continueInSession(active) : undefined}
             handoffProblem={handoffProblem}
+            sessionRead={sessionRead}
           />
         )}
       </div>
@@ -730,6 +707,7 @@ function ThreadPane({
   onDelete,
   continueInSession,
   handoffProblem,
+  sessionRead,
 }: {
   thread: ChatThread;
   chat: AgentChatApi;
@@ -743,6 +721,7 @@ function ThreadPane({
   /** Present when the conversation can go on in a terminal session. */
   continueInSession?: () => void;
   handoffProblem?: string | null;
+  sessionRead?: { loading: boolean; error: string | null; refresh: () => void } | null;
 }) {
   const { t } = useI18n();
   const { draft, setDraft, attachments, setAttachments, picks, setPicks,
@@ -774,7 +753,9 @@ function ThreadPane({
   const pinnedToBottom = useRef(true);
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
-  const settingsLocked = running || pendingInputs.length > 0;
+  const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
+  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession);
+  const settingsLocked = running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
   const cliInstalled = installed.includes(thread.definitionId);
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
   const activeProfile = availableProfiles.find((profile) => profile.id === thread.accountProfileId) ?? null;
@@ -793,6 +774,7 @@ function ThreadPane({
   const activeProfileMissing = thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = selectedOption?.disabled === true;
   const canSend =
+    !awaitingHistory &&
     !steering &&
     !pastingImage &&
     !activeProfileMissing &&
@@ -820,22 +802,7 @@ function ThreadPane({
       if (mounted.current) setNotice(t("chat.attachment.limit", { count: CHAT_ATTACHMENT_LIMIT }));
       return false;
     }
-    void keepImagePreviews(next.filter(file => file.isImage && !file.preview && paths.includes(file.path)));
     return true;
-  }
-
-  /** Thumbnails need the picture inside a folder the preview may read. */
-  async function keepImagePreviews(images: readonly ChatAttachment[]) {
-    if (images.length === 0 || !hasDesktopBackend()) return;
-    const { invoke } = await import("@tauri-apps/api/core");
-    for (const image of images) {
-      const preview = await invoke<string | null>("agent_chat_keep_image_preview", {
-        threadId: thread.id,
-        path: image.path,
-      }).catch(() => null);
-      if (!preview) continue;
-      setAttachments(current => current.map(file => file.path === image.path ? { ...file, preview } : file));
-    }
   }
 
   async function pasteImage(silent = false) {
@@ -922,27 +889,35 @@ function ThreadPane({
     }
   }
 
-  function submit(event?: FormEvent) {
+  async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend || steeringRef.current || pastingImageRef.current) return;
     const prompt = draft;
+    const files = attachments;
+    const selectedPicks = picks;
     const mentions = mentionsInPrompt(prompt, picks);
-    if (running || pendingInputs.length > 0) {
-      try {
-        chat.enqueue(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null, mentions);
-      } catch (reason) {
-        setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
-        return;
+    pastingImageRef.current = true;
+    setPastingImage(true);
+    try {
+      const saved = await keepChatAttachmentPreviews(thread.id, files);
+      const current = chat.getThread(thread.id);
+      if (!current) return;
+      if (current.runningTurnId || (current.pendingInputs?.length ?? 0) > 0) {
+        chat.enqueue(thread.id, prompt, saved, activeProfile?.configDirectory ?? null, mentions);
+      } else {
+        await chat.send(thread.id, prompt, saved, activeProfile?.configDirectory ?? null, undefined, mentions);
       }
-    } else {
-      void chat.send(thread.id, prompt, attachments, activeProfile?.configDirectory ?? null, undefined, mentions);
+      setDraft(current => current === prompt ? "" : current);
+      setAttachments(current => current === files ? [] : current);
+      setPicks(current => current === selectedPicks ? [] : current);
+      pinnedToBottom.current = true;
+      if (mounted.current) { setSettingsOpen(false); setNotice(null); }
+    } catch (reason) {
+      if (mounted.current) setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      pastingImageRef.current = false;
+      setPastingImage(false);
     }
-    setDraft("");
-    setAttachments([]);
-    setPicks([]);
-    pinnedToBottom.current = true;
-    setSettingsOpen(false);
-    setNotice(null);
   }
 
   async function steer() {
@@ -950,11 +925,15 @@ function ThreadPane({
     steeringRef.current = true;
     setSteering(true);
     setNotice(null);
+    const submitted = draft;
+    const files = attachments;
+    const selectedPicks = picks;
     try {
-      await chat.steer(thread.id, draft, attachments, undefined, mentionsInPrompt(draft, picks));
-      setDraft("");
-      setAttachments([]);
-      setPicks([]);
+      const saved = await keepChatAttachmentPreviews(thread.id, files);
+      await chat.steer(thread.id, submitted, saved, thread.runningTurnId ?? undefined, mentionsInPrompt(submitted, selectedPicks));
+      setDraft(current => current === submitted ? "" : current);
+      setAttachments(current => current === files ? [] : current);
+      setPicks(current => current === selectedPicks ? [] : current);
       pinnedToBottom.current = true;
     } catch (reason) {
       setNotice(t("chat.steer.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
@@ -1252,11 +1231,13 @@ function ThreadPane({
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
         <div className="chat-messages__inner">
+          {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
+          {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} onRetry={sessionRead.refresh} />}
           {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("history.textOnly")} · {t("history.stateUnknown")}</p>}
           {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
           {thread.historyTruncated && <p role="status">{t("history.truncated")}</p>}
           {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
-          {thread.items.length === 0 && (
+          {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && (
             <div className="chat-welcome">
               <span className="chat-avatar chat-avatar--lg" aria-hidden="true">
                 {assistant.slice(0, 1)}
@@ -1493,30 +1474,24 @@ function ChatItemView({
     </button>
   );
   switch (item.type) {
-    case "user":
+    case "user": {
+      const sent = splitSessionAttachments(item.text);
+      const files = item.attachments?.length ? item.attachments : mergeAttachmentPaths([], sent.paths) ?? [];
       return (
         <ConversationMessage role="user" assistant={assistant} actions={branchButton}>
-            {item.text && <div>{item.text}</div>}
-            {item.attachments && item.attachments.length > 0 && (
-              <div className="chat-attachments chat-attachments--sent">
-                {item.attachments.map((attachment) => (
-                  <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
-                    {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
-                    <span>{attachment.name}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            {item.attachments?.some((attachment) => attachment.isImage) && (
+            {sent.text && <div>{sent.text}</div>}
+            <SentAttachments attachments={files} workingDirectory={workingDirectory ?? ""} threadId={threadId} />
+            {files.some((attachment) => attachment.isImage) && (
               <ChatImageStrip
-                paths={item.attachments.filter((attachment) => attachment.isImage).map((attachment) => attachment.preview ?? attachment.path)}
-                workingDirectory={workingDirectory}
+                paths={files.filter((attachment) => attachment.isImage).map((attachment) => attachment.preview ?? attachment.path)}
+                workingDirectory={workingDirectory ?? ""}
                 threadId={threadId}
                 captions={false}
               />
             )}
         </ConversationMessage>
       );
+    }
     case "text":
       return (
         <ConversationMessage role="assistant" assistant={assistant} actions={!streaming && branchButton}>

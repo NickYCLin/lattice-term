@@ -10,6 +10,7 @@ import { chatProjectKey } from "../../app/chatProjects";
 import { displayPath } from "../../app/displayPath";
 import { ConversationListIdentity } from "./ConversationPresentation";
 import { FolderIcon } from "../icons";
+import { ConversationReadProgress } from "./ConversationReadProgress";
 
 function directoryKey(path: string) {
   return path.replace(/[\\/]+$/, "") || path;
@@ -35,7 +36,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   const { t } = useI18n();
   const [opening, setOpening] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ key: string; detail: string } | null>(null);
-  const [reading, setReading] = useState<{ key: string; snapshot: NativeMessageSnapshot } | null>(null);
+  const [reading, setReading] = useState<{ key: string; snapshot: NativeMessageSnapshot | null } | null>(null);
   const inFlight = useRef(false);
   const known = useMemo(() => new Set(chat.threads.filter(thread => thread.nativeSessionId).map(thread => nativeConversationKey({
     definitionId: thread.definitionId, profileId: thread.accountProfileId ?? null, nativeSessionId: thread.nativeSessionId!,
@@ -55,16 +56,29 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
   }, [rows]);
   if (!history) return null;
 
-  async function open(entry: LocalConversation) {
-    if (inFlight.current || !history) return;
+  async function open(entry: LocalConversation, retry = false) {
+    if (!history) return;
     const key = nativeConversationKey(entry);
-    if (reading?.key === key) {
+    if (entry.definitionId !== "cursor") {
+      const proxy = isProxyConversation(entry) ? nativeConversationProxy(entry, proxies) : undefined;
+      chat.importNativeConversation({
+        definitionId: entry.definitionId, nativeSessionId: entry.nativeSessionId,
+        workingDirectory: entry.workingDirectory, title: entry.title,
+        accountProfileId: entry.profileId, messages: [],
+        ...(proxy ? { provider: "cliproxyapi" as const, proxyId: proxy.id } : {}),
+      });
+      onOpened();
+      return;
+    }
+    if (inFlight.current) return;
+    if (reading?.key === key && !retry) {
       setReading(null);
       return;
     }
     inFlight.current = true;
     setOpening(key);
     setFailed(null);
+    setReading({ key, snapshot: null });
     try {
       const snapshot = await invoke<NativeMessageSnapshot>("agent_chat_local_history_snapshot", {
         definitionId: entry.definitionId, nativeSessionId: entry.nativeSessionId,
@@ -72,21 +86,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
       });
       // Cursor keeps editor chats that no CLI here can continue, so they are
       // shown in place rather than becoming a thread with a composer.
-      if (entry.definitionId === "cursor") {
-        setReading({ key, snapshot });
-        return;
-      }
-      const proxy = isProxyConversation(entry) ? nativeConversationProxy(entry, proxies) : undefined;
-      chat.importNativeConversation({
-        definitionId: entry.definitionId,
-        nativeSessionId: entry.nativeSessionId,
-        workingDirectory: entry.workingDirectory,
-        title: entry.title,
-        accountProfileId: entry.profileId,
-        messages: snapshot.messages,
-        ...(proxy ? { provider: "cliproxyapi" as const, proxyId: proxy.id } : {}),
-      });
-      onOpened();
+      setReading({ key, snapshot });
     } catch (reason) {
       setFailed({ key, detail: reason instanceof Error ? reason.message : String(reason) });
     } finally {
@@ -104,7 +104,7 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
       <ul className="chat-native-rows">{group.entries.map(entry => {
         const key = nativeConversationKey(entry);
         return <li key={key}>
-          <button type="button" className="chat-thread" disabled={opening !== null} aria-busy={opening === key}
+          <button type="button" className="chat-thread" disabled={entry.definitionId === "cursor" && opening !== null} aria-busy={opening === key}
             aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
             title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
             <ConversationListIdentity title={entry.title || t("chat.untitled")}>
@@ -113,11 +113,11 @@ export function NativeConversationRows({ chat, projectFilter, onOpened }: {
                 {entry.workingDirectory ? ` · ${directoryName(entry.workingDirectory)}` : ""}
             </ConversationListIdentity>
           </button>
-          {failed?.key === key && <p className="chat-native-rows__error" role="alert">{t("history.stale")} {failed.detail}</p>}
           {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>
             <p className="chat-native-rows__hint">{t("history.cursorReadOnly")}</p>
-            {reading.snapshot.truncated && <p className="chat-native-rows__hint">{t("history.truncated")}</p>}
-            {reading.snapshot.messages.map((message, index) =>
+            <ConversationReadProgress loading={opening === key} error={failed?.key === key ? failed.detail : null} onRetry={() => void open(entry, true)} />
+            {reading.snapshot?.truncated && <p className="chat-native-rows__hint">{t("history.truncated")}</p>}
+            {reading.snapshot?.messages.map((message, index) =>
               <p key={index} className={`chat-native-rows__message chat-native-rows__message--${message.role}`}>{message.text}</p>)}
           </div>}
         </li>;

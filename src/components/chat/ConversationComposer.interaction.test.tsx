@@ -260,6 +260,46 @@ it.each(["thread", "session"] as const)("keeps a delayed screenshot paste on its
   } finally { await act(async () => root.unmount()); }
 });
 
+it.each(["thread", "session"] as const)("waits for image previews in the %s composer and preserves later draft edits", async kind => {
+  const container = installHostDom();
+  vi.stubGlobal("__TAURI_INTERNALS__", {});
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ id: "composer-draft-a" });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  const agents = fakeAgentApi({ catalog: [fakeDefinition()] });
+  let finishCopy!: (value: string) => void;
+  clipboard.invoke.mockImplementation(async (command: string) => {
+    if (command === "agent_chat_paste_files") return ["C:/selected/screenshot.png"];
+    if (command === "agent_chat_models") return [];
+    if (command === "agent_chat_keep_image_preview") return new Promise(resolve => { finishCopy = resolve; });
+    return null;
+  });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW">{kind === "thread"
+      ? <ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+      : <SessionConversationPane session={fakeSession({ sessionId: thread.id, stateSource: "integration" })}
+        agents={agents} onOpenTerminal={() => {}} onSessionReplaced={() => {}} />}</I18nProvider>));
+    await act(async () => inputProps(container).onChange({ target: { value: "送出這張圖" } }));
+    await act(async () => inputProps(container).onPaste({
+      clipboardData: { items: [{ kind: "file", type: "image/png" }], getData: () => "" }, preventDefault: vi.fn(),
+    }));
+    const form = allNodes(container).find(node => node.tagName === "FORM")!;
+    const key = Object.keys(form).find(name => name.startsWith("__reactProps$"))!;
+    const submit = (form as unknown as Record<string, { onSubmit: (event: { preventDefault: () => void }) => Promise<void> }>)[key].onSubmit;
+    let pending!: Promise<void>;
+    await act(async () => { pending = submit({ preventDefault: vi.fn() }); });
+    expect(chat.send).not.toHaveBeenCalled();
+    expect(sessionConversation.send).not.toHaveBeenCalled();
+    expect(inputProps(container).value).toBe("送出這張圖");
+    await act(async () => inputProps(container).onChange({ target: { value: "下一則草稿" } }));
+    await act(async () => { finishCopy("C:/safe/screenshot.png"); await pending; });
+    if (kind === "thread") expect(chat.send).toHaveBeenCalledWith(thread.id, "送出這張圖",
+      [expect.objectContaining({ path: "C:/selected/screenshot.png", preview: "C:/safe/screenshot.png" })], null, undefined, []);
+    else expect(sessionConversation.send).toHaveBeenCalledWith(expect.stringContaining('"C:/safe/screenshot.png"'));
+    expect(inputProps(container).value).toBe("下一則草稿");
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("offers files and images under plus, without a clipboard action", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);

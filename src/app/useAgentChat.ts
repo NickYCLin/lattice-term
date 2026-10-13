@@ -115,6 +115,7 @@ export interface ChatThreadCreation extends ChatThreadSettings {
 }
 
 export interface AgentChatApi {
+  nativeRead: { threadId: string; ready: boolean; loading: boolean; error: string | null; refresh: () => void } | null;
   threads: ChatThread[];
   getThread: (id: string) => ChatThread | undefined;
   activeThreadId: string | null;
@@ -291,8 +292,12 @@ export function useAgentChat(
         title: mirror.title, workingDirectory: mirror.workingDirectory, resumable: false, updatedAt: 0, archived: mirror.nativeHistoryArchived }
     : null;
   const nativeMessages = useNativeConversationMessages(nativeEntry, nativeHistory?.profileKey ?? "[]");
+  const readyNativeThreads = useRef(new Set<string>());
+  const nativeReadProfileKey = useRef(nativeHistory?.profileKey ?? "[]");
+  nativeReadProfileKey.current = nativeHistory?.profileKey ?? "[]";
   useEffect(() => {
     if (!nativeEntry || !nativeMessages.value || !mirror) return;
+    readyNativeThreads.current.add(JSON.stringify([mirror.id, mirror.nativeSessionId, mirror.accountProfileId, nativeReadProfileKey.current]));
     changeThreads(current => {
       const old = current.find(thread => thread.id === mirror.id);
       if (!old) return current;
@@ -399,6 +404,7 @@ export function useAgentChat(
       thread.accountProfileId === settings.accountProfileId,
     );
     if (existing) {
+      if (settings.messages.length === 0) { setActiveThreadId(existing.id); return existing; }
       const next = refreshNativeHistoryMirror(existing, {
         definitionId: settings.definitionId, profileId: settings.accountProfileId, nativeSessionId: settings.nativeSessionId,
         workingDirectory: settings.workingDirectory, title: settings.title, updatedAt: 0, resumable: true,
@@ -646,6 +652,7 @@ export function useAgentChat(
 
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
+    if (thread.nativeHistorySource && !readyNativeThreads.current.has(JSON.stringify([id, thread.nativeSessionId, thread.accountProfileId, nativeReadProfileKey.current]))) throw new Error("Read the conversation history before sending. Retry if reading failed.");
     const turnId = crypto.randomUUID();
     const next = beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
     const snapshot = threadsRef.current.map(entry => entry.id === id ? next : entry);
@@ -963,6 +970,9 @@ export function useAgentChat(
   return useMemo(
     () => ({
       threads,
+      nativeRead: mirror ? { threadId: mirror.id, ready: nativeMessages.value !== null,
+        loading: !nativeMessages.value && (nativeMessages.busy || !nativeMessages.error),
+        error: nativeMessages.error, refresh: nativeMessages.refresh } : null,
       getThread: (id: string) => threadsRef.current.find(thread => thread.id === id),
       activeThreadId,
       setActiveThreadId: activate,
@@ -1001,6 +1011,12 @@ export function useAgentChat(
     }),
     [
       threads,
+      mirror?.id,
+      nativeMessages.value,
+      nativeMessages.busy,
+      nativeMessages.error,
+      nativeMessages.refresh,
+      importNative,
       activeThreadId,
       activate,
       supported,
