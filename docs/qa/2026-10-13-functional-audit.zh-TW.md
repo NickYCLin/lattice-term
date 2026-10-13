@@ -75,9 +75,19 @@
 
 ## 執行結果
 
+### Windows CI 發現驗收清單未同步
+
+PR 第一輪完整 Windows CI 在 `A tools and sharing` 失敗：實際工具清單含
+`read_saved_connection_credential`，驗收腳本卻漏列。該工具已存在於基線，
+不是本輪新增，也不是洩漏使用者憑證。
+新增 source contract 測試比對 Windows 預期清單與 Rust `TOOL_NAMES`，
+先確認測試失敗，再補上遺漏項目；另外在隔離 Windows fixture 檢查未授權
+credential 查詢仍回錯誤。不改產品權限、不讀使用者憑證、不忽略失敗檢查。
+Windows 原生程序與 named-pipe／ConPTY 結果仍以更新後 CI 重跑為準。
+
 | 指令／檢查 | 結果 |
 | --- | --- |
-| `npm run check` | 通過：typecheck、i18n／sidecar／版本／Actions 檢查、222 files／1598 tests、production build |
+| `npm run check` | 通過：typecheck、i18n／sidecar／版本／Actions 檢查、223 files／1599 tests、production build |
 | frontend bundle check | 入口約 359 KiB，小於 500 KiB 限制 |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | 通過 |
 | `cargo check --manifest-path src-tauri/Cargo.toml` | 通過 |
