@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { RdpApi } from "../../app/useRdpSessions";
 import { useSavedCredential } from "../../app/useSavedCredential";
+import { rdpCredentialFailure } from "../../app/rdpCredentialFailure";
 import { connectionTarget, type ConnectionProfile } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
@@ -77,11 +78,12 @@ export function RdpConnectFlow({
       setPassword("");
       onConnected(outcome.sessionId);
     } else {
-      if (outcome.stage === "credential" && useSavedPassword) {
+      const credentialFailure = rdpCredentialFailure(outcome.detail);
+      if ((outcome.stage === "credential" || credentialFailure) && useSavedPassword) {
         setUseSavedPassword(false);
       }
       setProblem(
-        t("rdp.connect.failedBody", {
+        (credentialFailure ? t(`rdp.connect.${credentialFailure}`) + "\n\n" : "") + t("rdp.connect.failedBody", {
           stage: outcome.stage,
           detail: outcome.detail,
         }),
@@ -233,7 +235,7 @@ export function RdpConnectFlow({
             </div>
           </div>
 
-          {!useSavedPassword && savedCredential.state.mode === "missing" && (
+          {!useSavedPassword && (savedCredential.state.mode === "missing" || savedCredential.state.mode === "saved") && (
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -247,7 +249,7 @@ export function RdpConnectFlow({
                 <CheckIcon size={11} />
               </span>
               <ShieldIcon size={13} />
-              {t("credential.remember", {
+              {t(savedCredential.state.mode === "saved" ? "rdp.connect.replaceSavedPassword" : "credential.remember", {
                 provider: savedCredential.state.provider,
               })}
             </label>
