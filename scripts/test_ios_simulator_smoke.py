@@ -17,6 +17,24 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_failure_probes_do_not_conflate_ocr_and_simulator_stalls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "iPhone.png").write_bytes(b"fixture")
+            def probe(command, **kwargs):
+                self.assertEqual(kwargs["timeout"], 15)
+                if "simctl" in command:
+                    raise subprocess.TimeoutExpired(command, 15)
+                if command[0] == "reader":
+                    return subprocess.CompletedProcess(command, 0, '["No connections yet", "Add connection"]', "")
+                return subprocess.CompletedProcess(command, 0, "host responds", "")
+            with patch.object(smoke.subprocess, "run", side_effect=probe):
+                result = smoke.failure_diagnostics("owned-device", output, Path("reader"))
+            self.assertTrue(result["knownGoodOCR"]["frontendVisible"])
+            self.assertTrue(result["hostProcesses"]["completed"])
+            self.assertFalse(result["simulatorProcesses"]["completed"])
+            self.assertFalse(result["webViewLog"]["completed"])
+
     def setUp(self):
         self.info = {"CFBundleSupportedPlatforms": ["iPhoneSimulator"], "MinimumOSVersion": "14.0"}
         self.ios18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-6"
@@ -137,6 +155,35 @@ class StoreScreenshotTests(unittest.TestCase):
 
 
 class FailureEvidenceTests(unittest.TestCase):
+    def test_completed_blank_captures_stay_within_the_stall_budget(self):
+        now = [0.0]
+        attempts = []
+        with tempfile.TemporaryDirectory() as directory:
+            screenshot = Path(directory) / "blank.png"
+
+            def capture(*args, **kwargs):
+                attempts.append(kwargs["timeout"])
+                if len(attempts) > 100:
+                    raise AssertionError("Capture loop did not terminate")
+                screenshot.write_bytes(b"\x89PNG\r\n\x1a\n" + smoke.PNG_END)
+                now[0] += kwargs["timeout"]
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+            def sleep(seconds):
+                now[0] += seconds
+
+            with patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke.os, "kill"), \
+                    patch.object(smoke, "simctl", side_effect=capture), \
+                    patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, stdout='["status bar only"]')):
+                with self.assertRaises(RuntimeError):
+                    smoke.wait_for_frontend("owned-device", 123, screenshot, Path("reader"))
+            self.assertLessEqual(now[0], 90 + 2 * 60)
+            self.assertEqual(json.loads(screenshot.with_suffix(".ocr.json").read_text()), ["status bar only"])
+            self.assertTrue(screenshot.is_file())
+
     def test_a_stalled_capture_does_not_spend_the_apps_readiness_budget(self):
         now = [0.0]
         attempts = []

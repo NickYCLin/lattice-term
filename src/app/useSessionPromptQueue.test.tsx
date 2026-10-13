@@ -6,6 +6,30 @@ import { fakeAgentApi } from "./testFixtures/agentApis";
 import { useSessionPromptQueue } from "./useSessionPromptQueue";
 import type { AgentQueuedPrompt } from "./useAgentSessions";
 
+it("ignores an old save conflict after switching during its refresh", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const prompt: AgentQueuedPrompt = { id: "one", text: "original", data: "expected", editable: true };
+  let finishOldRefresh!: (prompts: AgentQueuedPrompt[]) => void;
+  let firstReads = 0;
+  const readQueue = vi.fn().mockImplementation((id: string) => {
+    if (id !== "first") return Promise.resolve([]);
+    if (++firstReads === 1) return Promise.resolve([prompt]);
+    return new Promise(resolve => { finishOldRefresh = resolve; });
+  });
+  const agents = fakeAgentApi({ readQueue, editQueuedPrompt: vi.fn().mockResolvedValue(false) });
+  let api!: ReturnType<typeof useSessionPromptQueue>;
+  let saving!: Promise<boolean>;
+  function Probe({ id }: { id: string }) { api = useSessionPromptQueue(id, agents); return null; }
+  try {
+    await act(async () => root.render(<Probe id="first" />));
+    await act(async () => { saving = api.save(prompt, "edited"); });
+    await act(async () => root.render(<Probe id="second" />));
+    expect(api.error).toBeNull();
+    await act(async () => { finishOldRefresh([]); await saving; });
+    expect(api.error).toBeNull();
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("does not read the queue of a closed session", async () => {
   const root = createRoot(installFakeDom() as unknown as Element);
   const agents = fakeAgentApi();
@@ -57,4 +81,27 @@ it("ignores stale queue reads and refuses to resurrect an already dispatched pro
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(readQueue).toHaveBeenCalledTimes(reads);
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("does not let a previous session's save invalidate the current session's queue read", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const prompt: AgentQueuedPrompt = { id: "one", text: "original", data: "expected", editable: true };
+  let finishSave!: (changed: boolean) => void;
+  let finishRead!: (prompts: AgentQueuedPrompt[]) => void;
+  const readQueue = vi.fn().mockImplementation((id: string) => id === "first"
+    ? Promise.resolve([prompt]) : new Promise(resolve => { finishRead = resolve; }));
+  const agents = fakeAgentApi({ readQueue,
+    editQueuedPrompt: vi.fn().mockImplementation(() => new Promise(resolve => { finishSave = resolve; })) });
+  let api!: ReturnType<typeof useSessionPromptQueue>;
+  let saving!: Promise<boolean>;
+  function Probe({ id }: { id: string }) { api = useSessionPromptQueue(id, agents); return null; }
+  try {
+    await act(async () => root.render(<Probe id="first" />));
+    await act(async () => { saving = api.save(prompt, "edited"); });
+    await act(async () => root.render(<Probe id="second" />));
+    await act(async () => { finishSave(true); await saving; });
+    await act(async () => finishRead([{ ...prompt, id: "current" }]));
+    expect(api.prompts.map(entry => entry.id)).toEqual(["current"]);
+    expect(readQueue.mock.calls.map(([id]) => id)).toEqual(["first", "second"]);
+  } finally { await act(async () => root.unmount()); }
 });

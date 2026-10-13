@@ -1,4 +1,5 @@
 import { PathDropZone } from "../components/files/PathDropZone";
+import { useSessionClose } from "../app/useSessionClose";
 import { FileDropZone } from "../components/files/FileDropZone";
 import { localFileError, readSelectedText, type UploadFile } from "../app/localFiles";
 /** Unified workspace for text terminals and graphical remote sessions. */
@@ -1225,6 +1226,7 @@ export function SessionsView({
     sessions.find((session) => session.sessionId === activeSessionId) ??
     sessions[0] ??
     null;
+  const sessionClose = useSessionClose(active?.sessionId ?? null);
   // Live host readings for the active SSH tab, polled only while its files
   // sidebar is on screen.
   const activeSshSessionId =
@@ -2132,7 +2134,7 @@ export function SessionsView({
     await agents.disconnect(sessionId);
     // Closing the visible CLI hands focus to a sibling if the tab still has
     // one, so the whole tab only disappears once its last CLI is gone.
-    if (sessionId === active.sessionId) {
+    if (sessionClose.isCurrent(sessionId)) {
       const sibling = members.find((member) => member.sessionId !== sessionId);
       onSelect(sibling?.sessionId ?? null);
     }
@@ -2148,7 +2150,7 @@ export function SessionsView({
     else if (session.kind === "remote") await remote.disconnect(session.sessionId);
     else if (session.kind === "rdp") await rdp.disconnect(session.sessionId);
     else await vnc.disconnect(session.sessionId);
-    if (session.sessionId === active.sessionId) onSelect(null);
+    if (sessionClose.isCurrent(session.sessionId)) onSelect(null);
   }
 
   async function removeSession(session: SessionRef) {
@@ -2162,6 +2164,17 @@ export function SessionsView({
       {workspaceFilePicker}
       {storageCallout}
       {closedCallout}
+      {sessionClose.error && (
+        <div className="session-notice" role="alert">
+          <Callout
+            tone="warn"
+            title={t("terminal.disconnect")}
+            actions={<button type="button" className="button button--ghost button--sm" onClick={sessionClose.dismiss}>{t("common.close")}</button>}
+          >
+            {sessionClose.error}
+          </Callout>
+        </div>
+      )}
       {workspaceTransferCallout}
       {addCliErrorCallout}
         {nativeSyncCallout}
@@ -2357,7 +2370,8 @@ export function SessionsView({
                   <button
                     type="button"
                     className="icon-button icon-button--sm"
-                    onClick={() => void close(active)}
+                    disabled={sessionClose.pending.has(active.sessionId)}
+                    onClick={() => void sessionClose.run(active.sessionId, () => close(active))}
                     aria-label={t("terminal.disconnect")}
                     data-tooltip={t("terminal.disconnect")}
                   >
@@ -2476,8 +2490,9 @@ export function SessionsView({
                         <button
                           type="button"
                           className="cli-switch__close"
+                          disabled={sessionClose.pending.has(member.sessionId)}
                           onClick={() =>
-                            void closeAgentMember(group.members, member.sessionId)
+                            void sessionClose.run(member.sessionId, () => closeAgentMember(group.members, member.sessionId))
                           }
                           aria-label={t("terminal.disconnect")}
                         >

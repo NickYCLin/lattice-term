@@ -43,7 +43,7 @@ export function useNativeConversationList({ chat, projectFilter, onOpened }: {
   }))), [chat.threads]);
   const rows = useMemo(() => (history?.entries ?? []).filter(entry =>
     !entry.archived && !known.has(nativeConversationKey(entry)) &&
-    (projectFilter === null || chatProjectKey(entry.workingDirectory) === projectFilter)), [history?.entries, known, projectFilter]);
+    (projectFilter === null || chatProjectKey(entry.workingDirectory) === chatProjectKey(projectFilter))), [history?.entries, known, projectFilter]);
 
   async function open(entry: LocalConversation, retry = false) {
     if (!history) return;

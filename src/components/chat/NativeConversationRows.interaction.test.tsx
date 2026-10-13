@@ -15,6 +15,26 @@ import { emptySessionSidebarLayout } from "../../app/sessionSidebarLayout";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
+it.each(["C:\\Work\\LatticeTerm", "c:/work/latticeterm"])("filters retained native rows by the Windows project identity: %s", async (projectFilter) => {
+  const container = installHostDom();
+  const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "windows-filter",
+    title: "Windows native history", workingDirectory: "C:\\Work\\LatticeTerm", resumable: true, updatedAt: 1 };
+  const history = { entries: [entry], profiles: [], profileKey: "[]" } as unknown as NativeHistory;
+  const chat = fakeChatApi();
+  const root = createRoot(container as unknown as Element);
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><NativeHistoryContext.Provider value={history}>
+      <NativeConversationRows chat={chat} projectFilter={projectFilter} onOpened={() => {}} />
+    </NativeHistoryContext.Provider></I18nProvider>));
+    expect(container.textContent).toContain(entry.title);
+    const button = allNodes(container).find(node => node.tagName === "BUTTON")!;
+    await act(async () => onClick(button)());
+    expect(chat.importNativeConversation).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory: entry.workingDirectory }));
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("files native history without opening it on the drag-release click", async () => {
   const container = installHostDom();
   const listeners = new Map<string, (event: Partial<PointerEvent>) => void>();

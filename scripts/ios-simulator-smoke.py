@@ -131,6 +131,7 @@ def allow_stall(device_id, stalls):
 def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     started = time.monotonic()
     deadline = started + timeout
+    maximum_deadline = deadline + MAX_CAPTURE_STALLS * 60
     texts = []
     stalls = 0
     while time.monotonic() < deadline:
@@ -147,11 +148,11 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         try:
             simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=min(60, remaining))
         except subprocess.TimeoutExpired:
-            deadline += time.monotonic() - attempt
+            stalls += 1
+            deadline = min(maximum_deadline, deadline + time.monotonic() - attempt)
             if finished_capture(screenshot, written_after):
                 print(f"{device_id}: 截圖已寫完但指令沒有結束，直接辨識這張", flush=True)
             else:
-                stalls += 1
                 if not allow_stall(device_id, stalls):
                     break
                 print(f"{device_id}: 截圖指令逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
@@ -169,7 +170,7 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
             stalls += 1
             if not allow_stall(device_id, stalls):
                 break
-            deadline += time.monotonic() - attempt
+            deadline = min(maximum_deadline, deadline + time.monotonic() - attempt)
             print(f"{device_id}: 截圖辨識逾時，重新擷取（第 {stalls} 次停擺）", flush=True)
             continue
         texts = json.loads(result.stdout)
@@ -178,6 +179,8 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
         if frontend_is_visible(texts):
             os.kill(pid, 0)
             return {"renderedStartup": True, "renderWaitSeconds": round(time.monotonic() - started, 1)}
+        if not allow_stall(device_id, stalls):
+            break
         time.sleep(min(3, max(0, deadline - time.monotonic())))
     # Keep the last screenshot and recognized text, so a spinner or render
     # failure is reviewable even when the job fails. A stalled capture used to
@@ -195,7 +198,31 @@ def simctl(*args, timeout=60):
     ).stdout.strip()
 
 
-def capture_failure(device_id, label, stage, error, directory):
+def failure_diagnostics(device_id, directory, reader):
+    probes = {
+        "hostProcesses": ["/bin/ps", "-axo", "pid,ppid,state,%cpu,%mem,comm"],
+        "simulatorProcesses": ["xcrun", "simctl", "spawn", device_id, "launchctl", "list"],
+        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
+                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit"'],
+        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--last", "3m",
+                             "--predicate", 'process == "CoreSimulatorService"'],
+    }
+    known_image = directory / "iPhone.png"
+    if reader and known_image.is_file():
+        probes["knownGoodOCR"] = [str(reader), str(known_image.resolve())]
+    results = {}
+    for name, command in probes.items():
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=15)
+            results[name] = {"completed": True, "stdout": result.stdout[-65536:], "stderr": result.stderr[-8192:]}
+            if name == "knownGoodOCR":
+                results[name]["frontendVisible"] = frontend_is_visible(json.loads(result.stdout))
+        except Exception as probe_error:
+            results[name] = {"completed": False, "error": f"{type(probe_error).__name__}: {probe_error}"[:2048]}
+    return results
+
+
+def capture_failure(device_id, label, stage, error, directory, reader=None):
     # This device was created by this invocation. Write the cause before any
     # best-effort capture, so even an unresponsive simulator leaves evidence.
     path = directory / f"{label}.failure.json"
@@ -204,6 +231,8 @@ def capture_failure(device_id, label, stage, error, directory):
         value = getattr(error, stream, None)
         if value:
             report[stream] = (value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value))[-8192:]
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    report["diagnostics"] = failure_diagnostics(device_id, directory, reader)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     screenshot = directory / f"{label}.failure.png"
     try:
@@ -309,7 +338,7 @@ def check_simulators(args, runtime, devices, reader):
             print(f"{label}: 已辨識連線頁內容，程序仍在執行，已保存 {screenshot}", flush=True)
         except Exception as error:
             try:
-                capture_failure(device_id, label, stage, error, args.output)
+                capture_failure(device_id, label, stage, error, args.output, reader)
             except Exception as evidence_error:
                 # Preserve the original failure if the output disk also fails.
                 print(f"無法保存失敗證據：{evidence_error}", file=sys.stderr, flush=True)

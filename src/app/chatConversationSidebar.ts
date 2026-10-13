@@ -1,7 +1,7 @@
 import type { ChatThread } from "./agentChat";
 import { presentAgentSessionGroup } from "./agentSessionPresentation";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
-import { chatProjectKey, projectName } from "./chatProjects";
+import { chatProjectDirectory, projectName } from "./chatProjects";
 import { chatThreadNodeId } from "./chatThreadLayout";
 import { agentWorkspaceProjectNodeId, chatWorkspaceProjection } from "./chatWorkspaceNodes";
 import { displayPath } from "./displayPath";
@@ -56,7 +56,9 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
     const existing = projectIds.get(key);
     if (existing) return existing;
     let nodeId = /^[a-z]:\//i.test(key) || key.startsWith("//")
-      ? agentWorkspaceProjectNodeId(chatProjectKey(directory)) : "project:local:" + key;
+      ? agentWorkspaceProjectNodeId(chatProjectDirectory(directory)) : "project:local:" + key;
+    const plain = displayPath(directory.trim());
+    if (/^[a-z]:[\\/]+$/i.test(plain)) nodeId = "project:local:" + plain.slice(0, 2);
     if (workspace.projects.has(nodeId)) nodeId = "project:native:" + key;
     projectIds.set(key, nodeId);
     workspace.projects.set(nodeId, projectName(displayPath(directory)) || generalProjectLabel);

@@ -409,15 +409,12 @@ export function useSftpSessions(): SftpApi {
   );
 
   const disconnect = useCallback(async (sessionId: string) => {
-    try {
-      const { invoke } = await core();
-      await invoke("sftp_disconnect", { sessionId });
-    } finally {
-      rememberRemovedId(disconnectedSessionIds.current, sessionId);
-      setSessions((current) =>
-        current.filter((session) => session.sessionId !== sessionId),
-      );
-    }
+    const { invoke } = await core();
+    await invoke("sftp_disconnect", { sessionId });
+    rememberRemovedId(disconnectedSessionIds.current, sessionId);
+    setSessions((current) =>
+      current.filter((session) => session.sessionId !== sessionId),
+    );
   }, []);
 
   const list = useCallback(async (sessionId: string, path: string) => {

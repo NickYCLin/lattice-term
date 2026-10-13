@@ -1809,6 +1809,7 @@ export const en: Messages = {
   "chat.projects.defaults.clear": "Follow recent settings instead",
   "chat.projects.defaults.saved": "Saved. New conversations use this source, model, account, permissions, reasoning level and browser setting.",
   "chat.projects.defaults.error": "Cannot read or save project defaults. Retry or follow recent settings instead; the source will not be changed automatically.",
+  "chat.projects.defaults.conflict": "Legacy defaults for this project conflict. None were applied. Save or clear defaults explicitly; the original records are retained.",
   "chat.projects.defaults.cli": "The default assistant is not installed. No conversation was created. Install it or save new project defaults.",
   "chat.projects.defaults.proxy": "The default proxy no longer exists. No conversation was created. Save new project defaults.",
   "chat.projects.defaults.account": "The default account is missing or belongs to another assistant. No conversation was created. Save new project defaults.",
