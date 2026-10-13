@@ -1,6 +1,6 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
-import { clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
+import { ChatProjectDefaultsConflict, clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
 import { useChatClipboardFallback } from "../app/chatClipboard";
 import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
@@ -179,9 +179,9 @@ export function ChatView({
     setProjectNotice(null);
     try {
       setProjectDefaults(projectFilter ? loadChatProjectDefaults(localStorage, projectFilter) : null);
-    } catch {
+    } catch (error) {
       setProjectDefaults(null);
-      setProjectNotice(t("chat.projects.defaults.error"));
+      setProjectNotice(t(error instanceof ChatProjectDefaultsConflict ? "chat.projects.defaults.conflict" : "chat.projects.defaults.error"));
     }
   }, [projectFilter, t]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
@@ -284,8 +284,8 @@ export function ChatView({
           chat.createThread({ ...defaults, workingDirectory });
           return;
         }
-      } catch {
-        setProjectNotice(t("chat.projects.defaults.error"));
+      } catch (error) {
+        setProjectNotice(t(error instanceof ChatProjectDefaultsConflict ? "chat.projects.defaults.conflict" : "chat.projects.defaults.error"));
         return;
       }
     }

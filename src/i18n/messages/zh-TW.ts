@@ -1743,6 +1743,7 @@ export const zhTW = {
   "chat.projects.defaults.clear": "改回沿用最近設定",
   "chat.projects.defaults.saved": "已保存。之後的新對話會使用這組來源、模型、帳號、權限、推理深度與瀏覽器設定。",
   "chat.projects.defaults.error": "無法讀取或保存專案預設值。請重試，或改回沿用最近設定；不會自動換成其他來源。",
+  "chat.projects.defaults.conflict": "同一專案的舊預設值互相衝突，未套用任何一組。請重新保存或清除預設值；原資料仍保留。",
   "chat.projects.defaults.cli": "預設助理尚未安裝，未建立對話。請安裝助理，或重新保存專案預設值。",
   "chat.projects.defaults.proxy": "預設代理已不存在，未建立對話。請重新保存專案預設值。",
   "chat.projects.defaults.account": "預設帳號已不存在或不屬於此助理，未建立對話。請重新保存專案預設值。",

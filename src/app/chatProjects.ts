@@ -15,7 +15,14 @@ export interface ChatProject {
  * that Windows reported with its internal verbatim prefix.
  */
 export function chatProjectKey(directory: string): string {
+  const plain = chatProjectDirectory(directory);
+  return /^[a-z]:[\\/]/i.test(plain) || plain.startsWith("\\\\") || plain.startsWith("//")
+    ? plain.replace(/\\/g, "/").toLowerCase() : plain;
+}
+
+export function chatProjectDirectory(directory: string): string {
   const plain = displayPath(directory.trim());
+  if (/^[a-z]:[\\/]+$/i.test(plain)) return plain.slice(0, 3);
   return plain.replace(/[\\/]+$/, "") || plain;
 }
 
@@ -29,9 +36,10 @@ export function chatProjects(
 ): ChatProject[] {
   const byDirectory = new Map<string, ChatProject>();
   for (const thread of threads) {
-    const directory = chatProjectKey(thread.workingDirectory);
-    if (!directory || thread.shelvedAt) continue;
-    const project = byDirectory.get(directory) ?? {
+    const key = chatProjectKey(thread.workingDirectory);
+    if (!key || thread.shelvedAt) continue;
+    const directory = chatProjectDirectory(thread.workingDirectory);
+    const project = byDirectory.get(key) ?? {
       directory,
       name: projectName(directory),
       threads: 0,
@@ -39,7 +47,7 @@ export function chatProjects(
     };
     project.threads += 1;
     project.updatedAt = Math.max(project.updatedAt, thread.updatedAt);
-    byDirectory.set(directory, project);
+    byDirectory.set(key, project);
   }
   return [...byDirectory.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }

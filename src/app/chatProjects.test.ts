@@ -22,7 +22,7 @@ describe("chat projects", () => {
       { workingDirectory: "\\\\?\\D:\\project\\FaceSpeak", updatedAt: 2 },
     ]);
     expect(projects).toEqual([{ directory: "D:\\project\\FaceSpeak", name: "FaceSpeak", threads: 2, updatedAt: 2 }]);
-    expect(chatProjectKey("\\\\?\\UNC\\server\\share\\app\\")).toBe("\\\\server\\share\\app");
+    expect(chatProjectKey("\\\\?\\UNC\\server\\share\\app\\")).toBe("//server/share/app");
   });
 
   it("adds folders that only hold CLI conversations, once each", () => {
