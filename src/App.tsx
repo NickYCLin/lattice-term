@@ -42,6 +42,7 @@ import { APP_VERSION } from "./app/version";
 import { hasDesktopBackend } from "./app/nativeRuntime";
 import { useStorageStatus } from "./app/useStorageStatus";
 import { useAgentSessions } from "./app/useAgentSessions";
+import { useAgentMcpAccess } from "./app/useAgentMcpAccess";
 import { useAgentActivity } from "./app/useAgentActivity";
 import type { ChatRuntimeApi } from "./app/ChatRuntime";
 import { useSshSessions } from "./app/useSshSessions";
@@ -238,6 +239,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const visibleNavigation = navigationItemsFor(platform);
   const storage = useStorageStatus();
   const agents = useAgentSessions();
+  const agentMcp = useAgentMcpAccess(agents.sessions, agents.mode === "ready");
   const ssh = useSshSessions();
   const sftp = useSftpSessions();
   const remote = useRemoteSessions();
@@ -1202,6 +1204,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             {view === "agents" && (
               <AgentsView
                 agents={agents}
+                mcp={agentMcp}
                 remote={remote}
                 sandboxAvailable={runtime.summary?.agentSandboxAvailable === true}
                 onOpen={(sessionId) => {

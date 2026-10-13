@@ -55,6 +55,11 @@ function render(
     <I18nProvider locale="zh-TW">
       <AgentsView
         agents={agents}
+        mcp={{ daemon: { status: { ...daemonStatus.current, mcpOutputScopes: daemonStatus.current.mcpOutputScopes === true,
+          shared: daemonStatus.current.shared.map(entry => ({ ...entry, readOutput: entry.readOutput ?? true })), history: null },
+          refresh: vi.fn(async () => {}), start: vi.fn(async () => true), stop: vi.fn(async () => true),
+          share: vi.fn(async () => {}), control: vi.fn(async () => {}) },
+          setAccess: vi.fn(async () => {}), pending: new Set(), failures: {}, retry: vi.fn() }}
         remote={fakeRemoteApi()}
         sandboxAvailable={sandboxAvailable}
         onOpen={vi.fn()}

@@ -32,7 +32,8 @@ import { AgentSkillsPanel } from "../components/agents/AgentSkillsPanel";
 import { SharedAgentRulesPanel } from "../components/agents/SharedAgentRulesPanel";
 import { Callout } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
-import { mcpAccessOf, useAgentDaemon, type McpAccess } from "../app/useAgentDaemon";
+import { mcpAccessOf, type McpAccess } from "../app/useAgentDaemon";
+import type { AgentMcpAccessApi } from "../app/useAgentMcpAccess";
 import { claudeCodeCommand, codexCommand, mcpServersJson } from "../app/agentMcpConfig";
 import {
   AgentIcon,
@@ -102,11 +103,13 @@ const DETACHED_DEFAULT_KEY = "latticeterm.agentDetachedDefault.v1";
 
 export function AgentsView({
   agents,
+  mcp,
   remote,
   sandboxAvailable,
   onOpen,
 }: {
   agents: AgentApi;
+  mcp: AgentMcpAccessApi;
   remote: RemoteApi;
   /** bubblewrap is installed, so the file-scope sandbox can be offered. */
   sandboxAvailable: boolean;
@@ -143,7 +146,7 @@ export function AgentsView({
       // Remembering the choice is a convenience only.
     }
   };
-  const daemon = useAgentDaemon(agents.sessions.length);
+  const daemon = mcp.daemon;
   const [confirmingDaemonStop, setConfirmingDaemonStop] = useState(false);
   const [daemonStarting, setDaemonStarting] = useState(false);
   const [mcpNotice, setMcpNotice] = useState<string | null>(null);
@@ -160,16 +163,7 @@ export function AgentsView({
   // One choice per session: not shared, read-only, or read plus control.
   const setMcpAccess = (sessionId: string, access: McpAccess) => {
     setMcpNotice(null);
-    const current = sharedWithMcp.get(sessionId);
-    const steps = async () => {
-      if (access === "off") {
-        await daemon.share(sessionId, false);
-        return;
-      }
-      await daemon.share(sessionId, true, true);
-      if (access === "full" || current?.control) await daemon.control(sessionId, access === "full");
-    };
-    void steps().catch(reportMcpFailure);
+    void mcp.setAccess(sessionId, access).catch(reportMcpFailure);
   };
   const [mcpLaunchBusy, setMcpLaunchBusy] = useState(false);
   const toggleMcpLaunch = (enabled: boolean) => {
@@ -1728,8 +1722,8 @@ export function AgentsView({
                         value={mcpAccessOf(mcpEntry)}
                         // An old background service cannot take new shares,
                         // but an existing one must stay revocable.
-                        disabled={!mcpEntry
-                          && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes)}
+                        disabled={mcp.pending.has(session.sessionId) || (!mcpEntry
+                          && (daemon.status.mcpNeedsRestart || !daemon.status.mcpOutputScopes))}
                         onChange={(event) =>
                           setMcpAccess(session.sessionId, event.currentTarget.value as McpAccess)
                         }
@@ -1739,6 +1733,13 @@ export function AgentsView({
                         <option value="full">{t("agents.mcp.access.full")}</option>
                       </select>
                     </label>
+                    {mcp.failures[session.sessionId] && <span role="alert">
+                      {t("agents.mcp.error.share", { error: mcp.failures[session.sessionId] })}
+                      <button type="button" className="button button--ghost button--sm"
+                        disabled={mcp.pending.has(session.sessionId)} onClick={() => mcp.retry(session.sessionId)}>
+                        {t("common.retry")}
+                      </button>
+                    </span>}
                     <button
                       type="button"
                       className="button button--ghost button--sm"
