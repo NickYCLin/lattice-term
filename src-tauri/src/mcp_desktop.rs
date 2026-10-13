@@ -808,6 +808,7 @@ pub struct DesktopService {
     /// they make, and it takes effect at once.
     book_shared: Arc<AtomicBool>,
     connecting: tokio::sync::Mutex<()>,
+    paired_sftp: tokio::sync::Mutex<HashMap<String, Option<String>>>,
     /// SSH connections the person told the card to stop asking about.
     /// Loaded from [`crate::mcp_command_trust`] and kept in step with it.
     trusted_command_profiles: Arc<Mutex<std::collections::HashSet<String>>>,
@@ -843,6 +844,7 @@ impl DesktopService {
             book: None,
             book_shared: Arc::new(AtomicBool::new(true)),
             connecting: tokio::sync::Mutex::new(()),
+            paired_sftp: tokio::sync::Mutex::new(HashMap::new()),
             trusted_command_profiles: Arc::new(Mutex::new(std::collections::HashSet::new())),
             trust_all_commands: Arc::new(AtomicBool::new(false)),
             allow_remote_operations: Arc::new(AtomicBool::new(true)),
@@ -1379,6 +1381,7 @@ impl DesktopService {
             )
             .await;
         }
+        self.pair_ssh_files().await;
         for session in self.sftp.list() {
             let Some(root) = self.sftp_home(&session.session_id).await else {
                 continue;
@@ -1397,6 +1400,45 @@ impl DesktopService {
                 vec![root],
             )
             .await;
+        }
+    }
+
+    async fn pair_ssh_files(&self) {
+        let mut paired = self.paired_sftp.lock().await;
+        let sessions = self.ssh.list();
+        let expired: Vec<_> = paired
+            .keys()
+            .filter(|id| !sessions.iter().any(|session| session.session_id == **id))
+            .cloned()
+            .collect();
+        for id in expired {
+            if let Some(Some(files)) = paired.remove(&id) {
+                let _ = crate::sftp::disconnect(&self.sftp, &files).await;
+            }
+        }
+        for session in sessions {
+            if paired.contains_key(&session.session_id) {
+                continue;
+            }
+            let Some((summary, transport)) = self.ssh.session_transport(&session.session_id) else {
+                continue;
+            };
+            if self.sftp.paired_session(&transport).is_some() {
+                paired.insert(session.session_id, None);
+                continue;
+            }
+            let files = match tokio::time::timeout(
+                Duration::from_secs(10),
+                crate::sftp::attach_to_ssh(Arc::clone(&self.sftp), summary, transport),
+            )
+            .await
+            {
+                Ok(crate::sftp::SftpConnectOutcome::Connected { session }) => {
+                    Some(session.session_id)
+                }
+                _ => None,
+            };
+            paired.insert(session.session_id, files);
         }
     }
 

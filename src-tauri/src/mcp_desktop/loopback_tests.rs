@@ -16,6 +16,7 @@ mod openssh;
 #[derive(Clone)]
 enum SftpMode {
     Disabled,
+    Files,
     Fleet {
         data: Arc<std::path::PathBuf>,
         directory: Arc<std::path::PathBuf>,
@@ -149,6 +150,17 @@ impl server::Handler for Handler {
         }
         match &self.sftp_mode {
             SftpMode::Disabled => session.channel_failure(channel_id)?,
+            SftpMode::Files => {
+                let index = self
+                    .channels
+                    .iter()
+                    .position(|channel| channel.id() == channel_id)
+                    .unwrap();
+                let channel = self.channels.swap_remove(index);
+                self.sftp_channels.insert(channel_id);
+                session.channel_success(channel_id)?;
+                tokio::spawn(russh_sftp::server::run(channel.into_stream(), FilesPeer));
+            }
             SftpMode::Fleet { .. } => session.channel_failure(channel_id)?,
             #[cfg(unix)]
             SftpMode::OpenSsh { denied_requests } => {
@@ -406,6 +418,87 @@ impl SessionSink for Sink {
         self.0.lock().unwrap().extend_from_slice(bytes);
     }
     fn closed(&self, _: &str, _: &str) {}
+}
+
+struct FilesPeer;
+impl russh_sftp::server::Handler for FilesPeer {
+    type Error = russh_sftp::protocol::StatusCode;
+    fn unimplemented(&self) -> Self::Error {
+        Self::Error::OpUnsupported
+    }
+    async fn realpath(
+        &mut self,
+        id: u32,
+        path: String,
+    ) -> Result<russh_sftp::protocol::Name, Self::Error> {
+        let path = if path == "." {
+            "/fixture".to_string()
+        } else {
+            path
+        };
+        Ok(russh_sftp::protocol::Name {
+            id,
+            files: vec![russh_sftp::protocol::File::dummy(path)],
+        })
+    }
+    async fn lstat(
+        &mut self,
+        id: u32,
+        _path: String,
+    ) -> Result<russh_sftp::protocol::Attrs, Self::Error> {
+        Ok(russh_sftp::protocol::Attrs {
+            id,
+            attrs: russh_sftp::protocol::FileAttributes {
+                permissions: Some(0o040755),
+                ..russh_sftp::protocol::FileAttributes::empty()
+            },
+        })
+    }
+}
+
+#[tokio::test]
+async fn ssh_automatically_offers_files_once_and_retires_its_paired_channel() {
+    bounded(async {
+        let peer = Peer::start_with_sftp(SftpMode::Files).await;
+        let ssh = Arc::new(SshRegistry::new());
+        let outcome = crate::ssh::connect(
+            Arc::new(Sink::default()),
+            Arc::clone(&ssh),
+            Some(peer.known.clone()),
+            peer.request(),
+        )
+        .await;
+        let ConnectOutcome::Connected { session_id } = outcome else {
+            panic!("fixture SSH did not connect");
+        };
+        let sftp = Arc::new(SftpRegistry::new());
+        let service = DesktopService::new(Arc::clone(&ssh), Arc::clone(&sftp));
+        service.grant_live_connections().await;
+        let first = sftp.list();
+        assert_eq!(first.len(), 1);
+        let files = service
+            .targets()
+            .into_iter()
+            .find(|target| target.backend == Backend::Sftp)
+            .unwrap();
+        assert!(files.scopes.list && files.scopes.upload && files.scopes.download);
+        service.grant_live_connections().await;
+        assert_eq!(sftp.list()[0].session_id, first[0].session_id);
+        assert_eq!(peer.authentications.load(Ordering::Relaxed), 1);
+        service.revoke(&files.id).unwrap();
+        service.grant_live_connections().await;
+        assert!(!service
+            .targets()
+            .iter()
+            .any(|target| target.backend == Backend::Sftp));
+        crate::ssh::disconnect(&ssh, &session_id).await.unwrap();
+        while !ssh.list().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        service.grant_live_connections().await;
+        assert!(sftp.list().is_empty());
+    })
+    .await;
 }
 
 async fn bounded(test: impl std::future::Future<Output = ()>) {

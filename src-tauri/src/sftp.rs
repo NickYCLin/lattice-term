@@ -133,6 +133,18 @@ impl SftpRegistry {
             .unwrap_or_default()
     }
 
+    pub(crate) fn paired_session(
+        &self,
+        transport: &Arc<client::Handle<TrustingHandler>>,
+    ) -> Option<String> {
+        self.sessions
+            .lock()
+            .ok()?
+            .values()
+            .find(|entry| Arc::ptr_eq(&entry._transport, transport))
+            .map(|entry| entry.summary.session_id.clone())
+    }
+
     pub(crate) fn session(&self, session_id: &str) -> Result<Arc<SftpSession>, String> {
         self.sessions
             .lock()
