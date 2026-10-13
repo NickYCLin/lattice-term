@@ -63,6 +63,9 @@ export function loadChatProjectDefaults(storage: Pick<Storage, "getItem"> & Part
       if (!key?.startsWith(legacyPrefix)) continue;
       let path: string;
       try { path = decodeURIComponent(key.slice(legacyPrefix.length)); } catch { continue; }
+      if (/^[a-z]:[\\/]+$/i.test(plain) && path.toLowerCase() === plain.slice(0, 2).toLowerCase()) {
+        throw new ChatProjectDefaultsConflict();
+      }
       if (chatProjectKey(path) === chatProjectKey(directory)) candidates.add(key);
     }
   }

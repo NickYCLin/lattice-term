@@ -35,13 +35,13 @@ it("keeps POSIX case-sensitive paths separate", () => {
   expect(chatProjects([{ workingDirectory: "/work/LatticeTerm", updatedAt: 1 },
     { workingDirectory: "/work/latticeterm", updatedAt: 2 }])).toHaveLength(2);
 });
-it("does not apply a drive-relative legacy permission to an absolute root", () => {
+it.each(["C:/", "c:/"])("does not apply an ambiguous legacy permission to root %s", root => {
   const saved = storage();
   saved.setItem(legacyKey("C:"), JSON.stringify({ ...settings, permission: "full" }));
-  expect(() => loadChatProjectDefaults(saved, "C:/")).toThrow(/conflict/i);
+  expect(() => loadChatProjectDefaults(saved, root)).toThrow(/conflict/i);
   expect(saved.values.size).toBe(1);
-  clearChatProjectDefaults(saved, "C:/");
-  expect(loadChatProjectDefaults(saved, "C:/")).toBeNull();
+  clearChatProjectDefaults(saved, root);
+  expect(loadChatProjectDefaults(saved, root)).toBeNull();
 });
 it("accepts equal legacy defaults despite JSON field order", () => {
   const saved = storage();

@@ -134,7 +134,7 @@ GitHub 記錄與最終回報為準。本報告不提前宣稱 CI、安裝版或�
   v1 的 C: 無法證明來自絕對根目錄，明確報衝突並阻止自動建立對話，
   不擅自把該權限套給 C:/，也不默默回退最近設定。
 - 新增回歸最初 7 failed／5 passed；修正後針對測試通過。
-  完整 npm run check：224 files／1610 tests、typecheck、production build 通過。
+  完整 npm run check：224 files／1611 tests、typecheck、production build 通過。
   沒有重做已通過的 close-focus 修正。
 - coordinator 回報實機 MCP 已使用既有分享，經 capabilities／授權目標／state／read，
   同一 conversation 為 integration/done/ready=true、queued=0，派送回覆
