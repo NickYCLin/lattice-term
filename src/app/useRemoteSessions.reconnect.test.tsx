@@ -149,3 +149,20 @@ it("does not retry a session the person disconnected on purpose", async () => {
   expect(api.current.lastClosed).toBeNull();
   await act(async () => { root.unmount(); });
 });
+
+it("keeps saved-code reconnect available after a failed disconnect", async () => {
+  const { root, api } = await mount();
+  const implementation = invoke.getMockImplementation()!;
+  invoke.mockImplementation(async (command: string, args?: { request?: RemoteConnectRequest }) => {
+    if (command === "remote_disconnect") throw new Error("fixture disconnect failure");
+    return implementation(command, args);
+  });
+  try {
+    await act(async () => { await expect(api.current.disconnect("remote-1")).rejects.toThrow("fixture disconnect failure"); });
+    connects.push(connected("remote-2"));
+    await drop("remote-1");
+    expect(api.current.lastClosed?.reconnecting).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(api.current.sessions.map(session => session.sessionId)).toEqual(["remote-2"]);
+  } finally { await act(async () => root.unmount()); }
+});

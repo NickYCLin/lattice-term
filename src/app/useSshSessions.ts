@@ -302,16 +302,12 @@ export function useSshSessions(): SshApi {
     try {
       const { invoke } = await core();
       await invoke("ssh_disconnect", { sessionId });
-    } catch (reason) {
-      intentionalDisconnects.current.delete(sessionId);
-      throw reason;
-    } finally {
-      // Even if the backend refused, the session is over as far as this
-      // window is concerned; leaving the tab would strand the user with
-      // something they cannot close.
       setSessions((current) =>
         current.filter((session) => session.sessionId !== sessionId),
       );
+    } catch (reason) {
+      intentionalDisconnects.current.delete(sessionId);
+      throw reason;
     }
   }, []);
 

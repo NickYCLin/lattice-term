@@ -994,18 +994,17 @@ export function useRemoteSessions(): RemoteApi {
 
   const disconnect = useCallback(async (sessionId: string) => {
     intentionalDisconnects.current.add(sessionId);
-    reconnectRequests.current.delete(sessionId);
     try {
       const { invoke } = await core();
       await invoke("remote_disconnect", { sessionId });
-    } catch (reason) {
-      intentionalDisconnects.current.delete(sessionId);
-      throw reason;
-    } finally {
+      reconnectRequests.current.delete(sessionId);
       terminalOutput.current?.close(sessionId);
       setSessions((current) =>
         current.filter((session) => session.sessionId !== sessionId),
       );
+    } catch (reason) {
+      intentionalDisconnects.current.delete(sessionId);
+      throw reason;
     }
   }, []);
 

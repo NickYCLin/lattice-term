@@ -267,13 +267,12 @@ export function useRdpSessions(): RdpApi {
     try {
       const { invoke } = await core();
       await invoke("rdp_disconnect", { sessionId });
-    } catch (reason) {
-      intentionalDisconnects.current.delete(sessionId);
-      throw reason;
-    } finally {
       setSessions((current) =>
         current.filter((session) => session.sessionId !== sessionId),
       );
+    } catch (reason) {
+      intentionalDisconnects.current.delete(sessionId);
+      throw reason;
     }
   }, []);
 

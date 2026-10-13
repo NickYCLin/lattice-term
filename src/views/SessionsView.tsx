@@ -1,4 +1,5 @@
 import { PathDropZone } from "../components/files/PathDropZone";
+import { useSessionClose } from "../app/useSessionClose";
 import { FileDropZone } from "../components/files/FileDropZone";
 import { localFileError, readSelectedText, type UploadFile } from "../app/localFiles";
 /** Unified workspace for text terminals and graphical remote sessions. */
@@ -412,6 +413,7 @@ export function SessionsView({
     useState<SavedAgentSession | null>(null);
   const [syncNativeRemoval, setSyncNativeRemoval] = useState(true);
   const [nativeSyncError, setNativeSyncError] = useState<string | null>(null);
+  const sessionClose = useSessionClose();
   const [savedStartError, setSavedStartError] = useState<string | null>(null);
   const [removingSession, setRemovingSession] = useState(false);
   const [removeSessionError, setRemoveSessionError] = useState<string | null>(
@@ -2162,6 +2164,17 @@ export function SessionsView({
       {workspaceFilePicker}
       {storageCallout}
       {closedCallout}
+      {sessionClose.error && (
+        <div className="session-notice" role="alert">
+          <Callout
+            tone="warn"
+            title={t("terminal.disconnect")}
+            actions={<button type="button" className="button button--ghost button--sm" onClick={sessionClose.dismiss}>{t("common.close")}</button>}
+          >
+            {sessionClose.error}
+          </Callout>
+        </div>
+      )}
       {workspaceTransferCallout}
       {addCliErrorCallout}
         {nativeSyncCallout}
@@ -2357,7 +2370,8 @@ export function SessionsView({
                   <button
                     type="button"
                     className="icon-button icon-button--sm"
-                    onClick={() => void close(active)}
+                    disabled={sessionClose.pending.has(active.sessionId)}
+                    onClick={() => void sessionClose.run(active.sessionId, () => close(active))}
                     aria-label={t("terminal.disconnect")}
                     data-tooltip={t("terminal.disconnect")}
                   >
@@ -2476,8 +2490,9 @@ export function SessionsView({
                         <button
                           type="button"
                           className="cli-switch__close"
+                          disabled={sessionClose.pending.has(member.sessionId)}
                           onClick={() =>
-                            void closeAgentMember(group.members, member.sessionId)
+                            void sessionClose.run(member.sessionId, () => closeAgentMember(group.members, member.sessionId))
                           }
                           aria-label={t("terminal.disconnect")}
                         >
