@@ -4,6 +4,27 @@
 
 ---
 
+## [2026.10.13](https://github.com/NickYCLin/lattice-term/compare/v2026.10.12...v2026.10.13) (2026-10-13)
+
+
+### 🚀 新增功能
+
+* **credentials:** 支援離線保存帳密與 MCP 查詢 ([9da5a2f](https://github.com/NickYCLin/lattice-term/commit/9da5a2f41e1122de258a03469c461510c656f647))
+* **settings:** 加入 Windows 登入後自動開啟桌面 ([40d2682](https://github.com/NickYCLin/lattice-term/commit/40d26825f16346ed9071357be670d72bf04e0634))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 補上歷史讀取狀態與已送圖片預覽 ([faf4be8](https://github.com/NickYCLin/lattice-term/commit/faf4be82fd8d5bfc8e80ac8bb0e88d1a12728c78))
+* **chat:** 補齊送出回饋、排隊編輯與專案分類 ([38387ba](https://github.com/NickYCLin/lattice-term/commit/38387ba56a7368fe84fad5ffa2e08b7bd9e1b726))
+* **mcp:** 重開後恢復同一工作階段的分享設定 ([d4afdc7](https://github.com/NickYCLin/lattice-term/commit/d4afdc78f3a3bf31715f8e03aafe064509ef7bb9))
+* **sessions:** 修正還原期間無法接續其他對話 ([eacd0ee](https://github.com/NickYCLin/lattice-term/commit/eacd0ee828494843a206699451ef32997c3e41a7))
+* **sessions:** 在快速對話加入代理來源 ([6471d26](https://github.com/NickYCLin/lattice-term/commit/6471d26843629158dd5a90014ec6adc5e2218321))
+* **sessions:** 快速對話直接開啟啟動設定 ([3555459](https://github.com/NickYCLin/lattice-term/commit/3555459d00d07a809cb3e492cac4a233bcc049f7))
+* **ssh:** 修正關閉誤報並加入連線保活 ([abafe75](https://github.com/NickYCLin/lattice-term/commit/abafe755ef27ea1f14ad000d2079547bb506f2ef))
+* **terminal:** 修正捲軸遮字與軌道忽隱忽現 ([76b4439](https://github.com/NickYCLin/lattice-term/commit/76b4439a8fa446e79d55333bdb650af97101c32c))
+* **terminal:** 讓滾輪優先回看助理輸出 ([b5b5e60](https://github.com/NickYCLin/lattice-term/commit/b5b5e606ad882017f62ad02b48dde16d80902b9f))
+
 ## [2026.10.12](https://github.com/NickYCLin/lattice-term/compare/v2026.10.11...v2026.10.12) (2026-10-12)
 
 
