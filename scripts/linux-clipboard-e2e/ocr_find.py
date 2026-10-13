@@ -8,8 +8,11 @@ import csv
 import io
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from PIL import Image
 
 
 @dataclass(frozen=True)
@@ -39,27 +42,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-x", type=int, default=1_000_000)
     parser.add_argument("--max-y", type=int, default=1_000_000)
     parser.add_argument("--min-confidence", type=float, default=20.0)
+    parser.add_argument("--scale", type=int, choices=(1, 2, 3), default=1)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    completed = subprocess.run(
-        [
-            "tesseract",
-            str(args.image),
-            "stdout",
-            "-l",
-            "eng+chi_tra",
-            "--psm",
-            "11",
-            "tsv",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
+    with tempfile.TemporaryDirectory(prefix="latticeterm-ocr-") as directory:
+        image_path = args.image
+        if args.scale != 1:
+            image_path = Path(directory) / "scaled.png"
+            with Image.open(args.image) as image:
+                image.resize(
+                    (image.width * args.scale, image.height * args.scale),
+                    Image.Resampling.LANCZOS,
+                ).save(image_path)
+        completed = subprocess.run(
+            [
+                "tesseract",
+                str(image_path),
+                "stdout",
+                "-l",
+                "eng+chi_tra",
+                "--psm",
+                "11",
+                "tsv",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
     needle = args.needle.casefold()
     words: list[Word] = []
     for row in csv.DictReader(io.StringIO(completed.stdout), delimiter="\t"):
@@ -70,10 +83,10 @@ def main() -> int:
             word = Word(
                 text=text,
                 confidence=float(row["conf"]),
-                left=int(row["left"]),
-                top=int(row["top"]),
-                width=int(row["width"]),
-                height=int(row["height"]),
+                left=int(row["left"]) // args.scale,
+                top=int(row["top"]) // args.scale,
+                width=int(row["width"]) // args.scale,
+                height=int(row["height"]) // args.scale,
             )
         except (KeyError, TypeError, ValueError):
             continue
