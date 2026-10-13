@@ -17,6 +17,24 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_failure_probes_do_not_conflate_ocr_and_simulator_stalls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "iPhone.png").write_bytes(b"fixture")
+            def probe(command, **kwargs):
+                self.assertEqual(kwargs["timeout"], 15)
+                if "simctl" in command:
+                    raise subprocess.TimeoutExpired(command, 15)
+                if command[0] == "reader":
+                    return subprocess.CompletedProcess(command, 0, '["No connections yet", "Add connection"]', "")
+                return subprocess.CompletedProcess(command, 0, "host responds", "")
+            with patch.object(smoke.subprocess, "run", side_effect=probe):
+                result = smoke.failure_diagnostics("owned-device", output, Path("reader"))
+            self.assertTrue(result["knownGoodOCR"]["frontendVisible"])
+            self.assertTrue(result["hostProcesses"]["completed"])
+            self.assertFalse(result["simulatorProcesses"]["completed"])
+            self.assertFalse(result["webViewLog"]["completed"])
+
     def setUp(self):
         self.info = {"CFBundleSupportedPlatforms": ["iPhoneSimulator"], "MinimumOSVersion": "14.0"}
         self.ios18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-6"

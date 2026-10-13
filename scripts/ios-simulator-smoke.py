@@ -195,7 +195,31 @@ def simctl(*args, timeout=60):
     ).stdout.strip()
 
 
-def capture_failure(device_id, label, stage, error, directory):
+def failure_diagnostics(device_id, directory, reader):
+    probes = {
+        "hostProcesses": ["/bin/ps", "-axo", "pid,ppid,state,%cpu,%mem,comm"],
+        "simulatorProcesses": ["xcrun", "simctl", "spawn", device_id, "launchctl", "list"],
+        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
+                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit"'],
+        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--last", "3m",
+                             "--predicate", 'process == "CoreSimulatorService"'],
+    }
+    known_image = directory / "iPhone.png"
+    if reader and known_image.is_file():
+        probes["knownGoodOCR"] = [str(reader), str(known_image.resolve())]
+    results = {}
+    for name, command in probes.items():
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=15)
+            results[name] = {"completed": True, "stdout": result.stdout[-65536:], "stderr": result.stderr[-8192:]}
+            if name == "knownGoodOCR":
+                results[name]["frontendVisible"] = frontend_is_visible(json.loads(result.stdout))
+        except Exception as probe_error:
+            results[name] = {"completed": False, "error": f"{type(probe_error).__name__}: {probe_error}"[:2048]}
+    return results
+
+
+def capture_failure(device_id, label, stage, error, directory, reader=None):
     # This device was created by this invocation. Write the cause before any
     # best-effort capture, so even an unresponsive simulator leaves evidence.
     path = directory / f"{label}.failure.json"
@@ -204,6 +228,8 @@ def capture_failure(device_id, label, stage, error, directory):
         value = getattr(error, stream, None)
         if value:
             report[stream] = (value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value))[-8192:]
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    report["diagnostics"] = failure_diagnostics(device_id, directory, reader)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     screenshot = directory / f"{label}.failure.png"
     try:
@@ -309,7 +335,7 @@ def check_simulators(args, runtime, devices, reader):
             print(f"{label}: 已辨識連線頁內容，程序仍在執行，已保存 {screenshot}", flush=True)
         except Exception as error:
             try:
-                capture_failure(device_id, label, stage, error, args.output)
+                capture_failure(device_id, label, stage, error, args.output, reader)
             except Exception as evidence_error:
                 # Preserve the original failure if the output disk also fails.
                 print(f"無法保存失敗證據：{evidence_error}", file=sys.stderr, flush=True)
