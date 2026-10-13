@@ -38,8 +38,10 @@ it("keeps POSIX case-sensitive paths separate", () => {
 it("does not apply a drive-relative legacy permission to an absolute root", () => {
   const saved = storage();
   saved.setItem(legacyKey("C:"), JSON.stringify({ ...settings, permission: "full" }));
-  expect(loadChatProjectDefaults(saved, "C:/")).toBeNull();
+  expect(() => loadChatProjectDefaults(saved, "C:/")).toThrow(/conflict/i);
   expect(saved.values.size).toBe(1);
+  clearChatProjectDefaults(saved, "C:/");
+  expect(loadChatProjectDefaults(saved, "C:/")).toBeNull();
 });
 it("accepts equal legacy defaults despite JSON field order", () => {
   const saved = storage();

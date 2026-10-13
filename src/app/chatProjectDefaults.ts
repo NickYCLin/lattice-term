@@ -52,6 +52,9 @@ export function loadChatProjectDefaults(storage: Pick<Storage, "getItem"> & Part
   if (currentKey.startsWith(legacyPrefix)) return null;
   const plain = displayPath(directory.trim());
   const oldDirectory = plain.replace(/[\\/]+$/, "") || plain;
+  if (/^[a-z]:[\\/]+$/i.test(plain) && storage.getItem(legacyPrefix + encodeURIComponent(oldDirectory)) !== null) {
+    throw new ChatProjectDefaultsConflict();
+  }
   const candidates = new Set<string>();
   if (chatProjectKey(oldDirectory) === chatProjectKey(directory)) candidates.add(legacyPrefix + encodeURIComponent(oldDirectory));
   if (storage.key && storage.length !== undefined) {
