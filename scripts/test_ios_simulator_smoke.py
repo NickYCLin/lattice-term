@@ -21,7 +21,8 @@ class RuntimeSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
             (cache / "layout-2-0.json").write_text('{"delaySeconds":2}')
-            (cache / "layout-10-0.json").write_text('{"delaySeconds":10}')
+            (cache / "layout-10-0.json").write_text(json.dumps({"delaySeconds": 10, "dom": {"rects": [
+                {"selector": "#root", "height": 800}, {"selector": ".app--mobile", "height": 800}]}}))
             (cache / "unrelated.json").write_text('not a layout snapshot')
             snapshots = smoke.read_layout_snapshots(cache, timeout=0)
             self.assertEqual({entry["delaySeconds"] for entry in snapshots}, {2, 10})
@@ -30,6 +31,19 @@ class RuntimeSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(RuntimeError, "未產生"):
                 smoke.read_layout_snapshots(Path(directory), timeout=0)
+
+    def test_layout_snapshots_require_rendered_app_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-10-0.json").write_text('{"delaySeconds":10,"dom":{"rects":[{"selector":"#root"}]}}')
+            with self.assertRaisesRegex(RuntimeError, "早於前端"):
+                smoke.read_layout_snapshots(cache, timeout=0)
+
+    def test_failed_frontend_preserves_early_layout_as_partial_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-2-0.json").write_text('{"delaySeconds":2}')
+            self.assertEqual(smoke.read_layout_snapshots(cache, timeout=0, require_ready=False), [{"delaySeconds": 2}])
 
     def test_failure_probes_do_not_conflate_ocr_and_simulator_stalls(self):
         with tempfile.TemporaryDirectory() as directory:

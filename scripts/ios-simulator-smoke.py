@@ -251,13 +251,25 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 
-def read_layout_snapshots(cache, timeout=15):
+def read_layout_snapshots(cache, timeout=15, require_ready=True):
     deadline = time.monotonic() + timeout
-    while not list(cache.glob("layout-10-*.json")) and time.monotonic() < deadline:
+    while True:
+        snapshots = [json.loads(path.read_text()) for path in sorted(cache.glob("layout-*.json"))]
+        ready = any(
+            all(any(rect.get("selector") == selector and rect.get("height", 0) > 0
+                    for rect in entry.get("dom", {}).get("rects", []))
+                for selector in ("#root", ".app--mobile"))
+            for entry in snapshots
+        )
+        if not require_ready or (ready and any(entry.get("delaySeconds") == 10 for entry in snapshots)):
+            break
+        if time.monotonic() >= deadline:
+            break
         time.sleep(0.5)
-    snapshots = [json.loads(path.read_text()) for path in sorted(cache.glob("layout-*.json"))]
     if not snapshots:
         raise RuntimeError("模擬器未產生原生與 DOM 幾何診斷")
+    if require_ready and not ready:
+        raise RuntimeError("幾何診斷早於前端完成，缺少 root 與 mobile app 尺寸")
     return snapshots
 
 
@@ -357,6 +369,13 @@ def check_simulators(args, runtime, devices, reader):
             (args.output / "launch-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
             print(f"{label}: 已辨識連線頁內容，程序仍在執行，已保存 {screenshot}", flush=True)
         except Exception as error:
+            if getattr(args, "layout_diagnostics", False) and stage == "frontend":
+                try:
+                    container = Path(simctl("get_app_container", device_id, BUNDLE_ID, "data"))
+                    snapshots = read_layout_snapshots(container / "Library" / "Caches", timeout=0, require_ready=False)
+                    (args.output / f"{label}.layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+                except Exception as layout_error:
+                    (args.output / f"{label}.layout-error.json").write_text(json.dumps({"error": str(layout_error)}) + "\n")
             try:
                 capture_failure(device_id, label, stage, error, args.output, reader)
             except Exception as evidence_error:

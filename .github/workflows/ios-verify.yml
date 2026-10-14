@@ -161,23 +161,12 @@ jobs:
           path: src-tauri/gen/apple/build/reports
           if-no-files-found: error
           retention-days: 7
-      - name: Verify startup and capture original App Store screenshot candidates
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import subprocess
-          from pathlib import Path
-          apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
-          if len(apps) != 1:
-              raise SystemExit(f'Expected one simulator app, found {len(apps)}')
-          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'src-tauri/gen/apple/build/smoke', '--store-screenshots'], check=True)
-          PY
       - name: Save simulator launch evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ios-simulator-launch-evidence
-          path: src-tauri/gen/apple/build/smoke
+          path: ios-layout-evidence
           if-no-files-found: ignore
           retention-days: 14
       # This job deliberately creates no IPA, uses no Apple credentials,

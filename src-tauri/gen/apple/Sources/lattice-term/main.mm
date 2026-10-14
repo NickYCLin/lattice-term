@@ -20,6 +20,7 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
         WKWebView *webview = (WKWebView *)view;
         NSMutableDictionary *snapshot = [@{
             @"delaySeconds": @(seconds), @"windowBounds": layoutRect(window.bounds),
+            @"capturedAt": @([[NSDate date] timeIntervalSince1970]),
             @"screenBounds": layoutRect(window.screen.bounds), @"scale": @(window.screen.scale),
             @"windowSafeArea": layoutInsets(window.safeAreaInsets),
             @"webviewFrame": layoutRect(webview.frame),
@@ -46,7 +47,9 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
 
 static void scheduleLayoutDiagnostics(void) {
     if (![[NSProcessInfo processInfo].environment[@"LATTICETERM_LAYOUT_DIAGNOSTICS"] isEqualToString:@"1"]) return;
-    for (NSNumber *delay in @[@2, @10]) {
+    NSMutableArray<NSNumber *> *delays = [NSMutableArray arrayWithObject:@2];
+    for (NSInteger seconds = 5; seconds <= 900; seconds += 5) [delays addObject:@(seconds)];
+    for (NSNumber *delay in delays) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay.longLongValue * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             NSInteger index = 0;
             for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
