@@ -24,7 +24,7 @@ import {
 import { useI18n } from "../../i18n/context";
 import { ConfirmDialog } from "../overlays/ConfirmDialog";
 import { ArchiveFileIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
-import { ConversationListIdentity } from "./ConversationPresentation";
+import { ConversationListIdentity, ConversationMetadata } from "./ConversationPresentation";
 
 const DRAG_THRESHOLD_PX = 6;
 
@@ -351,7 +351,7 @@ export function ChatThreadTree({
                 }}
               >
                 <ConversationListIdentity title={row.session.label}>
-                  {row.session.detail ?? t("terminal.title")}
+                  {row.session.metadata ? <ConversationMetadata labels={row.session.metadata} /> : row.session.detail ?? t("terminal.title")}
                 </ConversationListIdentity>
                 <span className="chat-session__status" aria-hidden="true" />
               </div>

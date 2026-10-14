@@ -1,6 +1,8 @@
 /** Live Agent sessions projected as leaves of the conversation sidebar tree. */
 
 import { displayPath } from "./displayPath";
+import { conversationLabels, type ConversationLabels } from "./conversationLabels";
+import { cliProxyIdFromArguments, cliProxyLabel, type CliProxyEndpoint } from "./cliProxyApi";
 import {
   agentSessionSidebarMemberNodeId,
   presentAgentSessionGroup,
@@ -17,6 +19,7 @@ export interface ChatWorkspaceSession {
   sessionId: string;
   label: string;
   detail: string | null;
+  metadata?: ConversationLabels;
   status: SessionSidebarStatus;
 }
 
@@ -46,6 +49,7 @@ export function chatWorkspaceProjection(
   sessions: readonly AgentSessionSummary[],
   definitions: readonly Pick<AgentDefinition, "id" | "label">[],
   generalProjectLabel: string,
+  proxies: readonly CliProxyEndpoint[] = [],
 ): ChatWorkspaceProjection {
   const groups: { groupId: string; members: AgentSessionSummary[] }[] = [];
   const groupIndex = new Map<string, number>();
@@ -85,6 +89,8 @@ export function chatWorkspaceProjection(
         definitions.find((definition) => definition.id === member.definitionId)
           ?.label ?? member.definitionId;
       const memberLabel = member.label.trim() || definitionLabel;
+      const proxyId = cliProxyIdFromArguments(member.launchArguments);
+      const proxy = proxies.find(entry => entry.id === proxyId);
       sessionLeaves.set(nodeId, {
         nodeId,
         sessionId: member.sessionId,
@@ -92,6 +98,9 @@ export function chatWorkspaceProjection(
           ? `${presentation.groupLabel} · ${memberLabel}`
           : memberLabel,
         detail: [definitionLabel, member.model, directoryName(member.workingDirectory, "")].filter(Boolean).join(" · "),
+        metadata: conversationLabels({ definitionId: member.definitionId, model: member.model,
+          endpoint: proxyId !== null ? proxy ? cliProxyLabel(proxy) : "CLIProxyAPI" : null,
+          workingDirectory: member.workingDirectory }),
         status: agentGroupSidebarStatus([member]),
       });
       projectMembers.get(projectNodeId)!.push(nodeId);

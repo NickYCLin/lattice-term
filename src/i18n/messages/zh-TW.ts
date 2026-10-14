@@ -6,6 +6,14 @@
  */
 
 export const zhTW = {
+  "form.route.title": "同主機連線方式",
+  "form.route.add": "新增連線方式",
+  "form.route.hint": "每條路線分別儲存參數與帳密；切換協定只會修改目前路線。",
+  "conversation.meta.model": "模型",
+  "conversation.meta.connection": "連線",
+  "conversation.meta.account": "帳號",
+  "conversation.meta.project": "專案",
+  "agents.images.marker": "查看這段對話的圖片附件",
   "chat.proxy.direct": "直接透過 CLIProxyAPI 對話，不需要安裝 CLI。可傳送圖片與 UTF-8 文字附件；不執行本機指令、瀏覽器或外掛工具。",
   "chat.delegate.remoteAttachments": "遠端子任務尚未支援傳送附件，請改用本機子任務或先移除附件。",
   "workspace.recovery.title": "已存專案與復原",
