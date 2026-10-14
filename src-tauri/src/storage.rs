@@ -46,6 +46,30 @@ pub trait Storage: Send + Sync {
     fn update_profile(&mut self, profile: ConnectionProfile) -> Result<(), StorageError>;
     fn delete_profile(&mut self, id: &str) -> Result<bool, StorageError>;
     fn replace_profiles(&mut self, profiles: Vec<ConnectionProfile>) -> Result<(), StorageError>;
+    fn insert_linked_profile(
+        &mut self,
+        mut profile: ConnectionProfile,
+        source_id: &str,
+    ) -> Result<(), StorageError> {
+        let mut profiles = self.list_profiles()?;
+        if source_id == profile.id || profiles.iter().any(|entry| entry.id == profile.id) {
+            return Err(StorageError::Validation(
+                "A new route needs its own identity.".into(),
+            ));
+        }
+        let source = profiles
+            .iter_mut()
+            .find(|entry| entry.id == source_id)
+            .ok_or_else(|| StorageError::NotFound(source_id.into()))?;
+        let machine_id = source
+            .machine_id
+            .clone()
+            .unwrap_or_else(|| source.id.clone());
+        source.machine_id = Some(machine_id.clone());
+        profile.machine_id = Some(machine_id);
+        profiles.push(profile);
+        self.replace_profiles(profiles)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -353,6 +377,68 @@ mod file_storage_tests {
         assert_eq!(back, linked);
         let old: ConnectionProfile = serde_json::from_value(plain).unwrap();
         assert_eq!(old.machine_id, None);
+    }
+
+    #[test]
+    fn new_route_links_both_records_durably_without_replacing_parameters() {
+        let dir = temp_dir("new-machine-route");
+        let mut store = FileStorage::open(&dir).unwrap();
+        let mut source = profile("source", "Source");
+        source.port = 2222;
+        store.insert_profile(source.clone()).unwrap();
+        store.insert_profile(profile("other", "Other")).unwrap();
+        let mut route = profile("route", "Route");
+        route.protocol = Protocol::Sftp;
+        route.username = "separate-user".into();
+        store
+            .insert_linked_profile(route.clone(), "source")
+            .unwrap();
+        source.machine_id = Some("source".into());
+        route.machine_id = Some("source".into());
+        let reopened = FileStorage::open(&dir).unwrap();
+        assert_eq!(reopened.get_profile("source").unwrap(), Some(source));
+        assert_eq!(reopened.get_profile("route").unwrap(), Some(route.clone()));
+        assert_eq!(
+            reopened.get_profile("other").unwrap(),
+            Some(profile("other", "Other"))
+        );
+        let before = store.list_profiles().unwrap();
+        assert!(store.insert_linked_profile(route, "source").is_err());
+        assert!(store
+            .insert_linked_profile(profile("fresh", "Fresh"), "missing")
+            .is_err());
+        assert!(store
+            .insert_linked_profile(profile("source", "Replacement"), "source")
+            .is_err());
+        assert_eq!(store.list_profiles().unwrap(), before);
+    }
+
+    #[test]
+    fn new_route_keeps_existing_machine_identity_and_rolls_back_failed_write() {
+        let dir = temp_dir("failed-machine-route");
+        let mut store = FileStorage::open(&dir).unwrap();
+        let mut source = profile("source", "Source");
+        source.machine_id = Some("existing-machine".into());
+        store.insert_profile(source.clone()).unwrap();
+        store
+            .insert_linked_profile(profile("route", "Route"), "source")
+            .unwrap();
+        assert_eq!(
+            store.get_profile("route").unwrap().unwrap().machine_id,
+            source.machine_id
+        );
+        let before = store.list_profiles().unwrap();
+        let blocked_target = dir.join("blocked-target");
+        fs::create_dir(&blocked_target).unwrap();
+        store.path = blocked_target;
+        assert!(store
+            .insert_linked_profile(profile("failed", "Failed"), "source")
+            .is_err());
+        assert_eq!(store.list_profiles().unwrap(), before);
+        assert_eq!(
+            FileStorage::open(&dir).unwrap().list_profiles().unwrap(),
+            before
+        );
     }
 
     #[test]

@@ -31,6 +31,7 @@ import {
 } from "../domain/query";
 import { sampleProfiles } from "../domain/samples";
 import { persistConnectionRecord, type ConnectionCredentialDraft } from "./connectionCredentialRecord";
+import { savedRouteProfiles } from "./connectionRoutes";
 
 /** `SSH · operator@host:22`, the line shown beside an activity entry. */
 function describe(profile: ConnectionProfile): string {
@@ -162,11 +163,13 @@ export function useWorkspace() {
     [persist, record],
   );
 
-  const saveProfileRecord = useCallback(async (profile: ConnectionProfile, credential?: ConnectionCredentialDraft) => {
+  const saveProfileRecord = useCallback(async (profile: ConnectionProfile, credential?: ConnectionCredentialDraft, linkedProfileId?: string) => {
+    const next = savedRouteProfiles(profiles, profile, linkedProfileId);
+    const saved = next.find(entry => entry.id === profile.id)!;
     const existed = profiles.some(entry => entry.id === profile.id);
     if ("__TAURI_INTERNALS__" in window) {
       try {
-        await persistConnectionRecord(profile, credential);
+        await persistConnectionRecord(saved, credential, linkedProfileId);
       } catch (reason) {
         await refreshProfiles().catch(() => undefined);
         throw reason;
@@ -174,12 +177,14 @@ export function useWorkspace() {
     } else if (credential) {
       throw new Error("Credential storage requires the desktop application.");
     }
-    setProfiles(current => current.some(entry => entry.id === profile.id)
-      ? current.map(entry => entry.id === profile.id ? profile : entry)
-      : [...current, profile]);
+    setProfiles(current => {
+      if (linkedProfileId && (current.some(entry => entry.id === saved.id) ||
+        !current.some(entry => entry.id === linkedProfileId))) return current;
+      return savedRouteProfiles(current, saved, linkedProfileId);
+    });
     setSelectedId(profile.id);
     record({ kind: existed ? "updated" : "created", subject: profile.name, detail: describe(profile) });
-    return profile;
+    return saved;
   }, [profiles, record, refreshProfiles]);
 
   const updateProfile = useCallback(

@@ -9,7 +9,7 @@ it("saves the profile and credential through a dedicated native command, without
   const profile = createConnectionProfile({ ...emptyDraft(), hostname: "offline.example" }, "profile");
   const credential = { secret: "test-only-password", allowMcpRead: false };
   await persistConnectionRecord(profile, credential);
-  expect(native.invoke).toHaveBeenCalledExactlyOnceWith("save_connection_record", { profile, credential });
+  expect(native.invoke).toHaveBeenCalledExactlyOnceWith("save_connection_record", { profile, credential, linkedProfileId: null });
   expect(JSON.stringify(profile)).not.toContain("test-only-password");
 });
 
@@ -17,6 +17,14 @@ it("offers pairing-code records only for permanent remote device identities", ()
   const profile = createConnectionProfile(emptyDraft("lattice"), "profile");
   expect(supportsCredentialRecord(profile)).toBe(false);
   expect(supportsCredentialRecord({ ...profile, deviceId: "123456789" })).toBe(true);
+});
+
+it("passes only a source identity when saving a separate route and propagates failures", async () => {
+  native.invoke.mockReset();
+  const profile = createConnectionProfile({ ...emptyDraft("sftp"), hostname: "fixture.invalid" }, "route");
+  native.invoke.mockRejectedValueOnce(new Error("synthetic write failure"));
+  await expect(persistConnectionRecord(profile, undefined, "source")).rejects.toThrow("synthetic write failure");
+  expect(native.invoke).toHaveBeenCalledExactlyOnceWith("save_connection_record", { profile, credential: null, linkedProfileId: "source" });
 });
 
 it("does not expose an old saved login after the endpoint is edited", () => {

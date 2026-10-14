@@ -29,7 +29,7 @@ export async function readConnectionCredential(profileId: string) {
   return invoke<string>("connection_credential_read", { profileId });
 }
 
-export async function persistConnectionRecord(profile: ConnectionProfile, credential?: ConnectionCredentialDraft) {
+export async function persistConnectionRecord(profile: ConnectionProfile, credential?: ConnectionCredentialDraft, linkedProfileId?: string) {
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("save_connection_record", { profile, credential: credential ?? null });
+  await invoke("save_connection_record", { profile, credential: credential ?? null, linkedProfileId: linkedProfileId ?? null });
 }

@@ -3437,6 +3437,7 @@ async fn save_connection_record(
     app: AppHandle,
     profile: ConnectionProfile,
     credential: Option<connection_credentials::CredentialRecordDraft>,
+    linked_profile_id: Option<String>,
 ) -> Result<(), String> {
     connection_credentials::validate_profile(&profile)?;
     credential_call(move || {
@@ -3444,6 +3445,31 @@ async fn save_connection_record(
         let mut storage = storage.lock().map_err(|error| error.to_string())?;
         let setting = app.state::<AppConnectionBook>();
         let mut setting = setting.lock().map_err(|error| error.to_string())?;
+        if let Some(source_id) = linked_profile_id.as_deref() {
+            if source_id == profile.id
+                || storage
+                    .get_profile(&profile.id)
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+            {
+                return Err("A new route needs its own identity.".into());
+            }
+            if storage
+                .get_profile(source_id)
+                .map_err(|error| error.to_string())?
+                .is_none()
+            {
+                return Err("The source connection is no longer available.".into());
+            }
+        }
+        let save = |storage: &mut FileStorage, profile: ConnectionProfile| {
+            if let Some(source_id) = linked_profile_id.as_deref() {
+                storage.insert_linked_profile(profile, source_id)
+            } else {
+                storage.insert_profile(profile)
+            }
+            .map_err(|error| error.to_string())
+        };
         if let Some(credential) = credential {
             let secret = credential.secret.map(zeroize::Zeroizing::new);
             if !credential.allow_mcp_read {
@@ -3455,17 +3481,13 @@ async fn save_connection_record(
             } else if credential.allow_mcp_read {
                 connection_credentials::load(&profile)?;
             }
-            storage
-                .insert_profile(profile.clone())
-                .map_err(|error| error.to_string())?;
+            save(&mut storage, profile.clone())?;
             setting.share_credential(
                 &profile.id,
                 credential.allow_mcp_read.then_some(binding.as_str()),
             )?;
         } else {
-            storage
-                .insert_profile(profile)
-                .map_err(|error| error.to_string())?;
+            save(&mut storage, profile)?;
         }
         Ok(())
     })

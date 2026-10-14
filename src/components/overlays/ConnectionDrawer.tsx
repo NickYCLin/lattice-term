@@ -43,6 +43,7 @@ import { clearValidationError } from "./connectionValidation";
 import { moveRadioGroupFocus } from "./radioNavigation";
 import { useModalFocus } from "./modalFocus";
 import { useConnectionCredentialDraft } from "../../app/useConnectionCredentialDraft";
+import { newRouteDraft } from "../../app/connectionRoutes";
 import {
   sameCredentialTarget,
   supportsCredentialRecord,
@@ -81,6 +82,9 @@ const hostnamePlaceholderKeys: Record<Protocol, MessageKey> = {
 
 export function ConnectionDrawer({
   profile,
+  routeSource = null,
+  onOpenRoute,
+  onAddRoute,
   profiles,
   supportedProtocols,
   mobile,
@@ -89,6 +93,9 @@ export function ConnectionDrawer({
 }: {
   /** `null` opens an empty draft; a profile opens it for editing. */
   profile: ConnectionProfile | null;
+  routeSource?: ConnectionProfile | null;
+  onOpenRoute?: (id: string) => void;
+  onAddRoute?: (id: string) => void;
   profiles: ConnectionProfile[];
   /** Native session engines registered by this package. */
   supportedProtocols: readonly string[];
@@ -105,14 +112,15 @@ export function ConnectionDrawer({
   const { t } = useI18n();
 
   const initial = useMemo(
-    () => (profile ? draftFromProfile(profile) : emptyDraft()),
-    [profile],
+    () => (profile ? draftFromProfile(profile) : routeSource ? newRouteDraft(routeSource, profiles) : emptyDraft()),
+    [profile, routeSource, profiles],
   );
 
   const [draft, setDraft] = useState<ConnectionDraft>(initial);
   const [tagInput, setTagInput] = useState((initial.tags ?? []).join(", "));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const navigation = useRef<(() => void) | null>(null);
   const [recordId] = useState(() => profile?.id ?? createConnectionProfile(emptyDraft()).id);
   const credential = useConnectionCredentialDraft(profile);
   const [showSecret, setShowSecret] = useState(false);
@@ -154,12 +162,19 @@ export function ConnectionDrawer({
   const relayEntry = isRelayProfile(draft);
 
   function requestClose() {
+    navigation.current = null;
     if (savingRef.current) return;
     if (dirty) {
       setConfirmDiscard(true);
       return;
     }
     onClose();
+  }
+
+  function navigate(action: () => void) {
+    if (savingRef.current) return;
+    if (dirty) { navigation.current = action; setConfirmDiscard(true); }
+    else action();
   }
 
   useModalFocus({
@@ -301,6 +316,20 @@ export function ConnectionDrawer({
         </header>
 
         <form className="drawer__body" id={formId} onSubmit={submit} noValidate inert={saving}>
+          {(profile || routeSource) && <section className="form-section">
+            <h3 className="form-section__title">{t("form.route.title")}</h3>
+            <p>{t("form.route.hint")}</p>
+            <div className="connection-drawer__routes">
+              {profiles.filter(entry => entry.id === (profile ?? routeSource)!.id ||
+                ((profile ?? routeSource)!.machineId && entry.machineId === (profile ?? routeSource)!.machineId)).map(entry =>
+                <button type="button" className="button button--secondary button--sm" key={entry.id}
+                  aria-pressed={entry.id === profile?.id} disabled={entry.id === profile?.id || saving}
+                  title={connectionTarget(entry)} onClick={() => onOpenRoute && navigate(() => onOpenRoute(entry.id))}>
+                  {findProtocol(entry.protocol).acronym} · {entry.name}</button>)}
+              {profile && onAddRoute && <button type="button" className="button button--primary button--sm"
+                onClick={() => navigate(() => onAddRoute(profile.id))}>{t("form.route.add")}</button>}
+            </div>
+          </section>}
           <section className="form-section">
             <div className="form-section__heading">
               <h3 className="form-section__title">
@@ -755,7 +784,7 @@ export function ConnectionDrawer({
               <button
                 type="button"
                 className="button button--danger"
-                onClick={onClose}
+                onClick={() => { const action = navigation.current; navigation.current = null; if (action) action(); else onClose(); }}
               >
                 {t("form.discard.confirm")}
               </button>

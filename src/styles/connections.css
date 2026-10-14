@@ -36,6 +36,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 0 var(--space-6) var(--space-8);
 }
 
@@ -2953,6 +2954,20 @@
   flex-wrap: wrap;
   gap: var(--space-1);
   min-width: 0;
+}
+
+.connection-drawer__routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.connection-drawer__routes .button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inspector__machine-list {
