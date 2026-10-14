@@ -47,6 +47,15 @@ function envelope(
   return { threadId: "thread-1", turnId, event };
 }
 
+it("keeps provider reports separate from tool names and clears them across accounts", () => {
+  const original = beginTurn(thread({ definitionId: "codex" }), "Synthetic", "turn-provider", 2000);
+  const reported = applyChatEvent(original, { threadId: original.id, turnId: "turn-provider", event: { kind: "providerReport", provider: "verified-adapter-id" } });
+  expect(reported.reportedProvider).toBe("verified-adapter-id");
+  const idle = { ...reported, runningTurnId: null };
+  expect(handoffThreadAccount(idle, "another-account").reportedProvider).toBeNull();
+  expect(changeThreadDirectory(idle, "/another-project").reportedProvider).toBeNull();
+});
+
 describe("beginTurn", () => {
   it("keeps visible context but starts a new native session when leaving a project", () => {
     const previous = thread({ nativeSessionId: "native-project", items: [{ type: "user", id: "u", text: "Explain this", at: 1 }, { type: "text", id: "a", text: "The answer" }] });

@@ -67,7 +67,9 @@
 - 統一副標欄位：來源、模型、連線端點、帳號、專案。
 - Codex 終端／原生對話標 `Codex CLI`；直接 API 對話標 `Codex API`。
   使用 API endpoint 的 CLI 仍是 CLI，不因 endpoint 而改成直接 API。
-- 模型缺值顯示「模型: 預設」，不是猜測某一模型；原生歷史未提供模型亦如此。
+- 當輪模型缺值顯示「模型: 預設」，不是猜測某一模型。
+  追加輪已改為「模型: 未知」並新增可信供應商欄位，
+  見 `2026-10-14-desktop-followup.zh-TW.md`，不將歷史描述當成目前規則。
 - 自訂 endpoint 保留 `cliProxyLabel`；找不到設定的 endpoint 顯示 `CLIProxyAPI`。
 - 使用者對話名稱、persisted label、primary node ID 與側欄 identity 不變。
   長副標可透過 title 查看完整內容。

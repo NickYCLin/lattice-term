@@ -1766,8 +1766,8 @@ fn agent_chat_close(
     registry.close(&thread_id)
 }
 
-/// Permanently deletes a native CLI conversation from the CLI's storage (e.g. Codex or Claude),
-/// keeping external desktops and native CLI stores in sync.
+/// Archives Codex through its official API; other adapters retain their
+/// existing removal behavior.
 #[tauri::command]
 async fn agent_chat_delete_native_conversation(
     definition_id: String,
@@ -1780,6 +1780,18 @@ async fn agent_chat_delete_native_conversation(
         &native_session_id,
         profile_config_path.as_deref(),
         working_directory.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn agent_chat_restore_codex_conversation(
+    native_session_id: String,
+    profile_config_path: Option<String>,
+) -> Result<(), String> {
+    crate::agent_chat::restore_codex_conversation(
+        &native_session_id,
+        profile_config_path.as_deref(),
     )
     .await
 }
@@ -5577,6 +5589,7 @@ pub fn run() {
             agent_chat_close,
             agent_chat_general_directory,
             agent_chat_delete_native_conversation,
+            agent_chat_restore_codex_conversation,
             agent_chat_respond,
             agent_chat_models,
             agent_chat_skills,

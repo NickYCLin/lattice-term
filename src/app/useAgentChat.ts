@@ -1,6 +1,6 @@
 import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
 import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
-import { dismissNativeConversation } from "./nativeConversationDismissals";
+import { dismissNativeConversation, restoreNativeConversation } from "./nativeConversationDismissals";
 import { removeConversationDraft } from "./useConversationDraft";
 /**
  * Chat threads with an agent CLI, kept in the WebView and driven by the
@@ -117,6 +117,9 @@ export interface ChatThreadCreation extends ChatThreadSettings {
 }
 
 export interface AgentChatApi {
+  removal: { id: string; pending: boolean; error: string | null } | null;
+  archivedReceipt: { title: string; pending: boolean; error: string | null } | null;
+  undoArchive: () => Promise<void>;
   nativeRead: { threadId: string; ready: boolean; loading: boolean; error: string | null; refresh: () => void } | null;
   threads: ChatThread[];
   getThread: (id: string) => ChatThread | undefined;
@@ -158,7 +161,7 @@ export interface AgentChatApi {
   /** Starts a new native conversation with another CLI and carries safe context. */
   handoffThread: (id: string, definitionId: ChatDefinitionId, model: string) => void;
   handoffThreadAccount: (id: string, accountProfileId: string | null) => void;
-  removeThread: (id: string, profileConfigPath?: string | null) => void;
+  removeThread: (id: string, profileConfigPath?: string | null) => Promise<void>;
   /** Moves a thread out of the main list, or back into it. */
   shelveThread: (id: string, shelved: boolean) => void;
   /**
@@ -233,6 +236,11 @@ export function useAgentChat(
   completionVolume = 60,
   completionNotification = false,
 ): AgentChatApi {
+  const removals = useRef(new Set<string>());
+  const [removal, setRemoval] = useState<AgentChatApi["removal"]>(null);
+  const [archivedReceipt, setArchivedReceipt] = useState<AgentChatApi["archivedReceipt"]>(null);
+  const archivedThread = useRef<{ thread: ChatThread; profile: string | null } | null>(null);
+  const restoringArchive = useRef(false);
   const completionTracker = useRef(new ChatCompletionTracker());
   const soundRef = useRef(completionSound);
   soundRef.current = completionSound;
@@ -561,22 +569,18 @@ export function useAgentChat(
     );
   }, []);
 
-  const remove = useCallback((id: string, profileConfigPath?: string | null) => {
+  const remove = useCallback(async (id: string, profileConfigPath?: string | null) => {
+    if (removals.current.has(id)) return;
+    removals.current.add(id);
+    setRemoval({ id, pending: true, error: null });
     completionTracker.current.cancel(id);
     const threadToDelete = threadsRef.current.find((thread) => thread.id === id);
-    if (threadToDelete?.nativeSessionId && !threadToDelete.remote) {
-      dismissNativeConversation({
-        definitionId: threadToDelete.definitionId,
-        profileId: threadToDelete.accountProfileId ?? null,
-        nativeSessionId: threadToDelete.nativeSessionId,
-      });
-    }
     // A Codex thread keeps a server alive between turns; closing the thread
     // must end it whether or not a turn is running. A mirror of a subtask on
     // another machine has no local thread to close.
     if (hasDesktopBackend() && !threadToDelete?.remote) {
-      core()
-        .then(async ({ invoke }) => {
+      try {
+          const { invoke } = await core();
           await invoke("agent_chat_close", { threadId: id });
           if (threadToDelete?.nativeSessionId && !threadToDelete.archived) {
             await invoke("agent_chat_delete_native_conversation", {
@@ -586,8 +590,19 @@ export function useAgentChat(
               workingDirectory: threadToDelete.workingDirectory || null,
             });
           }
-        })
-        .catch(() => {});
+      } catch (reason) {
+        removals.current.delete(id);
+        setRemoval({ id, pending: false, error: reason instanceof Error ? reason.message : String(reason) });
+        return;
+      }
+    }
+    if (threadToDelete?.nativeSessionId && !threadToDelete.remote && threadToDelete.definitionId !== "codex") {
+      dismissNativeConversation({ definitionId: threadToDelete.definitionId,
+        profileId: threadToDelete.accountProfileId ?? null, nativeSessionId: threadToDelete.nativeSessionId });
+    }
+    if (threadToDelete?.definitionId === "codex" && threadToDelete.nativeSessionId && !threadToDelete.remote && !threadToDelete.archived) {
+      archivedThread.current = { thread: threadToDelete, profile: profileConfigPath ?? null };
+      setArchivedReceipt({ title: threadToDelete.title, pending: false, error: null });
     }
     const remaining = threadsRef.current.filter((thread) => thread.id !== id);
     removeConversationDraft("thread", id);
@@ -602,7 +617,27 @@ export function useAgentChat(
       if (current !== id) return current;
       return remaining[0]?.id ?? null;
     });
+    removals.current.delete(id);
+    setRemoval(null);
   }, []);
+
+  const undoArchive = useCallback(async () => {
+    const receipt = archivedThread.current;
+    if (!receipt || restoringArchive.current) return;
+    restoringArchive.current = true;
+    setArchivedReceipt({ title: receipt.thread.title, pending: true, error: null });
+    try {
+      const { invoke } = await core();
+      await invoke("agent_chat_restore_codex_conversation", { nativeSessionId: receipt.thread.nativeSessionId, profileConfigPath: receipt.profile });
+      restoreNativeConversation({ definitionId: "codex", profileId: receipt.thread.accountProfileId, nativeSessionId: receipt.thread.nativeSessionId! });
+      changeThreads(current => current.some(thread => thread.id === receipt.thread.id) ? current : [{ ...receipt.thread, runningTurnId: null }, ...current]);
+      setActiveThreadId(receipt.thread.id);
+      archivedThread.current = null;
+      setArchivedReceipt(null);
+    } catch (reason) {
+      setArchivedReceipt({ title: receipt.thread.title, pending: false, error: reason instanceof Error ? reason.message : String(reason) });
+    } finally { restoringArchive.current = false; }
+  }, [changeThreads]);
 
   const shelve = useCallback((id: string, shelved: boolean) => {
     changeThreads((current) =>
@@ -986,6 +1021,9 @@ export function useAgentChat(
 
   return useMemo(
     () => ({
+      removal,
+      archivedReceipt,
+      undoArchive,
       threads,
       nativeRead: mirror ? { threadId: mirror.id, ready: nativeMessages.value !== null,
         loading: !nativeMessages.value && (nativeMessages.busy || !nativeMessages.error),
@@ -1028,6 +1066,9 @@ export function useAgentChat(
     }),
     [
       threads,
+      removal,
+      archivedReceipt,
+      undoArchive,
       mirror?.id,
       nativeMessages.value,
       nativeMessages.busy,

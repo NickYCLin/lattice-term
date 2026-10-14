@@ -149,6 +149,7 @@ export function looksLikeDiff(output: string | null): boolean {
 
 export type ChatEvent =
   | { kind: "started"; nativeSessionId: string | null; model: string | null }
+  | { kind: "providerReport"; provider: string }
   | { kind: "textDelta"; itemId: string; delta: string }
   | { kind: "text"; itemId: string; text: string }
   | { kind: "reasoning"; itemId: string; text: string }
@@ -273,6 +274,7 @@ export interface ChatHandoff {
 }
 
 export interface ChatThread {
+  reportedProvider?: string | null;
   provider?: "cliproxyapi";
   /** Which configured proxy answers this thread. */
   proxyId?: string;
@@ -464,6 +466,7 @@ export function handoffThread(
     definitionId,
     provider: undefined,
     proxyId: undefined,
+    reportedProvider: null,
     accountProfileId: null,
     model: model.trim(),
     permission: permissionsFor(definitionId).includes(thread.permission)
@@ -497,6 +500,7 @@ export function handoffThreadAccount(
     ...thread,
     accountProfileId,
     nativeSessionId: null,
+    reportedProvider: null,
     reportedModel: null,
     handoff: transcript
       ? { sourceDefinitionId: thread.definitionId, transcript }
@@ -567,6 +571,7 @@ export function changeThreadDirectory(thread: ChatThread, directory: string): Ch
     ...thread,
     workingDirectory: directory,
     nativeSessionId: null,
+    reportedProvider: null,
     reportedModel: null,
     handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
   };
@@ -590,8 +595,9 @@ export function selectThreadModel(
   const transcript = providerChanged ? handoffTranscript(thread.items, thread.definitionId) : "";
   return {
     ...next, provider, proxyId, model: selection.model.trim(), updatedAt: now,
+    ...(selection.model.trim() !== thread.model ? { reportedModel: null } : {}),
     ...(providerChanged ? {
-      nativeSessionId: null, reportedModel: null,
+      nativeSessionId: null, reportedModel: null, reportedProvider: null,
       handoff: transcript ? { sourceDefinitionId: thread.definitionId, transcript } : null,
     } : {}),
   };
@@ -757,6 +763,8 @@ export function applyChatEvent(
   const scoped = (itemId: string) => `${envelope.turnId}:${itemId}`;
 
   switch (event.kind) {
+    case "providerReport":
+      return { ...thread, reportedProvider: event.provider.trim().slice(0, 128) || null };
     case "started":
       return {
         ...thread,
@@ -1040,6 +1048,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
         typeof thread.nativeSessionId === "string" ? thread.nativeSessionId : null,
       reportedModel:
         typeof thread.reportedModel === "string" ? thread.reportedModel : null,
+      reportedProvider: typeof thread.reportedProvider === "string" ? thread.reportedProvider.slice(0, 128) : null,
       accountProfileId:
         typeof thread.accountProfileId === "string" ? thread.accountProfileId : null,
       handoff:

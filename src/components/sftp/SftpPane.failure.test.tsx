@@ -1,0 +1,66 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, expect, it, vi } from "vitest";
+import { I18nProvider } from "../../i18n";
+import { SftpPane } from "./SftpPane";
+import type { SftpApi, SftpSessionSummary } from "../../app/useSftpSessions";
+import { allNodes, installHostDom, props } from "../agents/testFixtures/interactionDom";
+
+vi.mock("../../app/fileDrop", () => ({ useFileDrop: () => ({ dragging: false }) }));
+vi.mock("../files/RemoteTextEditorProvider", () => ({ useRemoteTextEditor: () => ({ active: false, open: vi.fn() }) }));
+vi.mock("../overlays/useAppDialogs", () => ({ useAppDialogs: () => ({ confirm: vi.fn(), prompt: vi.fn(), dialogs: null }) }));
+afterEach(() => vi.unstubAllGlobals());
+
+it("keeps failed listing unknown, disables writes and supports refresh and parent recovery", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  const list = vi.fn().mockResolvedValueOnce({ path: "/known-empty", entries: [] })
+    .mockRejectedValueOnce(new Error("Synthetic listing unavailable"))
+    .mockRejectedValueOnce(new Error("Synthetic retry unavailable"))
+    .mockResolvedValueOnce({ path: "/unread", entries: [] });
+  const sftp = { list, transfers: {} } as unknown as SftpApi;
+  const session = { sessionId: "synthetic", currentPath: "/known-empty" } as SftpSessionSummary;
+  const button = (text: string) => allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent.includes(text))!;
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SftpPane session={session} sftp={sftp} /></I18nProvider>));
+    expect(host.textContent).toContain("這個資料夾目前是空的");
+    const input = allNodes(host).find(node => node.tagName === "INPUT")!;
+    await act(async () => props(input).onChange({ currentTarget: { value: "/unread/destination" } }));
+    await act(async () => props(allNodes(host).find(node => node.tagName === "FORM")!).onSubmit({ preventDefault() {} }));
+    expect(list).toHaveBeenLastCalledWith("synthetic", "/unread/destination");
+    expect(host.textContent).toContain("Synthetic listing unavailable");
+    expect(host.textContent).not.toContain("這個資料夾目前是空的");
+    expect(props(button("上傳")).disabled).toBe(true);
+    expect(props(button("新增資料夾")).disabled).toBe(true);
+    await act(async () => props(button("重新整理")).onClick());
+    expect(list).toHaveBeenLastCalledWith("synthetic", "/unread/destination");
+    expect(host.textContent).toContain("Synthetic retry unavailable");
+    await act(async () => props(button("上一層")).onClick());
+    expect(list).toHaveBeenLastCalledWith("synthetic", "/unread");
+    expect(host.textContent).toContain("這個資料夾目前是空的");
+    expect(props(button("上傳")).disabled).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("coalesces repeated opens and ignores old session results after reconnect", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  let finishFirst!: (value: unknown) => void;
+  const list = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }))
+    .mockResolvedValue({ path: "/second", entries: [] });
+  const sftp = { list, transfers: {} } as unknown as SftpApi;
+  const render = (sessionId: string, currentPath: string) => root.render(<I18nProvider locale="zh-TW">
+    <SftpPane session={{ sessionId, currentPath } as SftpSessionSummary} sftp={sftp} /></I18nProvider>);
+  try {
+    await act(async () => render("first", "/first"));
+    const form = allNodes(host).find(node => node.tagName === "FORM")!;
+    await act(async () => { props(form).onSubmit({ preventDefault() {} }); props(form).onSubmit({ preventDefault() {} }); });
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => render("second", "/second"));
+    expect(allNodes(host).find(node => node.tagName === "INPUT")!.value).toBe("/second");
+    await act(async () => finishFirst({ path: "/first", entries: [] }));
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenLastCalledWith("second", "/second");
+    expect(allNodes(host).find(node => node.tagName === "INPUT")!.value).toBe("/second");
+  } finally { await act(async () => root.unmount()); }
+});

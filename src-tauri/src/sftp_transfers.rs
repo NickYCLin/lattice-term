@@ -516,9 +516,11 @@ async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String>
 fn require_upload_permissions(attributes: &FileAttributes, expected: u32) -> Result<(), String> {
     match attributes.permissions {
         Some(mode) if mode & 0o777 == expected => Ok(()),
-        _ => Err(
-            "the server could not establish the required owner-only upload permissions".to_string(),
-        ),
+        Some(mode) => Err(format!(
+            "Upload refused: the server reported mode {:03o}, expected {:03o}. Owner-only access could not be verified. Windows SFTP mode reports alone cannot verify an ACL.",
+            mode & 0o777, expected
+        )),
+        None => Err("Upload refused: the server did not report POSIX permissions. Owner-only access could not be verified. Ask the server administrator for a supported private upload location; no permission checks were bypassed.".to_string()),
     }
 }
 
@@ -1143,6 +1145,7 @@ mod tests {
     struct UploadPermissionServer {
         mode: Option<u32>,
         collision: bool,
+        cleanup_failure: bool,
         operations: Arc<Mutex<Vec<&'static str>>>,
     }
 
@@ -1203,6 +1206,9 @@ mod tests {
             _filename: String,
         ) -> Result<russh_sftp::protocol::Status, Self::Error> {
             self.operations.lock().unwrap().push("remove");
+            if self.cleanup_failure {
+                return Err(Self::Error::Failure);
+            }
             Ok(russh_sftp::protocol::Status {
                 id,
                 status_code: Self::Error::Ok,
@@ -1214,13 +1220,14 @@ mod tests {
 
     #[tokio::test]
     async fn uploads_require_private_creation_and_preserve_colliding_paths() {
-        for (mode, collision) in [
-            (Some(0o100600), false),
-            (Some(0o100644), false),
-            (Some(0o100400), false),
-            (Some(0o100700), false),
-            (None, false),
-            (Some(0o100600), true),
+        for (mode, collision, cleanup_failure) in [
+            (Some(0o100600), false, false),
+            (Some(0o100644), false, false),
+            (Some(0o100400), false, false),
+            (Some(0o100700), false, false),
+            (None, false, false),
+            (Some(0o100600), true, false),
+            (Some(0o100644), false, true),
         ] {
             let operations = Arc::new(Mutex::new(Vec::new()));
             let (client, server) = tokio::io::duplex(8192);
@@ -1229,6 +1236,7 @@ mod tests {
                 UploadPermissionServer {
                     mode,
                     collision,
+                    cleanup_failure,
                     operations: Arc::clone(&operations),
                 },
             ));
@@ -1241,6 +1249,12 @@ mod tests {
                 assert_eq!(*operations.lock().unwrap(), ["open", "fstat", "close"]);
             } else {
                 assert!(result.is_err());
+                if cleanup_failure {
+                    assert!(result
+                        .err()
+                        .unwrap()
+                        .contains("could not remove empty staging file"));
+                }
                 let observed = operations.lock().unwrap();
                 if collision {
                     assert_eq!(*observed, ["open"]);
@@ -1256,7 +1270,7 @@ mod tests {
         }
     }
 
-    struct PromotionServer(Arc<Mutex<HashMap<String, FileAttributes>>>);
+    struct PromotionServer(Arc<Mutex<HashMap<String, FileAttributes>>>, bool, bool);
 
     impl russh_sftp::server::Handler for PromotionServer {
         type Error = russh_sftp::protocol::StatusCode;
@@ -1301,6 +1315,10 @@ mod tests {
             old: String,
             new: String,
         ) -> Result<russh_sftp::protocol::Status, Self::Error> {
+            if (self.1 && old == "/srv/.upload") || (self.2 && old.contains(".latticeterm-backup-"))
+            {
+                return Err(Self::Error::Failure);
+            }
             let mut files = self.0.lock().unwrap();
             if files.contains_key(&new) {
                 return Err(Self::Error::Failure);
@@ -1334,12 +1352,14 @@ mod tests {
 
     #[tokio::test]
     async fn replacements_keep_owner_access_without_widening_permissions() {
-        for (mode, overwrite) in [
-            (0o100600, true),
-            (0o100644, true),
-            (0o100755, true),
-            (0o120777, true),
-            (0o100600, false),
+        for (mode, overwrite, fail_publish, fail_restore) in [
+            (0o100600, true, false, false),
+            (0o100644, true, false, false),
+            (0o100755, true, false, false),
+            (0o120777, true, false, false),
+            (0o100600, false, false, false),
+            (0o100600, true, true, false),
+            (0o100600, true, true, true),
         ] {
             let original = FileAttributes {
                 permissions: Some(mode),
@@ -1358,7 +1378,7 @@ mod tests {
             let (client, server) = tokio::io::duplex(8192);
             let peer = tokio::spawn(russh_sftp::server::run(
                 server,
-                PromotionServer(Arc::clone(&files)),
+                PromotionServer(Arc::clone(&files), fail_publish, fail_restore),
             ));
             let session = Arc::new(
                 SftpSession::new(crate::sftp_limits::BoundedSftpStream::new(client))
@@ -1386,11 +1406,21 @@ mod tests {
                 target_gate: Arc::default(),
             };
             let result = promote_upload(&entry).await;
-            let success = mode != 0o120777 && overwrite;
+            let success = mode != 0o120777 && overwrite && !fail_publish;
             assert_eq!(result.is_ok(), success);
             {
                 let snapshot = files.lock().unwrap();
-                let target = &snapshot["/srv/report"];
+                let target = if fail_restore {
+                    assert!(!snapshot.contains_key("/srv/report"));
+                    let (path, original) = snapshot
+                        .iter()
+                        .find(|(path, _)| path.contains(".latticeterm-backup-"))
+                        .unwrap();
+                    assert!(result.as_ref().unwrap_err().contains(path));
+                    original
+                } else {
+                    &snapshot["/srv/report"]
+                };
                 assert_eq!(target.size, Some(if success { 456 } else { 123 }));
                 assert_eq!(
                     target.permissions,
@@ -1404,6 +1434,8 @@ mod tests {
             }
             if success {
                 assert_eq!(result.unwrap().is_some(), mode & 0o077 != 0);
+            } else if fail_publish && !fail_restore {
+                assert!(result.unwrap_err().contains("original file was restored"));
             }
             drop(entry);
             drop(session);

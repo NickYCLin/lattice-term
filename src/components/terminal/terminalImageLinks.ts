@@ -16,7 +16,7 @@ export function terminalImageLinks(terminal: Pick<Terminal, "buffer">, openImage
         }
         return line.length + 1;
       };
-      callback([...text.matchAll(/\[Image #[1-9][0-9]*\]/g)].map(match => ({
+      callback([...text.matchAll(/\[Image #[1-9][0-9]*\]|Viewed image[^\r\n]*/g)].map(match => ({
         text: match[0],
         range: { start: { x: columnAt(match.index), y: lineNumber },
           end: { x: columnAt(match.index + match[0].length) - 1, y: lineNumber } },

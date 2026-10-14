@@ -78,6 +78,23 @@ const renderImages = (sessionId = "owner", active = true) => <I18nProvider local
   <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} />
 </I18nProvider>;
 
+it("distinguishes saved user attachments, historical pixels and unavailable tool references", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: true, observed: [
+    { tool: "view_image", at: "synthetic-time", paths: [], localReference: true },
+    { tool: "capture", at: null, paths: [], localReference: false },
+  ] });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={0} /></I18nProvider>));
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={1} /></I18nProvider>));
+    expect(host.textContent).toContain("本機檔案參照");
+    expect(host.textContent).toContain("當時靜態圖片");
+    expect(host.textContent).toContain("未保存可讀像素");
+    expect(host.textContent).toContain("synthetic-time");
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("opens through a terminal marker revision, closes and reopens without reusing a previous session", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);

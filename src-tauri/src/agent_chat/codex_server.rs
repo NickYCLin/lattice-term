@@ -871,6 +871,18 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                     (None, Some(codex_thread_id)) => {
                         state.codex_thread_id = Some(codex_thread_id.clone());
                         state.thread_ready = true;
+                        if let Some(provider) =
+                            result.and_then(|result| str_field(result, "modelProvider"))
+                        {
+                            if let Some(queued) = state.queued.as_ref() {
+                                out.events.push((
+                                    queued.turn_id.clone(),
+                                    ChatEvent::ProviderReport {
+                                        provider: truncate(provider, 128),
+                                    },
+                                ));
+                            }
+                        }
                         let model = result
                             .and_then(|result| str_field(result, "model"))
                             .map(str::to_string);
@@ -1987,17 +1999,25 @@ mod tests {
         // thread/start names the thread: Started goes out and turn/start follows.
         let out = feed(
             &server,
-            r#"{"id":2,"result":{"thread":{"id":"01a0-thread"},"model":"gpt-5.6-sol"}}"#,
+            r#"{"id":2,"result":{"thread":{"id":"01a0-thread"},"model":"gpt-5.6-sol","modelProvider":"synthetic-provider"}}"#,
         );
         assert_eq!(
             out.events,
-            vec![(
-                "turn-1".to_string(),
-                ChatEvent::Started {
-                    native_session_id: Some("01a0-thread".into()),
-                    model: Some("gpt-5.6-sol".into()),
-                }
-            )]
+            vec![
+                (
+                    "turn-1".to_string(),
+                    ChatEvent::ProviderReport {
+                        provider: "synthetic-provider".into()
+                    }
+                ),
+                (
+                    "turn-1".to_string(),
+                    ChatEvent::Started {
+                        native_session_id: Some("01a0-thread".into()),
+                        model: Some("gpt-5.6-sol".into()),
+                    }
+                )
+            ]
         );
         let start: Value = serde_json::from_str(&out.writes[0]).unwrap();
         assert_eq!(start["method"], "turn/start");

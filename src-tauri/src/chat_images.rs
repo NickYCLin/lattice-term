@@ -129,6 +129,14 @@ fn image_bytes(image: &ToolImage) -> Option<Vec<u8>> {
 /// their paths. Files are named by content, so the same screenshot read
 /// twice is stored once, and an existing file is never replaced.
 pub fn store(directory: &Path, images: &[ToolImage]) -> Vec<String> {
+    store_with_prefix(directory, images, "agent-image")
+}
+
+pub(crate) fn store_observed(directory: &Path, images: &[ToolImage]) -> Vec<String> {
+    store_with_prefix(directory, images, "observed-image")
+}
+
+fn store_with_prefix(directory: &Path, images: &[ToolImage], prefix: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for image in images.iter().take(MAX_STORED_PER_TOOL) {
         let Some(bytes) = image_bytes(image) else {
@@ -142,7 +150,7 @@ pub fn store(directory: &Path, images: &[ToolImage]) -> Vec<String> {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        let target = directory.join(format!("agent-image-{name}.{}", extension(mime)));
+        let target = directory.join(format!("{prefix}-{name}.{}", extension(mime)));
         let kept = |target: &Path| {
             std::fs::symlink_metadata(target).is_ok_and(|metadata| metadata.is_file())
         };

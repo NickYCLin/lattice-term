@@ -20,6 +20,86 @@ const RPC_PLUGINS: u64 = 3;
 const RPC_APPS: u64 = 4;
 const MAX_ENTRIES: usize = 256;
 
+pub(super) async fn set_archived(
+    executable: &Path,
+    profile: Option<&Path>,
+    thread_id: &str,
+    archived: bool,
+) -> Result<(), String> {
+    let mut command = headless_command(executable);
+    command.arg("app-server");
+    apply_profile_environment(&mut command, Dialect::Codex, profile);
+    command.kill_on_drop(true);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Cannot start Codex: {error}"))?;
+    let result = async {
+        let mut stdin = child.stdin.take().ok_or("Codex input unavailable")?;
+        let stdout = child.stdout.take().ok_or("Codex output unavailable")?;
+        tauri::async_runtime::spawn(stderr_tail(child.stderr.take()));
+        let mut reader = BufReader::new(stdout);
+        let initialize = requests(None).remove(0);
+        stdin
+            .write_all(format!("{initialize}\n").as_bytes())
+            .await
+            .map_err(|error| error.to_string())?;
+        stdin.flush().await.map_err(|error| error.to_string())?;
+        read_rpc_reply(&mut reader, 1).await?;
+        let method = if archived {
+            "thread/archive"
+        } else {
+            "thread/unarchive"
+        };
+        let request =
+            serde_json::json!({"id": 2, "method": method, "params": {"threadId": thread_id}});
+        stdin
+            .write_all(
+                format!("{{\"method\":\"initialized\",\"params\":{{}}}}\n{request}\n").as_bytes(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        stdin.flush().await.map_err(|error| error.to_string())?;
+        read_rpc_reply(&mut reader, 2).await.map(|_| ())
+    };
+    let result = tokio::time::timeout(CATALOG_TIMEOUT, result)
+        .await
+        .map_err(|_| {
+            "Codex archive outcome is unknown after timeout; the local conversation was retained."
+                .to_string()
+        });
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    result?
+}
+
+async fn read_rpc_reply<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    id: u64,
+) -> Result<Value, String> {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match read_bounded_line(reader, &mut line).await {
+            Ok(0) => return Err("Codex ended without confirming the operation".into()),
+            Err(_) => return Err("Codex operation response could not be read safely".into()),
+            Ok(_) => {}
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if value["id"].as_u64() != Some(id) {
+            continue;
+        }
+        if let Some(error) = value.get("error") {
+            return Err(format!("Codex operation rejected: {error}"));
+        }
+        return value
+            .get("result")
+            .cloned()
+            .ok_or("Codex did not confirm the operation".into());
+    }
+}
+
 pub(super) async fn list(
     executable: &Path,
     profile_config_directory: Option<&Path>,
@@ -256,6 +336,49 @@ fn kind_order(kind: &str) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn archive_requires_matching_official_confirmation() {
+        let mut replies = BufReader::new(&b"{\"method\":\"thread/updated\"}\n{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{}}\n"[..]);
+        assert_eq!(
+            read_rpc_reply(&mut replies, 2).await.unwrap(),
+            serde_json::json!({})
+        );
+        let mut rejected =
+            BufReader::new(&b"{\"id\":2,\"error\":{\"message\":\"synthetic unavailable\"}}\n"[..]);
+        assert!(read_rpc_reply(&mut rejected, 2)
+            .await
+            .unwrap_err()
+            .contains("synthetic unavailable"));
+        let mut unconfirmed = BufReader::new(&b"{\"id\":1,\"result\":{}}\n"[..]);
+        assert!(read_rpc_reply(&mut unconfirmed, 2).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn archive_and_restore_use_the_selected_profile_and_official_protocol() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-codex");
+        for archived in [true, false] {
+            let method = if archived {
+                "thread/archive"
+            } else {
+                "thread/unarchive"
+            };
+            let script = format!("#!/bin/sh\n[ \"$1\" = app-server ] || exit 1\n[ \"$CODEX_HOME\" = \"{}\" ] || exit 2\nread -r initialize\nprintf '%s\\n' '{{\"id\":1,\"result\":{{}}}}'\nread -r initialized\nread -r operation\ncase \"$operation\" in *\"{method}\"*synthetic-thread*) ;; *) exit 3 ;; esac\nprintf '%s\\n' '{{\"id\":2,\"result\":{{}}}}'\n", directory.path().display());
+            std::fs::write(&executable, script).unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            set_archived(
+                &executable,
+                Some(directory.path()),
+                "synthetic-thread",
+                archived,
+            )
+            .await
+            .unwrap();
+        }
+    }
 
     #[test]
     fn catalog_keeps_enabled_skills_installed_plugins_and_callable_apps() {

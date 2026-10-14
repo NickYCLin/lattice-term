@@ -189,7 +189,7 @@ describe("remote editor integration", () => {
       </RemoteTextEditorProvider></I18nProvider></StrictMode>,
     ));
     await act(async () => { await new Promise((done) => setTimeout(done, 100)); });
-    expect(vi.mocked(sftp.list).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(sftp.list).toHaveBeenCalledTimes(1);
     expect(peak).toBe(1);
     expect(host.textContent).not.toContain("already running");
     expect(host.textContent).toContain("file.txt");
