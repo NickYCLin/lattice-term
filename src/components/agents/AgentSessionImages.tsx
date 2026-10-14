@@ -10,7 +10,7 @@ export interface SessionImagesSnapshot {
   paths: string[];
   truncated: boolean;
   historyAvailable: boolean;
-  observed?: { tool: string; at: string | null; paths: string[]; localReference: boolean }[];
+  observed?: { tool: string; stepId?: string | null; at: string | null; paths: string[]; localReference: boolean }[];
 }
 
 const PAGE_SIZE = 9;
@@ -99,7 +99,7 @@ function SessionImageGallery({ sessionId, revision, onClose }: {
               </nav>}
               <h3>{t("agents.images.observed")}</h3>
               {snapshot.observed?.length ? snapshot.observed.map((image, index) => <section key={`${image.tool}:${image.at}:${index}`}>
-                <p>{image.tool} · {image.at ?? t("conversation.meta.unknown")} · {t(image.localReference ? "agents.images.localReference" : "agents.images.snapshot")}</p>
+                <p>{image.tool}{image.stepId ? ` · ${image.stepId}` : ""} · {image.at ?? t("conversation.meta.unknown")} · {t(image.localReference ? "agents.images.localReference" : "agents.images.snapshot")}</p>
                 {image.paths.length ? <div className="agent-session-images__grid">{image.paths.map(path =>
                   <SessionImageTile key={path} path={path} sessionId={sessionId} onSelect={(path, url) => setSelected({ path, url })} />)}</div>
                   : <p>{t("agents.images.unavailableObserved")}</p>}

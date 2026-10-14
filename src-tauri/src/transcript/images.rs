@@ -27,6 +27,8 @@ pub struct SessionImagesSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ObservedImage {
     pub tool: String,
+    #[serde(default)]
+    pub step_id: Option<String>,
     pub at: Option<String>,
     pub paths: Vec<String>,
     pub local_reference: bool,
@@ -188,6 +190,7 @@ fn observed_images(
                     .unwrap_or_default();
                 observed.push(ObservedImage {
                     tool: name.into(),
+                    step_id: payload["call_id"].as_str().map(str::to_owned),
                     at,
                     paths,
                     local_reference: true,
@@ -240,6 +243,7 @@ fn observed_images(
                                 .get(payload["call_id"].as_str().unwrap_or(""))
                                 .cloned()
                                 .unwrap_or("tool result".into()),
+                            step_id: payload["call_id"].as_str().map(str::to_owned),
                             at: at.clone(),
                             paths,
                             local_reference: false,
@@ -260,6 +264,12 @@ fn encoded_image(item: &Value) -> Option<&str> {
     }
     if item["source"]["type"].as_str() == Some("base64") {
         return item["source"]["data"].as_str();
+    }
+    if item["mimeType"]
+        .as_str()
+        .is_some_and(|mime| mime.starts_with("image/"))
+    {
+        return item["data"].as_str();
     }
     let url = item["image_url"]
         .as_str()
@@ -407,6 +417,46 @@ mod tests {
     use base64::Engine;
 
     #[test]
+    fn standard_mcp_result_keeps_tool_and_time_with_legacy_image_formats() {
+        let work = tempfile::tempdir().unwrap();
+        let chat = tempfile::tempdir().unwrap();
+        let data = base64::engine::general_purpose::STANDARD.encode(PNG);
+        let transcript = work.path().join("synthetic-mcp.jsonl");
+        let rows = [
+            serde_json::json!({"type":"response_item","timestamp":"call-time","payload":{"type":"function_call","name":"synthetic_capture","call_id":"capture-step","arguments":"{}"}}),
+            serde_json::json!({"type":"response_item","timestamp":"result-time","payload":{"type":"function_call_output","call_id":"capture-step","output":serde_json::json!({"content":[
+                {"type":"image","mimeType":"image/png","data":data},
+                {"type":"image","source":{"type":"base64","data":data}},
+                {"type":"image","image_url":format!("data:image/png;base64,{data}")},
+                {"type":"image","image_url":"https://example.invalid/private.png"}
+            ]}).to_string()}}),
+        ];
+        std::fs::write(
+            &transcript,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let images = observed_images(
+            &transcript,
+            TranscriptKind::Codex,
+            work.path().to_str().unwrap(),
+            chat.path(),
+        )
+        .unwrap();
+        assert_eq!(images.len(), 3);
+        for image in images {
+            assert_eq!(image.tool, "synthetic_capture");
+            assert_eq!(image.step_id.as_deref(), Some("capture-step"));
+            assert_eq!(image.at.as_deref(), Some("result-time"));
+            assert_eq!(image.paths.len(), 1);
+            assert!(!image.local_reference);
+        }
+    }
+
+    #[test]
     fn observed_metadata_survives_missing_history_without_following_external_paths() {
         let directory = tempfile::tempdir().unwrap();
         let paths = chat_images::store_observed(
@@ -417,6 +467,7 @@ mod tests {
         );
         let images = vec![ObservedImage {
             tool: "synthetic screenshot".into(),
+            step_id: None,
             at: Some("fixture-time".into()),
             paths: paths.clone(),
             local_reference: false,
