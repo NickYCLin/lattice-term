@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import termios
 import tty
@@ -52,6 +53,8 @@ def main() -> int:
     tty.setraw(stdin_fd, termios.TCSANOW)
     pending = b""
     emitted = False
+    image_marker_emitted = False
+    image_pending = b""
 
     try:
         while True:
@@ -59,6 +62,11 @@ def main() -> int:
             if not chunk:
                 return 0
             write_all(log_fd, chunk)
+            if os.environ.get("LATTICETERM_E2E_DESKTOP_UI") == "1" and not image_marker_emitted:
+                image_pending = (image_pending + chunk)[-4096:]
+                if re.search(rb"latticeterm-clip-[A-Za-z0-9._-]+\.png", image_pending):
+                    write_all(stdout_fd, b"\x1b[2J\x1b[H[Image #1]\r\n\x1b[6n")
+                    image_marker_emitted = True
             if not emitted:
                 combined = pending + chunk
                 if trigger in combined:

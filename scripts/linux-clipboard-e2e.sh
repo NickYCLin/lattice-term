@@ -21,6 +21,8 @@ APP_BIN=${LATTICETERM_E2E_APP_BIN:-$REPO_ROOT/src-tauri/target/debug/lattice-ter
 VITE_BIN="$REPO_ROOT/node_modules/.bin/vite"
 NODE_BIN=$(command -v node || true)
 KEEP_ARTIFACTS=${LATTICETERM_E2E_KEEP:-0}
+DESKTOP_UI=${LATTICETERM_E2E_DESKTOP_UI:-0}
+TEST_ROUTES=${LATTICETERM_E2E_ROUTES:-0}
 DISPLAY_MIN=${LATTICETERM_E2E_DISPLAY_MIN:-90}
 DISPLAY_MAX=${LATTICETERM_E2E_DISPLAY_MAX:-190}
 
@@ -181,6 +183,18 @@ wait_for_log_text() {
   return 1
 }
 
+wait_for_evidence() {
+  local text=$1
+  local previous=$2
+  for _ in $(seq 1 100); do
+    local count
+    count=$(grep -acF -- "$text" "$E2E_ROOT/frontend-events.jsonl" 2>/dev/null || true)
+    [[ ${count:-0} -gt "$previous" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 capture_window() {
   local path=$1
   timeout 5s env DISPLAY="$DISPLAY_ID" import -window "$WINDOW_ID" "$path"
@@ -201,7 +215,9 @@ click_local() {
   local x=$1
   local y=$2
   refresh_window_geometry
-  env DISPLAY="$DISPLAY_ID" xdotool mousemove "$((WINDOW_X + x))" "$((WINDOW_Y + y))" click 1
+  env DISPLAY="$DISPLAY_ID" xdotool windowfocus "$WINDOW_ID" mousemove --sync "$((WINDOW_X + x))" "$((WINDOW_Y + y))"
+  sleep 0.2
+  env DISPLAY="$DISPLAY_ID" xdotool click 1
 }
 
 send_key() {
@@ -318,6 +334,20 @@ python3 "$HELPER_DIR/clipboard_fixture.py" create-image "$FIXTURE_IMAGE"
 
 log "artifacts: $E2E_ROOT"
 
+if [[ "$TEST_ROUTES" == 1 ]]; then
+  python3 - "$E2E_ROOT" "$E2E_NONCE" <<'PY'
+import json
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+directory = root / "data/io.github.nickyclin.latticeterm"
+directory.mkdir(parents=True, exist_ok=True)
+profile = dict(id=sys.argv[2], name="E2EROUTE", protocol="ssh", hostname="fixture.invalid",
+               username="fixture", port=2222, environment="unassigned", group="", tags=[], favorite=False)
+(directory / "connections.json").write_text(json.dumps(dict(version=1, profiles=[profile])), encoding="utf-8")
+PY
+fi
+
 for candidate in $(seq "$DISPLAY_MIN" "$DISPLAY_MAX"); do
   [[ -e "/tmp/.X${candidate}-lock" || -S "/tmp/.X11-unix/X${candidate}" ]] && continue
   : >"$E2E_ROOT/xvfb.log"
@@ -340,6 +370,7 @@ log "isolated display: $DISPLAY_ID (Xvfb PID $Xvfb_PID)"
 SYSTEM_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 E2E_ENV=(
   "LATTICETERM_E2E_NONCE=$E2E_NONCE"
+  "LATTICETERM_E2E_DESKTOP_UI=$DESKTOP_UI"
   "LATTICETERM_E2E_PTY_LOG=$E2E_ROOT/pty-input.log"
   "LATTICETERM_E2E_FAKE_PID_FILE=$E2E_ROOT/fake-aider.pid"
   "LATTICETERM_E2E_FAKE_OUTPUT_ACK=$E2E_ROOT/fake-aider-output.ack"
@@ -369,9 +400,44 @@ E2E_ENV=(
 # Start the frontend directly so its PID belongs to a dedicated, validated
 # session. Vite's strict configured port makes an unrelated listener a hard
 # failure instead of silently testing a different page.
+VITE_ARGS=(--host 127.0.0.1)
+if [[ "$DESKTOP_UI" == 1 || "$TEST_ROUTES" == 1 ]]; then
+  python3 - "$REPO_ROOT" "$E2E_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+repo, root = sys.argv[1:]
+code = '''
+import { loadConfigFromFile } from VITE;
+import { appendFileSync } from 'node:fs';
+const base = await loadConfigFromFile({ command: 'serve', mode: 'development' }, CONFIG, REPO);
+export default { ...base.config, root: REPO, plugins: [...base.config.plugins, {
+  name: 'isolated-ui-evidence',
+  transformIndexHtml() { return [{ tag: 'script', injectTo: 'head-prepend', children: `
+    const report = value => fetch('/__isolated_ui_evidence', {method:'POST',body:JSON.stringify(value)}).catch(()=>{});
+    window.addEventListener('error', event => report({error:event.message}));
+    window.addEventListener('unhandledrejection', event => report({rejection:String(event.reason)}));
+    document.addEventListener('click', event => report({click:event.target.tagName,classes:String(event.target.className),label:event.target.getAttribute('aria-label')}),true);
+    let previous = ''; setInterval(() => {
+      const state = JSON.stringify([...document.querySelectorAll('[role=dialog]')].map(element => ({label:element.getAttribute('aria-label'),kind:element.className,width:element.getBoundingClientRect().width,tiles:[...element.querySelectorAll('.agent-session-images__tile')].map(tile => {const rect=tile.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};}),images:[...element.querySelectorAll('img')].map(image => ({loaded:image.complete && image.naturalWidth>0,width:image.naturalWidth,height:image.naturalHeight}))})));
+      if (state !== previous) { previous = state; report({dialogs:JSON.parse(state)}); }
+    }, 200);
+  ` }]; },
+  configureServer(server) { server.middlewares.use('/__isolated_ui_evidence', (request, response) => {
+    let body = ''; request.on('data', chunk => { if (body.length < 8192) body += chunk; });
+    request.on('end', () => { appendFileSync(LOG, body + '\\n'); response.end('ok'); });
+  }); }
+}] };
+'''
+for key, value in dict(VITE=repo+'/node_modules/vite/dist/node/index.js', CONFIG=repo+'/vite.config.ts', REPO=repo, LOG=root+'/frontend-events.jsonl').items():
+    code = code.replace(key, json.dumps(value))
+Path(root+'/vite-evidence.mjs').write_text(code, encoding='utf-8')
+PY
+  VITE_ARGS+=(--config "$E2E_ROOT/vite-evidence.mjs")
+fi
 setsid env -i "${E2E_ENV[@]}" \
   NO_AT_BRIDGE=1 \
-  "$VITE_BIN" --host 127.0.0.1 >"$E2E_ROOT/vite.log" 2>&1 &
+  "$VITE_BIN" "${VITE_ARGS[@]}" >"$E2E_ROOT/vite.log" 2>&1 &
 VITE_PID=$!
 for _ in $(seq 1 100); do
   kill -0 "$VITE_PID" 2>/dev/null || die "Vite exited; inspect $E2E_ROOT/vite.log"
@@ -408,6 +474,53 @@ refresh_window_geometry
 wait_for_visible_text "LatticeTerm" "01-launched" 20 --min-x 800 --min-y 700 \
   >/dev/null || die "the WebKit frontend never finished its initial paint"
 log "isolated desktop session: $APP_SESSION_PID, window $WINDOW_ID"
+
+if [[ "$TEST_ROUTES" == 1 ]]; then
+  ROUTE_MATCH=$(wait_for_visible_text "E2EROUTE" "routes-01-card" 10 --min-x 380) || die "synthetic route card missing"
+  click_local 450 196
+  send_key Tab
+  send_key Tab
+  send_key Tab
+  send_key Return
+  wait_for_log_text "$E2E_ROOT/frontend-events.jsonl" '"label":"編輯連線"' 10 || die "edit route drawer missing"
+  capture_window "$E2E_ROOT/routes-02-edit-drawer.png"
+  send_key shift+Tab
+  send_key shift+Tab
+  send_key Return
+  wait_for_log_text "$E2E_ROOT/frontend-events.jsonl" '"label":"新增連線"' 10 || die "new route drawer missing"
+  capture_window "$E2E_ROOT/routes-03-new-route.png"
+  send_key Escape
+  sleep 0.3
+  python3 - "$E2E_ROOT/data/io.github.nickyclin.latticeterm/connections.json" <<'PY'
+import json
+import sys
+assert len(json.load(open(sys.argv[1]))["profiles"]) == 1
+PY
+  click_local 719 244
+  sleep 0.5
+  send_key shift+Tab
+  send_key shift+Tab
+  send_key Return
+  sleep 0.5
+  send_key Return
+  send_key Return
+  sleep 0.8
+  python3 - "$E2E_ROOT/data/io.github.nickyclin.latticeterm/connections.json" "$E2E_NONCE" <<'PY'
+import json
+import sys
+records = json.load(open(sys.argv[1]))["profiles"]
+assert len(records) == 2, records
+assert {entry["protocol"] for entry in records} == {"ssh", "sftp"}
+assert all(entry["machineId"] == sys.argv[2] for entry in records)
+assert next(entry for entry in records if entry["protocol"] == "ssh")["port"] == 2222
+assert next(entry for entry in records if entry["protocol"] == "sftp")["port"] == 22
+PY
+  capture_window "$E2E_ROOT/routes-05-saved.png"
+  log "same-machine add / Escape cancel / repeated save / separate persistent parameters: PASS"
+  log "route-only acceptance complete; clipboard acceptance runs separately"
+  TEST_SUCCEEDED=1
+  exit 0
+fi
 
 # Open the terminal workspace from the fixed desktop rail. The quick-chat list
 # is intentionally used here: with only the fake aider in PATH, OCR can locate
@@ -566,6 +679,38 @@ python3 "$HELPER_DIR/clipboard_fixture.py" \
   verify-staged "$FIXTURE_IMAGE" "$STAGED_IMAGE" \
   | tee "$E2E_ROOT/staged-image-verification.txt"
 log "real X11 image -> staged PNG: PASS"
+
+if [[ "$DESKTOP_UI" == 1 ]]; then
+  sleep 0.5
+  click_local 370 246
+  wait_for_evidence '"kind":"agent-session-images__dialog"' 0 || die "terminal marker did not open the saved image gallery"
+  wait_for_evidence '"loaded":true' 0 || die "saved gallery did not load the native image preview"
+  capture_window "$E2E_ROOT/images-01-marker-gallery.png"
+  GALLERY_COUNT=$(grep -acF '"kind":"agent-session-images__dialog"' "$E2E_ROOT/frontend-events.jsonl")
+  send_key Escape
+  sleep 0.3
+  env DISPLAY="$DISPLAY_ID" xdotool mousemove --sync "$((WINDOW_X + 370))" "$((WINDOW_Y + 270))"
+  click_local 370 246
+  wait_for_evidence '"kind":"agent-session-images__dialog"' "$GALLERY_COUNT" || die "terminal marker could not reopen the gallery"
+  sleep 0.5
+  read -r TILE_X TILE_Y < <(python3 - "$E2E_ROOT/frontend-events.jsonl" <<'PY'
+import json
+import sys
+records = [json.loads(line) for line in open(sys.argv[1])]
+tiles = [dialog["tiles"] for record in records for dialog in record.get("dialogs", [])
+         if dialog.get("kind") == "agent-session-images__dialog" and dialog.get("tiles")]
+assert tiles, "gallery tile geometry missing"
+print(round(tiles[-1][0]["x"]), round(tiles[-1][0]["y"]))
+PY
+  )
+  click_local "$TILE_X" "$TILE_Y"
+  wait_for_evidence '"kind":"chat-image-preview__dialog"' 0 || die "gallery did not open the image preview"
+  capture_window "$E2E_ROOT/images-03-preview.png"
+  send_key Escape
+  sleep 0.3
+  send_key Escape
+  log "terminal image marker -> saved gallery / native image load / close / reopen / mouse preview: PASS (DOM journal; X11 paint is separate)"
+fi
 
 # The right-most active-session header action is the direct disconnect button.
 # It has no confirmation dialog; cleanup must happen as part of this operation,
