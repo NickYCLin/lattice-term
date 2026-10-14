@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { chatConversationSidebar, nativeConversationNodeId } from "./chatConversationSidebar";
+import { chatConversationSidebar, nativeConversationNodeId, reconcileProjectChatLayout } from "./chatConversationSidebar";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
+import type { ChatThread } from "./agentChat";
 import { chatSidebarLayout, chatSidebarRows, chatThreadNodeId } from "./chatThreadLayout";
 import type { LocalConversation } from "./localConversationSessions";
 import { createSessionSidebarFolder, emptySessionSidebarLayout, moveSessionSidebarNode, toggleSessionSidebarFolder } from "./sessionSidebarLayout";
@@ -151,6 +152,26 @@ describe("conversation sidebar identity", () => {
 });
 
 describe("conversation sidebar placement", () => {
+  it("keeps automatically grouped history under its project after successive imports", () => {
+    const history = [conversation(), conversation({ nativeSessionId: "native-2" }), conversation({ nativeSessionId: "native-3" })];
+    const before = sidebar({ history });
+    const projectId = [...before.workspace.projects.keys()][0];
+    let stored = emptySessionSidebarLayout;
+    const threads: ChatThread[] = [];
+    for (const entry of history) {
+      const imported = fakeThread({ id: entry.nativeSessionId, nativeSessionId: entry.nativeSessionId });
+      threads.push(imported);
+      stored = reconcileProjectChatLayout(stored, threads);
+      const after = sidebar({ history, threads });
+      const layout = chatSidebarLayout(stored, after.listedThreads, after.workspace.nodes);
+      expect(layout.placements[chatThreadNodeId(imported.id)].parentId).toBe(projectId);
+      const visible = chatSidebarRows(layout, after.listedThreads, after.workspace);
+      expect(visible.filter(row => row.kind === "project")).toHaveLength(1);
+      expect(visible.filter(row => row.kind !== "project")).toHaveLength(3);
+      expect(visible.filter(row => row.kind !== "project").every(row => row.depth === 1)).toBe(true);
+    }
+  });
+
   it("keeps a manually filed history row's folder and order after import", () => {
     const entry = conversation();
     const before = sidebar({ history: [entry, conversation({ nativeSessionId: "other" })] });
@@ -164,12 +185,35 @@ describe("conversation sidebar placement", () => {
     expect(chatSidebarRows(next, after.listedThreads, after.workspace).map(row => row.kind)).toEqual(["folder", "thread"]);
   });
 
+  it("keeps the clicked history row in its original order when the new thread is prepended", () => {
+    const history = [conversation({ nativeSessionId: "first" }), conversation({ nativeSessionId: "second" }), conversation({ nativeSessionId: "third" })];
+    const before = sidebar({ history });
+    const stored = chatSidebarLayout(emptySessionSidebarLayout, [], before.workspace.nodes);
+    const imported = fakeThread({ nativeSessionId: "third" });
+    const after = sidebar({ history, threads: [imported] });
+    const next = chatSidebarLayout(reconcileProjectChatLayout(stored, [imported]), after.listedThreads, after.workspace.nodes);
+    expect(next.placements[chatThreadNodeId(imported.id)]).toEqual(stored.placements[nativeConversationNodeId(history[2])]);
+    expect(chatSidebarRows(next, after.listedThreads, after.workspace).map(row => row.nodeId)).toEqual([
+      [...before.workspace.projects.keys()][0], nativeConversationNodeId(history[0]),
+      nativeConversationNodeId(history[1]), chatThreadNodeId(imported.id),
+    ]);
+  });
+
   it("does not move an explicitly top-level thread into its project", () => {
     const thread = fakeThread();
     const previous = chatSidebarLayout(emptySessionSidebarLayout, [thread]);
     const result = sidebar({ threads: [thread], history: [conversation()] });
-    const next = chatSidebarLayout(previous, result.listedThreads, result.workspace.nodes);
+    const next = chatSidebarLayout(reconcileProjectChatLayout(previous, [thread]), result.listedThreads, result.workspace.nodes);
     expect(next.placements[chatThreadNodeId(thread.id)].parentId).toBeNull();
+  });
+
+  it("groups Windows paths consistently and retains shelved thread placements", () => {
+    const threads = [fakeThread({ id: "first", workingDirectory: "D:\\project\\App" }),
+      fakeThread({ id: "second", workingDirectory: "d:/project/app/", shelvedAt: 1 })];
+    const layout = reconcileProjectChatLayout(emptySessionSidebarLayout, threads);
+    expect(layout.placements["thread:first"].parentId).toBe(layout.placements["thread:second"].parentId);
+    expect(layout.placements["thread:first"].parentId).not.toBeNull();
+    expect(reconcileProjectChatLayout(layout, threads)).toEqual(layout);
   });
 
   it("keeps an imported thread's own placement instead of copying history", () => {

@@ -4,6 +4,8 @@ import { installFakeDom } from "./testFixtures/hookDom";
 import { CLI_PROXY_SETTINGS_KEY } from "./cliProxyApi";
 import type { AgentChatApi } from "./useAgentChat";
 import type { ChatEventEnvelope } from "./agentChat";
+import { SHARED_SIDEBAR_LAYOUT_KEY } from "./sharedSidebarLayout";
+import { emptySessionSidebarLayout } from "./sessionSidebarLayout";
 
 const events = vi.hoisted(() => ({ listener: null as ((event: { payload: ChatEventEnvelope }) => void) | null }));
 
@@ -15,6 +17,38 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async (name: string, listener:
 } }));
 vi.mock("./notificationSounds", () => ({ playCompletionSound: async () => "disabled" }));
 afterEach(() => vi.unstubAllGlobals());
+
+it("persists imported conversations under their project when reading and organizing threads", async () => {
+  const root = installFakeDom();
+  const values = new Map([[SHARED_SIDEBAR_LAYOUT_KEY, JSON.stringify({ ...emptySessionSidebarLayout, fixtureRevision: "project-import" })]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  });
+  const { createRoot } = await import("react-dom/client");
+  const { useAgentChat } = await import("./useAgentChat");
+  let chat!: AgentChatApi;
+  function Runtime() { chat = useAgentChat(); return null; }
+  const mounted = createRoot(root as unknown as Element);
+  try {
+    await act(async () => mounted.render(<Runtime />));
+    const importedIds: string[] = [];
+    for (const nativeSessionId of ["history-first", "history-second", "history-third"]) {
+      await act(async () => {
+        importedIds.push(chat.importNativeConversation({ definitionId: "codex", nativeSessionId,
+          accountProfileId: null, workingDirectory: "D:/project/site", title: nativeSessionId, messages: [] }).id);
+      });
+      await act(async () => chat.setActiveThreadId(importedIds[0]));
+      const stored = JSON.parse(values.get(SHARED_SIDEBAR_LAYOUT_KEY)!);
+      for (const id of importedIds) {
+        expect(stored.placements[`thread:${id}`].parentId).toBe("project:local:d:/project/site");
+      }
+    }
+  } finally {
+    await act(async () => mounted.unmount());
+  }
+});
 
 it("sends the saved address only for proxy turns and preserves the choice across settings edits", async () => {
   const root = installFakeDom();

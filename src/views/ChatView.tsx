@@ -193,7 +193,6 @@ export function ChatView({
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
   const nativeHistory = useNativeHistory();
-  const nativeConversations = useNativeConversationList({ chat, projectFilter, onOpened: () => setSelectedSessionId(null) });
   const { workspace, listedThreads } = useMemo(
     () =>
       chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: chat.threads,
@@ -201,6 +200,10 @@ export function ChatView({
         generalProjectLabel: t("terminal.projects.generalChat"), projectFilter }),
     [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, projectFilter, t],
   );
+  const nativeConversations = useNativeConversationList({ chat, projectFilter,
+    onBeforeOpen: () => setSharedLayout(current => chatSidebarLayout(current, chat.threads, workspace.nodes)),
+    onOpened: () => setSelectedSessionId(null),
+  });
   // Shelved threads leave the tree and wait in their own list below it.
   const projects = useMemo(() => chatProjectsWithHistory(chat.threads, nativeHistory?.entries ?? []),
     [chat.threads, nativeHistory?.entries]);

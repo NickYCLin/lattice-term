@@ -67,8 +67,8 @@ import { useSharedSidebarLayout } from "./sharedSidebarLayout";
 import {
   chatFolderNodeId,
   chatThreadNodeId,
-  reconcileChatLayout,
 } from "./chatThreadLayout";
+import { reconcileProjectChatLayout } from "./chatConversationSidebar";
 import {
   createSessionSidebarFolder,
   expandSessionSidebarAncestors,
@@ -274,9 +274,9 @@ export function useAgentChat(
   const modelsRef = useRef(models);
   modelsRef.current = models;
   const [storedLayout, setStoredLayout] = useSharedSidebarLayout();
-  const layout = useMemo(() => reconcileChatLayout(storedLayout, threads), [storedLayout, threads]);
+  const layout = useMemo(() => reconcileProjectChatLayout(storedLayout, threads), [storedLayout, threads]);
   useEffect(() => {
-    setStoredLayout(current => reconcileChatLayout(current, threads));
+    setStoredLayout(current => reconcileProjectChatLayout(current, threads));
   }, [threads, setStoredLayout]);
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
@@ -465,7 +465,7 @@ export function useAgentChat(
         markUnread(id, false);
         setStoredLayout((current) =>
           expandSessionSidebarAncestors(
-            reconcileChatLayout(current, threadsRef.current),
+            reconcileProjectChatLayout(current, threadsRef.current),
             chatThreadNodeId(id),
           ),
         );
@@ -477,7 +477,7 @@ export function useAgentChat(
   const createFolder = useCallback((name: string, parentId: string | null) => {
     setStoredLayout((current) =>
       createSessionSidebarFolder(
-        reconcileChatLayout(current, threadsRef.current),
+        reconcileProjectChatLayout(current, threadsRef.current),
         { id: chatFolderNodeId(), name },
         parentId,
       ),
@@ -490,7 +490,7 @@ export function useAgentChat(
 
   const removeFolder = useCallback((folderId: string) => {
     setStoredLayout((current) =>
-      removeSessionSidebarFolder(reconcileChatLayout(current, threadsRef.current), folderId),
+      removeSessionSidebarFolder(reconcileProjectChatLayout(current, threadsRef.current), folderId),
     );
   }, []);
 
@@ -498,7 +498,7 @@ export function useAgentChat(
     (nodeId: string, parentId: string | null, beforeNodeId: string | null) => {
       setStoredLayout((current) =>
         moveSessionSidebarNode(
-          reconcileChatLayout(current, threadsRef.current),
+          reconcileProjectChatLayout(current, threadsRef.current),
           nodeId,
           parentId,
           beforeNodeId,

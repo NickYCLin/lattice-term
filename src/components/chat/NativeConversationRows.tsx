@@ -26,9 +26,10 @@ function directoryName(path: string) {
  * are. Nothing is stored until one is opened; from then on it is an ordinary
  * thread whose text follows the CLI's history.
  */
-export function useNativeConversationList({ chat, projectFilter, onOpened }: {
+export function useNativeConversationList({ chat, projectFilter, onBeforeOpen, onOpened }: {
   chat: AgentChatApi;
   projectFilter: string | null;
+  onBeforeOpen?: () => void;
   onOpened: () => void;
 }) {
   const history = useNativeHistory();
@@ -50,6 +51,7 @@ export function useNativeConversationList({ chat, projectFilter, onOpened }: {
     const key = nativeConversationKey(entry);
     if (entry.definitionId !== "cursor") {
       const proxy = isProxyConversation(entry) ? nativeConversationProxy(entry, proxies) : undefined;
+      onBeforeOpen?.();
       chat.importNativeConversation({
         definitionId: entry.definitionId, nativeSessionId: entry.nativeSessionId,
         workingDirectory: entry.workingDirectory, title: entry.title,

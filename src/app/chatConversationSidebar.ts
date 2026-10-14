@@ -2,7 +2,8 @@ import type { ChatThread } from "./agentChat";
 import { presentAgentSessionGroup } from "./agentSessionPresentation";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
 import { chatProjectDirectory, projectName } from "./chatProjects";
-import { chatThreadNodeId } from "./chatThreadLayout";
+import { chatSidebarLayout, chatThreadNodeId } from "./chatThreadLayout";
+import type { SessionSidebarLayout } from "./sessionSidebarLayout";
 import { agentWorkspaceProjectNodeId, chatWorkspaceProjection } from "./chatWorkspaceNodes";
 import { displayPath } from "./displayPath";
 import type { LocalConversation } from "./localConversationSessions";
@@ -12,6 +13,14 @@ import type { AgentDefinition, AgentSessionSummary } from "./useAgentSessions";
 
 export function nativeConversationNodeId(entry: { definitionId: string; profileId: string | null; nativeSessionId: string }) {
   return "native:" + nativeConversationKey(entry);
+}
+
+export function reconcileProjectChatLayout(layout: SessionSidebarLayout, threads: readonly ChatThread[]): SessionSidebarLayout {
+  const { workspace } = chatConversationSidebar({
+    sessions: [], definitions: [], threads: threads.map(thread => thread.shelvedAt ? { ...thread, shelvedAt: null } : thread),
+    history: [], profiles: [], generalProjectLabel: "", projectFilter: null,
+  });
+  return chatSidebarLayout(layout, threads, workspace.nodes);
 }
 
 export function chatConversationSidebar({ sessions, definitions, threads, history, profiles, generalProjectLabel, projectFilter }: {
