@@ -191,10 +191,10 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     raise RuntimeError(f"{device_id}: 連線頁在 {timeout} 秒內未顯示{stalled}，已保存 {screenshot}")
 
 
-def simctl(*args, timeout=60):
+def simctl(*args, timeout=60, env=None):
     return subprocess.run(
         ["xcrun", "simctl", *map(str, args)],
-        check=True, capture_output=True, text=True, timeout=timeout,
+        check=True, capture_output=True, text=True, timeout=timeout, env=env,
     ).stdout.strip()
 
 
@@ -251,6 +251,16 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 
+def read_layout_snapshots(cache, timeout=15):
+    deadline = time.monotonic() + timeout
+    while not list(cache.glob("layout-10-*.json")) and time.monotonic() < deadline:
+        time.sleep(0.5)
+    snapshots = [json.loads(path.read_text()) for path in sorted(cache.glob("layout-*.json"))]
+    if not snapshots:
+        raise RuntimeError("模擬器未產生原生與 DOM 幾何診斷")
+    return snapshots
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
@@ -258,6 +268,7 @@ def main():
     parser.add_argument("--local", action="store_true", help="在本機以符合 App 最低版本的 runtime 驗證；只建立及清理本次測試裝置")
     parser.add_argument("--boot-timeout", type=int, default=180, help="新裝置開機與系統資料移轉的等待秒數，預設 180，範圍 30–1800；不影響 App 畫面期限")
     parser.add_argument("--store-screenshots", action="store_true", help="另產生符合商店尺寸且不含 Alpha 的原始截圖候選素材")
+    parser.add_argument("--layout-diagnostics", action="store_true", help="僅在新建模擬器蒐集原生 frame、安全區與無文字內容的 DOM 幾何")
     args = parser.parse_args()
     if not 30 <= args.boot_timeout <= 1800:
         parser.error("--boot-timeout 必須介於 30 與 1800 秒之間")
@@ -318,7 +329,10 @@ def check_simulators(args, runtime, devices, reader):
             # Leave a small IPC margin; the app's separate 90-second rendered
             # startup deadline still starts only after a PID is returned.
             launch_started = time.monotonic()
-            output = simctl("launch", device_id, BUNDLE_ID, timeout=330)
+            launch_env = None
+            if getattr(args, "layout_diagnostics", False):
+                launch_env = {**os.environ, "SIMCTL_CHILD_LATTICETERM_LAYOUT_DIAGNOSTICS": "1"}
+            output = simctl("launch", device_id, BUNDLE_ID, timeout=330, env=launch_env)
             launch_seconds = round(time.monotonic() - launch_started, 1)
             match = re.search(r": (\d+)\s*$", output)
             if match is None:
@@ -329,6 +343,12 @@ def check_simulators(args, runtime, devices, reader):
             print(f"{label}: 已取得 PID，驗證實際連線頁", flush=True)
             visible = wait_for_frontend(device_id, pid, screenshot, reader)
             entry = {"family": family, "model": model["name"], "runtime": runtime, "launchCommandSeconds": launch_seconds, "survivedStartup": True, **visible, "screenshot": screenshot.name}
+            if getattr(args, "layout_diagnostics", False):
+                container = Path(simctl("get_app_container", device_id, BUNDLE_ID, "data"))
+                cache = container / "Library" / "Caches"
+                snapshots = read_layout_snapshots(cache)
+                (args.output / f"{label}.layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+                entry["layoutDiagnostics"] = f"{label}.layout.json"
             if capture_store:
                 stage = "store-screenshot"
                 entry["appStoreCandidate"] = capture_store_image(device_id, family, args.output)

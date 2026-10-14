@@ -17,6 +17,20 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_layout_snapshots_exclude_unrelated_cache_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-2-0.json").write_text('{"delaySeconds":2}')
+            (cache / "layout-10-0.json").write_text('{"delaySeconds":10}')
+            (cache / "unrelated.json").write_text('not a layout snapshot')
+            snapshots = smoke.read_layout_snapshots(cache, timeout=0)
+            self.assertEqual({entry["delaySeconds"] for entry in snapshots}, {2, 10})
+
+    def test_layout_snapshots_do_not_claim_success_without_native_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "未產生"):
+                smoke.read_layout_snapshots(Path(directory), timeout=0)
+
     def test_failure_probes_do_not_conflate_ocr_and_simulator_stalls(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
