@@ -151,6 +151,7 @@
 - `npm run build`：通過，入口 362.28 KiB（限制 500 KiB）。
 - Rust fmt／check／debug build 通過；agent_chat 82 passed／6 ignored、
   transcript images 8 passed、SFTP 14 passed／7 ignored。
+  交付前完整 Rust lib：963 passed／38 ignored；all-targets clippy 通過。
 - 本輪 debug binary SHA-256：
   `06db3bad112f1072b1e291ef64a3ca7c563f4c17963d35ed439365f123ecce32`。
   先 build 當前 Rust，再以隔離 Vite 使用當前前端，不把舊已存在 binary 當新版本。
@@ -161,7 +162,7 @@
   私有 Xvfb／D-Bus／HOME／TMP，依精確 PID／nonce 清理，不接現行 display／MCP。
   此輪 DESKTOP_UI=0，不冒稱工具圖片與兩頁交接已由真 IPC 全驗。
 - `LATTICETERM_E2E_CHROMIUM=/usr/bin/google-chrome node scripts/desktop-followup-e2e.mjs`：
-  PASS，`/tmp/lattice-followup-gui-vEhsHO/evidence.json` 保存上述幾何／事件。
+  PASS，最終 `/tmp/lattice-followup-gui-kgG7od/evidence.json` 保存上述幾何／事件。
   這是實際 React／xterm／鍵鼠、合成 IPC，不是 Windows 安裝版。
   既有 headless shell 在本機無可用 sandbox；改用已安裝 Chrome 標準 sandbox，
   未安裝新瀏覽器、未使用 no-sandbox 繞過限制。
@@ -170,5 +171,8 @@
 
 ## 交付追蹤
 
-本輪程式與回歸完成；遠端 head、必要 CI、PR／merge 結果於交付後續更新。
+本輪程式提交：`7f48141b5bab89c893b5cbf25a4c8107c28baed8`。
+交付 PR：[#308](https://github.com/NickYCLin/lattice-term/pull/308)。
+PR 內保留本輪 head、必要 CI／Windows／iOS 檢查與最終 merge 的可核對紀錄；
+只在必要檢查全綠後合併，不繞過檢查。後續文件提交不改上述程式來源。
 未驗證項目保持上述限制，不因 CI 綠燈改寫成實機完整通過。
