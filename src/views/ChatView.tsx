@@ -14,6 +14,7 @@ import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
 import { ConversationIdentity, ConversationListIdentity, ConversationMessage, ConversationMetadata } from "../components/chat/ConversationPresentation";
+import { isChatAtBottom } from "../app/chatScroll";
 import { conversationLabels } from "../app/conversationLabels";
 import { cliProxyLabel } from "../app/cliProxyApi";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
@@ -971,7 +972,7 @@ function ThreadPane({
   function onScroll() {
     const node = scrollRef.current;
     if (!node) return;
-    pinnedToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+    pinnedToBottom.current = isChatAtBottom(node);
   }
 
   async function chooseDirectory() {

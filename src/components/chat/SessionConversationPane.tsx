@@ -30,6 +30,7 @@ import { useChatClipboardFallback } from "../../app/chatClipboard";
 import { SentAttachments } from "./SentAttachments";
 import { keepChatAttachmentPreviews } from "../../app/chatAttachmentPreviews";
 import { ConversationReadProgress } from "./ConversationReadProgress";
+import { isChatAtBottom } from "../../app/chatScroll";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -220,7 +221,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
     </header>
     <div ref={messagesRef} className="chat-messages" onScroll={event => {
       const node = event.currentTarget;
-      pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+      pinned.current = isChatAtBottom(node);
     }}>
       <div className="chat-messages__inner">
         {supported && <ConversationReadProgress loading={conversation.loading} />}
@@ -276,7 +277,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           {conversation.outputError && <p className="session-chat__diagnostic" role="status">{conversation.outputError}</p>}
           <pre ref={outputRef} aria-label={t("sessionChat.output")} onScroll={event => {
             const node = event.currentTarget;
-            outputPinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+            outputPinned.current = isChatAtBottom(node);
           }}>{conversation.output || t("sessionChat.noOutput")}</pre>
         </details>
         {working && (
