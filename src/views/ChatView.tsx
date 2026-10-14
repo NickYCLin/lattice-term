@@ -11,7 +11,9 @@ import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
-import { ConversationIdentity, ConversationListIdentity, ConversationMessage } from "../components/chat/ConversationPresentation";
+import { ConversationIdentity, ConversationListIdentity, ConversationMessage, ConversationMetadata } from "../components/chat/ConversationPresentation";
+import { conversationLabels } from "../app/conversationLabels";
+import { cliProxyLabel } from "../app/cliProxyApi";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
 import { useFittingTabs } from "../components/chat/useFittingTabs";
@@ -190,6 +192,7 @@ export function ChatView({
   const [newFolderName, setNewFolderName] = useState("");
   const [sessionSidebarLayout, setSharedLayout] = useSharedSidebarLayout();
   const accountProfiles = useChatAccountProfiles();
+  const { proxies } = useCliProxySettings();
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
   const nativeHistory = useNativeHistory();
@@ -197,8 +200,8 @@ export function ChatView({
     () =>
       chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: chat.threads,
         history: nativeHistory?.entries ?? [], profiles: nativeHistory?.profiles ?? accountProfiles,
-        generalProjectLabel: t("terminal.projects.generalChat"), projectFilter }),
-    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, projectFilter, t],
+        proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter }),
+    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, proxies, projectFilter, t],
   );
   const nativeConversations = useNativeConversationList({ chat, projectFilter,
     onBeforeOpen: () => setSharedLayout(current => chatSidebarLayout(current, chat.threads, workspace.nodes)),
@@ -238,7 +241,6 @@ export function ChatView({
   const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
   const activeLiveSession = active ? liveSessionForThread(active, agents.sessions, accountProfiles) : undefined;
   const shownSession = selectedSession ?? activeLiveSession;
-  const { proxies } = useCliProxySettings();
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
 
@@ -516,11 +518,11 @@ export function ChatView({
                 >
                   <ConversationListIdentity title={thread.title || t("chat.untitled")}>
                       {thread.automationId ? `${t("automation.badge")} · ` : ""}
-                      {cliLabel(thread.definitionId)}
-                      {thread.model ? ` · ${thread.model}` : ""}
-                      {thread.workingDirectory
-                        ? ` · ${directoryName(thread.workingDirectory)}`
-                        : ""}
+                      <ConversationMetadata labels={conversationLabels({ definitionId: thread.definitionId,
+                        directApi: thread.provider === "cliproxyapi" && !thread.nativeSessionId,
+                        model: thread.model, workingDirectory: thread.workingDirectory,
+                        endpoint: thread.provider ? (() => { const proxy = proxies.find(entry => entry.id === thread.proxyId); return proxy ? cliProxyLabel(proxy) : "CLIProxyAPI"; })() : null,
+                        account: accountProfiles.find(entry => entry.id === thread.accountProfileId)?.name })} />
                   </ConversationListIdentity>
                   {thread.runningTurnId ? (
                     <span className="chat-thread__dot" aria-label={t("chat.running")} />

@@ -18,6 +18,7 @@ export function AgentTerminalPane({
 }) {
   const { t } = useI18n();
   const [imageRevision, setImageRevision] = useState(0);
+  const [openImagesRevision, setOpenImagesRevision] = useState(0);
   const io = useMemo<PtyTerminalIo>(
     () => ({
       send: (data) => agents.send(sessionId, data),
@@ -34,12 +35,13 @@ export function AgentTerminalPane({
         if (path) setImageRevision(value => value + 1);
         return path;
       },
+      openImages: () => setOpenImagesRevision(value => value + 1),
     }),
     [agents, sessionId],
   );
   return (
     <div className="agent-terminal-pane">
-      <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={imageRevision} />
+      <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={imageRevision} openRevision={openImagesRevision} />
       <PtyTerminal
       ioKey={sessionId}
       io={io}

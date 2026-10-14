@@ -1,5 +1,16 @@
 import type { ReactNode } from "react";
 import { AgentIcon } from "../icons";
+import { useI18n } from "../../i18n/context";
+import type { ConversationLabels } from "../../app/conversationLabels";
+
+export function ConversationMetadata({ labels }: { labels: ConversationLabels }) {
+  const { t } = useI18n();
+  const text = [labels.source, `${t("conversation.meta.model")}: ${labels.model ?? t("chat.model.default")}`,
+    labels.endpoint && `${t("conversation.meta.connection")}: ${labels.endpoint}`,
+    labels.account && `${t("conversation.meta.account")}: ${labels.account}`,
+    labels.project && `${t("conversation.meta.project")}: ${labels.project}`].filter(Boolean).join(" · ");
+  return <span title={text}>{text}</span>;
+}
 
 export function ConversationListIdentity({ title, children }: { title: string; children: ReactNode }) {
   return <span className="chat-thread__identity">

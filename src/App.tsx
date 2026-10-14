@@ -387,6 +387,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [drawer, setDrawer] = useState<{
     open: boolean;
     profileId: string | null;
+    routeSourceId?: string;
   }>({ open: false, profileId: null });
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [removingProfile, setRemovingProfile] = useState(false);
@@ -798,6 +799,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setDrawer({ open: true, profileId: id });
   }, []);
 
+  const openRoute = useCallback((id: string) => {
+    setView("connections");
+    setDrawer({ open: true, profileId: null, routeSourceId: id });
+  }, []);
+
   const toggleResourceSidebar = useCallback(() => {
     if (onMobile) {
       setView("connections");
@@ -849,7 +855,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       id: string,
       credential?: ConnectionCredentialDraft,
     ) => {
-      const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential);
+      const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential, drawer.routeSourceId);
       setDrawer({ open: false, profileId: null });
       if (
         connectAfterSave &&
@@ -858,7 +864,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         openConnection(saved);
       }
     },
-    [saveProfileRecord, openConnection, supportedProtocols],
+    [saveProfileRecord, openConnection, supportedProtocols, drawer.routeSourceId],
   );
 
 
@@ -1293,6 +1299,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 onShow: setSelectedId,
                 onLink: (id) => workspace.linkProfiles([selected.id, id]),
                 onUnlink: () => workspace.unlinkProfile(selected.id),
+                onAdd: () => openRoute(selected.id),
               }}
             />
           )}
@@ -1322,8 +1329,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       <Suspense fallback={<LazyOverlayFallback />}>
       {drawer.open && (
         <ConnectionDrawer
-          key={drawer.profileId ?? "new"}
+          key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}` : "new"}
           profile={editing}
+          routeSource={profiles.find(entry => entry.id === drawer.routeSourceId) ?? null}
+          onOpenRoute={openEdit}
+          onAddRoute={openRoute}
           profiles={profiles}
           supportedProtocols={supportedProtocols}
           mobile={onMobile}

@@ -1,6 +1,7 @@
 import type { ChatThread } from "./agentChat";
 import { presentAgentSessionGroup } from "./agentSessionPresentation";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
+import type { CliProxyEndpoint } from "./cliProxyApi";
 import { chatProjectDirectory, projectName } from "./chatProjects";
 import { chatSidebarLayout, chatThreadNodeId } from "./chatThreadLayout";
 import type { SessionSidebarLayout } from "./sessionSidebarLayout";
@@ -23,12 +24,13 @@ export function reconcileProjectChatLayout(layout: SessionSidebarLayout, threads
   return chatSidebarLayout(layout, threads, workspace.nodes);
 }
 
-export function chatConversationSidebar({ sessions, definitions, threads, history, profiles, generalProjectLabel, projectFilter }: {
+export function chatConversationSidebar({ sessions, definitions, threads, history, profiles, proxies = [], generalProjectLabel, projectFilter }: {
   sessions: readonly AgentSessionSummary[];
   definitions: readonly Pick<AgentDefinition, "id" | "label">[];
   threads: readonly ChatThread[];
   history: readonly LocalConversation[];
   profiles: readonly ChatAccountProfile[];
+  proxies?: readonly CliProxyEndpoint[];
   generalProjectLabel: string;
   projectFilter: string | null;
 }) {
@@ -53,7 +55,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
     members.push(session);
     groupMembers.set(groupId, members);
   }
-  const workspace = chatWorkspaceProjection(visibleSessions, definitions, generalProjectLabel);
+  const workspace = chatWorkspaceProjection(visibleSessions, definitions, generalProjectLabel, proxies);
   const leavesBySession = new Map([...workspace.sessions.values()].map(leaf => [leaf.sessionId, leaf]));
   const projectIds = new Map<string, string>();
   for (const members of groupMembers.values()) {

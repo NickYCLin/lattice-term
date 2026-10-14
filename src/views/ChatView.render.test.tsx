@@ -230,9 +230,8 @@ describe("ChatView", () => {
     expect(markup).toContain("me@example.com · OpenAI Codex · 預設");
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
-    // The interface talks about assistants; the CLI is an implementation detail.
     const visibleText = markup.replace(/<[^>]+>/g, " ");
-    expect(visibleText).not.toMatch(/\bCLI\b/);
+    expect(visibleText).toContain("Codex CLI · 模型: 預設 · 專案: work");
   });
 
   it("shows the proxy model field even when native Codex is signed out", () => {
@@ -282,8 +281,8 @@ describe("ChatView", () => {
     expect(markup).toContain("改版討論");
     expect(markup.match(/class="chat-thread__identity"/g)).toHaveLength(2);
     expect(markup).toContain('class="chat-thread chat-session');
-    expect(markup).toContain('class="chat-thread__meta">OpenAI Codex · gpt-5.6-sol · LatticeTerm</span>');
-    expect(markup).toContain('class="chat-thread__meta">OpenAI Codex · chat-model · LatticeTerm</span>');
+    expect(markup).toContain('Codex CLI · 模型: gpt-5.6-sol · 專案: LatticeTerm');
+    expect(markup).toContain('Codex CLI · 模型: chat-model · 專案: LatticeTerm');
   });
 
   it("shows one sidebar row when a terminal holds the same native conversation", () => {

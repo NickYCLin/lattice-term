@@ -103,16 +103,22 @@ function SessionImageGallery({ sessionId, revision, onClose }: {
   </div>, document.body);
 }
 
-export function AgentSessionImages({ sessionId, active, revision }: {
+export function AgentSessionImages({ sessionId, active, revision, openRevision = 0 }: {
   sessionId: string;
   active: boolean;
   revision: number;
+  openRevision?: number;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const lastOpenRevision = useRef(openRevision);
+  useEffect(() => {
+    if (lastOpenRevision.current !== openRevision && active) setOpen(true);
+    lastOpenRevision.current = openRevision;
+  }, [openRevision, active]);
   useEffect(() => { if (!active) setOpen(false); }, [active]);
   return <div className="agent-session-images__toolbar">
-    <button type="button" className="button button--quiet" onClick={() => setOpen(true)}>
+    <button type="button" className="button button--quiet" title={t("agents.images.marker")} onClick={() => setOpen(true)}>
       <ImageFileIcon size={16} />{t("agents.images.title")}
     </button>
     {open && active && <SessionImageGallery key={sessionId} sessionId={sessionId} revision={revision} onClose={() => setOpen(false)} />}

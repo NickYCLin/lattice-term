@@ -9,6 +9,14 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "form.route.title": "Connections to this machine",
+  "form.route.add": "Add connection route",
+  "form.route.hint": "Each route saves its own parameters and credentials. Changing protocol edits only this route.",
+  "conversation.meta.model": "Model",
+  "conversation.meta.connection": "Connection",
+  "conversation.meta.account": "Account",
+  "conversation.meta.project": "Project",
+  "agents.images.marker": "View images from this conversation",
   "chat.proxy.direct": "Chat directly through CLIProxyAPI without installing a CLI. Supports images and UTF-8 text attachments, but does not execute local commands, browser or plugin tools.",
   "chat.delegate.remoteAttachments": "Remote subtasks do not support attachment transfer yet. Choose a local subtask or remove the attachments first.",
   "sessionChat.waitingIdentity": "This session's native conversation ID is not available yet. Terminal output is shown below; another conversation in the same directory will not be substituted.",

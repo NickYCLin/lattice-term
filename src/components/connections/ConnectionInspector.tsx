@@ -6,7 +6,7 @@
  * so it renders the honest unavailable state until then.
  */
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   UNGROUPED,
@@ -59,21 +59,33 @@ export function ConnectionInspector({
     onShow: (id: string) => void;
     onLink: (id: string) => Promise<string | null>;
     onUnlink: () => Promise<string | null>;
+    onAdd?: () => void;
   };
 }) {
   const { t } = useI18n();
   const [linkTarget, setLinkTarget] = useState("");
   const [machineBusy, setMachineBusy] = useState(false);
   const [machineError, setMachineError] = useState<string | null>(null);
+  const machinePending = useRef(false);
+  const currentProfileId = useRef(profile.id);
+  currentProfileId.current = profile.id;
+  useEffect(() => { setLinkTarget(""); setMachineError(null); }, [profile.id]);
 
   async function runMachineAction(action: () => Promise<string | null>) {
+    if (machinePending.current) return;
+    machinePending.current = true;
     setMachineBusy(true);
     setMachineError(null);
+    const actionProfileId = profile.id;
     try {
       const failure = await action();
+      if (currentProfileId.current !== actionProfileId) return;
       if (failure) setMachineError(failure);
       else setLinkTarget("");
+    } catch (reason) {
+      if (currentProfileId.current === actionProfileId) setMachineError(reason instanceof Error ? reason.message : String(reason));
     } finally {
+      machinePending.current = false;
       setMachineBusy(false);
     }
   }
@@ -215,9 +227,11 @@ export function ConnectionInspector({
               </dl>
             </section>
 
-            {machine && (machine.peers.length > 0 || machine.candidates.length > 0) && (
+            {machine && (
               <section className="inspector__section">
                 <h3 className="eyebrow">{t("inspector.machine.title")}</h3>
+                {machine.onAdd && <button type="button" className="button button--secondary button--sm"
+                  disabled={machineBusy} onClick={machine.onAdd}>{t("form.route.add")}</button>}
                 {machine.peers.length > 0 ? (
                   <ul className="inspector__machine-list">
                     {machine.peers.map((peer) => (

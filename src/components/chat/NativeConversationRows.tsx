@@ -1,14 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AgentChatApi } from "../../app/useAgentChat";
-import { agentDisplayName } from "../../app/agentNames";
+import { conversationLabels } from "../../app/conversationLabels";
+import { cliProxyLabel } from "../../app/cliProxyApi";
 import { isProxyConversation, nativeConversationProxy, type LocalConversation } from "../../app/localConversationSessions";
 import { useCliProxySettings } from "../../app/useCliProxyApi";
 import { nativeConversationKey, useNativeHistory, type NativeMessageSnapshot } from "../../app/useNativeConversations";
 import { useI18n } from "../../i18n/context";
 import { chatProjectKey } from "../../app/chatProjects";
 import { displayPath } from "../../app/displayPath";
-import { ConversationListIdentity } from "./ConversationPresentation";
+import { ConversationListIdentity, ConversationMetadata } from "./ConversationPresentation";
 import { FolderIcon } from "../icons";
 import { ConversationReadProgress } from "./ConversationReadProgress";
 
@@ -94,9 +95,10 @@ export function useNativeConversationList({ chat, projectFilter, onBeforeOpen, o
         aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
         title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
         <ConversationListIdentity title={entry.title || t("chat.untitled")}>
-            {agentDisplayName(entry.definitionId)}
-            {entry.profileId ? ` · ${history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId}` : ""}
-            {entry.workingDirectory ? ` · ${directoryName(entry.workingDirectory)}` : ""}
+            <ConversationMetadata labels={conversationLabels({ definitionId: entry.definitionId,
+              workingDirectory: entry.workingDirectory,
+              account: entry.profileId ? history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId : null,
+              endpoint: isProxyConversation(entry) ? (() => { const proxy = nativeConversationProxy(entry, proxies); return proxy ? cliProxyLabel(proxy) : "CLIProxyAPI"; })() : null })} />
         </ConversationListIdentity>
       </button>
       {reading?.key === key && <div className="chat-native-rows__reader" role="region" aria-label={entry.title || t("chat.untitled")}>
