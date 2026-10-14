@@ -99,6 +99,10 @@ it("reads the system state and confirms changes without writing to the backgroun
     throw new Error(command);
   });
   const { container } = await mount();
+  const panel = allNodes(container).find(node => node.tagName === "SECTION")!;
+  expect(panel.attributes.class).toBe("panel glass glass--sheen");
+  expect(allNodes(panel).find(node => node.tagName === "HEADER")?.attributes.class).toBe("panel__head");
+  expect(allNodes(panel).find(node => node.tagName === "H2")?.attributes.class).toBe("panel__title");
   expect(controls(container)[0].attributes["aria-checked"]).toBe("true");
   await act(async () => { onClick(controls(container)[1])(); onClick(controls(container)[1])(); });
   expect(controls(container).every(node => props(node).disabled)).toBe(true);

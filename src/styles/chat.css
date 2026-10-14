@@ -1535,6 +1535,10 @@ button.chat-chip:hover {
   font-size: var(--text-xs);
 }
 
+.chat-archive-status--mobile {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .chat-view {
     grid-template-columns: minmax(0, 1fr);
@@ -1542,6 +1546,15 @@ button.chat-chip:hover {
 
   .chat-threads {
     display: none;
+  }
+
+  .chat-archive-status--mobile {
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    max-height: 40vh;
+    overflow: auto;
+    overflow-wrap: anywhere;
   }
 
   .chat-card,

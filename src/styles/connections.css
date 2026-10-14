@@ -670,6 +670,19 @@
   color: var(--text-muted);
 }
 
+.settings-panels > .panel {
+  min-width: 0;
+}
+
+.settings-panels :is(.panel__head, .setting__text, .panel__hint, .setting__description) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-panels .setting__text {
+  flex-basis: 13rem;
+}
+
 .mobile-download {
   display: flex;
   gap: var(--space-5);

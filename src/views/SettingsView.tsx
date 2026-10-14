@@ -261,7 +261,7 @@ export function SettingsView({
   const [motionPreview, setMotionPreview] = useState(0);
 
   return (
-    <div className="stack">
+    <div className="stack settings-panels">
       <section className="panel glass glass--sheen">
         <header className="panel__head">
           <div>

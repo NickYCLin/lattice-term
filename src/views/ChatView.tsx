@@ -1,4 +1,5 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { ChatArchiveStatus } from "../components/chat/ChatArchiveStatus";
 import { ConversationHandoffDialog } from "../components/agents/ConversationHandoffDialog";
 import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
 import { ChatProjectDefaultsConflict, clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
@@ -352,6 +353,14 @@ export function ChatView({
     workingDirectory: previous?.workingDirectory ?? "",
   };
 
+  const archiveStatus = <ChatArchiveStatus error={chat.removal?.error} pending={chat.removal?.pending}
+    receipt={chat.archivedReceipt} onRetry={() => {
+      if (!chat.removal) return;
+      const thread = chat.getThread(chat.removal.id);
+      const profile = accountProfiles.find(profile => profile.id === thread?.accountProfileId);
+      void chat.removeThread(chat.removal.id, profile?.configDirectory ?? null);
+    }} onRestore={() => void chat.undoArchive()} />;
+
   return (
     <section className="chat-view" aria-label={t("chat.title")}>
       {summarySource && <ConversationHandoffDialog source={summarySource.title || summarySource.id}
@@ -386,18 +395,7 @@ export function ChatView({
           summaryDestination.current = null;
         }} />}
       <aside className="chat-threads">
-      {chat.removal?.error && <Callout tone="danger" title={t("chat.archive.failed")}>
-        <p>{chat.removal.error}</p>
-        <button type="button" className="button" onClick={() => {
-          const thread = chat.getThread(chat.removal!.id);
-          const profile = accountProfiles.find(profile => profile.id === thread?.accountProfileId);
-          void chat.removeThread(chat.removal!.id, profile?.configDirectory ?? null);
-        }}>{t("chat.archive.retry")}</button>
-      </Callout>}
-        {chat.archivedReceipt && <Callout tone="info" title={t("chat.archive.done")}>
-          {chat.archivedReceipt.error && <p role="alert">{chat.archivedReceipt.error}</p>}
-          <button type="button" className="button" disabled={chat.archivedReceipt.pending} onClick={() => void chat.undoArchive()}>{t("chat.archive.restore")}</button>
-        </Callout>}
+        {archiveStatus}
         {(shownSession || active) && <button type="button" className="button" disabled={!shownSession && Boolean(active?.runningTurnId)}
           onClick={() => {
             summaryDestination.current = null;
@@ -687,6 +685,7 @@ export function ChatView({
       </aside>
 
       <div className="chat-main">
+        {(chat.removal?.error || chat.archivedReceipt) && <div className="chat-archive-status--mobile">{archiveStatus}</div>}
         {mode === "automations" && agents.mode !== "unavailable" ? (
           composingAutomation || selectedAutomationId ? (
             <AutomationPane
