@@ -63,6 +63,12 @@ export function AgentSkillsPanel({
   const [skills, setSkills] = useState<DiscoveredSkill[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const skillIdentity = (skill: DiscoveredSkill) => JSON.stringify([skill.source, skill.name, skill.description]);
+  const distinctSkills = [...new Map((skills ?? []).map(skill => [skillIdentity(skill), skill])).values()];
+  const visibleSkills = distinctSkills.filter(skill => (!sourceFilter || skill.source === sourceFilter) &&
+    `${skill.name} ${skill.description ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const normalizedDirectory = projectDirectory.trim();
   const targets = useMemo(
     () => skillTargets(catalog, accountProfiles, t("agents.account.default")),
@@ -86,6 +92,8 @@ export function AgentSkillsPanel({
     }
 
     setLoading(true);
+    setQuery("");
+    setSourceFilter("");
     setError(null);
     setSkills(null);
     void (async () => {
@@ -124,7 +132,7 @@ export function AgentSkillsPanel({
         <span className={`badge ${loading ? "tone-neutral" : "tone-ok"}`}>
           {loading
             ? t("agents.skills.discovering")
-            : t("agents.skills.count", { count: skills?.length ?? 0 })}
+            : t("agents.skills.count", { count: distinctSkills.length })}
         </span>
       </div>
       <p className="agents-skills__body">{t("agents.skills.body")}</p>
@@ -147,6 +155,20 @@ export function AgentSkillsPanel({
               ))}
             </select>
           </label>
+          <div className="agents-skills__filters">
+            <label className="field"><span>{t("agents.skills.search")}</span>
+              <input className="input" value={query} onChange={event => setQuery(event.currentTarget.value)} />
+            </label>
+            <label className="field"><span>{t("agents.skills.source")}</span>
+              <select className="select" value={sourceFilter} onChange={event => setSourceFilter(event.currentTarget.value)}>
+                <option value="">{t("agents.skills.allSources")}</option>
+                {[...new Set((skills ?? []).map(skill => skill.source))].sort().map(source =>
+                  <option key={source} value={source}>{skillSourceLabel(source, t)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="button button--quiet" onClick={() => { setQuery(""); setSourceFilter(""); }}>
+              {t("agents.skills.clear")}</button>
+          </div>
 
           {error && (
             <Callout tone="danger" title={t("agents.skills.failedTitle")}>
@@ -158,16 +180,17 @@ export function AgentSkillsPanel({
             <p className="agents-skills__empty">{t("agents.skills.empty")}</p>
           )}
           {skills && skills.length > 0 && !loading && (
+            visibleSkills.length === 0 ? <p role="status">{t("agents.skills.noResults")}</p> :
             <ul className="agents-skills__list" aria-label={t("agents.skills.title")}>
-              {skills.map((skill) => (
-                <li key={`${skill.source}:${skill.name}`}>
+              {visibleSkills.map((skill) => (
+                <li key={skillIdentity(skill)}>
                   <span className="agents-skills__icon" aria-hidden="true"><AgentIcon size={14} /></span>
                   <div>
                     <div className="agents-skills__name-row">
                       <strong>{skill.name}</strong>
                       <span className="badge tone-neutral">{skillSourceLabel(skill.source, t)}</span>
                     </div>
-                    {skill.description && <p>{skill.description}</p>}
+                    {skill.description && <details><summary>{t("agents.skills.details")}</summary><p>{skill.description}</p></details>}
                   </div>
                 </li>
               ))}

@@ -73,16 +73,21 @@ export function SftpPane({
   // the view, so a slow earlier folder never replaces the one asked for last.
   const listQueue = useRef(createSerialQueue());
   const latestOpen = useRef(0);
+  const pendingPath = useRef<string | null>(null);
   const list = sftp.list;
   const sessionTransfers = Object.values(sftp.transfers)
     .filter((transfer) => transfer.sessionId === session.sessionId)
     .sort((a, b) => a.transferId.localeCompare(b.transferId, undefined, { numeric: true }));
 
   async function open(path: string) {
+    if (pendingPath.current === `${session.sessionId}:${path}`) return;
+    pendingPath.current = `${session.sessionId}:${path}`;
     const ticket = ++latestOpen.current;
     const current = () => mounted.current && ticket === latestOpen.current;
     setLoading(true);
     setProblem(null);
+    setDirectory(null);
+    setPathInput(path);
     try {
       const next = await listQueue.current(() => list(session.sessionId, path));
       if (!current()) return;
@@ -92,7 +97,7 @@ export function SftpPane({
       if (!current()) return;
       setProblem(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      if (current()) setLoading(false);
+      if (current()) { pendingPath.current = null; setLoading(false); }
     }
   }
 
@@ -115,16 +120,20 @@ export function SftpPane({
         !refreshedPathUploads.current.has(transfer.transferId),
     );
     if (arrivals.length === 0) return;
+    const ticket = latestOpen.current;
     for (const transfer of arrivals) {
       refreshedPathUploads.current.add(transfer.transferId);
     }
     void listQueue.current(() => list(session.sessionId, currentPath))
       .then((next) => {
+        if (!mounted.current || ticket !== latestOpen.current) return;
         setDirectory((current) =>
           current?.path === currentPath ? next : current,
         );
       })
       .catch((reason: unknown) => {
+        if (!mounted.current || ticket !== latestOpen.current) return;
+        setDirectory(null);
         setProblem(reason instanceof Error ? reason.message : String(reason));
       });
   }, [directory?.path, list, session.sessionId, sessionTransfers]);
@@ -343,8 +352,8 @@ export function SftpPane({
           <button
             type="button"
             className="button button--ghost button--sm"
-            disabled={loading || busy || directory?.path === "/"}
-            onClick={() => directory && void open(parentPath(directory.path))}
+            disabled={loading || busy || !pathInput.trim() || (directory?.path ?? pathInput.trim()) === "/"}
+            onClick={() => void open(parentPath(directory?.path ?? pathInput.trim()))}
           >
             <FolderIcon size={13} />
             {t("sftp.up")}
@@ -352,8 +361,8 @@ export function SftpPane({
           <button
             type="button"
             className="button button--ghost button--sm"
-            disabled={loading || busy || !directory}
-            onClick={() => directory && void open(directory.path)}
+            disabled={loading || busy || !pathInput.trim()}
+            onClick={() => void open(directory?.path ?? pathInput.trim())}
           >
             <RefreshIcon size={13} />
             {t("sftp.refresh")}
@@ -399,7 +408,9 @@ export function SftpPane({
       <div className="sftp-table-wrap">
         {loading ? (
           <div className="sftp-state">{t("sftp.loading")}</div>
-        ) : directory && directory.entries.length === 0 ? (
+        ) : !directory ? (
+          <div className="sftp-state">{t("sftp.listUnknown")}</div>
+        ) : directory.entries.length === 0 ? (
           <div className="sftp-state">{t("sftp.empty")}</div>
         ) : (
           <table className="sftp-table">

@@ -1,4 +1,5 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { ConversationHandoffDialog } from "../components/agents/ConversationHandoffDialog";
 import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
 import { ChatProjectDefaultsConflict, clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
 import { useChatClipboardFallback } from "../app/chatClipboard";
@@ -43,6 +44,7 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, splitSessionAttachments } 
 import { keepChatAttachmentPreviews } from "../app/chatAttachmentPreviews";
 import {
   defaultPermission,
+  handoffTranscript,
   effortChoices,
   toolOutputCount,
   delegationResult,
@@ -243,6 +245,8 @@ export function ChatView({
   const shownSession = selectedSession ?? activeLiveSession;
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
+  const [summarySource, setSummarySource] = useState<(Pick<ChatThread, "id" | "title" | "workingDirectory" | "definitionId" | "items"> & Partial<Pick<ChatThread, "permission">> & { sessionId?: string }) | null>(null);
+  const summaryDestination = useRef<{ key: string; id: string } | null>(null);
 
   async function continueInSession(thread: ChatThread) {
     if (handingOff.current) return;
@@ -350,7 +354,57 @@ export function ChatView({
 
   return (
     <section className="chat-view" aria-label={t("chat.title")}>
+      {summarySource && <ConversationHandoffDialog source={summarySource.title || summarySource.id}
+        definitions={agents.catalog.filter(definition => chat.supported.includes(definition.id as ChatDefinitionId))}
+        profiles={accountProfiles}
+        apiTargets={proxies.map(proxy => ({ definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: proxy.id, label: `${cliProxyLabel(proxy)} · Codex API` }))}
+        loadSummary={async () => summarySource.sessionId
+          ? agents.exportTranscript(summarySource.sessionId, { forFile: true })
+          : handoffTranscript(summarySource.items, summarySource.definitionId) || null}
+        onCancel={() => { setSummarySource(null); summaryDestination.current = null; }}
+        onConfirm={async (summary, target) => {
+          const key = JSON.stringify([target, summary]);
+          const destination = summaryDestination.current?.key === key
+            ? chat.getThread(summaryDestination.current.id)
+            : null;
+          const thread = destination ?? chat.createThread({
+            definitionId: target.definitionId as ChatDefinitionId, accountProfileId: target.accountProfileId,
+            provider: target.provider, proxyId: target.proxyId, model: target.model,
+            workingDirectory: summarySource.workingDirectory,
+            permission: summarySource.permission && permissionsFor(target.definitionId as ChatDefinitionId).includes(summarySource.permission)
+              ? summarySource.permission : "readOnly", activate: false,
+          });
+          summaryDestination.current = { key, id: thread.id };
+          const profile = accountProfiles.find(profile => profile.id === target.accountProfileId);
+          const previousItems = thread.items.length;
+          await chat.send(thread.id, `Source conversation: ${summarySource.title || summarySource.id}\nSummary handoff, not native thread continuity.\n\n${summary}`, [], profile?.configDirectory ?? null);
+          const result = chat.getThread(thread.id);
+          const failure = result?.items.slice(previousItems).reverse().find(item => item.type === "turnEnd" && item.error);
+          if (failure?.type === "turnEnd" && failure.error) throw new Error(failure.error);
+          selectThread(thread.id);
+          setSummarySource(null);
+          summaryDestination.current = null;
+        }} />}
       <aside className="chat-threads">
+      {chat.removal?.error && <Callout tone="danger" title={t("chat.archive.failed")}>
+        <p>{chat.removal.error}</p>
+        <button type="button" className="button" onClick={() => {
+          const thread = chat.getThread(chat.removal!.id);
+          const profile = accountProfiles.find(profile => profile.id === thread?.accountProfileId);
+          void chat.removeThread(chat.removal!.id, profile?.configDirectory ?? null);
+        }}>{t("chat.archive.retry")}</button>
+      </Callout>}
+        {chat.archivedReceipt && <Callout tone="info" title={t("chat.archive.done")}>
+          {chat.archivedReceipt.error && <p role="alert">{chat.archivedReceipt.error}</p>}
+          <button type="button" className="button" disabled={chat.archivedReceipt.pending} onClick={() => void chat.undoArchive()}>{t("chat.archive.restore")}</button>
+        </Callout>}
+        {(shownSession || active) && <button type="button" className="button" disabled={!shownSession && Boolean(active?.runningTurnId)}
+          onClick={() => {
+            summaryDestination.current = null;
+            setSummarySource(shownSession ? { id: shownSession.sessionId, sessionId: shownSession.sessionId,
+              title: shownSession.groupLabel || shownSession.label, workingDirectory: shownSession.workingDirectory,
+              definitionId: shownSession.definitionId as ChatDefinitionId, items: [] } : active);
+          }}>{t("handoff.summary.title")}</button>}
         <div className="chat-threads__header">
           <div ref={modeTabs.ref} className={`chat-mode${modeTabs.compact ? " is-compact" : ""}`} role="tablist">
             <button
@@ -519,8 +573,9 @@ export function ChatView({
                   <ConversationListIdentity title={thread.title || t("chat.untitled")}>
                       {thread.automationId ? `${t("automation.badge")} · ` : ""}
                       <ConversationMetadata labels={conversationLabels({ definitionId: thread.definitionId,
+                        provider: thread.reportedProvider,
                         directApi: thread.provider === "cliproxyapi" && !thread.nativeSessionId,
-                        model: thread.model, workingDirectory: thread.workingDirectory,
+                        model: thread.reportedModel ?? thread.model, workingDirectory: thread.workingDirectory,
                         endpoint: thread.provider ? (() => { const proxy = proxies.find(entry => entry.id === thread.proxyId); return proxy ? cliProxyLabel(proxy) : "CLIProxyAPI"; })() : null,
                         account: accountProfiles.find(entry => entry.id === thread.accountProfileId)?.name })} />
                   </ConversationListIdentity>
@@ -727,8 +782,8 @@ export function ChatView({
           title={t("chat.delete.confirm.title", {
             title: pendingDelete.title || t("chat.untitled"),
           })}
-          body={t("chat.delete.confirm.body")}
-          confirmLabel={t("chat.delete.confirm.action")}
+          body={t(pendingDelete.definitionId === "codex" && pendingDelete.nativeSessionId && !pendingDelete.remote && !pendingDelete.archived ? "chat.archive.confirm.body" : "chat.delete.confirm.body")}
+          confirmLabel={t(pendingDelete.definitionId === "codex" && pendingDelete.nativeSessionId && !pendingDelete.remote && !pendingDelete.archived ? "chat.archive.confirm.action" : "chat.delete.confirm.action")}
           cancelLabel={t("common.cancel")}
           tone="danger"
           onConfirm={() => {

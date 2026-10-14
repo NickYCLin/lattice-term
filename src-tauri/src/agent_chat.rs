@@ -271,6 +271,9 @@ pub struct ToolMeta {
     rename_all_fields = "camelCase"
 )]
 pub enum ChatEvent {
+    ProviderReport {
+        provider: String,
+    },
     Started {
         native_session_id: Option<String>,
         model: Option<String>,
@@ -3109,47 +3112,6 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
-fn codex_home_for(profile_config_path: Option<&str>) -> Option<PathBuf> {
-    profile_config_path
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
-        .or_else(|| home_directory().map(|h| h.join(".codex")))
-}
-
-/// Whether Codex still lists the conversation: its rollout is under
-/// `sessions/`, not `archived_sessions/`. Read-only.
-fn codex_rollout_is_active(codex_home: &Path, session_id: &str) -> bool {
-    let suffix = format!("-{session_id}.jsonl");
-    let mut dirs = vec![codex_home.join("sessions")];
-    let mut searched = 0;
-    while let Some(current) = dirs.pop() {
-        let Ok(entries) = fs::read_dir(current) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            searched += 1;
-            if searched > 50_000 {
-                return false;
-            }
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_dir() {
-                dirs.push(entry.path());
-            } else if kind.is_file()
-                && entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.ends_with(&suffix))
-            {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 fn cleanup_claude_files(session_id: &str, profile_config_path: Option<&str>) {
     let claude_home = profile_config_path
         .map(PathBuf::from)
@@ -3184,7 +3146,7 @@ pub async fn delete_native_conversation(
     definition_id: &str,
     native_session_id: &str,
     profile_config_path: Option<&str>,
-    working_directory: Option<&str>,
+    _working_directory: Option<&str>,
 ) -> Result<(), String> {
     let session_id = native_session_id.trim();
     if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_LEN {
@@ -3199,30 +3161,15 @@ pub async fn delete_native_conversation(
 
     match definition_id {
         "codex" => {
-            // Codex Desktop's own delete is an archive: the rollout moves to
-            // archived_sessions and the thread can be restored from Codex.
-            // Going through the CLI keeps Codex's state database in step.
-            let codex_home = codex_home_for(profile_config_path);
-            if let Some(executable) = crate::agent::catalog_executable("codex") {
-                let mut command = headless_command(&executable);
-                command.args(["archive", session_id]);
-                if let Some(home) = &codex_home {
-                    command.env("CODEX_HOME", home);
-                }
-                if let Some(cwd) = working_directory {
-                    if let Ok(path) = fs::canonicalize(cwd) {
-                        command.current_dir(path);
-                    }
-                }
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(20), command.status())
-                    .await;
-            }
-            match codex_home {
-                Some(home) if codex_rollout_is_active(&home, session_id) => {
-                    Err("Codex did not archive this conversation.".to_string())
-                }
-                _ => Ok(()),
-            }
+            let executable = crate::agent::catalog_executable("codex")
+                .ok_or("Codex is unavailable; the conversation was retained.")?;
+            codex_catalog::set_archived(
+                &executable,
+                profile_config_path.map(Path::new),
+                session_id,
+                true,
+            )
+            .await
         }
         "claude" => {
             cleanup_claude_files(session_id, profile_config_path);
@@ -3230,6 +3177,23 @@ pub async fn delete_native_conversation(
         }
         _ => Ok(()),
     }
+}
+
+pub async fn restore_codex_conversation(
+    session_id: &str,
+    profile: Option<&str>,
+) -> Result<(), String> {
+    if session_id.is_empty()
+        || session_id.len() > MAX_SESSION_ID_LEN
+        || !session_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err("Invalid native session id".into());
+    }
+    let executable = crate::agent::catalog_executable("codex")
+        .ok_or("Codex is unavailable; archive unchanged.")?;
+    codex_catalog::set_archived(&executable, profile.map(Path::new), session_id, false).await
 }
 
 #[cfg(test)]
@@ -3316,31 +3280,6 @@ mod tests {
         assert!(delete_native_conversation("codex", &oversized, None, None)
             .await
             .is_err());
-    }
-
-    #[test]
-    fn codex_rollout_lookup_ignores_archived_copies() {
-        let temp = tempfile::tempdir().unwrap();
-        let sessions = temp.path().join("sessions/2026/09/24");
-        let archived = temp.path().join("archived_sessions");
-        fs::create_dir_all(&sessions).unwrap();
-        fs::create_dir_all(&archived).unwrap();
-        fs::write(
-            sessions.join("rollout-2026-09-24T10-00-00-abc-uuid.jsonl"),
-            "x",
-        )
-        .unwrap();
-        fs::write(
-            archived.join("rollout-2026-09-24T10-00-00-old-uuid.jsonl"),
-            "x",
-        )
-        .unwrap();
-        assert!(codex_rollout_is_active(temp.path(), "abc-uuid"));
-        assert!(!codex_rollout_is_active(temp.path(), "old-uuid"));
-        assert!(!codex_rollout_is_active(
-            &temp.path().join("missing"),
-            "abc-uuid"
-        ));
     }
 
     #[tokio::test]

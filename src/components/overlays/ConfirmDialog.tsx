@@ -18,6 +18,7 @@ export function ConfirmDialog({
   tone = "danger",
   confirmDisabled = false,
   busy = false,
+  dialogClassName,
   children,
   onConfirm,
   onCancel,
@@ -29,6 +30,7 @@ export function ConfirmDialog({
   tone?: "danger" | "default";
   confirmDisabled?: boolean;
   busy?: boolean;
+  dialogClassName?: string;
   /** Extra choices shown under the body, such as a sync checkbox. */
   children?: ReactNode;
   onConfirm: () => void;
@@ -58,7 +60,7 @@ export function ConfirmDialog({
     >
       <div
         ref={dialogRef}
-        className="dialog"
+        className={dialogClassName ? `dialog ${dialogClassName}` : "dialog"}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"

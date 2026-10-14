@@ -19,9 +19,8 @@ export function loadDismissedNativeConversations(storage: Pick<Storage, "getItem
 }
 
 /**
- * Some CLIs keep no deletable store (Gemini, Antigravity), and a Codex
- * archive can fail. Remembering the removal keeps a deleted conversation
- * from coming back with the next sync.
+ * Some CLIs keep no deletable store (Gemini, Antigravity). Remembering their
+ * local removal keeps a dismissed conversation from coming back with sync.
  */
 export function dismissNativeConversation(
   entry: { definitionId: string; profileId: string | null; nativeSessionId: string },
@@ -48,4 +47,13 @@ export function useDismissedNativeConversations(): ReadonlySet<string> {
     return () => globalThis.removeEventListener?.(CHANGED, reload);
   }, []);
   return keys;
+}
+
+export function restoreNativeConversation(entry: { definitionId: string; profileId: string | null; nativeSessionId: string }) {
+  const key = nativeConversationKey(entry);
+  const existing = loadDismissedNativeConversations();
+  if (!existing.has(key)) return;
+  const keys = [...existing].filter(value => value !== key);
+  globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(keys));
+  globalThis.dispatchEvent?.(new Event(CHANGED));
 }

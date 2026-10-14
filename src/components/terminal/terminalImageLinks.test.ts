@@ -33,3 +33,12 @@ it("ignores missing lines, ordinary text and invalid markers", () => {
   expect(callback).toHaveBeenLastCalledWith([]);
   expect(open).not.toHaveBeenCalled();
 });
+
+it("opens tool-observed image history from a Viewed image step without reading a terminal path", () => {
+  const open = vi.fn();
+  let links: ILink[] | undefined;
+  terminalImageLinks(fixture("中文 Viewed image synthetic.png"), open).provideLinks(3, value => { links = value; });
+  expect(links).toHaveLength(1);
+  links![0].activate({} as MouseEvent, links![0].text);
+  expect(open).toHaveBeenCalledOnce();
+});
