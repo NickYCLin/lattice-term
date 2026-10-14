@@ -106,7 +106,6 @@ it("creates a separate route, prevents repeat submissions, and leaves a failed s
     await act(async () => rejectSave(new Error("合成重試失敗")));
   } finally { await act(async () => root.unmount()); }
 });
-
 it("keeps edits when backing out of route navigation and discards only after confirmation", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);
