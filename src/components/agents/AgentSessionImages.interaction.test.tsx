@@ -78,6 +78,31 @@ const renderImages = (sessionId = "owner", active = true) => <I18nProvider local
   <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} />
 </I18nProvider>;
 
+it("opens through a terminal marker revision, closes and reopens without reusing a previous session", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: false });
+  const render = (sessionId: string, revision: number, active = true) => <I18nProvider locale="zh-TW">
+    <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} openRevision={revision} />
+  </I18nProvider>;
+  try {
+    await act(async () => root.render(render("first", 0)));
+    expect(invoke).not.toHaveBeenCalled();
+    await act(async () => root.render(render("first", 1)));
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("agent_session_images_snapshot", { sessionId: "first" });
+    await act(async () => onClick(allNodes(container).find(node => node.attributes["aria-label"] === "關閉")!)());
+    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
+    await act(async () => root.render(render("first", 2)));
+    expect(invoke).toHaveBeenCalledTimes(2);
+    await act(async () => root.render(render("second", 2)));
+    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
+    await act(async () => root.render(render("second", 3)));
+    expect(invoke).toHaveBeenLastCalledWith("agent_session_images_snapshot", { sessionId: "second" });
+    await act(async () => root.render(render("second", 4, false)));
+    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("loads only on opening and opens the exact thumbnail without guessing image numbers", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);

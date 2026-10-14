@@ -14,6 +14,7 @@ import {
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
 import { attachTerminalScrollback } from "./terminalScrollback";
+import { terminalImageLinks } from "./terminalImageLinks";
 
 /** The byte stream behind one terminal: an agent PTY or a plain local shell. */
 export interface PtyTerminalIo {
@@ -25,6 +26,7 @@ export interface PtyTerminalIo {
   closedReason?: () => string | null | undefined;
   /** Saves a clipboard image somewhere the program can read, returning its path. */
   pasteImage?: () => Promise<string | null>;
+  openImages?: () => void;
 }
 
 export function PtyTerminal({
@@ -107,6 +109,9 @@ export function PtyTerminal({
     };
     fitAndReport();
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit, true);
+    const imageLinks = ioRef.current.openImages ? terminal.registerLinkProvider(
+      terminalImageLinks(terminal, () => ioRef.current.openImages?.()),
+    ) : null;
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,
@@ -178,6 +183,7 @@ export function PtyTerminal({
       imeFallback.dispose();
       typed.dispose();
       stopScrollback();
+      imageLinks?.dispose();
       terminal.dispose();
       terminalRef.current = null;
     };
