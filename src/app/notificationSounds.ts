@@ -54,10 +54,22 @@ function audioContext(): AudioContext | null {
       .webkitAudioContext;
   if (!AudioContextConstructor) return null;
   try {
-    sharedContext ??= new AudioContextConstructor();
+    if (!sharedContext || sharedContext.state === "closed") sharedContext = new AudioContextConstructor();
     return sharedContext;
   } catch {
     return null;
+  }
+}
+
+async function withinPlaybackBudget<Value>(operation: Promise<Value>, milliseconds: number): Promise<Value | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<undefined>(resolve => { timer = setTimeout(resolve, milliseconds); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -70,7 +82,14 @@ export async function prepareNotificationAudio(): Promise<boolean> {
   const context = audioContext();
   if (!context) return false;
   try {
-    if (context.state === "suspended") await context.resume();
+    if (context.state === "suspended") {
+      const resumed = await withinPlaybackBudget(context.resume().then(() => true), 1500);
+      if (!resumed) {
+        if (sharedContext === context) sharedContext = null;
+        void context.close?.().catch(() => {});
+        return false;
+      }
+    }
     return context.state === "running";
   } catch {
     return false;
@@ -122,7 +141,9 @@ async function playNotificationSoundNow(
     "__TAURI_INTERNALS__" in window
   ) {
     try {
-      if (await invoke<boolean>("play_notification_sound", { sound, volume })) {
+      const native = await withinPlaybackBudget(invoke<boolean>("play_notification_sound", { sound, volume }), 2000);
+      if (native === undefined) return "unavailable";
+      if (native) {
         return "native";
       }
     } catch {
@@ -157,6 +178,7 @@ export function playNotificationSound(
 // already says "something finished"; repeating it for each task is noise.
 export const COMPLETION_SOUND_COALESCE_MS = 5000;
 let lastCompletionCueAt: number | null = null;
+let pendingCompletionCue: object | null = null;
 
 /** Completion cue that plays once for a burst of completions. */
 export function playCompletionSound(
@@ -165,19 +187,24 @@ export function playCompletionSound(
   now = Date.now(),
 ): Promise<NotificationPlaybackResult> {
   if (
-    lastCompletionCueAt !== null &&
+    pendingCompletionCue || (lastCompletionCueAt !== null &&
     now >= lastCompletionCueAt &&
-    now - lastCompletionCueAt < COMPLETION_SOUND_COALESCE_MS
+    now - lastCompletionCueAt < COMPLETION_SOUND_COALESCE_MS)
   ) {
     return Promise.resolve("disabled");
   }
-  const playback = playNotificationSound(sound, volume);
-  if (normalizeNotificationVolume(volume) > 0 && notificationToneSequence(sound).length > 0) {
-    lastCompletionCueAt = now;
-  }
-  return playback;
+  if (normalizeNotificationVolume(volume) === 0 || notificationToneSequence(sound).length === 0) return Promise.resolve("disabled");
+  const pending = {};
+  pendingCompletionCue = pending;
+  return playNotificationSound(sound, volume).then(result => {
+    if (result === "native" || result === "webAudio") lastCompletionCueAt = now;
+    return result;
+  }).finally(() => {
+    if (pendingCompletionCue === pending) pendingCompletionCue = null;
+  });
 }
 
 export function resetCompletionSoundForTests(): void {
   lastCompletionCueAt = null;
+  pendingCompletionCue = null;
 }

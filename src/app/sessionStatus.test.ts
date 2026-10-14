@@ -45,4 +45,17 @@ describe("agent group sidebar status", () => {
       ]),
     ).toBe(false);
   });
+
+  it("does not announce closed processes or newly discovered historical tasks", () => {
+    const previous = new Map([["synthetic", "working" as const]]);
+    expect(anyAgentSessionJustCompleted(previous, [
+      { sessionId: "synthetic", state: "done", closedReason: "Synthetic process cancelled" },
+    ])).toBe(false);
+    expect(anyAgentSessionJustCompleted(previous, [
+      { sessionId: "historical", state: "done" },
+    ])).toBe(false);
+    expect(anyAgentSessionJustCompleted(previous, [
+      { sessionId: "synthetic", state: "needsAttention" },
+    ])).toBe(false);
+  });
 });

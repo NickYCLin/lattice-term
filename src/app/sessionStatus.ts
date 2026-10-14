@@ -35,11 +35,12 @@ export function agentGroupSidebarStatus(
 
 export function anyAgentSessionJustCompleted(
   previous: ReadonlyMap<string, AgentSessionSummary["state"]> | null,
-  current: readonly Pick<AgentSessionSummary, "sessionId" | "state">[],
+  current: readonly Pick<AgentSessionSummary, "sessionId" | "state" | "closedReason">[],
 ): boolean {
   if (!previous) return false;
   return current.some(
     (session) =>
-      session.state === "done" && previous.get(session.sessionId) !== "done",
+      session.state === "done" && !session.closedReason &&
+      previous.has(session.sessionId) && previous.get(session.sessionId) !== "done",
   );
 }
