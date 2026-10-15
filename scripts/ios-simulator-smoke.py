@@ -451,9 +451,21 @@ def capture_input_diagnostics(device_id, output, label, inputs):
     started, finished = before.get("at"), after.get("at")
     if not all(isinstance(value, (int, float)) and 0 < value < 1e11 for value in (started, finished)):
         return
-    if not 0 <= finished - started <= 30:
+    if finished < started:
         return
-    interval = log_interval(started, finished)
+    truncated = finished - started > 30
+    ranges = [(started, started + 5), (finished - 5, finished)] if truncated else [(started, finished)]
+    windows = [{"start": begin - 5, "end": end + 1} for begin, end in ranges]
+    report = {"touchDurationSeconds": finished - started, "truncated": truncated,
+              "afterAvailable": after is not before, "windows": windows,
+              "omittedInterval": {"start": windows[0]["end"], "end": windows[-1]["start"]} if truncated else None}
+    (output / f"{label}.input-diagnostics.json").write_text(json.dumps(report, indent=2) + "\n")
+    for index, (begin, end) in enumerate(ranges):
+        suffix = ".before" if truncated and index == 0 else ""
+        capture_input_window(device_id, output, label, log_interval(begin, end), suffix)
+
+
+def capture_input_window(device_id, output, label, interval, suffix):
     probes = {
         "inputSimulatorLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
                               "--predicate", 'process == "backboardd" OR process == "SpringBoard" OR process == "testmanagerd" OR process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process CONTAINS "LayoutUITests"'],
@@ -462,7 +474,7 @@ def capture_input_diagnostics(device_id, output, label, inputs):
     }
     for name, command in probes.items():
         try:
-            recorded_command(command, 15, output / f"{label}.{name}.command.json")
+            recorded_command(command, 15, output / f"{label}.{name}{suffix}.command.json")
         except Exception:
             pass
 
@@ -498,11 +510,24 @@ def capture_interactions(device_id, cache, output, label, runner):
     (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
     if completed.returncode:
         capture_input_diagnostics(device_id, output, label, inputs)
+    primary_failure = (f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult"
+                       + ("；XCUITest timed out after 300 seconds" if completed.returncode == 124 else "")) if completed.returncode else None
+    export_error = None
     if result.exists():
-        subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
-                        "--output-path", str(output.resolve() / f"{label}.attachments")], check=True, timeout=60)
+        try:
+            recorded_command(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
+                              "--output-path", str(output.resolve() / f"{label}.attachments")],
+                             60, output / f"{label}.attachments.command.json")
+        except Exception as error:
+            export_error = str(error)
+    (output / f"{label}.interactions.result.json").write_text(json.dumps({
+        "exitCode": completed.returncode, "timedOut": completed.returncode == 124,
+        "primaryFailure": primary_failure, "attachmentExportError": export_error,
+    }, ensure_ascii=False, indent=2) + "\n")
     if completed.returncode:
-        raise RuntimeError(f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult")
+        raise RuntimeError(primary_failure)
+    if export_error:
+        raise RuntimeError(f"互動附件採證失敗：{label}：{export_error}")
     if [stage["stage"] for stage in stages] != ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]:
         raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
     for stage in stages:

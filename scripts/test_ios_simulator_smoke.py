@@ -427,10 +427,70 @@ class RuntimeSelectionTests(unittest.TestCase):
             self.assertEqual(host["exitCode"], 0)
             self.assertIn("HID", host["command"][-1])
 
-    def test_input_diagnostics_skip_missing_or_unbounded_touch_times(self):
+    def test_long_idle_keeps_bounded_start_and_end_input_logs(self):
+        inputs = [{"id": "refocus", "phase": "before", "at": 1792084307.57955},
+                  {"id": "refocus", "phase": "after", "at": 1792084428.7889771}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("log", 15, b"partial HID", b"busy"),
+                    *[subprocess.CompletedProcess([], 0, "window log", "") for _ in range(3)]]) as run:
+                smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(run.call_count, 4)
+            for call in run.call_args_list:
+                command = call.args[0]
+                start = datetime.strptime(command[command.index("--start") + 1], "%Y-%m-%d %H:%M:%S%z")
+                end = datetime.strptime(command[command.index("--end") + 1], "%Y-%m-%d %H:%M:%S%z")
+                self.assertLessEqual((end - start).total_seconds(), 12)
+                self.assertEqual(call.kwargs["timeout"], 15)
+            report = json.loads((root / "phone.input-diagnostics.json").read_text())
+            self.assertTrue(report["truncated"])
+            self.assertAlmostEqual(report["touchDurationSeconds"], 121.2094271)
+            self.assertEqual(len(report["windows"]), 2)
+            self.assertGreater(report["omittedInterval"]["end"] - report["omittedInterval"]["start"], 100)
+            before = json.loads((root / "phone.inputSimulatorLog.before.command.json").read_text())
+            self.assertEqual((before["status"], before["stdout"], before["stderr"]),
+                             ("timeout", "partial HID", "busy"))
+            self.assertTrue((root / "phone.inputHostLog.command.json").is_file())
+
+    def test_incomplete_xcresult_does_not_mask_xctest_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phone.xcresult").mkdir()
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("xcodebuild", 300, b"Wait app idle", b"partial stderr"),
+                    subprocess.CalledProcessError(64, "xcresulttool", output="partial export", stderr="Info.plist missing")]), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[]):
+                with self.assertRaisesRegex(RuntimeError, "XCUITest timed out after 300 seconds"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            report = json.loads((root / "phone.interactions.result.json").read_text())
+            self.assertEqual(report["exitCode"], 124)
+            self.assertTrue(report["timedOut"])
+            self.assertIn("300 seconds", report["primaryFailure"])
+            self.assertIn("64", report["attachmentExportError"])
+            export = json.loads((root / "phone.attachments.command.json").read_text())
+            self.assertEqual((export["exitCode"], export["stdout"], export["stderr"]),
+                             (64, "partial export", "Info.plist missing"))
+
+    def test_attachment_export_failure_still_fails_successful_xctest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phone.xcresult").mkdir()
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.CompletedProcess([], 0, "", ""),
+                    subprocess.CalledProcessError(64, "xcresulttool", stderr="export failed")]), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[]):
+                with self.assertRaisesRegex(RuntimeError, "互動附件採證失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            report = json.loads((root / "phone.interactions.result.json").read_text())
+            self.assertEqual(report["exitCode"], 0)
+            self.assertIsNone(report["primaryFailure"])
+            self.assertIn("64", report["attachmentExportError"])
+
+    def test_input_diagnostics_skip_missing_or_invalid_touch_times(self):
         for inputs in ([], [{"phase": "before", "at": "bad"}],
                        [{"id": "tap", "phase": "before", "at": 110},
-                        {"id": "tap", "phase": "after", "at": 150}]):
+                        {"id": "tap", "phase": "after", "at": 100}]):
             with patch.object(smoke, "recorded_command") as command:
                 smoke.capture_input_diagnostics("owned-device", Path("unused"), "phone", inputs)
                 command.assert_not_called()
