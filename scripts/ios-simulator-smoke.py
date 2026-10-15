@@ -233,8 +233,8 @@ def simctl(*args, timeout=60, env=None, evidence_path=None):
 
 
 def log_interval(started_at, finished_at):
-    return ["--start", datetime.fromtimestamp(started_at - 5, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + "+00:00",
-            "--end", datetime.fromtimestamp(finished_at + 1, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + "+00:00"]
+    return ["--start", datetime.fromtimestamp(started_at - 5, timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z"),
+            "--end", datetime.fromtimestamp(finished_at + 1, timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z")]
 
 
 def failure_diagnostics(device_id, directory, reader, interval=None, label="failure"):

@@ -2,11 +2,13 @@
 import importlib.util
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +20,26 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_log_interval_uses_apple_basic_utc_offset_and_full_failure_window(self):
+        started_at = datetime(2026, 10, 15, 13, 24, 21, tzinfo=timezone.utc).timestamp()
+        failure_at = datetime(2026, 10, 15, 13, 31, 16, tzinfo=timezone.utc).timestamp()
+        interval = smoke.log_interval(started_at, failure_at)
+        self.assertEqual(interval, ["--start", "2026-10-15 13:24:16+0000",
+                                    "--end", "2026-10-15 13:31:17+0000"])
+        apple_format = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{4}"
+        self.assertIsNone(re.fullmatch(apple_format, "2026-10-15 13:24:16+00:00"))
+        for value, timestamp in zip(interval[1::2], (started_at - 5, failure_at + 1)):
+            self.assertRegex(value, "^" + apple_format + "$")
+            self.assertEqual(datetime.strptime(value, "%Y-%m-%d %H:%M:%S%z").timestamp(), timestamp)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires the actual macOS log parser")
+    def test_log_interval_is_accepted_by_macos_log(self):
+        now = datetime.now(timezone.utc).timestamp()
+        command = ["/usr/bin/log", "show", "--style", "json", *smoke.log_interval(now - 1, now),
+                   "--predicate", "FALSEPREDICATE"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_startup_commands_preserve_success_stderr_exit_and_launch_pid(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "launch.json"
@@ -133,8 +155,8 @@ class RuntimeSelectionTests(unittest.TestCase):
             self.assertEqual(len(log_commands), 3)
             for command in log_commands:
                 self.assertNotIn("--last", command)
-                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:16:35+00:00")
-                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:23:21+00:00")
+                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:16:35+0000")
+                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:23:21+0000")
             self.assertIn("SpringBoard", log_commands[0][-1])
             self.assertIn("runningboardd", log_commands[0][-1])
             self.assertIn("Simulator", log_commands[1][-1])
