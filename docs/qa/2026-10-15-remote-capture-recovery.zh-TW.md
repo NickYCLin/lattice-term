@@ -61,7 +61,7 @@ MCP 11 項通過。篩選有重疊，不把 354 稱為互不重複案例。
 ## 五項擷取恢復的 Windows 增量驗收
 
 既有 Windows workflow 對 Agent binary 只執行 `windows_text_requests`，
-因此新增的五項恢復測試雖在 Linux 通過，尚未在 Windows 執行。
+因此另補五項恢復測試的 Windows 增量驗收。
 沿用 `windows-test-installer.yml` 的 `capture_recovery_only` 選項，
 只建置及執行這五項，不重跑安裝包、354 次原生篩選或 11 項 MCP。
 一般完整流程亦補入同一 runner，避免日後遺漏。
@@ -72,6 +72,13 @@ MCP 11 項通過。篩選有重疊，不把 354 稱為互不重複案例。
 fixture 關閉輸入，不開 TCP／relay、不保存配對、不注入 OS 鍵鼠。
 
 本次 runner 的五項 Linux 實跑及零項／忽略／非零退出防護檢查通過，
-workflow YAML 與精簡／完整模式互斥檢查通過。Windows 增量結果待驗；
+workflow YAML 與精簡／完整模式互斥檢查通過。
+
+Windows run `38764348535` 已成功，精確來源為
+`5190f329b9c91d7f504ba343b2768b66052b942a`；原始 job 日誌逐項核對
+五項均通過、零忽略，安裝包工作依精簡模式略過。產物 metadata 與
+SHA-256 已從 GitHub 核對，但下載連線失敗，尚未核對本機產物內容。
+工作流已還原停用，沒有為下載失敗重跑 CI。
+
 不以這些程序內測試取代 DXGI 擷取、實際輸入、桌面切換或 RDP 恢復。
 PR 維持 draft，尚未合併、安裝或部署修正版。
