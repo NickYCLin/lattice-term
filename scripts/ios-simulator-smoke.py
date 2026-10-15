@@ -438,6 +438,20 @@ def main():
         check_simulators(args, runtime, devices, reader)
 
 
+def prepare_ci_keyboard(device_id):
+    if os.environ.get("CI") != "true":
+        return
+    subprocess.run([
+        "defaults", "write", "com.apple.iphonesimulator", "DevicePreferences",
+        "-dict-add", device_id,
+        "<dict><key>ConnectHardwareKeyboard</key><false/></dict>",
+    ], check=True, capture_output=True, text=True, timeout=15)
+    subprocess.run([
+        "open", "-a", "Simulator", "--args", "-CurrentDeviceUDID", device_id,
+        "-ConnectHardwareKeyboard", "NO",
+    ], check=True, capture_output=True, text=True, timeout=30)
+
+
 def check_simulators(args, runtime, devices, reader):
     report = []
     targets = []
@@ -459,6 +473,9 @@ def check_simulators(args, runtime, devices, reader):
             simctl("boot", device_id)
             stage = "bootstatus"
             simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
+            if getattr(args, "interaction_checks", False):
+                stage = "keyboard-setup"
+                prepare_ci_keyboard(device_id)
             stage = "install"
             print(f"{label}: 開機完成，安裝 App", flush=True)
             # A shared runner installing onto a device that just finished

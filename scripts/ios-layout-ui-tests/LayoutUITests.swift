@@ -43,6 +43,10 @@ final class LayoutUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         XCTAssertTrue(field.isHittable)
         field.tap()
+        let focused = XCTAttachment(string: app.debugDescription)
+        focused.name = "keyboard-focus-hierarchy"
+        focused.lifetime = .keepAlways
+        add(focused)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15))
         XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 100)
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch

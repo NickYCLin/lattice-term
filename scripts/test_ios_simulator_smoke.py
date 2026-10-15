@@ -17,6 +17,21 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_keyboard_setup_targets_only_ci_disposable_device(self):
+        with patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run") as run:
+            smoke.prepare_ci_keyboard("owned-device")
+            self.assertEqual(run.call_count, 2)
+            self.assertIn("owned-device", run.call_args_list[0].args[0])
+            self.assertIn("<false/>", run.call_args_list[0].args[0][-1])
+            self.assertEqual(run.call_args_list[1].args[0], [
+                "open", "-a", "Simulator", "--args", "-CurrentDeviceUDID",
+                "owned-device", "-ConnectHardwareKeyboard", "NO"])
+        with patch.dict(smoke.os.environ, {"CI": "false"}), \
+                patch.object(smoke.subprocess, "run") as run:
+            smoke.prepare_ci_keyboard("owned-device")
+            run.assert_not_called()
+
     def test_keyboard_geometry_must_not_overlap_native_keyboard(self):
         snapshot = {"windowBounds": {"width": 402, "height": 874}, "webviewInWindow": {"y": 0}, "dom": {
             "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 500, "offsetTop": 0},
