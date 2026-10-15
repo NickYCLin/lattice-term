@@ -1,0 +1,12 @@
+[package]
+name = "lattice-updater-signature-compat"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+base64 = "=0.22.1"
+minisign-old = { package = "minisign-verify", version = "=0.2.5" }
+minisign-new = { package = "minisign-verify", version = "=0.3.0" }
