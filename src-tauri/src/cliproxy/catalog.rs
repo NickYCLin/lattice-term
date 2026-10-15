@@ -325,10 +325,47 @@ mod tests {
     #[test]
     fn version_probe_has_no_console_even_through_a_cmd_shim() {
         let fixture = tempfile::tempdir().unwrap();
+        let compiler = fixture.path().join("compile.ps1");
+        std::fs::write(
+            &compiler,
+            r#"$ErrorActionPreference = 'Stop'
+Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+"#,
+        )
+        .unwrap();
+        let mut compile = Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&compiler)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        while compile.try_wait().unwrap().is_none() {
+            if started.elapsed() >= Duration::from_secs(60) {
+                let _ = compile.kill();
+                let _ = compile.wait();
+                panic!("console fixture compilation timed out after 60s");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let output = compile.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "console fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let script = fixture.path().join("probe.ps1");
         std::fs::write(
             &script,
-            r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+            r#"Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
 if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
 Write-Output 'codex-cli 0.134.0'
 "#,
