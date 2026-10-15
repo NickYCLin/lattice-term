@@ -287,11 +287,11 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
             record = json.loads(command_path.read_text())
             if record.get("startedAt", 0) >= started_at:
                 report["startupCommands"][phase] = record
-    readiness_path = directory / f"{label}.spawn-readiness.json"
+    readiness_path = directory / f"{label}.keyboard-readiness.json"
     if readiness_path.exists():
         readiness = json.loads(readiness_path.read_text())
         if readiness.get("startedAt", 0) >= started_at:
-            report["spawnReadiness"] = readiness
+            report["keyboardReadiness"] = readiness
     report["logInterval"] = {"startedAt": started_at, "failureAt": time.time()}
     interval = log_interval(started_at, report["logInterval"]["failureAt"])
     for stream in ("stdout", "stderr"):
@@ -610,57 +610,69 @@ def main():
         check_simulators(args, runtime, devices, reader)
 
 
-def wait_for_simulator_spawn(device_id, output, label):
+def wait_for_keyboard_preference(device_id, output=None, label=None):
     started = time.monotonic()
     deadline = started + 60
-    path = output / f"{label}.spawn-readiness.json"
+    path = output / f"{label}.keyboard-readiness.json" if output else None
     report = {"deviceId": device_id, "startedAt": time.time(), "budgetSeconds": 60,
-              "probeTimeoutSeconds": 10, "maxAttempts": 4, "retryDelaySeconds": 2,
+              "commandTimeoutSeconds": 15, "maxAttemptsPerOperation": 4, "retryDelaySeconds": 2,
               "status": "running", "attempts": []}
+    domain, key = "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"
     last_error = None
     try:
-        for attempt in range(1, 5):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            command_path = output / f"{label}.spawn-readiness.{attempt}.command.json"
-            report["attempts"].append(command_path.name)
-            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-            try:
-                simctl("spawn", device_id, "launchctl", "list", timeout=min(10, remaining),
-                       evidence_path=command_path)
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
-                last_error = error
-            else:
-                if time.monotonic() <= deadline:
-                    report["status"] = "ready"
-                    return
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or attempt == 4:
-                break
-            time.sleep(min(2, remaining))
-        report.update(status="failed", stopReason="deadline" if time.monotonic() >= deadline else "attempt-limit")
-        raise RuntimeError("隔離模擬器 spawn 在有界健康探測內未就緒；尚未執行鍵盤設定或安裝產品") from last_error
+        for operation in ("write", "read"):
+            report["operation"] = operation
+            completed = False
+            for attempt in range(1, 5):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                suffix = "" if attempt == 1 else f".{attempt}"
+                command_path = output / f"{label}.keyboardTutorial.{operation}{suffix}.command.json" if output else None
+                report["attempts"].append({"operation": operation, "attempt": attempt,
+                                           "commandFile": command_path.name if command_path else None})
+                if path:
+                    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+                arguments = ["spawn", device_id, "defaults", operation, domain, key]
+                if operation == "write":
+                    arguments.extend(["-bool", "YES"])
+                try:
+                    value = simctl(*arguments, timeout=min(15, remaining), evidence_path=command_path)
+                except subprocess.TimeoutExpired as error:
+                    last_error = error
+                else:
+                    if time.monotonic() > deadline:
+                        break
+                    if operation == "read":
+                        report["readback"] = value.strip()
+                        if report["readback"] != "1":
+                            report["stopReason"] = "readback-mismatch"
+                            raise RuntimeError("隔離模擬器鍵盤教學前置設定未生效")
+                    completed = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or attempt == 4:
+                    break
+                time.sleep(min(2, remaining))
+            if not completed:
+                report["stopReason"] = "deadline" if time.monotonic() >= deadline else "attempt-limit"
+                raise RuntimeError("隔離模擬器鍵盤偏好在有界等待內未完成寫入及讀回；尚未安裝產品") from last_error
+            last_error = None
+        report["status"] = "ready"
     except Exception:
-        if report["status"] == "running":
-            report.update(status="failed", stopReason="probe-error")
+        report["status"] = "failed"
+        report.setdefault("stopReason", "command-error")
         raise
     finally:
         report.update(finishedAt=time.time(), elapsedSeconds=time.monotonic() - started)
-        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        if path:
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 
 def prepare_ci_keyboard(device_id, output=None, label=None):
     if os.environ.get("CI") != "true":
         return
-    preference = ["spawn", device_id, "defaults"]
-    domain, key = "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"
-    simctl(*preference, "write", domain, key, "-bool", "YES", timeout=15,
-           evidence_path=output / f"{label}.keyboardTutorial.write.command.json" if output else None)
-    value = simctl(*preference, "read", domain, key, timeout=15,
-                   evidence_path=output / f"{label}.keyboardTutorial.read.command.json" if output else None)
-    if value.strip() != "1":
-        raise RuntimeError("隔離模擬器鍵盤教學前置設定未生效")
+    wait_for_keyboard_preference(device_id, output, label)
     subprocess.run([
         "defaults", "write", "com.apple.iphonesimulator", "DevicePreferences",
         "-dict-add", device_id,
@@ -697,9 +709,6 @@ def check_simulators(args, runtime, devices, reader):
             simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout,
                    evidence_path=args.output / f"{label}.bootstatus.command.json")
             if getattr(args, "interaction_checks", False):
-                if os.environ.get("CI") == "true":
-                    stage = "simulator-readiness"
-                    wait_for_simulator_spawn(device_id, args.output, label)
                 stage = "keyboard-setup"
                 prepare_ci_keyboard(device_id, args.output, label)
             stage = "install"
