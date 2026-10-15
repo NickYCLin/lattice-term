@@ -23,6 +23,16 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
       "data-mobile-keyboard",
       String(Boolean(editing && win.innerHeight - height > 100)),
     );
+    const body = editing && focused?.closest<HTMLElement>(".drawer__body");
+    if (body && focused && win.innerHeight - height > 100) {
+      const fieldRect = focused.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      if (fieldRect.bottom > bodyRect.bottom - 8) {
+        body.scrollTop += fieldRect.bottom - bodyRect.bottom + 8;
+      } else if (fieldRect.top < bodyRect.top + 8) {
+        body.scrollTop += fieldRect.top - bodyRect.top - 8;
+      }
+    }
   };
   const schedule = () => {
     if (frame === null) frame = win.requestAnimationFrame(update);

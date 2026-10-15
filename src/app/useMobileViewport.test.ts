@@ -33,7 +33,7 @@ function fixture(withViewport = true) {
       setProperty: (name: string, value: string) => styles.set(name, value),
       removeProperty: (name: string) => styles.delete(name),
     },
-    ownerDocument: { activeElement: { matches: () => editing } },
+    ownerDocument: { activeElement: { matches: () => editing, closest: vi.fn((): HTMLElement | null => null), getBoundingClientRect: vi.fn(() => ({ top: 440, bottom: 482 })) } },
     getAttribute: (name: string) => attributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => attributes.set(name, value),
     removeAttribute: (name: string) => attributes.delete(name),
@@ -47,6 +47,32 @@ function fixture(withViewport = true) {
 }
 
 describe("mobile keyboard viewport", () => {
+  it("scrolls only a clipped focused drawer field after the keyboard shrinks the body", () => {
+    const mobile = fixture();
+    const body = { scrollTop: 0, getBoundingClientRect: () => ({ top: 120, bottom: 470 }) };
+    const field = mobile.root.ownerDocument.activeElement;
+    field.closest.mockReturnValue(body as unknown as HTMLElement);
+    const stop = mobile.start();
+    expect(body.scrollTop).toBe(0);
+    mobile.viewport.height = 540;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(20);
+    field.getBoundingClientRect.mockReturnValue({ top: 200, bottom: 242 });
+    mobile.viewport.dispatchEvent(new Event("scroll"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(20);
+    field.getBoundingClientRect.mockReturnValue({ top: 110, bottom: 152 });
+    mobile.root.dispatchEvent(new Event("focusin"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(2);
+    mobile.setEditing(false);
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(2);
+    stop();
+  });
+
   it("notifies native layout after the mobile DOM observer is ready, without repeating on resize", async () => {
     const mobile = fixture();
     vi.stubGlobal("window", mobile.win);
