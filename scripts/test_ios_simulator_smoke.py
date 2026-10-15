@@ -763,6 +763,164 @@ class RuntimeSelectionTests(unittest.TestCase):
                 command.assert_not_called()
 
 
+class SimulatorSpawnReadinessTests(unittest.TestCase):
+    def test_success_uses_remaining_budget_and_does_not_sleep_afterwards(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            if clock[0] == 0:
+                self.assertEqual(kwargs["timeout"], 10)
+                clock[0] = 53
+                raise subprocess.TimeoutExpired(command, 10)
+            self.assertEqual(kwargs["timeout"], 5)
+            return subprocess.CompletedProcess(command, 0, "PID Status Label", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)) as sleep:
+            smoke.wait_for_simulator_spawn("owned-device", Path(directory), "phone")
+            sleep.assert_called_once_with(2)
+
+    def test_late_success_is_not_accepted_past_deadline(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            clock[0] = 61
+            return subprocess.CompletedProcess(command, 0, "PID Status Label", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run) as command, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]):
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_simulator_spawn("owned-device", root, "phone")
+            self.assertEqual(command.call_count, 1)
+            report = json.loads((root / "phone.spawn-readiness.json").read_text())
+            self.assertEqual((report["status"], report["stopReason"]), ("failed", "deadline"))
+
+    def test_probe_recovers_before_setup_without_retrying_preferences(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            self.assertEqual(command, ["xcrun", "simctl", "spawn", "owned-device", "launchctl", "list"])
+            self.assertEqual(kwargs["timeout"], 10)
+            clock[0] += 10
+            if clock[0] == 10:
+                raise subprocess.TimeoutExpired(command, 10, b"partial", b"busy")
+            return subprocess.CompletedProcess(command, 0, "PID Status Label\n", "warning")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run) as command, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)):
+            root = Path(directory)
+            smoke.wait_for_simulator_spawn("owned-device", root, "phone")
+            self.assertEqual(command.call_count, 2)
+            report = json.loads((root / "phone.spawn-readiness.json").read_text())
+            self.assertEqual(report["status"], "ready")
+            self.assertEqual(len(report["attempts"]), 2)
+            first = json.loads((root / report["attempts"][0]).read_text())
+            self.assertEqual((first["status"], first["stdout"], first["stderr"]), ("timeout", "partial", "busy"))
+            self.assertFalse((root / "phone.keyboardTutorial.write.command.json").exists())
+
+    def test_persistent_timeouts_stop_after_four_probes(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 10)) as run, \
+                patch.object(smoke.time, "sleep") as sleep:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "spawn.*未就緒"):
+                smoke.wait_for_simulator_spawn("owned-device", root, "phone")
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(sleep.call_count, 3)
+            report = json.loads((root / "phone.spawn-readiness.json").read_text())
+            self.assertEqual((report["status"], report["stopReason"]), ("failed", "attempt-limit"))
+            self.assertEqual(len(report["attempts"]), 4)
+
+    def test_budget_exhaustion_does_not_start_another_command(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            clock[0] += 61
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run) as command, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep") as sleep:
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_simulator_spawn("owned-device", root, "phone")
+            self.assertEqual(command.call_count, 1)
+            sleep.assert_not_called()
+            report = json.loads((root / "phone.spawn-readiness.json").read_text())
+            self.assertEqual(report["stopReason"], "deadline")
+            self.assertEqual(report["elapsedSeconds"], 61)
+
+    def test_nonzero_probe_is_not_spawn_readiness(self):
+        error = subprocess.CalledProcessError(70, "probe", output="partial", stderr="service unavailable")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=error), patch.object(smoke.time, "sleep"):
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_simulator_spawn("owned-device", root, "phone")
+            record = json.loads((root / "phone.spawn-readiness.1.command.json").read_text())
+            self.assertEqual((record["status"], record["exitCode"], record["stderr"]),
+                             ("failed", 70, "service unavailable"))
+
+    def test_boot_success_does_not_skip_spawn_gate_or_install_on_failure(self):
+        owned = iter(("new-phone", "new-tablet"))
+        def command(*args, **kwargs):
+            return next(owned) if args[0] == "create" else ""
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke, "simctl", side_effect=command) as simctl, \
+                patch.object(smoke, "wait_for_simulator_spawn", side_effect=RuntimeError("spawn 未就緒")) as probe, \
+                patch.object(smoke, "prepare_ci_keyboard") as keyboard, patch.object(smoke, "capture_failure") as capture:
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=180, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaises(RuntimeError):
+                smoke.check_simulators(args, "runtime", devices, None)
+            self.assertEqual([call.args[0] for call in probe.call_args_list], ["new-phone", "new-tablet"])
+            self.assertTrue(all(call.args[2] == "simulator-readiness" for call in capture.call_args_list))
+            self.assertFalse(any(call.args[0] in ("install", "launch") for call in simctl.call_args_list))
+            keyboard.assert_not_called()
+
+    def test_failure_report_retains_current_readiness_but_not_stale(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "failure_diagnostics", return_value={}), patch.object(smoke, "simctl", return_value=""):
+            root = Path(directory)
+            (root / "phone.startup.json").write_text(json.dumps({"startedAt": 1000}))
+            readiness = root / "phone.spawn-readiness.json"
+            readiness.write_text(json.dumps({"startedAt": 1001, "status": "failed", "attempts": ["probe.json"]}))
+            smoke.capture_failure("owned-device", "phone", "simulator-readiness", RuntimeError("busy"), root)
+            report = json.loads((root / "phone.failure.json").read_text())
+            self.assertEqual(report["spawnReadiness"]["status"], "failed")
+            readiness.write_text(json.dumps({"startedAt": 999, "status": "ready"}))
+            smoke.capture_failure("owned-device", "phone", "keyboard-setup", RuntimeError("busy"), root)
+            self.assertNotIn("spawnReadiness", json.loads((root / "phone.failure.json").read_text()))
+
+    def test_successful_gate_precedes_preferences_and_preserves_setup_failure(self):
+        owned = iter(("new-phone", "new-tablet"))
+        events = []
+        def command(*args, **kwargs):
+            events.append(args[0])
+            return next(owned) if args[0] == "create" else ""
+        def ready(*args):
+            events.append("ready")
+        def keyboard(*args):
+            events.append("preferences")
+            raise subprocess.TimeoutExpired("defaults", 15)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke, "simctl", side_effect=command), \
+                patch.object(smoke, "wait_for_simulator_spawn", side_effect=ready) as probe, \
+                patch.object(smoke, "prepare_ci_keyboard", side_effect=keyboard) as setup, \
+                patch.object(smoke, "capture_failure") as capture:
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=180, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaises(RuntimeError):
+                smoke.check_simulators(args, "runtime", devices, None)
+            self.assertEqual(events, ["create", "boot", "bootstatus", "ready", "preferences", "shutdown", "delete"] * 2)
+            self.assertEqual((probe.call_count, setup.call_count), (2, 2))
+            self.assertTrue(all(call.args[2] == "keyboard-setup" for call in capture.call_args_list))
+            self.assertTrue(all(isinstance(call.args[3], subprocess.TimeoutExpired) for call in capture.call_args_list))
+
+
 class FrontendVisibilityTests(unittest.TestCase):
     def test_status_bar_and_spinner_are_not_a_ready_app(self):
         self.assertFalse(smoke.frontend_is_visible(["1:54 PM", "Sat Sep 5", "100% "]))

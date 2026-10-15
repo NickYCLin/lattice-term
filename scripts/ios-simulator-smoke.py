@@ -287,6 +287,11 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
             record = json.loads(command_path.read_text())
             if record.get("startedAt", 0) >= started_at:
                 report["startupCommands"][phase] = record
+    readiness_path = directory / f"{label}.spawn-readiness.json"
+    if readiness_path.exists():
+        readiness = json.loads(readiness_path.read_text())
+        if readiness.get("startedAt", 0) >= started_at:
+            report["spawnReadiness"] = readiness
     report["logInterval"] = {"startedAt": started_at, "failureAt": time.time()}
     interval = log_interval(started_at, report["logInterval"]["failureAt"])
     for stream in ("stdout", "stderr"):
@@ -605,6 +610,46 @@ def main():
         check_simulators(args, runtime, devices, reader)
 
 
+def wait_for_simulator_spawn(device_id, output, label):
+    started = time.monotonic()
+    deadline = started + 60
+    path = output / f"{label}.spawn-readiness.json"
+    report = {"deviceId": device_id, "startedAt": time.time(), "budgetSeconds": 60,
+              "probeTimeoutSeconds": 10, "maxAttempts": 4, "retryDelaySeconds": 2,
+              "status": "running", "attempts": []}
+    last_error = None
+    try:
+        for attempt in range(1, 5):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            command_path = output / f"{label}.spawn-readiness.{attempt}.command.json"
+            report["attempts"].append(command_path.name)
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+            try:
+                simctl("spawn", device_id, "launchctl", "list", timeout=min(10, remaining),
+                       evidence_path=command_path)
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+                last_error = error
+            else:
+                if time.monotonic() <= deadline:
+                    report["status"] = "ready"
+                    return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or attempt == 4:
+                break
+            time.sleep(min(2, remaining))
+        report.update(status="failed", stopReason="deadline" if time.monotonic() >= deadline else "attempt-limit")
+        raise RuntimeError("隔離模擬器 spawn 在有界健康探測內未就緒；尚未執行鍵盤設定或安裝產品") from last_error
+    except Exception:
+        if report["status"] == "running":
+            report.update(status="failed", stopReason="probe-error")
+        raise
+    finally:
+        report.update(finishedAt=time.time(), elapsedSeconds=time.monotonic() - started)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+
+
 def prepare_ci_keyboard(device_id, output=None, label=None):
     if os.environ.get("CI") != "true":
         return
@@ -652,6 +697,9 @@ def check_simulators(args, runtime, devices, reader):
             simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout,
                    evidence_path=args.output / f"{label}.bootstatus.command.json")
             if getattr(args, "interaction_checks", False):
+                if os.environ.get("CI") == "true":
+                    stage = "simulator-readiness"
+                    wait_for_simulator_spawn(device_id, args.output, label)
                 stage = "keyboard-setup"
                 prepare_ci_keyboard(device_id, args.output, label)
             stage = "install"
