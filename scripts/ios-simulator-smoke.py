@@ -310,6 +310,21 @@ def build_interaction_runner(directory):
     return project, derived
 
 
+def capture_app_processes(device_id, pid, output, label, stage):
+    executable = Path(simctl("get_app_container", device_id, BUNDLE_ID, "app")) / "LatticeTerm"
+    result = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,comm="],
+                            check=True, capture_output=True, text=True, timeout=15)
+    processes = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) == 3 and Path(fields[2]).resolve() == executable.resolve():
+            processes.append({"pid": int(fields[0]), "parentPid": int(fields[1])})
+    evidence = {"stage": stage, "capturedAt": time.time(), "expectedPid": pid, "processes": processes}
+    (output / f"{label}.{stage}.processes.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    if [process["pid"] for process in processes] != [pid]:
+        raise RuntimeError(f"隔離 App 必須只有啟動的單一程序：{label}，實際 {len(processes)} 個")
+
+
 def validate_native_viewport(snapshot, keyboard=False):
     dom = snapshot.get("dom", {})
     viewport = dom.get("viewport", {})
@@ -461,6 +476,7 @@ def check_simulators(args, runtime, devices, reader):
                 snapshots = read_layout_snapshots(cache)
                 (args.output / f"{label}.layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
                 entry["layoutDiagnostics"] = f"{label}.layout.json"
+                capture_app_processes(device_id, pid, args.output, label, "baseline")
             if capture_store:
                 stage = "store-screenshot"
                 entry["appStoreCandidate"] = capture_store_image(device_id, family, args.output)
@@ -472,6 +488,8 @@ def check_simulators(args, runtime, devices, reader):
                 validate_native_viewport(max(snapshots, key=lambda snapshot: snapshot.get("capturedAt", 0)))
                 capture_interactions(device_id, cache, args.output, label, args.interaction_runner)
             stage = "report"
+            if getattr(args, "layout_diagnostics", False):
+                capture_app_processes(device_id, pid, args.output, label, "completed")
             report.append(entry)
             (args.output / "launch-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
             print(f"{label}: 已辨識連線頁內容，程序仍在執行，已保存 {screenshot}", flush=True)

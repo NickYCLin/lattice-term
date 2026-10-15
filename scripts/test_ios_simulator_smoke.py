@@ -17,6 +17,22 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_process_evidence_rejects_recursive_launches_and_ignores_other_devices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            executable = output / "owned device" / "LatticeTerm.app" / "LatticeTerm"
+            for extra, expected_count in [("", 1), (f"101 100 {executable}\n", 2)]:
+                process_output = f"100 1 {executable}\n200 1 /other/device/LatticeTerm.app/LatticeTerm\n" + extra
+                with patch.object(smoke, "simctl", return_value=str(executable.parent)), \
+                        patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, process_output, "")):
+                    if extra:
+                        with self.assertRaisesRegex(RuntimeError, "單一程序"):
+                            smoke.capture_app_processes("owned-device", 100, output, "phone", "baseline")
+                    else:
+                        smoke.capture_app_processes("owned-device", 100, output, "phone", "baseline")
+                evidence = json.loads((output / "phone.baseline.processes.json").read_text())
+                self.assertEqual(len(evidence["processes"]), expected_count)
+
     def test_full_viewport_rejects_safe_area_sized_dom_and_clipped_controls(self):
         snapshot = {"windowBounds": {"width": 402, "height": 874}, "dom": {
             "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 874, "offsetTop": 0},
