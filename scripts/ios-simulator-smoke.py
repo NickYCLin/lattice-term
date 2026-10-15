@@ -325,7 +325,7 @@ def capture_app_processes(device_id, pid, output, label, stage):
         raise RuntimeError(f"隔離 App 必須只有啟動的單一程序：{label}，實際 {len(processes)} 個")
 
 
-def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None):
+def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None, controls=None):
     dom = snapshot.get("dom", {})
     viewport = dom.get("viewport", {})
     window = snapshot.get("windowBounds", {})
@@ -333,7 +333,7 @@ def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None):
     height = viewport.get("height", 0)
     if height <= 0 or abs(app.get("height", 0) - height) > 1:
         raise RuntimeError("App 高度未跟隨已載入的 visual viewport")
-    top = viewport.get("offsetTop", 0)
+    top = viewport.get("offsetTop", 0) - snapshot.get("scrollBounds", {}).get("y", 0)
     if abs(app.get("y", -100) - top) > 1:
         raise RuntimeError("App 起點未跟隨 visual viewport")
     if not keyboard and any(abs(dom.get(dom_key, 0) - window.get(window_key, -100)) > 1
@@ -351,6 +351,28 @@ def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None):
         if rect.get("selector") in (".rail", ".drawer__foot") and rect.get("height", 0) > 0:
             if rect.get("y", -100) < top - 1 or rect.get("y", 0) + rect["height"] > top + height + 1:
                 raise RuntimeError(f"控制列超出可見 viewport：{rect['selector']}")
+    if controls is not None:
+        native = snapshot.get("webviewInWindow", {})
+        for control in controls:
+            rect = control["frame"]
+            if (rect.get("x", 0) < -1 or rect.get("y", -100) < -1
+                    or rect.get("x", 0) + rect.get("width", 0) > window.get("width", 0) + 1
+                    or rect.get("y", 0) + rect.get("height", 0) > window.get("height", 0) + 1):
+                raise RuntimeError("原生控制項超出視窗")
+        if keyboard:
+            for selector, control in zip((".drawer input", ".drawer__head button"), controls):
+                rect = next((rect for rect in dom.get("rects", []) if rect.get("selector") == selector), {})
+                frame = control["frame"]
+                center_x = frame.get("x", 0) + frame.get("width", 0) / 2 - native.get("x", 0)
+                center_y = frame.get("y", 0) + frame.get("height", 0) / 2 - native.get("y", 0)
+                if (rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0
+                        or rect.get("y", -100) < top - 1
+                        or rect.get("y", 0) + rect.get("height", 0) > top + height + 1
+                        or not rect.get("x", 0) - 1 <= center_x <= rect.get("x", 0) + rect.get("width", 0) + 1
+                        or not rect.get("y", 0) - 1 <= center_y <= rect.get("y", 0) + rect.get("height", 0) + 1):
+                    raise RuntimeError(f"原生與 DOM 控制項可見座標不符：{selector}")
+            if len(controls) != 2:
+                raise RuntimeError("缺少鍵盤開啟時的輸入欄位與關閉按鈕")
 
 
 def capture_interactions(device_id, cache, output, label, runner):
@@ -392,7 +414,7 @@ def capture_interactions(device_id, cache, output, label, runner):
         if keyboard != (stage["stage"] == "keyboard-open"):
             raise RuntimeError(f"原生鍵盤狀態不符驗收階段：{stage['stage']}")
         frame = stage.get("keyboardFrame", {})
-        validate_native_viewport(stage["layout"], keyboard=keyboard, keyboard_frame=frame)
+        validate_native_viewport(stage["layout"], keyboard=keyboard, keyboard_frame=frame, controls=stage.get("controls", []))
         if not stage.get("controls"):
             raise RuntimeError(f"缺少原生控制項可用性證據：{stage['stage']}")
         for control in stage["controls"]:

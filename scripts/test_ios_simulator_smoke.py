@@ -17,6 +17,32 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_keyboard_scroll_bounds_convert_dom_coordinates_without_relaxing_visibility(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874},
+                    "webviewInWindow": {"x": 0, "y": 0}, "scrollBounds": {"y": 233.6666667}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 471, "offsetTop": 233.65625},
+            "rects": [{"selector": ".app--mobile", "y": -0.34375, "height": 471},
+                      {"selector": ".drawer__foot", "y": 404.65625, "height": 61},
+                      {"selector": ".drawer input", "x": 20, "y": 244, "width": 362, "height": 42},
+                      {"selector": ".drawer__head button", "x": 336, "y": 70, "width": 46, "height": 46}]}}
+        controls = [{"frame": {"x": 20, "y": 244, "width": 362, "height": 42}},
+                    {"frame": {"x": 336, "y": 70, "width": 46, "height": 46}}]
+        smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 583, "height": 233}, controls=controls)
+        controls[0]["frame"]["y"] = 300
+        with self.assertRaisesRegex(RuntimeError, "座標不符"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        controls[0]["frame"]["y"] = 900
+        with self.assertRaisesRegex(RuntimeError, "超出視窗"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        with self.assertRaisesRegex(RuntimeError, "缺少鍵盤"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=[])
+        snapshot["dom"]["rects"][1]["y"] = 450
+        with self.assertRaisesRegex(RuntimeError, "控制列超出"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+        snapshot["scrollBounds"]["y"] = 0
+        with self.assertRaisesRegex(RuntimeError, "App 起點"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+
     def test_interaction_failures_preserve_errors_and_continue_other_devices(self):
         owned = iter(("new-phone", "new-tablet"))
 

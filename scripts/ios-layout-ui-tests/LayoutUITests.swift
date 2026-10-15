@@ -64,15 +64,20 @@ final class LayoutUITests: XCTestCase {
             tapCenter(field)
         }
         field.typeText("Layout check")
-        XCTAssertEqual(field.value as? String, "Layout check")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Layout check"), object: field)], timeout: 10), .completed)
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         try record("keyboard-open", controls: [field, close])
         tapCenter(close)
+        let discard = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Discard changes", "放棄修改")).firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        tapCenter(discard)
         XCTAssertTrue(NSPredicate(format: "exists == false").evaluate(with: app.keyboards.firstMatch)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 15) == .completed)
         try record("keyboard-closed", controls: [add])
         XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 2)
+        app.webViews.firstMatch.swipeUp()
         try record("landscape", controls: [add])
         XCTAssertGreaterThan(app.frame.width, app.frame.height)
         XCUIDevice.shared.orientation = .portrait
