@@ -23,11 +23,16 @@ class RuntimeSelectionTests(unittest.TestCase):
             "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 471, "offsetTop": 233.65625},
             "rects": [{"selector": ".app--mobile", "y": -0.34375, "height": 471},
                       {"selector": ".drawer__foot", "y": 404.65625, "height": 61},
+                      {"selector": ".drawer__body", "y": 120, "height": 284.65625},
                       {"selector": ".drawer input", "x": 20, "y": 244, "width": 362, "height": 42},
                       {"selector": ".drawer__head button", "x": 336, "y": 70, "width": 46, "height": 46}]}}
         controls = [{"frame": {"x": 20, "y": 244, "width": 362, "height": 42}},
                     {"frame": {"x": 336, "y": 70, "width": 46, "height": 46}}]
         smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 583, "height": 233}, controls=controls)
+        snapshot["dom"]["rects"][2]["height"] = 150
+        with self.assertRaisesRegex(RuntimeError, "底列遮擋"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        snapshot["dom"]["rects"][2]["height"] = 284.65625
         controls[0]["frame"]["y"] = 300
         with self.assertRaisesRegex(RuntimeError, "座標不符"):
             smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)

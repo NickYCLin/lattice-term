@@ -371,6 +371,11 @@ def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None, cont
                         or not rect.get("x", 0) - 1 <= center_x <= rect.get("x", 0) + rect.get("width", 0) + 1
                         or not rect.get("y", 0) - 1 <= center_y <= rect.get("y", 0) + rect.get("height", 0) + 1):
                     raise RuntimeError(f"原生與 DOM 控制項可見座標不符：{selector}")
+                if selector == ".drawer input":
+                    body = next((rect for rect in dom.get("rects", []) if rect.get("selector") == ".drawer__body"), {})
+                    if (body.get("height", 0) <= 0 or rect["y"] < body.get("y", 0) - 1
+                            or rect["y"] + rect["height"] > body.get("y", 0) + body.get("height", 0) + 1):
+                        raise RuntimeError("輸入欄位被表單標題或底列遮擋")
             if len(controls) != 2:
                 raise RuntimeError("缺少鍵盤開啟時的輸入欄位與關閉按鈕")
 
