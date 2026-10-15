@@ -4,6 +4,19 @@
 
 ---
 
+## [2026.10.15](https://github.com/NickYCLin/lattice-term/compare/v2026.10.14...v2026.10.15) (2026-10-14)
+
+
+### 🚀 新增功能
+
+* **desktop:** 補齊主機多路線與對話附件入口 ([8104de8](https://github.com/NickYCLin/lattice-term/commit/8104de84a4cf053e12ae52177dbc8443144cee07)), refs [#307](https://github.com/NickYCLin/lattice-term/issues/307)
+* **desktop:** 補齊摘要交接與桌面操作回饋 ([ff216e6](https://github.com/NickYCLin/lattice-term/commit/ff216e6835964a9e9f16d52fcdd9bb988824c0e5))
+
+
+### 🛠️ 問題修正
+
+* **chat:** 保留點選對話的專案歸屬與排序 ([b6a0f4e](https://github.com/NickYCLin/lattice-term/commit/b6a0f4e3c432971fb5341319d5709c30de6673b0))
+
 ## [2026.10.14](https://github.com/NickYCLin/lattice-term/compare/v2026.10.13...v2026.10.14) (2026-10-13)
 
 
