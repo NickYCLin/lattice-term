@@ -9,6 +9,13 @@ function rule(selector) {
 }
 
 describe("conversation composer layout", () => {
+  it("wraps header actions before squeezing the conversation identity to zero width", () => {
+    expect(rule(".chat-header__title")).toContain("flex-wrap: wrap;");
+    expect(rule(".chat-header__identity")).toContain("flex: 1 1 16rem;");
+    expect(rule(".chat-header__title > .chat-composer__actions")).toContain("flex-wrap: wrap;");
+    expect(rule(".chat-header__title > .chat-composer__actions")).toContain("max-width: 100%;");
+  });
+
   it("aligns delivery notices with the shared composer and separates them from the project strip", () => {
     expect(rule(".session-composer__notices")).toContain("max-width: 52rem;");
     expect(rule(".session-composer__notices")).toContain("margin: 0 auto var(--space-3);");

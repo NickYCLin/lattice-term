@@ -426,17 +426,23 @@
 
 .chat-header__title {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
 }
 
 .chat-header__identity {
-  flex: 1;
+  flex: 1 1 16rem;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+}
+
+.chat-header__title > .chat-composer__actions {
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .chat-header__details {
