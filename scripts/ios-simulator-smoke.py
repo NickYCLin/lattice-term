@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 BUNDLE_ID = "io.github.nickyclin.latticeterm"
@@ -192,34 +193,79 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     raise RuntimeError(f"{device_id}: 連線頁在 {timeout} 秒內未顯示{stalled}，已保存 {screenshot}")
 
 
-def simctl(*args, timeout=60, env=None):
+def stream_text(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
+def recorded_command(command, timeout, path, env=None):
+    started = time.monotonic()
+    record = {"command": command, "startedAt": time.time(), "timeoutSeconds": timeout,
+              "status": "running", "exitCode": None, "pid": None, "stdout": "", "stderr": ""}
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout, env=env)
+        record.update(status="completed", exitCode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        if command[:3] == ["xcrun", "simctl", "launch"]:
+            match = re.search(r": (\d+)\s*$", result.stdout)
+            record["pid"] = int(match[1]) if match else None
+        return result.stdout.strip()
+    except Exception as error:
+        record.update(status="timeout" if isinstance(error, subprocess.TimeoutExpired) else "failed",
+                      exitCode=getattr(error, "returncode", None),
+                      errorType=type(error).__name__, error=str(error),
+                      stdout=stream_text(getattr(error, "stdout", None)),
+                      stderr=stream_text(getattr(error, "stderr", None)))
+        raise
+    finally:
+        record.update(finishedAt=time.time(), elapsedSeconds=time.monotonic() - started)
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+
+
+def simctl(*args, timeout=60, env=None, evidence_path=None):
+    if evidence_path is not None:
+        return recorded_command(["xcrun", "simctl", *map(str, args)], timeout, evidence_path, env)
     return subprocess.run(
         ["xcrun", "simctl", *map(str, args)],
         check=True, capture_output=True, text=True, timeout=timeout, env=env,
     ).stdout.strip()
 
 
-def failure_diagnostics(device_id, directory, reader):
+def log_interval(started_at, finished_at):
+    return ["--start", datetime.fromtimestamp(started_at - 5, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + "+00:00",
+            "--end", datetime.fromtimestamp(finished_at + 1, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + "+00:00"]
+
+
+def failure_diagnostics(device_id, directory, reader, interval=None, label="failure"):
+    if interval is None:
+        now = time.time()
+        interval = log_interval(now, now)
     probes = {
         "hostProcesses": ["/bin/ps", "-axo", "pid,ppid,state,%cpu,%mem,comm"],
         "simulatorProcesses": ["xcrun", "simctl", "spawn", device_id, "launchctl", "list"],
-        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
-                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit"'],
-        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--last", "3m",
-                             "--predicate", 'process == "CoreSimulatorService"'],
+        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process == "SpringBoard" OR process == "runningboardd"'],
+        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                             "--predicate", 'process == "CoreSimulatorService" OR process == "Simulator" OR process == "SimulatorTrampoline" OR process == "runningboardd"'],
     }
     known_image = directory / "iPhone.png"
     if reader and known_image.is_file():
         probes["knownGoodOCR"] = [str(reader), str(known_image.resolve())]
     results = {}
     for name, command in probes.items():
+        evidence = directory / f"{label}.{name}.command.json"
         try:
-            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=15)
-            results[name] = {"completed": True, "stdout": result.stdout[-65536:], "stderr": result.stderr[-8192:]}
+            output = recorded_command(command, 15, evidence)
+            results[name] = {"completed": True}
             if name == "knownGoodOCR":
-                results[name]["frontendVisible"] = frontend_is_visible(json.loads(result.stdout))
+                results[name]["frontendVisible"] = frontend_is_visible(json.loads(output))
         except Exception as probe_error:
             results[name] = {"completed": False, "error": f"{type(probe_error).__name__}: {probe_error}"[:2048]}
+        record = json.loads(evidence.read_text())
+        results[name].update(commandEvidence=evidence.name, status=record["status"],
+                             exitCode=record["exitCode"], timeoutSeconds=record["timeoutSeconds"],
+                             stdout=record["stdout"][-65536:], stderr=record["stderr"][-8192:])
     return results
 
 
@@ -228,12 +274,23 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     # best-effort capture, so even an unresponsive simulator leaves evidence.
     path = directory / f"{label}.failure.json"
     report = {"stage": stage, "errorType": type(error).__name__, "error": str(error)[:2048]}
+    startup_path = directory / f"{label}.startup.json"
+    started_at = json.loads(startup_path.read_text())["startedAt"] if startup_path.exists() else time.time()
+    report["startupCommands"] = {}
+    for phase in ("install", "launch"):
+        command_path = directory / f"{label}.{phase}.command.json"
+        if command_path.exists():
+            record = json.loads(command_path.read_text())
+            if record.get("startedAt", 0) >= started_at:
+                report["startupCommands"][phase] = record
+    report["logInterval"] = {"startedAt": started_at, "failureAt": time.time()}
+    interval = log_interval(started_at, report["logInterval"]["failureAt"])
     for stream in ("stdout", "stderr"):
         value = getattr(error, stream, None)
         if value:
             report[stream] = (value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value))[-8192:]
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-    report["diagnostics"] = failure_diagnostics(device_id, directory, reader)
+    report["diagnostics"] = failure_diagnostics(device_id, directory, reader, interval, label)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     screenshot = directory / f"{label}.failure.png"
     try:
@@ -242,8 +299,9 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     except Exception as capture_error:
         report["captureError"] = f"{type(capture_error).__name__}: {capture_error}"[:2048]
     try:
-        logs = simctl("spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
-                      "--predicate", 'eventMessage CONTAINS[c] "io.github.nickyclin.latticeterm"', timeout=15)
+        logs = simctl("spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                      "--predicate", 'eventMessage CONTAINS[c] "io.github.nickyclin.latticeterm"', timeout=15,
+                      evidence_path=directory / f"{label}.bundleLog.command.json")
         log_path = directory / f"{label}.failure.log"
         log_path.write_text(logs[-262144:])
         report["systemLog"] = log_path.name
@@ -502,6 +560,7 @@ def check_simulators(args, runtime, devices, reader):
         device_id = simctl("create", f"LatticeTerm Smoke {label}", model["deviceTypeIdentifier"], runtime)
         stage = "boot"
         try:
+            (args.output / f"{label}.startup.json").write_text(json.dumps({"startedAt": time.time()}) + "\n")
             print(f"{label}: 啟動新的 {model['name']} 模擬器", flush=True)
             simctl("boot", device_id)
             stage = "bootstatus"
@@ -515,7 +574,8 @@ def check_simulators(args, runtime, devices, reader):
             # booting has taken longer than two minutes; the install itself is
             # not what this smoke test measures, so give it the same room as
             # the launch below.
-            simctl("install", device_id, args.app.resolve(), timeout=300)
+            simctl("install", device_id, args.app.resolve(), timeout=300,
+                   evidence_path=args.output / f"{label}.install.command.json")
             stage = "launch"
             print(f"{label}: 安裝完成，等待啟動指令", flush=True)
             # CoreSimulatorBridge reports a 300-second launch/boot retry
@@ -527,7 +587,8 @@ def check_simulators(args, runtime, devices, reader):
             launch_env = None
             if getattr(args, "layout_diagnostics", False):
                 launch_env = {**os.environ, "SIMCTL_CHILD_LATTICETERM_LAYOUT_DIAGNOSTICS": "1"}
-            output = simctl("launch", device_id, BUNDLE_ID, timeout=330, env=launch_env)
+            output = simctl("launch", device_id, BUNDLE_ID, timeout=330, env=launch_env,
+                            evidence_path=args.output / f"{label}.launch.command.json")
             launch_seconds = round(time.monotonic() - launch_started, 1)
             match = re.search(r": (\d+)\s*$", output)
             if match is None:

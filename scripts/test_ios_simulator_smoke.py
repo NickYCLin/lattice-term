@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -17,6 +18,143 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_startup_commands_preserve_success_stderr_exit_and_launch_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launch.json"
+            def run(command, **kwargs):
+                self.assertEqual(json.loads(path.read_text())["status"], "running")
+                self.assertEqual(kwargs["timeout"], 330)
+                return subprocess.CompletedProcess(command, 0, "bundle: 123\n", "launch warning\n")
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", side_effect=[1000, 1330]), \
+                    patch.object(smoke.time, "monotonic", side_effect=[10, 340.125]):
+                self.assertEqual(smoke.simctl("launch", "device", "bundle", timeout=330, evidence_path=path), "bundle: 123")
+            record = json.loads(path.read_text())
+            self.assertEqual((record["startedAt"], record["finishedAt"], record["elapsedSeconds"]), (1000, 1330, 330.125))
+            self.assertEqual((record["exitCode"], record["pid"], record["stderr"]), (0, 123, "launch warning\n"))
+
+    def test_timeout_keeps_partial_bytes_and_does_not_invent_exit_or_pid(self):
+        error = subprocess.TimeoutExpired(["xcrun", "simctl", "launch"], 330,
+                                          output=b"bundle: 123\n", stderr=b"waiting\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launch.json"
+            with patch.object(smoke.subprocess, "run", side_effect=error):
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    smoke.simctl("launch", "device", "bundle", timeout=330, evidence_path=path)
+            self.assertIs(raised.exception, error)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["timeoutSeconds"]), ("timeout", 330))
+            self.assertIsNone(record["exitCode"])
+            self.assertIsNone(record["pid"])
+            self.assertEqual((record["stdout"], record["stderr"]), ("bundle: 123\n", "waiting\n"))
+
+    def test_install_nonzero_retains_exit_and_both_streams(self):
+        error = subprocess.CalledProcessError(7, ["xcrun", "simctl", "install"], "install output", "install error")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "install.json"
+            with patch.object(smoke.subprocess, "run", side_effect=error):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    smoke.simctl("install", "device", "App.app", timeout=300, evidence_path=path)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["exitCode"], record["timeoutSeconds"]), ("failed", 7, 300))
+            self.assertEqual((record["stdout"], record["stderr"]), ("install output", "install error"))
+
+    def test_real_local_timeout_is_recorded_without_simulator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timeout.json"
+            with self.assertRaises(subprocess.TimeoutExpired):
+                smoke.recorded_command([sys.executable, "-u", "-c",
+                                        "import time; print('started'); time.sleep(10)"], 0.5, path)
+            record = json.loads(path.read_text())
+            self.assertEqual(record["status"], "timeout")
+            self.assertEqual(record["stdout"], "started\n")
+            self.assertGreaterEqual(record["elapsedSeconds"], 0.5)
+
+    def test_missing_executable_retains_spawn_failure_without_exit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spawn.json"
+            with patch.object(smoke.subprocess, "run", side_effect=FileNotFoundError("missing xcrun")):
+                with self.assertRaises(FileNotFoundError):
+                    smoke.recorded_command(["xcrun"], 15, path)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["errorType"]), ("failed", "FileNotFoundError"))
+            self.assertIsNone(record["exitCode"])
+
+    def test_simulator_startup_integrates_install_and_launch_failure_evidence(self):
+        clock = {"now": 1000}
+        def run(command, **kwargs):
+            if command[2] == "create":
+                return subprocess.CompletedProcess(command, 0, "owned-device", "")
+            if command[2] == "install":
+                self.assertEqual(kwargs["timeout"], 300)
+                clock["now"] += 20
+                return subprocess.CompletedProcess(command, 0, "installed\n", "install note\n")
+            if command[2] == "launch":
+                self.assertEqual(kwargs["timeout"], 330)
+                clock["now"] += 330
+                raise subprocess.TimeoutExpired(command, 330, stderr=b"launch pending")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            args = Namespace(app=output / "App.app", output=output, store_screenshots=False, boot_timeout=180)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", side_effect=lambda: clock["now"]):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    smoke.check_simulators(args, "runtime", devices, None)
+            report = json.loads((output / "iPhone.failure.json").read_text())
+            install = report["startupCommands"]["install"]
+            launch = report["startupCommands"]["launch"]
+            self.assertEqual((install["startedAt"], install["finishedAt"], install["exitCode"]), (1000, 1020, 0))
+            self.assertEqual(install["stderr"], "install note\n")
+            self.assertEqual((launch["startedAt"], launch["finishedAt"], launch["status"]), (1020, 1350, "timeout"))
+            self.assertEqual(launch["stderr"], "launch pending")
+            self.assertEqual(report["stage"], "launch")
+            self.assertFalse((output / "launch-report.json").exists())
+
+    def test_failure_logs_cover_entire_startup_and_keep_probe_partial_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "iPhone.startup.json").write_text(json.dumps({"startedAt": 1000}))
+            (output / "iPhone.launch.command.json").write_text(json.dumps({"startedAt": 1020, "status": "timeout", "timeoutSeconds": 330}))
+            (output / "iPhone.install.command.json").write_text(json.dumps({"startedAt": 900, "status": "completed"}))
+            commands = []
+            def run(command, **kwargs):
+                commands.append(command)
+                raise subprocess.TimeoutExpired(command, 15, output=b"partial log\n", stderr=b"busy\n")
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", return_value=1400):
+                smoke.capture_failure("device", "iPhone", "launch", RuntimeError("original"), output)
+            report = json.loads((output / "iPhone.failure.json").read_text())
+            self.assertNotIn("install", report["startupCommands"])
+            self.assertEqual(report["startupCommands"]["launch"]["timeoutSeconds"], 330)
+            self.assertEqual(report["logInterval"], {"startedAt": 1000, "failureAt": 1400})
+            log_commands = [command for command in commands if "show" in command]
+            self.assertEqual(len(log_commands), 3)
+            for command in log_commands:
+                self.assertNotIn("--last", command)
+                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:16:35+00:00")
+                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:23:21+00:00")
+            self.assertIn("SpringBoard", log_commands[0][-1])
+            self.assertIn("runningboardd", log_commands[0][-1])
+            self.assertIn("Simulator", log_commands[1][-1])
+            probe = report["diagnostics"]["webViewLog"]
+            self.assertFalse(probe["completed"])
+            self.assertEqual((probe["stdout"], probe["stderr"]), ("partial log\n", "busy\n"))
+            self.assertIsNone(probe["exitCode"])
+            self.assertEqual(json.loads((output / probe["commandEvidence"]).read_text())["status"], "timeout")
+            self.assertEqual(json.loads((output / "iPhone.bundleLog.command.json").read_text())["stdout"], "partial log\n")
+
+    def test_failure_probe_sidecar_preserves_output_before_summary_tail(self):
+        text = "start of failure\n" + "remaining log\n" * 10000
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, text, "warning")):
+                result = smoke.failure_diagnostics("device", output, None)
+            probe = result["webViewLog"]
+            self.assertEqual(len(probe["stdout"]), 65536)
+            self.assertEqual(json.loads((output / probe["commandEvidence"]).read_text())["stdout"], text)
+
     def test_keyboard_scroll_bounds_convert_dom_coordinates_without_relaxing_visibility(self):
         snapshot = {"windowBounds": {"width": 402, "height": 874},
                     "webviewInWindow": {"x": 0, "y": 0}, "scrollBounds": {"y": 233.6666667}, "dom": {
