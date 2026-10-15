@@ -99,12 +99,14 @@ class RuntimeSelectionTests(unittest.TestCase):
 
     def test_interactions_require_all_stages_and_fresh_geometry(self):
         stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
-        observations = [{"stage": stage, "capturedAt": 100 + index * 10,
+        observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10,
                          "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500, "height": 300},
                          "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
                         for index, stage in enumerate(stages)]
         stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
-        snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {"innerHeight": 400}} for entry in observations]
+        snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {
+            "capturedAt": entry["capturedAt"] - 2, "innerHeight": 400,
+            "rects": [{"selector": ".app--mobile", "height": 400}]}} for entry in observations]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
@@ -115,6 +117,12 @@ class RuntimeSelectionTests(unittest.TestCase):
             result = json.loads((root / "phone.interactions.json").read_text())
             self.assertEqual([entry["stage"] for entry in result], stages)
             self.assertEqual(result[-1]["layout"]["capturedAt"], 128)
+            for invalid in ({"capturedAt": 100, "dom": {"capturedAt": 80, "rects": [{"selector": ".app--mobile", "height": 400}]}},
+                            {"capturedAt": 100, "dom": {"capturedAt": 100, "rects": []}}):
+                with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                        patch.object(smoke, "read_layout_snapshots", return_value=[invalid]):
+                    with self.assertRaisesRegex(RuntimeError, "新鮮"):
+                        smoke.capture_interactions("owned-device", root, root, "invalid", (root, root))
             with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
                     patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 1}]):
                 with self.assertRaisesRegex(RuntimeError, "新鮮"):
@@ -133,7 +141,7 @@ class RuntimeSelectionTests(unittest.TestCase):
     def test_interactions_reject_incorrect_keyboard_state_and_hidden_controls(self):
         stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
         for fault, message in [("keyboard", "鍵盤狀態"), ("controls", "無法點擊"), ("overlap", "鍵盤遮擋")]:
-            observations = [{"stage": stage, "capturedAt": 100 + index * 10,
+            observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10,
                              "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500},
                              "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
                             for index, stage in enumerate(stages)]
@@ -144,7 +152,9 @@ class RuntimeSelectionTests(unittest.TestCase):
             else:
                 observations[0]["controls"][0]["frame"]["y"] = 490
             stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
-            snapshots = [{"capturedAt": entry["capturedAt"] - 2} for entry in observations]
+            snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {
+                "capturedAt": entry["capturedAt"] - 2,
+                "rects": [{"selector": ".app--mobile", "height": 400}]}} for entry in observations]
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \

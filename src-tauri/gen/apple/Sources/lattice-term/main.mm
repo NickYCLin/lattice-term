@@ -68,7 +68,7 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
         NSMutableDictionary *snapshot = [@{
             @"variant": variant,
             @"delaySeconds": @(seconds), @"windowBounds": layoutRect(window.bounds),
-            @"capturedAt": @([[NSDate date] timeIntervalSince1970]),
+            @"requestedAt": @([[NSDate date] timeIntervalSince1970]),
             @"screenBounds": layoutRect(window.screen.bounds), @"scale": @(window.screen.scale),
             @"windowSafeArea": layoutInsets(window.safeAreaInsets),
             @"webviewFrame": layoutRect(webview.frame),
@@ -89,8 +89,17 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
         NSString *name = [NSString stringWithFormat:@"layout-%ld-%ld.json", (long)seconds, (long)(*index)++];
         [webview evaluateJavaScript:@"if(!globalThis.__latticeLayoutEvents){globalThis.__latticeLayoutEvents=[];for(const kind of ['pointerdown','pointerup','click','focusin'])document.addEventListener(kind,event=>{const target=event.target;globalThis.__latticeLayoutEvents.push({kind,at:Date.now(),x:event.clientX??null,y:event.clientY??null,tag:target?.tagName,role:target?.getAttribute?.('role')});globalThis.__latticeLayoutEvents.splice(0,Math.max(0,globalThis.__latticeLayoutEvents.length-16))},true)}" completionHandler:nil];
         NSString *script = @"JSON.stringify({innerWidth,innerHeight,devicePixelRatio,viewportMeta:Array.from(document.querySelectorAll('meta[name=viewport]'),n=>n.content),screen:{width:screen.width,height:screen.height},viewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rects:['html','body','#root','.app--mobile','.rail','.drawer','.drawer__foot'].map(selector=>{const n=document.querySelector(selector);if(!n)return {selector};const r=n.getBoundingClientRect();const c=getComputedStyle(n);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,background:c.backgroundColor,position:c.position,cssHeight:c.height,paddingTop:c.paddingTop,paddingBottom:c.paddingBottom,keyboard:document.documentElement.getAttribute('data-mobile-keyboard'),viewportHeight:c.getPropertyValue('--app-viewport-height')}})})";
-        script = [script stringByReplacingOccurrencesOfString:@"{innerWidth,innerHeight" withString:@"{events:globalThis.__latticeLayoutEvents,activeTag:document.activeElement?.tagName,documentFocused:document.hasFocus(),innerWidth,innerHeight"];
+        script = [script stringByReplacingOccurrencesOfString:@"{innerWidth,innerHeight" withString:@"{capturedAt:Date.now()/1000,events:globalThis.__latticeLayoutEvents,activeTag:document.activeElement?.tagName,documentFocused:document.hasFocus(),innerWidth,innerHeight"];
         [webview evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+            snapshot[@"capturedAt"] = @([[NSDate date] timeIntervalSince1970]);
+            snapshot[@"windowBounds"] = layoutRect(window.bounds);
+            snapshot[@"screenBounds"] = layoutRect(window.screen.bounds);
+            snapshot[@"windowSafeArea"] = layoutInsets(window.safeAreaInsets);
+            snapshot[@"webviewFrame"] = layoutRect(webview.frame);
+            snapshot[@"webviewInWindow"] = layoutRect([webview convertRect:webview.bounds toView:window]);
+            snapshot[@"webviewSafeArea"] = layoutInsets(webview.safeAreaInsets);
+            snapshot[@"scrollFrame"] = layoutRect(webview.scrollView.frame);
+            snapshot[@"scrollBounds"] = layoutRect(webview.scrollView.bounds);
             if ([result isKindOfClass:[NSString class]]) {
                 snapshot[@"dom"] = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] ?: @{};
             }

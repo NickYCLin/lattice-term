@@ -21,6 +21,7 @@ final class LayoutUITests: XCTestCase {
         let frame = keyboard.exists ? keyboard.frame : .zero
         let observation: [String: Any] = [
             "stage": stage, "capturedAt": capturedAt,
+            "captureFinishedAt": Date().timeIntervalSince1970,
             "keyboardVisible": keyboard.exists,
             "keyboardFrame": ["x": frame.minX, "y": frame.minY,
                               "width": frame.width, "height": frame.height],
@@ -37,6 +38,7 @@ final class LayoutUITests: XCTestCase {
         ]
         let data = try JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
         print("LATTICE_LAYOUT_STAGE \(String(data: data, encoding: .utf8)!)")
+        Thread.sleep(forTimeInterval: 6)
     }
 
     func testKeyboardAndRotation() throws {
@@ -56,6 +58,13 @@ final class LayoutUITests: XCTestCase {
         self.add(focused)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15))
         XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 100)
+        let tutorial = app.buttons["Continue"]
+        if tutorial.waitForExistence(timeout: 3) {
+            tapCenter(tutorial)
+            tapCenter(field)
+        }
+        field.typeText("Layout check")
+        XCTAssertEqual(field.value as? String, "Layout check")
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         try record("keyboard-open", controls: [field, close])
