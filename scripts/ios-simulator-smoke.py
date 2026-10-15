@@ -281,7 +281,7 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     startup_path = directory / f"{label}.startup.json"
     started_at = json.loads(startup_path.read_text())["startedAt"] if startup_path.exists() else time.time()
     report["startupCommands"] = {}
-    for phase in ("install", "launch"):
+    for phase in ("boot", "bootstatus", "keyboardTutorial.write", "keyboardTutorial.read", "install", "launch"):
         command_path = directory / f"{label}.{phase}.command.json"
         if command_path.exists():
             record = json.loads(command_path.read_text())
@@ -459,10 +459,27 @@ def capture_input_diagnostics(device_id, output, label, inputs):
     report = {"touchDurationSeconds": finished - started, "truncated": truncated,
               "afterAvailable": after is not before, "windows": windows,
               "omittedInterval": {"start": windows[0]["end"], "end": windows[-1]["start"]} if truncated else None}
+    comparison = None
+    for candidate in inputs:
+        if candidate.get("phase") != "before" or candidate.get("id") == before.get("id"):
+            continue
+        completed = next((entry for entry in inputs
+                          if entry.get("id") == candidate.get("id") and entry.get("phase") == "after"), {})
+        begin, end = candidate.get("at"), completed.get("at")
+        if (all(isinstance(value, (int, float)) and 0 < value < 1e11 for value in (begin, end))
+                and 0 <= end - begin <= 5 and end < started):
+            comparison = (begin, end)
+            report["comparisonInput"] = {"id": candidate.get("id"), "start": begin - 5, "end": end + 1,
+                                         "deliveredClickVerified": False}
+            break
+    if comparison is None:
+        report["comparisonInput"] = None
     (output / f"{label}.input-diagnostics.json").write_text(json.dumps(report, indent=2) + "\n")
     for index, (begin, end) in enumerate(ranges):
         suffix = ".before" if truncated and index == 0 else ""
         capture_input_window(device_id, output, label, log_interval(begin, end), suffix)
+    if comparison is not None:
+        capture_input_window(device_id, output, label, log_interval(*comparison), ".reference")
 
 
 def capture_input_window(device_id, output, label, interval, suffix):
@@ -630,9 +647,10 @@ def check_simulators(args, runtime, devices, reader):
         try:
             (args.output / f"{label}.startup.json").write_text(json.dumps({"startedAt": time.time()}) + "\n")
             print(f"{label}: 啟動新的 {model['name']} 模擬器", flush=True)
-            simctl("boot", device_id)
+            simctl("boot", device_id, evidence_path=args.output / f"{label}.boot.command.json")
             stage = "bootstatus"
-            simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
+            simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout,
+                   evidence_path=args.output / f"{label}.bootstatus.command.json")
             if getattr(args, "interaction_checks", False):
                 stage = "keyboard-setup"
                 prepare_ci_keyboard(device_id, args.output, label)
