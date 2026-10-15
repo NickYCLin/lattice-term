@@ -78,12 +78,22 @@ final class LayoutUITests: XCTestCase {
         try record("keyboard-closed", controls: [add])
         XCUIDevice.shared.orientation = .landscapeLeft
         Thread.sleep(forTimeInterval: 2)
-        app.webViews.firstMatch.swipeUp()
         try record("landscape", controls: [add])
         XCTAssertGreaterThan(app.frame.width, app.frame.height)
         XCUIDevice.shared.orientation = .portrait
         try record("portrait-return", controls: [add])
         XCTAssertGreaterThan(app.frame.height, app.frame.width)
         XCTAssertTrue(add.exists)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 2)
+        tapCenter(add)
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        let landscapeForm = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscapeForm.name = "landscape-add-form"
+        landscapeForm.lifetime = .keepAlways
+        self.add(landscapeForm)
+        tapCenter(close)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)], timeout: 10), .completed)
+        XCUIDevice.shared.orientation = .portrait
     }
 }

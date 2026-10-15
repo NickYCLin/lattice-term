@@ -266,6 +266,16 @@ class RuntimeSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "控制列超出"):
             smoke.validate_native_viewport(snapshot, keyboard=True)
 
+    def test_iphone_landscape_rejects_offscreen_add_even_when_hittable(self):
+        snapshot = {"windowBounds": {"width": 874, "height": 402}, "dom": {
+            "innerWidth": 874, "innerHeight": 402, "viewport": {"height": 402, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 402}]}}
+        controls = [{"hittable": True, "frame": {"x": 231, "y": 366, "width": 155, "height": 44}}]
+        with self.assertRaisesRegex(RuntimeError, "原生控制項超出視窗"):
+            smoke.validate_native_viewport(snapshot, controls=controls)
+        controls[0]["frame"]["y"] = 226
+        smoke.validate_native_viewport(snapshot, controls=controls)
+
     def test_interactions_require_all_stages_and_fresh_geometry(self):
         stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
         observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10, "captureStableUntil": 106 + index * 10,
