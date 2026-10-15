@@ -402,6 +402,39 @@ class RuntimeSelectionTests(unittest.TestCase):
             preserved = json.loads((root / "iPad.interactions.json").read_text())
             self.assertEqual(preserved, [{**stage, "layout": snapshots[0]}])
 
+    def test_input_diagnostics_target_last_touch_and_keep_partial_logs(self):
+        inputs = [{"id": "old", "phase": "before", "at": 10},
+                  {"id": "new", "phase": "before", "at": 110},
+                  {"id": "new", "phase": "after", "at": 112}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("log", 15, b"digitizer did disappear", b"partial"),
+                    subprocess.CompletedProcess([], 0, "HID source", "")]) as run:
+                smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                command = call.args[0]
+                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:01:45+0000")
+                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:01:53+0000")
+                self.assertEqual(call.kwargs["timeout"], 15)
+                self.assertIn("testmanagerd", command[-1])
+            simulator = json.loads((root / "phone.inputSimulatorLog.command.json").read_text())
+            self.assertEqual(simulator["status"], "timeout")
+            self.assertEqual(simulator["stdout"], "digitizer did disappear")
+            self.assertEqual(simulator["stderr"], "partial")
+            host = json.loads((root / "phone.inputHostLog.command.json").read_text())
+            self.assertEqual(host["exitCode"], 0)
+            self.assertIn("HID", host["command"][-1])
+
+    def test_input_diagnostics_skip_missing_or_unbounded_touch_times(self):
+        for inputs in ([], [{"phase": "before", "at": "bad"}],
+                       [{"id": "tap", "phase": "before", "at": 110},
+                        {"id": "tap", "phase": "after", "at": 150}]):
+            with patch.object(smoke, "recorded_command") as command:
+                smoke.capture_input_diagnostics("owned-device", Path("unused"), "phone", inputs)
+                command.assert_not_called()
+
     def test_viewport_comparisons_wait_for_each_variant_and_preserve_originals(self):
         now = [100.0]
         captures = []

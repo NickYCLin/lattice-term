@@ -442,6 +442,31 @@ def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None, cont
                 raise RuntimeError("缺少鍵盤開啟時的輸入欄位與關閉按鈕")
 
 
+def capture_input_diagnostics(device_id, output, label, inputs):
+    before = next((entry for entry in reversed(inputs) if entry.get("phase") == "before"), None)
+    if before is None:
+        return
+    after = next((entry for entry in reversed(inputs)
+                  if entry.get("id") == before.get("id") and entry.get("phase") == "after"), before)
+    started, finished = before.get("at"), after.get("at")
+    if not all(isinstance(value, (int, float)) and 0 < value < 1e11 for value in (started, finished)):
+        return
+    if not 0 <= finished - started <= 30:
+        return
+    interval = log_interval(started, finished)
+    probes = {
+        "inputSimulatorLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                              "--predicate", 'process == "backboardd" OR process == "SpringBoard" OR process == "testmanagerd" OR process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process CONTAINS "LayoutUITests"'],
+        "inputHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                         "--predicate", 'process == "Simulator" OR process == "SimulatorTrampoline" OR process == "CoreSimulatorService" OR process == "testmanagerd" OR process == "xcodebuild" OR subsystem CONTAINS[c] "HID" OR subsystem CONTAINS[c] "XCTest"'],
+    }
+    for name, command in probes.items():
+        try:
+            recorded_command(command, 15, output / f"{label}.{name}.command.json")
+        except Exception:
+            pass
+
+
 def capture_interactions(device_id, cache, output, label, runner):
     project, derived = runner
     result = output.resolve() / f"{label}.xcresult"
@@ -471,6 +496,8 @@ def capture_interactions(device_id, cache, output, label, runner):
         if matching:
             stage["layout"] = min(matching, key=lambda snapshot: abs(snapshot["capturedAt"] - stage["capturedAt"]))
     (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
+    if completed.returncode:
+        capture_input_diagnostics(device_id, output, label, inputs)
     if result.exists():
         subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
                         "--output-path", str(output.resolve() / f"{label}.attachments")], check=True, timeout=60)
