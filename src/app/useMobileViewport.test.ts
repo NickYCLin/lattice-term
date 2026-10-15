@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { observeMobileViewport } from "./useMobileViewport";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { observeMobileViewport, useMobileViewport } from "./useMobileViewport";
+
+const host = vi.hoisted(() => ({
+  effects: [] as (() => void | (() => void))[],
+  invoke: vi.fn(async () => undefined),
+}));
+vi.mock("react", () => ({ useEffect: (effect: () => void | (() => void)) => host.effects.push(effect) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: host.invoke, isTauri: () => true }));
+
+afterEach(() => {
+  host.effects = [];
+  host.invoke.mockClear();
+  vi.unstubAllGlobals();
+});
 
 function fixture(withViewport = true) {
   const styles = new Map<string, string>();
@@ -34,6 +47,33 @@ function fixture(withViewport = true) {
 }
 
 describe("mobile keyboard viewport", () => {
+  it("notifies native layout after the mobile DOM observer is ready, without repeating on resize", async () => {
+    const mobile = fixture();
+    vi.stubGlobal("window", mobile.win);
+    vi.stubGlobal("document", { documentElement: mobile.root });
+    useMobileViewport(true);
+    const stop = host.effects[0]();
+    expect(mobile.styles.get("--app-viewport-height")).toBe("852px");
+    await vi.waitFor(() => expect(host.invoke).toHaveBeenCalledExactlyOnceWith("mobile_frontend_ready"));
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(host.invoke).toHaveBeenCalledTimes(1);
+    if (typeof stop === "function") stop();
+  });
+
+  it("does not request native layout when disabled or already unmounted", async () => {
+    useMobileViewport(false);
+    expect(host.effects[0]()).toBeUndefined();
+    const mobile = fixture();
+    vi.stubGlobal("window", mobile.win);
+    vi.stubGlobal("document", { documentElement: mobile.root });
+    useMobileViewport(true);
+    const stop = host.effects[1]();
+    if (typeof stop === "function") stop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.invoke).not.toHaveBeenCalled();
+  });
+
   it("keeps the app and overlays within the keyboard-visible height and offset", () => {
     const f = fixture();
     const stop = f.start();

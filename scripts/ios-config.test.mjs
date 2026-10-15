@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("iOS Tauri 設定", () => {
-  it("iOS 文件載入後要求原生 layout，不改 frame 或安全區", () => {
+  it("iOS 前端掛載後要求原生 layout，不改 frame 或安全區", () => {
     const app = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
-    const hook = app.split('let builder = builder.on_page_load')[1].split('// Auto-update')[0];
-    expect(app).toMatch(/#\[cfg\(target_os = "ios"\)\]\s*let builder = builder.on_page_load/);
-    expect(hook).toContain("PageLoadEvent::Finished");
+    const hook = app.split('fn mobile_frontend_ready')[1].split('/// Probing')[0];
+    expect(hook).toContain('#[cfg(target_os = "ios")]');
     expect(hook).toContain("view.setNeedsLayout()");
     expect(hook).toContain("view.layoutIfNeeded()");
     expect(hook).not.toMatch(/setFrame|contentInset|evaluateJavaScript/);
+    expect(app.split('tauri::generate_handler![')[1]).toContain("mobile_frontend_ready,");
   });
 
   it("行動版不啟動桌面 bridge，client 也拒絕自啟背景服務", () => {

@@ -936,6 +936,21 @@ struct EncryptedBackupRestore {
     local_storage: BTreeMap<String, String>,
 }
 
+#[tauri::command]
+fn mobile_frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    window
+        .with_webview(|platform| {
+            let view = unsafe { &*platform.inner().cast::<objc2_ui_kit::UIView>() };
+            view.setNeedsLayout();
+            view.layoutIfNeeded();
+        })
+        .map_err(|error| error.to_string())?;
+    #[cfg(not(target_os = "ios"))]
+    let _ = window;
+    Ok(())
+}
+
 /// Probing the OS keyring and the sandbox tool can block for seconds when
 /// Secret Service or `bwrap` is slow to answer, so every command that
 /// touches them runs off the main thread; a stuck keyring must not freeze
@@ -5373,18 +5388,6 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
-    #[cfg(target_os = "ios")]
-    let builder = builder.on_page_load(|webview, payload| {
-        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-            if let Err(error) = webview.with_webview(|platform| {
-                let view = unsafe { &*platform.inner().cast::<objc2_ui_kit::UIView>() };
-                view.setNeedsLayout();
-                view.layoutIfNeeded();
-            }) {
-                eprintln!("Cannot update the loaded iOS webview layout: {error}");
-            }
-        }
-    });
     // Auto-update and relaunch are desktop concerns; mobile installs come
     // from a package manager and restart through the OS.
     #[cfg(desktop)]
@@ -5540,6 +5543,7 @@ pub fn run() {
             local_path_info,
             local_file_read_text,
             runtime_summary,
+            mobile_frontend_ready,
             mcp_remote_targets,
             mcp_connection_book_shared,
             mcp_connection_book_share,
