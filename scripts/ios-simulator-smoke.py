@@ -4,6 +4,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -275,7 +276,7 @@ def read_layout_snapshots(cache, timeout=15, require_ready=True):
 
 def capture_viewport_experiments(device_id, cache, output, label):
     results = []
-    for variant in ("never", "automatic", "zero-insets", "resize"):
+    for variant in ("document-dvh", "document-percent", "relayout", "resize-never", "never", "automatic", "zero-insets", "resize"):
         started = time.time()
         pending = cache / "layout-variant.tmp"
         pending.write_text(variant)
@@ -298,6 +299,73 @@ def capture_viewport_experiments(device_id, cache, output, label):
     return results
 
 
+def build_interaction_runner(directory):
+    project = directory / "layout-ui-tests"
+    shutil.copytree(Path(__file__).with_name("ios-layout-ui-tests"), project)
+    subprocess.run(["xcodegen", "generate", "--spec", "project.yml"], cwd=project, check=True, timeout=60)
+    derived = project / "derived"
+    subprocess.run(["xcodebuild", "build-for-testing", "-project", str(project / "LatticeLayoutChecks.xcodeproj"),
+                    "-scheme", "LayoutUITests", "-destination", "generic/platform=iOS Simulator",
+                    "-derivedDataPath", str(derived), "CODE_SIGNING_ALLOWED=NO"], check=True, timeout=300)
+    return project, derived
+
+
+def validate_native_viewport(snapshot, keyboard=False):
+    dom = snapshot.get("dom", {})
+    viewport = dom.get("viewport", {})
+    window = snapshot.get("windowBounds", {})
+    app = next((rect for rect in dom.get("rects", []) if rect.get("selector") == ".app--mobile"), {})
+    height = viewport.get("height", 0)
+    if height <= 0 or abs(app.get("height", 0) - height) > 1:
+        raise RuntimeError("App 高度未跟隨已載入的 visual viewport")
+    top = viewport.get("offsetTop", 0)
+    if abs(app.get("y", -100) - top) > 1:
+        raise RuntimeError("App 起點未跟隨 visual viewport")
+    if not keyboard and any(abs(dom.get(dom_key, 0) - window.get(window_key, -100)) > 1
+                            for dom_key, window_key in (("innerWidth", "width"), ("innerHeight", "height"))):
+        raise RuntimeError("鍵盤關閉時 DOM 仍短於原生視窗，不能通過全畫面驗收")
+    if not keyboard and abs(height - window.get("height", -100)) > 1:
+        raise RuntimeError("鍵盤關閉時 visual viewport 仍短於原生視窗")
+    for rect in dom.get("rects", []):
+        if rect.get("selector") in (".rail", ".drawer__foot") and rect.get("height", 0) > 0:
+            if rect.get("y", -100) < top - 1 or rect.get("y", 0) + rect["height"] > top + height + 1:
+                raise RuntimeError(f"控制列超出可見 viewport：{rect['selector']}")
+
+
+def capture_interactions(device_id, cache, output, label, runner):
+    project, derived = runner
+    result = output.resolve() / f"{label}.xcresult"
+    command = ["xcodebuild", "test-without-building", "-project", str(project / "LatticeLayoutChecks.xcodeproj"),
+               "-scheme", "LayoutUITests", "-destination", f"platform=iOS Simulator,id={device_id}",
+               "-derivedDataPath", str(derived), "-resultBundlePath", str(result),
+               "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired as error:
+        stdout = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
+        stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
+        completed = subprocess.CompletedProcess(command, 124, stdout, stderr + "\nXCUITest timed out after 300 seconds")
+    (output / f"{label}.interactions.log").write_text(completed.stdout + completed.stderr)
+    snapshots = read_layout_snapshots(cache, timeout=0, require_ready=False)
+    (output / f"{label}.interaction-layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+    if result.exists():
+        subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
+                        "--output-path", str(output.resolve() / f"{label}.attachments")], check=True, timeout=60)
+    if completed.returncode:
+        raise RuntimeError(f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult")
+    stages = [json.loads(match) for match in re.findall(r"LATTICE_LAYOUT_STAGE (\{[^\n]+\})", completed.stdout)]
+    if [stage["stage"] for stage in stages] != ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]:
+        raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
+    for stage in stages:
+        matching = [snapshot for snapshot in snapshots if stage["capturedAt"] - 6 <= snapshot.get("capturedAt", 0) <= stage["capturedAt"]]
+        if not matching:
+            raise RuntimeError(f"鍵盤與旋轉階段缺少新鮮原生幾何：{stage['stage']}")
+        stage["layout"] = max(matching, key=lambda snapshot: snapshot["capturedAt"])
+    (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
+    for stage in stages:
+        validate_native_viewport(stage["layout"], keyboard=stage.get("keyboardVisible", False))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
@@ -307,9 +375,12 @@ def main():
     parser.add_argument("--store-screenshots", action="store_true", help="另產生符合商店尺寸且不含 Alpha 的原始截圖候選素材")
     parser.add_argument("--layout-diagnostics", action="store_true", help="僅在新建模擬器蒐集原生 frame、安全區與無文字內容的 DOM 幾何")
     parser.add_argument("--viewport-experiments", action="store_true", help="僅在隔離模擬器對照原生 inset 與 resize，不作為產品驗收")
+    parser.add_argument("--interaction-checks", action="store_true", help="透過 XCUITest 驗證新建模擬器的真鍵盤開關與旋轉，保存原圖及幾何")
     args = parser.parse_args()
     if args.viewport_experiments and not args.layout_diagnostics:
         parser.error("--viewport-experiments 需要 --layout-diagnostics")
+    if args.interaction_checks and (not args.layout_diagnostics or args.viewport_experiments):
+        parser.error("--interaction-checks 需要 --layout-diagnostics，且不得混用 viewport 對照變更")
     if not 30 <= args.boot_timeout <= 1800:
         parser.error("--boot-timeout 必須介於 30 與 1800 秒之間")
     if os.environ.get("CI") != "true" and not args.local:
@@ -330,6 +401,7 @@ def main():
             ["xcrun", "swiftc", str(Path(__file__).with_name("ios-screen-text.swift")), "-o", str(reader)],
             check=True, capture_output=True, text=True, timeout=180,
         )
+        args.interaction_runner = build_interaction_runner(Path(directory)) if args.interaction_checks else None
         check_simulators(args, runtime, devices, reader)
 
 
@@ -395,6 +467,10 @@ def check_simulators(args, runtime, devices, reader):
             if getattr(args, "viewport_experiments", False):
                 stage = "viewport-experiments"
                 capture_viewport_experiments(device_id, cache, args.output, label)
+            if getattr(args, "interaction_checks", False):
+                stage = "interaction-checks"
+                validate_native_viewport(max(snapshots, key=lambda snapshot: snapshot.get("capturedAt", 0)))
+                capture_interactions(device_id, cache, args.output, label, args.interaction_runner)
             stage = "report"
             report.append(entry)
             (args.output / "launch-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")

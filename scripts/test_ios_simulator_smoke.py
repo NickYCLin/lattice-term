@@ -17,6 +17,63 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_full_viewport_rejects_safe_area_sized_dom_and_clipped_controls(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 874, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 874}]}}
+        smoke.validate_native_viewport(snapshot)
+        snapshot["dom"]["innerHeight"] = 778
+        with self.assertRaisesRegex(RuntimeError, "DOM 仍短於原生"):
+            smoke.validate_native_viewport(snapshot)
+        snapshot["dom"]["innerHeight"] = 874
+        snapshot["dom"]["viewport"]["height"] = 500
+        snapshot["dom"]["rects"][0]["height"] = 500
+        smoke.validate_native_viewport(snapshot, keyboard=True)
+        snapshot["dom"]["rects"].append({"selector": ".drawer__foot", "y": 490, "height": 50})
+        with self.assertRaisesRegex(RuntimeError, "控制列超出"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+
+    def test_interactions_require_all_stages_and_fresh_geometry(self):
+        stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
+        observations = [{"stage": stage, "capturedAt": 100 + index * 10} for index, stage in enumerate(stages)]
+        stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
+        snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {"innerHeight": 400}} for entry in observations]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                    patch.object(smoke, "validate_native_viewport") as validate:
+                smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+                self.assertEqual(validate.call_count, 4)
+            result = json.loads((root / "phone.interactions.json").read_text())
+            self.assertEqual([entry["stage"] for entry in result], stages)
+            self.assertEqual(result[-1]["layout"]["capturedAt"], 128)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 1}]):
+                with self.assertRaisesRegex(RuntimeError, "新鮮"):
+                    smoke.capture_interactions("owned-device", root, root, "stale", (root, root))
+
+    def test_interactions_preserve_geometry_when_native_test_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 65, "native failure", "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 100}]):
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            self.assertEqual((root / "phone.interactions.log").read_text(), "native failure")
+            self.assertEqual(json.loads((root / "phone.interaction-layout.json").read_text()), [{"capturedAt": 100}])
+
+    def test_interactions_preserve_partial_output_on_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("xcodebuild", 300, b"partial output", b"stderr")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 100}]):
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            self.assertIn("partial outputstderr", (root / "phone.interactions.log").read_text())
+            self.assertIn("timed out", (root / "phone.interactions.log").read_text())
+            self.assertTrue((root / "phone.interaction-layout.json").is_file())
+
     def test_viewport_comparisons_wait_for_each_variant_and_preserve_originals(self):
         now = [100.0]
         captures = []
@@ -40,9 +97,11 @@ class RuntimeSelectionTests(unittest.TestCase):
                     patch.object(smoke, "read_layout_snapshots", side_effect=snapshots), \
                     patch.object(smoke, "simctl", side_effect=lambda *args, **kwargs: captures.append(args)):
                 results = smoke.capture_viewport_experiments("owned-device", cache, root, "phone")
-            self.assertEqual([entry["variant"] for entry in results], ["never", "automatic", "zero-insets", "resize"])
-            self.assertEqual(len(captures), 4)
-            self.assertGreaterEqual(now[0], 120)
+            self.assertEqual([entry["variant"] for entry in results], [
+                "document-dvh", "document-percent", "relayout", "resize-never",
+                "never", "automatic", "zero-insets", "resize"])
+            self.assertEqual(len(captures), 8)
+            self.assertGreaterEqual(now[0], 140)
             self.assertEqual(original.read_bytes(), b"original")
             self.assertEqual(json.loads((root / "phone.experiments.json").read_text()), results)
 

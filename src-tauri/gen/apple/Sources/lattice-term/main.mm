@@ -30,7 +30,20 @@ static NSString *applyLayoutExperiment(WKWebView *webview) {
     NSString *variant = [NSString stringWithContentsOfURL:[cache URLByAppendingPathComponent:@"layout-variant.txt"] encoding:NSUTF8StringEncoding error:nil] ?: @"baseline";
     static NSString *previous = @"baseline";
     if (![variant isEqualToString:previous]) {
-        if ([variant isEqualToString:@"never"]) {
+        if ([variant isEqualToString:@"document-dvh"]) {
+            [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.height='100dvh')" completionHandler:nil];
+        } else if ([variant isEqualToString:@"document-percent"]) {
+            [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.removeProperty('height'))" completionHandler:nil];
+        } else if ([variant isEqualToString:@"relayout"]) {
+            [webview setNeedsLayout];
+            [webview layoutIfNeeded];
+        } else if ([variant isEqualToString:@"resize-never"]) {
+            webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+            webview.scrollView.contentOffset = CGPointZero;
+            CGRect frame = webview.frame;
+            webview.frame = CGRectInset(frame, 0, 1);
+            dispatch_async(dispatch_get_main_queue(), ^{ webview.frame = frame; });
+        } else if ([variant isEqualToString:@"never"]) {
             webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
         } else if ([variant isEqualToString:@"automatic"]) {
             webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
@@ -74,7 +87,7 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
             snapshot[@"maximumViewportInset"] = layoutInsets(webview.maximumViewportInset);
         }
         NSString *name = [NSString stringWithFormat:@"layout-%ld-%ld.json", (long)seconds, (long)(*index)++];
-        NSString *script = @"JSON.stringify({innerWidth,innerHeight,devicePixelRatio,viewportMeta:Array.from(document.querySelectorAll('meta[name=viewport]'),n=>n.content),screen:{width:screen.width,height:screen.height},viewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rects:['html','body','#root','.app--mobile'].map(selector=>{const n=document.querySelector(selector);if(!n)return {selector};const r=n.getBoundingClientRect();const c=getComputedStyle(n);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,background:c.backgroundColor,position:c.position,cssHeight:c.height,viewportHeight:c.getPropertyValue('--app-viewport-height')}})})";
+        NSString *script = @"JSON.stringify({innerWidth,innerHeight,devicePixelRatio,viewportMeta:Array.from(document.querySelectorAll('meta[name=viewport]'),n=>n.content),screen:{width:screen.width,height:screen.height},viewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rects:['html','body','#root','.app--mobile','.rail','.drawer','.drawer__foot'].map(selector=>{const n=document.querySelector(selector);if(!n)return {selector};const r=n.getBoundingClientRect();const c=getComputedStyle(n);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,background:c.backgroundColor,position:c.position,cssHeight:c.height,paddingTop:c.paddingTop,paddingBottom:c.paddingBottom,keyboard:document.documentElement.getAttribute('data-mobile-keyboard'),viewportHeight:c.getPropertyValue('--app-viewport-height')}})})";
         [webview evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
             if ([result isKindOfClass:[NSString class]]) {
                 snapshot[@"dom"] = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] ?: @{};
