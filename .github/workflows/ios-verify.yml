@@ -101,7 +101,7 @@ jobs:
           PY
       - name: Save original simulator layout evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ios-layout-evidence
           path: ios-layout-evidence
@@ -161,7 +161,7 @@ jobs:
           )
           PY
       - name: Save verified bundles and reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ios-unsigned-release-${{ github.sha }}
           path: src-tauri/gen/apple/build/reports
@@ -169,7 +169,7 @@ jobs:
           retention-days: 7
       - name: Save simulator launch evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ios-simulator-launch-evidence
           path: ios-layout-evidence
