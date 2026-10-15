@@ -273,6 +273,31 @@ def read_layout_snapshots(cache, timeout=15, require_ready=True):
     return snapshots
 
 
+def capture_viewport_experiments(device_id, cache, output, label):
+    results = []
+    for variant in ("never", "automatic", "zero-insets", "resize"):
+        started = time.time()
+        pending = cache / "layout-variant.tmp"
+        pending.write_text(variant)
+        pending.replace(cache / "layout-variant.txt")
+        deadline = time.monotonic() + 30
+        while True:
+            snapshots = read_layout_snapshots(cache, timeout=0)
+            matching = [entry for entry in snapshots
+                        if entry.get("variant") == variant and entry.get("capturedAt", 0) >= started + 5]
+            if matching:
+                latest = max(matching, key=lambda entry: entry["capturedAt"])
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"缺少 viewport 對照幾何：{variant}")
+            time.sleep(0.5)
+        screenshot = output / f"{label}.{variant}.png"
+        simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=60)
+        results.append({"variant": variant, "layout": latest, "screenshot": screenshot.name})
+        (output / f"{label}.experiments.json").write_text(json.dumps(results, indent=2) + "\n")
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
@@ -281,7 +306,10 @@ def main():
     parser.add_argument("--boot-timeout", type=int, default=180, help="新裝置開機與系統資料移轉的等待秒數，預設 180，範圍 30–1800；不影響 App 畫面期限")
     parser.add_argument("--store-screenshots", action="store_true", help="另產生符合商店尺寸且不含 Alpha 的原始截圖候選素材")
     parser.add_argument("--layout-diagnostics", action="store_true", help="僅在新建模擬器蒐集原生 frame、安全區與無文字內容的 DOM 幾何")
+    parser.add_argument("--viewport-experiments", action="store_true", help="僅在隔離模擬器對照原生 inset 與 resize，不作為產品驗收")
     args = parser.parse_args()
+    if args.viewport_experiments and not args.layout_diagnostics:
+        parser.error("--viewport-experiments 需要 --layout-diagnostics")
     if not 30 <= args.boot_timeout <= 1800:
         parser.error("--boot-timeout 必須介於 30 與 1800 秒之間")
     if os.environ.get("CI") != "true" and not args.local:
@@ -364,6 +392,9 @@ def check_simulators(args, runtime, devices, reader):
             if capture_store:
                 stage = "store-screenshot"
                 entry["appStoreCandidate"] = capture_store_image(device_id, family, args.output)
+            if getattr(args, "viewport_experiments", False):
+                stage = "viewport-experiments"
+                capture_viewport_experiments(device_id, cache, args.output, label)
             stage = "report"
             report.append(entry)
             (args.output / "launch-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")

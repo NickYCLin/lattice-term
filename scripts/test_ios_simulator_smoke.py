@@ -17,6 +17,50 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_viewport_comparisons_wait_for_each_variant_and_preserve_originals(self):
+        now = [100.0]
+        captures = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            original = root / "phone.png"
+            original.write_bytes(b"original")
+
+            def snapshots(*args, **kwargs):
+                variant = (cache / "layout-variant.txt").read_text()
+                return [{"variant": variant, "capturedAt": now[0]}]
+
+            def sleep(seconds):
+                now[0] += seconds
+
+            with patch.object(smoke.time, "time", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke, "read_layout_snapshots", side_effect=snapshots), \
+                    patch.object(smoke, "simctl", side_effect=lambda *args, **kwargs: captures.append(args)):
+                results = smoke.capture_viewport_experiments("owned-device", cache, root, "phone")
+            self.assertEqual([entry["variant"] for entry in results], ["never", "automatic", "zero-insets", "resize"])
+            self.assertEqual(len(captures), 4)
+            self.assertGreaterEqual(now[0], 120)
+            self.assertEqual(original.read_bytes(), b"original")
+            self.assertEqual(json.loads((root / "phone.experiments.json").read_text()), results)
+
+    def test_viewport_comparison_rejects_stale_variant(self):
+        now = [0.0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def sleep(seconds):
+                now[0] += seconds
+            with patch.object(smoke.time, "time", return_value=100), \
+                    patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"variant": "baseline", "capturedAt": 200}]), \
+                    patch.object(smoke, "simctl") as capture:
+                with self.assertRaisesRegex(RuntimeError, "viewport"):
+                    smoke.capture_viewport_experiments("owned-device", root, root, "phone")
+                capture.assert_not_called()
+
     def test_layout_snapshots_exclude_unrelated_cache_files(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)

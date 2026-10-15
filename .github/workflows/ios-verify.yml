@@ -91,7 +91,7 @@ jobs:
           apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
           if len(apps) != 1:
               raise SystemExit('Expected exactly one simulator app')
-          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics'], check=True)
+          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics', '--viewport-experiments'], check=True)
           PY
       - name: Save original simulator layout evidence
         if: always()
