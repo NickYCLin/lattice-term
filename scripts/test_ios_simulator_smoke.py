@@ -130,13 +130,13 @@ class RuntimeSelectionTests(unittest.TestCase):
 
     def test_interactions_require_all_stages_and_fresh_geometry(self):
         stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
-        observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10,
+        observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10, "captureStableUntil": 106 + index * 10,
                          "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500, "height": 300},
                          "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
                         for index, stage in enumerate(stages)]
         stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
-        snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {
-            "capturedAt": entry["capturedAt"] - 2, "innerHeight": 400,
+        snapshots = [{"capturedAt": entry["capturedAt"] + 1.2, "dom": {
+            "capturedAt": entry["capturedAt"] + 1.2, "innerHeight": 400,
             "rects": [{"selector": ".app--mobile", "height": 400}]}} for entry in observations]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -147,9 +147,10 @@ class RuntimeSelectionTests(unittest.TestCase):
                 self.assertEqual(validate.call_count, 4)
             result = json.loads((root / "phone.interactions.json").read_text())
             self.assertEqual([entry["stage"] for entry in result], stages)
-            self.assertEqual(result[-1]["layout"]["capturedAt"], 128)
+            self.assertEqual(result[-1]["layout"]["capturedAt"], 131.2)
             for invalid in ({"capturedAt": 100, "dom": {"capturedAt": 80, "rects": [{"selector": ".app--mobile", "height": 400}]}},
-                            {"capturedAt": 100, "dom": {"capturedAt": 100, "rects": []}}):
+                            {"capturedAt": 100, "dom": {"capturedAt": 100, "rects": []}},
+                            {"capturedAt": 106.1, "dom": {"capturedAt": 106.1, "rects": [{"selector": ".app--mobile", "height": 400}]}}):
                 with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
                         patch.object(smoke, "read_layout_snapshots", return_value=[invalid]):
                     with self.assertRaisesRegex(RuntimeError, "新鮮"):

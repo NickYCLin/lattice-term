@@ -7,7 +7,7 @@ final class LayoutUITests: XCTestCase {
         XCTAssertTrue(control.isHittable)
         let frame = control.frame
         print("LATTICE_LAYOUT_TAP x=\(frame.midX) y=\(frame.midY)")
-        control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
     }
 
     private func record(_ stage: String, controls: [XCUIElement] = []) throws {
@@ -19,7 +19,7 @@ final class LayoutUITests: XCTestCase {
         add(screenshot)
         let keyboard = app.keyboards.firstMatch
         let frame = keyboard.exists ? keyboard.frame : .zero
-        let observation: [String: Any] = [
+        var observation: [String: Any] = [
             "stage": stage, "capturedAt": capturedAt,
             "captureFinishedAt": Date().timeIntervalSince1970,
             "keyboardVisible": keyboard.exists,
@@ -36,9 +36,10 @@ final class LayoutUITests: XCTestCase {
                                   "width": rect.width, "height": rect.height]]
             }
         ]
+        Thread.sleep(forTimeInterval: 6)
+        observation["captureStableUntil"] = Date().timeIntervalSince1970
         let data = try JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
         print("LATTICE_LAYOUT_STAGE \(String(data: data, encoding: .utf8)!)")
-        Thread.sleep(forTimeInterval: 6)
     }
 
     func testKeyboardAndRotation() throws {

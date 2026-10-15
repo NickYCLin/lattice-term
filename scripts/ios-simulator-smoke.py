@@ -406,13 +406,14 @@ def capture_interactions(device_id, cache, output, label, runner):
         raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
     for stage in stages:
         matching = [snapshot for snapshot in snapshots
-                    if stage["capturedAt"] - 6 <= snapshot.get("capturedAt", 0) <= stage["captureFinishedAt"]
+                    if stage["capturedAt"] - 6 <= snapshot.get("capturedAt", 0)
+                    <= min(stage["capturedAt"] + 6, stage.get("captureStableUntil", stage["captureFinishedAt"]))
                     and abs(snapshot.get("capturedAt", 0) - snapshot.get("dom", {}).get("capturedAt", -100)) <= 1
                     and any(rect.get("selector") == ".app--mobile" and rect.get("height", 0) > 0
                             for rect in snapshot.get("dom", {}).get("rects", []))]
         if not matching:
             raise RuntimeError(f"鍵盤與旋轉階段缺少新鮮原生幾何：{stage['stage']}")
-        stage["layout"] = max(matching, key=lambda snapshot: snapshot["capturedAt"])
+        stage["layout"] = min(matching, key=lambda snapshot: abs(snapshot["capturedAt"] - stage["capturedAt"]))
     (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
     for stage in stages:
         keyboard = stage.get("keyboardVisible", False)
