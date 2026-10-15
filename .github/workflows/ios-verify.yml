@@ -84,6 +84,10 @@ jobs:
           reports.mkdir(exist_ok=True)
           (reports / 'simulator.json').write_text(result.stdout)
           PY
+      - name: Prepare isolated keyboard and rotation checks
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
       - name: Capture isolated simulator layout evidence
         shell: bash
         run: |
@@ -93,7 +97,7 @@ jobs:
           apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
           if len(apps) != 1:
               raise SystemExit('Expected exactly one simulator app')
-          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics', '--viewport-experiments'], check=True)
+          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics', '--interaction-checks'], check=True)
           PY
       - name: Save original simulator layout evidence
         if: always()

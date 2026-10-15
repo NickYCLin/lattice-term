@@ -3,7 +3,7 @@ import XCTest
 final class LayoutUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
 
-    private func record(_ stage: String) throws {
+    private func record(_ stage: String, controls: [XCUIElement] = []) throws {
         Thread.sleep(forTimeInterval: 8)
         let capturedAt = Date().timeIntervalSince1970
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -16,7 +16,17 @@ final class LayoutUITests: XCTestCase {
             "stage": stage, "capturedAt": capturedAt,
             "keyboardVisible": keyboard.exists,
             "keyboardFrame": ["x": frame.minX, "y": frame.minY,
-                              "width": frame.width, "height": frame.height]
+                              "width": frame.width, "height": frame.height],
+            "controls": controls.map { control -> [String: Any] in
+                XCTAssertTrue(control.isHittable)
+                let rect = control.frame
+                if keyboard.exists {
+                    XCTAssertLessThanOrEqual(rect.maxY, frame.minY + 1)
+                }
+                return ["hittable": control.isHittable,
+                        "frame": ["x": rect.minX, "y": rect.minY,
+                                  "width": rect.width, "height": rect.height]]
+            }
         ]
         let data = try JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
         print("LATTICE_LAYOUT_STAGE \(String(data: data, encoding: .utf8)!)")
@@ -31,21 +41,22 @@ final class LayoutUITests: XCTestCase {
         add.tap()
         let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR placeholderValue == %@", "For example: Production gateway", "例如：正式站主機")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))
+        XCTAssertTrue(field.isHittable)
         field.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15))
         XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 100)
-        try record("keyboard-open")
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10))
+        try record("keyboard-open", controls: [field, close])
         close.tap()
         XCTAssertTrue(NSPredicate(format: "exists == false").evaluate(with: app.keyboards.firstMatch)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 15) == .completed)
-        try record("keyboard-closed")
+        try record("keyboard-closed", controls: [add])
         XCUIDevice.shared.orientation = .landscapeLeft
-        try record("landscape")
+        try record("landscape", controls: [add])
         XCTAssertGreaterThan(app.frame.width, app.frame.height)
         XCUIDevice.shared.orientation = .portrait
-        try record("portrait-return")
+        try record("portrait-return", controls: [add])
         XCTAssertGreaterThan(app.frame.height, app.frame.width)
         XCTAssertTrue(add.exists)
     }

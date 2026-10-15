@@ -17,6 +17,16 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_keyboard_geometry_must_not_overlap_native_keyboard(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874}, "webviewInWindow": {"y": 0}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 500, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 500}]}}
+        smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 500, "height": 374})
+        with self.assertRaisesRegex(RuntimeError, "鍵盤重疊"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 490, "height": 384})
+        with self.assertRaisesRegex(RuntimeError, "鍵盤重疊"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 500, "height": 0})
+
     def test_process_evidence_rejects_recursive_launches_and_ignores_other_devices(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -51,7 +61,10 @@ class RuntimeSelectionTests(unittest.TestCase):
 
     def test_interactions_require_all_stages_and_fresh_geometry(self):
         stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
-        observations = [{"stage": stage, "capturedAt": 100 + index * 10} for index, stage in enumerate(stages)]
+        observations = [{"stage": stage, "capturedAt": 100 + index * 10,
+                         "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500, "height": 300},
+                         "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
+                        for index, stage in enumerate(stages)]
         stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
         snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {"innerHeight": 400}} for entry in observations]
         with tempfile.TemporaryDirectory() as directory:
@@ -78,6 +91,29 @@ class RuntimeSelectionTests(unittest.TestCase):
                     smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
             self.assertEqual((root / "phone.interactions.log").read_text(), "native failure")
             self.assertEqual(json.loads((root / "phone.interaction-layout.json").read_text()), [{"capturedAt": 100}])
+
+    def test_interactions_reject_incorrect_keyboard_state_and_hidden_controls(self):
+        stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
+        for fault, message in [("keyboard", "鍵盤狀態"), ("controls", "無法點擊"), ("overlap", "鍵盤遮擋")]:
+            observations = [{"stage": stage, "capturedAt": 100 + index * 10,
+                             "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500},
+                             "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
+                            for index, stage in enumerate(stages)]
+            if fault == "keyboard":
+                observations[0]["keyboardVisible"] = False
+            elif fault == "controls":
+                observations[0]["controls"][0]["hittable"] = False
+            else:
+                observations[0]["controls"][0]["frame"]["y"] = 490
+            stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
+            snapshots = [{"capturedAt": entry["capturedAt"] - 2} for entry in observations]
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                        patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                        patch.object(smoke, "validate_native_viewport"):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        smoke.capture_interactions("owned-device", root, root, fault, (root, root))
 
     def test_interactions_preserve_partial_output_on_timeout(self):
         with tempfile.TemporaryDirectory() as directory:

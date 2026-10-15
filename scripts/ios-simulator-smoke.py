@@ -325,7 +325,7 @@ def capture_app_processes(device_id, pid, output, label, stage):
         raise RuntimeError(f"隔離 App 必須只有啟動的單一程序：{label}，實際 {len(processes)} 個")
 
 
-def validate_native_viewport(snapshot, keyboard=False):
+def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None):
     dom = snapshot.get("dom", {})
     viewport = dom.get("viewport", {})
     window = snapshot.get("windowBounds", {})
@@ -341,6 +341,12 @@ def validate_native_viewport(snapshot, keyboard=False):
         raise RuntimeError("鍵盤關閉時 DOM 仍短於原生視窗，不能通過全畫面驗收")
     if not keyboard and abs(height - window.get("height", -100)) > 1:
         raise RuntimeError("鍵盤關閉時 visual viewport 仍短於原生視窗")
+    if keyboard_frame is not None and keyboard:
+        native_top = snapshot.get("webviewInWindow", {}).get("y", 0)
+        if keyboard_frame.get("height", 0) <= 100 or height + native_top > keyboard_frame.get("y", 0) + 1:
+            raise RuntimeError("App 可見 viewport 與原生鍵盤重疊")
+        if dom.get("innerHeight", 0) - height <= 100:
+            raise RuntimeError("原生鍵盤顯示時 visual viewport 未縮小")
     for rect in dom.get("rects", []):
         if rect.get("selector") in (".rail", ".drawer__foot") and rect.get("height", 0) > 0:
             if rect.get("y", -100) < top - 1 or rect.get("y", 0) + rect["height"] > top + height + 1:
@@ -378,7 +384,19 @@ def capture_interactions(device_id, cache, output, label, runner):
         stage["layout"] = max(matching, key=lambda snapshot: snapshot["capturedAt"])
     (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
     for stage in stages:
-        validate_native_viewport(stage["layout"], keyboard=stage.get("keyboardVisible", False))
+        keyboard = stage.get("keyboardVisible", False)
+        if keyboard != (stage["stage"] == "keyboard-open"):
+            raise RuntimeError(f"原生鍵盤狀態不符驗收階段：{stage['stage']}")
+        frame = stage.get("keyboardFrame", {})
+        validate_native_viewport(stage["layout"], keyboard=keyboard, keyboard_frame=frame)
+        if not stage.get("controls"):
+            raise RuntimeError(f"缺少原生控制項可用性證據：{stage['stage']}")
+        for control in stage["controls"]:
+            rect = control["frame"]
+            if not control.get("hittable") or rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0:
+                raise RuntimeError("原生控制項無法點擊")
+            if keyboard and rect["y"] + rect["height"] > frame.get("y", 0) + 1:
+                raise RuntimeError("原生控制項被鍵盤遮擋")
 
 
 def main():
