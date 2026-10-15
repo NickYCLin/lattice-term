@@ -3,6 +3,13 @@ import XCTest
 final class LayoutUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
 
+    private func tapCenter(_ control: XCUIElement) {
+        XCTAssertTrue(control.isHittable)
+        let frame = control.frame
+        print("LATTICE_LAYOUT_TAP x=\(frame.midX) y=\(frame.midY)")
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
     private func record(_ stage: String, controls: [XCUIElement] = []) throws {
         Thread.sleep(forTimeInterval: 8)
         let capturedAt = Date().timeIntervalSince1970
@@ -38,11 +45,11 @@ final class LayoutUITests: XCTestCase {
         app.activate()
         let add = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add connection", "新增連線")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 30))
-        add.tap()
+        tapCenter(add)
         let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR placeholderValue == %@", "For example: Production gateway", "例如：正式站主機")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         XCTAssertTrue(field.isHittable)
-        field.tap()
+        tapCenter(field)
         let focused = XCTAttachment(string: app.debugDescription)
         focused.name = "keyboard-focus-hierarchy"
         focused.lifetime = .keepAlways
@@ -52,7 +59,7 @@ final class LayoutUITests: XCTestCase {
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         try record("keyboard-open", controls: [field, close])
-        close.tap()
+        tapCenter(close)
         XCTAssertTrue(NSPredicate(format: "exists == false").evaluate(with: app.keyboards.firstMatch)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 15) == .completed)
         try record("keyboard-closed", controls: [add])

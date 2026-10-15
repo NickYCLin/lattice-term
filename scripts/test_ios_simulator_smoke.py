@@ -17,6 +17,29 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_interaction_failures_preserve_errors_and_continue_other_devices(self):
+        owned = iter(("new-phone", "new-tablet"))
+
+        def simctl(*args, **kwargs):
+            return next(owned) if args[0] == "create" else ""
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "simctl", side_effect=simctl) as command, \
+                patch.object(smoke, "prepare_ci_keyboard", side_effect=RuntimeError("keyboard setup failed")), \
+                patch.object(smoke, "capture_failure") as capture:
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=600, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaisesRegex(RuntimeError, "iPhone, iPad"):
+                smoke.check_simulators(args, "runtime", devices, root / "reader")
+            self.assertEqual(capture.call_count, 2)
+            failures = json.loads((root / "interaction-failures.json").read_text())
+            self.assertEqual([failure["device"] for failure in failures], ["iPhone", "iPad"])
+            self.assertTrue(all(failure["stage"] == "keyboard-setup" for failure in failures))
+            self.assertEqual([call.args for call in command.call_args_list if call.args[0] == "delete"],
+                             [("delete", "new-phone"), ("delete", "new-tablet")])
+
     def test_keyboard_setup_targets_only_ci_disposable_device(self):
         with patch.dict(smoke.os.environ, {"CI": "true"}), \
                 patch.object(smoke.subprocess, "run") as run:

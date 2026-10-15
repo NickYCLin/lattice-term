@@ -454,6 +454,7 @@ def prepare_ci_keyboard(device_id):
 
 def check_simulators(args, runtime, devices, reader):
     report = []
+    failures = []
     targets = []
     for family in ("iPhone", "iPad"):
         model = (store_model(devices, family) if args.store_screenshots and family == "iPad" else
@@ -541,13 +542,18 @@ def check_simulators(args, runtime, devices, reader):
             except Exception as evidence_error:
                 # Preserve the original failure if the output disk also fails.
                 print(f"無法保存失敗證據：{evidence_error}", file=sys.stderr, flush=True)
-            raise
+            if not getattr(args, "interaction_checks", False):
+                raise
+            failures.append({"device": label, "stage": stage, "error": str(error)})
+            (args.output / "interaction-failures.json").write_text(json.dumps(failures, ensure_ascii=False, indent=2) + "\n")
         finally:
             # Cleanup is limited to this invocation's newly created device.
             try:
                 simctl("shutdown", device_id)
             finally:
                 simctl("delete", device_id)
+    if failures:
+        raise RuntimeError("原生互動驗收未通過：" + ", ".join(failure["device"] for failure in failures))
 
 
 if __name__ == "__main__":
