@@ -3047,6 +3047,7 @@ dependencies = [
  "keyring",
  "lattice-remote",
  "libc",
+ "objc2-ui-kit",
  "png 0.18.1",
  "portable-pty",
  "reqwest",

@@ -5373,6 +5373,18 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_notification::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
+    #[cfg(target_os = "ios")]
+    let builder = builder.on_page_load(|webview, payload| {
+        if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+            if let Err(error) = webview.with_webview(|platform| {
+                let view = unsafe { &*platform.inner().cast::<objc2_ui_kit::UIView>() };
+                view.setNeedsLayout();
+                view.layoutIfNeeded();
+            }) {
+                eprintln!("Cannot update the loaded iOS webview layout: {error}");
+            }
+        }
+    });
     // Auto-update and relaunch are desktop concerns; mobile installs come
     // from a package manager and restart through the OS.
     #[cfg(desktop)]

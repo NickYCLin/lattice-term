@@ -2,6 +2,25 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("iOS Tauri 設定", () => {
+  it("iOS 文件載入後要求原生 layout，不改 frame 或安全區", () => {
+    const app = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const hook = app.split('let builder = builder.on_page_load')[1].split('// Auto-update')[0];
+    expect(app).toMatch(/#\[cfg\(target_os = "ios"\)\]\s*let builder = builder.on_page_load/);
+    expect(hook).toContain("PageLoadEvent::Finished");
+    expect(hook).toContain("view.setNeedsLayout()");
+    expect(hook).toContain("view.layoutIfNeeded()");
+    expect(hook).not.toMatch(/setFrame|contentInset|evaluateJavaScript/);
+  });
+
+  it("行動版不啟動桌面 bridge，client 也拒絕自啟背景服務", () => {
+    const app = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const client = readFileSync(new URL("../src-tauri/src/agent_daemon/client.rs", import.meta.url), "utf8");
+    expect(app).toMatch(/#\[cfg\(desktop\)\]\s*agent_daemon::client::start_desktop_bridge/);
+    expect(client).toMatch(/pub async fn ensure[^]*?require_desktop_daemon\(cfg!\(desktop\)\)\?;/);
+    expect(client).toMatch(/#\[cfg\(not\(desktop\)\)\]\s*pub\(super\) fn spawn_daemon[^]*?require_desktop_daemon\(false\)/);
+    expect(client).toMatch(/#\[cfg\(desktop\)\]\s*pub\(super\) fn spawn_daemon/);
+  });
+
   it("商店匯出不含過期的企業團隊或 In-House 描述檔", () => {
     const source = readFileSync(new URL("../src-tauri/gen/apple/ExportOptions.plist", import.meta.url), "utf8");
     expect(source).toContain("<string>app-store-connect</string>");

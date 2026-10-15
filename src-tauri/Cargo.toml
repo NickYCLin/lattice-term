@@ -72,6 +72,7 @@ tauri-plugin-clipboard-manager = "2.3.2"
 # `keyring` selects the Apple-native provider on iOS. The provider has no
 # default feature, but iOS only exposes the protected-data store.
 apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIView"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
