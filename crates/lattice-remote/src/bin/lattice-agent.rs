@@ -157,6 +157,9 @@ enum AgentEvent<'a> {
     SessionEnded {
         reason: String,
     },
+    ScreenState {
+        state: &'a str,
+    },
     /// Relay mode only: the control link dropped or came back.
     RelayState {
         connected: bool,
@@ -442,6 +445,71 @@ fn capture_jpeg(monitor: &Monitor) -> Result<Capture, String> {
     })
 }
 
+/// One OS capture worker for the process. A stuck GDI call cannot create a new
+/// blocked thread on every retry or reconnect. The queue and each wait are bounded.
+type CaptureReply = tokio::sync::oneshot::Sender<Result<Capture, String>>;
+
+fn capture_worker() -> &'static std::sync::mpsc::SyncSender<CaptureReply> {
+    static WORKER: OnceLock<std::sync::mpsc::SyncSender<CaptureReply>> = OnceLock::new();
+    WORKER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<CaptureReply>(1);
+        std::thread::spawn(move || {
+            let mut monitor: Option<Monitor> = None;
+            while let Ok(reply) = rx.recv() {
+                if reply.is_closed() {
+                    continue;
+                }
+                let result = (|| {
+                    if monitor.is_none() {
+                        let monitors = Monitor::all().map_err(|e| e.to_string())?;
+                        let index = monitors
+                            .iter()
+                            .position(|m| m.is_primary().unwrap_or(false))
+                            .unwrap_or(0);
+                        monitor = monitors.into_iter().nth(index);
+                    }
+                    capture_jpeg(monitor.as_ref().ok_or("no display is available")?)
+                })();
+                if result.is_err() || reply.is_closed() {
+                    monitor = None;
+                }
+                let _ = reply.send(result);
+            }
+        });
+        tx
+    })
+}
+
+async fn capture_desktop() -> Result<Capture, String> {
+    capture_from_worker(capture_worker()).await
+}
+
+async fn capture_from_worker(
+    worker: &std::sync::mpsc::SyncSender<CaptureReply>,
+) -> Result<Capture, String> {
+    let (reply, receive) = tokio::sync::oneshot::channel();
+    worker.try_send(reply).map_err(|error| match error {
+        std::sync::mpsc::TrySendError::Full(_) => "desktop capture is busy".to_string(),
+        std::sync::mpsc::TrySendError::Disconnected(_) => {
+            "desktop capture worker stopped".to_string()
+        }
+    })?;
+    timeout(Duration::from_secs(2), receive)
+        .await
+        .map_err(|_| "desktop capture timed out".to_string())?
+        .map_err(|_| "desktop capture worker stopped".to_string())?
+}
+
+fn unavailable_capture() -> Capture {
+    Capture {
+        display_width: 0,
+        display_height: 0,
+        stream_width: 960,
+        stream_height: 540,
+        jpeg: include_bytes!("../../assets/desktop-unavailable.jpg").to_vec(),
+    }
+}
+
 /// Runs the OS input backend on its own thread. `enigo::Enigo` is not portable
 /// across async await points, so it lives here and consumes decoded inputs off
 /// a channel. Returns when the channel closes (viewer gone), releasing keys.
@@ -477,32 +545,77 @@ fn release_input_floor(session: u64) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ScreenInputState {
+    generation: u64,
+    dimensions: Option<[u32; 4]>,
+}
+
+struct ScreenInput {
+    generation: u64,
+    input: lattice_remote::RemoteInput,
+}
+
+fn update_screen_input(state: &watch::Sender<ScreenInputState>, dimensions: Option<[u32; 4]>) {
+    state.send_if_modified(|current| {
+        if current.dimensions == dimensions {
+            return false;
+        }
+        current.generation = current.generation.wrapping_add(1);
+        current.dimensions = dimensions;
+        true
+    });
+}
+
 fn spawn_input_thread(
     session: u64,
-    stream_width: u32,
-    stream_height: u32,
-    display_width: u32,
-    display_height: u32,
-    mut inputs: mpsc::Receiver<lattice_remote::RemoteInput>,
+    mut state: watch::Receiver<ScreenInputState>,
+    mut inputs: mpsc::Receiver<ScreenInput>,
 ) -> std::thread::JoinHandle<()> {
+    let runtime = Handle::current();
     std::thread::spawn(move || {
-        let mut injector =
-            match InputInjector::new(stream_width, stream_height, display_width, display_height) {
-                Ok(injector) => injector,
-                Err(error) => {
-                    eprintln!("Input control unavailable: {error}");
-                    // Drain so the sender never blocks on a full channel.
-                    while inputs.blocking_recv().is_some() {}
-                    return;
-                }
-            };
-        while let Some(input) = inputs.blocking_recv() {
-            if !may_inject(session, &input) {
-                continue;
+        let mut injector: Option<InputInjector> = None;
+        let mut generation = u64::MAX;
+        loop {
+            let current = *state.borrow_and_update();
+            if generation != current.generation {
+                // Drop releases held keys, even if no further input arrives.
+                drop(injector.take());
+                release_input_floor(session);
+                generation = current.generation;
+                injector = current
+                    .dimensions
+                    .and_then(|[sw, sh, dw, dh]| InputInjector::new(sw, sh, dw, dh).ok());
             }
-            let _ = injector.apply(input);
+            let next = runtime.block_on(async {
+                tokio::select! {
+                    biased;
+                    changed = state.changed() => match changed { Ok(()) => Some(None), Err(_) => None },
+                    input = inputs.recv() => input.map(Some),
+                }
+            });
+            match next {
+                None => break,
+                Some(None) => continue,
+                Some(Some(input)) => {
+                    // A capture transition can race a queued event. Old-screen
+                    // coordinates must never reach the recovered desktop.
+                    let latest = *state.borrow();
+                    if generation != input.generation
+                        || latest.generation != input.generation
+                        || latest.dimensions.is_none()
+                    {
+                        continue;
+                    }
+                    if let Some(injector) = injector.as_mut() {
+                        if may_inject(session, &input.input) {
+                            let _ = injector.apply(input.input);
+                        }
+                    }
+                }
+            }
         }
-        injector.release_all();
+        drop(injector);
         release_input_floor(session);
     })
 }
@@ -2220,6 +2333,7 @@ const STREAM_PAUSE_POLL: Duration = Duration::from_millis(500);
 async fn serve<S>(
     connection: SecureConnection<S>,
     fps: u32,
+    report_json: bool,
     allow_input: bool,
     allow_commands: bool,
     file_root: Option<PathBuf>,
@@ -2229,18 +2343,39 @@ async fn serve<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let monitors = Monitor::all().map_err(|error| error.to_string())?;
-    // X11 and virtual-display setups may have usable monitors without a
-    // primary flag. Pairing must not immediately close in that configuration.
-    let index = monitors
-        .iter()
-        .position(|monitor| monitor.is_primary().unwrap_or(false))
-        .unwrap_or(0);
-    let monitor = monitors
-        .into_iter()
-        .nth(index)
-        .ok_or_else(|| "no display is available".to_string())?;
-    let mut capture = capture_jpeg(&monitor)?;
+    serve_with_capture(
+        connection,
+        capture_desktop,
+        fps,
+        report_json,
+        allow_input,
+        allow_commands,
+        file_root,
+        file_job_permits,
+        command_permits,
+    )
+    .await
+}
+
+async fn serve_with_capture<S, F, Fut>(
+    connection: SecureConnection<S>,
+    mut capture_next: F,
+    fps: u32,
+    report_json: bool,
+    allow_input: bool,
+    allow_commands: bool,
+    file_root: Option<PathBuf>,
+    file_job_permits: Arc<Semaphore>,
+    command_permits: Arc<Semaphore>,
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Capture, String>>,
+{
+    // Identity and non-screen capabilities must not depend on an active RDP
+    // desktop. Start with an explicit status frame, then recover asynchronously.
+    let mut capture = unavailable_capture();
     let mut width = capture.stream_width;
     let mut height = capture.stream_height;
 
@@ -2287,14 +2422,12 @@ where
 
     // Receiving runs on its own task. Input remains independently authorised;
     // file messages are accepted only when an explicit shared root exists.
+    let (screen_state, screen_changes) = watch::channel(ScreenInputState::default());
     let (input_tx, input_thread) = if allow_input {
         let (tx, rx) = bounded_input_channel(SCREEN_INPUT_QUEUE_CAPACITY);
         let handle = spawn_input_thread(
             NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
-            capture.stream_width,
-            capture.stream_height,
-            capture.display_width,
-            capture.display_height,
+            screen_changes,
             rx,
         );
         (Some(tx), Some(handle))
@@ -2316,6 +2449,7 @@ where
     // Heartbeats keep the paused session alive without capturing frames.
     let (paused_tx, mut paused_rx) = watch::channel(false);
     let chat_outgoing = outgoing.clone();
+    let receiver_screen_state = screen_state.subscribe();
     let heartbeat = spawn_session_heartbeat(outgoing.clone());
     let receiver = tokio::spawn(async move {
         let mut peer_heartbeats = false;
@@ -2330,6 +2464,14 @@ where
             match message {
                 Ok(RemoteMessage::Input(input)) => {
                     if let Some(tx) = &input_tx {
+                        let state = *receiver_screen_state.borrow();
+                        if state.dimensions.is_none() {
+                            continue;
+                        }
+                        let input = ScreenInput {
+                            generation: state.generation,
+                            input,
+                        };
                         let queued = tokio::select! {
                             biased;
                             _ = receiver_stop_rx.changed() => false,
@@ -2394,22 +2536,26 @@ where
 
     let interval = Duration::from_millis(1000 / fps as u64);
     let mut frame_id = 0u64;
-    let stream_result = loop {
+    let mut last_screen_state = "waiting";
+    emit_event(
+        report_json,
+        &AgentEvent::ScreenState {
+            state: last_screen_state,
+        },
+    );
+    let stream_result = 'stream: loop {
         if receiver.is_finished() {
             break Ok(());
         }
         if *paused_rx.borrow_and_update() {
+            update_screen_input(&screen_state, None);
             // The receiver owns the sender, so a closed channel means the
             // session is ending; the next iteration observes that.
             let _ = timeout(STREAM_PAUSE_POLL, paused_rx.changed()).await;
-            if !*paused_rx.borrow() {
-                capture = match capture_jpeg(&monitor) {
-                    Ok(capture) => capture,
-                    Err(error) => break Err(error),
-                };
-                width = capture.stream_width;
-                height = capture.stream_height;
-            }
+            // Never show a stale pre-pause desktop as a newly recovered frame.
+            capture = unavailable_capture();
+            width = capture.stream_width;
+            height = capture.stream_height;
             continue;
         }
         let started = Instant::now();
@@ -2421,7 +2567,15 @@ where
                 Err(error) => break Err(error.to_string()),
             };
         for message in messages {
-            if outgoing.send(message).await.is_err() {
+            let sent = tokio::select! {
+                biased;
+                changed = paused_rx.changed() => {
+                    if changed.is_err() { break 'stream Ok(()); }
+                    continue 'stream;
+                },
+                sent = outgoing.send(message) => sent,
+            };
+            if sent.is_err() {
                 send_error = Some("The encrypted writer stopped.".to_string());
                 break;
             }
@@ -2430,12 +2584,60 @@ where
             break Err(error);
         }
 
-        if started.elapsed() < interval {
-            sleep(interval - started.elapsed()).await;
+        let wait = if capture.display_width == 0 {
+            Duration::from_secs(1)
+        } else {
+            interval
+        };
+        if started.elapsed() < wait {
+            tokio::select! {
+                _ = sleep(wait - started.elapsed()) => {},
+                _ = paused_rx.changed() => continue,
+                _ = outgoing.closed() => break Ok(()),
+            }
         }
-        capture = match capture_jpeg(&monitor) {
-            Ok(capture) => capture,
-            Err(error) => break Err(error),
+        if receiver.is_finished() {
+            break Ok(());
+        }
+        let result = tokio::select! {
+            // Closing/pausing must not wait for a synchronous OS capture.
+            _ = outgoing.closed() => break Ok(()),
+            _ = paused_rx.changed() => continue,
+            result = capture_next() => result,
+        };
+        let screen_state_name = match &result {
+            Ok(_) => "available",
+            Err(error) if error == "no display is available" => "noDisplay",
+            Err(error) if error == "desktop capture timed out" => "timeout",
+            Err(error) if error == "desktop capture is busy" => "busy",
+            Err(_) => "captureFailed",
+        };
+        if last_screen_state != screen_state_name {
+            emit_event(
+                report_json,
+                &AgentEvent::ScreenState {
+                    state: screen_state_name,
+                },
+            );
+            last_screen_state = screen_state_name;
+        }
+        capture = match result {
+            Ok(capture) => {
+                update_screen_input(
+                    &screen_state,
+                    Some([
+                        capture.stream_width,
+                        capture.stream_height,
+                        capture.display_width,
+                        capture.display_height,
+                    ]),
+                );
+                capture
+            }
+            Err(_) => {
+                update_screen_input(&screen_state, None);
+                unavailable_capture()
+            }
         };
         width = capture.stream_width;
         height = capture.stream_height;
@@ -2443,7 +2645,9 @@ where
 
     // Cooperatively stop and await the receiver so its bounded file shutdown
     // and input-sender drop run even when capture or the writer failed first.
+    update_screen_input(&screen_state, None);
     stop_and_wait(receiver_stop_tx, receiver).await;
+    drop(screen_state);
     heartbeat.abort();
     drop(outgoing);
     abort_and_wait(writer).await;
@@ -2940,6 +3144,7 @@ async fn run_relay_session(
         serve(
             secure,
             options.fps,
+            options.json,
             options.allow_input,
             options.allow_commands,
             options.file_root,
@@ -3439,6 +3644,7 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
                 serve(
                     secure,
                     session_options.fps,
+                    session_options.json,
                     session_options.allow_input,
                     session_options.allow_commands,
                     session_options.file_root.clone(),
@@ -3472,6 +3678,185 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_capture_has_bounded_wait_and_queue_across_retries() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        assert_eq!(
+            capture_from_worker(&tx).await.err().as_deref(),
+            Some("desktop capture timed out")
+        );
+        for _ in 0..100 {
+            assert_eq!(
+                capture_from_worker(&tx).await.err().as_deref(),
+                Some("desktop capture is busy")
+            );
+        }
+        assert!(rx.try_recv().unwrap().is_closed());
+        drop(rx);
+        assert_eq!(
+            capture_from_worker(&tx).await.err().as_deref(),
+            Some("desktop capture worker stopped")
+        );
+    }
+
+    #[test]
+    fn unavailable_status_frame_is_valid_and_has_no_input_dimensions() {
+        let capture = unavailable_capture();
+        let decoded = image::load_from_memory(&capture.jpeg).unwrap();
+        assert_eq!(
+            (decoded.width(), decoded.height()),
+            (capture.stream_width, capture.stream_height)
+        );
+        assert_eq!((capture.display_width, capture.display_height), (0, 0));
+    }
+
+    #[test]
+    fn screen_input_generation_rejects_stale_coordinates_and_recovers() {
+        let (state, _) = watch::channel(ScreenInputState::default());
+        assert_eq!(state.borrow().dimensions, None);
+        update_screen_input(&state, Some([960, 540, 1920, 1080]));
+        let first = *state.borrow();
+        update_screen_input(&state, None);
+        assert_ne!(state.borrow().generation, first.generation);
+        assert_eq!(state.borrow().dimensions, None);
+        update_screen_input(&state, Some([1280, 720, 1280, 720]));
+        assert_ne!(state.borrow().generation, first.generation);
+        let recovered = *state.borrow();
+        update_screen_input(&state, recovered.dimensions);
+        assert_eq!(*state.borrow(), recovered);
+    }
+
+    #[tokio::test]
+    async fn authenticated_screen_session_survives_capture_loss_and_recovers() {
+        let (host, viewer) = tokio::io::duplex(128 * 1024);
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let calls = attempts.clone();
+        let server = tokio::spawn(async move {
+            let connection = SecureConnection::accept(host, "screen-recovery-test")
+                .await
+                .unwrap();
+            serve_with_capture(
+                connection,
+                move || {
+                    let call = calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if call == 0 || call == 2 {
+                            return Err("simulated unavailable desktop".into());
+                        }
+                        let image = DynamicImage::ImageRgb8(image::RgbImage::new(2, 2));
+                        let mut bytes = Cursor::new(Vec::new());
+                        image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+                            .encode_image(&image)
+                            .unwrap();
+                        Ok(Capture {
+                            display_width: 2,
+                            display_height: 2,
+                            stream_width: 2,
+                            stream_height: 2,
+                            jpeg: bytes.into_inner(),
+                        })
+                    }
+                },
+                10,
+                false,
+                false,
+                false,
+                None,
+                Arc::new(Semaphore::new(1)),
+                Arc::new(Semaphore::new(1)),
+            )
+            .await
+        });
+        let mut client = SecureConnection::initiate(viewer, "screen-recovery-test")
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.receive().await.unwrap(),
+            RemoteMessage::Hello(_)
+        ));
+        let mut widths = Vec::new();
+        timeout(Duration::from_secs(12), async {
+            while widths.len() < 5 {
+                match client.receive().await.unwrap() {
+                    RemoteMessage::FrameStart(frame) => widths.push(frame.width),
+                    RemoteMessage::Close(reason) => panic!("capture loss closed session: {reason}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("capture must retry and recover on the same authenticated stream");
+        assert_eq!(widths, [960, 960, 2, 960, 2]);
+        assert!(attempts.load(Ordering::SeqCst) >= 4);
+        client
+            .send(&RemoteMessage::StreamControl { paused: true })
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(300)).await;
+        let paused_calls = attempts.load(Ordering::SeqCst);
+        sleep(Duration::from_millis(1200)).await;
+        assert_eq!(attempts.load(Ordering::SeqCst), paused_calls);
+        client
+            .send(&RemoteMessage::StreamControl { paused: false })
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(3), async {
+            while attempts.load(Ordering::SeqCst) == paused_calls {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("resuming must restart capture without reconnecting");
+        client
+            .send(&RemoteMessage::Close("test complete".into()))
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_while_capture_is_pending_does_not_wait_for_capture() {
+        let (host, viewer) = tokio::io::duplex(128 * 1024);
+        let server = tokio::spawn(async move {
+            let connection = SecureConnection::accept(host, "screen-cancel-test")
+                .await
+                .unwrap();
+            serve_with_capture(
+                connection,
+                || std::future::pending(),
+                10,
+                false,
+                false,
+                false,
+                None,
+                Arc::new(Semaphore::new(1)),
+                Arc::new(Semaphore::new(1)),
+            )
+            .await
+        });
+        let mut client = SecureConnection::initiate(viewer, "screen-cancel-test")
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.receive().await.unwrap(),
+            RemoteMessage::Hello(_)
+        ));
+        sleep(Duration::from_millis(1200)).await;
+        client
+            .send(&RemoteMessage::Close("cancel".into()))
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(2), server)
+            .await
+            .expect("cancel must drop pending capture future")
+            .unwrap()
+            .unwrap();
+    }
 
     static NEXT_FILE_TEST_ROOT: AtomicUsize = AtomicUsize::new(1);
 

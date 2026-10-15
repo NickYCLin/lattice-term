@@ -747,8 +747,8 @@ where
         }
         Ok(Err(_)) => {
             return Err((
-                "pairing",
-                "The pairing code was rejected by the Agent.".to_string(),
+                "protocol",
+                "The Agent connection ended before screen sharing started. Check the host's desktop availability and connection; this does not establish that the pairing code was wrong.".to_string(),
             ))
         }
         Err(_) => {
@@ -2434,7 +2434,10 @@ mod tests {
         }
     }
 
-    fn pin_candidate(path: PathBuf, connection: &SecureConnection<TcpStream>) -> RelayPinCandidate {
+    fn pin_candidate<S: AsyncRead + AsyncWrite + Unpin + Send>(
+        path: PathBuf,
+        connection: &SecureConnection<S>,
+    ) -> RelayPinCandidate {
         RelayPinCandidate {
             path,
             device_id: "123456789".to_string(),
@@ -3007,6 +3010,30 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let pins_path = directory.path().join(crate::remote_pins::PINS_FILE);
+        assert!(!pins_path.exists());
+    }
+
+    #[tokio::test]
+    async fn authenticated_eof_is_not_a_password_rejection_and_does_not_pin() {
+        let (host, client) = tokio::io::duplex(65536);
+        let server = tokio::spawn(async move {
+            let connection = SecureConnection::accept(host, "correct-pairing-code")
+                .await
+                .unwrap();
+            drop(connection); // desktop initialization failed before Hello
+        });
+        let mut viewer = SecureConnection::initiate(client, "correct-pairing-code")
+            .await
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let pins_path = directory.path().join(crate::remote_pins::PINS_FILE);
+        let candidate = pin_candidate(pins_path.clone(), &viewer);
+        let (stage, detail) = receive_authenticated_hello(&mut viewer, Some(candidate))
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(stage, "protocol");
+        assert!(!detail.contains("pairing code was rejected"));
         assert!(!pins_path.exists());
     }
 
