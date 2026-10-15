@@ -381,6 +381,27 @@ class RuntimeSelectionTests(unittest.TestCase):
             self.assertIn("timed out", (root / "phone.interactions.log").read_text())
             self.assertTrue((root / "phone.interaction-layout.json").is_file())
 
+    def test_failed_native_tap_preserves_stages_and_input_without_passing_validation(self):
+        stage = {"stage": "landscape", "capturedAt": 100, "captureFinishedAt": 101, "captureStableUntil": 106}
+        inputs = [{"id": "tap", "phase": phase, "at": timestamp,
+                   "frame": {"x": 482, "y": 587, "width": 155, "height": 44}}
+                  for phase, timestamp in (("before", 110), ("after", 111))]
+        stdout = "LATTICE_LAYOUT_STAGE " + json.dumps(stage) + "\n" + "\n".join(
+            "LATTICE_LAYOUT_INPUT " + json.dumps(entry) for entry in inputs)
+        snapshots = [{"capturedAt": 102, "dom": {"capturedAt": 102,
+                      "rects": [{"selector": ".app--mobile", "height": 1032}]}}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 65, stdout, "field absent")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                    patch.object(smoke, "validate_native_viewport") as validate:
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "iPad", (root, root))
+                validate.assert_not_called()
+            self.assertEqual(json.loads((root / "iPad.inputs.json").read_text()), inputs)
+            preserved = json.loads((root / "iPad.interactions.json").read_text())
+            self.assertEqual(preserved, [{**stage, "layout": snapshots[0]}])
+
     def test_viewport_comparisons_wait_for_each_variant_and_preserve_originals(self):
         now = [100.0]
         captures = []

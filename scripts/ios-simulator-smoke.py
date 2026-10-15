@@ -458,14 +458,9 @@ def capture_interactions(device_id, cache, output, label, runner):
     (output / f"{label}.interactions.log").write_text(completed.stdout + completed.stderr)
     snapshots = read_layout_snapshots(cache, timeout=0, require_ready=False)
     (output / f"{label}.interaction-layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
-    if result.exists():
-        subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
-                        "--output-path", str(output.resolve() / f"{label}.attachments")], check=True, timeout=60)
-    if completed.returncode:
-        raise RuntimeError(f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult")
+    inputs = [json.loads(match) for match in re.findall(r"LATTICE_LAYOUT_INPUT (\{[^\n]+\})", completed.stdout)]
+    (output / f"{label}.inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
     stages = [json.loads(match) for match in re.findall(r"LATTICE_LAYOUT_STAGE (\{[^\n]+\})", completed.stdout)]
-    if [stage["stage"] for stage in stages] != ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]:
-        raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
     for stage in stages:
         matching = [snapshot for snapshot in snapshots
                     if stage["capturedAt"] - 6 <= snapshot.get("capturedAt", 0)
@@ -473,10 +468,19 @@ def capture_interactions(device_id, cache, output, label, runner):
                     and abs(snapshot.get("capturedAt", 0) - snapshot.get("dom", {}).get("capturedAt", -100)) <= 1
                     and any(rect.get("selector") == ".app--mobile" and rect.get("height", 0) > 0
                             for rect in snapshot.get("dom", {}).get("rects", []))]
-        if not matching:
-            raise RuntimeError(f"鍵盤與旋轉階段缺少新鮮原生幾何：{stage['stage']}")
-        stage["layout"] = min(matching, key=lambda snapshot: abs(snapshot["capturedAt"] - stage["capturedAt"]))
+        if matching:
+            stage["layout"] = min(matching, key=lambda snapshot: abs(snapshot["capturedAt"] - stage["capturedAt"]))
     (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
+    if result.exists():
+        subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
+                        "--output-path", str(output.resolve() / f"{label}.attachments")], check=True, timeout=60)
+    if completed.returncode:
+        raise RuntimeError(f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult")
+    if [stage["stage"] for stage in stages] != ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]:
+        raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
+    for stage in stages:
+        if "layout" not in stage:
+            raise RuntimeError(f"鍵盤與旋轉階段缺少新鮮原生幾何：{stage['stage']}")
     for stage in stages:
         keyboard = stage.get("keyboardVisible", False)
         if keyboard != (stage["stage"] == "keyboard-open"):

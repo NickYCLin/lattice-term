@@ -3,11 +3,33 @@ import XCTest
 final class LayoutUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
 
-    private func tapCenter(_ control: XCUIElement) {
+    private func recordInput(_ phase: String, id: String, control: XCUIElement) throws {
+        let exists = control.exists
+        let frame = exists ? control.frame : .zero
+        let window = app.frame
+        let observation: [String: Any] = [
+            "id": id, "phase": phase, "at": Date().timeIntervalSince1970,
+            "orientation": XCUIDevice.shared.orientation.rawValue,
+            "exists": exists, "hittable": exists && control.isHittable,
+            "frame": ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height],
+            "appFrame": ["x": window.minX, "y": window.minY, "width": window.width, "height": window.height]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
+        print("LATTICE_LAYOUT_INPUT \(String(data: data, encoding: .utf8)!)")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "input-\(id)-\(phase)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    private func tapCenter(_ control: XCUIElement) throws {
         XCTAssertTrue(control.isHittable)
+        let id = UUID().uuidString
+        try recordInput("before", id: id, control: control)
         let frame = control.frame
         print("LATTICE_LAYOUT_TAP x=\(frame.midX) y=\(frame.midY)")
         control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+        try recordInput("after", id: id, control: control)
     }
 
     private func record(_ stage: String, controls: [XCUIElement] = []) throws {
@@ -44,15 +66,25 @@ final class LayoutUITests: XCTestCase {
 
     func testKeyboardAndRotation() throws {
         continueAfterFailure = false
+        addTeardownBlock {
+            let hierarchy = XCTAttachment(string: self.app.debugDescription)
+            hierarchy.name = "final-input-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            self.add(hierarchy)
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "final-input-screen"
+            screenshot.lifetime = .keepAlways
+            self.add(screenshot)
+        }
         XCUIDevice.shared.orientation = .portrait
         app.activate()
         let add = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add connection", "新增連線")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 30))
-        tapCenter(add)
+        try tapCenter(add)
         let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR placeholderValue == %@", "For example: Production gateway", "例如：正式站主機")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         XCTAssertTrue(field.isHittable)
-        tapCenter(field)
+        try tapCenter(field)
         let focused = XCTAttachment(string: app.debugDescription)
         focused.name = "keyboard-focus-hierarchy"
         focused.lifetime = .keepAlways
@@ -61,18 +93,18 @@ final class LayoutUITests: XCTestCase {
         XCTAssertGreaterThan(app.keyboards.firstMatch.frame.height, 100)
         let tutorial = app.buttons["Continue"]
         if tutorial.waitForExistence(timeout: 3) {
-            tapCenter(tutorial)
-            tapCenter(field)
+            try tapCenter(tutorial)
+            try tapCenter(field)
         }
         field.typeText("Layout check")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Layout check"), object: field)], timeout: 10), .completed)
         let close = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Close", "關閉")).firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         try record("keyboard-open", controls: [field, close])
-        tapCenter(close)
+        try tapCenter(close)
         let discard = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Discard changes", "放棄修改")).firstMatch
         XCTAssertTrue(discard.waitForExistence(timeout: 10))
-        tapCenter(discard)
+        try tapCenter(discard)
         XCTAssertTrue(NSPredicate(format: "exists == false").evaluate(with: app.keyboards.firstMatch)
             || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 15) == .completed)
         try record("keyboard-closed", controls: [add])
@@ -86,13 +118,13 @@ final class LayoutUITests: XCTestCase {
         XCTAssertTrue(add.exists)
         XCUIDevice.shared.orientation = .landscapeLeft
         Thread.sleep(forTimeInterval: 2)
-        tapCenter(add)
+        try tapCenter(add)
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         let landscapeForm = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscapeForm.name = "landscape-add-form"
         landscapeForm.lifetime = .keepAlways
         self.add(landscapeForm)
-        tapCenter(close)
+        try tapCenter(close)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)], timeout: 10), .completed)
         XCUIDevice.shared.orientation = .portrait
     }
