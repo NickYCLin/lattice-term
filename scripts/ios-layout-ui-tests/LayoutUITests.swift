@@ -3,15 +3,14 @@ import XCTest
 final class LayoutUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
 
-    private func recordInput(_ phase: String, id: String, control: XCUIElement) throws {
-        let exists = control.exists
-        let frame = exists ? control.frame : .zero
+    private func recordInput(_ phase: String, id: String, beforeFrame: CGRect, beforeHittable: Bool) throws {
+        let frame = beforeFrame
         let window = app.frame
         let observation: [String: Any] = [
             "id": id, "phase": phase, "at": Date().timeIntervalSince1970,
             "orientation": XCUIDevice.shared.orientation.rawValue,
-            "exists": exists, "hittable": exists && control.isHittable,
-            "frame": ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height],
+            "beforeHittable": beforeHittable,
+            "beforeFrame": ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height],
             "appFrame": ["x": window.minX, "y": window.minY, "width": window.width, "height": window.height]
         ]
         let data = try JSONSerialization.data(withJSONObject: observation, options: [.sortedKeys])
@@ -23,13 +22,14 @@ final class LayoutUITests: XCTestCase {
     }
 
     private func tapCenter(_ control: XCUIElement) throws {
-        XCTAssertTrue(control.isHittable)
+        let beforeHittable = control.isHittable
+        XCTAssertTrue(beforeHittable)
         let id = UUID().uuidString
-        try recordInput("before", id: id, control: control)
         let frame = control.frame
+        try recordInput("before", id: id, beforeFrame: frame, beforeHittable: beforeHittable)
         print("LATTICE_LAYOUT_TAP x=\(frame.midX) y=\(frame.midY)")
         control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
-        try recordInput("after", id: id, control: control)
+        try recordInput("after", id: id, beforeFrame: frame, beforeHittable: beforeHittable)
     }
 
     private func record(_ stage: String, controls: [XCUIElement] = []) throws {

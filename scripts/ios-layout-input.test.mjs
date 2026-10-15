@@ -71,3 +71,31 @@ describe("iOS 隔離觸點診斷", () => {
     expect(context.__latticeLayoutEvents.at(-1).x).toBe(69);
   });
 });
+
+describe("XCUITest 觸控採證來源契約", () => {
+  const swift = readFileSync(new URL("./ios-layout-ui-tests/LayoutUITests.swift", import.meta.url), "utf8");
+  const evidence = swift.split("private func recordInput(")[1].split("private func tapCenter(")[0];
+  const tap = swift.split("private func tapCenter(")[1].split("private func record(")[0];
+
+  it("採證只接收已擷取值，不查詢可能在觸控後消失的控制項", () => {
+    expect(evidence).toContain("beforeFrame: CGRect, beforeHittable: Bool");
+    expect(evidence).not.toMatch(/XCUIElement|control\.|\.exists|\.isHittable/);
+    expect(evidence).toContain('"beforeFrame":');
+    expect(evidence).toContain('"beforeHittable": beforeHittable');
+    expect(evidence).toContain("let window = app.frame");
+    expect(evidence).toContain("XCUIScreen.main.screenshot()");
+  });
+
+  it("單次短按後只使用觸控前快照，不重新解參考原控制項", () => {
+    const action = "control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)";
+    expect(tap.split(action)).toHaveLength(2);
+    const [before, after] = tap.split(action);
+    expect(before).toContain("let beforeHittable = control.isHittable");
+    expect(before).toContain("XCTAssertTrue(beforeHittable)");
+    expect(before).toContain("let frame = control.frame");
+    expect(before).toContain('recordInput("before", id: id, beforeFrame: frame, beforeHittable: beforeHittable)');
+    expect(after).toContain('recordInput("after", id: id, beforeFrame: frame, beforeHittable: beforeHittable)');
+    expect(after).not.toMatch(/\bcontrol\b/);
+    expect(tap.match(/control\.frame/g)).toHaveLength(1);
+  });
+});
