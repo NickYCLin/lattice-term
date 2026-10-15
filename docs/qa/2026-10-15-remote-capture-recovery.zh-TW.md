@@ -50,10 +50,28 @@ busy、captureFailed。只接受這些固定值，不記錄密碼、原始 OS �
 重複取消與重連。核對 host 診斷分類、frame 更新、既有非畫面功能與
 按鍵釋放。Windows 不提供桌面時，不能宣稱可以操控不存在的桌面。
 
-目前可用環境僅 Linux，沒有 Windows 編譯 target；已分享 Windows
-MCP target 為離線，唯讀紀錄查詢要求先重連。沒有重啟或切換使用者
-工作階段、改分享權限、安裝 service 或用 tscon 強制取得桌面。
-Windows 原生建置／實機驗收及已安裝版本驗收均尚未完成。
+Windows run `38741157865` 已成功，來源為 `f0cec3d`。安裝包與
+sidecar 雜湊已核對；既有 24 組篩選共 354 次測試通過、5 次忽略，
+MCP 11 項通過。篩選有重疊，不把 354 稱為互不重複案例。
+這些結果不等同修正版的真實畫面、鍵鼠或 RDP 驗收。
 
-CI、Windows test installer、iOS verification 維持停用，沒有重新啟用
-或手動觸發。PR 應維持 draft，直到上述必要 Windows 驗收完成。
+使用者目前沒有隔離 Windows 測試機或帳號，真實 RDP 斷線／恢復
+列為環境缺口；不建立帳號、不啟用 RDP、不改安全設定或現有服務。
+
+## 五項擷取恢復的 Windows 增量驗收
+
+既有 Windows workflow 對 Agent binary 只執行 `windows_text_requests`，
+因此新增的五項恢復測試雖在 Linux 通過，尚未在 Windows 執行。
+沿用 `windows-test-installer.yml` 的 `capture_recovery_only` 選項，
+只建置及執行這五項，不重跑安裝包、354 次原生篩選或 11 項 MCP。
+一般完整流程亦補入同一 runner，避免日後遺漏。
+
+`verify-remote-capture-recovery.py` 逐項以 `--exact` 執行，強制每項
+恰有一項通過且沒有失敗／忽略；保存來源 SHA、run ID、命令、結果
+與各自原始日誌。五項皆使用合成畫面、程序內通道或純狀態，認證
+fixture 關閉輸入，不開 TCP／relay、不保存配對、不注入 OS 鍵鼠。
+
+本次 runner 的五項 Linux 實跑及零項／忽略／非零退出防護檢查通過，
+workflow YAML 與精簡／完整模式互斥檢查通過。Windows 增量結果待驗；
+不以這些程序內測試取代 DXGI 擷取、實際輸入、桌面切換或 RDP 恢復。
+PR 維持 draft，尚未合併、安裝或部署修正版。
