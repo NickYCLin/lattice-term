@@ -244,6 +244,10 @@ def failure_diagnostics(device_id, directory, reader, interval=None, label="fail
     probes = {
         "hostProcesses": ["/bin/ps", "-axo", "pid,ppid,state,%cpu,%mem,comm"],
         "simulatorProcesses": ["xcrun", "simctl", "spawn", device_id, "launchctl", "list"],
+        "appLaunchLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                         "--predicate", f'eventMessage CONTAINS[c] "{BUNDLE_ID}" OR process == "LatticeTerm"'],
+        "appLaunchHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                             "--predicate", f'eventMessage CONTAINS[c] "{BUNDLE_ID}" OR eventMessage CONTAINS[c] "{device_id}"'],
         "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
                        "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process == "SpringBoard" OR process == "runningboardd"'],
         "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,

@@ -152,14 +152,19 @@ class RuntimeSelectionTests(unittest.TestCase):
             self.assertEqual(report["startupCommands"]["launch"]["timeoutSeconds"], 330)
             self.assertEqual(report["logInterval"], {"startedAt": 1000, "failureAt": 1400})
             log_commands = [command for command in commands if "show" in command]
-            self.assertEqual(len(log_commands), 3)
+            self.assertEqual(len(log_commands), 5)
             for command in log_commands:
                 self.assertNotIn("--last", command)
                 self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:16:35+0000")
                 self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:23:21+0000")
-            self.assertIn("SpringBoard", log_commands[0][-1])
-            self.assertIn("runningboardd", log_commands[0][-1])
-            self.assertIn("Simulator", log_commands[1][-1])
+            self.assertTrue(any("SpringBoard" in command[-1] and "runningboardd" in command[-1] for command in log_commands))
+            self.assertTrue(any("Simulator" in command[-1] for command in log_commands))
+            for name in ("appLaunchLog", "appLaunchHostLog"):
+                command = json.loads((output / report["diagnostics"][name]["commandEvidence"]).read_text())["command"]
+                self.assertIn(smoke.BUNDLE_ID, command[-1])
+                self.assertNotIn('process == "runningboardd"', command[-1])
+                self.assertNotIn('process == "SpringBoard"', command[-1])
+            self.assertIn('"device"', json.loads((output / "iPhone.appLaunchHostLog.command.json").read_text())["command"][-1])
             probe = report["diagnostics"]["webViewLog"]
             self.assertFalse(probe["completed"])
             self.assertEqual((probe["stdout"], probe["stderr"]), ("partial log\n", "busy\n"))
