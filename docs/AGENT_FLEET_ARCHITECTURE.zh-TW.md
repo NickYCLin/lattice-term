@@ -236,6 +236,8 @@ Reporter 傳輸與狀態模型已完成，Codex、Claude Code、Gemini CLI、Ope
 
 第一版已完成（`src-tauri/src/agent_daemon/`）。做法不是把 registry 拆開，而是**整個 `AgentRegistry` 原封不動在另一個程序裡跑**：
 
+此本機背景服務僅限桌面平台。iOS／Android 不啟動桌面 bridge 或背景服務更新流程，client 也拒絕本機 attach 與啟動；行動版入口不分派 `agent-daemon` 命令，不能以自身執行檔重啟桌面服務。
+
 - **程序**：daemon 就是同一個 `lattice-term` 執行檔以 `agent-daemon --data-dir <app data>` 啟動（`main.rs` 在建立視窗前就分派），由桌面在第一次需要時以 `setsid`（Windows：`DETACHED_PROCESS | CREATE_NO_WINDOW`）脫離啟動，stderr 導到資料目錄的 `agent-daemon.log`（只記連線與錯誤，不記提示、輸出或權杖，超過 1 MiB 截斷）。沒有工作階段也沒有客戶端連著 60 秒後自行結束；收到 SIGTERM／Ctrl+C 或 `shutdown` 請求時先 `stop_all` 再退出。
 - **通道**：Unix 是資料目錄下 0600 的 `agent-daemon.sock`（綁定前先嘗試連線，連得上代表已有 daemon 在跑，連不上才清掉舊檔），Windows 是以資料目錄雜湊命名的具名管道。第一個 frame 必須是 `hello`，帶 `agent-daemon.token`（0600，首次自動產生）與協定版本，不符就關連線。
 - **協定**：換行分隔的 JSON frame（`request`／`response`／`event`），請求以 id 對應回應可亂序；`launch`、`send`、`enqueue`、`clearQueue`、`broadcast`、`resize`、`disconnect`、`rename`、`sessions`、`snapshots`、`stageImage`、`shutdown` 對應桌面既有的指令；`event` 轉送 registry sink 的 `data`／`state`／`closed`／`captured`／`model`／`usage`／`queue`，payload 與桌面事件完全相同，桌面端原樣 `emit` 到同名 Tauri 事件，前端不知道也不需要知道是哪個程序持有。

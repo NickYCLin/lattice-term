@@ -5493,10 +5493,12 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
+            #[cfg(desktop)]
             agent_daemon::client::start_desktop_bridge(app.handle().clone());
             // An update replaces the executable but not a background service
             // that is still running; swap it for this build while it holds
             // nothing, and hand the new one the launch plans again.
+            #[cfg(desktop)]
             {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
