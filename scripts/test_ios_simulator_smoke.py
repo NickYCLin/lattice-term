@@ -238,18 +238,44 @@ class RuntimeSelectionTests(unittest.TestCase):
 
     def test_keyboard_setup_targets_only_ci_disposable_device(self):
         with patch.dict(smoke.os.environ, {"CI": "true"}), \
-                patch.object(smoke.subprocess, "run") as run:
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "1", "")) as run:
             smoke.prepare_ci_keyboard("owned-device")
-            self.assertEqual(run.call_count, 2)
-            self.assertIn("owned-device", run.call_args_list[0].args[0])
-            self.assertIn("<false/>", run.call_args_list[0].args[0][-1])
-            self.assertEqual(run.call_args_list[1].args[0], [
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[0].args[0], [
+                "xcrun", "simctl", "spawn", "owned-device", "defaults", "write",
+                "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction", "-bool", "YES"])
+            self.assertEqual(run.call_args_list[1].args[0][-4:], [
+                "defaults", "read", "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"])
+            self.assertTrue(all(call.kwargs["timeout"] == 15 for call in run.call_args_list[:3]))
+            self.assertEqual(run.call_args_list[3].kwargs["timeout"], 30)
+            self.assertIn("<false/>", run.call_args_list[2].args[0][-1])
+            self.assertEqual(run.call_args_list[3].args[0], [
                 "open", "-a", "Simulator", "--args", "-CurrentDeviceUDID",
                 "owned-device", "-ConnectHardwareKeyboard", "NO"])
         with patch.dict(smoke.os.environ, {"CI": "false"}), \
                 patch.object(smoke.subprocess, "run") as run:
             smoke.prepare_ci_keyboard("owned-device")
             run.assert_not_called()
+
+    def test_keyboard_tutorial_setup_readback_failure_stops_setup(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "0", "")) as run:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "前置設定未生效"):
+                smoke.prepare_ci_keyboard("owned-device", root, "phone")
+            self.assertEqual(run.call_count, 2)
+            self.assertTrue((root / "phone.keyboardTutorial.write.command.json").is_file())
+            self.assertEqual(json.loads((root / "phone.keyboardTutorial.read.command.json").read_text())["stdout"], "0")
+
+    def test_keyboard_tutorial_setup_command_failure_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("defaults", 15, b"partial", b"busy")) as run:
+            root = Path(directory)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                smoke.prepare_ci_keyboard("owned-device", root, "phone")
+            self.assertEqual(run.call_count, 1)
+            report = json.loads((root / "phone.keyboardTutorial.write.command.json").read_text())
+            self.assertEqual((report["status"], report["stdout"], report["stderr"]), ("timeout", "partial", "busy"))
 
     def test_keyboard_geometry_must_not_overlap_native_keyboard(self):
         snapshot = {"windowBounds": {"width": 402, "height": 874}, "webviewInWindow": {"y": 0}, "dom": {

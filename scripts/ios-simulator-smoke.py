@@ -588,9 +588,17 @@ def main():
         check_simulators(args, runtime, devices, reader)
 
 
-def prepare_ci_keyboard(device_id):
+def prepare_ci_keyboard(device_id, output=None, label=None):
     if os.environ.get("CI") != "true":
         return
+    preference = ["spawn", device_id, "defaults"]
+    domain, key = "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"
+    simctl(*preference, "write", domain, key, "-bool", "YES", timeout=15,
+           evidence_path=output / f"{label}.keyboardTutorial.write.command.json" if output else None)
+    value = simctl(*preference, "read", domain, key, timeout=15,
+                   evidence_path=output / f"{label}.keyboardTutorial.read.command.json" if output else None)
+    if value.strip() != "1":
+        raise RuntimeError("隔離模擬器鍵盤教學前置設定未生效")
     subprocess.run([
         "defaults", "write", "com.apple.iphonesimulator", "DevicePreferences",
         "-dict-add", device_id,
@@ -627,7 +635,7 @@ def check_simulators(args, runtime, devices, reader):
             simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
             if getattr(args, "interaction_checks", False):
                 stage = "keyboard-setup"
-                prepare_ci_keyboard(device_id)
+                prepare_ci_keyboard(device_id, args.output, label)
             stage = "install"
             print(f"{label}: 開機完成，安裝 App", flush=True)
             # A shared runner installing onto a device that just finished

@@ -94,6 +94,7 @@ final class LayoutUITests: XCTestCase {
         let tutorial = app.buttons["Continue"]
         if tutorial.waitForExistence(timeout: 3) {
             try tapCenter(tutorial)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: tutorial)], timeout: 5), .completed, "系統鍵盤教學未關閉")
             try tapCenter(field)
         }
         field.typeText("Layout check")

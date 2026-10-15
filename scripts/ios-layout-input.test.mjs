@@ -77,6 +77,14 @@ describe("XCUITest 觸控採證來源契約", () => {
   const evidence = swift.split("private func recordInput(")[1].split("private func tapCenter(")[0];
   const tap = swift.split("private func tapCenter(")[1].split("private func record(")[0];
 
+  it("系統教學必須實際關閉後才重新聚焦及輸入", () => {
+    const tutorial = swift.split('if tutorial.waitForExistence(timeout: 3) {')[1].split('field.typeText')[0];
+    expect(tutorial).toContain('try tapCenter(tutorial)');
+    expect(tutorial).toContain('NSPredicate(format: "exists == false"), object: tutorial');
+    expect(tutorial).toContain('timeout: 5), .completed, "系統鍵盤教學未關閉"');
+    expect(tutorial.indexOf('exists == false')).toBeLessThan(tutorial.indexOf('try tapCenter(field)'));
+  });
+
   it("採證只接收已擷取值，不查詢可能在觸控後消失的控制項", () => {
     expect(evidence).toContain("beforeFrame: CGRect, beforeHittable: Bool");
     expect(evidence).not.toMatch(/XCUIElement|control\.|\.exists|\.isHittable/);
