@@ -959,9 +959,11 @@ fn mobile_frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
                 let received_at = timestamp(received);
                 let applied_at = timestamp(std::time::SystemTime::now());
                 let after_height = view.bounds().size.height;
-                let _ = window.eval(format!(
-                    "globalThis.__latticeNativeLayout ??= []; globalThis.__latticeNativeLayout.push({{receivedAt:{received_at},appliedAt:{applied_at},beforeHeight:{before_height},afterHeight:{after_height}}}); globalThis.__latticeNativeLayout = globalThis.__latticeNativeLayout.slice(-16);"
-                ));
+                tauri::async_runtime::spawn(async move {
+                    let _ = window.eval(format!(
+                        "globalThis.__latticeNativeLayout ??= []; globalThis.__latticeNativeLayout.push({{receivedAt:{received_at},appliedAt:{applied_at},beforeHeight:{before_height},afterHeight:{after_height}}}); globalThis.__latticeNativeLayout = globalThis.__latticeNativeLayout.slice(-16);"
+                    ));
+                });
             }
         })
         .map_err(|error| error.to_string())?;

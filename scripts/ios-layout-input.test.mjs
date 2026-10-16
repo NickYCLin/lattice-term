@@ -107,6 +107,17 @@ describe("iOS 隔離觸點診斷", () => {
 });
 
 describe("XCUITest 觸控採證來源契約", () => {
+  it("原生排版回呼不得同步派送診斷 eval，以免重入 WebView 鎖", () => {
+    const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const command = rust.split("fn mobile_frontend_ready(")[1].split("async fn runtime_summary(")[0];
+    const deferred = "tauri::async_runtime::spawn(async move {";
+    expect(command).toContain(deferred);
+    const [beforeTask, task] = command.split(deferred);
+    expect(beforeTask).not.toContain("window.eval(");
+    expect(task).toContain("window.eval(");
+    expect(task).toContain("receivedAt:");
+  });
+
   it("原生首次排版只在啟用診斷的 iOS 模擬器記錄時間與高度", () => {
     const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
     const command = rust.split("fn mobile_frontend_ready(")[1].split("async fn runtime_summary(")[0];
