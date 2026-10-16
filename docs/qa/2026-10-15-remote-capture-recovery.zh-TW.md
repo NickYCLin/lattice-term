@@ -44,7 +44,7 @@ busy、captureFailed。只接受這些固定值，不記錄密碼、原始 OS �
   安裝包驗收。既有 glib lifetime 警告未在本急件修改。
 - 狀態畫面已視覺檢查；沒有 React、CSS 或前端邏輯變更。
 
-## 合併前仍須驗證
+## 原先的合併前驗證缺口
 
 在隔離 Windows 主機實測正常桌面、RDP 中斷、重新開啟、恢復後鍵鼠、
 重複取消與重連。核對 host 診斷分類、frame 更新、既有非畫面功能與
@@ -55,8 +55,9 @@ sidecar 雜湊已核對；既有 24 組篩選共 354 次測試通過、5 次忽�
 MCP 11 項通過。篩選有重疊，不把 354 稱為互不重複案例。
 這些結果不等同修正版的真實畫面、鍵鼠或 RDP 驗收。
 
-使用者目前沒有隔離 Windows 測試機或帳號，真實 RDP 斷線／恢復
-列為環境缺口；不建立帳號、不啟用 RDP、不改安全設定或現有服務。
+當時沒有隔離 Windows 測試機或帳號，真實 RDP 斷線／恢復列為環境
+缺口，未操作使用者既有工作階段。後續取得建立隔離 VM 與測試帳號
+的明確授權，實測結果記於下節；沒有變更宿主機的 RDP 或防火牆。
 
 ## 五項擷取恢復的 Windows 增量驗收
 
@@ -82,4 +83,54 @@ run ID、Windows 平台與五份原始日誌，各為一項通過、零失敗及
 工作流已還原停用，沒有為下載失敗重跑 CI。
 
 不以這些程序內測試取代 DXGI 擷取、實際輸入、桌面切換或 RDP 恢復。
-PR 維持 draft，尚未合併、安裝或部署修正版。
+此增量驗收當時仍不足以解除 draft，亦未安裝或部署修正版。
+
+## 2026-10-16 隔離 Windows VM 原生驗收
+
+在 Hyper-V 的 Windows 11 Enterprise 評估版客體執行原生 Agent，
+以外部 Rust viewer harness 使用正式加密協定連線，另以 RDP ActiveX
+控制項建立、斷開及恢復客體的 RDP 工作階段。測試只使用客體專用
+帳號、合成文字與測試目錄，未操作使用者的宿主機工作階段。
+
+來源為 `77b1fd94ec2858dc6450e3bfb3e61f5ae3227c9f`。Windows
+原生 Agent build、remote crate fmt、`cargo check --features agent`
+及 Agent binary 測試均通過；本次 Windows 測試為 32 passed、
+0 failed、0 ignored，不與先前其他平台的 36 項混計。
+
+直接複製的 debug Agent 最初因客體缺少 `VCRUNTIME140.dll` 無法
+啟動，退出碼為 `0xC0000135`。安裝經 Microsoft 簽章驗證的官方
+VC++ x64 執行階段後，安裝與 Agent help 均退出 0，才開始以下驗收。
+這是測試 binary 的環境前置條件，不代表已確認安裝包會自帶依賴。
+
+- 第一組在相同 Agent PID、相同 viewer 程序及相同加密連線中完成
+  兩次 RDP 斷線／重連。正常桌面為 960×720，失效時改送 960×540
+  狀態畫面，恢復後重新收到真實桌面，沒有重新配對或重啟來掩蓋失敗。
+- 首輪 frame ID 由正常的 111、失效的 116，接續恢復至 181；第二輪
+  由 246、失效的 251，恢復至 256。原生診斷同步記錄
+  `available → captureFailed → available`。
+- 以 WinForms fixture 的文字與點擊計數檔回讀確認真實 OS 輸入：
+  恢復前計數 1，首次恢復後 2，再次恢復後 3；文字分別加入
+  `-AFTER` 與 `-SECOND`。不是僅以 input 命令送出當成成功。
+- 失效時送入 `MUST-NOT-APPEAR` 與滑鼠點擊，並暫停／恢復串流；
+  RDP 恢復後文字沒有該字串，點擊數未增加，沒有重播失效期間輸入。
+- 第二組另開 Agent，僅分享合成測試目錄。正常與桌面失效期間均收到
+  檔案清單的 `ListStart`、測試檔 `ListEntry`、`ListDone`，確認
+  非畫面 receiver 不因擷取失敗停擺，未開放命令執行或其他目錄。
+- 在客體以 `GetAsyncKeyState` 定時回讀 Shift：按住時為 True，
+  RDP 斷線再恢復後為 False；另一次按住後結束 viewer，亦回到 False。
+  沒有補送 key-up 來替代產品的釋放處理。
+- 第三組在同一 Agent PID 連續兩次配對與正常取消，兩個 viewer 均
+  退出 0，Agent 繼續接受連線。前兩組超過五分鐘後不再接受新配對，
+  最後 viewer 離開才退出 0，符合既有配對碼期限，非恢復故障。
+
+失效畫面 SHA-256 為
+`2b525262c34fb0b521cb35d0ef96477e6a5c73a76ca338e6d32696deb0375ddc`，
+與專案狀態 JPEG 相符；第二輪恢復後畫面為
+`dc78baf3a4f0f89f69f1b577c92b30a29a3256ae4cf3725684792f6b4fe04537`。
+Agent binary SHA-256 為
+`b3f5c2db683838f71acc0cb8b586d30b3317317c5275cb1c62e2188e7e97eaf8`。
+
+以上補齊本 PR 的 Windows 原生畫面、RDP 恢復、鍵鼠與取消驗收。
+外部 harness、客體設定、配對碼及原始連線日誌不提交公開專案。
+未驗收安裝版 GUI、實體無螢幕主機或 iOS；亦未新增 CI run、安裝包
+或 release，手動停用的工作流維持停用。
