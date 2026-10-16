@@ -107,6 +107,20 @@ describe("iOS 隔離觸點診斷", () => {
 });
 
 describe("XCUITest 觸控採證來源契約", () => {
+  it("原生首次排版只在啟用診斷的 iOS 模擬器記錄時間與高度", () => {
+    const rust = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const command = rust.split("fn mobile_frontend_ready(")[1].split("async fn runtime_summary(")[0];
+    expect(command).toContain('#[cfg(all(target_os = "ios", target_abi = "sim"))]');
+    expect(command).toContain('std::env::var("LATTICETERM_LAYOUT_DIAGNOSTICS").as_deref() == Ok("1")');
+    expect(command.indexOf("SystemTime::now()")).toBeLessThan(command.indexOf(".with_webview("));
+    expect(command.indexOf("view.layoutIfNeeded()")).toBeLessThan(command.indexOf("let applied_at"));
+    expect(command).toContain(".slice(-16)");
+    expect(command).toContain("receivedAt:");
+    const { context } = fixture();
+    context.__latticeNativeLayout = [{ receivedAt: 10, appliedAt: 10.1, beforeHeight: 1376, afterHeight: 1376 }];
+    expect(JSON.parse(runInNewContext(snapshot, context)).nativeLayout).toEqual(context.__latticeNativeLayout);
+  });
+
   const swift = readFileSync(new URL("./ios-layout-ui-tests/LayoutUITests.swift", import.meta.url), "utf8");
   const evidence = swift.split("private func recordInput(")[1].split("private func tapCenter(")[0];
   const tap = swift.split("private func tapCenter(")[1].split("private func record(")[0];

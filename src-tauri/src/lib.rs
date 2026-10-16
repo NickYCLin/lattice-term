@@ -938,12 +938,31 @@ struct EncryptedBackupRestore {
 
 #[tauri::command]
 fn mobile_frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(all(target_os = "ios", target_abi = "sim"))]
+    let diagnostic = (std::env::var("LATTICETERM_LAYOUT_DIAGNOSTICS").as_deref() == Ok("1"))
+        .then(|| (window.clone(), std::time::SystemTime::now()));
     #[cfg(target_os = "ios")]
     window
-        .with_webview(|platform| {
+        .with_webview(move |platform| {
             let view = unsafe { &*platform.inner().cast::<objc2_ui_kit::UIView>() };
+            #[cfg(all(target_os = "ios", target_abi = "sim"))]
+            let before_height = view.bounds().size.height;
             view.setNeedsLayout();
             view.layoutIfNeeded();
+            #[cfg(all(target_os = "ios", target_abi = "sim"))]
+            if let Some((window, received)) = diagnostic {
+                let timestamp = |time: std::time::SystemTime| {
+                    time.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64()
+                };
+                let received_at = timestamp(received);
+                let applied_at = timestamp(std::time::SystemTime::now());
+                let after_height = view.bounds().size.height;
+                let _ = window.eval(format!(
+                    "globalThis.__latticeNativeLayout ??= []; globalThis.__latticeNativeLayout.push({{receivedAt:{received_at},appliedAt:{applied_at},beforeHeight:{before_height},afterHeight:{after_height}}}); globalThis.__latticeNativeLayout = globalThis.__latticeNativeLayout.slice(-16);"
+                ));
+            }
         })
         .map_err(|error| error.to_string())?;
     #[cfg(not(target_os = "ios"))]
