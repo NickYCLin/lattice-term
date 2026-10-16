@@ -91,6 +91,9 @@ pub struct RemoteHostStatus {
     pub state: &'static str,
     pub peer: Option<String>,
     pub active_sessions: u32,
+    /// Sanitized capture diagnostic; contains no OS error text or private paths.
+    pub screen_state: Option<String>,
+    pub screen_state_at: Option<u64>,
     pub attempts_remaining: u32,
     /// Relay mode: the permanent nine-digit device ID viewers dial.
     pub device_id: Option<String>,
@@ -151,6 +154,9 @@ enum AgentEvent {
     },
     SessionEnded {
         reason: String,
+    },
+    ScreenState {
+        state: String,
     },
     RelayState {
         connected: bool,
@@ -274,6 +280,18 @@ impl RemoteHostRegistry {
                     .map_err(|error| error.to_string())
             })
             .transpose()
+    }
+}
+
+fn sanitized_screen_state(state: &str) -> Option<&'static str> {
+    match state {
+        "waiting" => Some("waiting"),
+        "available" => Some("available"),
+        "noDisplay" => Some("noDisplay"),
+        "timeout" => Some("timeout"),
+        "busy" => Some("busy"),
+        "captureFailed" => Some("captureFailed"),
+        _ => None,
     }
 }
 
@@ -827,6 +845,8 @@ async fn start_inner(
         state: "waiting",
         peer: None,
         active_sessions: 0,
+        screen_state: None,
+        screen_state_at: None,
         attempts_remaining: 5,
         device_id,
         relay,
@@ -894,6 +914,21 @@ async fn start_inner(
                             // A one-shot code is spent now; a persistent share
                             // keeps its code for the sessions that follow.
                             mark_session_paired(status, peer);
+                            true
+                        },
+                    );
+                }
+                Ok(AgentEvent::ScreenState { state }) => {
+                    let Some(state) = sanitized_screen_state(&state) else {
+                        continue;
+                    };
+                    update_and_emit_current_status(
+                        &watcher_app,
+                        &watcher_registry,
+                        &record,
+                        |status| {
+                            status.screen_state = Some(state.to_string());
+                            status.screen_state_at = Some(now_seconds());
                             true
                         },
                     );
@@ -1135,6 +1170,19 @@ pub fn chat_reply(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capture_diagnostics_never_forward_arbitrary_error_text() {
+        assert_eq!(
+            super::sanitized_screen_state("captureFailed"),
+            Some("captureFailed")
+        );
+        assert_eq!(
+            super::sanitized_screen_state("C:\\private\\secret.txt"),
+            None
+        );
+        assert_eq!(super::sanitized_screen_state("password=secret"), None);
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -1177,6 +1225,8 @@ mod tests {
                 state: "waiting",
                 peer: None,
                 active_sessions: 0,
+                screen_state: None,
+                screen_state_at: None,
                 attempts_remaining: 5,
                 device_id: None,
                 relay: None,
@@ -1372,6 +1422,8 @@ mod tests {
             state: "waiting",
             peer: None,
             active_sessions: 0,
+            screen_state: None,
+            screen_state_at: None,
             attempts_remaining: 5,
             device_id: Some("123456789".to_string()),
             relay: Some("wss://relay.example.test".to_string()),

@@ -13,12 +13,18 @@ on:
       - "scripts/verify-windows-lib-tests.ps1"
       - "scripts/verify-windows-lib-tests.test.mjs"
       - "scripts/windows-lib-test.manifest"
+      - "scripts/verify-remote-capture-recovery.py"
       - "src/**"
       - "src-tauri/**"
       - "crates/lattice-remote/**"
       - "crates/lattice-rdp/**"
       - "crates/lattice-vnc/**"
   workflow_dispatch:
+    inputs:
+      capture_recovery_only:
+        description: "只驗證五項程序內擷取恢復測試，不建置安裝程式"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,7 +34,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  capture-recovery:
+    name: Windows capture recovery regressions
+    if: inputs.capture_recovery_only == true
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: crates/lattice-remote -> target
+      - name: Verify five in-process capture recovery tests
+        run: python scripts/verify-remote-capture-recovery.py
+      - name: Save exact test results and source revision
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LatticeTerm-Windows-capture-recovery
+          path: remote-capture-recovery-evidence
+          if-no-files-found: error
+          retention-days: 7
+
   build:
+    if: inputs.capture_recovery_only != true
     name: Windows amd64 test installer
     runs-on: windows-latest
     timeout-minutes: 90
@@ -93,6 +122,18 @@ jobs:
       - name: Verify native regression runner contracts
         shell: pwsh
         run: ./scripts/verify-windows-lib-tests.ps1 -SelfTest
+
+      - name: Verify capture recovery regressions
+        run: python scripts/verify-remote-capture-recovery.py
+
+      - name: Upload capture recovery results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: LatticeTerm-Windows-capture-recovery
+          path: remote-capture-recovery-evidence
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify Windows library regressions
         shell: pwsh
