@@ -34,6 +34,40 @@ function fixture(hitMatches = true) {
   return { context, handlers, button };
 }
 
+describe("前端就緒 IPC 對照診斷", () => {
+  const script = source.match(/evaluateJavaScript:@"(globalThis\.__latticeFrontendSync=[^\n]+)" completionHandler:nil/)[1];
+
+  it.each([true, false])("記錄固定命令的完成狀態，不收集錯誤內容：%s", async (succeeds) => {
+    const commands = [];
+    const context = {
+      __TAURI_INTERNALS__: {
+        invoke: async (command) => {
+          commands.push(command);
+          if (!succeeds) throw new Error("不得記錄的內容");
+        },
+      },
+    };
+    runInNewContext(script, context);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(commands).toEqual(["mobile_frontend_ready"]);
+    expect(context.__latticeFrontendSync).toEqual({
+      status: succeeds ? "completed" : "failed",
+      startedAt: expect.any(Number),
+      completedAt: expect.any(Number),
+    });
+  });
+
+  it("基準快照不觸發 IPC，且診斷不混入正式互動驗收", () => {
+    const { context } = fixture();
+    expect(JSON.parse(runInNewContext(snapshot, context)).frontendSync).toBeNull();
+    const smoke = readFileSync(new URL("./ios-simulator-smoke.py", import.meta.url), "utf8");
+    const experiments = smoke.split("def capture_viewport_experiments(")[1].split("def build_interaction_runner(")[0];
+    expect(experiments).toContain('"frontend-ready"');
+    expect(smoke).toContain("args.viewport_experiments");
+    expect(script).not.toMatch(/setTimeout|setInterval|.message|.stack/);
+  });
+});
+
 describe("iOS 隔離觸點診斷", () => {
   it("保存實際觸點命中與取消事件，不把 pointerdown 當 click", () => {
     const { context, handlers, button } = fixture();

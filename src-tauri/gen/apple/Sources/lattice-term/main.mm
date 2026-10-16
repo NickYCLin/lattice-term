@@ -34,6 +34,8 @@ static NSString *applyLayoutExperiment(WKWebView *webview) {
             [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.height='100dvh')" completionHandler:nil];
         } else if ([variant isEqualToString:@"document-percent"]) {
             [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.removeProperty('height'))" completionHandler:nil];
+        } else if ([variant isEqualToString:@"frontend-ready"]) {
+            [webview evaluateJavaScript:@"globalThis.__latticeFrontendSync={status:'pending',startedAt:Date.now()/1000};Promise.resolve().then(()=>globalThis.__TAURI_INTERNALS__.invoke('mobile_frontend_ready')).then(()=>{globalThis.__latticeFrontendSync.status='completed';globalThis.__latticeFrontendSync.completedAt=Date.now()/1000},()=>{globalThis.__latticeFrontendSync.status='failed';globalThis.__latticeFrontendSync.completedAt=Date.now()/1000});undefined" completionHandler:nil];
         } else if ([variant isEqualToString:@"relayout"]) {
             [webview setNeedsLayout];
             [webview layoutIfNeeded];
@@ -94,6 +96,7 @@ static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSI
         NSString *script = @"JSON.stringify({innerWidth,innerHeight,devicePixelRatio,viewportMeta:Array.from(document.querySelectorAll('meta[name=viewport]'),n=>n.content),screen:{width:screen.width,height:screen.height},viewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rects:['html','body','#root','.app--mobile','.rail','.drawer','.drawer__body','.drawer__foot','.drawer input','.drawer__head button'].map(selector=>{const n=document.querySelector(selector);if(!n)return {selector};const r=n.getBoundingClientRect();const c=getComputedStyle(n);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,background:c.backgroundColor,position:c.position,cssHeight:c.height,paddingTop:c.paddingTop,paddingBottom:c.paddingBottom,keyboard:document.documentElement.getAttribute('data-mobile-keyboard'),viewportHeight:c.getPropertyValue('--app-viewport-height')}})})";
         script = [script stringByReplacingOccurrencesOfString:@"{innerWidth,innerHeight" withString:@"{capturedAt:Date.now()/1000,events:globalThis.__latticeLayoutEvents,activeTag:document.activeElement?.tagName,documentFocused:document.hasFocus(),innerWidth,innerHeight"];
         script = [script stringByReplacingOccurrencesOfString:@"'.drawer input'" withString:@"'.connections--empty .button--primary','.drawer input'"];
+        script = [script stringByReplacingOccurrencesOfString:@"{capturedAt:" withString:@"{frontendSync:globalThis.__latticeFrontendSync??null,capturedAt:"];
         script = [script stringByReplacingOccurrencesOfString:@"return {selector,x:r.x" withString:@"const center={x:r.x+r.width/2,y:r.y+r.height/2};const hit=document.elementFromPoint(center.x,center.y);return {selector,center,centerHitsElement:hit===n||n.contains(hit),hitTag:hit?.tagName??null,hitButtonClass:hit?.closest?.('button')?.getAttribute('class')??null,x:r.x"];
         [webview evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
             snapshot[@"capturedAt"] = @([[NSDate date] timeIntervalSince1970]);

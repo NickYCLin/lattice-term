@@ -343,7 +343,7 @@ def read_layout_snapshots(cache, timeout=15, require_ready=True):
 
 def capture_viewport_experiments(device_id, cache, output, label):
     results = []
-    for variant in ("document-dvh", "document-percent", "relayout", "resize-never", "never", "automatic", "zero-insets", "resize"):
+    for variant in ("frontend-ready", "document-dvh", "document-percent", "relayout", "resize-never", "never", "automatic", "zero-insets", "resize"):
         started = time.time()
         pending = cache / "layout-variant.tmp"
         pending.write_text(variant)

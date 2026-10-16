@@ -626,10 +626,10 @@ class RuntimeSelectionTests(unittest.TestCase):
                     patch.object(smoke, "simctl", side_effect=lambda *args, **kwargs: captures.append(args)):
                 results = smoke.capture_viewport_experiments("owned-device", cache, root, "phone")
             self.assertEqual([entry["variant"] for entry in results], [
-                "document-dvh", "document-percent", "relayout", "resize-never",
+                "frontend-ready", "document-dvh", "document-percent", "relayout", "resize-never",
                 "never", "automatic", "zero-insets", "resize"])
-            self.assertEqual(len(captures), 8)
-            self.assertGreaterEqual(now[0], 140)
+            self.assertEqual(len(captures), 9)
+            self.assertGreaterEqual(now[0], 145)
             self.assertEqual(original.read_bytes(), b"original")
             self.assertEqual(json.loads((root / "phone.experiments.json").read_text()), results)
 
