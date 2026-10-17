@@ -60,6 +60,8 @@ pub mod tunnel;
 pub mod vault;
 pub mod vnc;
 mod voice_typing;
+#[cfg(any(windows, test))]
+mod window_fit;
 
 use crate::agent::{
     AgentBroadcastOutcome, AgentDefinition, AgentLaunchPlan, AgentLaunchPlanDraft,
@@ -5415,6 +5417,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                crate::window_fit::install(window);
+            }
             // Connection data belongs beside the app's other data, not next to
             // the executable, so it survives an update and follows the user
             // profile on a shared machine.
