@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.10.18](https://github.com/NickYCLin/lattice-term/compare/v2026.10.15...v2026.10.18) (2026-10-17)
+
+
+### 🛠️ 問題修正
+
+* **remote:** 保留桌面失效連線並自動恢復擷取 ([f0cec3d](https://github.com/NickYCLin/lattice-term/commit/f0cec3deb07f81ff263d1632e9b655938675e071))
+* **remote:** 保留桌面失效連線並自動恢復擷取 ([#323](https://github.com/NickYCLin/lattice-term/issues/323)) ([b10bffb](https://github.com/NickYCLin/lattice-term/commit/b10bffbbecfb9e5be37013d479f98d6d56b00cab))
+
 ## [2026.10.15](https://github.com/NickYCLin/lattice-term/compare/v2026.10.14...v2026.10.15) (2026-10-14)
 
 
