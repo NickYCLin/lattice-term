@@ -1359,6 +1359,30 @@ async fn agent_send(
     }
 }
 
+#[tauri::command]
+async fn agent_send_escape(
+    app: AppHandle,
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<(), String> {
+    if crate::agent_daemon::owns(&session_id) {
+        daemon
+            .request(
+                false,
+                crate::agent_daemon::Request::DesktopEscape { session_id },
+            )
+            .await
+            .map(|_| ())
+    } else {
+        crate::agent::send_desktop_escape(
+            &crate::agent::EventSink(app),
+            registry.inner(),
+            &session_id,
+        )
+    }
+}
+
 /// Lines a prompt up behind whatever the agent is already doing.
 ///
 /// Returns how many prompts are now waiting; zero means the agent was free
@@ -5603,6 +5627,7 @@ pub fn run() {
             agent_default_working_directory,
             agent_launch,
             agent_send,
+            agent_send_escape,
             agent_broadcast,
             agent_enqueue,
             agent_read_queue,

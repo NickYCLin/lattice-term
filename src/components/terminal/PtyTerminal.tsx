@@ -19,6 +19,7 @@ import { terminalImageLinks } from "./terminalImageLinks";
 /** The byte stream behind one terminal: an agent PTY or a plain local shell. */
 export interface PtyTerminalIo {
   send: (data: string) => Promise<void>;
+  sendEscape?: () => Promise<void>;
   resize: (cols: number, rows: number) => Promise<void>;
   onData: (handler: (bytes: Uint8Array) => void) => () => void;
   onClosed: (handler: (reason: string) => void) => () => void;
@@ -115,6 +116,11 @@ export function PtyTerminal({
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,
+      onEscape: ioRef.current.sendEscape ? () => {
+        void ioRef.current.sendEscape?.().catch(() => {
+          terminal.write(`\r\n\x1b[31m${errorRef.current}\x1b[0m\r\n`);
+        });
+      } : undefined,
       shouldProcessKeyEvent: () =>
         imePresentation.shouldProcessTerminalKeyEvent(),
       // The agent runs locally, so an image on the clipboard can be written to

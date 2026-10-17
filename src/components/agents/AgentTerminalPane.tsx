@@ -22,6 +22,7 @@ export function AgentTerminalPane({
   const io = useMemo<PtyTerminalIo>(
     () => ({
       send: (data) => agents.send(sessionId, data),
+      sendEscape: agents.sendEscape ? () => agents.sendEscape!(sessionId) : undefined,
       resize: (cols, rows) => agents.resize(sessionId, cols, rows),
       onData: (handler) => agents.onData(sessionId, handler),
       onClosed: (handler) => agents.onClosed(sessionId, handler),

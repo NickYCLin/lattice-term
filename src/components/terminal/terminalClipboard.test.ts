@@ -71,6 +71,33 @@ afterEach(() => {
 });
 
 describe("terminal right-click", () => {
+  it("routes only a trusted single Escape key to explicit cancellation", () => {
+    const onEscape = vi.fn();
+    const { terminal, keyEventHandler } = fakeTerminal(null);
+    attachTerminalClipboard(terminal, { onEscape });
+    const event = {
+      type: "keydown", key: "Escape", isTrusted: true, repeat: false,
+      ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
+      isComposing: false, preventDefault: vi.fn(),
+    } as unknown as KeyboardEvent;
+    expect(keyEventHandler()!(event)).toBe(false);
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    for (const change of [
+      { isTrusted: false }, { repeat: true }, { ctrlKey: true },
+      { altKey: true }, { metaKey: true }, { shiftKey: true },
+      { isComposing: true }, { type: "keyup" }, { key: "ArrowUp" },
+    ]) {
+      expect(keyEventHandler()!({ ...event, ...change } as KeyboardEvent)).toBe(true);
+    }
+    expect(onEscape).toHaveBeenCalledOnce();
+    attachTerminalClipboard(terminal, { onEscape, shouldProcessKeyEvent: () => false });
+    expect(keyEventHandler()!(event)).toBe(false);
+    expect(onEscape).toHaveBeenCalledOnce();
+    attachTerminalClipboard(terminal);
+    expect(keyEventHandler()!(event)).toBe(true);
+  });
+
   it("copies and drops the selection when one exists", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });

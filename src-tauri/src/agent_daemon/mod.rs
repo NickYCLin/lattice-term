@@ -446,6 +446,9 @@ pub enum Request {
         session_id: String,
         data: String,
     },
+    DesktopEscape {
+        session_id: String,
+    },
     Enqueue {
         session_id: String,
         data: String,

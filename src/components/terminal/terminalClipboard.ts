@@ -35,6 +35,7 @@ export interface TerminalClipboardOptions {
    * keeps xterm from finalizing and forwarding unfinished composition text.
    */
   shouldProcessKeyEvent?: (event: KeyboardEvent) => boolean;
+  onEscape?: () => void;
 }
 
 export function attachTerminalClipboard(
@@ -44,6 +45,13 @@ export function attachTerminalClipboard(
   terminal.attachCustomKeyEventHandler((event) => {
     if (options.shouldProcessKeyEvent?.(event) === false) return false;
     if (event.type !== "keydown") return true;
+    if (options.onEscape && event.key === "Escape" && event.isTrusted
+      && !event.repeat && !event.isComposing && !event.ctrlKey
+      && !event.altKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+      options.onEscape();
+      return false;
+    }
     // Leave anything with Alt/Meta, or plain keys, to xterm and the shell.
     if (!event.ctrlKey || event.altKey || event.metaKey) return true;
 
