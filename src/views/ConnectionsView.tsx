@@ -230,7 +230,7 @@ export function ConnectionsView({
 
   if (profiles.length === 0) {
     return (
-      <div className="connections">
+      <div className="connections connections--empty">
         {filePicker}
         <div style={{ padding: "var(--space-5) var(--space-6) 0" }}>
           {notice && (

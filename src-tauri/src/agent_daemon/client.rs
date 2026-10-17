@@ -29,6 +29,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(8);
 pub(crate) const DAEMON_GONE: &str = "The background service is no longer running.";
 
 /// Make desktop-owned connections available even before an Agent is launched.
+#[cfg(desktop)]
 pub(crate) fn start_desktop_bridge(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let Some(daemon) = app.try_state::<crate::AppDaemon>() else {
@@ -90,6 +91,9 @@ impl DaemonClient {
 
     /// Attaches to a daemon that is already running; never starts one.
     pub async fn attached(&self) -> Option<Arc<Connection>> {
+        if !cfg!(desktop) {
+            return None;
+        }
         let mut guard = self.connection.lock().await;
         if let Some(connection) = guard.as_ref() {
             if connection.alive.load(Ordering::Relaxed) {
@@ -111,6 +115,7 @@ impl DaemonClient {
 
     /// Attaches, starting the daemon first when none is listening.
     pub async fn ensure(&self) -> Result<Arc<Connection>, String> {
+        require_desktop_daemon(cfg!(desktop))?;
         if let Some(connection) = self.attached().await {
             return Ok(connection);
         }
@@ -710,6 +715,20 @@ fn last_failure_line(log: &str) -> Option<String> {
 /// Starts `lattice-term agent-daemon` detached from this process: its own
 /// session on Unix, no console and no job on Windows. Nothing is inherited
 /// but the environment; the log file catches what it has to say.
+#[cfg(not(desktop))]
+pub(super) fn spawn_daemon(_paths: &DaemonPaths) -> Result<(), String> {
+    require_desktop_daemon(false)
+}
+
+fn require_desktop_daemon(desktop: bool) -> Result<(), String> {
+    if desktop {
+        Ok(())
+    } else {
+        Err("The background service is only available on desktop platforms.".to_string())
+    }
+}
+
+#[cfg(desktop)]
 pub(super) fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Cannot locate the LatticeTerm executable: {error}"))?;
@@ -781,6 +800,12 @@ fn outdated_service_is_idle(
 mod replace_tests {
     use super::outdated_service_is_idle;
     use crate::agent_daemon::automations::AutomationStatus;
+
+    #[test]
+    fn mobile_cannot_start_the_desktop_service() {
+        assert!(super::require_desktop_daemon(false).is_err());
+        assert!(super::require_desktop_daemon(true).is_ok());
+    }
 
     fn automation(running: bool) -> AutomationStatus {
         AutomationStatus {

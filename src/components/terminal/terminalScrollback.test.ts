@@ -9,6 +9,7 @@ function fakeTerminal() {
   const classes = new Set<string>();
   const terminal = {
     element: {
+      dataset: {} as Record<string, string>,
       querySelector: vi.fn((_selector: string): unknown => null),
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
@@ -20,6 +21,7 @@ function fakeTerminal() {
     },
     options: { scrollbar: { showScrollbar: true } },
     rows: 20,
+    cols: 80,
     scrollLines: vi.fn(),
     buffer: { active: { baseY: 0, type: "normal" as "normal" | "alternate" }, onBufferChange: (callback: () => void) => {
       events.bufferChanged = callback;
@@ -40,6 +42,21 @@ function fakeTerminal() {
 }
 
 describe("terminal scrollback visibility", () => {
+  it("exposes only buffer geometry and clears it on disposal without changing modes", () => {
+    const { terminal, events } = fakeTerminal();
+    const dispose = attachTerminalScrollback(terminal as unknown as Terminal);
+    expect(terminal.element.dataset).toEqual({ terminalBuffer: "normal", terminalHistoryRows: "0", terminalRows: "20", terminalCols: "80" });
+    terminal.buffer.active.baseY = 40;
+    events.parsed();
+    expect(terminal.element.dataset.terminalHistoryRows).toBe("40");
+    terminal.buffer.active = { baseY: 0, type: "alternate" };
+    events.bufferChanged();
+    expect(terminal.element.dataset.terminalBuffer).toBe("alternate");
+    expect(terminal.element.dataset.terminalHistoryRows).toBe("0");
+    expect(terminal.buffer.active.type).toBe("alternate");
+    dispose();
+    expect(terminal.element.dataset).toEqual({});
+  });
   it("refits after font metrics make the screen overlap the scrollbar", () => {
     const { terminal, events } = fakeTerminal();
     terminal.element.querySelector.mockImplementation(selector => ({ getBoundingClientRect: () =>

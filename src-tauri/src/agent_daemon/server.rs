@@ -1205,6 +1205,9 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
         Request::Send { session_id, data } => {
             agent::send(sink, registry, &session_id, &data).map(|_| Value::Null)
         }
+        Request::DesktopEscape { session_id } => {
+            agent::send_desktop_escape(sink, registry, &session_id).map(|_| Value::Null)
+        }
         Request::Enqueue { session_id, data } => {
             agent::enqueue(sink, registry, &session_id, &data).map(|depth| json!(depth))
         }
@@ -2297,6 +2300,9 @@ mod observer_transport_tests {
         let dir = tempfile::tempdir().unwrap();
         let context = test_context(dir.path());
         for request in [
+            Request::DesktopEscape {
+                session_id: "agent-bg-missing".into(),
+            },
             Request::ReadQueue {
                 session_id: "agent-bg-missing".into(),
             },

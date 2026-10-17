@@ -47,8 +47,8 @@ export function DesktopStartupPanel({ available }: { available: boolean }) {
       if (revision.current === currentRevision) { pending.current = false; setBusy(false); }
     }
   }
-  return <section className="settings-section">
-    <h2 className="settings-section__title">{t("settings.desktopStartup.title")}</h2>
+  return <section className="panel glass glass--sheen" aria-label={t("settings.desktopStartup.title")}>
+    <header className="panel__head"><h2 className="panel__title">{t("settings.desktopStartup.title")}</h2></header>
     <div className="setting">
       <div className="setting__text"><strong className="setting__title">{t("settings.desktopStartup.login")}</strong>
         <p className="setting__description">{t("settings.desktopStartup.hint")}</p>

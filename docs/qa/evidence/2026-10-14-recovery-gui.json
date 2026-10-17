@@ -1,0 +1,299 @@
+{
+  "scope": "Isolated Chromium; real React, xterm and keyboard/mouse; synthetic IPC only, not installed Windows/WebKit or full App navigation",
+  "settingsGeometry": [
+    {
+      "width": 320,
+      "theme": "light",
+      "left": 28,
+      "right": 282,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "theme": "light",
+      "left": 28,
+      "right": 282,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 760,
+      "theme": "light",
+      "left": 28,
+      "right": 722,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 760,
+      "theme": "light",
+      "left": 28,
+      "right": 722,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 1000,
+      "theme": "light",
+      "left": 28,
+      "right": 962,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 1000,
+      "theme": "light",
+      "left": 28,
+      "right": 962,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(250, 251, 252)",
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "theme": "dark",
+      "left": 28,
+      "right": 282,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "theme": "dark",
+      "left": 28,
+      "right": 282,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    },
+    {
+      "width": 760,
+      "theme": "dark",
+      "left": 28,
+      "right": 722,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    },
+    {
+      "width": 760,
+      "theme": "dark",
+      "left": 28,
+      "right": 722,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    },
+    {
+      "width": 1000,
+      "theme": "dark",
+      "left": 28,
+      "right": 962,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    },
+    {
+      "width": 1000,
+      "theme": "dark",
+      "left": 28,
+      "right": 962,
+      "border": "1px",
+      "borderStyle": "solid",
+      "radius": "14px",
+      "padding": "16px 20px",
+      "background": "rgb(34, 39, 41)",
+      "overflow": 0
+    }
+  ],
+  "settingsBefore": 132.375,
+  "archiveGeometry": [
+    {
+      "width": 320,
+      "main": {
+        "x": 8,
+        "y": 70.390625,
+        "width": 294
+      },
+      "aside": {
+        "x": 0,
+        "y": 0,
+        "width": 0
+      },
+      "overflow": 0
+    },
+    {
+      "width": 760,
+      "main": {
+        "x": 280,
+        "y": 28.796875,
+        "width": 462
+      },
+      "aside": {
+        "x": 8,
+        "y": 28.796875,
+        "width": 272
+      },
+      "overflow": 0
+    },
+    {
+      "width": 1000,
+      "main": {
+        "x": 280,
+        "y": 28.796875,
+        "width": 702
+      },
+      "aside": {
+        "x": 8,
+        "y": 28.796875,
+        "width": 272
+      },
+      "overflow": 0
+    }
+  ],
+  "measurements": [
+    {
+      "width": 320,
+      "overlap": 0,
+      "cols": "290px"
+    },
+    {
+      "width": 760,
+      "overlap": 0,
+      "cols": "728px"
+    },
+    {
+      "width": 1280,
+      "overlap": 0,
+      "cols": "1244px"
+    }
+  ],
+  "modes": [
+    {
+      "theme": "light",
+      "zoom": 1,
+      "overlap": 0
+    },
+    {
+      "theme": "light",
+      "zoom": 1.25,
+      "overlap": 0
+    },
+    {
+      "theme": "light",
+      "zoom": 1.5,
+      "overlap": 0
+    },
+    {
+      "theme": "dark",
+      "zoom": 1,
+      "overlap": 0
+    },
+    {
+      "theme": "dark",
+      "zoom": 1.25,
+      "overlap": 0
+    },
+    {
+      "theme": "dark",
+      "zoom": 1.5,
+      "overlap": 0
+    }
+  ],
+  "dialogGeometry": {
+    "top": 19.388565063476562,
+    "bottom": 458.6806182861328,
+    "height": 480,
+    "width": 279.5494384765625
+  },
+  "before": {
+    "confirmations": 2,
+    "payload": "Synthetic goal and pending work",
+    "recipient": "claude",
+    "archiveRetries": 3,
+    "archiveRestores": 3,
+    "renders": 5,
+    "fits": 5,
+    "mounts": 1
+  },
+  "afterStream": {
+    "confirmations": 2,
+    "payload": "Synthetic goal and pending work",
+    "recipient": "claude",
+    "archiveRetries": 3,
+    "archiveRestores": 3,
+    "renders": 25,
+    "fits": 6,
+    "mounts": 1
+  },
+  "afterIdle": {
+    "confirmations": 2,
+    "payload": "Synthetic goal and pending work",
+    "recipient": "claude",
+    "archiveRetries": 3,
+    "archiveRestores": 3,
+    "renders": 25,
+    "fits": 6,
+    "mounts": 1
+  },
+  "refreshBefore": {
+    "confirmations": 2,
+    "payload": "Synthetic goal and pending work",
+    "recipient": "claude",
+    "archiveRetries": 3,
+    "archiveRestores": 3,
+    "renders": 30,
+    "fits": 12,
+    "mounts": 1
+  },
+  "refreshAfter": {
+    "confirmations": 2,
+    "payload": "Synthetic goal and pending work",
+    "recipient": "claude",
+    "archiveRetries": 3,
+    "archiveRestores": 3,
+    "renders": 30,
+    "fits": 12,
+    "mounts": 1
+  }
+}

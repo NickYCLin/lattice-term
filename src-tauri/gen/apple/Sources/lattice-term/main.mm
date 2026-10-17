@@ -1,6 +1,149 @@
 #include "bindings/bindings.h"
+#include <TargetConditionals.h>
+
+#if TARGET_OS_SIMULATOR
+#import <UIKit/UIKit.h>
+#import <WebKit/WebKit.h>
+
+static NSDictionary *layoutRect(CGRect rect) {
+    return @{ @"x": @(rect.origin.x), @"y": @(rect.origin.y),
+              @"width": @(rect.size.width), @"height": @(rect.size.height) };
+}
+
+static NSDictionary *layoutInsets(UIEdgeInsets insets) {
+    return @{ @"top": @(insets.top), @"bottom": @(insets.bottom),
+              @"left": @(insets.left), @"right": @(insets.right) };
+}
+
+static NSArray *layoutChildren(UIView *view) {
+    NSMutableArray *children = [NSMutableArray array];
+    for (UIView *child in view.subviews) {
+        [children addObject:@{ @"class": NSStringFromClass(child.class),
+            @"frame": layoutRect(child.frame), @"bounds": layoutRect(child.bounds),
+            @"children": layoutChildren(child) }];
+    }
+    return children;
+}
+
+static NSString *applyLayoutExperiment(WKWebView *webview) {
+    NSURL *cache = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
+    NSString *variant = [NSString stringWithContentsOfURL:[cache URLByAppendingPathComponent:@"layout-variant.txt"] encoding:NSUTF8StringEncoding error:nil] ?: @"baseline";
+    static NSString *previous = @"baseline";
+    if (![variant isEqualToString:previous]) {
+        if ([variant isEqualToString:@"document-dvh"]) {
+            [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.height='100dvh')" completionHandler:nil];
+        } else if ([variant isEqualToString:@"document-percent"]) {
+            [webview evaluateJavaScript:@"['html','body','#root'].forEach(selector=>document.querySelector(selector).style.removeProperty('height'))" completionHandler:nil];
+        } else if ([variant isEqualToString:@"frontend-ready"]) {
+            [webview evaluateJavaScript:@"globalThis.__latticeFrontendSync={status:'pending',startedAt:Date.now()/1000};Promise.resolve().then(()=>globalThis.__TAURI_INTERNALS__.invoke('mobile_frontend_ready')).then(()=>{globalThis.__latticeFrontendSync.status='completed';globalThis.__latticeFrontendSync.completedAt=Date.now()/1000},()=>{globalThis.__latticeFrontendSync.status='failed';globalThis.__latticeFrontendSync.completedAt=Date.now()/1000});undefined" completionHandler:nil];
+        } else if ([variant isEqualToString:@"relayout"]) {
+            [webview setNeedsLayout];
+            [webview layoutIfNeeded];
+        } else if ([variant isEqualToString:@"resize-never"]) {
+            webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+            webview.scrollView.contentOffset = CGPointZero;
+            CGRect frame = webview.frame;
+            webview.frame = CGRectInset(frame, 0, 1);
+            dispatch_async(dispatch_get_main_queue(), ^{ webview.frame = frame; });
+        } else if ([variant isEqualToString:@"never"]) {
+            webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        } else if ([variant isEqualToString:@"automatic"]) {
+            webview.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
+        } else if ([variant isEqualToString:@"zero-insets"]) {
+            if (@available(iOS 15.5, *)) {
+                [webview setMinimumViewportInset:UIEdgeInsetsZero maximumViewportInset:UIEdgeInsetsZero];
+            }
+        } else if ([variant isEqualToString:@"resize"]) {
+            CGRect frame = webview.frame;
+            webview.frame = CGRectInset(frame, 0, 1);
+            webview.frame = frame;
+        }
+        previous = [variant copy];
+    }
+    return previous;
+}
+
+static void captureLayout(UIView *view, UIWindow *window, NSInteger seconds, NSInteger *index) {
+    if ([view isKindOfClass:[WKWebView class]]) {
+        WKWebView *webview = (WKWebView *)view;
+        NSString *variant = applyLayoutExperiment(webview);
+        NSMutableDictionary *snapshot = [@{
+            @"variant": variant,
+            @"delaySeconds": @(seconds), @"windowBounds": layoutRect(window.bounds),
+            @"requestedAt": @([[NSDate date] timeIntervalSince1970]),
+            @"screenBounds": layoutRect(window.screen.bounds), @"scale": @(window.screen.scale),
+            @"windowSafeArea": layoutInsets(window.safeAreaInsets),
+            @"interfaceOrientation": @(window.windowScene.interfaceOrientation),
+            @"isKeyWindow": @(window.isKeyWindow),
+            @"webviewInteractive": @(webview.userInteractionEnabled),
+            @"webviewFrame": layoutRect(webview.frame),
+            @"webviewInWindow": layoutRect([webview convertRect:webview.bounds toView:window]),
+            @"webviewSafeArea": layoutInsets(webview.safeAreaInsets),
+            @"scrollFrame": layoutRect(webview.scrollView.frame),
+            @"scrollBounds": layoutRect(webview.scrollView.bounds),
+            @"scrollContentSize": @{ @"width": @(webview.scrollView.contentSize.width), @"height": @(webview.scrollView.contentSize.height) },
+            @"insetAdjustmentBehavior": @(webview.scrollView.contentInsetAdjustmentBehavior),
+            @"children": layoutChildren(webview),
+            @"contentInset": layoutInsets(webview.scrollView.contentInset),
+            @"adjustedContentInset": layoutInsets(webview.scrollView.adjustedContentInset)
+        } mutableCopy];
+        if (@available(iOS 15.5, *)) {
+            snapshot[@"minimumViewportInset"] = layoutInsets(webview.minimumViewportInset);
+            snapshot[@"maximumViewportInset"] = layoutInsets(webview.maximumViewportInset);
+        }
+        NSString *name = [NSString stringWithFormat:@"layout-%ld-%ld.json", (long)seconds, (long)(*index)++];
+        [webview evaluateJavaScript:@"if(!globalThis.__latticeLayoutEvents){globalThis.__latticeLayoutEvents=[];for(const kind of ['pointerdown','pointerup','pointercancel','touchstart','touchend','touchcancel','click','focusin'])document.addEventListener(kind,event=>{const target=event.target;const point=event.changedTouches?.[0]??event;const button=target?.closest?.('button');const hit=Number.isFinite(point.clientX)&&Number.isFinite(point.clientY)?document.elementFromPoint(point.clientX,point.clientY):null;globalThis.__latticeLayoutEvents.push({kind,at:Date.now(),x:point.clientX??null,y:point.clientY??null,screenX:point.screenX??null,screenY:point.screenY??null,pointerId:event.pointerId??null,buttons:event.buttons??null,trusted:event.isTrusted,tag:target?.tagName,role:target?.getAttribute?.('role'),buttonClass:button?.getAttribute('class')??null,hitTag:hit?.tagName??null,hitButtonClass:hit?.closest?.('button')?.getAttribute('class')??null});globalThis.__latticeLayoutEvents.splice(0,Math.max(0,globalThis.__latticeLayoutEvents.length-64))},true)}" completionHandler:nil];
+        NSString *script = @"JSON.stringify({innerWidth,innerHeight,devicePixelRatio,viewportMeta:Array.from(document.querySelectorAll('meta[name=viewport]'),n=>n.content),screen:{width:screen.width,height:screen.height},viewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale}:null,rects:['html','body','#root','.app--mobile','.rail','.drawer','.drawer__body','.drawer__foot','.drawer input','.drawer__head button'].map(selector=>{const n=document.querySelector(selector);if(!n)return {selector};const r=n.getBoundingClientRect();const c=getComputedStyle(n);return {selector,x:r.x,y:r.y,width:r.width,height:r.height,background:c.backgroundColor,position:c.position,cssHeight:c.height,paddingTop:c.paddingTop,paddingBottom:c.paddingBottom,keyboard:document.documentElement.getAttribute('data-mobile-keyboard'),viewportHeight:c.getPropertyValue('--app-viewport-height')}})})";
+        script = [script stringByReplacingOccurrencesOfString:@"{innerWidth,innerHeight" withString:@"{capturedAt:Date.now()/1000,events:globalThis.__latticeLayoutEvents,activeTag:document.activeElement?.tagName,documentFocused:document.hasFocus(),innerWidth,innerHeight"];
+        script = [script stringByReplacingOccurrencesOfString:@"'.drawer input'" withString:@"'.connections--empty .button--primary','.drawer input'"];
+        script = [script stringByReplacingOccurrencesOfString:@"{capturedAt:" withString:@"{nativeLayout:globalThis.__latticeNativeLayout??[],frontendSync:globalThis.__latticeFrontendSync??null,capturedAt:"];
+        script = [script stringByReplacingOccurrencesOfString:@"return {selector,x:r.x" withString:@"const center={x:r.x+r.width/2,y:r.y+r.height/2};const hit=document.elementFromPoint(center.x,center.y);return {selector,center,centerHitsElement:hit===n||n.contains(hit),hitTag:hit?.tagName??null,hitButtonClass:hit?.closest?.('button')?.getAttribute('class')??null,x:r.x"];
+        [webview evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+            snapshot[@"capturedAt"] = @([[NSDate date] timeIntervalSince1970]);
+            snapshot[@"windowBounds"] = layoutRect(window.bounds);
+            snapshot[@"interfaceOrientation"] = @(window.windowScene.interfaceOrientation);
+            snapshot[@"isKeyWindow"] = @(window.isKeyWindow);
+            snapshot[@"screenBounds"] = layoutRect(window.screen.bounds);
+            snapshot[@"windowSafeArea"] = layoutInsets(window.safeAreaInsets);
+            snapshot[@"webviewFrame"] = layoutRect(webview.frame);
+            snapshot[@"webviewInWindow"] = layoutRect([webview convertRect:webview.bounds toView:window]);
+            snapshot[@"webviewSafeArea"] = layoutInsets(webview.safeAreaInsets);
+            snapshot[@"scrollFrame"] = layoutRect(webview.scrollView.frame);
+            snapshot[@"scrollBounds"] = layoutRect(webview.scrollView.bounds);
+            if ([result isKindOfClass:[NSString class]]) {
+                snapshot[@"dom"] = [NSJSONSerialization JSONObjectWithData:[result dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] ?: @{};
+            }
+            if (error) snapshot[@"javascriptErrorCode"] = @(error.code);
+            NSURL *cache = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
+            NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil];
+            [data writeToURL:[cache URLByAppendingPathComponent:name] options:NSDataWritingAtomic error:nil];
+        }];
+    }
+    for (UIView *child in view.subviews) captureLayout(child, window, seconds, index);
+}
+
+static void scheduleLayoutDiagnostics(void) {
+    if (![[NSProcessInfo processInfo].environment[@"LATTICETERM_LAYOUT_DIAGNOSTICS"] isEqualToString:@"1"]) return;
+    NSMutableArray<NSNumber *> *delays = [NSMutableArray arrayWithObject:@2];
+    for (NSInteger seconds = 5; seconds <= 900; seconds += 5) [delays addObject:@(seconds)];
+    for (NSNumber *delay in delays) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay.longLongValue * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            NSInteger index = 0;
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                    captureLayout(window, window, delay.integerValue, &index);
+                }
+            }
+        });
+    }
+}
+#endif
 
 int main(int argc, char * argv[]) {
+#if TARGET_OS_SIMULATOR
+	scheduleLayoutDiagnostics();
+#endif
 	ffi::start_app();
 	return 0;
 }

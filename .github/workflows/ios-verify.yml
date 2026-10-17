@@ -9,6 +9,7 @@ on:
       - "src-tauri/**"
       - "crates/lattice-remote/**"
       - "scripts/*ios*"
+      - "scripts/ios-layout-ui-tests/**"
       - "package*.json"
       - ".github/workflows/ios-verify.yml"
   pull_request:
@@ -17,6 +18,7 @@ on:
       - "src-tauri/**"
       - "crates/lattice-remote/**"
       - "scripts/*ios*"
+      - "scripts/ios-layout-ui-tests/**"
       - "package*.json"
       - ".github/workflows/ios-verify.yml"
 
@@ -82,6 +84,28 @@ jobs:
           reports.mkdir(exist_ok=True)
           (reports / 'simulator.json').write_text(result.stdout)
           PY
+      - name: Prepare isolated keyboard and rotation checks
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
+      - name: Capture isolated simulator layout evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
+          if len(apps) != 1:
+              raise SystemExit('Expected exactly one simulator app')
+          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics', '--interaction-checks'], check=True)
+          PY
+      - name: Save original simulator layout evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-layout-evidence
+          path: ios-layout-evidence
+          if-no-files-found: ignore
       - name: Build an unsigned device archive
         run: npm run ios:device:unsigned
       - name: Check the device SDK and bundled privacy declarations
@@ -143,23 +167,12 @@ jobs:
           path: src-tauri/gen/apple/build/reports
           if-no-files-found: error
           retention-days: 7
-      - name: Verify startup and capture original App Store screenshot candidates
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import subprocess
-          from pathlib import Path
-          apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
-          if len(apps) != 1:
-              raise SystemExit(f'Expected one simulator app, found {len(apps)}')
-          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'src-tauri/gen/apple/build/smoke', '--store-screenshots'], check=True)
-          PY
       - name: Save simulator launch evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ios-simulator-launch-evidence
-          path: src-tauri/gen/apple/build/smoke
+          path: ios-layout-evidence
           if-no-files-found: ignore
           retention-days: 14
       # This job deliberately creates no IPA, uses no Apple credentials,

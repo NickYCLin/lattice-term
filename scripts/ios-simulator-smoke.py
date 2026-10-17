@@ -4,10 +4,12 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 BUNDLE_ID = "io.github.nickyclin.latticeterm"
@@ -191,34 +193,83 @@ def wait_for_frontend(device_id, pid, screenshot, reader, timeout=90):
     raise RuntimeError(f"{device_id}: 連線頁在 {timeout} 秒內未顯示{stalled}，已保存 {screenshot}")
 
 
-def simctl(*args, timeout=60):
+def stream_text(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
+def recorded_command(command, timeout, path, env=None):
+    started = time.monotonic()
+    record = {"command": command, "startedAt": time.time(), "timeoutSeconds": timeout,
+              "status": "running", "exitCode": None, "pid": None, "stdout": "", "stderr": ""}
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=timeout, env=env)
+        record.update(status="completed", exitCode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        if command[:3] == ["xcrun", "simctl", "launch"]:
+            match = re.search(r": (\d+)\s*$", result.stdout)
+            record["pid"] = int(match[1]) if match else None
+        return result.stdout.strip()
+    except Exception as error:
+        record.update(status="timeout" if isinstance(error, subprocess.TimeoutExpired) else "failed",
+                      exitCode=getattr(error, "returncode", None),
+                      errorType=type(error).__name__, error=str(error),
+                      stdout=stream_text(getattr(error, "stdout", None)),
+                      stderr=stream_text(getattr(error, "stderr", None)))
+        raise
+    finally:
+        record.update(finishedAt=time.time(), elapsedSeconds=time.monotonic() - started)
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+
+
+def simctl(*args, timeout=60, env=None, evidence_path=None):
+    if evidence_path is not None:
+        return recorded_command(["xcrun", "simctl", *map(str, args)], timeout, evidence_path, env)
     return subprocess.run(
         ["xcrun", "simctl", *map(str, args)],
-        check=True, capture_output=True, text=True, timeout=timeout,
+        check=True, capture_output=True, text=True, timeout=timeout, env=env,
     ).stdout.strip()
 
 
-def failure_diagnostics(device_id, directory, reader):
+def log_interval(started_at, finished_at):
+    return ["--start", datetime.fromtimestamp(started_at - 5, timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z"),
+            "--end", datetime.fromtimestamp(finished_at + 1, timezone.utc).strftime("%Y-%m-%d %H:%M:%S%z")]
+
+
+def failure_diagnostics(device_id, directory, reader, interval=None, label="failure"):
+    if interval is None:
+        now = time.time()
+        interval = log_interval(now, now)
     probes = {
         "hostProcesses": ["/bin/ps", "-axo", "pid,ppid,state,%cpu,%mem,comm"],
         "simulatorProcesses": ["xcrun", "simctl", "spawn", device_id, "launchctl", "list"],
-        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
-                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit"'],
-        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--last", "3m",
-                             "--predicate", 'process == "CoreSimulatorService"'],
+        "appLaunchLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                         "--predicate", f'eventMessage CONTAINS[c] "{BUNDLE_ID}" OR process == "LatticeTerm"'],
+        "appLaunchHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                             "--predicate", f'eventMessage CONTAINS[c] "{BUNDLE_ID}" OR eventMessage CONTAINS[c] "{device_id}"'],
+        "webViewLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                       "--predicate", 'process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process == "SpringBoard" OR process == "runningboardd"'],
+        "simulatorHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                             "--predicate", 'process == "CoreSimulatorService" OR process == "Simulator" OR process == "SimulatorTrampoline" OR process == "runningboardd"'],
     }
     known_image = directory / "iPhone.png"
     if reader and known_image.is_file():
         probes["knownGoodOCR"] = [str(reader), str(known_image.resolve())]
     results = {}
     for name, command in probes.items():
+        evidence = directory / f"{label}.{name}.command.json"
         try:
-            result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=15)
-            results[name] = {"completed": True, "stdout": result.stdout[-65536:], "stderr": result.stderr[-8192:]}
+            output = recorded_command(command, 15, evidence)
+            results[name] = {"completed": True}
             if name == "knownGoodOCR":
-                results[name]["frontendVisible"] = frontend_is_visible(json.loads(result.stdout))
+                results[name]["frontendVisible"] = frontend_is_visible(json.loads(output))
         except Exception as probe_error:
             results[name] = {"completed": False, "error": f"{type(probe_error).__name__}: {probe_error}"[:2048]}
+        record = json.loads(evidence.read_text())
+        results[name].update(commandEvidence=evidence.name, status=record["status"],
+                             exitCode=record["exitCode"], timeoutSeconds=record["timeoutSeconds"],
+                             stdout=record["stdout"][-65536:], stderr=record["stderr"][-8192:])
     return results
 
 
@@ -227,12 +278,28 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     # best-effort capture, so even an unresponsive simulator leaves evidence.
     path = directory / f"{label}.failure.json"
     report = {"stage": stage, "errorType": type(error).__name__, "error": str(error)[:2048]}
+    startup_path = directory / f"{label}.startup.json"
+    started_at = json.loads(startup_path.read_text())["startedAt"] if startup_path.exists() else time.time()
+    report["startupCommands"] = {}
+    for phase in ("boot", "bootstatus", "keyboardTutorial.write", "keyboardTutorial.read", "install", "launch"):
+        command_path = directory / f"{label}.{phase}.command.json"
+        if command_path.exists():
+            record = json.loads(command_path.read_text())
+            if record.get("startedAt", 0) >= started_at:
+                report["startupCommands"][phase] = record
+    readiness_path = directory / f"{label}.keyboard-readiness.json"
+    if readiness_path.exists():
+        readiness = json.loads(readiness_path.read_text())
+        if readiness.get("startedAt", 0) >= started_at:
+            report["keyboardReadiness"] = readiness
+    report["logInterval"] = {"startedAt": started_at, "failureAt": time.time()}
+    interval = log_interval(started_at, report["logInterval"]["failureAt"])
     for stream in ("stdout", "stderr"):
         value = getattr(error, stream, None)
         if value:
             report[stream] = (value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value))[-8192:]
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-    report["diagnostics"] = failure_diagnostics(device_id, directory, reader)
+    report["diagnostics"] = failure_diagnostics(device_id, directory, reader, interval, label)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     screenshot = directory / f"{label}.failure.png"
     try:
@@ -241,14 +308,267 @@ def capture_failure(device_id, label, stage, error, directory, reader=None):
     except Exception as capture_error:
         report["captureError"] = f"{type(capture_error).__name__}: {capture_error}"[:2048]
     try:
-        logs = simctl("spawn", device_id, "log", "show", "--style", "compact", "--last", "3m",
-                      "--predicate", 'eventMessage CONTAINS[c] "io.github.nickyclin.latticeterm"', timeout=15)
+        logs = simctl("spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                      "--predicate", 'eventMessage CONTAINS[c] "io.github.nickyclin.latticeterm"', timeout=15,
+                      evidence_path=directory / f"{label}.bundleLog.command.json")
         log_path = directory / f"{label}.failure.log"
         log_path.write_text(logs[-262144:])
         report["systemLog"] = log_path.name
     except Exception as log_error:
         report["logError"] = f"{type(log_error).__name__}: {log_error}"[:2048]
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+
+
+def read_layout_snapshots(cache, timeout=15, require_ready=True):
+    deadline = time.monotonic() + timeout
+    while True:
+        snapshots = [json.loads(path.read_text()) for path in sorted(cache.glob("layout-*.json"))]
+        ready = any(
+            all(any(rect.get("selector") == selector and rect.get("height", 0) > 0
+                    for rect in entry.get("dom", {}).get("rects", []))
+                for selector in ("#root", ".app--mobile"))
+            for entry in snapshots
+        )
+        if not require_ready or (ready and any(entry.get("delaySeconds") == 10 for entry in snapshots)):
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.5)
+    if not snapshots:
+        raise RuntimeError("模擬器未產生原生與 DOM 幾何診斷")
+    if require_ready and not ready:
+        raise RuntimeError("幾何診斷早於前端完成，缺少 root 與 mobile app 尺寸")
+    return snapshots
+
+
+def capture_viewport_experiments(device_id, cache, output, label):
+    results = []
+    for variant in ("frontend-ready", "document-dvh", "document-percent", "relayout", "resize-never", "never", "automatic", "zero-insets", "resize"):
+        started = time.time()
+        pending = cache / "layout-variant.tmp"
+        pending.write_text(variant)
+        pending.replace(cache / "layout-variant.txt")
+        deadline = time.monotonic() + 30
+        while True:
+            snapshots = read_layout_snapshots(cache, timeout=0)
+            matching = [entry for entry in snapshots
+                        if entry.get("variant") == variant and entry.get("capturedAt", 0) >= started + 5]
+            if matching:
+                latest = max(matching, key=lambda entry: entry["capturedAt"])
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"缺少 viewport 對照幾何：{variant}")
+            time.sleep(0.5)
+        screenshot = output / f"{label}.{variant}.png"
+        simctl("io", device_id, "screenshot", screenshot.resolve(), timeout=60)
+        results.append({"variant": variant, "layout": latest, "screenshot": screenshot.name})
+        (output / f"{label}.experiments.json").write_text(json.dumps(results, indent=2) + "\n")
+    return results
+
+
+def build_interaction_runner(directory):
+    project = directory / "layout-ui-tests"
+    shutil.copytree(Path(__file__).with_name("ios-layout-ui-tests"), project)
+    subprocess.run(["xcodegen", "generate", "--spec", "project.yml"], cwd=project, check=True, timeout=60)
+    derived = project / "derived"
+    subprocess.run(["xcodebuild", "build-for-testing", "-project", str(project / "LatticeLayoutChecks.xcodeproj"),
+                    "-scheme", "LayoutUITests", "-destination", "generic/platform=iOS Simulator",
+                    "-derivedDataPath", str(derived), "CODE_SIGNING_ALLOWED=NO"], check=True, timeout=300)
+    return project, derived
+
+
+def capture_app_processes(device_id, pid, output, label, stage):
+    executable = Path(simctl("get_app_container", device_id, BUNDLE_ID, "app")) / "LatticeTerm"
+    result = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,comm="],
+                            check=True, capture_output=True, text=True, timeout=15)
+    processes = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) == 3 and Path(fields[2]).resolve() == executable.resolve():
+            processes.append({"pid": int(fields[0]), "parentPid": int(fields[1])})
+    evidence = {"stage": stage, "capturedAt": time.time(), "expectedPid": pid, "processes": processes}
+    (output / f"{label}.{stage}.processes.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    if [process["pid"] for process in processes] != [pid]:
+        raise RuntimeError(f"隔離 App 必須只有啟動的單一程序：{label}，實際 {len(processes)} 個")
+
+
+def validate_native_viewport(snapshot, keyboard=False, keyboard_frame=None, controls=None):
+    dom = snapshot.get("dom", {})
+    viewport = dom.get("viewport", {})
+    window = snapshot.get("windowBounds", {})
+    app = next((rect for rect in dom.get("rects", []) if rect.get("selector") == ".app--mobile"), {})
+    height = viewport.get("height", 0)
+    if height <= 0 or abs(app.get("height", 0) - height) > 1:
+        raise RuntimeError("App 高度未跟隨已載入的 visual viewport")
+    top = viewport.get("offsetTop", 0) - snapshot.get("scrollBounds", {}).get("y", 0)
+    if abs(app.get("y", -100) - top) > 1:
+        raise RuntimeError("App 起點未跟隨 visual viewport")
+    if not keyboard and any(abs(dom.get(dom_key, 0) - window.get(window_key, -100)) > 1
+                            for dom_key, window_key in (("innerWidth", "width"), ("innerHeight", "height"))):
+        raise RuntimeError("鍵盤關閉時 DOM 仍短於原生視窗，不能通過全畫面驗收")
+    if not keyboard and abs(height - window.get("height", -100)) > 1:
+        raise RuntimeError("鍵盤關閉時 visual viewport 仍短於原生視窗")
+    if keyboard_frame is not None and keyboard:
+        native_top = snapshot.get("webviewInWindow", {}).get("y", 0)
+        if keyboard_frame.get("height", 0) <= 100 or height + native_top > keyboard_frame.get("y", 0) + 1:
+            raise RuntimeError("App 可見 viewport 與原生鍵盤重疊")
+        if dom.get("innerHeight", 0) - height <= 100:
+            raise RuntimeError("原生鍵盤顯示時 visual viewport 未縮小")
+    for rect in dom.get("rects", []):
+        if rect.get("selector") in (".rail", ".drawer__foot") and rect.get("height", 0) > 0:
+            if rect.get("y", -100) < top - 1 or rect.get("y", 0) + rect["height"] > top + height + 1:
+                raise RuntimeError(f"控制列超出可見 viewport：{rect['selector']}")
+    if controls is not None:
+        native = snapshot.get("webviewInWindow", {})
+        for control in controls:
+            rect = control["frame"]
+            if (rect.get("x", 0) < -1 or rect.get("y", -100) < -1
+                    or rect.get("x", 0) + rect.get("width", 0) > window.get("width", 0) + 1
+                    or rect.get("y", 0) + rect.get("height", 0) > window.get("height", 0) + 1):
+                raise RuntimeError("原生控制項超出視窗")
+        if keyboard:
+            for selector, control in zip((".drawer input", ".drawer__head button"), controls):
+                rect = next((rect for rect in dom.get("rects", []) if rect.get("selector") == selector), {})
+                frame = control["frame"]
+                center_x = frame.get("x", 0) + frame.get("width", 0) / 2 - native.get("x", 0)
+                center_y = frame.get("y", 0) + frame.get("height", 0) / 2 - native.get("y", 0)
+                if (rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0
+                        or rect.get("y", -100) < top - 1
+                        or rect.get("y", 0) + rect.get("height", 0) > top + height + 1
+                        or not rect.get("x", 0) - 1 <= center_x <= rect.get("x", 0) + rect.get("width", 0) + 1
+                        or not rect.get("y", 0) - 1 <= center_y <= rect.get("y", 0) + rect.get("height", 0) + 1):
+                    raise RuntimeError(f"原生與 DOM 控制項可見座標不符：{selector}")
+                if selector == ".drawer input":
+                    body = next((rect for rect in dom.get("rects", []) if rect.get("selector") == ".drawer__body"), {})
+                    if (body.get("height", 0) <= 0 or rect["y"] < body.get("y", 0) - 1
+                            or rect["y"] + rect["height"] > body.get("y", 0) + body.get("height", 0) + 1):
+                        raise RuntimeError("輸入欄位被表單標題或底列遮擋")
+            if len(controls) != 2:
+                raise RuntimeError("缺少鍵盤開啟時的輸入欄位與關閉按鈕")
+
+
+def capture_input_diagnostics(device_id, output, label, inputs):
+    before = next((entry for entry in reversed(inputs) if entry.get("phase") == "before"), None)
+    if before is None:
+        return
+    after = next((entry for entry in reversed(inputs)
+                  if entry.get("id") == before.get("id") and entry.get("phase") == "after"), before)
+    started, finished = before.get("at"), after.get("at")
+    if not all(isinstance(value, (int, float)) and 0 < value < 1e11 for value in (started, finished)):
+        return
+    if finished < started:
+        return
+    truncated = finished - started > 30
+    ranges = [(started, started + 5), (finished - 5, finished)] if truncated else [(started, finished)]
+    windows = [{"start": begin - 5, "end": end + 1} for begin, end in ranges]
+    report = {"touchDurationSeconds": finished - started, "truncated": truncated,
+              "afterAvailable": after is not before, "windows": windows,
+              "omittedInterval": {"start": windows[0]["end"], "end": windows[-1]["start"]} if truncated else None}
+    comparison = None
+    for candidate in inputs:
+        if candidate.get("phase") != "before" or candidate.get("id") == before.get("id"):
+            continue
+        completed = next((entry for entry in inputs
+                          if entry.get("id") == candidate.get("id") and entry.get("phase") == "after"), {})
+        begin, end = candidate.get("at"), completed.get("at")
+        if (all(isinstance(value, (int, float)) and 0 < value < 1e11 for value in (begin, end))
+                and 0 <= end - begin <= 5 and end < started):
+            comparison = (begin, end)
+            report["comparisonInput"] = {"id": candidate.get("id"), "start": begin - 5, "end": end + 1,
+                                         "deliveredClickVerified": False}
+            break
+    if comparison is None:
+        report["comparisonInput"] = None
+    (output / f"{label}.input-diagnostics.json").write_text(json.dumps(report, indent=2) + "\n")
+    for index, (begin, end) in enumerate(ranges):
+        suffix = ".before" if truncated and index == 0 else ""
+        capture_input_window(device_id, output, label, log_interval(begin, end), suffix)
+    if comparison is not None:
+        capture_input_window(device_id, output, label, log_interval(*comparison), ".reference")
+
+
+def capture_input_window(device_id, output, label, interval, suffix):
+    probes = {
+        "inputSimulatorLog": ["xcrun", "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--info", "--debug", *interval,
+                              "--predicate", 'process == "backboardd" OR process == "SpringBoard" OR process == "testmanagerd" OR process == "LatticeTerm" OR process BEGINSWITH "com.apple.WebKit" OR process CONTAINS "LayoutUITests"'],
+        "inputHostLog": ["/usr/bin/log", "show", "--style", "compact", "--info", "--debug", *interval,
+                         "--predicate", 'process == "Simulator" OR process == "SimulatorTrampoline" OR process == "CoreSimulatorService" OR process == "testmanagerd" OR process == "xcodebuild" OR subsystem CONTAINS[c] "HID" OR subsystem CONTAINS[c] "XCTest"'],
+    }
+    for name, command in probes.items():
+        try:
+            recorded_command(command, 15, output / f"{label}.{name}{suffix}.command.json")
+        except Exception:
+            pass
+
+
+def capture_interactions(device_id, cache, output, label, runner):
+    project, derived = runner
+    result = output.resolve() / f"{label}.xcresult"
+    command = ["xcodebuild", "test-without-building", "-project", str(project / "LatticeLayoutChecks.xcodeproj"),
+               "-scheme", "LayoutUITests", "-destination", f"platform=iOS Simulator,id={device_id}",
+               "-derivedDataPath", str(derived), "-resultBundlePath", str(result),
+               "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired as error:
+        stdout = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
+        stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
+        completed = subprocess.CompletedProcess(command, 124, stdout, stderr + "\nXCUITest timed out after 300 seconds")
+    (output / f"{label}.interactions.log").write_text(completed.stdout + completed.stderr)
+    snapshots = read_layout_snapshots(cache, timeout=0, require_ready=False)
+    (output / f"{label}.interaction-layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+    inputs = [json.loads(match) for match in re.findall(r"LATTICE_LAYOUT_INPUT (\{[^\n]+\})", completed.stdout)]
+    (output / f"{label}.inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
+    stages = [json.loads(match) for match in re.findall(r"LATTICE_LAYOUT_STAGE (\{[^\n]+\})", completed.stdout)]
+    for stage in stages:
+        matching = [snapshot for snapshot in snapshots
+                    if stage["capturedAt"] - 6 <= snapshot.get("capturedAt", 0)
+                    <= min(stage["capturedAt"] + 6, stage.get("captureStableUntil", stage["captureFinishedAt"]))
+                    and abs(snapshot.get("capturedAt", 0) - snapshot.get("dom", {}).get("capturedAt", -100)) <= 1
+                    and any(rect.get("selector") == ".app--mobile" and rect.get("height", 0) > 0
+                            for rect in snapshot.get("dom", {}).get("rects", []))]
+        if matching:
+            stage["layout"] = min(matching, key=lambda snapshot: abs(snapshot["capturedAt"] - stage["capturedAt"]))
+    (output / f"{label}.interactions.json").write_text(json.dumps(stages, indent=2) + "\n")
+    if completed.returncode:
+        capture_input_diagnostics(device_id, output, label, inputs)
+    primary_failure = (f"鍵盤與旋轉驗收失敗：{label}，請檢查 interactions.log 與 xcresult"
+                       + ("；XCUITest timed out after 300 seconds" if completed.returncode == 124 else "")) if completed.returncode else None
+    export_error = None
+    if result.exists():
+        try:
+            recorded_command(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
+                              "--output-path", str(output.resolve() / f"{label}.attachments")],
+                             60, output / f"{label}.attachments.command.json")
+        except Exception as error:
+            export_error = str(error)
+    (output / f"{label}.interactions.result.json").write_text(json.dumps({
+        "exitCode": completed.returncode, "timedOut": completed.returncode == 124,
+        "primaryFailure": primary_failure, "attachmentExportError": export_error,
+    }, ensure_ascii=False, indent=2) + "\n")
+    if completed.returncode:
+        raise RuntimeError(primary_failure)
+    if export_error:
+        raise RuntimeError(f"互動附件採證失敗：{label}：{export_error}")
+    if [stage["stage"] for stage in stages] != ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]:
+        raise RuntimeError("鍵盤與旋轉驗收缺少完整階段紀錄")
+    for stage in stages:
+        if "layout" not in stage:
+            raise RuntimeError(f"鍵盤與旋轉階段缺少新鮮原生幾何：{stage['stage']}")
+    for stage in stages:
+        keyboard = stage.get("keyboardVisible", False)
+        if keyboard != (stage["stage"] == "keyboard-open"):
+            raise RuntimeError(f"原生鍵盤狀態不符驗收階段：{stage['stage']}")
+        frame = stage.get("keyboardFrame", {})
+        validate_native_viewport(stage["layout"], keyboard=keyboard, keyboard_frame=frame, controls=stage.get("controls", []))
+        if not stage.get("controls"):
+            raise RuntimeError(f"缺少原生控制項可用性證據：{stage['stage']}")
+        for control in stage["controls"]:
+            rect = control["frame"]
+            if not control.get("hittable") or rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0:
+                raise RuntimeError("原生控制項無法點擊")
+            if keyboard and rect["y"] + rect["height"] > frame.get("y", 0) + 1:
+                raise RuntimeError("原生控制項被鍵盤遮擋")
 
 
 def main():
@@ -258,7 +578,14 @@ def main():
     parser.add_argument("--local", action="store_true", help="在本機以符合 App 最低版本的 runtime 驗證；只建立及清理本次測試裝置")
     parser.add_argument("--boot-timeout", type=int, default=180, help="新裝置開機與系統資料移轉的等待秒數，預設 180，範圍 30–1800；不影響 App 畫面期限")
     parser.add_argument("--store-screenshots", action="store_true", help="另產生符合商店尺寸且不含 Alpha 的原始截圖候選素材")
+    parser.add_argument("--layout-diagnostics", action="store_true", help="僅在新建模擬器蒐集原生 frame、安全區與無文字內容的 DOM 幾何")
+    parser.add_argument("--viewport-experiments", action="store_true", help="僅在隔離模擬器對照原生 inset 與 resize，不作為產品驗收")
+    parser.add_argument("--interaction-checks", action="store_true", help="透過 XCUITest 驗證新建模擬器的真鍵盤開關與旋轉，保存原圖及幾何")
     args = parser.parse_args()
+    if args.viewport_experiments and not args.layout_diagnostics:
+        parser.error("--viewport-experiments 需要 --layout-diagnostics")
+    if args.interaction_checks and (not args.layout_diagnostics or args.viewport_experiments):
+        parser.error("--interaction-checks 需要 --layout-diagnostics，且不得混用 viewport 對照變更")
     if not 30 <= args.boot_timeout <= 1800:
         parser.error("--boot-timeout 必須介於 30 與 1800 秒之間")
     if os.environ.get("CI") != "true" and not args.local:
@@ -279,11 +606,87 @@ def main():
             ["xcrun", "swiftc", str(Path(__file__).with_name("ios-screen-text.swift")), "-o", str(reader)],
             check=True, capture_output=True, text=True, timeout=180,
         )
+        args.interaction_runner = build_interaction_runner(Path(directory)) if args.interaction_checks else None
         check_simulators(args, runtime, devices, reader)
+
+
+def wait_for_keyboard_preference(device_id, output=None, label=None):
+    started = time.monotonic()
+    deadline = started + 60
+    path = output / f"{label}.keyboard-readiness.json" if output else None
+    report = {"deviceId": device_id, "startedAt": time.time(), "budgetSeconds": 60,
+              "commandTimeoutSeconds": 15, "maxAttemptsPerOperation": 4, "retryDelaySeconds": 2,
+              "status": "running", "attempts": []}
+    domain, key = "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"
+    last_error = None
+    try:
+        for operation in ("write", "read"):
+            report["operation"] = operation
+            completed = False
+            for attempt in range(1, 5):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                suffix = "" if attempt == 1 else f".{attempt}"
+                command_path = output / f"{label}.keyboardTutorial.{operation}{suffix}.command.json" if output else None
+                report["attempts"].append({"operation": operation, "attempt": attempt,
+                                           "commandFile": command_path.name if command_path else None})
+                if path:
+                    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+                arguments = ["spawn", device_id, "defaults", operation, domain, key]
+                if operation == "write":
+                    arguments.extend(["-bool", "YES"])
+                try:
+                    value = simctl(*arguments, timeout=min(15, remaining), evidence_path=command_path)
+                except subprocess.TimeoutExpired as error:
+                    last_error = error
+                else:
+                    if time.monotonic() > deadline:
+                        break
+                    if operation == "read":
+                        report["readback"] = value.strip()
+                        if report["readback"] != "1":
+                            report["stopReason"] = "readback-mismatch"
+                            raise RuntimeError("隔離模擬器鍵盤教學前置設定未生效")
+                    completed = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or attempt == 4:
+                    break
+                time.sleep(min(2, remaining))
+            if not completed:
+                report["stopReason"] = "deadline" if time.monotonic() >= deadline else "attempt-limit"
+                raise RuntimeError("隔離模擬器鍵盤偏好在有界等待內未完成寫入及讀回；尚未安裝產品") from last_error
+            last_error = None
+        report["status"] = "ready"
+    except Exception:
+        report["status"] = "failed"
+        report.setdefault("stopReason", "command-error")
+        raise
+    finally:
+        report.update(finishedAt=time.time(), elapsedSeconds=time.monotonic() - started)
+        if path:
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+
+
+def prepare_ci_keyboard(device_id, output=None, label=None):
+    if os.environ.get("CI") != "true":
+        return
+    wait_for_keyboard_preference(device_id, output, label)
+    subprocess.run([
+        "defaults", "write", "com.apple.iphonesimulator", "DevicePreferences",
+        "-dict-add", device_id,
+        "<dict><key>ConnectHardwareKeyboard</key><false/></dict>",
+    ], check=True, capture_output=True, text=True, timeout=15)
+    subprocess.run([
+        "open", "-a", "Simulator", "--args", "-CurrentDeviceUDID", device_id,
+        "-ConnectHardwareKeyboard", "NO",
+    ], check=True, capture_output=True, text=True, timeout=30)
 
 
 def check_simulators(args, runtime, devices, reader):
     report = []
+    failures = []
     targets = []
     for family in ("iPhone", "iPad"):
         model = (store_model(devices, family) if args.store_screenshots and family == "iPad" else
@@ -299,17 +702,23 @@ def check_simulators(args, runtime, devices, reader):
         device_id = simctl("create", f"LatticeTerm Smoke {label}", model["deviceTypeIdentifier"], runtime)
         stage = "boot"
         try:
+            (args.output / f"{label}.startup.json").write_text(json.dumps({"startedAt": time.time()}) + "\n")
             print(f"{label}: 啟動新的 {model['name']} 模擬器", flush=True)
-            simctl("boot", device_id)
+            simctl("boot", device_id, evidence_path=args.output / f"{label}.boot.command.json")
             stage = "bootstatus"
-            simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout)
+            simctl("bootstatus", device_id, "-b", timeout=args.boot_timeout,
+                   evidence_path=args.output / f"{label}.bootstatus.command.json")
+            if getattr(args, "interaction_checks", False):
+                stage = "keyboard-setup"
+                prepare_ci_keyboard(device_id, args.output, label)
             stage = "install"
             print(f"{label}: 開機完成，安裝 App", flush=True)
             # A shared runner installing onto a device that just finished
             # booting has taken longer than two minutes; the install itself is
             # not what this smoke test measures, so give it the same room as
             # the launch below.
-            simctl("install", device_id, args.app.resolve(), timeout=300)
+            simctl("install", device_id, args.app.resolve(), timeout=300,
+                   evidence_path=args.output / f"{label}.install.command.json")
             stage = "launch"
             print(f"{label}: 安裝完成，等待啟動指令", flush=True)
             # CoreSimulatorBridge reports a 300-second launch/boot retry
@@ -318,7 +727,11 @@ def check_simulators(args, runtime, devices, reader):
             # Leave a small IPC margin; the app's separate 90-second rendered
             # startup deadline still starts only after a PID is returned.
             launch_started = time.monotonic()
-            output = simctl("launch", device_id, BUNDLE_ID, timeout=330)
+            launch_env = None
+            if getattr(args, "layout_diagnostics", False):
+                launch_env = {**os.environ, "SIMCTL_CHILD_LATTICETERM_LAYOUT_DIAGNOSTICS": "1"}
+            output = simctl("launch", device_id, BUNDLE_ID, timeout=330, env=launch_env,
+                            evidence_path=args.output / f"{label}.launch.command.json")
             launch_seconds = round(time.monotonic() - launch_started, 1)
             match = re.search(r": (\d+)\s*$", output)
             if match is None:
@@ -329,26 +742,54 @@ def check_simulators(args, runtime, devices, reader):
             print(f"{label}: 已取得 PID，驗證實際連線頁", flush=True)
             visible = wait_for_frontend(device_id, pid, screenshot, reader)
             entry = {"family": family, "model": model["name"], "runtime": runtime, "launchCommandSeconds": launch_seconds, "survivedStartup": True, **visible, "screenshot": screenshot.name}
+            if getattr(args, "layout_diagnostics", False):
+                container = Path(simctl("get_app_container", device_id, BUNDLE_ID, "data"))
+                cache = container / "Library" / "Caches"
+                snapshots = read_layout_snapshots(cache)
+                (args.output / f"{label}.layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+                entry["layoutDiagnostics"] = f"{label}.layout.json"
+                capture_app_processes(device_id, pid, args.output, label, "baseline")
             if capture_store:
                 stage = "store-screenshot"
                 entry["appStoreCandidate"] = capture_store_image(device_id, family, args.output)
+            if getattr(args, "viewport_experiments", False):
+                stage = "viewport-experiments"
+                capture_viewport_experiments(device_id, cache, args.output, label)
+            if getattr(args, "interaction_checks", False):
+                stage = "interaction-checks"
+                validate_native_viewport(max(snapshots, key=lambda snapshot: snapshot.get("capturedAt", 0)))
+                capture_interactions(device_id, cache, args.output, label, args.interaction_runner)
             stage = "report"
+            if getattr(args, "layout_diagnostics", False):
+                capture_app_processes(device_id, pid, args.output, label, "completed")
             report.append(entry)
             (args.output / "launch-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
             print(f"{label}: 已辨識連線頁內容，程序仍在執行，已保存 {screenshot}", flush=True)
         except Exception as error:
+            if getattr(args, "layout_diagnostics", False) and stage == "frontend":
+                try:
+                    container = Path(simctl("get_app_container", device_id, BUNDLE_ID, "data"))
+                    snapshots = read_layout_snapshots(container / "Library" / "Caches", timeout=0, require_ready=False)
+                    (args.output / f"{label}.layout.json").write_text(json.dumps(snapshots, indent=2) + "\n")
+                except Exception as layout_error:
+                    (args.output / f"{label}.layout-error.json").write_text(json.dumps({"error": str(layout_error)}) + "\n")
             try:
                 capture_failure(device_id, label, stage, error, args.output, reader)
             except Exception as evidence_error:
                 # Preserve the original failure if the output disk also fails.
                 print(f"無法保存失敗證據：{evidence_error}", file=sys.stderr, flush=True)
-            raise
+            if not getattr(args, "interaction_checks", False):
+                raise
+            failures.append({"device": label, "stage": stage, "error": str(error)})
+            (args.output / "interaction-failures.json").write_text(json.dumps(failures, ensure_ascii=False, indent=2) + "\n")
         finally:
             # Cleanup is limited to this invocation's newly created device.
             try:
                 simctl("shutdown", device_id)
             finally:
                 simctl("delete", device_id)
+    if failures:
+        raise RuntimeError("原生互動驗收未通過：" + ", ".join(failure["device"] for failure in failures))
 
 
 if __name__ == "__main__":

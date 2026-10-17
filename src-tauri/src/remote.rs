@@ -954,7 +954,36 @@ pub async fn command_start(
     session_id: &str,
     input: crate::remote_commands::CommandInput,
 ) -> Result<crate::remote_commands::CommandView, String> {
-    command_start_checked(registry, session_id, input, None).await
+    command_start_checked(registry, session_id, input, None)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CommandStartError {
+    NotConnected,
+    ConnectionChanged,
+    ShellNotAllowed,
+    Busy,
+    ReconnectRequired,
+    InvalidRequest(String),
+    StateUnavailable(String),
+    UnknownOutcome(String),
+}
+
+impl std::fmt::Display for CommandStartError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::NotConnected => "The remote session is not connected.",
+            Self::ConnectionChanged => "The remote connection changed.",
+            Self::ShellNotAllowed => "The host has not allowed this command shell.",
+            Self::Busy => "A command is still running.",
+            Self::ReconnectRequired => "Reconnect before starting more commands.",
+            Self::InvalidRequest(detail)
+            | Self::StateUnavailable(detail)
+            | Self::UnknownOutcome(detail) => detail,
+        })
+    }
 }
 
 pub(crate) async fn command_start_checked(
@@ -962,30 +991,33 @@ pub(crate) async fn command_start_checked(
     session_id: &str,
     input: crate::remote_commands::CommandInput,
     generation: Option<u64>,
-) -> Result<crate::remote_commands::CommandView, String> {
+) -> Result<crate::remote_commands::CommandView, CommandStartError> {
     use lattice_remote::command_protocol::{CommandEnd, CommandEvent};
     let (outbound, generation, request, view) = {
-        let mut state = registry.state.lock().map_err(|e| e.to_string())?;
+        let mut state = registry
+            .state
+            .lock()
+            .map_err(|error| CommandStartError::StateUnavailable(error.to_string()))?;
         let record = state
             .sessions
             .get_mut(session_id)
-            .ok_or("The remote session is not connected.")?;
+            .ok_or(CommandStartError::NotConnected)?;
         if generation.is_some_and(|expected| expected != record.generation) {
-            return Err("The remote connection changed.".into());
+            return Err(CommandStartError::ConnectionChanged);
         }
         if record.summary.command_shells & input.shell.flag() == 0 {
-            return Err("The host has not allowed this command shell.".into());
+            return Err(CommandStartError::ShellNotAllowed);
         }
         if record.command.as_ref().is_some_and(|c| c.view.active()) {
-            return Err("A command is still running.".into());
+            return Err(CommandStartError::Busy);
         }
         if record.command_next >= 256 {
-            return Err("Reconnect before starting more commands.".into());
+            return Err(CommandStartError::ReconnectRequired);
         }
         let request = input.request(record.command_next + 1);
         RemoteMessage::CommandRequest(request.clone())
             .encode()
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| CommandStartError::InvalidRequest(error.to_string()))?;
         record.command_next += 1;
         let command = crate::remote_commands::CommandState::new(session_id, &request);
         let view = command.view.clone();
@@ -1011,7 +1043,7 @@ pub(crate) async fn command_start_checked(
                 detail: detail.into(),
             },
         );
-        return Err(detail.into());
+        return Err(CommandStartError::UnknownOutcome(detail.into()));
     }
     Ok(view)
 }
@@ -2277,6 +2309,75 @@ mod tests {
         };
         assert_eq!(shell, selected_shell);
         assert_eq!(command, selected_command);
+        let busy_operation = if auto_allow {
+            let mut second = operation.clone();
+            if let DesktopOperation::RemoteCommand { request_id, .. } = &mut second {
+                *request_id = "remote-command-busy".into();
+            }
+            let pending = service
+                .execute("test-client", second.clone())
+                .await
+                .unwrap();
+            let second_id = pending["operationId"].as_str().unwrap().to_owned();
+            let failure = tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    match service
+                        .execute(
+                            "test-client",
+                            DesktopOperation::OperationStatus {
+                                target_id: target.clone(),
+                                operation_id: second_id.clone(),
+                            },
+                        )
+                        .await
+                    {
+                        Err(error) => break error,
+                        Ok(_) => tokio::task::yield_now().await,
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(failure.code, "busy");
+            assert!(failure.message.contains("not sent"));
+            let repeated_status = service
+                .execute(
+                    "test-client",
+                    DesktopOperation::OperationStatus {
+                        target_id: target.clone(),
+                        operation_id: second_id.clone(),
+                    },
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(repeated_status, failure);
+            let history = service
+                .execute(
+                    "test-client",
+                    DesktopOperation::ListOperations {
+                        target_id: target.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(history["operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| {
+                    entry["operationId"] == second_id
+                        && entry["code"] == "busy"
+                        && entry["state"] == "failed"
+                }));
+            assert!(peer.try_recv().is_err());
+            assert_eq!(
+                registry.command_state("mcp-command").unwrap().unwrap().id,
+                command_id
+            );
+            Some(second)
+        } else {
+            None
+        };
         registry
             .command_event(
                 "mcp-command",
@@ -2334,6 +2435,16 @@ mod tests {
         assert_eq!(result["exitStatus"], 7);
         let replay = service.execute("test-client", operation).await.unwrap();
         assert_eq!(replay["duplicate"], true);
+        if let Some(second) = busy_operation {
+            assert_eq!(
+                service
+                    .execute("test-client", second)
+                    .await
+                    .unwrap_err()
+                    .code,
+                "busy"
+            );
+        }
         assert!(peer.try_recv().is_err());
         // Another client cannot read or cancel this client's result.
         assert!(service
@@ -2424,6 +2535,151 @@ mod tests {
             .is_err());
         let record = registry.remove("command-test").unwrap().unwrap();
         stop_remote_session(record, "owned test completed", Duration::from_millis(10)).await;
+    }
+
+    fn command_fixture() -> crate::remote_commands::CommandInput {
+        crate::remote_commands::CommandInput {
+            shell: lattice_remote::command_protocol::CommandShell::Cmd,
+            command: "echo fixture".into(),
+            directory: String::new(),
+            timeout_seconds: 5,
+        }
+    }
+
+    #[tokio::test]
+    async fn command_start_rejections_never_enqueue_or_consume_command_ids() {
+        let registry = Arc::new(RemoteRegistry::new());
+        assert_eq!(
+            command_start_checked(&registry, "start-test", command_fixture(), Some(7))
+                .await
+                .unwrap_err(),
+            CommandStartError::NotConnected
+        );
+        let (wire, mut peer) = mpsc::channel(1);
+        let mut summary = remote_summary("start-test", false);
+        summary.command_shells = 1;
+        let mut record = idle_test_record(summary, 7);
+        record.outbound = wire;
+        register_test_record(&registry, record);
+        assert_eq!(
+            command_start_checked(&registry, "start-test", command_fixture(), Some(8))
+                .await
+                .unwrap_err(),
+            CommandStartError::ConnectionChanged
+        );
+        let mut input = command_fixture();
+        input.shell = lattice_remote::command_protocol::CommandShell::PowerShell;
+        assert_eq!(
+            command_start_checked(&registry, "start-test", input, Some(7))
+                .await
+                .unwrap_err(),
+            CommandStartError::ShellNotAllowed
+        );
+        let mut input = command_fixture();
+        input.command.clear();
+        assert!(matches!(
+            command_start_checked(&registry, "start-test", input, Some(7)).await,
+            Err(CommandStartError::InvalidRequest(_))
+        ));
+        {
+            let mut state = registry.state.lock().unwrap();
+            let record = state.sessions.get_mut("start-test").unwrap();
+            assert_eq!(record.command_next, 0);
+            assert!(record.command.is_none());
+            record.command_next = 256;
+        }
+        assert_eq!(
+            command_start_checked(&registry, "start-test", command_fixture(), Some(7))
+                .await
+                .unwrap_err(),
+            CommandStartError::ReconnectRequired
+        );
+        assert!(peer.try_recv().is_err());
+        assert_eq!(
+            registry.state.lock().unwrap().sessions["start-test"].command_next,
+            256
+        );
+        let record = registry.remove("start-test").unwrap().unwrap();
+        stop_remote_session(record, "owned test completed", Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn command_send_failures_remain_uncertain_and_do_not_retry() {
+        for full in [false, true] {
+            let registry = Arc::new(RemoteRegistry::new());
+            let (wire, peer) = mpsc::channel(1);
+            let mut peer = if full {
+                wire.send(RemoteMessage::KeepAlive).await.unwrap();
+                Some(peer)
+            } else {
+                drop(peer);
+                None
+            };
+            let mut summary = remote_summary("send-test", false);
+            summary.command_shells = 1;
+            let mut record = idle_test_record(summary, 7);
+            record.outbound = wire;
+            register_test_record(&registry, record);
+            assert!(matches!(
+                command_start_checked(&registry, "send-test", command_fixture(), Some(7)).await,
+                Err(CommandStartError::UnknownOutcome(_))
+            ));
+            let view = registry.command_state("send-test").unwrap().unwrap();
+            assert_eq!(view.id, 1);
+            assert_eq!(view.state, "failed");
+            assert!(!view.active());
+            assert_eq!(
+                registry.state.lock().unwrap().sessions["send-test"].command_next,
+                1
+            );
+            if let Some(peer) = peer.as_mut() {
+                assert_eq!(peer.try_recv().unwrap(), RemoteMessage::KeepAlive);
+                assert!(peer.try_recv().is_err());
+            }
+            let record = registry.remove("send-test").unwrap().unwrap();
+            stop_remote_session(record, "owned test completed", Duration::from_millis(10)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_pending_send_does_not_mutate_a_reconnected_session() {
+        let registry = Arc::new(RemoteRegistry::new());
+        let (wire, peer) = mpsc::channel(1);
+        wire.send(RemoteMessage::KeepAlive).await.unwrap();
+        let mut summary = remote_summary("reused-command", false);
+        summary.command_shells = 1;
+        let mut record = idle_test_record(summary.clone(), 7);
+        record.outbound = wire;
+        register_test_record(&registry, record);
+        let task = {
+            let registry = Arc::clone(&registry);
+            tokio::spawn(async move {
+                command_start_checked(&registry, "reused-command", command_fixture(), Some(7)).await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while registry.command_state("reused-command").unwrap().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let previous = registry.remove("reused-command").unwrap().unwrap();
+        register_test_record(&registry, idle_test_record(summary, 8));
+        drop(peer);
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(CommandStartError::UnknownOutcome(_))
+        ));
+        assert_eq!(registry.command_generation("reused-command"), Some(8));
+        assert!(registry.command_state("reused-command").unwrap().is_none());
+        assert_eq!(
+            registry.state.lock().unwrap().sessions["reused-command"].command_next,
+            0
+        );
+        stop_remote_session(previous, "owned test completed", Duration::from_millis(10)).await;
+        let current = registry.remove("reused-command").unwrap().unwrap();
+        stop_remote_session(current, "owned test completed", Duration::from_millis(10)).await;
     }
 
     struct Dropped(Arc<AtomicBool>);
