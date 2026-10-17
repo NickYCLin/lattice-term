@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 const script = readFileSync(new URL("./verify-windows-lib-tests.ps1", import.meta.url), "utf8");
 const manifest = readFileSync(new URL("./windows-lib-test.manifest", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/windows-test-installer.yml", import.meta.url), "utf8");
+const agentSource = readFileSync(new URL("../src-tauri/src/agent.rs", import.meta.url), "utf8");
 
 describe("Windows account-free native regression CI", () => {
   test("runs only in ephemeral CI and discovers the exact Cargo lib-test artifact", () => {
@@ -57,5 +58,22 @@ describe("Windows account-free native regression CI", () => {
       expect(workflow).toContain(`- "${path}"`);
     }
     expect(workflow).not.toContain("continue-on-error:");
+  });
+
+  test("executes the desktop interrupt predicate and Windows cancellation guards", () => {
+    const filterLoop = script.match(/foreach \(\$filter in @\(([\s\S]*?)\)\) \{/);
+    expect(filterLoop).not.toBeNull();
+    const filters = [...filterLoop[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+    expect(filters.filter((filter) => filter === "desktop_interrupt")).toEqual(["desktop_interrupt"]);
+    for (const name of [
+      "desktop_interrupt_requires_verified_working_and_clean_input",
+      "desktop_interrupt_preserves_profile_but_requires_official_ready_before_resend",
+      "desktop_interrupt_never_repairs_raw_escape_paste_draft_or_changed_profile",
+      "desktop_interrupt_rejects_waiters_from_an_unconfirmed_submit",
+      "repeated_desktop_interrupt_does_not_preserve_input_profile",
+    ]) {
+      expect(agentSource).toContain(`fn ${name}(`);
+      expect(name).toContain("desktop_interrupt");
+    }
   });
 });
