@@ -14,6 +14,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const ENTRY_NAME: &str = "io.github.nickyclin.latticeterm.agent-daemon";
 /// Proves an entry was written by LatticeTerm before it is touched.
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -25,7 +25,7 @@ pub mod client;
 mod desktop_bridge;
 pub mod mcp;
 pub mod server;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
 mod transport;
 

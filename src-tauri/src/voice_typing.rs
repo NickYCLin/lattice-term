@@ -62,6 +62,7 @@ pub fn start() -> Result<(), String> {
 
 #[derive(Clone, Copy, PartialEq)]
 enum DictationSignal {
+    #[cfg(any(target_os = "linux", test))]
     Listen,
     Finish,
     Cancel,
