@@ -39,6 +39,7 @@ import {
   type SensitiveClipboardClearOutcome,
 } from "../app/sensitiveClipboard";
 import { NotificationSoundPanel } from "../components/settings/NotificationSoundPanel";
+import { TypographySettings } from "../components/settings/TypographySettings";
 import { moveRadioGroupFocus } from "../components/overlays/radioNavigation";
 
 interface Choice<T> {
@@ -269,6 +270,8 @@ export function SettingsView({
             <p className="panel__hint">{t("settings.appearanceHint")}</p>
           </div>
         </header>
+
+        <TypographySettings preferences={preferences} onChange={onChange} />
 
         <div className="setting">
           <div className="setting__text">

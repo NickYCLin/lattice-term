@@ -818,6 +818,44 @@
   flex-direction: column;
 }
 
+.typography-settings {
+  min-width: 0;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.typography-settings__control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 1 18rem;
+  min-width: 0;
+}
+
+.typography-settings__control input {
+  width: 100%;
+  min-width: 0;
+}
+
+.typography-settings__control output {
+  white-space: nowrap;
+  min-width: 5ch;
+  text-align: end;
+}
+
+.typography-settings__preview {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  background: var(--canvas-deep);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--output-font-size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .setting {
   display: flex;
   align-items: center;

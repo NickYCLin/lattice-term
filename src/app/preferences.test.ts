@@ -3,6 +3,18 @@ import { defaultPreferences, readStoredPreferences, sanitizePreferences } from "
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
+describe("stored text sizes", () => {
+  it("keeps older profiles at the original sizes", () => {
+    expect(sanitizePreferences({})).toMatchObject({ interfaceScale: 100, outputFontSize: 13 });
+  });
+
+  it("loads saved sizes and bounds hand-edited values", () => {
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({ interfaceScale: 150, outputFontSize: 24 }) });
+    expect(readStoredPreferences()).toMatchObject({ interfaceScale: 150, outputFontSize: 24 });
+    expect(sanitizePreferences({ interfaceScale: 500, outputFontSize: -10 })).toMatchObject({ interfaceScale: 200, outputFontSize: 12 });
+  });
+});
+
 describe("stored language preference", () => {
   function setup(languages: string[], stored: string | null = null) {
     vi.stubGlobal("navigator", { languages, language: languages[0] });

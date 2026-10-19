@@ -27,7 +27,7 @@
 }
 
 .button--sm {
-  height: 1.875rem;
+  height: calc(1.875rem * var(--interface-text-scale));
   padding: 0 var(--space-4);
   font-size: var(--text-xs);
 }

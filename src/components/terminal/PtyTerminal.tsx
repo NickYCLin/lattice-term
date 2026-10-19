@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { attachTerminalTypography } from "../../app/typography";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -109,6 +110,7 @@ export function PtyTerminal({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopTypography = attachTerminalTypography(terminal, scheduleFit);
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit, true);
     const imageLinks = ioRef.current.openImages ? terminal.registerLinkProvider(
       terminalImageLinks(terminal, () => ioRef.current.openImages?.()),
@@ -188,6 +190,7 @@ export function PtyTerminal({
       imePresentation.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopTypography();
       stopScrollback();
       imageLinks?.dispose();
       terminal.dispose();

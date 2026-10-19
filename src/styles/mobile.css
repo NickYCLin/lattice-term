@@ -8,7 +8,7 @@
   height: var(--app-viewport-height, 100dvh);
   padding-left: max(var(--space-2), env(safe-area-inset-left, 0px));
   padding-right: max(var(--space-2), env(safe-area-inset-right, 0px));
-  --control-height: 2.75rem;
+  --control-height: calc(2.75rem * var(--interface-text-scale));
 }
 
 .app--mobile .view-header {
@@ -56,7 +56,7 @@
 .app--mobile .rail__label { display: block; font-size: 10px; line-height: 1.2; white-space: nowrap; }
 .app--mobile input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .app--mobile select,
-.app--mobile textarea { font-size: 16px; }
+.app--mobile textarea { font-size: calc(16px * var(--interface-text-scale)); }
 .app--mobile .xterm-helper-textarea { font-size: 16px !important; }
 .app--mobile .input, .app--mobile .select { min-width: 0; max-width: 100%; }
 

@@ -683,6 +683,13 @@ export const en: Messages = {
   // Settings --------------------------------------------------------------
   "settings.appearance": "Appearance",
   "settings.appearanceHint": "Applies immediately and is remembered.",
+  "settings.interfaceScale": "Interface text size",
+  "settings.interfaceScaleHint": "Resize menus, buttons, forms and descriptions up to 200%.",
+  "settings.outputFontSize": "Output text size",
+  "settings.outputFontSizeHint": "Resize assistant replies, command results and terminal text without disconnecting or clearing history.",
+  "settings.fontPreview": "Output text preview",
+  "settings.fontPreviewText": "Connected. Ready to work.\n$ echo Hello LatticeTerm\nHello LatticeTerm",
+  "settings.resetFontSize": "Reset text sizes",
   "settings.notifications": "Notifications",
   "settings.notificationsHint": "Choose from 12 new cues, with separate sounds for sessions and chats.",
   "settings.notifications.preview": "Preview",

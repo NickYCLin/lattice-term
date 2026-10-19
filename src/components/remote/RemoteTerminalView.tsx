@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { attachTerminalTypography } from "../../app/typography";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { attachTerminalScrollback } from "../terminal/terminalScrollback";
@@ -117,6 +118,7 @@ export function RemoteTerminalView({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopTypography = attachTerminalTypography(terminal, scheduleFit);
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     const sendInput = (data: string) => {
@@ -169,6 +171,7 @@ export function RemoteTerminalView({
       mobileInput.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopTypography();
       stopScrollback();
       terminal.dispose();
       termRef.current = null;

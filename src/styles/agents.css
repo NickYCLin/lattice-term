@@ -1294,7 +1294,7 @@
   border-radius: 6px;
   background: var(--surface-sunken);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: calc(var(--output-font-size) * 12 / 13);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

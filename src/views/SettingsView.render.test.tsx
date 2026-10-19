@@ -56,6 +56,17 @@ function renderSettings(platform: string): string {
 }
 
 describe("Settings updater platform boundary", () => {
+  it("offers independent labelled text sizes, output preview and reset", () => {
+    const markup = renderSettings("windows");
+    expect(markup).toContain("介面字級");
+    expect(markup).toContain("輸出字級");
+    expect(markup).toContain("不會中斷連線或清除紀錄");
+    expect(markup).toContain('for="interface-text-scale"');
+    expect(markup).toContain('for="output-font-size"');
+    expect(markup).toContain('aria-valuetext="100%"');
+    expect(markup).toContain('aria-valuetext="13 px"');
+    expect(markup).toContain("恢復預設字級");
+  });
   it("shows Windows desktop startup separately from the background service", () => {
     const markup = renderSettings("windows");
     expect(markup).toContain("登入 Windows 後自動開啟 LatticeTerm");

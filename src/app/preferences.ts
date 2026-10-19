@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { applyTypography, normalizeInterfaceScale, normalizeOutputFontSize } from "./typography";
 import { defaultLocale, localeCatalog, type Locale } from "../i18n/catalog";
 import { detectSystemLocale } from "../i18n/systemLocale";
 import {
@@ -27,6 +28,8 @@ export type SensitiveClipboardClearChoice =
   | "120";
 
 export interface Preferences {
+  interfaceScale: number;
+  outputFontSize: number;
   theme: ThemeChoice;
   locale: Locale;
   density: DensityChoice;
@@ -45,6 +48,8 @@ export interface Preferences {
 }
 
 export const defaultPreferences: Preferences = {
+  interfaceScale: 100,
+  outputFontSize: 13,
   theme: "dark",
   locale: defaultLocale,
   density: "comfortable",
@@ -85,6 +90,8 @@ const knownSensitiveClipboardClearChoices = new Set<string>([
  */
 export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
   return {
+    interfaceScale: normalizeInterfaceScale(stored.interfaceScale),
+    outputFontSize: normalizeOutputFontSize(stored.outputFontSize),
     theme: normalizeTheme(stored.theme),
     locale: knownLocales.has(String(stored.locale))
       ? (stored.locale as Locale)
@@ -160,6 +167,10 @@ export function usePreferences(): PreferencesValue {
 
   const activeTheme =
     preferences.theme === "system" ? systemTheme : preferences.theme;
+
+  useEffect(() => {
+    applyTypography(preferences.interfaceScale, preferences.outputFontSize);
+  }, [preferences.interfaceScale, preferences.outputFontSize]);
 
   useEffect(() => {
     const root = document.documentElement;

@@ -667,6 +667,13 @@ export const zhTW = {
   // 設定 ------------------------------------------------------------------
   "settings.appearance": "外觀",
   "settings.appearanceHint": "調整後立即生效，並且會記住你的選擇。",
+  "settings.interfaceScale": "介面字級",
+  "settings.interfaceScaleHint": "調整選單、按鈕、表單與說明文字，最大可放大至 200%。",
+  "settings.outputFontSize": "輸出字級",
+  "settings.outputFontSizeHint": "調整助理回覆、指令結果與終端機文字。立即生效，不會中斷連線或清除紀錄。",
+  "settings.fontPreview": "輸出文字預覽",
+  "settings.fontPreviewText": "連線已建立，現在可以開始工作。\n$ echo Hello LatticeTerm\nHello LatticeTerm",
+  "settings.resetFontSize": "恢復預設字級",
   "settings.notifications": "通知",
   "settings.notificationsHint": "12 款全新提示音，為工作階段與對話選擇各自的聲音。",
   "settings.notifications.preview": "試聽",

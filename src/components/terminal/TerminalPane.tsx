@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { attachTerminalTypography } from "../../app/typography";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -120,6 +121,7 @@ export function TerminalPane({
       resizeFrame = requestAnimationFrame(fitAndReport);
     };
     fitAndReport();
+    const stopTypography = attachTerminalTypography(terminal, scheduleFit);
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     attachTerminalClipboard(terminal, {
@@ -187,6 +189,7 @@ export function TerminalPane({
       imePresentation.dispose();
       imeFallback.dispose();
       typed.dispose();
+      stopTypography();
       stopScrollback();
       terminal.dispose();
       termRef.current = null;
