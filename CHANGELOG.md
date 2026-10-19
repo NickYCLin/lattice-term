@@ -4,6 +4,34 @@
 
 ---
 
+## [2026.10.20](https://github.com/NickYCLin/lattice-term/compare/v2026.10.19...v2026.10.20) (2026-10-19)
+
+
+### 🚀 新增功能
+
+* **chat:** 顯示模型推理等級與未知能力提示 ([4f80e0d](https://github.com/NickYCLin/lattice-term/commit/4f80e0d8bb38ba9a39776ece620c566785a77d73))
+* **connections:** 補上同主機連線入口與協定變更確認 ([94a6357](https://github.com/NickYCLin/lattice-term/commit/94a6357ecfbc3e5c1fa1671e224aa725fd96cfcd))
+* **settings:** 支援介面與終端輸出字級調整 ([41ef2e0](https://github.com/NickYCLin/lattice-term/commit/41ef2e0428a7bec9fb6bb2e9cb213c1dc8570a4a))
+
+
+### 🛠️ 問題修正
+
+* **agents:** 修正閒置後待送訊息未接續送出 ([aec80a8](https://github.com/NickYCLin/lattice-term/commit/aec80a89b770daff9200b98d143d17af30024386))
+* **chat:** 修正 Antigravity 模型選取未生效 ([4c58ec0](https://github.com/NickYCLin/lattice-term/commit/4c58ec09b29b6d0717f1ff71b6cb57e7ef8cdcf8))
+* **clipboard:** 避免舊清理作業取消新密碼計時 ([c0f1ce9](https://github.com/NickYCLin/lattice-term/commit/c0f1ce9bee8aa6084d50aaad233443b8678178a1))
+* **cliproxy:** 補齊原生對話的代理設定 ([28e9399](https://github.com/NickYCLin/lattice-term/commit/28e9399cde67186bb9b02b08a118af0d07158d5d))
+* **connect:** 顯示主機金鑰儲存失敗原因 ([8b95807](https://github.com/NickYCLin/lattice-term/commit/8b95807579924e17c84c83e67873913c7768edda))
+* **dialogs:** 關閉頁面時結束等待中的對話框 ([b5abf32](https://github.com/NickYCLin/lattice-term/commit/b5abf3209be096561682f79ea8c0653392b4c09b))
+* **sftp:** 修正 Windows OpenSSH 上傳遭誤擋 ([9885e81](https://github.com/NickYCLin/lattice-term/commit/9885e81df73843ec0e119af5d420164230efce8b))
+* **sftp:** 修正小檔上傳大小上限誤判 ([932ce32](https://github.com/NickYCLin/lattice-term/commit/932ce325cce948a2dc1f2578e2ac822f234aa4d8))
+* **sftp:** 寫入期間停用拖曳上傳入口 ([917f61f](https://github.com/NickYCLin/lattice-term/commit/917f61ff869d427658fbcb8af9a7a5ab69d34efd))
+* **sftp:** 補上讀檔串流建立失敗的上傳清理 ([b4e628a](https://github.com/NickYCLin/lattice-term/commit/b4e628a92e913b77d75d63d3ef059b46b52baa74))
+* **sftp:** 避免拖曳上傳取消時誤刪暫存檔 ([01cb56f](https://github.com/NickYCLin/lattice-term/commit/01cb56fea03b3f39fa810ebaeb6d47cb6c04f4a2))
+* **sftp:** 關閉面板後停止送出後續上傳 ([3ced765](https://github.com/NickYCLin/lattice-term/commit/3ced765c394ae3ff9caf4fc134c42bfb1876ff1b))
+* **tunnels:** 保護損壞設定並停用複本自動啟動 ([54da1c5](https://github.com/NickYCLin/lattice-term/commit/54da1c5e72829753db0904f84133959573c46137))
+* **tunnels:** 修正埠號驗證與 IPv6 複製命令 ([1f1a683](https://github.com/NickYCLin/lattice-term/commit/1f1a6838b41a2fb463ffbd6b84e5f5640db8e42d))
+* **workspace:** 保留復原專案路徑的大小寫差異 ([5f216c6](https://github.com/NickYCLin/lattice-term/commit/5f216c642e69f795b8725185f113b269e343b9c0))
+
 ## [2026.10.19](https://github.com/NickYCLin/lattice-term/compare/v2026.10.15...v2026.10.19) (2026-10-19)
 
 
