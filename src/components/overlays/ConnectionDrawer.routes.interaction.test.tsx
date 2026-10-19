@@ -116,6 +116,7 @@ it("keeps edits when backing out of route navigation and discards only after con
     await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={linkedSource} profiles={[linkedSource, route]}
       supportedProtocols={["ssh", "sftp"]} mobile={false} onSave={vi.fn()} onClose={close} onOpenRoute={open} onAddRoute={add} /></I18nProvider>));
     const name = allNodes(container).find(node => node.attributes["data-field"] === "name")!;
+    expect(container.textContent).toContain("SFTP · fixture@fixture.invalid:2223");
     await act(async () => props(name).onChange({ currentTarget: { value: "未儲存名稱" } }));
     const clickText = async (text: string) => {
       const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.includes(text))!;
@@ -131,5 +132,56 @@ it("keeps edits when backing out of route navigation and discards only after con
     expect(add).toHaveBeenCalledExactlyOnceWith(source.id);
     expect(open).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("preserves the original protocol until the user chooses whether to add or replace", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const add = vi.fn();
+  const save = vi.fn();
+  const original = { ...source, port: 2222 };
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={original} profiles={[original]}
+      supportedProtocols={["ssh", "rdp"]} mobile={false} onSave={save} onClose={vi.fn()} onAddRoute={add} /></I18nProvider>));
+    const clickText = async (text: string) => {
+      const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === text)!;
+      expect(button).toBeDefined();
+      await act(async () => props(button).onClick());
+    };
+    const chooseRdp = async () => {
+      const button = allNodes(container).find(node => node.tagName === "BUTTON" && props(node)?.role === "radio" && node.textContent.includes("RDP"))!;
+      await act(async () => props(button).onClick());
+    };
+    await chooseRdp();
+    expect(container.textContent).toContain("要另外新增 RDP");
+    const form = allNodes(container).find(node => node.tagName === "FORM")!;
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(save).not.toHaveBeenCalled();
+    await clickText("取消");
+    expect(allNodes(container).find(node => props(node)?.role === "radio" && props(node)["aria-checked"])!.textContent).toContain("SSH");
+    await chooseRdp();
+    await clickText("另外新增連線");
+    expect(add).toHaveBeenCalledExactlyOnceWith(source.id, "rdp");
+    expect(save).not.toHaveBeenCalled();
+    await clickText("變更目前連線");
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toMatchObject({ protocol: "rdp", port: 2222 });
+    expect(save.mock.calls[0][2]).toBe(source.id);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("opens a requested route with its own default port and a fresh record identity", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const save = vi.fn();
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={null} routeSource={{ ...source, port: 2222 }} routeProtocol="rdp" profiles={[source]}
+      supportedProtocols={["ssh", "rdp"]} mobile={false} onSave={save} onClose={vi.fn()} /></I18nProvider>));
+    const form = allNodes(container).find(node => node.tagName === "FORM")!;
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(save.mock.calls[0][0]).toMatchObject({ protocol: "rdp", port: 3389, machineId: source.id });
+    expect(save.mock.calls[0][2]).not.toBe(source.id);
   } finally { await act(async () => root.unmount()); }
 });

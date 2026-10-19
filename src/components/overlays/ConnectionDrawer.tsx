@@ -83,6 +83,7 @@ const hostnamePlaceholderKeys: Record<Protocol, MessageKey> = {
 export function ConnectionDrawer({
   profile,
   routeSource = null,
+  routeProtocol,
   onOpenRoute,
   onAddRoute,
   profiles,
@@ -94,8 +95,9 @@ export function ConnectionDrawer({
   /** `null` opens an empty draft; a profile opens it for editing. */
   profile: ConnectionProfile | null;
   routeSource?: ConnectionProfile | null;
+  routeProtocol?: Protocol;
   onOpenRoute?: (id: string) => void;
-  onAddRoute?: (id: string) => void;
+  onAddRoute?: (id: string, protocol?: Protocol) => void;
   profiles: ConnectionProfile[];
   /** Native session engines registered by this package. */
   supportedProtocols: readonly string[];
@@ -112,14 +114,15 @@ export function ConnectionDrawer({
   const { t } = useI18n();
 
   const initial = useMemo(
-    () => (profile ? draftFromProfile(profile) : routeSource ? newRouteDraft(routeSource, profiles) : emptyDraft()),
-    [profile, routeSource, profiles],
+    () => (profile ? draftFromProfile(profile) : routeSource ? newRouteDraft(routeSource, profiles, routeProtocol) : emptyDraft()),
+    [profile, routeSource, profiles, routeProtocol],
   );
 
   const [draft, setDraft] = useState<ConnectionDraft>(initial);
   const [tagInput, setTagInput] = useState((initial.tags ?? []).join(", "));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [pendingProtocol, setPendingProtocol] = useState<Protocol | null>(null);
   const navigation = useRef<(() => void) | null>(null);
   const [recordId] = useState(() => profile?.id ?? createConnectionProfile(emptyDraft()).id);
   const credential = useConnectionCredentialDraft(profile);
@@ -197,7 +200,17 @@ export function ConnectionDrawer({
   }
 
   function selectProtocol(protocol: Protocol) {
-    if (protocol === draft.protocol) return;
+    if (savingRef.current) return;
+    if (protocol === draft.protocol) { setPendingProtocol(null); return; }
+    if (profile) {
+      setPendingProtocol(protocol);
+      return;
+    }
+    changeProtocol(protocol);
+  }
+
+  function changeProtocol(protocol: Protocol) {
+    setPendingProtocol(null);
     credential.setSecret("");
     credential.setAllowMcpRead(false);
     setShowSecret(false);
@@ -250,7 +263,7 @@ export function ConnectionDrawer({
   }
 
   async function save(connectAfterSave: boolean) {
-    if (savingRef.current || credential.loading) return;
+    if (savingRef.current || credential.loading || pendingProtocol) return;
     if (Object.keys(validateNow()).length > 0) return;
     savingRef.current = true;
     setSaving(true);
@@ -325,7 +338,7 @@ export function ConnectionDrawer({
                 <button type="button" className="button button--secondary button--sm" key={entry.id}
                   aria-pressed={entry.id === profile?.id} disabled={entry.id === profile?.id || saving}
                   title={connectionTarget(entry)} onClick={() => onOpenRoute && navigate(() => onOpenRoute(entry.id))}>
-                  {findProtocol(entry.protocol).acronym} · {entry.name}</button>)}
+                  {findProtocol(entry.protocol).acronym} · {connectionTarget(entry)}</button>)}
               {profile && onAddRoute && <button type="button" className="button button--primary button--sm"
                 onClick={() => navigate(() => onAddRoute(profile.id))}>{t("form.route.add")}</button>}
             </div>
@@ -788,6 +801,26 @@ export function ConnectionDrawer({
               >
                 {t("form.discard.confirm")}
               </button>
+            </div>
+          </div>
+        ) : pendingProtocol ? (
+          <div className="drawer__foot drawer__foot--confirm connection-drawer__protocol-confirm">
+            <p className="drawer__confirm-text" role="alert">
+              {t("form.route.changeQuestion", { protocol: findProtocol(pendingProtocol).acronym })}
+            </p>
+            <div className="drawer__foot-actions">
+              <button type="button" className="button button--ghost" onClick={() => setPendingProtocol(null)}>
+                {t("common.cancel")}
+              </button>
+              <button type="button" className="button button--secondary" onClick={() => changeProtocol(pendingProtocol)}>
+                {t("form.route.replace")}
+              </button>
+              {profile && onAddRoute && (
+                <button type="button" className="button button--primary"
+                  onClick={() => navigate(() => onAddRoute(profile.id, pendingProtocol))}>
+                  {t("form.route.addInstead")}
+                </button>
+              )}
             </div>
           </div>
         ) : (

@@ -21,7 +21,7 @@ const profile = createConnectionProfile(
 function renderCard(
   options: Pick<
     Parameters<typeof ConnectionCard>[0],
-    "onConnect" | "unavailableReason" | "linked"
+    "onConnect" | "unavailableReason" | "linked" | "onAddRoute"
   >,
 ) {
   return renderToStaticMarkup(
@@ -70,6 +70,14 @@ describe("connection card runtime capability", () => {
 });
 
 describe("same-computer card", () => {
+  it("offers a separate add-route action even when the current protocol is unavailable", () => {
+    const markup = renderCard({ onAddRoute: vi.fn(), unavailableReason: "desktop-only" });
+    expect(markup).toContain("connection-card__add-route");
+    expect(markup).toContain("新增連線方式</button>");
+    expect(markup).toContain("桌面版限定");
+    expect(renderCard({})).not.toContain("connection-card__add-route");
+  });
+
   it("offers one connect button per route and names the folded entry", () => {
     const remote = createConnectionProfile(
       { ...emptyDraft("lattice"), name: "蘋果筆電", deviceId: "008806370" },

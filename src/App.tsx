@@ -62,6 +62,7 @@ import {
   createConnectionProfile,
   type ConnectionDraft,
   type ConnectionProfile,
+  type Protocol,
 } from "./domain/connection";
 import { I18nProvider } from "./i18n";
 import { useI18n } from "./i18n/context";
@@ -388,6 +389,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     open: boolean;
     profileId: string | null;
     routeSourceId?: string;
+    routeProtocol?: Protocol;
   }>({ open: false, profileId: null });
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [removingProfile, setRemovingProfile] = useState(false);
@@ -799,9 +801,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setDrawer({ open: true, profileId: id });
   }, []);
 
-  const openRoute = useCallback((id: string) => {
+  const openRoute = useCallback((id: string, protocol?: Protocol) => {
     setView("connections");
-    setDrawer({ open: true, profileId: null, routeSourceId: id });
+    setDrawer({ open: true, profileId: null, routeSourceId: id, routeProtocol: protocol });
   }, []);
 
   const toggleResourceSidebar = useCallback(() => {
@@ -1153,6 +1155,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   workspace={workspace}
                   onCreate={openCreate}
                   onEdit={openEdit}
+                  onAddRoute={openRoute}
                   onDelete={requestDelete}
                   onConnect={openConnection}
                   supportedProtocols={supportedProtocols}
@@ -1329,9 +1332,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       <Suspense fallback={<LazyOverlayFallback />}>
       {drawer.open && (
         <ConnectionDrawer
-          key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}` : "new"}
+          key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : "new"}
           profile={editing}
           routeSource={profiles.find(entry => entry.id === drawer.routeSourceId) ?? null}
+          routeProtocol={drawer.routeProtocol}
           onOpenRoute={openEdit}
           onAddRoute={openRoute}
           profiles={profiles}

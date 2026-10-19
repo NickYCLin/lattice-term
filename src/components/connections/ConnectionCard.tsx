@@ -17,6 +17,7 @@ import { EnvironmentBadge, ProtocolTile, TagChip } from "../common/Badge";
 import {
   DuplicateIcon,
   EditIcon,
+  PlusIcon,
   StarIcon,
   TerminalIcon,
   TrashIcon,
@@ -39,6 +40,7 @@ export function ConnectionCard({
   selected,
   onSelect,
   onEdit,
+  onAddRoute,
   onDuplicate,
   onDelete,
   onToggleFavorite,
@@ -50,6 +52,7 @@ export function ConnectionCard({
   selected: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  onAddRoute?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onToggleFavorite: () => void;
@@ -218,6 +221,16 @@ export function ConnectionCard({
           </button>
         </div>
       </div>
+      {onAddRoute && (
+        <button
+          type="button"
+          className="button button--ghost button--sm connection-card__add-route"
+          onClick={onAddRoute}
+        >
+          <PlusIcon size={13} />
+          {t("form.route.add")}
+        </button>
+      )}
     </li>
   );
 }

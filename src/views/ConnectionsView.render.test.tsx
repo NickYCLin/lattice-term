@@ -49,6 +49,7 @@ function render(profiles: ConnectionProfile[]): string {
         workspace={workspaceWith(profiles)}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
+        onAddRoute={vi.fn()}
         onDelete={vi.fn()}
         onConnect={vi.fn()}
         supportedProtocols={["ssh", "sftp"]}
@@ -71,6 +72,7 @@ describe("ConnectionsView", () => {
     const markup = render([profile]);
     expect(markup).toContain("資料庫跳板");
     expect(markup).toContain("bastion.example.com");
+    expect(markup).toContain("connection-card__add-route");
     expect(markup).not.toContain("還沒有任何連線");
   });
 

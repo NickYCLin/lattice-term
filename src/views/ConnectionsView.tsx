@@ -54,6 +54,7 @@ export function ConnectionsView({
   workspace,
   onCreate,
   onEdit,
+  onAddRoute,
   onDelete,
   onConnect,
   supportedProtocols,
@@ -64,6 +65,7 @@ export function ConnectionsView({
   workspace: Workspace;
   onCreate: () => void;
   onEdit: (id: string) => void;
+  onAddRoute?: (id: string) => void;
   onDelete: (id: string) => void;
   onConnect: (profile: ConnectionProfile) => void;
   supportedProtocols: readonly string[];
@@ -407,6 +409,7 @@ export function ConnectionsView({
                             )
                           }
                           onEdit={() => onEdit(profile.id)}
+                          onAddRoute={onAddRoute ? () => onAddRoute(profile.id) : undefined}
                           onDuplicate={() => duplicateProfile(profile.id)}
                           onDelete={() => onDelete(profile.id)}
                           onToggleFavorite={() => toggleFavorite(profile.id)}

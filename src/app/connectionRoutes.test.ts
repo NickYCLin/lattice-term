@@ -5,6 +5,15 @@ import { newRouteDraft, savedRouteProfiles } from "./connectionRoutes";
 const source = createConnectionProfile({ ...emptyDraft(), name: "合成主機", hostname: "fixture.invalid", username: "fixture" }, "ssh-route");
 
 describe("same-machine route records", () => {
+  it("adds the requested RDP protocol without inheriting the custom SSH port", () => {
+    const original = { ...source, port: 2222 };
+    const draft = newRouteDraft(original, [original], "rdp");
+    expect(draft).toMatchObject({ protocol: "rdp", port: 3389, machineId: original.id });
+    const records = savedRouteProfiles([original], createConnectionProfile(draft, "rdp-route"), original.id);
+    expect(records[0]).toEqual({ ...original, machineId: original.id });
+    expect(records[1].port).toBe(3389);
+  });
+
   it("starts a separate protocol with default parameters and no inherited remote identity", () => {
     const draft = newRouteDraft({ ...source, port: 2222, deviceId: "synthetic-device", relayAddress: "synthetic-relay" }, [source]);
     expect(draft).toMatchObject({ protocol: "sftp", hostname: source.hostname, port: 22, machineId: source.id });

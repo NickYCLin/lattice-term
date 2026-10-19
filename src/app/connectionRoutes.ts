@@ -1,9 +1,9 @@
-import { emptyDraft, findProtocol, protocolCatalog, protocolUsesUsername, type ConnectionProfile } from "../domain/connection";
+import { emptyDraft, findProtocol, protocolCatalog, protocolUsesUsername, type ConnectionProfile, type Protocol } from "../domain/connection";
 
-export function newRouteDraft(source: ConnectionProfile, profiles: readonly ConnectionProfile[]) {
+export function newRouteDraft(source: ConnectionProfile, profiles: readonly ConnectionProfile[], requestedProtocol?: Protocol) {
   const used = new Set(profiles.filter(profile => profile.id === source.id ||
     (source.machineId && profile.machineId === source.machineId)).map(profile => profile.protocol));
-  const protocol = protocolCatalog.find(entry => !used.has(entry.id))?.id ?? source.protocol;
+  const protocol = requestedProtocol ?? protocolCatalog.find(entry => !used.has(entry.id))?.id ?? source.protocol;
   return { ...emptyDraft(protocol), name: source.name,
     hostname: source.hostname, username: protocolUsesUsername(protocol) ? source.username : "",
     port: findProtocol(protocol).defaultPort, group: source.group, tags: [...source.tags],
