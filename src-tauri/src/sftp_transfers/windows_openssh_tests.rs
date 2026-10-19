@@ -128,6 +128,78 @@ async fn bounded(test: impl std::future::Future<Output = ()>) {
 
 #[tokio::test]
 #[ignore = "Requires a verified Windows OpenSSH sftp-server.exe in the opt-in environment variable"]
+async fn windows_openssh_concurrent_chunks_keep_complete_byte_count() {
+    bounded(async {
+        let server = WindowsServer::start().await;
+        let (transfers, entry) = server.prepare("concurrent.bin", b"", false).await;
+        let transfers = Arc::new(transfers);
+        let chunk = vec![0x5a; REMOTE_CHUNK];
+        let chunks = 16;
+        let total = chunk.len() * chunks;
+        entry.state.lock().unwrap().total_bytes = Some(total as u64);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&chunk);
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..chunks {
+            let transfers = Arc::clone(&transfers);
+            let encoded = encoded.clone();
+            tasks.spawn(async move {
+                upload_chunk(&transfers, &QuietSink, "windows-upload", &encoded).await
+            });
+        }
+        while let Some(result) = tasks.join_next().await {
+            result.unwrap().unwrap();
+        }
+        assert_eq!(entry.state.lock().unwrap().bytes_done, total as u64);
+        finish_upload(&transfers, &QuietSink, "windows-upload")
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(server.path("concurrent.bin")).unwrap(),
+            vec![0x5a; total]
+        );
+        server.assert_no_staging();
+        server.stop().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires a verified Windows OpenSSH sftp-server.exe in the opt-in environment variable"]
+async fn windows_openssh_path_uploads_empty_large_and_changed_files() {
+    bounded(async {
+        let server = WindowsServer::start().await;
+        let source = tempfile::tempdir().unwrap();
+        let local_path = source.path().join("source.bin");
+        for (size, changed) in [(0, false), (REMOTE_CHUNK * 3 + 17, false), (4, true)] {
+            let payload = vec![0x5a; size];
+            std::fs::write(&local_path, &payload).unwrap();
+            let name = format!("path-{size}-{changed}.bin");
+            let (_transfers, entry) = server.prepare(&name, b"", false).await;
+            let declared = size as u64 + u64::from(changed);
+            entry.state.lock().unwrap().total_bytes = Some(declared);
+            let local = tokio::fs::File::open(&local_path).await.unwrap();
+            let result = stream_path_upload(&entry, &QuietSink, local, declared).await;
+            if changed {
+                let detail = result.unwrap_err();
+                assert!(detail.contains("changed size"));
+                abort_upload(&entry, &QuietSink, "error", &detail).await;
+                assert!(!Path::new(&server.path(&name)).exists());
+                assert_eq!(entry.state.lock().unwrap().state, "error");
+            } else {
+                result.unwrap();
+                assert_eq!(std::fs::read(server.path(&name)).unwrap(), payload);
+                assert_eq!(entry.state.lock().unwrap().state, "done");
+                assert_eq!(entry.state.lock().unwrap().bytes_done, declared);
+            }
+            server.assert_no_staging();
+        }
+        server.stop().await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Requires a verified Windows OpenSSH sftp-server.exe in the opt-in environment variable"]
 async fn windows_openssh_uploads_new_and_replacement_files() {
     bounded(async {
         let server = WindowsServer::start().await;

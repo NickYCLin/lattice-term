@@ -824,7 +824,7 @@ pub async fn start_upload_from_path(
     // Open first, then read metadata from that exact handle. The path may be
     // replaced between the drop event and this command; keeping one handle
     // ensures the advertised size and streamed bytes refer to the same file.
-    let mut local = tokio::fs::File::open(&local_path)
+    let local = tokio::fs::File::open(&local_path)
         .await
         .map_err(|error| format!("cannot open the dropped file: {error}"))?;
     let metadata = local
@@ -898,76 +898,64 @@ pub async fn start_upload_from_path(
 
     let task_entry = Arc::clone(&entry);
     tokio::spawn(async move {
-        let result: Result<(), String> = async {
-            let mut buffer = vec![0u8; REMOTE_CHUNK];
-            let mut done: u64 = 0;
-            let mut last_emitted: u64 = 0;
-            loop {
-                if task_entry.cancel.load(Ordering::Relaxed) {
-                    return Err("cancelled".to_string());
-                }
-                let read = local
-                    .read(&mut buffer)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if read == 0 {
-                    break;
-                }
-                let next = next_upload_size(done, total, read)
-                    .map_err(|_| "the dropped file changed size while it was being uploaded")?;
-                {
-                    let mut slot = task_entry.upload.lock().await;
-                    let file = slot
-                        .as_mut()
-                        .ok_or_else(|| "the upload lost its remote file handle".to_string())?;
-                    file.write_all(&buffer[..read])
-                        .await
-                        .map_err(|error| error.to_string())?;
-                }
-                done = next;
-                if done - last_emitted >= EMIT_EVERY_BYTES {
-                    last_emitted = done;
-                    task_entry.update(sink.as_ref(), |state| state.bytes_done = done);
-                }
-            }
-            require_complete_upload(done, total)
-                .map_err(|_| "the dropped file changed size while it was being uploaded")?;
-            {
-                let mut slot = task_entry.upload.lock().await;
-                if let Some(mut file) = slot.take() {
-                    file.flush().await.map_err(|error| error.to_string())?;
-                    file.shutdown().await.map_err(|error| error.to_string())?;
-                }
-            }
-            task_entry.update(sink.as_ref(), |state| state.bytes_done = done);
-            Ok(())
-        }
-        .await;
-
-        match result {
-            Ok(()) => match promote_upload(&task_entry).await {
-                Ok(warning) => task_entry.update(sink.as_ref(), |state| {
-                    if state.state == "running" {
-                        state.state = "done";
-                        state.detail = warning;
-                    }
-                }),
-                Err(detail) => {
-                    let _ = abort_upload(&task_entry, sink.as_ref(), "error", &detail).await;
-                }
-            },
-            Err(detail) => {
-                let state = if detail == "cancelled" {
-                    "cancelled"
-                } else {
-                    "error"
-                };
-                let _ = abort_upload(&task_entry, sink.as_ref(), state, &detail).await;
-            }
+        if let Err(detail) = stream_path_upload(&task_entry, sink.as_ref(), local, total).await {
+            let state = if detail == "cancelled" {
+                "cancelled"
+            } else {
+                "error"
+            };
+            let _ = abort_upload(&task_entry, sink.as_ref(), state, &detail).await;
         }
     });
 
     Ok(snapshot)
+}
+
+async fn stream_path_upload(
+    task_entry: &TransferEntry,
+    sink: &dyn TransferSink,
+    mut local: tokio::fs::File,
+    total: u64,
+) -> Result<(), String> {
+    let mut buffer = vec![0u8; REMOTE_CHUNK];
+    let mut done: u64 = 0;
+    let mut last_emitted: u64 = 0;
+    loop {
+        if task_entry.cancel.load(Ordering::Relaxed) {
+            return Err("cancelled".to_string());
+        }
+        let read = local
+            .read(&mut buffer)
+            .await
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        let next = next_upload_size(done, total, read)
+            .map_err(|_| "the dropped file changed size while it was being uploaded")?;
+        {
+            let mut slot = task_entry.upload.lock().await;
+            running_state(task_entry)?;
+            if task_entry.cancel.load(Ordering::Relaxed) {
+                return Err("cancelled".to_string());
+            }
+            let file = slot
+                .as_mut()
+                .ok_or_else(|| "the upload lost its remote file handle".to_string())?;
+            file.write_all(&buffer[..read])
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        done = next;
+        if done - last_emitted >= EMIT_EVERY_BYTES {
+            last_emitted = done;
+            task_entry.update(sink, |state| state.bytes_done = done);
+        }
+    }
+    require_complete_upload(done, total)
+        .map_err(|_| "the dropped file changed size while it was being uploaded")?;
+    task_entry.update(sink, |state| state.bytes_done = done);
+    finish_upload_entry(task_entry, sink).await
 }
 
 /// What an upload needs before its first byte arrives.
@@ -1139,11 +1127,11 @@ pub async fn upload_chunk(
         return Err(abort_upload(&entry, sink, "error", &detail).await);
     }
 
-    drop(slot);
     {
         let mut state = entry.state.lock().map_err(|e| e.to_string())?;
         state.bytes_done = next;
     }
+    drop(slot);
     // Chunks arrive megabytes at a time, so per-chunk reporting is already
     // coarse enough not to flood the event stream.
     if let Ok(state) = entry.state.lock() {
@@ -1159,18 +1147,22 @@ pub async fn finish_upload(
     transfer_id: &str,
 ) -> Result<(), String> {
     let entry = transfers.entry(transfer_id)?;
+    finish_upload_entry(&entry, sink).await
+}
+
+async fn finish_upload_entry(entry: &TransferEntry, sink: &dyn TransferSink) -> Result<(), String> {
     let mut slot = entry.upload.lock().await;
-    let state = running_state(&entry)?;
+    let state = running_state(entry)?;
     let total = state.total_bytes.unwrap_or(0);
     if let Err(detail) = require_complete_upload(state.bytes_done, total) {
         drop(slot);
-        return Err(abort_upload(&entry, sink, "error", &detail).await);
+        return Err(abort_upload(entry, sink, "error", &detail).await);
     }
 
     let Some(mut file) = slot.take() else {
         drop(slot);
         let detail = "the upload lost its remote file handle";
-        return Err(abort_upload(&entry, sink, "error", detail).await);
+        return Err(abort_upload(entry, sink, "error", detail).await);
     };
 
     let close_result = async {
@@ -1181,18 +1173,18 @@ pub async fn finish_upload(
     drop(file);
     if let Err(detail) = close_result {
         drop(slot);
-        return Err(abort_upload(&entry, sink, "error", &detail).await);
+        return Err(abort_upload(entry, sink, "error", &detail).await);
     }
     if entry.cancel.load(Ordering::Relaxed) {
         drop(slot);
-        return Err(abort_upload(&entry, sink, "cancelled", "cancelled").await);
+        return Err(abort_upload(entry, sink, "cancelled", "cancelled").await);
     }
 
-    let warning = match promote_upload(&entry).await {
+    let warning = match promote_upload(entry).await {
         Ok(warning) => warning,
         Err(detail) => {
             drop(slot);
-            return Err(abort_upload(&entry, sink, "error", &detail).await);
+            return Err(abort_upload(entry, sink, "error", &detail).await);
         }
     };
     entry.update(sink, |state| {
@@ -1261,6 +1253,10 @@ mod openssh_tests;
 #[cfg(all(test, windows))]
 #[path = "sftp_transfers/windows_openssh_tests.rs"]
 mod windows_openssh_tests;
+
+#[cfg(test)]
+#[path = "sftp_transfers/upload_lifecycle_tests.rs"]
+mod upload_lifecycle_tests;
 
 #[cfg(test)]
 mod tests {
