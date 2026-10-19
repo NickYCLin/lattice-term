@@ -182,7 +182,7 @@ export async function streamSftpUpload(
   transferId: string,
   invoke: SftpInvoke,
 ): Promise<void> {
-  const reader = file.stream().getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let pending = new Uint8Array(0);
 
   async function sendChunk(bytes: Uint8Array) {
@@ -193,6 +193,7 @@ export async function streamSftpUpload(
   }
 
   try {
+    reader = file.stream().getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -213,7 +214,7 @@ export async function streamSftpUpload(
     await invoke("sftp_upload_finish", { transferId });
   } catch (reason) {
     try {
-      await reader.cancel(reason);
+      await reader?.cancel(reason);
     } catch {
       // The backend cancellation below is the authoritative cleanup path.
     }
@@ -238,7 +239,7 @@ export async function streamSftpUpload(
     }
     throw reason;
   } finally {
-    reader.releaseLock();
+    reader?.releaseLock();
   }
 }
 

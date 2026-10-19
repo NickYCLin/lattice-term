@@ -61,6 +61,46 @@ describe("SFTP IPC payloads", () => {
     ]);
   });
 
+  it("cancels the backend transfer when the local stream cannot be opened", async () => {
+    const commands: string[] = [];
+    await expect(
+      streamSftpUpload(
+        { stream() { throw new Error("cannot read local file"); } },
+        "transfer-open",
+        async command => { commands.push(command); },
+      ),
+    ).rejects.toThrow("cannot read local file");
+    expect(commands).toEqual(["sftp_transfer_cancel"]);
+  });
+
+  it("cancels the backend transfer when the local stream is already locked", async () => {
+    const commands: string[] = [];
+    const stream = new ReadableStream<Uint8Array<ArrayBuffer>>();
+    const reader = stream.getReader();
+    try {
+      await expect(
+        streamSftpUpload(
+          { stream: () => stream },
+          "transfer-reader",
+          async command => { commands.push(command); },
+        ),
+      ).rejects.toThrow();
+      expect(commands).toEqual(["sftp_transfer_cancel"]);
+    } finally {
+      reader.releaseLock();
+    }
+  });
+
+  it("keeps both stream initialization and backend cleanup failures visible", async () => {
+    await expect(
+      streamSftpUpload(
+        { stream() { throw new Error("cannot read local file"); } },
+        "transfer-cleanup",
+        async () => { throw new Error("connection lost"); },
+      ),
+    ).rejects.toThrow("cannot read local file; transfer cleanup failed: connection lost");
+  });
+
   it("treats an acknowledged user cancellation as a clean stop", async () => {
     const commands: string[] = [];
     const invoke = async (command: string) => {
