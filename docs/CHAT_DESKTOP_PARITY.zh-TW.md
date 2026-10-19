@@ -1,5 +1,24 @@
 # 對話頁與 Codex Desktop 的功能對照
 
+## 原生對話保留原本服務
+
+CLIProxyAPI 對話續接原本的代理，ChatGPT 對話則維持原帳號；不能因為
+從另一個介面開啟，就把對話改送其他服務。服務不符或憑證讀取失敗時，
+停止續接並提示原因，不自動回退到 ChatGPT。
+
+Codex 代理對話使用綁定代理識別碼與端點的固定 provider 名稱。啟動或
+續接時，只將該 provider 的端點與憑證 helper 定義補入該帳號的
+`config.toml`，不改預設 `model_provider`、帳號或原始逐字稿，也不將
+API key 寫入設定。既有 provider、profile 或專案設定有衝突時不覆寫。
+
+舊版 v2 對話需先在更新後的 LatticeTerm 選擇原代理續接一次，才能補上
+相容定義；舊識別碼沒有端點摘要，因此無法單靠歷史資料重建原端點。
+外部原生介面需支援 Codex 的 `model_providers.<id>.auth.command`。
+helper 從系統憑證庫讀取綁定的 key；若 key 只存在加密 vault，外部
+程序無法沿用 App 的解鎖記憶體，應回 LatticeTerm 續聊，不改送其他帳號。
+
+測試界線見 `docs/qa/2026-10-19-native-provider-resume.zh-TW.md`。
+
 ## 排隊訊息與送出回饋
 
 工作階段的對話頁在佇列接受訊息後，會先保留完整文字與附件資訊，

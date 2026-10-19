@@ -18,6 +18,7 @@ it("restores proxy routing only from a known identity or an explicit connection 
   expect(restored.resumeSessionId).toBe(entry.nativeSessionId);
   const current = { ...entry, modelProvider: `latticeterm_cliproxyapi_v2_work_${"a".repeat(32)}` };
   expect(nativeConversationProxy(current, [proxy])).toEqual(proxy);
+  expect(nativeConversationProxy({ ...current, modelProvider: current.modelProvider.replace("_v2_", "_v3_") }, [proxy])).toEqual(proxy);
   expect(localConversationLaunchIntents([current], [], [fakeDefinition()], [], [], [proxy])).toHaveLength(1);
   expect(localConversationLaunchIntents([current], [], [fakeDefinition()], [], [], [])).toEqual([]);
 });

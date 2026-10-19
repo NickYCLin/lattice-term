@@ -1,11 +1,12 @@
-//! Process-local Codex configuration. Saved launch arguments contain the
-//! endpoint, while credentials are loaded again each time a process starts.
+//! Codex provider configuration shared with native desktop conversations.
+//! Credentials are loaded when needed, never written into configuration.
 
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 pub const PROVIDER: &str = "latticeterm_cliproxyapi";
 pub const KEY_ENV: &str = "LATTICETERM_CLI_PROXY_API_KEY";
+pub const KEY_ROUTE_ENV: &str = "LATTICETERM_CLI_PROXY_API_ROUTE";
 /// Sent when the proxy has no saved key. A fixed placeholder keeps Claude
 /// Code from sending the user's own Anthropic login to the proxy instead.
 const NO_KEY_PLACEHOLDER: &str = "latticeterm-cliproxyapi";
@@ -45,6 +46,21 @@ pub struct ProxyLaunch {
     base_url: String,
     key: Option<Zeroizing<String>>,
     provider: String,
+    proxy_id: String,
+    helper: String,
+}
+
+pub(super) fn desktop_provider(base_url: &str, proxy_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"latticeterm-desktop-provider-v3\0");
+    digest.update(proxy_id.as_bytes());
+    digest.update([0]);
+    digest.update(base_url.as_bytes());
+    let suffix: String = digest.finalize()[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("{PROVIDER}_v3_{proxy_id}_{suffix}")
 }
 
 impl ProxyLaunch {
@@ -55,21 +71,24 @@ impl ProxyLaunch {
         } else {
             None
         };
-        let mut nonce = [0u8; 16];
-        getrandom::fill(&mut nonce).map_err(|_| "Cannot create a CLIProxyAPI process identity.")?;
-        let suffix: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+        let proxy_id = proxy_id.unwrap_or(crate::credentials::CLI_PROXY_DEFAULT_ID);
+        crate::credentials::cli_proxy_credential_id(Some(proxy_id))?;
+        let helper = std::env::current_exe()
+            .map_err(|_| "Cannot locate the CLIProxyAPI credential helper.")?;
+        let helper = helper
+            .to_str()
+            .ok_or("The credential helper path is not UTF-8.")?;
         Ok(Self {
+            provider: desktop_provider(&base_url, proxy_id),
             base_url,
             key,
-            provider: format!(
-                "{PROVIDER}_v2_{}_{suffix}",
-                proxy_id.unwrap_or(crate::credentials::CLI_PROXY_DEFAULT_ID)
-            ),
+            proxy_id: proxy_id.to_string(),
+            helper: helper.to_string(),
         })
     }
 
-    /// Codex deep-merges provider tables. A fresh name prevents stale headers,
-    /// bearer tokens or auth commands from an existing provider being inherited.
+    /// Codex deep-merges provider tables. Registration rejects conflicting
+    /// definitions before the process receives these overrides.
     pub fn arguments(&self) -> Vec<String> {
         let provider = self.provider_table();
         vec![
@@ -89,16 +108,74 @@ impl ProxyLaunch {
         provider.insert("name".into(), "CLIProxyAPI".into());
         provider.insert("base_url".into(), format!("{}/v1", self.base_url).into());
         provider.insert("wire_api".into(), "responses".into());
-        provider.insert("requires_openai_auth".into(), false.into());
-        if self.key.is_some() {
-            provider.insert("env_key".into(), KEY_ENV.into());
-        }
+        let mut auth = toml::Table::new();
+        auth.insert("command".into(), self.helper.clone().into());
+        auth.insert(
+            "args".into(),
+            toml::Value::Array(vec![
+                "cliproxy-token".into(),
+                self.proxy_id.clone().into(),
+                self.base_url.clone().into(),
+            ]),
+        );
+        provider.insert("auth".into(), auth.into());
         provider
     }
 
-    /// TUI resume restores the provider saved in the thread, even when the
-    /// process selects a fresh one. Supply that missing definition only for
-    /// our own namespace. Credentials still come from the child environment.
+    pub fn prepare_desktop_resume(
+        &self,
+        profile_home: Option<&std::path::Path>,
+        cwd: &std::path::Path,
+        native_provider: Option<&str>,
+    ) -> Result<(), String> {
+        let config_home = profile_home
+            .map(std::path::Path::to_path_buf)
+            .or_else(|| std::env::var_os("CODEX_HOME").map(std::path::PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+            .ok_or("Cannot locate the Codex account directory.")?;
+        let table = self.provider_table();
+        let mut providers = vec![self.provider.as_str()];
+        if let Some(native) = native_provider {
+            if !is_managed_provider(native) {
+                return Err("This conversation belongs to another provider. Start a new conversation to change services.".into());
+            }
+            if native.starts_with(&format!("{PROVIDER}_v3_")) && native != self.provider {
+                return Err(
+                    "The saved conversation belongs to a different CLIProxyAPI endpoint.".into(),
+                );
+            }
+            if let Some(suffix) = native.strip_prefix(&format!("{PROVIDER}_v2_")) {
+                let (proxy_id, nonce) = suffix
+                    .rsplit_once('_')
+                    .ok_or("Invalid saved CLIProxyAPI identity.")?;
+                if proxy_id != self.proxy_id
+                    || nonce.len() != 32
+                    || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return Err(
+                        "The saved conversation belongs to a different CLIProxyAPI connection."
+                            .into(),
+                    );
+                }
+            }
+            if !native.starts_with(&format!("{PROVIDER}_v2_"))
+                && !native.starts_with(&format!("{PROVIDER}_v3_"))
+                && native != saved_provider(Some(&self.proxy_id))
+            {
+                return Err("Cannot identify the original connection for this legacy CLIProxyAPI conversation.".into());
+            }
+            if native != self.provider {
+                providers.push(native);
+            }
+        }
+        for provider in &providers {
+            check_resume_alias_table(provider, &config_home, cwd, Some(&table))?;
+        }
+        super::desktop::register(&config_home, &providers, &table)
+    }
+
+    /// TUI resume restores the provider saved in the thread. Register that
+    /// definition only for our own namespace, without copying credentials.
     pub fn resume_arguments(&self, provider: &str) -> Result<Vec<String>, String> {
         if !is_managed_provider(provider) {
             return Err("Cannot replace another provider while resuming a conversation.".into());
@@ -152,8 +229,8 @@ impl ProxyLaunch {
         }
     }
 
-    /// Saved metadata uses a stable marker; the actual process must only see
-    /// its fresh provider name, including when resuming a native conversation.
+    /// Saved metadata uses a marker; the process receives the endpoint-bound
+    /// provider identity, including when resuming a native conversation.
     pub fn configure_arguments(&self, arguments: Vec<String>) -> Vec<String> {
         let mut configured = self.arguments();
         configured.extend(without_saved_arguments(arguments));
@@ -164,6 +241,8 @@ impl ProxyLaunch {
     /// the key in the background server's state or exposing it to the UI.
     pub fn identity(&self) -> [u8; 32] {
         let mut digest = Sha256::new();
+        digest.update(self.proxy_id.as_bytes());
+        digest.update([0]);
         digest.update(self.base_url.as_bytes());
         digest.update([0]);
         digest.update(self.key().unwrap_or_default().as_bytes());
@@ -186,11 +265,20 @@ pub fn is_managed_provider(provider: &str) -> bool {
 
 /// Do not merge a recovery alias into a user-defined provider: inherited
 /// headers or auth commands could redirect credentials. Check user/profile
-/// and project configuration before adding the process-local alias.
+/// and project configuration before registering the recovery alias.
 pub fn check_resume_alias(
     provider: &str,
     config_home: &std::path::Path,
     cwd: &std::path::Path,
+) -> Result<(), String> {
+    check_resume_alias_table(provider, config_home, cwd, None)
+}
+
+fn check_resume_alias_table(
+    provider: &str,
+    config_home: &std::path::Path,
+    cwd: &std::path::Path,
+    expected: Option<&toml::Table>,
 ) -> Result<(), String> {
     fn defines(value: &toml::Value, provider: &str) -> bool {
         value
@@ -240,6 +328,22 @@ pub fn check_resume_alias(
         let value: toml::Value =
             toml::from_str(&text).map_err(|_| "Cannot parse Codex configuration.")?;
         if defines(&value, provider) {
+            if path == config_home.join("config.toml") {
+                let mut other = value.clone();
+                if let Some(providers) = other
+                    .get_mut("model_providers")
+                    .and_then(toml::Value::as_table_mut)
+                {
+                    if expected.is_some_and(|expected| {
+                        providers.get(provider).and_then(toml::Value::as_table) == Some(expected)
+                    }) {
+                        providers.remove(provider);
+                        if !defines(&other, provider) {
+                            continue;
+                        }
+                    }
+                }
+            }
             return Err("The saved proxy provider is already defined in Codex configuration. Remove the conflicting definition or resume it directly in Codex.".into());
         }
     }
@@ -313,7 +417,7 @@ pub fn without_saved_arguments(arguments: Vec<String>) -> Vec<String> {
 }
 
 /// The arguments LatticeTerm stores for a saved launch; the running process
-/// receives the fresh provider name built in `arguments` instead.
+/// receives the endpoint-bound provider name built in `arguments` instead.
 pub fn saved_arguments(base_url: &str, proxy_id: Option<&str>) -> Vec<String> {
     let provider = saved_provider(proxy_id);
     vec![
@@ -332,6 +436,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn desktop_identity_is_stable_and_bound_to_endpoint_and_proxy() {
+        let base = "http://127.0.0.1:8317";
+        assert_eq!(
+            desktop_provider(base, "work"),
+            desktop_provider(base, "work")
+        );
+        assert_ne!(
+            desktop_provider(base, "work"),
+            desktop_provider(base, "personal")
+        );
+        assert_ne!(
+            desktop_provider(base, "work"),
+            desktop_provider("http://127.0.0.1:8318", "work")
+        );
+        let mut other = launch(Some("fixture-secret"));
+        other.proxy_id = "other".into();
+        assert_ne!(launch(Some("fixture-secret")).identity(), other.identity());
+    }
+
+    #[test]
+    fn prepares_old_proxy_threads_without_changing_the_chatgpt_default() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.toml");
+        std::fs::write(&path, "# native default\nmodel_provider = 'openai'\n").unwrap();
+        let proxy = launch(Some("fixture-secret"));
+        let old = format!("{PROVIDER}_v2_fixture_{}", "a".repeat(32));
+        proxy
+            .prepare_desktop_resume(Some(home.path()), project.path(), Some(&old))
+            .unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+        let value: toml::Value = toml::from_str(&first).unwrap();
+        assert_eq!(value["model_provider"].as_str(), Some("openai"));
+        assert_eq!(
+            value["model_providers"][&old],
+            value["model_providers"][proxy.provider()]
+        );
+        assert!(!first.contains("fixture-secret"));
+        proxy
+            .prepare_desktop_resume(Some(home.path()), project.path(), Some(&old))
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), first);
+    }
+
+    #[test]
+    fn refuses_to_reroute_chatgpt_or_a_different_proxy_conversation() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let proxy = launch(None);
+        for native in [
+            "openai".into(),
+            PROVIDER.into(),
+            format!("{PROVIDER}_other"),
+            format!("{PROVIDER}_{}", "a".repeat(32)),
+            desktop_provider(proxy.base_url(), "other"),
+            format!("{PROVIDER}_v2_other_{}", "a".repeat(32)),
+        ] {
+            assert!(proxy
+                .prepare_desktop_resume(Some(home.path()), project.path(), Some(&native))
+                .is_err());
+            assert!(!home.path().join("config.toml").exists());
+        }
+    }
+
+    #[test]
+    fn project_overrides_cannot_inherit_or_replace_registered_credentials() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".codex")).unwrap();
+        let proxy = launch(None);
+        std::fs::write(
+            project.path().join(".codex/config.toml"),
+            format!(
+                "[model_providers.{}]\nbase_url = 'https://other.invalid'\n",
+                proxy.provider()
+            ),
+        )
+        .unwrap();
+        assert!(proxy
+            .prepare_desktop_resume(Some(home.path()), project.path(), None)
+            .is_err());
+        assert!(!home.path().join("config.toml").exists());
+    }
+
+    #[test]
     fn restores_the_missing_native_provider_without_persisting_credentials() {
         let proxy = launch(Some("fixture-secret"));
         let old = format!("{PROVIDER}_{}", "a".repeat(32));
@@ -339,7 +528,7 @@ mod tests {
         assert!(args[1].starts_with(&format!("model_providers.{old}=")));
         assert!(!args.join(" ").contains("fixture-secret"));
         let table: toml::Value = args[1].split_once('=').unwrap().1.parse().unwrap();
-        assert_eq!(table["env_key"].as_str(), Some(KEY_ENV));
+        assert_eq!(table["auth"]["command"].as_str(), Some("fixture-helper"));
         assert!(proxy.resume_arguments("openai").is_err());
         assert!(proxy
             .resume_arguments("latticeterm_cliproxyapi_bad.key")
@@ -365,6 +554,8 @@ mod tests {
             provider: format!("{PROVIDER}_fixture"),
             base_url: "http://127.0.0.1:8317/prefix".into(),
             key: key.map(|s| Zeroizing::new(s.into())),
+            proxy_id: "fixture".into(),
+            helper: "fixture-helper".into(),
         }
     }
 
@@ -434,12 +625,12 @@ mod tests {
         let arguments = config.arguments();
         assert!(!arguments.join(" ").contains("fixture-secret"));
         let provider: toml::Value = arguments[3].split_once('=').unwrap().1.parse().unwrap();
-        assert_eq!(provider["env_key"].as_str(), Some(KEY_ENV));
+        assert_eq!(provider["auth"]["command"].as_str(), Some("fixture-helper"));
         assert_eq!(
             provider["base_url"].as_str(),
             Some("http://127.0.0.1:8317/prefix/v1")
         );
-        assert_eq!(provider["requires_openai_auth"].as_bool(), Some(false));
+        assert!(provider.get("requires_openai_auth").is_none());
         assert_eq!(config.key(), Some("fixture-secret"));
         assert_ne!(config.identity(), launch(Some("replacement")).identity());
         assert!(!launch(None).arguments()[3].contains("env_key"));

@@ -7646,18 +7646,13 @@ pub fn launch_with_replay(
         .transpose()?;
     let mut proxy_catalog = None;
     if let (true, Some(proxy), Some(target)) = (definition_id == "codex", &proxy, &proxy_target) {
+        proxy.prepare_desktop_resume(
+            profile_config_path.as_deref(),
+            &working_directory,
+            resumed_provider.as_deref(),
+        )?;
         arguments = proxy.configure_arguments(arguments);
         if let Some(provider) = resumed_provider.as_deref() {
-            let config_home = profile_config_path
-                .clone()
-                .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
-                .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-                .ok_or("Cannot locate the Codex account directory.")?;
-            crate::cliproxy::launch::check_resume_alias(
-                provider,
-                &config_home,
-                &working_directory,
-            )?;
             let after_provider = proxy.arguments().len();
             arguments.splice(
                 after_provider..after_provider,
@@ -7904,7 +7899,11 @@ pub fn launch_with_replay(
         }
     }
     command.env_remove(crate::cliproxy::launch::KEY_ENV);
+    command.env_remove(crate::cliproxy::launch::KEY_ROUTE_ENV);
     if let Some(proxy) = proxy.as_ref() {
+        if definition_id == "codex" {
+            command.env(crate::cliproxy::launch::KEY_ROUTE_ENV, proxy.provider());
+        }
         if let Some(key) = proxy.key().filter(|_| definition_id == "codex") {
             command.env(crate::cliproxy::launch::KEY_ENV, key);
         }

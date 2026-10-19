@@ -9,6 +9,7 @@ use std::time::Duration;
 use zeroize::Zeroizing;
 
 pub mod catalog;
+pub mod desktop;
 pub mod launch;
 
 /// The proxy's own default. Shown as a placeholder, never assumed.

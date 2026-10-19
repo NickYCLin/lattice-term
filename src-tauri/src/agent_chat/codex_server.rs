@@ -596,6 +596,23 @@ pub(super) async fn send_turn<S: ChatSink>(
         }
     }
 
+    let native_provider = request
+        .native_session_id
+        .map(|id| crate::transcript::codex_session_provider(id, request.profile_config_directory))
+        .transpose()?
+        .flatten();
+    if let Some(proxy) = request.proxy {
+        proxy.prepare_desktop_resume(
+            request.profile_config_directory,
+            request.working_directory,
+            native_provider.as_deref(),
+        )?;
+    } else if native_provider
+        .as_deref()
+        .is_some_and(crate::cliproxy::launch::is_managed_provider)
+    {
+        return Err("This conversation uses CLIProxyAPI. Select its original connection instead of another account.".into());
+    }
     let mut command = headless_command(request.executable);
     apply_profile_environment(
         &mut command,
@@ -604,7 +621,9 @@ pub(super) async fn send_turn<S: ChatSink>(
     );
     command.arg("app-server");
     command.env_remove(crate::cliproxy::launch::KEY_ENV);
+    command.env_remove(crate::cliproxy::launch::KEY_ROUTE_ENV);
     if let Some(proxy) = request.proxy {
+        command.env(crate::cliproxy::launch::KEY_ROUTE_ENV, proxy.provider());
         command.args(proxy.arguments());
         if let Some(key) = proxy.key() {
             command.env(crate::cliproxy::launch::KEY_ENV, key);

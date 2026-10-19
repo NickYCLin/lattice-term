@@ -22,7 +22,7 @@ export function isProxyConversation(entry: LocalConversation): boolean {
 }
 
 export function nativeConversationProxy(entry: LocalConversation, proxies: readonly CliProxyEndpoint[]) {
-  const id = /^latticeterm_cliproxyapi_v2_([a-z0-9]{1,32})_[a-f0-9]{32}$/.exec(entry.modelProvider ?? "")?.[1];
+  const id = /^latticeterm_cliproxyapi_v[23]_([a-z0-9]{1,32})_[a-f0-9]{32}$/.exec(entry.modelProvider ?? "")?.[1];
   return id ? proxies.find(proxy => proxy.id === id) : undefined;
 }
 
