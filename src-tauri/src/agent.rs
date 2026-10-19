@@ -3446,12 +3446,9 @@ fn handle_report_connection(
             }
             if changed {
                 sink.state(&message.session_id, state, AgentStateSource::Integration);
-                // The only path that releases a queued prompt. Every
-                // integration event funnels through here, and nothing
-                // heuristic does.
-                if releases_queued_prompt(state, AgentStateSource::Integration) {
-                    deliver_next_queued_and_waiting(sink, registry, &message.session_id);
-                }
+            }
+            if releases_queued_prompt(state, AgentStateSource::Integration) {
+                deliver_next_queued_and_waiting(sink, registry, &message.session_id);
             }
             if let Some(native_session_id) = captured {
                 sink.captured(&message.session_id, &native_session_id);
@@ -8456,6 +8453,7 @@ fn send_bytes(
         return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
     }
     discard_profile_invalidated_queue(sink, registry, session_id, &entry);
+    let was_busy = input.desktop_busy();
     let desktop_input = observe_desktop_input(&mut input, bytes);
     if desktop_input && input.startup_seed_pending {
         let choosing_trust = entry
@@ -8474,6 +8472,11 @@ fn send_bytes(
         registry
             .approvals
             .settle(session_id, None, approval::ApprovalDecision::Withdrawn);
+    }
+    let input_released = was_busy && !input.desktop_busy();
+    drop(input);
+    if input_released {
+        deliver_next_queued(sink, registry, session_id);
     }
     Ok(())
 }
@@ -17512,5 +17515,10 @@ notify = ["notify.exe", "turn-ended"]"#,
     mod foreground_mcp_tests {
         use super::*;
         include!("agent/foreground_mcp_tests.rs");
+    }
+
+    mod queue_wakeup_tests {
+        use super::*;
+        include!("agent/queue_wakeup_tests.rs");
     }
 }
