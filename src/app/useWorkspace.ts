@@ -163,13 +163,13 @@ export function useWorkspace() {
     [persist, record],
   );
 
-  const saveProfileRecord = useCallback(async (profile: ConnectionProfile, credential?: ConnectionCredentialDraft, linkedProfileId?: string) => {
-    const next = savedRouteProfiles(profiles, profile, linkedProfileId);
+  const saveProfileRecord = useCallback(async (profile: ConnectionProfile, credential?: ConnectionCredentialDraft, linkedProfileId?: string, additionalRoute?: ConnectionProfile) => {
+    const next = savedRouteProfiles(profiles, profile, linkedProfileId, additionalRoute);
     const saved = next.find(entry => entry.id === profile.id)!;
     const existed = profiles.some(entry => entry.id === profile.id);
     if ("__TAURI_INTERNALS__" in window) {
       try {
-        await persistConnectionRecord(saved, credential, linkedProfileId);
+        await persistConnectionRecord(saved, credential, linkedProfileId, additionalRoute);
       } catch (reason) {
         await refreshProfiles().catch(() => undefined);
         throw reason;
@@ -178,9 +178,10 @@ export function useWorkspace() {
       throw new Error("Credential storage requires the desktop application.");
     }
     setProfiles(current => {
+      if (additionalRoute && current.some(entry => entry.id === additionalRoute.id)) return current;
       if (linkedProfileId && (current.some(entry => entry.id === saved.id) ||
         !current.some(entry => entry.id === linkedProfileId))) return current;
-      return savedRouteProfiles(current, saved, linkedProfileId);
+      return savedRouteProfiles(current, saved, linkedProfileId, additionalRoute);
     });
     setSelectedId(profile.id);
     record({ kind: existed ? "updated" : "created", subject: profile.name, detail: describe(profile) });

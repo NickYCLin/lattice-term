@@ -3007,6 +3007,13 @@
   min-width: 0;
 }
 
+.connection-card__routes .connection-card__go {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .connection-card__add-route {
   grid-column: 1 / -1;
   justify-self: start;

@@ -72,6 +72,50 @@ pub trait Storage: Send + Sync {
     }
 }
 
+pub fn profiles_with_additional_route(
+    mut profiles: Vec<ConnectionProfile>,
+    mut profile: ConnectionProfile,
+    source_id: Option<&str>,
+    mut additional: ConnectionProfile,
+) -> Result<Vec<ConnectionProfile>, StorageError> {
+    if additional.id == profile.id || profiles.iter().any(|entry| entry.id == additional.id) {
+        return Err(StorageError::Validation(
+            "A new address needs its own identity.".into(),
+        ));
+    }
+    let machine_id = if let Some(source_id) = source_id {
+        if source_id == profile.id || profiles.iter().any(|entry| entry.id == profile.id) {
+            return Err(StorageError::Validation(
+                "A new route needs its own identity.".into(),
+            ));
+        }
+        let source = profiles
+            .iter_mut()
+            .find(|entry| entry.id == source_id)
+            .ok_or_else(|| StorageError::NotFound(source_id.into()))?;
+        let machine_id = source
+            .machine_id
+            .clone()
+            .unwrap_or_else(|| source.id.clone());
+        source.machine_id = Some(machine_id.clone());
+        machine_id
+    } else {
+        profile
+            .machine_id
+            .clone()
+            .unwrap_or_else(|| profile.id.clone())
+    };
+    profile.machine_id = Some(machine_id.clone());
+    additional.machine_id = Some(machine_id);
+    if let Some(existing) = profiles.iter_mut().find(|entry| entry.id == profile.id) {
+        *existing = profile;
+    } else {
+        profiles.push(profile);
+    }
+    profiles.push(additional);
+    Ok(profiles)
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
     profiles: HashMap<String, ConnectionProfile>,
@@ -377,6 +421,86 @@ mod file_storage_tests {
         assert_eq!(back, linked);
         let old: ConnectionProfile = serde_json::from_value(plain).unwrap();
         assert_eq!(old.machine_id, None);
+    }
+
+    #[test]
+    fn additional_address_is_saved_together_and_survives_reopen() {
+        let dir = temp_dir("two-addresses");
+        let mut store = FileStorage::open(&dir).unwrap();
+        let other = profile("other", "Other");
+        store.insert_profile(other.clone()).unwrap();
+        let primary = profile("lan", "Machine");
+        let mut additional = profile("wan", "Machine");
+        additional.hostname = "wan.example".into();
+        additional.port = 2222;
+        let records = profiles_with_additional_route(
+            store.list_profiles().unwrap(),
+            primary.clone(),
+            None,
+            additional.clone(),
+        )
+        .unwrap();
+        store.replace_profiles(records).unwrap();
+        let reopened = FileStorage::open(&dir).unwrap();
+        assert_eq!(reopened.get_profile("other").unwrap(), Some(other));
+        assert_eq!(
+            reopened
+                .get_profile("lan")
+                .unwrap()
+                .unwrap()
+                .machine_id
+                .as_deref(),
+            Some("lan")
+        );
+        let restored = reopened.get_profile("wan").unwrap().unwrap();
+        assert_eq!(restored.hostname, "wan.example");
+        assert_eq!(restored.port, 2222);
+        assert_eq!(restored.machine_id.as_deref(), Some("lan"));
+        let before = store.list_profiles().unwrap();
+        assert!(
+            profiles_with_additional_route(before.clone(), primary.clone(), None, additional)
+                .is_err()
+        );
+        assert!(
+            profiles_with_additional_route(before.clone(), primary.clone(), None, primary).is_err()
+        );
+        assert_eq!(store.list_profiles().unwrap(), before);
+    }
+
+    #[test]
+    fn additional_address_keeps_linked_group_and_rolls_back_failed_write() {
+        let dir = temp_dir("two-addresses-rollback");
+        let mut store = FileStorage::open(&dir).unwrap();
+        let mut source = profile("source", "Source");
+        source.machine_id = Some("machine".into());
+        store.insert_profile(source).unwrap();
+        let before = store.list_profiles().unwrap();
+        let records = profiles_with_additional_route(
+            before.clone(),
+            profile("lan", "Machine"),
+            Some("source"),
+            profile("wan", "Machine"),
+        )
+        .unwrap();
+        assert!(records
+            .iter()
+            .all(|entry| entry.machine_id.as_deref() == Some("machine")));
+        assert!(profiles_with_additional_route(
+            before.clone(),
+            profile("lan", "Machine"),
+            Some("missing"),
+            profile("wan", "Machine"),
+        )
+        .is_err());
+        let blocked_target = dir.join("blocked");
+        fs::create_dir(&blocked_target).unwrap();
+        store.path = blocked_target;
+        assert!(store.replace_profiles(records).is_err());
+        assert_eq!(store.list_profiles().unwrap(), before);
+        assert_eq!(
+            FileStorage::open(&dir).unwrap().list_profiles().unwrap(),
+            before
+        );
     }
 
     #[test]

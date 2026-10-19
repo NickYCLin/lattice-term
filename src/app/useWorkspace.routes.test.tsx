@@ -9,6 +9,60 @@ import { newRouteDraft, savedRouteProfiles } from "./connectionRoutes";
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 
+it("publishes two addresses only after the single native write succeeds", async () => {
+  const container = installFakeDom();
+  const root = createRoot(container as unknown as Element);
+  const source = createConnectionProfile({ ...emptyDraft(), name: "Machine", hostname: "lan.example" }, "lan");
+  const additional = { ...source, id: "wan", hostname: "wan.example", port: 2222 };
+  let database = [source];
+  let api!: ReturnType<typeof useWorkspace>;
+  function Fixture() { api = useWorkspace(); return null; }
+  native.invoke.mockImplementation(async (command: string, args: Record<string, any>) => {
+    if (command === "list_connection_profiles") return database;
+    if (command === "save_connection_record") {
+      database = savedRouteProfiles(database, args.profile, args.linkedProfileId, args.additionalRoute);
+    }
+  });
+  try {
+    await act(async () => root.render(<Fixture />));
+    native.invoke.mockImplementationOnce(async () => { throw new Error("synthetic write failure"); });
+    await act(async () => { await expect(api.saveProfileRecord(source, undefined, undefined, additional)).rejects.toThrow(); });
+    expect(api.profiles).toEqual([source]);
+    expect(database).toEqual([source]);
+    await act(async () => { await api.saveProfileRecord(source, undefined, undefined, additional); });
+    expect(api.profiles).toEqual(database);
+    expect(api.profiles.map(profile => profile.machineId)).toEqual(["lan", "lan"]);
+    expect(database[1]).toMatchObject({ hostname: "wan.example", port: 2222 });
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("does not duplicate an address when profiles refresh during the native save", async () => {
+  const container = installFakeDom();
+  const root = createRoot(container as unknown as Element);
+  const source = createConnectionProfile({ ...emptyDraft(), name: "Machine", hostname: "lan.example" }, "lan");
+  const additional = { ...source, id: "wan", hostname: "wan.example" };
+  let database = [source];
+  let finish!: () => void;
+  let api!: ReturnType<typeof useWorkspace>;
+  function Fixture() { api = useWorkspace(); return null; }
+  native.invoke.mockImplementation(async (command: string, args: Record<string, any>) => {
+    if (command === "list_connection_profiles") return database;
+    if (command === "save_connection_record") {
+      database = savedRouteProfiles(database, args.profile, args.linkedProfileId, args.additionalRoute);
+      await new Promise<void>(resolve => { finish = resolve; });
+    }
+  });
+  try {
+    await act(async () => root.render(<Fixture />));
+    let saving!: Promise<unknown>;
+    await act(async () => { saving = api.saveProfileRecord(source, undefined, undefined, additional); });
+    await act(async () => api.refreshProfiles());
+    await act(async () => { finish(); await saving; });
+    expect(api.profiles).toEqual(database);
+    expect(api.profiles).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("keeps failed saves out of the workspace and supports reopen, unlink and deletion without replacing other routes", async () => {
   const container = installFakeDom();
   const root = createRoot(container as unknown as Element);

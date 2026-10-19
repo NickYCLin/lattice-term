@@ -10,13 +10,17 @@ export function newRouteDraft(source: ConnectionProfile, profiles: readonly Conn
     environment: source.environment, machineId: source.machineId ?? source.id };
 }
 
-export function savedRouteProfiles(profiles: readonly ConnectionProfile[], profile: ConnectionProfile, linkedProfileId?: string) {
+export function savedRouteProfiles(profiles: readonly ConnectionProfile[], profile: ConnectionProfile, linkedProfileId?: string, additionalRoute?: ConnectionProfile) {
   const source = linkedProfileId ? profiles.find(entry => entry.id === linkedProfileId) : undefined;
   if (linkedProfileId && (!source || source.id === profile.id)) throw new Error("The source connection is no longer available.");
   if (linkedProfileId && profiles.some(entry => entry.id === profile.id)) throw new Error("A new route needs its own identity.");
-  const machineId = source?.machineId ?? source?.id;
+  if (additionalRoute && (additionalRoute.id === profile.id || profiles.some(entry => entry.id === additionalRoute.id))) {
+    throw new Error("A new address needs its own identity.");
+  }
+  const machineId = source?.machineId ?? source?.id ?? (additionalRoute ? profile.machineId ?? profile.id : undefined);
   const saved = machineId ? { ...profile, machineId } : profile;
   const next = profiles.map(entry => entry.id === saved.id ? saved : source && entry.id === source.id
     ? { ...entry, machineId } : entry);
-  return profiles.some(entry => entry.id === saved.id) ? next : [...next, saved];
+  const records = profiles.some(entry => entry.id === saved.id) ? next : [...next, saved];
+  return additionalRoute ? [...records, { ...additionalRoute, machineId }] : records;
 }

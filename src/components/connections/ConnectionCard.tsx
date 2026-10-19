@@ -133,11 +133,13 @@ export function ConnectionCard({
                 aria-label={t("row.connectVia", {
                   name: route.profile.name,
                   protocol: findProtocol(route.profile.protocol).acronym,
-                })}
+                }) + ` · ${connectionTarget(route.profile)}`}
                 title={connectionTarget(route.profile)}
               >
                 <TerminalIcon size={13} />
                 {findProtocol(route.profile.protocol).acronym}
+                {routes.filter(entry => entry.profile.protocol === route.profile.protocol).length > 1 &&
+                  ` · ${route.profile.hostname}:${route.profile.port}`}
               </button>
             ))}
           </span>

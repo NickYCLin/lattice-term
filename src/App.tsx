@@ -856,8 +856,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       connectAfterSave: boolean,
       id: string,
       credential?: ConnectionCredentialDraft,
+      additionalRoute?: ConnectionProfile,
     ) => {
-      const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential, drawer.routeSourceId);
+      const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential, drawer.routeSourceId, additionalRoute);
       setDrawer({ open: false, profileId: null });
       if (
         connectAfterSave &&

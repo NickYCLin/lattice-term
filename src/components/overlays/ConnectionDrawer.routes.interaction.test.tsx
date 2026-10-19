@@ -35,6 +35,10 @@ class HostNode {
   setAttribute(name: string, value: string) { this.attributes[name] = value; }
   setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
   removeAttribute(name: string) { delete this.attributes[name]; }
+  querySelector(selector: string) {
+    const field = selector.match(/^\[data-field="([^"]+)"\]$/)?.[1];
+    return allNodes(this).find(node => node.attributes["data-field"] === field) ?? null;
+  }
   addEventListener() {}
   removeEventListener() {}
   focus() {}
@@ -79,6 +83,54 @@ const source = createConnectionProfile({ ...emptyDraft(), name: "合成主機", 
 const route = { ...source, id: "route", protocol: "sftp" as const, machineId: "source", port: 2223 };
 const linkedSource = { ...source, machineId: "source" };
 afterEach(() => vi.unstubAllGlobals());
+
+it("allows either host field alone and saves both addresses with their own ports", async () => {
+  for (const primaryHost of ["", "lan.example"]) {
+    const container = installHostDom();
+    const root = createRoot(container as unknown as Element);
+    const save = vi.fn();
+    try {
+      const profile = { ...source, hostname: primaryHost };
+      await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={profile} profiles={[profile]}
+        supportedProtocols={["ssh"]} mobile={false} onSave={save} onClose={vi.fn()} /></I18nProvider>));
+      const field = (name: string) => allNodes(container).find(node => node.attributes["data-field"] === name)!;
+      await act(async () => props(field("additional-hostname")).onChange({ currentTarget: { value: "wan.example" } }));
+      await act(async () => props(field("additional-port")).onChange({ currentTarget: { value: "2222" } }));
+      const form = allNodes(container).find(node => node.tagName === "FORM")!;
+      await act(async () => props(form).onSubmit({ preventDefault() {} }));
+      expect(save).toHaveBeenCalledTimes(1);
+      if (primaryHost) {
+        expect(save.mock.calls[0][0]).toMatchObject({ hostname: primaryHost, port: 22 });
+        expect(save.mock.calls[0][4]).toMatchObject({ hostname: "wan.example", port: 2222 });
+        expect(save.mock.calls[0][4].id).not.toBe(source.id);
+      } else {
+        expect(save.mock.calls[0][0]).toMatchObject({ hostname: "wan.example", port: 2222 });
+        expect(save.mock.calls[0][4]).toBeUndefined();
+      }
+    } finally { await act(async () => root.unmount()); }
+  }
+});
+
+it("keeps invalid extra addresses and unsaved changes in the drawer", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const save = vi.fn();
+  const close = vi.fn();
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={source} profiles={[source]}
+      supportedProtocols={["ssh"]} mobile={false} onSave={save} onClose={close} /></I18nProvider>));
+    const host = allNodes(container).find(node => node.attributes["data-field"] === "additional-hostname")!;
+    await act(async () => props(host).onChange({ currentTarget: { value: "https://bad.example" } }));
+    const form = allNodes(container).find(node => node.tagName === "FORM")!;
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(save).not.toHaveBeenCalled();
+    expect(props(host)["aria-invalid"]).toBe(true);
+    const closeButton = allNodes(container).find(node => node.tagName === "BUTTON" && props(node)["aria-label"] === "關閉")!;
+    await act(async () => props(closeButton).onClick());
+    expect(close).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("放棄修改");
+  } finally { await act(async () => root.unmount()); }
+});
 
 it("creates a separate route, prevents repeat submissions, and leaves a failed save open for retry", async () => {
   const container = installHostDom();

@@ -3512,8 +3512,12 @@ async fn save_connection_record(
     profile: ConnectionProfile,
     credential: Option<connection_credentials::CredentialRecordDraft>,
     linked_profile_id: Option<String>,
+    additional_route: Option<ConnectionProfile>,
 ) -> Result<(), String> {
     connection_credentials::validate_profile(&profile)?;
+    if let Some(additional) = additional_route.as_ref() {
+        connection_credentials::validate_profile(additional)?;
+    }
     credential_call(move || {
         let storage = app.state::<AppStorage>();
         let mut storage = storage.lock().map_err(|error| error.to_string())?;
@@ -3536,8 +3540,21 @@ async fn save_connection_record(
                 return Err("The source connection is no longer available.".into());
             }
         }
+        let additional_records = additional_route
+            .map(|additional| {
+                storage::profiles_with_additional_route(
+                    storage.list_profiles()?,
+                    profile.clone(),
+                    linked_profile_id.as_deref(),
+                    additional,
+                )
+            })
+            .transpose()
+            .map_err(|error| error.to_string())?;
         let save = |storage: &mut FileStorage, profile: ConnectionProfile| {
-            if let Some(source_id) = linked_profile_id.as_deref() {
+            if let Some(records) = additional_records.as_ref() {
+                storage.replace_profiles(records.clone())
+            } else if let Some(source_id) = linked_profile_id.as_deref() {
                 storage.insert_linked_profile(profile, source_id)
             } else {
                 storage.insert_profile(profile)

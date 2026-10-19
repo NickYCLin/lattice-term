@@ -44,6 +44,7 @@ import { moveRadioGroupFocus } from "./radioNavigation";
 import { useModalFocus } from "./modalFocus";
 import { useConnectionCredentialDraft } from "../../app/useConnectionCredentialDraft";
 import { newRouteDraft } from "../../app/connectionRoutes";
+import { connectionAddressDrafts, validateAdditionalAddress } from "../../app/connectionAddresses";
 import {
   sameCredentialTarget,
   supportsCredentialRecord,
@@ -108,6 +109,7 @@ export function ConnectionDrawer({
     connectAfterSave: boolean,
     id: string,
     credential?: ConnectionCredentialDraft,
+    additionalRoute?: ConnectionProfile,
   ) => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -119,6 +121,10 @@ export function ConnectionDrawer({
   );
 
   const [draft, setDraft] = useState<ConnectionDraft>(initial);
+  const [additionalHostname, setAdditionalHostname] = useState("");
+  const [additionalPort, setAdditionalPort] = useState("");
+  const [additionalErrors, setAdditionalErrors] = useState<ValidationErrors>({});
+  const [additionalId] = useState(() => crypto.randomUUID());
   const [tagInput, setTagInput] = useState((initial.tags ?? []).join(", "));
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -143,7 +149,7 @@ export function ConnectionDrawer({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const dirty =
-    credential.dirty || !sameDraft(draft, initial) ||
+    credential.dirty || Boolean(additionalHostname || additionalPort) || !sameDraft(draft, initial) ||
     parseTags(tagInput).join(",") !== (initial.tags ?? []).join(",");
   const protocolOptions = useMemo(
     () =>
@@ -227,10 +233,10 @@ export function ConnectionDrawer({
   const candidate = useMemo(
     () =>
       createConnectionProfile(
-        protocolDraft({ ...draft, tags: parseTags(tagInput) }),
+        connectionAddressDrafts(protocolDraft({ ...draft, tags: parseTags(tagInput) }), additionalHostname, additionalPort).primary,
         recordId,
       ),
-    [draft, tagInput, recordId],
+    [draft, tagInput, recordId, additionalHostname, additionalPort],
   );
 
   const duplicate = useMemo(
@@ -241,9 +247,20 @@ export function ConnectionDrawer({
 
   /** Validates and opens optional fields when one of them needs attention. */
   function validateNow(): ValidationErrors {
-    const next = protocolDraft({ ...draft, tags: parseTags(tagInput) });
-    const found = validateConnectionDraft(next);
+    const addresses = connectionAddressDrafts(protocolDraft({ ...draft, tags: parseTags(tagInput) }), additionalHostname, additionalPort);
+    const found = validateConnectionDraft(addresses.primary);
+    const extra: ValidationErrors = validateAdditionalAddress(addresses.additional);
+    if (!draft.hostname.trim() && additionalHostname.trim() && !relayEntry) {
+      for (const field of ["hostname", "port"] as const) {
+        if (found[field]) { extra[field] = found[field]; delete found[field]; }
+      }
+    }
+    setAdditionalErrors(extra);
     setErrors(found);
+
+    if (Object.keys(extra).length) {
+      panelRef.current?.querySelector<HTMLElement>(`[data-field="additional-${Object.keys(extra)[0]}"]`)?.focus();
+    }
 
     const firstField = Object.keys(found)[0];
     if (firstField) {
@@ -259,7 +276,7 @@ export function ConnectionDrawer({
       }
     }
 
-    return found;
+    return { ...found, ...extra };
   }
 
   async function save(connectAfterSave: boolean) {
@@ -269,11 +286,13 @@ export function ConnectionDrawer({
     setSaving(true);
     setSaveError(null);
     try {
+      const addresses = connectionAddressDrafts(protocolDraft({ ...draft, tags: parseTags(tagInput) }), additionalHostname, additionalPort);
       await onSave(
-        protocolDraft({ ...draft, tags: parseTags(tagInput) }),
+        addresses.primary,
         connectAfterSave,
         recordId,
         supportsCredentialRecord(candidate) ? credential.credential : undefined,
+        addresses.additional ? createConnectionProfile(addresses.additional, additionalId) : undefined,
       );
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : String(reason));
@@ -477,6 +496,37 @@ export function ConnectionDrawer({
                 </div>
               )}
             </div>
+
+            {!relayEntry && <div className="field-grid">
+              <div className="field">
+                <label className="field__label" htmlFor={`${formId}-additional-host`}>{t("form.additionalHostname")}</label>
+                <input id={`${formId}-additional-host`} data-field="additional-hostname"
+                  className={`input mono${additionalErrors.hostname ? " is-invalid" : ""}`}
+                  value={additionalHostname} placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                  aria-invalid={Boolean(additionalErrors.hostname)}
+                  onChange={event => {
+                    setAdditionalHostname(event.currentTarget.value);
+                    setAdditionalErrors({});
+                    setErrors(current => clearValidationError(current, "hostname"));
+                    if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
+                  }} />
+                {additionalErrors.hostname && <p className="field__error">{t(additionalErrors.hostname.key, additionalErrors.hostname.values)}</p>}
+                <p className="field__hint">{t("form.additionalHostnameHint")}</p>
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor={`${formId}-additional-port`}>{t("form.additionalPort")}</label>
+                <input id={`${formId}-additional-port`} data-field="additional-port" type="number"
+                  className={`input mono${additionalErrors.port ? " is-invalid" : ""}`}
+                  min={limits.minPort} max={limits.maxPort} step={1}
+                  value={additionalPort} placeholder={String(draft.port)}
+                  aria-invalid={Boolean(additionalErrors.port)}
+                  onChange={event => { setAdditionalPort(event.currentTarget.value); setAdditionalErrors({});
+                    if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
+                  }} />
+                {additionalErrors.port && <p className="field__error">{t(additionalErrors.port.key, additionalErrors.port.values)}</p>}
+              </div>
+            </div>}
 
             {relayEntry && (
               <div className="field">

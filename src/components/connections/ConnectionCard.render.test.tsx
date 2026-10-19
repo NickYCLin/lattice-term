@@ -41,6 +41,13 @@ function renderCard(
 }
 
 describe("connection card runtime capability", () => {
+  it("distinguishes same-protocol address buttons without needing hover", () => {
+    const markup = renderCard({ onConnect: vi.fn(), linked: [{
+      profile: { ...profile, id: "wan", hostname: "wan.example.com", port: 3390 }, onConnect: vi.fn(),
+    }] });
+    expect(markup).toContain("RDP · desktop.example.com:3389");
+    expect(markup).toContain("RDP · wan.example.com:3390");
+  });
   it("separates the primary action from compact management controls", () => {
     const markup = renderCard({ onConnect: vi.fn() });
     expect(markup).toContain('class="connection-card__primary"');

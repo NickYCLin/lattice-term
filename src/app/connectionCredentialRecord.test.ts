@@ -34,3 +34,15 @@ it("does not expose an old saved login after the endpoint is edited", () => {
     expect(sameCredentialTarget(profile, { ...profile, ...change })).toBe(false);
   }
 });
+
+it("sends both addresses in one native save without copying credentials to the other route", async () => {
+  native.invoke.mockReset();
+  const profile = createConnectionProfile({ ...emptyDraft(), hostname: "lan.example" }, "lan");
+  const additionalRoute = { ...profile, id: "wan", hostname: "wan.example", port: 2222 };
+  const credential = { secret: "test-only-password", allowMcpRead: false };
+  await persistConnectionRecord(profile, credential, undefined, additionalRoute);
+  expect(native.invoke).toHaveBeenCalledExactlyOnceWith("save_connection_record", {
+    profile, credential, linkedProfileId: null, additionalRoute,
+  });
+  expect(JSON.stringify(additionalRoute)).not.toContain(credential.secret);
+});
