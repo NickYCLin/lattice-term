@@ -595,6 +595,8 @@ export const zhTW = {
   "tunnels.stopAll": "全部停止",
   "tunnels.add": "新增通道",
   "tunnels.sshRequired": "請先建立至少一個 SSH 連線設定，才能建立或啟動通道。",
+  "tunnels.storageError.title": "無法讀取通道設定",
+  "tunnels.storageError.body": "原有資料未被覆蓋。為保護設定，目前暫停新增通道；請修復本機通道資料後，重新啟動 LatticeTerm 載入。",
   "tunnels.desktopOnly.title": "通道執行需要桌面後端",
   "tunnels.desktopOnly.body":
     "瀏覽器預覽可建立、編輯與複製通道設定；啟動、停止與流量監控請在 LatticeTerm 桌面應用程式使用。",

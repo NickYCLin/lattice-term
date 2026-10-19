@@ -9,6 +9,8 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "tunnels.storageError.title": "Tunnel settings could not be loaded",
+  "tunnels.storageError.body": "The saved data has not been overwritten. Adding tunnels is disabled to protect it. Repair the local tunnel settings, then restart LatticeTerm to reload them.",
   "chat.archive.done": "Archived in Codex (recoverable, not permanently deleted)",
   "chat.archive.restore": "Restore this archive",
   "chat.archive.confirm.body": "Archive the native thread in the same Codex account through the official interface. This is not permanent deletion. Restore the latest archive here or use another tool that supports unarchiving.",

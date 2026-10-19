@@ -5,10 +5,12 @@
  * having an SSH profile to tunnel through.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionProfile } from "../domain/connection";
 import { I18nProvider } from "../i18n";
 import { TunnelsView } from "./TunnelsView";
+
+afterEach(() => vi.unstubAllGlobals());
 
 const sshProfile: ConnectionProfile = {
   id: "p1",
@@ -32,6 +34,16 @@ function render(profiles: ConnectionProfile[], backendAvailable: boolean): strin
 }
 
 describe("TunnelsView", () => {
+  it("explains unreadable storage and disables both add buttons", () => {
+    vi.stubGlobal("localStorage", { getItem: () => "[null]" });
+    const markup = render([sshProfile], true);
+    expect(markup).toContain("無法讀取通道設定");
+    expect(markup).toContain("原有資料未被覆蓋");
+    const addButtons = markup.split("</button>").map(part => part.slice(part.lastIndexOf("<button")))
+      .filter(button => button.startsWith("<button") && button.includes("新增通道"));
+    expect(addButtons).toHaveLength(2);
+    expect(addButtons.every(button => button.slice(button.lastIndexOf("<button")).includes('disabled=""'))).toBe(true);
+  });
   it("shows the empty state with every tunnel type filter", () => {
     const markup = render([sshProfile], true);
     expect(markup).toContain("尚無任何通道設定");

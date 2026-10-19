@@ -60,6 +60,7 @@ export function TunnelsView({
     stopTunnel,
     startAll,
     stopAll,
+    storageError,
   } = useTunnels(profiles, onActivity, backendAvailable);
 
   // Backend failures arrive as "code:detail"; the code picks the translated
@@ -238,6 +239,11 @@ export function TunnelsView({
           {t("tunnels.desktopOnly.body")}
         </Callout>
       )}
+      {storageError && (
+        <Callout tone="danger" title={t("tunnels.storageError.title")}>
+          {t("tunnels.storageError.body")}
+        </Callout>
+      )}
       {copyProblem && (
         <Callout tone="danger" title={t("common.copyFailed.title")}>
           {copyProblem}
@@ -302,7 +308,7 @@ export function TunnelsView({
           <button
             type="button"
             className="button button--primary"
-            disabled={sshProfiles.length === 0}
+            disabled={storageError || sshProfiles.length === 0}
             onClick={() => setIsCreating(true)}
           >
             <PlusIcon size={15} />
@@ -333,7 +339,7 @@ export function TunnelsView({
             <button
               type="button"
               className="button button--primary"
-              disabled={sshProfiles.length === 0}
+              disabled={storageError || sshProfiles.length === 0}
               onClick={() => setIsCreating(true)}
             >
               <PlusIcon size={15} />

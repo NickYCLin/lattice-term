@@ -21,8 +21,7 @@ import {
 } from "../domain/tunnel";
 import type { ConnectionProfile } from "../domain/connection";
 import { DESKTOP_BACKEND_UNAVAILABLE } from "./nativeRuntime";
-
-const TUNNELS_STORAGE_KEY = "latticeterm.tunnels.v1";
+import { readTunnelStore, TUNNELS_STORAGE_KEY } from "./tunnelPersistence";
 
 export interface LiveTunnelState extends TunnelStats {
   status: TunnelStatus;
@@ -76,6 +75,7 @@ export async function requestTunnelStop(
 }
 
 export interface UseTunnelsResult {
+  storageError: boolean;
   tunnels: TunnelConfig[];
   states: Record<string, LiveTunnelState>;
   addTunnel: (draft: TunnelDraft) => { success: boolean; errors?: TunnelValidationError[]; tunnel?: TunnelConfig };
@@ -93,29 +93,22 @@ export function useTunnels(
   onActivity: ((type: string, detail: string) => void) | undefined,
   backendAvailable: boolean,
 ): UseTunnelsResult {
-  const [tunnels, setTunnels] = useState<TunnelConfig[]>(() => {
-    try {
-      const raw = localStorage.getItem(TUNNELS_STORAGE_KEY);
-      if (raw) {
-        return JSON.parse(raw) as TunnelConfig[];
-      }
-    } catch {
-      // An unreadable store starts empty rather than crashing the view.
-    }
-    return [];
-  });
+  const [initialStore] = useState(readTunnelStore);
+  const { storageError } = initialStore;
+  const [tunnels, setTunnels] = useState<TunnelConfig[]>(initialStore.tunnels);
 
   const [states, setStates] = useState<Record<string, LiveTunnelState>>({});
   const autoStartAttempted = useRef(new Set<string>());
 
   // Persist to storage
   useEffect(() => {
+    if (storageError) return;
     try {
       localStorage.setItem(TUNNELS_STORAGE_KEY, JSON.stringify(tunnels));
     } catch {
       // Ignore
     }
-  }, [tunnels]);
+  }, [storageError, tunnels]);
 
   // Poll live status from the backend. Only fields the backend owns are
   // overwritten, so an error recorded at start time survives until the next
@@ -175,6 +168,7 @@ export function useTunnels(
 
   const addTunnel = useCallback(
     (draft: TunnelDraft) => {
+      if (storageError) return { success: false };
       const errors = validateTunnelDraft(draft);
       if (errors.length > 0) {
         return { success: false, errors };
@@ -185,7 +179,7 @@ export function useTunnels(
       onActivity?.("tunnel_create", created.name);
       return { success: true, tunnel: created };
     },
-    [onActivity],
+    [onActivity, storageError],
   );
 
   const updateTunnel = useCallback(
@@ -222,6 +216,7 @@ export function useTunnels(
         ...target,
         id: `tunnel-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         name: `${target.name} (Copy)`,
+        autoStart: false,
         localPort: target.localPort < 65535 ? target.localPort + 1 : target.localPort,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -417,6 +412,7 @@ export function useTunnels(
   }, [tunnels, states, stopTunnel]);
 
   return {
+    storageError,
     tunnels,
     states,
     addTunnel,
