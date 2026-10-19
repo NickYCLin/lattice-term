@@ -78,6 +78,14 @@ describe("ModelField", () => {
     expect(decodeModelSelection("not-json")).toBeNull();
   });
 
+  it.each(["codex", "claude", "gemini", "antigravity"] as const)("round-trips %s including its default model", (definitionId) => {
+    for (const model of ["", "model:with/delimiters"]) {
+      expect(decodeModelSelection(encodeModelSelection({ definitionId, model })))
+        .toEqual({ definitionId, model });
+    }
+    expect(decodeModelSelection('["unknown-cli","model"]')).toBeNull();
+  });
+
   it("can lock only incompatible choices while preserving other assistants", () => {
     const markup = renderToStaticMarkup(
       <I18nProvider locale="zh-TW">

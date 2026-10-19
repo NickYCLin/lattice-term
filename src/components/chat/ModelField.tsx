@@ -20,7 +20,7 @@ export function decodeModelSelection(value: string): ChatModelSelection | null {
     if (!Array.isArray(selection) || selection.length !== 2) return null;
     const [definitionId, model] = selection;
     if (
-      (definitionId !== "claude" && definitionId !== "codex" && definitionId !== "gemini") ||
+      (definitionId !== "claude" && definitionId !== "codex" && definitionId !== "gemini" && definitionId !== "antigravity") ||
       typeof model !== "string"
     ) {
       return null;
