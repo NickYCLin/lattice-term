@@ -1293,6 +1293,7 @@ async fn open_session(
         .then(|| Arc::new(RemoteForwardGate::new(request)));
     let handler = TunnelHandler {
         trust: TrustingHandler {
+            windows_server: Arc::default(),
             host: request.ssh_hostname.clone(),
             port: request.ssh_port,
             known,
@@ -1896,6 +1897,7 @@ mod tests {
 
         let mut handler = TunnelHandler {
             trust: TrustingHandler {
+                windows_server: Arc::default(),
                 host: "gateway.internal".into(),
                 port: 22,
                 known: None,
@@ -2182,6 +2184,7 @@ mod tests {
         let counters = test_counters(Arc::new(Semaphore::new(1)), 1);
         let handler = TunnelHandler {
             trust: TrustingHandler {
+                windows_server: Arc::default(),
                 host: "gateway.internal".into(),
                 port: 22,
                 known: None,

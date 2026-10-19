@@ -99,6 +99,7 @@ pub struct SftpDirectory {
 }
 
 struct SftpSessionEntry {
+    windows_server: bool,
     summary: SftpSessionSummary,
     sftp: Arc<SftpSession>,
     // Holding the transport keeps the SSH session alive with the SFTP channel.
@@ -151,6 +152,15 @@ impl SftpRegistry {
             .map_err(|error| error.to_string())?
             .get(session_id)
             .map(|entry| Arc::clone(&entry.sftp))
+            .ok_or_else(|| format!("no SFTP session called '{session_id}'"))
+    }
+
+    pub(crate) fn windows_server(&self, session_id: &str) -> Result<bool, String> {
+        self.sessions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(session_id)
+            .map(|entry| entry.windows_server)
             .ok_or_else(|| format!("no SFTP session called '{session_id}'"))
     }
 
@@ -266,7 +276,9 @@ pub async fn connect(
     request: SftpConnectRequest,
 ) -> SftpConnectOutcome {
     let verdict = Arc::new(Mutex::new(None));
+    let windows_server = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handler = TrustingHandler {
+        windows_server: Arc::clone(&windows_server),
         host: request.hostname.clone(),
         port: request.port,
         known,
@@ -333,6 +345,7 @@ pub async fn connect(
         summary: summary.clone(),
         sftp,
         _transport: Arc::new(transport),
+        windows_server: windows_server.load(Ordering::Relaxed),
         listing: Arc::default(),
     }) {
         return failed("registry", error);
@@ -351,6 +364,7 @@ pub(crate) async fn attach_to_ssh(
     registry: Arc<SftpRegistry>,
     ssh: SessionSummary,
     transport: Arc<client::Handle<TrustingHandler>>,
+    windows_server: bool,
 ) -> SftpConnectOutcome {
     let channel = match transport.channel_open_session().await {
         Ok(channel) => channel,
@@ -381,6 +395,7 @@ pub(crate) async fn attach_to_ssh(
         summary: summary.clone(),
         sftp,
         _transport: transport,
+        windows_server,
         listing: Arc::default(),
     }) {
         return failed("registry", error);

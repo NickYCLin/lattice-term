@@ -1420,7 +1420,9 @@ impl DesktopService {
             if paired.contains_key(&session.session_id) {
                 continue;
             }
-            let Some((summary, transport)) = self.ssh.session_transport(&session.session_id) else {
+            let Some((summary, transport, windows_server)) =
+                self.ssh.session_transport(&session.session_id)
+            else {
                 continue;
             };
             if self.sftp.paired_session(&transport).is_some() {
@@ -1429,7 +1431,12 @@ impl DesktopService {
             }
             let files = match tokio::time::timeout(
                 Duration::from_secs(10),
-                crate::sftp::attach_to_ssh(Arc::clone(&self.sftp), summary, transport),
+                crate::sftp::attach_to_ssh(
+                    Arc::clone(&self.sftp),
+                    summary,
+                    transport,
+                    windows_server,
+                ),
             )
             .await
             {

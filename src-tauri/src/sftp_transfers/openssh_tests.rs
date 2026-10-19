@@ -18,7 +18,12 @@ async fn prepare_upload(
 ) -> (TransferRegistry, Arc<TransferEntry>) {
     let staging =
         temporary_remote_path(server.directory.path().to_str().unwrap(), "upload").unwrap();
-    let file = create_private_upload(&session, &staging).await.unwrap();
+    let target_snapshot = upload_target_snapshot(&session, &server.path(name), overwrite)
+        .await
+        .unwrap();
+    let file = create_upload_staging(&session, &staging, false)
+        .await
+        .unwrap();
     let entry = Arc::new(TransferEntry {
         state: Mutex::new(TransferState {
             transfer_id: "test-upload".into(),
@@ -35,6 +40,8 @@ async fn prepare_upload(
         cancel: AtomicBool::new(false),
         upload: AsyncMutex::new(Some(file)),
         upload_session: Some(session),
+        windows_permissions: false,
+        target_snapshot,
         staging_path: Some(staging),
         overwrite,
         target_gate: Arc::default(),

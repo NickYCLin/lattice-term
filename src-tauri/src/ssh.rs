@@ -17,7 +17,7 @@ use russh::keys::ssh_key;
 use russh::ChannelMsg;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -266,6 +266,7 @@ enum ClientInput {
 }
 
 struct SessionEntry {
+    windows_server: Arc<AtomicBool>,
     summary: SessionSummary,
     input: mpsc::Sender<ClientInput>,
     /// The connection itself, kept so other features — metrics probes, future
@@ -328,18 +329,27 @@ impl SshRegistry {
     pub(crate) fn session_transport(
         &self,
         session_id: &str,
-    ) -> Option<(SessionSummary, Arc<client::Handle<TrustingHandler>>)> {
-        self.sessions
-            .lock()
-            .ok()?
-            .get(session_id)
-            .map(|entry| (entry.summary.clone(), Arc::clone(&entry.handle)))
+    ) -> Option<(SessionSummary, Arc<client::Handle<TrustingHandler>>, bool)> {
+        self.sessions.lock().ok()?.get(session_id).map(|entry| {
+            (
+                entry.summary.clone(),
+                Arc::clone(&entry.handle),
+                entry.windows_server.load(Ordering::Relaxed),
+            )
+        })
     }
+}
+
+pub(crate) fn is_windows_openssh(identification: &[u8]) -> bool {
+    identification
+        .strip_prefix(b"SSH-2.0-OpenSSH_for_Windows_")
+        .is_some_and(|version| version.first().is_some_and(u8::is_ascii_digit))
 }
 
 /// Answers russh's "do you accept this host key?" question from the trust
 /// store, and remembers the verdict so the caller can explain a refusal.
 pub(crate) struct TrustingHandler {
+    pub(crate) windows_server: Arc<AtomicBool>,
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) known: Option<HostKeyRecord>,
@@ -349,6 +359,19 @@ pub(crate) struct TrustingHandler {
 
 impl client::Handler for TrustingHandler {
     type Error = russh::Error;
+
+    async fn kex_done(
+        &mut self,
+        _shared_secret: Option<&[u8]>,
+        _names: &russh::Names,
+        session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        self.windows_server.store(
+            is_windows_openssh(session.remote_sshid()),
+            Ordering::Relaxed,
+        );
+        Ok(())
+    }
 
     async fn check_server_key(
         &mut self,
@@ -503,7 +526,9 @@ pub async fn connect(
 ) -> ConnectOutcome {
     let verdict = Arc::new(Mutex::new(None));
     let disconnect_reason = Arc::new(Mutex::new(None));
+    let windows_server = Arc::new(AtomicBool::new(false));
     let handler = TrustingHandler {
+        windows_server: Arc::clone(&windows_server),
         host: request.hostname.clone(),
         port: request.port,
         known,
@@ -596,6 +621,7 @@ pub async fn connect(
         guard.insert(
             session_id.clone(),
             SessionEntry {
+                windows_server,
                 summary: summary.clone(),
                 input: input_tx,
                 handle: Arc::clone(&session),
@@ -767,9 +793,27 @@ mod tests {
     }
 
     #[test]
+    fn windows_sftp_detection_requires_the_server_software_identifier() {
+        assert!(is_windows_openssh(b"SSH-2.0-OpenSSH_for_Windows_9.5"));
+        assert!(is_windows_openssh(
+            b"SSH-2.0-OpenSSH_for_Windows_10.0 comment"
+        ));
+        for identification in [
+            b"SSH-2.0-OpenSSH_9.5".as_slice(),
+            b"SSH-2.0-OpenSSH_9.5 OpenSSH_for_Windows_9.5",
+            b"SSH-2.0-OpenSSH_for_Windows_",
+            b"SSH-2.0-OpenSSH_for_Windows_fake",
+            b"",
+        ] {
+            assert!(!is_windows_openssh(identification));
+        }
+    }
+
+    #[test]
     fn ssh_disconnect_reports_transport_errors_without_swallowing_them() {
         let report = Arc::new(Mutex::new(None));
         let mut handler = TrustingHandler {
+            windows_server: Arc::default(),
             host: "example.test".into(),
             port: 22,
             known: None,

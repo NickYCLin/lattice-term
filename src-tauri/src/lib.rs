@@ -4127,10 +4127,13 @@ async fn sftp_attach_ssh(
     ssh: State<'_, Arc<SshRegistry>>,
     sftp: State<'_, Arc<SftpRegistry>>,
 ) -> Result<SftpConnectOutcome, String> {
-    let Some((summary, transport)) = ssh.session_transport(&ssh_session_id) else {
+    let Some((summary, transport, windows_server)) = ssh.session_transport(&ssh_session_id) else {
         return Err(format!("SSH session '{ssh_session_id}' is not connected."));
     };
-    Ok(crate::sftp::attach_to_ssh(Arc::clone(sftp.inner()), summary, transport).await)
+    Ok(
+        crate::sftp::attach_to_ssh(Arc::clone(sftp.inner()), summary, transport, windows_server)
+            .await,
+    )
 }
 
 #[tauri::command]
@@ -4278,7 +4281,7 @@ async fn sftp_upload_begin(
     sessions: State<'_, Arc<SftpRegistry>>,
     transfers: State<'_, Arc<TransferRegistry>>,
 ) -> Result<TransferState, String> {
-    crate::sftp_transfers::begin_upload(
+    crate::sftp_transfers::begin_desktop_upload(
         Arc::clone(transfers.inner()),
         sessions.inner(),
         &crate::sftp_transfers::EventSink(app.clone()),

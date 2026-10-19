@@ -64,6 +64,8 @@ pub struct TransferState {
 }
 
 struct TransferEntry {
+    windows_permissions: bool,
+    target_snapshot: Option<FileAttributes>,
     state: Mutex<TransferState>,
     cancel: AtomicBool,
     /// The open remote file of an in-progress upload, fed chunk by chunk.
@@ -428,6 +430,19 @@ async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String>
         .map_err(|error| error.to_string())?
         .clone();
     let target_path = state.remote_path;
+    if entry.windows_permissions {
+        let staged = session
+            .symlink_metadata(staging_path.clone())
+            .await
+            .map_err(|error| format!("could not inspect the completed upload: {error}"))?;
+        require_upload_permissions(&staged, 0o600, true)?;
+        if staged.size != Some(state.bytes_done) {
+            return Err(
+                "The remote staging file changed during the upload; the upload was not published."
+                    .into(),
+            );
+        }
+    }
     let target_exists = session
         .try_exists(target_path.clone())
         .await
@@ -441,11 +456,19 @@ async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String>
     }
 
     if !target_exists {
+        if entry.target_snapshot.is_some() {
+            return Err(
+                "The remote file disappeared during the upload; the upload was not published."
+                    .into(),
+            );
+        }
         session
             .rename(staging_path.clone(), target_path)
             .await
             .map_err(|error| format!("could not publish the completed upload: {error}"))?;
-        return Ok(None);
+        return Ok(entry
+            .windows_permissions
+            .then(|| WINDOWS_UPLOAD_NOTICE.to_string()));
     }
 
     let original = session
@@ -455,30 +478,52 @@ async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String>
     if !original.file_type().is_file() {
         return Err("only an existing regular file can be replaced safely".to_string());
     }
+    if !entry
+        .target_snapshot
+        .as_ref()
+        .is_some_and(|expected| same_upload_target(expected, &original))
+    {
+        return Err(
+            "The remote file changed during the upload; the upload was not published.".into(),
+        );
+    }
     let original_mode = original
         .permissions
         .ok_or_else(|| "the server did not report the original file permissions".to_string())?;
     // SFTP v3 cannot carry arbitrary ACLs or safely transfer their ownership.
     // Preserve the owner's access, but never inherit new group/other readers.
-    let private_mode = original_mode & 0o700;
-    session
-        .set_metadata(
-            staging_path.clone(),
-            FileAttributes {
-                permissions: Some(private_mode),
-                ..FileAttributes::empty()
-            },
-        )
-        .await
-        .map_err(|error| format!("could not restrict the replacement file: {error}"))?;
-    let confirmed = session
-        .symlink_metadata(staging_path.clone())
-        .await
-        .map_err(|error| format!("could not verify replacement permissions: {error}"))?;
-    require_upload_permissions(&confirmed, private_mode)?;
-    let permission_notice = (original_mode & 0o077 != 0).then(||
+    let permission_notice = if entry.windows_permissions {
+        require_upload_permissions(&original, 0o600, true)?;
+        let mut writable = session
+            .open_with_flags(target_path.clone(), OpenFlags::WRITE)
+            .await
+            .map_err(|error| format!("the existing remote file is not writable: {error}"))?;
+        writable
+            .shutdown()
+            .await
+            .map_err(|error| error.to_string())?;
+        Some(WINDOWS_UPLOAD_NOTICE.to_string())
+    } else {
+        let private_mode = original_mode & 0o700;
+        session
+            .set_metadata(
+                staging_path.clone(),
+                FileAttributes {
+                    permissions: Some(private_mode),
+                    ..FileAttributes::empty()
+                },
+            )
+            .await
+            .map_err(|error| format!("could not restrict the replacement file: {error}"))?;
+        let confirmed = session
+            .symlink_metadata(staging_path.clone())
+            .await
+            .map_err(|error| format!("could not verify replacement permissions: {error}"))?;
+        require_upload_permissions(&confirmed, private_mode, false)?;
+        (original_mode & 0o077 != 0).then(||
         "The replacement retains owner permissions; group and other access was removed for privacy. Reapply shared access explicitly if needed.".to_string()
-    );
+    )
+    };
 
     let parent = target_path
         .rsplit_once('/')
@@ -513,9 +558,49 @@ async fn promote_upload(entry: &TransferEntry) -> Result<Option<String>, String>
     }
 }
 
-fn require_upload_permissions(attributes: &FileAttributes, expected: u32) -> Result<(), String> {
+const WINDOWS_UPLOAD_NOTICE: &str = "Windows controls access through the upload folder ACL. POSIX mode bits do not verify an owner-only ACL; custom ACLs on a replaced file are not copied to its replacement.";
+
+fn same_upload_target(expected: &FileAttributes, current: &FileAttributes) -> bool {
+    expected.size == current.size
+        && expected.mtime == current.mtime
+        && expected.uid == current.uid
+        && expected.gid == current.gid
+        && expected.permissions == current.permissions
+}
+
+async fn upload_target_snapshot(
+    session: &SftpSession,
+    path: &str,
+    overwrite: bool,
+) -> Result<Option<FileAttributes>, String> {
+    match session.symlink_metadata(path).await {
+        Ok(attributes) if overwrite && attributes.file_type().is_file() => Ok(Some(attributes)),
+        Ok(_) => Err(
+            "The remote path already exists or is not a regular file; confirm overwrite first."
+                .into(),
+        ),
+        Err(russh_sftp::client::error::Error::Status(status))
+            if status.status_code == russh_sftp::protocol::StatusCode::NoSuchFile =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(format!("could not inspect the upload target: {error}")),
+    }
+}
+
+fn require_upload_permissions(
+    attributes: &FileAttributes,
+    expected: u32,
+    windows: bool,
+) -> Result<(), String> {
+    if windows {
+        return match attributes.permissions {
+            Some(mode) if attributes.file_type().is_file() && mode & 0o200 != 0 => Ok(()),
+            _ => Err("Upload refused: the Windows server did not report a writable regular staging file.".into()),
+        };
+    }
     match attributes.permissions {
-        Some(mode) if mode & 0o777 == expected => Ok(()),
+        Some(mode) if attributes.file_type().is_file() && mode & 0o777 == expected => Ok(()),
         Some(mode) => Err(format!(
             "Upload refused: the server reported mode {:03o}, expected {:03o}. Owner-only access could not be verified. Windows SFTP mode reports alone cannot verify an ACL.",
             mode & 0o777, expected
@@ -524,9 +609,10 @@ fn require_upload_permissions(attributes: &FileAttributes, expected: u32) -> Res
     }
 }
 
-async fn create_private_upload(
+async fn create_upload_staging(
     session: &SftpSession,
     path: &str,
+    windows_permissions: bool,
 ) -> Result<russh_sftp::client::fs::File, String> {
     // EXCLUDE refuses an existing entry, including a pre-existing symlink.
     let mut file = session
@@ -541,7 +627,7 @@ async fn create_private_upload(
         .await
         .map_err(|error| error.to_string())?;
     let checked = match file.metadata().await {
-        Ok(attributes) => require_upload_permissions(&attributes, 0o600),
+        Ok(attributes) => require_upload_permissions(&attributes, 0o600, windows_permissions),
         Err(error) => Err(format!("could not verify upload permissions: {error}")),
     };
     if let Err(error) = checked {
@@ -608,6 +694,8 @@ pub async fn start_download(
         cancel: AtomicBool::new(false),
         upload: AsyncMutex::new(None),
         upload_session: None,
+        windows_permissions: false,
+        target_snapshot: None,
         staging_path: None,
         overwrite: false,
         target_gate: Arc::default(),
@@ -772,7 +860,9 @@ pub async fn start_upload_from_path(
     }
 
     let staging_path = temporary_remote_path(&parent, "upload")?;
-    let remote_file = create_private_upload(&session, &staging_path).await?;
+    let windows_permissions = sessions.windows_server(session_id)?;
+    let target_snapshot = upload_target_snapshot(&session, &remote_path, overwrite).await?;
+    let remote_file = create_upload_staging(&session, &staging_path, windows_permissions).await?;
 
     let entry = Arc::new(TransferEntry {
         state: Mutex::new(TransferState {
@@ -789,6 +879,8 @@ pub async fn start_upload_from_path(
         }),
         cancel: AtomicBool::new(false),
         upload: AsyncMutex::new(Some(remote_file)),
+        windows_permissions,
+        target_snapshot,
         upload_session: Some(session),
         staging_path: Some(staging_path),
         overwrite,
@@ -901,7 +993,7 @@ pub(crate) async fn write_small_upload(
         fn update(&self, _: &TransferState) {}
     }
     let transfers = Arc::new(TransferRegistry::new());
-    let state = begin_upload(Arc::clone(&transfers), sessions, &QuietSink, plan).await?;
+    let state = begin_desktop_upload(Arc::clone(&transfers), sessions, &QuietSink, plan).await?;
     for chunk in bytes.chunks(MAX_UPLOAD_CHUNK) {
         let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
         upload_chunk(&transfers, &QuietSink, &state.transfer_id, &encoded).await?;
@@ -915,6 +1007,31 @@ pub async fn begin_upload(
     sessions: &SftpRegistry,
     sink: &dyn TransferSink,
     plan: UploadPlan,
+) -> Result<TransferState, String> {
+    if sessions.windows_server(&plan.session_id)? {
+        return Err(
+            "MCP upload refused: an owner-only Windows ACL cannot be verified through SFTP.".into(),
+        );
+    }
+    begin_upload_with_permissions(transfers, sessions, sink, plan, false).await
+}
+
+pub async fn begin_desktop_upload(
+    transfers: Arc<TransferRegistry>,
+    sessions: &SftpRegistry,
+    sink: &dyn TransferSink,
+    plan: UploadPlan,
+) -> Result<TransferState, String> {
+    let windows_permissions = sessions.windows_server(&plan.session_id)?;
+    begin_upload_with_permissions(transfers, sessions, sink, plan, windows_permissions).await
+}
+
+async fn begin_upload_with_permissions(
+    transfers: Arc<TransferRegistry>,
+    sessions: &SftpRegistry,
+    sink: &dyn TransferSink,
+    plan: UploadPlan,
+    windows_permissions: bool,
 ) -> Result<TransferState, String> {
     let session_id = plan.session_id.as_str();
     let total_bytes = plan.total_bytes;
@@ -935,7 +1052,8 @@ pub async fn begin_upload(
     }
 
     let staging_path = temporary_remote_path(&parent, "upload")?;
-    let file = create_private_upload(&session, &staging_path).await?;
+    let target_snapshot = upload_target_snapshot(&session, &remote_path, overwrite).await?;
+    let file = create_upload_staging(&session, &staging_path, windows_permissions).await?;
 
     let entry = Arc::new(TransferEntry {
         state: Mutex::new(TransferState {
@@ -952,6 +1070,8 @@ pub async fn begin_upload(
         }),
         cancel: AtomicBool::new(false),
         upload: AsyncMutex::new(Some(file)),
+        windows_permissions,
+        target_snapshot,
         upload_session: Some(session),
         staging_path: Some(staging_path),
         overwrite,
@@ -1138,6 +1258,10 @@ pub async fn cancel_session(
 #[path = "sftp_transfers/openssh_tests.rs"]
 mod openssh_tests;
 
+#[cfg(all(test, windows))]
+#[path = "sftp_transfers/windows_openssh_tests.rs"]
+mod windows_openssh_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1219,8 +1343,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn uploads_require_private_creation_and_preserve_colliding_paths() {
-        for (mode, collision, cleanup_failure) in [
+    async fn uploads_follow_server_permissions_and_preserve_colliding_paths() {
+        for ((mode, collision, cleanup_failure), windows_permissions) in [
             (Some(0o100600), false, false),
             (Some(0o100644), false, false),
             (Some(0o100400), false, false),
@@ -1228,7 +1352,13 @@ mod tests {
             (None, false, false),
             (Some(0o100600), true, false),
             (Some(0o100644), false, true),
-        ] {
+            (Some(0o100666), false, false),
+            (Some(0o120666), false, false),
+            (Some(0o040666), false, false),
+        ]
+        .into_iter()
+        .flat_map(|case| [false, true].map(|windows_permissions| (case, windows_permissions)))
+        {
             let operations = Arc::new(Mutex::new(Vec::new()));
             let (client, server) = tokio::io::duplex(8192);
             let peer = tokio::spawn(russh_sftp::server::run(
@@ -1243,8 +1373,17 @@ mod tests {
             let session = SftpSession::new(crate::sftp_limits::BoundedSftpStream::new(client))
                 .await
                 .unwrap();
-            let result = create_private_upload(&session, "/srv/.upload.part").await;
-            if mode == Some(0o100600) && !collision {
+            let result =
+                create_upload_staging(&session, "/srv/.upload.part", windows_permissions).await;
+            let allowed = mode.is_some_and(|mode| {
+                mode & 0o170000 == 0o100000
+                    && if windows_permissions {
+                        mode & 0o200 != 0
+                    } else {
+                        mode & 0o777 == 0o600
+                    }
+            });
+            if allowed && !collision {
                 result.unwrap().shutdown().await.unwrap();
                 assert_eq!(*operations.lock().unwrap(), ["open", "fstat", "close"]);
             } else {
@@ -1382,7 +1521,7 @@ mod tests {
                 ..FileAttributes::empty()
             };
             let files = Arc::new(Mutex::new(HashMap::from([
-                ("/srv/report".to_string(), original),
+                ("/srv/report".to_string(), original.clone()),
                 ("/srv/.upload".to_string(), staged),
             ])));
             let (client, server) = tokio::io::duplex(8192);
@@ -1416,6 +1555,8 @@ mod tests {
                 cancel: AtomicBool::new(false),
                 upload: AsyncMutex::new(None),
                 upload_session: Some(Arc::clone(&session)),
+                windows_permissions: false,
+                target_snapshot: Some(original),
                 staging_path: Some("/srv/.upload".into()),
                 overwrite,
                 target_gate: Arc::default(),
@@ -1633,6 +1774,8 @@ mod tests {
             cancel: AtomicBool::new(false),
             upload: AsyncMutex::new(None),
             upload_session: None,
+            windows_permissions: false,
+            target_snapshot: None,
             staging_path: None,
             overwrite: false,
             target_gate: Arc::default(),
@@ -1700,6 +1843,8 @@ mod tests {
             cancel: AtomicBool::new(false),
             upload: AsyncMutex::new(None),
             upload_session: None,
+            windows_permissions: false,
+            target_snapshot: None,
             staging_path: None,
             overwrite: false,
             target_gate: Arc::default(),
