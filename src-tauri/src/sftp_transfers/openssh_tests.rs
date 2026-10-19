@@ -261,7 +261,7 @@ async fn openssh_exclusive_staging_never_truncates_existing_paths() {
         symlink(server.path("original"), server.path("link")).unwrap();
         symlink(server.path("missing"), server.path("dangling")).unwrap();
         for name in ["original", "link", "dangling"] {
-            assert!(create_private_upload(&session, &server.path(name))
+            assert!(create_upload_staging(&session, &server.path(name), false)
                 .await
                 .is_err());
         }

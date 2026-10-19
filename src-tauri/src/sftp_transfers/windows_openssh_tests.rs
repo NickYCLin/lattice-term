@@ -240,14 +240,13 @@ async fn windows_openssh_refuses_read_only_replacements() {
         let server = WindowsServer::start().await;
         let target = server.path("report.txt");
         std::fs::write(&target, b"original").unwrap();
-        let mut permissions = std::fs::metadata(&target).unwrap().permissions();
+        let original_permissions = std::fs::metadata(&target).unwrap().permissions();
+        let mut permissions = original_permissions.clone();
         permissions.set_readonly(true);
         std::fs::set_permissions(&target, permissions).unwrap();
         let (transfers, _) = server.prepare("report.txt", b"replacement", true).await;
         let result = finish_upload(&transfers, &QuietSink, "windows-upload").await;
-        let mut permissions = std::fs::metadata(&target).unwrap().permissions();
-        permissions.set_readonly(false);
-        std::fs::set_permissions(&target, permissions).unwrap();
+        std::fs::set_permissions(&target, original_permissions).unwrap();
         assert!(result.is_err());
         assert_eq!(std::fs::read(target).unwrap(), b"original");
         server.assert_no_staging();
