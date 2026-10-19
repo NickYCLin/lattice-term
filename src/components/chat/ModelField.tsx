@@ -2,7 +2,7 @@
  * chooses the CLI that owns it, so people never have to switch a brand first. */
 
 import { useEffect } from "react";
-import type { ChatDefinitionId, ChatModelList } from "../../app/agentChat";
+import { effortChoices, type ChatDefinitionId, type ChatModelList } from "../../app/agentChat";
 import { useI18n } from "../../i18n/context";
 
 export interface ChatModelSelection {
@@ -58,6 +58,11 @@ export function ModelField({
   const { t } = useI18n();
   const available = Array.from(new Set([definitionId, ...definitionIds]));
   const availableKey = available.join("\0");
+  const selectedList = models[definitionId];
+  const selectedModel = selectedList.state === "ready"
+    ? selectedList.models.find(model => value ? model.value === value : model.isDefault)
+    : undefined;
+  const efforts = effortChoices(definitionId, value, selectedList);
 
   useEffect(() => {
     for (const id of availableKey.split("\0") as ChatDefinitionId[]) {
@@ -119,6 +124,13 @@ export function ModelField({
           );
         })}
       </select>
+      {selectedModel?.description && <small className="field__hint">{selectedModel.description}</small>}
+      <small className="field__hint" role="status">
+        {t("chat.model.capabilities.reasoning", {
+          levels: efforts.length ? efforts.map(effort => effort.value).join(" / ") : t("chat.model.capabilities.unknown"),
+        })}
+        {" · "}{t("chat.model.capabilities.unreported")}
+      </small>
     </label>
   );
 }

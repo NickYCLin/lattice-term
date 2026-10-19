@@ -107,4 +107,29 @@ describe("ModelField", () => {
     expect(markup).toContain('value="[&quot;codex&quot;,&quot;&quot;]" disabled=""');
     expect(markup).toContain('value="[&quot;claude&quot;,&quot;sonnet&quot;]"');
   });
+
+  it("shows only reported effort levels and escapes the CLI description", () => {
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <ModelField definitionId="codex" definitionIds={["codex"]} cliLabel={id => id}
+        value="" models={{ ...models, codex: { state: "ready", models: [{
+          value: "default-model", label: "Default", isDefault: true,
+          description: "<script>not markup</script>", efforts: [{ value: "high", description: null }],
+        }] } }} loadModels={vi.fn()} onChange={vi.fn()} />
+    </I18nProvider>);
+    expect(markup).toContain("推理強度：high");
+    expect(markup).toContain("&lt;script&gt;");
+    expect(markup).toContain("不依模型名稱推測");
+  });
+
+  it.each(["loading", "unavailable", "unknown-model"])("keeps capabilities unknown for %s", state => {
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <ModelField definitionId="codex" definitionIds={["codex"]} cliLabel={id => id}
+        value="vision-search-pro" models={{ ...models, codex: state === "loading"
+          ? { state: "loading" } : state === "unavailable"
+            ? { state: "unavailable", reason: "offline" } : models.codex }}
+        loadModels={vi.fn()} onChange={vi.fn()} />
+    </I18nProvider>);
+    expect(markup).toContain("推理強度：尚未確認");
+    expect(markup).toContain("CLI 未提供能力資訊");
+  });
 });
