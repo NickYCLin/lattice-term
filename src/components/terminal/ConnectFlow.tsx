@@ -275,6 +275,28 @@ export function ConnectFlow({
     }
   }
 
+  async function trustAndConnect(
+    host: string,
+    port: number,
+    algorithm: string,
+    fingerprint: string,
+  ) {
+    try {
+      await ssh.trustHost(host, port, algorithm, fingerprint);
+    } catch (reason) {
+      setPhase({ step: "password" });
+      setProblem({
+        title: t("connect.failed.title"),
+        body: t("connect.failed.body", {
+          stage: t(stageKey("trust")),
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      });
+      return;
+    }
+    await attempt(password);
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile.username.trim()) {
@@ -299,13 +321,7 @@ export function ConnectFlow({
     return (
       <HostFingerprintDialog
         fingerprint={presented(host, port, algorithm, fingerprint)}
-        onTrustAndSave={() => {
-          void (async () => {
-            await ssh.trustHost(host, port, algorithm, fingerprint);
-            // Trust is recorded, so the same attempt now gets past the check.
-            await attempt(password);
-          })();
-        }}
+        onTrustAndSave={() => trustAndConnect(host, port, algorithm, fingerprint)}
         onCancel={onCancel}
       />
     );
@@ -335,12 +351,9 @@ export function ConnectFlow({
           receivedFingerprint,
         )}
         onAbort={onCancel}
-        onAcceptRiskAndReplace={() => {
-          void (async () => {
-            await ssh.trustHost(host, port, algorithm, receivedFingerprint);
-            await attempt(password);
-          })();
-        }}
+        onAcceptRiskAndReplace={() =>
+          trustAndConnect(host, port, algorithm, receivedFingerprint)
+        }
       />
     );
   }
