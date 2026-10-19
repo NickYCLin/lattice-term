@@ -99,7 +99,11 @@ npm run ios:simulator
 
 對產生的 `.app` 執行 `python3 scripts/verify-ios-app.py /實際路徑/LatticeTerm.app --check-api-symbols`，檢查 Bundle ID、行銷版本、執行檔、隱私清單、區網說明與桌面 sidecar 邊界，並輸出 C API 匯入盤點。再用 `xcrun simctl install booted /實際路徑/LatticeTerm.app` 與 `xcrun simctl launch booted io.github.nickyclin.latticeterm` 安裝、啟動；產物檢查本身不代表啟動已成功。
 
-`.github/workflows/ios-verify.yml` 會在相關變更推至 `main`、建立 PR 或手動觸發時，使用 macOS runner 上的 Xcode 26 以上版本編譯無簽章的 Release 模擬器 App，再建立實機 archive，分別檢查 bundle。模擬器另以新建的 iPhone／iPad 裝置安裝與啟動，確認程序仍在執行，並以本機 OCR 確認初始連線頁與新增按鈕皆已顯示；保留原始截圖供檢閱，完成後刪除這次測試建立的裝置。這不是完整互動或實機測試。實機產物另檢查 iOS 26 以上 SDK，未宣告的 C API 類別會讓工作失敗。CI 不需要 Apple 密鑰。
+`.github/workflows/ios-verify.yml` 會在相關變更推至 `main`、建立 PR 或手動觸發時，使用 macOS runner 上的 Xcode 26 以上版本編譯無簽章的 Release 模擬器 App，再建立實機 archive，分別檢查 bundle。日常仍執行 iOS 設定與工具回歸、編譯、SDK 及隱私宣告檢查，但不自動啟動三機原生互動。CI 不需要 Apple 密鑰。
+
+需要三機驗收時，在 Actions 的 `iOS verification` 手動執行頁選擇待驗 ref，勾選預設關閉的 `native_interactions`。獨立的 `iOS native interactions (on demand)` job 會等待建置成功，下載同一輪的模擬器封裝，核對 commit、run ID、attempt、架構與 SHA-256，再安全解壓縮及檢查 bundle，不重新編譯另一份產品。它仍在新建的 iPhone、Pro Max、iPad 上執行原本的啟動、畫面辨識、真文字輸入、鍵盤開關、四階段旋轉幾何與最後橫向表單開關，保留原始證據並清理本次裝置；所有互動門檻與逾時維持不變。
+
+互動失敗仍會讓該 job 與整輪 workflow 失敗，但不再阻止建置 job 產出無簽章實機 archive。未勾選時，摘要會明示未執行原生互動；建置綠燈不是互動通過，也不能代替真機驗收。涉及 iOS 介面、鍵盤、旋轉或發行候選的驗收，仍須明確安排對應來源的原生互動，不得只以日常建置結案。
 
 本機也可以在建置、bundle 檢查通過後執行相同的畫面驗證：
 
@@ -117,7 +121,7 @@ Apple silicon 請將上例的 `x86_64` 改成 `arm64-sim`。`--local` 會依 App
 
 2026-09-06 的 Intel／Xcode 16.4 本機驗證已完成 Debug 封裝及 iPhone 16 Pro（iOS 18.6）安裝。首次啟動空白，系統紀錄顯示 WebKit GPU 子程序無回應後被終止；同一裝置重啟 App 後，連線頁、新增按鈕及導覽列的截圖／OCR 驗證通過。這不等於首次冷啟動或本機 iPad 已通過，亦不取代前述獨立的 iOS 26.2 Release CI 證據。
 
-通過 bundle 檢查後，CI 會保留 `ios-unsigned-release-<commit>` artifact 七天，包含模擬器 App、無簽章實機 archive、兩份 JSON 檢查報告與 `provenance.json`。封裝使用 tar 保留執行權限；provenance 記錄來源 commit、執行編號、模擬器架構及 SHA-256。請先對照來源及雜湊，再將模擬器 App 安裝到相容架構的模擬器。實機 archive 不能直接安裝到手機或上傳商店。iPhone／iPad 的啟動截圖另外存於 `ios-simulator-launch-evidence`，保留十四天；下載到封裝 artifact 不代表後續啟動步驟已成功，仍須確認該次 workflow 結果。
+通過 bundle 檢查後，CI 會保留 `ios-unsigned-release-<commit>` artifact 七天，包含模擬器 App、無簽章實機 archive、兩份 JSON 檢查報告與 `provenance.json`。封裝使用 tar 保留執行權限；provenance 記錄來源 commit、執行編號、模擬器架構及 SHA-256。請先對照來源及雜湊，再將模擬器 App 安裝到相容架構的模擬器。實機 archive 不能直接安裝到手機或上傳商店。只有勾選原生互動時，才另外保留供同輪下載的 `ios-native-simulator-<commit>` 七天，以及 `ios-layout-evidence` 與 `ios-simulator-launch-evidence` 原始採證；後者保留十四天。下載到封裝 artifact 不代表啟動或互動成功，仍須確認原生 job 結果。
 
 若新建裝置在開機、安裝、啟動或畫面檢查期間失敗，流程會先保存 `*.failure.json` 的失敗階段與原因，再以最多 15 秒嘗試擷取該裝置畫面。即使模擬器無回應而截圖失敗，仍保留原本的失敗結果與紀錄，並清理這次建立的裝置；診斷資料不能當成通過證據。
 

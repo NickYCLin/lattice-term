@@ -2,6 +2,11 @@ name: iOS verification
 
 on:
   workflow_dispatch:
+    inputs:
+      native_interactions:
+        description: '執行三機真實鍵盤、旋轉與表單互動驗收'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -84,28 +89,6 @@ jobs:
           reports.mkdir(exist_ok=True)
           (reports / 'simulator.json').write_text(result.stdout)
           PY
-      - name: Prepare isolated keyboard and rotation checks
-        run: |
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
-      - name: Capture isolated simulator layout evidence
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import subprocess
-          from pathlib import Path
-          apps = list(Path('src-tauri/gen/apple/build').glob('*/LatticeTerm.app'))
-          if len(apps) != 1:
-              raise SystemExit('Expected exactly one simulator app')
-          subprocess.run(['python3', 'scripts/ios-simulator-smoke.py', str(apps[0]), '--output', 'ios-layout-evidence', '--store-screenshots', '--layout-diagnostics', '--interaction-checks'], check=True)
-          PY
-      - name: Save original simulator layout evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: ios-layout-evidence
-          path: ios-layout-evidence
-          if-no-files-found: ignore
       - name: Build an unsigned device archive
         run: npm run ios:device:unsigned
       - name: Check the device SDK and bundled privacy declarations
@@ -167,6 +150,96 @@ jobs:
           path: src-tauri/gen/apple/build/reports
           if-no-files-found: error
           retention-days: 7
+      - name: Save simulator bundle for requested native checks
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_interactions }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-native-simulator-${{ github.sha }}
+          path: |
+            src-tauri/gen/apple/build/reports/ios-simulator.tar.gz
+            src-tauri/gen/apple/build/reports/provenance.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Report verification boundaries
+        if: always()
+        shell: bash
+        env:
+          NATIVE_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.native_interactions }}
+        run: |
+          echo '### iOS 驗證範圍' >> "$GITHUB_STEP_SUMMARY"
+          echo '本 job 僅檢查建置與 bundle，未代表原生互動通過。' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$NATIVE_REQUESTED" = true ]; then
+            echo '已要求三機互動；請另查原生互動 job 結果，建置成功後才會執行。' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '本輪未執行三機原生互動；需要時請手動勾選 native_interactions。' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # This job deliberately creates no IPA, uses no Apple credentials,
+      # and makes no TestFlight or App Store submission.
+
+  native-interactions:
+    name: iOS native interactions (on demand)
+    needs: simulator
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_interactions }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Select an installed Xcode 26 or newer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          from pathlib import Path
+          candidates = []
+          for app in Path('/Applications').glob('Xcode*.app'):
+              match = re.match(r'Xcode_(\d+)(?:\.(\d+))?(?:\.(\d+))?\.app$', app.name)
+              if match and int(match[1]) >= 26:
+                  candidates.append((tuple(int(part or 0) for part in match.groups()), app))
+          if not candidates:
+              raise SystemExit('Runner has no supported Xcode 26 installation')
+          subprocess.run(['sudo', 'xcode-select', '-s', str(max(candidates)[1])], check=True)
+          PY
+          xcodebuild -version
+      - name: Download this run's simulator bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "ios-native-simulator-${GITHUB_SHA}" --dir native-source/package
+      - name: Verify simulator source and extract safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os, platform, subprocess
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('reuse', 'scripts/reuse-ios-simulator.py')
+          reuse = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(reuse)
+          run = {'head_sha': os.environ['GITHUB_SHA'], 'id': os.environ['GITHUB_RUN_ID'],
+                 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}
+          archive, provenance = reuse.verify_archive(Path('native-source/package'), run, platform.machine())
+          app = reuse.extract_app(archive, Path('native-source/extracted'))
+          subprocess.run(['python3', 'scripts/verify-ios-app.py', str(app), '--build-number', '1', '--require-declared-api'], check=True)
+          PY
+      - name: Prepare isolated keyboard and rotation checks
+        run: |
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool NO
+      - name: Capture isolated simulator layout evidence
+        run: >-
+          python3 scripts/ios-simulator-smoke.py native-source/extracted/LatticeTerm.app
+          --output ios-layout-evidence --store-screenshots --layout-diagnostics --interaction-checks
+      - name: Save original simulator layout evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-layout-evidence
+          path: ios-layout-evidence
+          if-no-files-found: ignore
       - name: Save simulator launch evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -175,5 +248,3 @@ jobs:
           path: ios-layout-evidence
           if-no-files-found: ignore
           retention-days: 14
-      # This job deliberately creates no IPA, uses no Apple credentials,
-      # and makes no TestFlight or App Store submission.

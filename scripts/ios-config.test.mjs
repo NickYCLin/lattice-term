@@ -1,5 +1,126 @@
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+
+describe("iOS workflow 驗證邊界", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/ios-verify.yml", import.meta.url), "utf8"));
+  const build = workflow.jobs.simulator;
+  const native = workflow.jobs["native-interactions"];
+
+  it("保留 push 與 PR 建置，三機互動只接受手動明確勾選", () => {
+    expect(workflow.on.push.branches).toEqual(["main"]);
+    expect(workflow.on.pull_request.paths).toContain("src-tauri/**");
+    expect(workflow.on.workflow_dispatch.inputs.native_interactions).toMatchObject({ type: "boolean", default: false });
+    expect(native.if).toBe("${{ github.event_name == 'workflow_dispatch' && inputs.native_interactions }}");
+    expect(native.needs).toBe("simulator");
+  });
+
+  it("日常建置仍檢查 bundle 並封裝實機，不啟動模擬器互動", () => {
+    const commands = build.steps.map((step) => step.run ?? "").join("\n");
+    expect(commands).toContain("npm run ios:check");
+    expect(commands).toContain("npm run ios:simulator:release");
+    expect(commands).toContain("npm run ios:device:unsigned");
+    expect(commands).toContain("--require-store-sdk");
+    expect(commands).not.toContain("scripts/ios-simulator-smoke.py");
+    expect(commands).not.toContain("defaults write");
+  });
+
+  it("互動下載同輪同 SHA 的封裝並驗證來源、架構及雜湊後才解壓縮", () => {
+    const upload = build.steps.find((step) => step.with?.name === "ios-native-simulator-${{ github.sha }}");
+    expect(upload.if).toBe(native.if);
+    expect(upload.with.path).toContain("reports/ios-simulator.tar.gz");
+    expect(upload.with.path).toContain("reports/provenance.json");
+    const download = native.steps.find((step) => step.name === "Download this run's simulator bundle");
+    expect(download.run).toContain('gh run download "$GITHUB_RUN_ID"');
+    expect(download.run).toContain('ios-native-simulator-${GITHUB_SHA}');
+    const verify = native.steps.find((step) => step.name === "Verify simulator source and extract safely").run;
+    for (const field of ["GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "platform.machine()", "verify_archive", "extract_app"])
+      expect(verify).toContain(field);
+    expect(verify.indexOf("reuse.verify_archive(")).toBeLessThan(verify.indexOf("reuse.extract_app("));
+  });
+
+  it("保留真互動參數、失敗狀態與原始證據", () => {
+    const capture = native.steps.find((step) => step.name === "Capture isolated simulator layout evidence");
+    expect(capture.run).toContain("--store-screenshots --layout-diagnostics --interaction-checks");
+    expect(native["timeout-minutes"]).toBe(60);
+    for (const job of Object.values(workflow.jobs)) {
+      expect(job["continue-on-error"]).toBeUndefined();
+      for (const step of job.steps) expect(step["continue-on-error"]).toBeUndefined();
+    }
+    for (const name of ["ios-layout-evidence", "ios-simulator-launch-evidence"]) {
+      expect(native.steps.find((step) => step.with?.name === name).if).toBe("always()");
+    }
+  });
+
+  it("建置摘要明示未驗互動，下載權限僅限互動 job", () => {
+    expect(build.steps.find((step) => step.name === "Report verification boundaries").run).toContain("未代表原生互動通過");
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(native.permissions).toEqual({ contents: "read", actions: "read" });
+  });
+
+  it("所有 shell 與內嵌 Python 指令語法有效", () => {
+    for (const job of Object.values(workflow.jobs)) {
+      for (const step of job.steps.filter((entry) => entry.run)) {
+        const shell = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+        expect(shell.status, shell.stderr).toBe(0);
+        for (const match of step.run.matchAll(/python3 - <<'PY'\n([^]*?)\nPY/g)) {
+          const python = spawnSync("python3", ["-c", "import sys; compile(sys.stdin.read(), '<workflow>', 'exec')"], { input: match[1], encoding: "utf8" });
+          expect(python.status, python.stderr).toBe(0);
+        }
+      }
+    }
+  });
+
+  it("實際來源檢查指令接受同輪封裝並拒絕異動雜湊", () => {
+    const command = native.steps.find((step) => step.name === "Verify simulator source and extract safely").run;
+    const code = command.match(/python3 - <<'PY'\n([^]*?)\nPY/)[1];
+    const fixture = `
+import hashlib, io, json, os, shutil, tarfile, tempfile
+from pathlib import Path
+from unittest.mock import patch
+source = Path('scripts/reuse-ios-simulator.py').resolve()
+code = ${JSON.stringify(code)}
+for corrupt in (False, True):
+    with tempfile.TemporaryDirectory() as temporary:
+        previous = Path.cwd()
+        try:
+            os.chdir(temporary)
+            Path('scripts').mkdir()
+            shutil.copyfile(source, 'scripts/reuse-ios-simulator.py')
+            package = Path('native-source/package')
+            package.mkdir(parents=True)
+            archive = package / 'ios-simulator.tar.gz'
+            with tarfile.open(archive, 'w:gz') as output:
+                member = tarfile.TarInfo('LatticeTerm.app/Info.plist')
+                member.size = 7
+                output.addfile(member, io.BytesIO(b'fixture'))
+            import platform
+            provenance = {'commit': 'a' * 40, 'runId': '42', 'runAttempt': '1',
+                          'simulatorArchitecture': platform.machine(),
+                          'sha256': {archive.name: '0' * 64 if corrupt else hashlib.sha256(archive.read_bytes()).hexdigest()}}
+            (package / 'provenance.json').write_text(json.dumps(provenance))
+            with patch.dict(os.environ, {'GITHUB_SHA': 'a' * 40, 'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '1'}), patch('subprocess.run') as verify:
+                if corrupt:
+                    try:
+                        exec(code, {})
+                        raise AssertionError('corrupt archive accepted')
+                    except ValueError:
+                        pass
+                    verify.assert_not_called()
+                    assert not Path('native-source/extracted').exists()
+                else:
+                    exec(code, {})
+                    verify.assert_called_once()
+                    assert verify.call_args.kwargs['check'] is True
+                    assert Path('native-source/extracted/LatticeTerm.app/Info.plist').read_bytes() == b'fixture'
+        finally:
+            os.chdir(previous)
+`;
+    const result = spawnSync("python3", ["-c", fixture], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  });
+});
 
 describe("iOS Tauri 設定", () => {
   it("iOS 前端掛載後要求原生 layout，不改 frame 或安全區", () => {
