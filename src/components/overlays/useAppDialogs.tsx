@@ -6,7 +6,7 @@
  * which once made "delete" and "overwrite" skip their questions.
  */
 
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TextPromptDialog } from "./TextPromptDialog";
 
@@ -36,8 +36,23 @@ export function useAppDialogs(): {
   const [promptRequest, setPromptRequest] = useState<PromptRequest | null>(null);
   const confirmResolver = useRef<((answer: boolean) => void) | null>(null);
   const promptResolver = useRef<((answer: string | null) => void) | null>(null);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const resolveConfirm = confirmResolver.current;
+      const resolvePrompt = promptResolver.current;
+      confirmResolver.current = null;
+      promptResolver.current = null;
+      resolveConfirm?.(false);
+      resolvePrompt?.(null);
+    };
+  }, []);
 
   const confirm = useCallback((request: ConfirmRequest) => {
+    if (!mounted.current) return Promise.resolve(false);
     confirmResolver.current?.(false);
     return new Promise<boolean>((resolve) => {
       confirmResolver.current = resolve;
@@ -46,6 +61,7 @@ export function useAppDialogs(): {
   }, []);
 
   const prompt = useCallback((request: PromptRequest) => {
+    if (!mounted.current) return Promise.resolve(null);
     promptResolver.current?.(null);
     return new Promise<string | null>((resolve) => {
       promptResolver.current = resolve;
