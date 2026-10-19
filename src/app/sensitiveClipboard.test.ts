@@ -59,6 +59,34 @@ describe("sensitiveClipboardClearDelayMs", () => {
 });
 
 describe("createSensitiveClipboardController", () => {
+  it("keeps a newer secret tracked when an older read returns oversized content", async () => {
+    let clipboard = "";
+    let finishRead!: (value: string) => void;
+    let reads = 0;
+    let nextTimer = 0;
+    const timers = new Map<number, () => void>();
+    const controller = createSensitiveClipboardController({
+      readText: () => ++reads === 1
+        ? new Promise<string>((resolve) => { finishRead = resolve; })
+        : Promise.resolve(clipboard),
+      writeText: async (value) => { clipboard = value; },
+    }, {
+      set: (callback) => { timers.set(++nextTimer, callback); return nextTimer; },
+      clear: (handle) => { timers.delete(handle); },
+    }, async (value) => new TextEncoder().encode(value));
+    try {
+      await controller.copy("first-secret", 15_000);
+      const clearing = controller.clear();
+      await controller.copy("second-secret", 30_000);
+      finishRead("x".repeat(4097));
+      await expect(clearing).resolves.toBe("nothing");
+      expect(timers.size).toBe(1);
+      expect(clipboard).toBe("second-secret");
+      await expect(controller.clear()).resolves.toBe("cleared");
+      expect(clipboard).toBe("");
+    } finally { controller.dispose(); }
+  });
+
   it("clears the tracked value when its timer expires", async () => {
     const test = fixture();
     await test.controller.copy("48291357", 30_000);

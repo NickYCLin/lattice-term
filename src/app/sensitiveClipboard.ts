@@ -87,6 +87,7 @@ export function createSensitiveClipboardController(
 
     try {
       const current = await adapter.readText();
+      if (tracked?.generation !== expectedGeneration) return "nothing";
       if (current.length > MAX_SENSITIVE_VALUE_BYTES) {
         forgetTracked();
         return "preserved";
