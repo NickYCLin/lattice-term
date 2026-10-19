@@ -690,18 +690,8 @@ pub async fn read_file(
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-pub async fn write_file(
-    registry: &SftpRegistry,
-    session_id: &str,
-    parent: &str,
-    name: &str,
-    data_base64: &str,
-    overwrite: bool,
-) -> Result<(), String> {
-    let parent = validate_path(parent)?;
-    let name = validate_name(name)?;
-    let estimated = data_base64.len().saturating_mul(3) / 4;
-    if estimated > MAX_TRANSFER_BYTES {
+fn decode_upload_payload(data_base64: &str) -> Result<Vec<u8>, String> {
+    if data_base64.len() > MAX_TRANSFER_BYTES.div_ceil(3) * 4 {
         return Err(format!(
             "The file is larger than the {} MiB transfer limit.",
             MAX_TRANSFER_BYTES / 1024 / 1024
@@ -716,6 +706,20 @@ pub async fn write_file(
             MAX_TRANSFER_BYTES / 1024 / 1024
         ));
     }
+    Ok(bytes)
+}
+
+pub async fn write_file(
+    registry: &SftpRegistry,
+    session_id: &str,
+    parent: &str,
+    name: &str,
+    data_base64: &str,
+    overwrite: bool,
+) -> Result<(), String> {
+    let parent = validate_path(parent)?;
+    let name = validate_name(name)?;
+    let bytes = decode_upload_payload(data_base64)?;
     crate::sftp_transfers::write_small_upload(
         registry,
         crate::sftp_transfers::UploadPlan {
@@ -827,6 +831,29 @@ mod tests {
         entry.longname = "x".repeat(256);
         budget.accept(&[entry]).unwrap();
         assert_eq!(budget.bytes, 1 + 256 + 128);
+    }
+
+    #[test]
+    fn upload_payload_limit_counts_decoded_bytes_not_base64_padding() {
+        for size in [
+            MAX_TRANSFER_BYTES - 1,
+            MAX_TRANSFER_BYTES,
+            MAX_TRANSFER_BYTES + 1,
+            MAX_TRANSFER_BYTES + 2,
+        ] {
+            let payload = vec![0x5a; size];
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
+            let result = decode_upload_payload(&encoded);
+            if size <= MAX_TRANSFER_BYTES {
+                assert_eq!(result.unwrap(), payload);
+            } else {
+                assert!(result.unwrap_err().contains("transfer limit"));
+            }
+        }
+        assert!(decode_upload_payload("invalid!")
+            .unwrap_err()
+            .contains("valid base64"));
+        assert!(decode_upload_payload("").unwrap().is_empty());
     }
 
     #[test]
