@@ -63,7 +63,7 @@ export interface TunnelValidationError {
  */
 export function isValidPort(port: string | number): boolean {
   const num = typeof port === "number" ? port : parseInt(port.trim(), 10);
-  return !isNaN(num) && num >= 1 && num <= 65535 && String(num) === String(port).trim();
+  return Number.isInteger(num) && num >= 1 && num <= 65535 && String(num) === String(port).trim();
 }
 
 /**
@@ -177,18 +177,19 @@ export function formatSshTunnelCommand(
 ): string {
   const portArg = gatewayPort !== 22 ? ` -p ${gatewayPort}` : "";
   const hostTarget = `${gatewayUser}@${gatewayHost}${portArg}`;
+  const forwardingHost = (host: string) => host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  const bind = tunnel.localHost !== "127.0.0.1" && tunnel.localHost !== "localhost"
+    ? `${forwardingHost(tunnel.localHost)}:` : "";
+  const remoteHost = forwardingHost(tunnel.remoteHost);
 
   switch (tunnel.type) {
     case "local": {
-      const bind = tunnel.localHost !== "127.0.0.1" && tunnel.localHost !== "localhost" ? `${tunnel.localHost}:` : "";
-      return `ssh -L ${bind}${tunnel.localPort}:${tunnel.remoteHost}:${tunnel.remotePort} ${hostTarget} -N`;
+      return `ssh -L ${bind}${tunnel.localPort}:${remoteHost}:${tunnel.remotePort} ${hostTarget} -N`;
     }
     case "remote": {
-      const bind = tunnel.localHost !== "127.0.0.1" && tunnel.localHost !== "localhost" ? `${tunnel.localHost}:` : "";
-      return `ssh -R ${bind}${tunnel.localPort}:${tunnel.remoteHost}:${tunnel.remotePort} ${hostTarget} -N`;
+      return `ssh -R ${bind}${tunnel.localPort}:${remoteHost}:${tunnel.remotePort} ${hostTarget} -N`;
     }
     case "dynamic": {
-      const bind = tunnel.localHost !== "127.0.0.1" && tunnel.localHost !== "localhost" ? `${tunnel.localHost}:` : "";
       return `ssh -D ${bind}${tunnel.localPort} ${hostTarget} -N`;
     }
   }

@@ -17,6 +17,31 @@ import {
 } from "../app/useTunnels";
 
 describe("tunnel domain model", () => {
+  it("rejects fractional numeric ports in both forwarding endpoints", () => {
+    expect(isValidPort(8080.5)).toBe(false);
+    expect(isValidPort("8080.5")).toBe(false);
+    const errors = validateTunnelDraft({
+      name: "Fractional ports", type: "local", profileId: "gateway",
+      localHost: "127.0.0.1", localPort: 8080.5,
+      remoteHost: "localhost", remotePort: 80.5,
+    });
+    expect(errors.map(error => error.field)).toEqual(["localPort", "remotePort"]);
+  });
+
+  it.each(["local", "remote", "dynamic"] as const)("brackets IPv6 addresses in %s forwarding commands", type => {
+    const tunnel: TunnelConfig = {
+      id: "ipv6", name: "IPv6", type, profileId: "gateway",
+      localHost: "::1", localPort: 8080, remoteHost: "2001:db8::2",
+      remotePort: 80, createdAt: 1, updatedAt: 1,
+    };
+    const forwarding = type === "dynamic" ? "-D [::1]:8080"
+      : `-${type === "local" ? "L" : "R"} [::1]:8080:[2001:db8::2]:80`;
+    expect(formatSshTunnelCommand(tunnel, "tester", "gateway.example", 2222))
+      .toBe(`ssh ${forwarding} tester@gateway.example -p 2222 -N`);
+    expect(formatSshTunnelCommand({ ...tunnel, remoteHost: "[2001:db8::2]" }, "tester", "gateway.example", 2222))
+      .toBe(`ssh ${forwarding} tester@gateway.example -p 2222 -N`);
+  });
+
   it("validates ports accurately within 1 - 65535", () => {
     expect(isValidPort(1)).toBe(true);
     expect(isValidPort(22)).toBe(true);
