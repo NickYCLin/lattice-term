@@ -3,13 +3,41 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { SftpPane } from "./SftpPane";
+import { useFileDrop } from "../../app/fileDrop";
 import type { SftpApi, SftpSessionSummary } from "../../app/useSftpSessions";
 import { allNodes, installHostDom, props } from "../agents/testFixtures/interactionDom";
 
-vi.mock("../../app/fileDrop", () => ({ useFileDrop: () => ({ dragging: false }) }));
+vi.mock("../../app/fileDrop", () => ({ useFileDrop: vi.fn(() => ({ dragging: false })) }));
 vi.mock("../files/RemoteTextEditorProvider", () => ({ useRemoteTextEditor: () => ({ active: false, open: vi.fn() }) }));
 vi.mock("../overlays/useAppDialogs", () => ({ useAppDialogs: () => ({ confirm: vi.fn(), prompt: vi.fn(), dialogs: null }) }));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+it("disables both drop routes while a selected upload is writing and restores them afterwards", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  let finishUpload!: () => void;
+  const uploadStream = vi.fn(() => new Promise<void>(resolve => { finishUpload = resolve; }));
+  const sftp = { list: vi.fn().mockResolvedValue({ path: "/uploads", entries: [] }), transfers: {}, uploadStream } as unknown as SftpApi;
+  const dropDisabled = () => {
+    const calls = vi.mocked(useFileDrop).mock.calls;
+    return calls[calls.length - 1][0].disabled;
+  };
+  let uploading: Promise<void> | undefined;
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SftpPane session={{ sessionId: "upload-session", currentPath: "/uploads" } as SftpSessionSummary} sftp={sftp} active /></I18nProvider>));
+    expect(dropDisabled()).toBe(false);
+    const input = allNodes(host).find(node => node.tagName === "INPUT" && props(node).type === "file")!;
+    await act(async () => {
+      uploading = props(input).onChange({ currentTarget: { files: [{ name: "report.txt", size: 1 }] } });
+    });
+    expect(uploadStream).toHaveBeenCalledTimes(1);
+    expect(dropDisabled()).toBe(true);
+    await act(async () => { finishUpload(); await uploading; });
+    expect(dropDisabled()).toBe(false);
+  } finally {
+    await act(async () => { finishUpload?.(); await uploading; root.unmount(); });
+  }
+});
 
 it("keeps failed listing unknown, disables writes and supports refresh and parent recovery", async () => {
   const host = installHostDom();

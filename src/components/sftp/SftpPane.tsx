@@ -282,7 +282,7 @@ export function SftpPane({
   }
 
   const { dragging, ...dropHandlers } = useFileDrop({
-    ref: dropRef, disabled: !active || editor.active || !directory,
+    ref: dropRef, disabled: !active || busy || editor.active || !directory,
     onPaths: dropFiles,
     onFiles: async files => { for (const file of files) await upload(file); },
     onError: error => setProblem(localFileError(error, t)),
