@@ -4,6 +4,36 @@
 
 ---
 
+## [2026.10.19](https://github.com/NickYCLin/lattice-term/compare/v2026.10.15...v2026.10.19) (2026-10-19)
+
+
+### 🛠️ 問題修正
+
+* **agent:** 保留明確單鍵取消後的輸入資格 ([8d844b3](https://github.com/NickYCLin/lattice-term/commit/8d844b3528eddf06261292f21b5c30c285a6940d))
+* **desktop:** 補齊音效恢復、圖片結果與窄屏操作 ([#309](https://github.com/NickYCLin/lattice-term/issues/309)) ([0fe4b96](https://github.com/NickYCLin/lattice-term/commit/0fe4b9614f27bee5777d2df3726957594fcd1a93))
+* **ios:** 以必要偏好讀回判定模擬器就緒 ([d8a4c72](https://github.com/NickYCLin/lattice-term/commit/d8a4c72c5630e7fd7da69318c83797951609bc0d))
+* **ios:** 保留旋轉後點擊失敗的命中證據 ([725b154](https://github.com/NickYCLin/lattice-term/commit/725b154d8cce56c66e144f959e7da2af3303dfe5))
+* **ios:** 保留長時間互動與逾時的失敗採證 ([a1e84d0](https://github.com/NickYCLin/lattice-term/commit/a1e84d077e71bb66ec3aad50431ec724068d9e2e))
+* **ios:** 修正失敗日誌查詢的時區格式 ([e1c5a84](https://github.com/NickYCLin/lattice-term/commit/e1c5a84860a19c442993ba9751dd128dec439317))
+* **ios:** 在鍵盤設定前確認隔離模擬器可執行指令 ([bf231d6](https://github.com/NickYCLin/lattice-term/commit/bf231d6c5845657e2cc9ff09fa03998873a9974e))
+* **ios:** 等待行動版前端掛載再同步視窗 ([9e6912b](https://github.com/NickYCLin/lattice-term/commit/9e6912be823ab5b13d88e7564ad32442600bb279))
+* **ios:** 補齊開機與觸控對照採證 ([de03ca7](https://github.com/NickYCLin/lattice-term/commit/de03ca7246543a619b2ce16e35740f5eeafe3c48))
+* **ios:** 補齊限定裝置的啟動失敗日誌 ([5ec0e60](https://github.com/NickYCLin/lattice-term/commit/5ec0e6072acb5782cf68e1aa30225fb938c593df))
+* **ios:** 讓短橫向空連線頁直接顯示新增按鈕 ([5c78af2](https://github.com/NickYCLin/lattice-term/commit/5c78af2519c41cf138a47b0b3639a37aeed464fe))
+* **ios:** 載入頁面後同步原生可視範圍 ([5c7cc91](https://github.com/NickYCLin/lattice-term/commit/5c7cc919e0dac842b90b581cb27b47db37170008))
+* **ios:** 避免排版診斷重入鎖定 ([38c9dfa](https://github.com/NickYCLin/lattice-term/commit/38c9dfa371917b5d46f0e3ee2a00981064e47ce5))
+* **ios:** 避免觸控後採證查詢已消失的按鈕 ([4c21150](https://github.com/NickYCLin/lattice-term/commit/4c211500418387cbc147cb67164edd55b49964d3))
+* **ios:** 鍵盤縮小版面後避開表單底列遮擋 ([4da6108](https://github.com/NickYCLin/lattice-term/commit/4da610807b08ae8c4b394d421438b522bf756f74))
+* **mobile:** 讓橫向空連線頁可捲至操作按鈕 ([39ea6df](https://github.com/NickYCLin/lattice-term/commit/39ea6df5ddf5b51d0917875f2e3486570b3e3ae7))
+* **remote:** 保留桌面失效連線並自動恢復擷取 ([f0cec3d](https://github.com/NickYCLin/lattice-term/commit/f0cec3deb07f81ff263d1632e9b655938675e071))
+* **remote:** 保留桌面失效連線並自動恢復擷取 ([#323](https://github.com/NickYCLin/lattice-term/issues/323)) ([b10bffb](https://github.com/NickYCLin/lattice-term/commit/b10bffbbecfb9e5be37013d479f98d6d56b00cab))
+* **remote:** 區分命令未送出與結果不確定 ([4d260bb](https://github.com/NickYCLin/lattice-term/commit/4d260bb7fb604ed4558be88bb3886e8c7d70082d))
+* **remote:** 集中螢幕工作階段設定以通過檢查 ([2dfb991](https://github.com/NickYCLin/lattice-term/commit/2dfb991a7f8f2d0724b2c9fabede6004fca6f0ca))
+* **windows:** 修正原生驗證的條件編譯警告 ([ca7d93b](https://github.com/NickYCLin/lattice-term/commit/ca7d93b1e89092adfc4868f3bc3a4e6c244a2564))
+* **window:** 依工作區限制 Windows 還原視窗 ([1686869](https://github.com/NickYCLin/lattice-term/commit/1686869ecba1bac92759a428bfe7a5ffc7655318))
+* 避免窄版聊天標題被操作列擠掉 ([32872a8](https://github.com/NickYCLin/lattice-term/commit/32872a8ae173551e7a3b19c8e368299017b0bae0)), refs [#309](https://github.com/NickYCLin/lattice-term/issues/309)
+* 阻止行動版遞迴啟動桌面背景服務 ([a5080bc](https://github.com/NickYCLin/lattice-term/commit/a5080bc24c95e540e592b6784057746b4cc15ebf))
+
 ## [2026.10.15](https://github.com/NickYCLin/lattice-term/compare/v2026.10.14...v2026.10.15) (2026-10-14)
 
 
