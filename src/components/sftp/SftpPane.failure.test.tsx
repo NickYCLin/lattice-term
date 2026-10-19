@@ -12,6 +12,44 @@ vi.mock("../files/RemoteTextEditorProvider", () => ({ useRemoteTextEditor: () =>
 vi.mock("../overlays/useAppDialogs", () => ({ useAppDialogs: () => ({ confirm: vi.fn(), prompt: vi.fn(), dialogs: null }) }));
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+it.each([
+  ["selected", true], ["browser-drop", true], ["native-drop", true],
+  ["selected", false], ["browser-drop", false], ["native-drop", false],
+] as const)("runs the %s upload batch only while its pane stays open (close: %s)", async (route, close) => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  let finishUpload!: () => void;
+  const upload = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finishUpload = resolve; }))
+    .mockResolvedValue(undefined);
+  const list = vi.fn().mockResolvedValue({ path: "/uploads", entries: [] });
+  const sftp = { list, transfers: {}, uploadStream: upload, uploadPath: upload } as unknown as SftpApi;
+  let unmounted = false;
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SftpPane session={{ sessionId: "batch", currentPath: "/uploads" } as SftpSessionSummary} sftp={sftp} active /></I18nProvider>));
+    const files = [{ name: "first.txt", size: 1 }, { name: "second.txt", size: 1 }];
+    await act(async () => {
+      const calls = vi.mocked(useFileDrop).mock.calls;
+      const options = calls[calls.length - 1][0];
+      if (route === "native-drop") void options.onPaths(["/local/first.txt", "/local/second.txt"]);
+      else if (route === "browser-drop") void options.onFiles!(files as File[]);
+      else {
+        const input = allNodes(host).find((node) => node.tagName === "INPUT" && props(node).type === "file")!;
+        props(input).onChange({ currentTarget: { files } });
+      }
+    });
+    expect(upload).toHaveBeenCalledTimes(1);
+    if (close) {
+      await act(async () => root.unmount());
+      unmounted = true;
+    }
+    await act(async () => { finishUpload(); });
+    expect(upload).toHaveBeenCalledTimes(close ? 1 : 2);
+    expect(list).toHaveBeenCalledTimes(close || route === "native-drop" ? 1 : 3);
+  } finally {
+    await act(async () => { finishUpload?.(); if (!unmounted) root.unmount(); });
+  }
+});
+
 it("disables both drop routes while a selected upload is writing and restores them afterwards", async () => {
   const host = installHostDom();
   const root = createRoot(host as unknown as Element);

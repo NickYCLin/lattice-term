@@ -150,15 +150,16 @@ export function SftpPane({
   }
 
   async function mutate(operation: () => Promise<void>) {
+    if (!mounted.current) return;
     setBusy(true);
     setProblem(null);
     try {
       await operation();
-      await open(directory?.path ?? session.currentPath);
+      if (mounted.current) await open(directory?.path ?? session.currentPath);
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      if (mounted.current) setProblem(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -232,7 +233,7 @@ export function SftpPane({
   }
 
   async function upload(file: File | undefined) {
-    if (!file || !directory) return;
+    if (!mounted.current || !file || !directory) return;
     const existing = directory.entries.find((entry) => entry.name === file.name);
     if (existing?.kind === "directory") {
       setProblem(t("sftp.overwriteDirectory", { name: file.name }));
@@ -256,9 +257,10 @@ export function SftpPane({
   }
 
   async function dropFiles(paths: string[]) {
-    if (!directory || paths.length === 0) return;
+    if (!mounted.current || !directory || paths.length === 0) return;
     setProblem(null);
     for (const path of paths) {
+      if (!mounted.current) return;
       const name = baseName(path);
       const existing = directory.entries.find((entry) => entry.name === name);
       if (existing?.kind === "directory") {
@@ -268,6 +270,7 @@ export function SftpPane({
       if (existing && !(await askOverwrite(name))) {
         continue;
       }
+      if (!mounted.current) return;
       try {
         await sftp.uploadPath(
           session.sessionId,
