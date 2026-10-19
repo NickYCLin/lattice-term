@@ -135,6 +135,37 @@ describe("workspace session persistence", () => {
     expect(loadWorkspaceSessionSnapshot(target)).toEqual(empty);
   });
 
+  it("preserves both account routes when the primary write fails after backup", () => {
+    const target = storage();
+    const original = snapshotLiveWorkspaceSessions([
+      agent({ profileConfigPath: "/accounts/one", sandbox: true, detached: true }),
+      agent({ sessionId: "account-two", profileConfigPath: "/accounts/two", capturedSessionId: "native-two" }),
+    ], [], "account-two");
+    saveWorkspaceSessionSnapshot(target, original);
+    const raw = target.getItem(WORKSPACE_SESSIONS_KEY);
+    expect(() => saveWorkspaceSessionSnapshot({
+      getItem: target.getItem,
+      setItem: (key, value) => {
+        if (key === WORKSPACE_SESSIONS_KEY) throw new Error("primary quota");
+        target.setItem(key, value);
+      },
+    }, snapshotLiveWorkspaceSessions([], [], null))).toThrow("primary quota");
+    expect(target.getItem(WORKSPACE_SESSIONS_KEY)).toBe(raw);
+    expect(loadWorkspaceSessionSnapshot(target)).toEqual(original);
+    expect(readWorkspaceRecoverySnapshots(target)[0].snapshot).toEqual(original);
+  });
+
+  it.each(["not-json", "{}", '[1,"snapshot"]'])("refuses a corrupt recovery archive without touching primary: %s", damaged => {
+    const target = storage();
+    const original = snapshotLiveWorkspaceSessions([agent()], [], null);
+    saveWorkspaceSessionSnapshot(target, original);
+    target.setItem(WORKSPACE_SESSIONS_RECOVERY_KEY, damaged);
+    const before = new Map(target.values);
+    expect(() => saveWorkspaceSessionSnapshot(target, snapshotLiveWorkspaceSessions([], [], null))).toThrow();
+    expect(target.values).toEqual(before);
+    expect(loadWorkspaceSessionSnapshot(target)).toEqual(original);
+  });
+
   it("restores background projects after reboot without duplicating reattached processes", () => {
     const first = agent({ detached: true });
     const second = agent({
@@ -252,6 +283,21 @@ describe("workspace session persistence", () => {
         { kind: "ssh", profileId: "server" },
       ]),
     ).toEqual(["D:\\project\\LatticeTerm"]);
+  });
+
+  it("preserves case and literal backslashes in Unix project directories", () => {
+    const directories = ["/work/Project", "/work/project", "/work/a\\b", "/work/a/b", "/", "/work/Project/"];
+    const saved = snapshotLiveWorkspaceSessions(directories.map((workingDirectory, index) =>
+      agent({ sessionId: `unix-${index}`, workingDirectory })), [], null);
+    expect(savedAgentWorkingDirectories(saved.sessions)).toEqual(directories.slice(0, -1));
+  });
+
+  it("deduplicates Windows UNC spelling without merging Unix paths", () => {
+    const saved = snapshotLiveWorkspaceSessions([
+      agent({ workingDirectory: "\\\\server\\share\\Project" }),
+      agent({ sessionId: "unc-2", workingDirectory: "//SERVER/share/project/" }),
+    ], [], null);
+    expect(savedAgentWorkingDirectories(saved.sessions)).toEqual(["\\\\server\\share\\Project"]);
   });
 
   it("keeps an exited CLI when its native conversation can be resumed", () => {

@@ -200,10 +200,11 @@ export function savedAgentWorkingDirectories(
   const directories: string[] = [];
   for (const session of sessions) {
     if (session.kind !== "agent") continue;
-    const identity = session.workingDirectory
-      .replace(/[\\/]+/g, "/")
-      .replace(/\/+$/, "")
-      .toLocaleLowerCase();
+    const directory = session.workingDirectory;
+    const windowsPath = /^[a-z]:[\\/]/i.test(directory) || /^(\\\\|\/\/)[^\\/]+[\\/]/.test(directory);
+    const identity = windowsPath
+      ? `windows:${directory.replace(/[\\/]+/g, "/").replace(/\/+$/, "").toLowerCase()}`
+      : `unix:${directory.replace(/\/+$/, "") || "/"}`;
     if (seen.has(identity)) continue;
     seen.add(identity);
     directories.push(session.workingDirectory);
