@@ -39,14 +39,14 @@ it("does not lose the local conversation when native archive fails", async () =>
     let id = "";
     await act(async () => {
       id = chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "synthetic-only",
-        workingDirectory: "/fixture", title: "Synthetic archive failure", accountProfileId: null, messages: [] }).id;
+        workingDirectory: "/fixture", title: "Synthetic archive failure", accountProfileId: "synthetic-account", messages: [] }).id;
     });
-    await act(async () => chat.removeThread(id));
+    await act(async () => chat.removeThread(id, "/synthetic/account"));
     expect(invoke.mock.calls.some(([command]) => command === "agent_chat_delete_native_conversation")).toBe(true);
     expect(chat.getThread(id)).toBeDefined();
     expect(chat.removal?.error).toContain("Synthetic archive unavailable");
     allowArchive = true;
-    await act(async () => { void chat.removeThread(id); void chat.removeThread(id); });
+    await act(async () => { void chat.removeThread(id, "/synthetic/account"); void chat.removeThread(id, "/synthetic/account"); });
     expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_delete_native_conversation")).toHaveLength(2);
     expect(chat.getThread(id)).toBeUndefined();
     expect(values.get("latticeterm.nativeConversationDismissed.v1") ?? "").not.toContain("synthetic-only");
@@ -59,5 +59,10 @@ it("does not lose the local conversation when native archive fails", async () =>
     expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_restore_codex_conversation")).toHaveLength(2);
     expect(chat.getThread(id)).toBeDefined();
     expect(chat.archivedReceipt).toBeNull();
+    expect(chat.getThread(id)).toMatchObject({ nativeSessionId: "synthetic-only", workingDirectory: "/fixture", accountProfileId: "synthetic-account" });
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_restore_codex_conversation").map(([, args]) => args)).toEqual([
+      { nativeSessionId: "synthetic-only", profileConfigPath: "/synthetic/account" },
+      { nativeSessionId: "synthetic-only", profileConfigPath: "/synthetic/account" },
+    ]);
   } finally { await act(async () => root.unmount()); }
 });

@@ -25,7 +25,7 @@ pub mod client;
 mod desktop_bridge;
 pub mod mcp;
 pub mod server;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
 mod transport;
 
@@ -445,6 +445,9 @@ pub enum Request {
     Send {
         session_id: String,
         data: String,
+    },
+    DesktopEscape {
+        session_id: String,
     },
     Enqueue {
         session_id: String,

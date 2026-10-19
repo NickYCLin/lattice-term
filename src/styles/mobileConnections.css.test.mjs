@@ -13,6 +13,16 @@ const overlayStyles = readFileSync(
 );
 
 describe("mobile connection layout", () => {
+  it("lets the empty connections page scroll to actions in landscape", () => {
+    expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty\s*\{[^}]*overflow-y:\s*auto;/s);
+    expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty > \.empty-state\s*\{[^}]*flex:\s*1 0 auto;/s);
+  });
+  it("compacts short landscape empty states without shrinking action targets", () => {
+    expect(mobileStyles).toMatch(/@media \(orientation: landscape\) and \(max-height: 30rem\)\s*\{\s*\.app--mobile \.connections--empty > \.empty-state\s*\{\s*gap: var\(--space-1\);\s*padding: var\(--space-2\);/);
+    expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty \.empty-state__icon\s*\{ display: none; \}/);
+    expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty \.empty-state__text\s*\{ max-width: none; \}/);
+    expect(mobileStyles).toContain(".app--mobile .button { min-height: 2.75rem; }");
+  });
   it("packs desktop cards into two rows without shrinking mobile touch targets", () => {
     expect(connectionStyles).toMatch(
       /\.connection-card\s*\{[^}]*grid-template-areas:\s*"head primary" "meta foot";/s,

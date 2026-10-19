@@ -23,6 +23,16 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
       "data-mobile-keyboard",
       String(Boolean(editing && win.innerHeight - height > 100)),
     );
+    const body = editing && focused?.closest<HTMLElement>(".drawer__body");
+    if (body && focused && win.innerHeight - height > 100) {
+      const fieldRect = focused.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      if (fieldRect.bottom > bodyRect.bottom - 8) {
+        body.scrollTop += fieldRect.bottom - bodyRect.bottom + 8;
+      } else if (fieldRect.top < bodyRect.top + 8) {
+        body.scrollTop += fieldRect.top - bodyRect.top - 8;
+      }
+    }
   };
   const schedule = () => {
     if (frame === null) frame = win.requestAnimationFrame(update);
@@ -52,6 +62,15 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
 
 export function useMobileViewport(enabled: boolean): void {
   useEffect(() => {
-    if (enabled) return observeMobileViewport(window, document.documentElement);
+    if (!enabled) return;
+    const stop = observeMobileViewport(window, document.documentElement);
+    let cancelled = false;
+    void import("@tauri-apps/api/core").then(({ invoke, isTauri }) => {
+      if (!cancelled && isTauri()) return invoke("mobile_frontend_ready");
+    }).catch((error: unknown) => console.warn("Cannot sync the native mobile viewport", error));
+    return () => {
+      cancelled = true;
+      stop();
+    };
   }, [enabled]);
 }

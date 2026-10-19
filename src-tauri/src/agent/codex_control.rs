@@ -660,6 +660,43 @@ mod tests {
     }
 
     #[test]
+    fn codex_mcp_submit_capacity_error_needs_official_recovery_on_the_same_thread() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut response = json!({"thread":{"id":ROOT,"cwd":directory.path(),"source":"cli",
+            "status":{"type":"systemError"},
+            "error":{"message":"Selected model is at capacity. Please try a different model."}}});
+        let failed = parse_snapshot(&response, ROOT, directory.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.state, State::NeedsAttention);
+        response["thread"]["error"]["message"] = json!("idle ready done");
+        assert_eq!(
+            parse_snapshot(&response, ROOT, directory.path())
+                .unwrap()
+                .unwrap()
+                .state,
+            State::NeedsAttention
+        );
+        response["thread"]["status"] = json!({"type":"active","activeFlags":[]});
+        assert_eq!(
+            parse_snapshot(&response, ROOT, directory.path())
+                .unwrap()
+                .unwrap()
+                .state,
+            State::Working
+        );
+        response["thread"]["status"] = json!({"type":"idle"});
+        let recovered = parse_snapshot(&response, ROOT, directory.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.state, State::Idle);
+        assert_eq!(recovered.thread_id, failed.thread_id);
+        assert!(parse_snapshot(&response, OTHER, directory.path()).is_err());
+        response["thread"]["status"] = json!({"type":"unknown"});
+        assert!(parse_snapshot(&response, ROOT, directory.path()).is_err());
+    }
+
+    #[test]
     fn codex_mcp_submit_control_requires_correlated_queue_receipt() {
         assert!(validate_receipt(
             &json!({"queuedSubmission":{"id":"queue-1","clientUserMessageId":ROOT}}),

@@ -1157,6 +1157,12 @@ fn invalidate_mcp_input_profile(entry: &AgentSessionEntry, bytes: &[u8]) {
 }
 
 fn next_desktop_input_ticket(entry: &AgentSessionEntry, bytes: &[u8]) -> Result<u64, String> {
+    let ticket = reserve_desktop_input_ticket(entry)?;
+    invalidate_mcp_input_profile(entry, bytes);
+    Ok(ticket)
+}
+
+fn reserve_desktop_input_ticket(entry: &AgentSessionEntry) -> Result<u64, String> {
     let ticket = entry
         .desktop_input_ticket
         .try_update(Ordering::AcqRel, Ordering::Acquire, |ticket| {
@@ -1164,7 +1170,6 @@ fn next_desktop_input_ticket(entry: &AgentSessionEntry, bytes: &[u8]) -> Result<
         })
         .map_err(|_| "The terminal input ticket limit was reached.".to_string())?
         + 1;
-    invalidate_mcp_input_profile(entry, bytes);
     Ok(ticket)
 }
 
@@ -8376,6 +8381,68 @@ pub fn send(
     send_bytes(sink, registry, session_id, &bytes)
 }
 
+fn desktop_interrupt_preserves_profile(
+    definition_id: &str,
+    state: AgentLifecycle,
+    source: AgentStateSource,
+    input: &AgentInputControl,
+    profile_valid: bool,
+) -> bool {
+    definition_id == "codex"
+        && state == AgentLifecycle::Working
+        && source == AgentStateSource::Integration
+        && !input.desktop_busy()
+        && !input.startup_seed_pending
+        && profile_valid
+}
+
+pub fn send_desktop_escape(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+) -> Result<(), String> {
+    if !cfg!(windows) {
+        return send_bytes(sink, registry, session_id, b"\x1b");
+    }
+    let entry = registry.get(session_id)?;
+    let ticket = reserve_desktop_input_ticket(&entry)?;
+    let mut input = entry.input.lock().map_err(|error| error.to_string())?;
+    if rejects_interrupted_desktop_input(&input, ticket, b"\x1b") {
+        return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
+    }
+    let summary = entry.summary.lock().map_err(|error| error.to_string())?;
+    let preserve = desktop_interrupt_preserves_profile(
+        &summary.definition_id,
+        summary.state,
+        summary.state_source,
+        &input,
+        mcp_input_profile_valid(&entry),
+    );
+    drop(summary);
+    if !preserve {
+        drop(input);
+        return send_bytes(sink, registry, session_id, b"\x1b");
+    }
+    let mut last = entry
+        .mcp_interrupt_at
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if last.is_some_and(|at| at.elapsed() < MCP_INTERRUPT_COOLDOWN) {
+        drop(last);
+        drop(input);
+        return send_bytes(sink, registry, session_id, b"\x1b");
+    }
+    revalidate_mcp_input_profile(&entry, "codex")?;
+    if let Err(error) = send_bytes_locked(sink, registry, session_id, b"\x1b") {
+        invalidate_mcp_input_profile(&entry, b"\x1b");
+        observe_desktop_input(&mut input, b"\x1b");
+        return Err(error);
+    }
+    *last = Some(Instant::now());
+    input.last_input_kind = Some("desktop_turn_interrupt");
+    Ok(())
+}
+
 fn send_bytes(
     sink: &dyn AgentSink,
     registry: &AgentRegistry,
@@ -14951,6 +15018,245 @@ notify = ["notify.exe", "turn-ended"]"#,
         _original_writer: Box<dyn Write + Send>,
     }
 
+    #[test]
+    fn desktop_interrupt_requires_verified_working_and_clean_input() {
+        let clean = AgentInputControl::default();
+        let ready = |input: &AgentInputControl| {
+            desktop_interrupt_preserves_profile(
+                "codex",
+                AgentLifecycle::Working,
+                AgentStateSource::Integration,
+                input,
+                true,
+            )
+        };
+        assert!(ready(&clean));
+        for input in [
+            AgentInputControl {
+                desktop_editing: true,
+                ..Default::default()
+            },
+            AgentInputControl {
+                desktop_paste: true,
+                ..Default::default()
+            },
+            AgentInputControl {
+                desktop_escape: b"\x1b".to_vec(),
+                ..Default::default()
+            },
+            AgentInputControl {
+                desktop_escape: b"\x1b[".to_vec(),
+                ..Default::default()
+            },
+            AgentInputControl {
+                startup_seed_pending: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(!ready(&input));
+        }
+        for state in [
+            AgentLifecycle::Idle,
+            AgentLifecycle::Done,
+            AgentLifecycle::NeedsAttention,
+        ] {
+            assert!(!desktop_interrupt_preserves_profile(
+                "codex",
+                state,
+                AgentStateSource::Integration,
+                &clean,
+                true,
+            ));
+        }
+        assert!(!desktop_interrupt_preserves_profile(
+            "codex",
+            AgentLifecycle::Working,
+            AgentStateSource::Heuristic,
+            &clean,
+            true,
+        ));
+        assert!(!desktop_interrupt_preserves_profile(
+            "codex",
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+            &clean,
+            false,
+        ));
+        assert!(!desktop_interrupt_preserves_profile(
+            "custom",
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+            &clean,
+            true,
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_interrupt_preserves_profile_but_requires_official_ready_before_resend() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+        assert_eq!(*fixture.writes.lock().unwrap(), vec![b"\x1b".to_vec()]);
+        assert!(mcp_input_profile_valid(&entry));
+        assert!(!entry.input.lock().unwrap().desktop_busy());
+        assert_eq!(
+            mcp_prompt(
+                fixture.sink.as_ref(),
+                &fixture.registry,
+                &fixture.id,
+                "next",
+                true
+            )
+            .unwrap_err(),
+            MCP_NOT_READY
+        );
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Heuristic,
+        );
+        assert!(!fixture
+            .registry
+            .mcp_prompt_blockers(&fixture.id)
+            .unwrap()
+            .is_empty());
+        assert!(mcp_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "next",
+            true
+        )
+        .is_err());
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Integration,
+        );
+        assert!(fixture
+            .registry
+            .mcp_prompt_blockers(&fixture.id)
+            .unwrap()
+            .is_empty());
+        mcp_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "next",
+            true,
+        )
+        .unwrap();
+        assert!(fixture.writes.lock().unwrap().len() > 1);
+        let fixture = CodexSubmitFixture::new(None);
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        set_mcp_control(fixture.sink.as_ref(), &fixture.registry, &fixture.id, false).unwrap();
+        send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Idle,
+            AgentStateSource::Integration,
+        );
+        assert!(mcp_prompt(
+            fixture.sink.as_ref(),
+            &fixture.registry,
+            &fixture.id,
+            "forbidden",
+            true
+        )
+        .is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_interrupt_never_repairs_raw_escape_paste_draft_or_changed_profile() {
+        for bytes in [
+            b"\x1b".as_slice(),
+            b"\x1b[",
+            b"\x1b[A",
+            b"\x1b[200~draft",
+            b"draft",
+            b"\x16",
+        ] {
+            let fixture = CodexSubmitFixture::new(None);
+            let entry = fixture.registry.get(&fixture.id).unwrap();
+            fixture.registry.update_state(
+                &fixture.id,
+                AgentLifecycle::Working,
+                AgentStateSource::Integration,
+            );
+            send_bytes(fixture.sink.as_ref(), &fixture.registry, &fixture.id, bytes).unwrap();
+            send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+            fixture.registry.update_state(
+                &fixture.id,
+                AgentLifecycle::Idle,
+                AgentStateSource::Integration,
+            );
+            assert!(!mcp_input_profile_valid(&entry));
+            assert!(mcp_prompt(
+                fixture.sink.as_ref(),
+                &fixture.registry,
+                &fixture.id,
+                "forbidden",
+                true
+            )
+            .is_err());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_interrupt_rejects_waiters_from_an_unconfirmed_submit() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        {
+            let mut input = entry.input.lock().unwrap();
+            input.desktop_editing = true;
+            input.rejected_desktop_through = 1;
+        }
+        assert_eq!(
+            send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap_err(),
+            MCP_DRAFT_RECOVERY_ERROR
+        );
+        assert!(fixture.writes.lock().unwrap().is_empty());
+        assert!(entry.input.lock().unwrap().desktop_editing);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn repeated_desktop_interrupt_does_not_preserve_input_profile() {
+        let fixture = CodexSubmitFixture::new(None);
+        let entry = fixture.registry.get(&fixture.id).unwrap();
+        fixture.registry.update_state(
+            &fixture.id,
+            AgentLifecycle::Working,
+            AgentStateSource::Integration,
+        );
+        send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+        assert!(mcp_input_profile_valid(&entry));
+        send_desktop_escape(fixture.sink.as_ref(), &fixture.registry, &fixture.id).unwrap();
+        assert!(!mcp_input_profile_valid(&entry));
+        assert_eq!(entry.input.lock().unwrap().desktop_escape, b"\x1b");
+        assert_eq!(
+            *fixture.writes.lock().unwrap(),
+            vec![b"\x1b".to_vec(), b"\x1b".to_vec()]
+        );
+    }
+
     /// Interrupting a turn is a keystroke into a live PTY, so the rules
     /// around it are what this pins: which CLIs it is offered for, and the
     /// states in which LatticeTerm refuses to press the key. The session is
@@ -15049,6 +15355,10 @@ notify = ["notify.exe", "turn-ended"]"#,
         // Ending a turn never ends the session.
         assert!(registry.session_summary(&id).is_some());
         assert!(collector.closed.lock().unwrap().is_empty());
+
+        send_desktop_escape(sink.as_ref(), &registry, &id).unwrap();
+        assert_eq!(entry.input.lock().unwrap().desktop_escape, b"\x1b");
+        assert!(entry.mcp_input_profile_invalidated.load(Ordering::Acquire));
 
         // Without a control grant nothing is pressed, whatever the state.
         set_mcp_control(sink.as_ref(), &registry, &id, false).unwrap();

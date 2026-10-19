@@ -1,0 +1,22 @@
+name: LatticeLayoutChecks
+options:
+  deploymentTarget:
+    iOS: '15.0'
+targets:
+  LayoutUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [LayoutUITests.swift]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.nickyclin.latticeterm.layoutchecks
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        SWIFT_VERSION: '5.0'
+schemes:
+  LayoutUITests:
+    build:
+      targets:
+        LayoutUITests: all
+    test:
+      targets: [LayoutUITests]

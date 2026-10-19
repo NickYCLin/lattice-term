@@ -60,6 +60,8 @@ pub mod tunnel;
 pub mod vault;
 pub mod vnc;
 mod voice_typing;
+#[cfg(any(windows, test))]
+mod window_fit;
 
 use crate::agent::{
     AgentBroadcastOutcome, AgentDefinition, AgentLaunchPlan, AgentLaunchPlanDraft,
@@ -936,6 +938,42 @@ struct EncryptedBackupRestore {
     local_storage: BTreeMap<String, String>,
 }
 
+#[tauri::command]
+fn mobile_frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(all(target_os = "ios", target_abi = "sim"))]
+    let diagnostic = (std::env::var("LATTICETERM_LAYOUT_DIAGNOSTICS").as_deref() == Ok("1"))
+        .then(|| (window.clone(), std::time::SystemTime::now()));
+    #[cfg(target_os = "ios")]
+    window
+        .with_webview(move |platform| {
+            let view = unsafe { &*platform.inner().cast::<objc2_ui_kit::UIView>() };
+            #[cfg(all(target_os = "ios", target_abi = "sim"))]
+            let before_height = view.bounds().size.height;
+            view.setNeedsLayout();
+            view.layoutIfNeeded();
+            #[cfg(all(target_os = "ios", target_abi = "sim"))]
+            if let Some((window, received)) = diagnostic {
+                let timestamp = |time: std::time::SystemTime| {
+                    time.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64()
+                };
+                let received_at = timestamp(received);
+                let applied_at = timestamp(std::time::SystemTime::now());
+                let after_height = view.bounds().size.height;
+                tauri::async_runtime::spawn(async move {
+                    let _ = window.eval(format!(
+                        "globalThis.__latticeNativeLayout ??= []; globalThis.__latticeNativeLayout.push({{receivedAt:{received_at},appliedAt:{applied_at},beforeHeight:{before_height},afterHeight:{after_height}}}); globalThis.__latticeNativeLayout = globalThis.__latticeNativeLayout.slice(-16);"
+                    ));
+                });
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    #[cfg(not(target_os = "ios"))]
+    let _ = window;
+    Ok(())
+}
+
 /// Probing the OS keyring and the sandbox tool can block for seconds when
 /// Secret Service or `bwrap` is slow to answer, so every command that
 /// touches them runs off the main thread; a stuck keyring must not freeze
@@ -1317,6 +1355,30 @@ async fn agent_send(
             registry.inner(),
             &session_id,
             &data,
+        )
+    }
+}
+
+#[tauri::command]
+async fn agent_send_escape(
+    app: AppHandle,
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<(), String> {
+    if crate::agent_daemon::owns(&session_id) {
+        daemon
+            .request(
+                false,
+                crate::agent_daemon::Request::DesktopEscape { session_id },
+            )
+            .await
+            .map(|_| ())
+    } else {
+        crate::agent::send_desktop_escape(
+            &crate::agent::EventSink(app),
+            registry.inner(),
+            &session_id,
         )
     }
 }
@@ -5379,6 +5441,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                crate::window_fit::install(window);
+            }
             // Connection data belongs beside the app's other data, not next to
             // the executable, so it survives an update and follows the user
             // profile on a shared machine.
@@ -5493,10 +5559,12 @@ pub fn run() {
                 app.handle().clone(),
                 &data_dir,
             )));
+            #[cfg(desktop)]
             agent_daemon::client::start_desktop_bridge(app.handle().clone());
             // An update replaces the executable but not a background service
             // that is still running; swap it for this build while it holds
             // nothing, and hand the new one the launch plans again.
+            #[cfg(desktop)]
             {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -5526,6 +5594,7 @@ pub fn run() {
             local_path_info,
             local_file_read_text,
             runtime_summary,
+            mobile_frontend_ready,
             mcp_remote_targets,
             mcp_connection_book_shared,
             mcp_connection_book_share,
@@ -5558,6 +5627,7 @@ pub fn run() {
             agent_default_working_directory,
             agent_launch,
             agent_send,
+            agent_send_escape,
             agent_broadcast,
             agent_enqueue,
             agent_read_queue,

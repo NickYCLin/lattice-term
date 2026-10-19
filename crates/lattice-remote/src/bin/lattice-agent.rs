@@ -2330,8 +2330,7 @@ impl Drop for FileRequestHandler {
 
 const STREAM_PAUSE_POLL: Duration = Duration::from_millis(500);
 
-async fn serve<S>(
-    connection: SecureConnection<S>,
+struct ScreenSessionOptions {
     fps: u32,
     report_json: bool,
     allow_input: bool,
@@ -2339,13 +2338,29 @@ async fn serve<S>(
     file_root: Option<PathBuf>,
     file_job_permits: Arc<Semaphore>,
     command_permits: Arc<Semaphore>,
+}
+
+async fn serve<S>(
+    connection: SecureConnection<S>,
+    options: ScreenSessionOptions,
 ) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    serve_with_capture(
-        connection,
-        capture_desktop,
+    serve_with_capture(connection, capture_desktop, options).await
+}
+
+async fn serve_with_capture<S, F, Fut>(
+    connection: SecureConnection<S>,
+    mut capture_next: F,
+    options: ScreenSessionOptions,
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Capture, String>>,
+{
+    let ScreenSessionOptions {
         fps,
         report_json,
         allow_input,
@@ -2353,26 +2368,7 @@ where
         file_root,
         file_job_permits,
         command_permits,
-    )
-    .await
-}
-
-async fn serve_with_capture<S, F, Fut>(
-    connection: SecureConnection<S>,
-    mut capture_next: F,
-    fps: u32,
-    report_json: bool,
-    allow_input: bool,
-    allow_commands: bool,
-    file_root: Option<PathBuf>,
-    file_job_permits: Arc<Semaphore>,
-    command_permits: Arc<Semaphore>,
-) -> Result<(), String>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<Capture, String>>,
-{
+    } = options;
     // Identity and non-screen capabilities must not depend on an active RDP
     // desktop. Start with an explicit status frame, then recover asynchronously.
     let mut capture = unavailable_capture();
@@ -3143,13 +3139,15 @@ async fn run_relay_session(
     } else {
         serve(
             secure,
-            options.fps,
-            options.json,
-            options.allow_input,
-            options.allow_commands,
-            options.file_root,
-            Arc::clone(&options.file_job_permits),
-            Arc::clone(&options.command_permits),
+            ScreenSessionOptions {
+                fps: options.fps,
+                report_json: options.json,
+                allow_input: options.allow_input,
+                allow_commands: options.allow_commands,
+                file_root: options.file_root,
+                file_job_permits: Arc::clone(&options.file_job_permits),
+                command_permits: Arc::clone(&options.command_permits),
+            },
         )
         .await
     };
@@ -3643,13 +3641,15 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
             } else {
                 serve(
                     secure,
-                    session_options.fps,
-                    session_options.json,
-                    session_options.allow_input,
-                    session_options.allow_commands,
-                    session_options.file_root.clone(),
-                    Arc::clone(&session_options.file_job_permits),
-                    Arc::clone(&session_options.command_permits),
+                    ScreenSessionOptions {
+                        fps: session_options.fps,
+                        report_json: session_options.json,
+                        allow_input: session_options.allow_input,
+                        allow_commands: session_options.allow_commands,
+                        file_root: session_options.file_root.clone(),
+                        file_job_permits: Arc::clone(&session_options.file_job_permits),
+                        command_permits: Arc::clone(&session_options.command_permits),
+                    },
                 )
                 .await
             };
@@ -3758,13 +3758,15 @@ mod tests {
                         })
                     }
                 },
-                10,
-                false,
-                false,
-                false,
-                None,
-                Arc::new(Semaphore::new(1)),
-                Arc::new(Semaphore::new(1)),
+                ScreenSessionOptions {
+                    fps: 10,
+                    report_json: false,
+                    allow_input: false,
+                    allow_commands: false,
+                    file_root: None,
+                    file_job_permits: Arc::new(Semaphore::new(1)),
+                    command_permits: Arc::new(Semaphore::new(1)),
+                },
             )
             .await
         });
@@ -3828,14 +3830,16 @@ mod tests {
                 .unwrap();
             serve_with_capture(
                 connection,
-                || std::future::pending(),
-                10,
-                false,
-                false,
-                false,
-                None,
-                Arc::new(Semaphore::new(1)),
-                Arc::new(Semaphore::new(1)),
+                std::future::pending,
+                ScreenSessionOptions {
+                    fps: 10,
+                    report_json: false,
+                    allow_input: false,
+                    allow_commands: false,
+                    file_root: None,
+                    file_job_permits: Arc::new(Semaphore::new(1)),
+                    command_permits: Arc::new(Semaphore::new(1)),
+                },
             )
             .await
         });

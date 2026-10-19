@@ -1270,7 +1270,12 @@ mod tests {
         }
     }
 
-    struct PromotionServer(Arc<Mutex<HashMap<String, FileAttributes>>>, bool, bool);
+    struct PromotionServer(
+        Arc<Mutex<HashMap<String, FileAttributes>>>,
+        bool,
+        bool,
+        bool,
+    );
 
     impl russh_sftp::server::Handler for PromotionServer {
         type Error = russh_sftp::protocol::StatusCode;
@@ -1306,7 +1311,11 @@ mod tests {
         ) -> Result<russh_sftp::protocol::Status, Self::Error> {
             let mut files = self.0.lock().unwrap();
             let file = files.get_mut(&path).ok_or(Self::Error::NoSuchFile)?;
-            file.permissions = attrs.permissions.map(|mode| 0o100000 | mode);
+            file.permissions = Some(if self.3 {
+                0o100644
+            } else {
+                0o100000 | attrs.permissions.unwrap()
+            });
             Ok(sftp_ok(id))
         }
         async fn rename(
@@ -1352,14 +1361,15 @@ mod tests {
 
     #[tokio::test]
     async fn replacements_keep_owner_access_without_widening_permissions() {
-        for (mode, overwrite, fail_publish, fail_restore) in [
-            (0o100600, true, false, false),
-            (0o100644, true, false, false),
-            (0o100755, true, false, false),
-            (0o120777, true, false, false),
-            (0o100600, false, false, false),
-            (0o100600, true, true, false),
-            (0o100600, true, true, true),
+        for (mode, overwrite, fail_publish, fail_restore, fail_permissions) in [
+            (0o100600, true, false, false, false),
+            (0o100644, true, false, false, false),
+            (0o100755, true, false, false, false),
+            (0o120777, true, false, false, false),
+            (0o100600, false, false, false, false),
+            (0o100600, true, true, false, false),
+            (0o100600, true, true, true, false),
+            (0o100600, true, false, false, true),
         ] {
             let original = FileAttributes {
                 permissions: Some(mode),
@@ -1378,7 +1388,12 @@ mod tests {
             let (client, server) = tokio::io::duplex(8192);
             let peer = tokio::spawn(russh_sftp::server::run(
                 server,
-                PromotionServer(Arc::clone(&files), fail_publish, fail_restore),
+                PromotionServer(
+                    Arc::clone(&files),
+                    fail_publish,
+                    fail_restore,
+                    fail_permissions,
+                ),
             ));
             let session = Arc::new(
                 SftpSession::new(crate::sftp_limits::BoundedSftpStream::new(client))
@@ -1406,7 +1421,7 @@ mod tests {
                 target_gate: Arc::default(),
             };
             let result = promote_upload(&entry).await;
-            let success = mode != 0o120777 && overwrite && !fail_publish;
+            let success = mode != 0o120777 && overwrite && !fail_publish && !fail_permissions;
             assert_eq!(result.is_ok(), success);
             {
                 let snapshot = files.lock().unwrap();
@@ -1436,6 +1451,15 @@ mod tests {
                 assert_eq!(result.unwrap().is_some(), mode & 0o077 != 0);
             } else if fail_publish && !fail_restore {
                 assert!(result.unwrap_err().contains("original file was restored"));
+            } else if fail_permissions {
+                let detail = result.unwrap_err();
+                assert!(!detail.contains("no payload was written"));
+                let sink = RecordingSink(Mutex::new(Vec::new()));
+                let failure = abort_upload(&entry, &sink, "error", &detail).await;
+                assert!(failure.contains("Owner-only"));
+                assert_eq!(entry.state.lock().unwrap().bytes_done, 456);
+                assert_eq!(files.lock().unwrap().len(), 1);
+                assert_eq!(files.lock().unwrap()["/srv/report"].size, Some(123));
             }
             drop(entry);
             drop(session);

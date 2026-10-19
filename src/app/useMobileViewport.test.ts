@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { observeMobileViewport } from "./useMobileViewport";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { observeMobileViewport, useMobileViewport } from "./useMobileViewport";
+
+const host = vi.hoisted(() => ({
+  effects: [] as (() => void | (() => void))[],
+  invoke: vi.fn(async () => undefined),
+}));
+vi.mock("react", () => ({ useEffect: (effect: () => void | (() => void)) => host.effects.push(effect) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: host.invoke, isTauri: () => true }));
+
+afterEach(() => {
+  host.effects = [];
+  host.invoke.mockClear();
+  vi.unstubAllGlobals();
+});
 
 function fixture(withViewport = true) {
   const styles = new Map<string, string>();
@@ -20,7 +33,7 @@ function fixture(withViewport = true) {
       setProperty: (name: string, value: string) => styles.set(name, value),
       removeProperty: (name: string) => styles.delete(name),
     },
-    ownerDocument: { activeElement: { matches: () => editing } },
+    ownerDocument: { activeElement: { matches: () => editing, closest: vi.fn((): HTMLElement | null => null), getBoundingClientRect: vi.fn(() => ({ top: 440, bottom: 482 })) } },
     getAttribute: (name: string) => attributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => attributes.set(name, value),
     removeAttribute: (name: string) => attributes.delete(name),
@@ -34,6 +47,59 @@ function fixture(withViewport = true) {
 }
 
 describe("mobile keyboard viewport", () => {
+  it("scrolls only a clipped focused drawer field after the keyboard shrinks the body", () => {
+    const mobile = fixture();
+    const body = { scrollTop: 0, getBoundingClientRect: () => ({ top: 120, bottom: 470 }) };
+    const field = mobile.root.ownerDocument.activeElement;
+    field.closest.mockReturnValue(body as unknown as HTMLElement);
+    const stop = mobile.start();
+    expect(body.scrollTop).toBe(0);
+    mobile.viewport.height = 540;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(20);
+    field.getBoundingClientRect.mockReturnValue({ top: 200, bottom: 242 });
+    mobile.viewport.dispatchEvent(new Event("scroll"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(20);
+    field.getBoundingClientRect.mockReturnValue({ top: 110, bottom: 152 });
+    mobile.root.dispatchEvent(new Event("focusin"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(2);
+    mobile.setEditing(false);
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(body.scrollTop).toBe(2);
+    stop();
+  });
+
+  it("notifies native layout after the mobile DOM observer is ready, without repeating on resize", async () => {
+    const mobile = fixture();
+    vi.stubGlobal("window", mobile.win);
+    vi.stubGlobal("document", { documentElement: mobile.root });
+    useMobileViewport(true);
+    const stop = host.effects[0]();
+    expect(mobile.styles.get("--app-viewport-height")).toBe("852px");
+    await vi.waitFor(() => expect(host.invoke).toHaveBeenCalledExactlyOnceWith("mobile_frontend_ready"));
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(host.invoke).toHaveBeenCalledTimes(1);
+    if (typeof stop === "function") stop();
+  });
+
+  it("does not request native layout when disabled or already unmounted", async () => {
+    useMobileViewport(false);
+    expect(host.effects[0]()).toBeUndefined();
+    const mobile = fixture();
+    vi.stubGlobal("window", mobile.win);
+    vi.stubGlobal("document", { documentElement: mobile.root });
+    useMobileViewport(true);
+    const stop = host.effects[1]();
+    if (typeof stop === "function") stop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.invoke).not.toHaveBeenCalled();
+  });
+
   it("keeps the app and overlays within the keyboard-visible height and offset", () => {
     const f = fixture();
     const stop = f.start();

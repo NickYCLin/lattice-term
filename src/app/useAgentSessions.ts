@@ -721,6 +721,7 @@ export interface AgentApi {
   deletePlan: (id: string) => Promise<boolean>;
   restorePlans: (planIds: string[]) => Promise<AgentRestoreOutcome[]>;
   send: (sessionId: string, data: string) => Promise<void>;
+  sendEscape?: (sessionId: string) => Promise<void>;
   /** Writes a clipboard image to a temp file and returns its path, or null. */
   pasteClipboardImage: (sessionId: string) => Promise<string | null>;
   /** Reads a CLI's conversation as text for a handoff, or null if unavailable. */
@@ -1509,6 +1510,11 @@ export function useAgentSessions(): AgentApi {
     });
   }, []);
 
+  const sendEscape = useCallback(async (sessionId: string) => {
+    const { invoke } = await core();
+    await invoke("agent_send_escape", { sessionId });
+  }, []);
+
   const pasteClipboardImage = useCallback(
     async (sessionId: string): Promise<string | null> => {
       const { invoke } = await core();
@@ -1746,6 +1752,7 @@ export function useAgentSessions(): AgentApi {
     deletePlan,
     restorePlans,
     send,
+    sendEscape,
     pasteClipboardImage,
     exportTranscript,
     importMemoryHandoff,

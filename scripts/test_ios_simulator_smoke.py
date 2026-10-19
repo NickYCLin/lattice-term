@@ -2,10 +2,13 @@
 import importlib.util
 import io
 import json
+import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +20,662 @@ spec.loader.exec_module(smoke)
 
 
 class RuntimeSelectionTests(unittest.TestCase):
+    def test_log_interval_uses_apple_basic_utc_offset_and_full_failure_window(self):
+        started_at = datetime(2026, 10, 15, 13, 24, 21, tzinfo=timezone.utc).timestamp()
+        failure_at = datetime(2026, 10, 15, 13, 31, 16, tzinfo=timezone.utc).timestamp()
+        interval = smoke.log_interval(started_at, failure_at)
+        self.assertEqual(interval, ["--start", "2026-10-15 13:24:16+0000",
+                                    "--end", "2026-10-15 13:31:17+0000"])
+        apple_format = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{4}"
+        self.assertIsNone(re.fullmatch(apple_format, "2026-10-15 13:24:16+00:00"))
+        for value, timestamp in zip(interval[1::2], (started_at - 5, failure_at + 1)):
+            self.assertRegex(value, "^" + apple_format + "$")
+            self.assertEqual(datetime.strptime(value, "%Y-%m-%d %H:%M:%S%z").timestamp(), timestamp)
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires the actual macOS log parser")
+    def test_log_interval_is_accepted_by_macos_log(self):
+        now = datetime.now(timezone.utc).timestamp()
+        command = ["/usr/bin/log", "show", "--style", "json", *smoke.log_interval(now - 1, now),
+                   "--predicate", "FALSEPREDICATE"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_startup_commands_preserve_success_stderr_exit_and_launch_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launch.json"
+            def run(command, **kwargs):
+                self.assertEqual(json.loads(path.read_text())["status"], "running")
+                self.assertEqual(kwargs["timeout"], 330)
+                return subprocess.CompletedProcess(command, 0, "bundle: 123\n", "launch warning\n")
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", side_effect=[1000, 1330]), \
+                    patch.object(smoke.time, "monotonic", side_effect=[10, 340.125]):
+                self.assertEqual(smoke.simctl("launch", "device", "bundle", timeout=330, evidence_path=path), "bundle: 123")
+            record = json.loads(path.read_text())
+            self.assertEqual((record["startedAt"], record["finishedAt"], record["elapsedSeconds"]), (1000, 1330, 330.125))
+            self.assertEqual((record["exitCode"], record["pid"], record["stderr"]), (0, 123, "launch warning\n"))
+
+    def test_timeout_keeps_partial_bytes_and_does_not_invent_exit_or_pid(self):
+        error = subprocess.TimeoutExpired(["xcrun", "simctl", "launch"], 330,
+                                          output=b"bundle: 123\n", stderr=b"waiting\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launch.json"
+            with patch.object(smoke.subprocess, "run", side_effect=error):
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    smoke.simctl("launch", "device", "bundle", timeout=330, evidence_path=path)
+            self.assertIs(raised.exception, error)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["timeoutSeconds"]), ("timeout", 330))
+            self.assertIsNone(record["exitCode"])
+            self.assertIsNone(record["pid"])
+            self.assertEqual((record["stdout"], record["stderr"]), ("bundle: 123\n", "waiting\n"))
+
+    def test_install_nonzero_retains_exit_and_both_streams(self):
+        error = subprocess.CalledProcessError(7, ["xcrun", "simctl", "install"], "install output", "install error")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "install.json"
+            with patch.object(smoke.subprocess, "run", side_effect=error):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    smoke.simctl("install", "device", "App.app", timeout=300, evidence_path=path)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["exitCode"], record["timeoutSeconds"]), ("failed", 7, 300))
+            self.assertEqual((record["stdout"], record["stderr"]), ("install output", "install error"))
+
+    def test_real_local_timeout_is_recorded_without_simulator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timeout.json"
+            with self.assertRaises(subprocess.TimeoutExpired):
+                smoke.recorded_command([sys.executable, "-u", "-c",
+                                        "import time; print('started'); time.sleep(10)"], 0.5, path)
+            record = json.loads(path.read_text())
+            self.assertEqual(record["status"], "timeout")
+            self.assertEqual(record["stdout"], "started\n")
+            self.assertGreaterEqual(record["elapsedSeconds"], 0.5)
+
+    def test_missing_executable_retains_spawn_failure_without_exit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spawn.json"
+            with patch.object(smoke.subprocess, "run", side_effect=FileNotFoundError("missing xcrun")):
+                with self.assertRaises(FileNotFoundError):
+                    smoke.recorded_command(["xcrun"], 15, path)
+            record = json.loads(path.read_text())
+            self.assertEqual((record["status"], record["errorType"]), ("failed", "FileNotFoundError"))
+            self.assertIsNone(record["exitCode"])
+
+    def test_simulator_startup_integrates_install_and_launch_failure_evidence(self):
+        clock = {"now": 1000}
+        def run(command, **kwargs):
+            if command[2] == "create":
+                return subprocess.CompletedProcess(command, 0, "owned-device", "")
+            if command[2] == "install":
+                self.assertEqual(kwargs["timeout"], 300)
+                clock["now"] += 20
+                return subprocess.CompletedProcess(command, 0, "installed\n", "install note\n")
+            if command[2] == "launch":
+                self.assertEqual(kwargs["timeout"], 330)
+                clock["now"] += 330
+                raise subprocess.TimeoutExpired(command, 330, stderr=b"launch pending")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            args = Namespace(app=output / "App.app", output=output, store_screenshots=False, boot_timeout=180)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", side_effect=lambda: clock["now"]):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    smoke.check_simulators(args, "runtime", devices, None)
+            report = json.loads((output / "iPhone.failure.json").read_text())
+            for phase in ("boot", "bootstatus"):
+                record = report["startupCommands"][phase]
+                self.assertEqual(record["status"], "completed")
+                self.assertEqual(record["command"][3], "owned-device")
+            self.assertEqual(report["startupCommands"]["bootstatus"]["timeoutSeconds"], 180)
+            install = report["startupCommands"]["install"]
+            launch = report["startupCommands"]["launch"]
+            self.assertEqual((install["startedAt"], install["finishedAt"], install["exitCode"]), (1000, 1020, 0))
+            self.assertEqual(install["stderr"], "install note\n")
+            self.assertEqual((launch["startedAt"], launch["finishedAt"], launch["status"]), (1020, 1350, "timeout"))
+            self.assertEqual(launch["stderr"], "launch pending")
+            self.assertEqual(report["stage"], "launch")
+            self.assertFalse((output / "launch-report.json").exists())
+
+    def test_failure_logs_cover_entire_startup_and_keep_probe_partial_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "iPhone.startup.json").write_text(json.dumps({"startedAt": 1000}))
+            (output / "iPhone.launch.command.json").write_text(json.dumps({"startedAt": 1020, "status": "timeout", "timeoutSeconds": 330}))
+            (output / "iPhone.install.command.json").write_text(json.dumps({"startedAt": 900, "status": "completed"}))
+            commands = []
+            def run(command, **kwargs):
+                commands.append(command)
+                raise subprocess.TimeoutExpired(command, 15, output=b"partial log\n", stderr=b"busy\n")
+            with patch.object(smoke.subprocess, "run", side_effect=run), \
+                    patch.object(smoke.time, "time", return_value=1400):
+                smoke.capture_failure("device", "iPhone", "launch", RuntimeError("original"), output)
+            report = json.loads((output / "iPhone.failure.json").read_text())
+            self.assertNotIn("install", report["startupCommands"])
+            self.assertEqual(report["startupCommands"]["launch"]["timeoutSeconds"], 330)
+            self.assertEqual(report["logInterval"], {"startedAt": 1000, "failureAt": 1400})
+            log_commands = [command for command in commands if "show" in command]
+            self.assertEqual(len(log_commands), 5)
+            for command in log_commands:
+                self.assertNotIn("--last", command)
+                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:16:35+0000")
+                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:23:21+0000")
+            self.assertTrue(any("SpringBoard" in command[-1] and "runningboardd" in command[-1] for command in log_commands))
+            self.assertTrue(any("Simulator" in command[-1] for command in log_commands))
+            for name in ("appLaunchLog", "appLaunchHostLog"):
+                command = json.loads((output / report["diagnostics"][name]["commandEvidence"]).read_text())["command"]
+                self.assertIn(smoke.BUNDLE_ID, command[-1])
+                self.assertNotIn('process == "runningboardd"', command[-1])
+                self.assertNotIn('process == "SpringBoard"', command[-1])
+            self.assertIn('"device"', json.loads((output / "iPhone.appLaunchHostLog.command.json").read_text())["command"][-1])
+            probe = report["diagnostics"]["webViewLog"]
+            self.assertFalse(probe["completed"])
+            self.assertEqual((probe["stdout"], probe["stderr"]), ("partial log\n", "busy\n"))
+            self.assertIsNone(probe["exitCode"])
+            self.assertEqual(json.loads((output / probe["commandEvidence"]).read_text())["status"], "timeout")
+            self.assertEqual(json.loads((output / "iPhone.bundleLog.command.json").read_text())["stdout"], "partial log\n")
+
+    def test_failure_probe_sidecar_preserves_output_before_summary_tail(self):
+        text = "start of failure\n" + "remaining log\n" * 10000
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, text, "warning")):
+                result = smoke.failure_diagnostics("device", output, None)
+            probe = result["webViewLog"]
+            self.assertEqual(len(probe["stdout"]), 65536)
+            self.assertEqual(json.loads((output / probe["commandEvidence"]).read_text())["stdout"], text)
+
+    def test_keyboard_scroll_bounds_convert_dom_coordinates_without_relaxing_visibility(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874},
+                    "webviewInWindow": {"x": 0, "y": 0}, "scrollBounds": {"y": 233.6666667}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 471, "offsetTop": 233.65625},
+            "rects": [{"selector": ".app--mobile", "y": -0.34375, "height": 471},
+                      {"selector": ".drawer__foot", "y": 404.65625, "height": 61},
+                      {"selector": ".drawer__body", "y": 120, "height": 284.65625},
+                      {"selector": ".drawer input", "x": 20, "y": 244, "width": 362, "height": 42},
+                      {"selector": ".drawer__head button", "x": 336, "y": 70, "width": 46, "height": 46}]}}
+        controls = [{"frame": {"x": 20, "y": 244, "width": 362, "height": 42}},
+                    {"frame": {"x": 336, "y": 70, "width": 46, "height": 46}}]
+        smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 583, "height": 233}, controls=controls)
+        snapshot["dom"]["rects"][2]["height"] = 150
+        with self.assertRaisesRegex(RuntimeError, "底列遮擋"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        snapshot["dom"]["rects"][2]["height"] = 284.65625
+        controls[0]["frame"]["y"] = 300
+        with self.assertRaisesRegex(RuntimeError, "座標不符"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        controls[0]["frame"]["y"] = 900
+        with self.assertRaisesRegex(RuntimeError, "超出視窗"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=controls)
+        with self.assertRaisesRegex(RuntimeError, "缺少鍵盤"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, controls=[])
+        snapshot["dom"]["rects"][1]["y"] = 450
+        with self.assertRaisesRegex(RuntimeError, "控制列超出"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+        snapshot["scrollBounds"]["y"] = 0
+        with self.assertRaisesRegex(RuntimeError, "App 起點"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+
+    def test_interaction_failures_preserve_errors_and_continue_other_devices(self):
+        owned = iter(("new-phone", "new-tablet"))
+
+        def simctl(*args, **kwargs):
+            return next(owned) if args[0] == "create" else ""
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "simctl", side_effect=simctl) as command, \
+                patch.object(smoke, "prepare_ci_keyboard", side_effect=RuntimeError("keyboard setup failed")), \
+                patch.object(smoke, "capture_failure") as capture:
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=600, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaisesRegex(RuntimeError, "iPhone, iPad"):
+                smoke.check_simulators(args, "runtime", devices, root / "reader")
+            self.assertEqual(capture.call_count, 2)
+            failures = json.loads((root / "interaction-failures.json").read_text())
+            self.assertEqual([failure["device"] for failure in failures], ["iPhone", "iPad"])
+            self.assertTrue(all(failure["stage"] == "keyboard-setup" for failure in failures))
+            self.assertEqual([call.args for call in command.call_args_list if call.args[0] == "delete"],
+                             [("delete", "new-phone"), ("delete", "new-tablet")])
+
+    def test_keyboard_setup_targets_only_ci_disposable_device(self):
+        with patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "1", "")) as run:
+            smoke.prepare_ci_keyboard("owned-device")
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[0].args[0], [
+                "xcrun", "simctl", "spawn", "owned-device", "defaults", "write",
+                "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction", "-bool", "YES"])
+            self.assertEqual(run.call_args_list[1].args[0][-4:], [
+                "defaults", "read", "com.apple.keyboard.preferences", "DidShowContinuousPathIntroduction"])
+            self.assertTrue(all(call.kwargs["timeout"] == 15 for call in run.call_args_list[:3]))
+            self.assertEqual(run.call_args_list[3].kwargs["timeout"], 30)
+            self.assertIn("<false/>", run.call_args_list[2].args[0][-1])
+            self.assertEqual(run.call_args_list[3].args[0], [
+                "open", "-a", "Simulator", "--args", "-CurrentDeviceUDID",
+                "owned-device", "-ConnectHardwareKeyboard", "NO"])
+        with patch.dict(smoke.os.environ, {"CI": "false"}), \
+                patch.object(smoke.subprocess, "run") as run:
+            smoke.prepare_ci_keyboard("owned-device")
+            run.assert_not_called()
+
+    def test_bootstatus_timeout_records_readiness_failure_without_keyboard_or_install(self):
+        owned = iter(("new-phone", "new-tablet"))
+        def run(command, **kwargs):
+            if command[2] == "create":
+                return subprocess.CompletedProcess(command, 0, next(owned), "")
+            if command[2] == "bootstatus":
+                self.assertEqual(kwargs["timeout"], 180)
+                raise subprocess.TimeoutExpired(command, 180, b"Waiting on boot", b"busy")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), \
+                patch.object(smoke, "prepare_ci_keyboard") as keyboard, \
+                patch.object(smoke, "capture_failure"):
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=180, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaisesRegex(RuntimeError, "iPhone, iPad"):
+                smoke.check_simulators(args, "runtime", devices, None)
+            keyboard.assert_not_called()
+            for label, device in (("iPhone", "new-phone"), ("iPad", "new-tablet")):
+                record = json.loads((root / f"{label}.bootstatus.command.json").read_text())
+                self.assertEqual(record["command"][3], device)
+                self.assertEqual((record["status"], record["stdout"], record["stderr"]),
+                                 ("timeout", "Waiting on boot", "busy"))
+                self.assertFalse((root / f"{label}.install.command.json").exists())
+
+    def test_setup_failure_includes_only_current_startup_command_records(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "failure_diagnostics", return_value={}), \
+                patch.object(smoke, "simctl", return_value=""):
+            root = Path(directory)
+            (root / "phone.startup.json").write_text(json.dumps({"startedAt": 1000}))
+            for phase, timestamp in (("boot", 999), ("bootstatus", 1001), ("keyboardTutorial.write", 1002)):
+                (root / f"phone.{phase}.command.json").write_text(json.dumps({"startedAt": timestamp, "status": "timeout"}))
+            smoke.capture_failure("owned-device", "phone", "keyboard-setup", RuntimeError("busy"), root)
+            report = json.loads((root / "phone.failure.json").read_text())
+            self.assertEqual(set(report["startupCommands"]), {"bootstatus", "keyboardTutorial.write"})
+            self.assertEqual(report["stage"], "keyboard-setup")
+
+    def test_keyboard_tutorial_setup_readback_failure_stops_setup(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "0", "")) as run:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "前置設定未生效"):
+                smoke.prepare_ci_keyboard("owned-device", root, "phone")
+            self.assertEqual(run.call_count, 2)
+            self.assertTrue((root / "phone.keyboardTutorial.write.command.json").is_file())
+            self.assertEqual(json.loads((root / "phone.keyboardTutorial.read.command.json").read_text())["stdout"], "0")
+
+    def test_keyboard_tutorial_setup_command_failure_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("defaults", 15, b"partial", b"busy")) as run, \
+                patch.object(smoke.time, "sleep"):
+            root = Path(directory)
+            with self.assertRaises(RuntimeError) as raised:
+                smoke.prepare_ci_keyboard("owned-device", root, "phone")
+            self.assertIsInstance(raised.exception.__cause__, subprocess.TimeoutExpired)
+            self.assertEqual(run.call_count, 4)
+            report = json.loads((root / "phone.keyboardTutorial.write.command.json").read_text())
+            self.assertEqual((report["status"], report["stdout"], report["stderr"]), ("timeout", "partial", "busy"))
+
+    def test_keyboard_geometry_must_not_overlap_native_keyboard(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874}, "webviewInWindow": {"y": 0}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 500, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 500}]}}
+        smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 500, "height": 374})
+        with self.assertRaisesRegex(RuntimeError, "鍵盤重疊"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 490, "height": 384})
+        with self.assertRaisesRegex(RuntimeError, "鍵盤重疊"):
+            smoke.validate_native_viewport(snapshot, keyboard=True, keyboard_frame={"y": 500, "height": 0})
+
+    def test_process_evidence_rejects_recursive_launches_and_ignores_other_devices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            executable = output / "owned device" / "LatticeTerm.app" / "LatticeTerm"
+            for extra, expected_count in [("", 1), (f"101 100 {executable}\n", 2)]:
+                process_output = f"100 1 {executable}\n200 1 /other/device/LatticeTerm.app/LatticeTerm\n" + extra
+                with patch.object(smoke, "simctl", return_value=str(executable.parent)), \
+                        patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, process_output, "")):
+                    if extra:
+                        with self.assertRaisesRegex(RuntimeError, "單一程序"):
+                            smoke.capture_app_processes("owned-device", 100, output, "phone", "baseline")
+                    else:
+                        smoke.capture_app_processes("owned-device", 100, output, "phone", "baseline")
+                evidence = json.loads((output / "phone.baseline.processes.json").read_text())
+                self.assertEqual(len(evidence["processes"]), expected_count)
+
+    def test_full_viewport_rejects_safe_area_sized_dom_and_clipped_controls(self):
+        snapshot = {"windowBounds": {"width": 402, "height": 874}, "dom": {
+            "innerWidth": 402, "innerHeight": 874, "viewport": {"height": 874, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 874}]}}
+        smoke.validate_native_viewport(snapshot)
+        snapshot["dom"]["innerHeight"] = 778
+        with self.assertRaisesRegex(RuntimeError, "DOM 仍短於原生"):
+            smoke.validate_native_viewport(snapshot)
+        snapshot["dom"]["innerHeight"] = 874
+        snapshot["dom"]["viewport"]["height"] = 500
+        snapshot["dom"]["rects"][0]["height"] = 500
+        smoke.validate_native_viewport(snapshot, keyboard=True)
+        snapshot["dom"]["rects"].append({"selector": ".drawer__foot", "y": 490, "height": 50})
+        with self.assertRaisesRegex(RuntimeError, "控制列超出"):
+            smoke.validate_native_viewport(snapshot, keyboard=True)
+
+    def test_iphone_landscape_rejects_offscreen_add_even_when_hittable(self):
+        snapshot = {"windowBounds": {"width": 874, "height": 402}, "dom": {
+            "innerWidth": 874, "innerHeight": 402, "viewport": {"height": 402, "offsetTop": 0},
+            "rects": [{"selector": ".app--mobile", "y": 0, "height": 402}]}}
+        controls = [{"hittable": True, "frame": {"x": 231, "y": 366, "width": 155, "height": 44}}]
+        with self.assertRaisesRegex(RuntimeError, "原生控制項超出視窗"):
+            smoke.validate_native_viewport(snapshot, controls=controls)
+        controls[0]["frame"]["y"] = 226
+        smoke.validate_native_viewport(snapshot, controls=controls)
+
+    def test_interactions_require_all_stages_and_fresh_geometry(self):
+        stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
+        observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10, "captureStableUntil": 106 + index * 10,
+                         "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500, "height": 300},
+                         "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
+                        for index, stage in enumerate(stages)]
+        stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
+        snapshots = [{"capturedAt": entry["capturedAt"] + 1.2, "dom": {
+            "capturedAt": entry["capturedAt"] + 1.2, "innerHeight": 400,
+            "rects": [{"selector": ".app--mobile", "height": 400}]}} for entry in observations]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                    patch.object(smoke, "validate_native_viewport") as validate:
+                smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+                self.assertEqual(validate.call_count, 4)
+            result = json.loads((root / "phone.interactions.json").read_text())
+            self.assertEqual([entry["stage"] for entry in result], stages)
+            self.assertEqual(result[-1]["layout"]["capturedAt"], 131.2)
+            for invalid in ({"capturedAt": 100, "dom": {"capturedAt": 80, "rects": [{"selector": ".app--mobile", "height": 400}]}},
+                            {"capturedAt": 100, "dom": {"capturedAt": 100, "rects": []}},
+                            {"capturedAt": 106.1, "dom": {"capturedAt": 106.1, "rects": [{"selector": ".app--mobile", "height": 400}]}}):
+                with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                        patch.object(smoke, "read_layout_snapshots", return_value=[invalid]):
+                    with self.assertRaisesRegex(RuntimeError, "新鮮"):
+                        smoke.capture_interactions("owned-device", root, root, "invalid", (root, root))
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 1}]):
+                with self.assertRaisesRegex(RuntimeError, "新鮮"):
+                    smoke.capture_interactions("owned-device", root, root, "stale", (root, root))
+
+    def test_interactions_preserve_geometry_when_native_test_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 65, "native failure", "")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 100}]):
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            self.assertEqual((root / "phone.interactions.log").read_text(), "native failure")
+            self.assertEqual(json.loads((root / "phone.interaction-layout.json").read_text()), [{"capturedAt": 100}])
+
+    def test_interactions_reject_incorrect_keyboard_state_and_hidden_controls(self):
+        stages = ["keyboard-open", "keyboard-closed", "landscape", "portrait-return"]
+        for fault, message in [("keyboard", "鍵盤狀態"), ("controls", "無法點擊"), ("overlap", "鍵盤遮擋")]:
+            observations = [{"stage": stage, "capturedAt": 100 + index * 10, "captureFinishedAt": 101 + index * 10,
+                             "keyboardVisible": stage == "keyboard-open", "keyboardFrame": {"y": 500},
+                             "controls": [{"hittable": True, "frame": {"y": 100, "width": 44, "height": 44}}]}
+                            for index, stage in enumerate(stages)]
+            if fault == "keyboard":
+                observations[0]["keyboardVisible"] = False
+            elif fault == "controls":
+                observations[0]["controls"][0]["hittable"] = False
+            else:
+                observations[0]["controls"][0]["frame"]["y"] = 490
+            stdout = "\n".join("LATTICE_LAYOUT_STAGE " + json.dumps(entry) for entry in observations)
+            snapshots = [{"capturedAt": entry["capturedAt"] - 2, "dom": {
+                "capturedAt": entry["capturedAt"] - 2,
+                "rects": [{"selector": ".app--mobile", "height": 400}]}} for entry in observations]
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")), \
+                        patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                        patch.object(smoke, "validate_native_viewport"):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        smoke.capture_interactions("owned-device", root, root, fault, (root, root))
+
+    def test_interactions_preserve_partial_output_on_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("xcodebuild", 300, b"partial output", b"stderr")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"capturedAt": 100}]):
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            self.assertIn("partial outputstderr", (root / "phone.interactions.log").read_text())
+            self.assertIn("timed out", (root / "phone.interactions.log").read_text())
+            self.assertTrue((root / "phone.interaction-layout.json").is_file())
+
+    def test_failed_native_tap_preserves_stages_and_input_without_passing_validation(self):
+        stage = {"stage": "landscape", "capturedAt": 100, "captureFinishedAt": 101, "captureStableUntil": 106}
+        inputs = [{"id": "tap", "phase": phase, "at": timestamp,
+                   "frame": {"x": 482, "y": 587, "width": 155, "height": 44}}
+                  for phase, timestamp in (("before", 110), ("after", 111))]
+        stdout = "LATTICE_LAYOUT_STAGE " + json.dumps(stage) + "\n" + "\n".join(
+            "LATTICE_LAYOUT_INPUT " + json.dumps(entry) for entry in inputs)
+        snapshots = [{"capturedAt": 102, "dom": {"capturedAt": 102,
+                      "rects": [{"selector": ".app--mobile", "height": 1032}]}}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 65, stdout, "field absent")), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=snapshots), \
+                    patch.object(smoke, "validate_native_viewport") as validate:
+                with self.assertRaisesRegex(RuntimeError, "驗收失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "iPad", (root, root))
+                validate.assert_not_called()
+            self.assertEqual(json.loads((root / "iPad.inputs.json").read_text()), inputs)
+            preserved = json.loads((root / "iPad.interactions.json").read_text())
+            self.assertEqual(preserved, [{**stage, "layout": snapshots[0]}])
+
+    def test_input_diagnostics_target_last_touch_and_keep_partial_logs(self):
+        inputs = [{"id": "old", "phase": "before", "at": 10},
+                  {"id": "new", "phase": "before", "at": 110},
+                  {"id": "new", "phase": "after", "at": 112}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("log", 15, b"digitizer did disappear", b"partial"),
+                    subprocess.CompletedProcess([], 0, "HID source", "")]) as run:
+                smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                command = call.args[0]
+                self.assertEqual(command[command.index("--start") + 1], "1970-01-01 00:01:45+0000")
+                self.assertEqual(command[command.index("--end") + 1], "1970-01-01 00:01:53+0000")
+                self.assertEqual(call.kwargs["timeout"], 15)
+                self.assertIn("testmanagerd", command[-1])
+            simulator = json.loads((root / "phone.inputSimulatorLog.command.json").read_text())
+            self.assertEqual(simulator["status"], "timeout")
+            self.assertEqual(simulator["stdout"], "digitizer did disappear")
+            self.assertEqual(simulator["stderr"], "partial")
+            host = json.loads((root / "phone.inputHostLog.command.json").read_text())
+            self.assertEqual(host["exitCode"], 0)
+            self.assertIn("HID", host["command"][-1])
+
+    def test_failed_touch_keeps_one_earlier_completed_input_for_comparison(self):
+        inputs = [{"id": "first", "phase": "before", "at": 10},
+                  {"id": "first", "phase": "after", "at": 12},
+                  {"id": "second", "phase": "before", "at": 20},
+                  {"id": "second", "phase": "after", "at": 22},
+                  {"id": "failed", "phase": "before", "at": 110},
+                  {"id": "failed", "phase": "after", "at": 112}]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "HID", "")) as run:
+            root = Path(directory)
+            smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(run.call_count, 4)
+            reference = json.loads((root / "phone.inputSimulatorLog.reference.command.json").read_text())
+            self.assertIn("owned-device", reference["command"])
+            self.assertEqual(reference["timeoutSeconds"], 15)
+            self.assertIn("1970-01-01 00:00:05+0000", reference["command"])
+            self.assertIn("1970-01-01 00:00:13+0000", reference["command"])
+            report = json.loads((root / "phone.input-diagnostics.json").read_text())
+            self.assertEqual(report["comparisonInput"], {
+                "id": "first", "start": 5, "end": 13, "deliveredClickVerified": False})
+
+    def test_input_comparison_skips_long_or_unpaired_earlier_inputs(self):
+        inputs = [{"id": "long", "phase": "before", "at": 10},
+                  {"id": "long", "phase": "after", "at": 80},
+                  {"id": "unpaired", "phase": "before", "at": 90},
+                  {"id": "failed", "phase": "before", "at": 110},
+                  {"id": "failed", "phase": "after", "at": 112}]
+        with tempfile.TemporaryDirectory() as directory, patch.object(smoke, "capture_input_window") as capture:
+            root = Path(directory)
+            smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(capture.call_count, 1)
+            report = json.loads((root / "phone.input-diagnostics.json").read_text())
+            self.assertIsNone(report["comparisonInput"])
+
+    def test_long_idle_keeps_bounded_start_and_end_input_logs(self):
+        inputs = [{"id": "refocus", "phase": "before", "at": 1792084307.57955},
+                  {"id": "refocus", "phase": "after", "at": 1792084428.7889771}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("log", 15, b"partial HID", b"busy"),
+                    *[subprocess.CompletedProcess([], 0, "window log", "") for _ in range(3)]]) as run:
+                smoke.capture_input_diagnostics("owned-device", root, "phone", inputs)
+            self.assertEqual(run.call_count, 4)
+            for call in run.call_args_list:
+                command = call.args[0]
+                start = datetime.strptime(command[command.index("--start") + 1], "%Y-%m-%d %H:%M:%S%z")
+                end = datetime.strptime(command[command.index("--end") + 1], "%Y-%m-%d %H:%M:%S%z")
+                self.assertLessEqual((end - start).total_seconds(), 12)
+                self.assertEqual(call.kwargs["timeout"], 15)
+            report = json.loads((root / "phone.input-diagnostics.json").read_text())
+            self.assertTrue(report["truncated"])
+            self.assertAlmostEqual(report["touchDurationSeconds"], 121.2094271)
+            self.assertEqual(len(report["windows"]), 2)
+            self.assertGreater(report["omittedInterval"]["end"] - report["omittedInterval"]["start"], 100)
+            before = json.loads((root / "phone.inputSimulatorLog.before.command.json").read_text())
+            self.assertEqual((before["status"], before["stdout"], before["stderr"]),
+                             ("timeout", "partial HID", "busy"))
+            self.assertTrue((root / "phone.inputHostLog.command.json").is_file())
+
+    def test_incomplete_xcresult_does_not_mask_xctest_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phone.xcresult").mkdir()
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.TimeoutExpired("xcodebuild", 300, b"Wait app idle", b"partial stderr"),
+                    subprocess.CalledProcessError(64, "xcresulttool", output="partial export", stderr="Info.plist missing")]), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[]):
+                with self.assertRaisesRegex(RuntimeError, "XCUITest timed out after 300 seconds"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            report = json.loads((root / "phone.interactions.result.json").read_text())
+            self.assertEqual(report["exitCode"], 124)
+            self.assertTrue(report["timedOut"])
+            self.assertIn("300 seconds", report["primaryFailure"])
+            self.assertIn("64", report["attachmentExportError"])
+            export = json.loads((root / "phone.attachments.command.json").read_text())
+            self.assertEqual((export["exitCode"], export["stdout"], export["stderr"]),
+                             (64, "partial export", "Info.plist missing"))
+
+    def test_attachment_export_failure_still_fails_successful_xctest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "phone.xcresult").mkdir()
+            with patch.object(smoke.subprocess, "run", side_effect=[
+                    subprocess.CompletedProcess([], 0, "", ""),
+                    subprocess.CalledProcessError(64, "xcresulttool", stderr="export failed")]), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[]):
+                with self.assertRaisesRegex(RuntimeError, "互動附件採證失敗"):
+                    smoke.capture_interactions("owned-device", root, root, "phone", (root, root))
+            report = json.loads((root / "phone.interactions.result.json").read_text())
+            self.assertEqual(report["exitCode"], 0)
+            self.assertIsNone(report["primaryFailure"])
+            self.assertIn("64", report["attachmentExportError"])
+
+    def test_input_diagnostics_skip_missing_or_invalid_touch_times(self):
+        for inputs in ([], [{"phase": "before", "at": "bad"}],
+                       [{"id": "tap", "phase": "before", "at": 110},
+                        {"id": "tap", "phase": "after", "at": 100}]):
+            with patch.object(smoke, "recorded_command") as command:
+                smoke.capture_input_diagnostics("owned-device", Path("unused"), "phone", inputs)
+                command.assert_not_called()
+
+    def test_viewport_comparisons_wait_for_each_variant_and_preserve_originals(self):
+        now = [100.0]
+        captures = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            original = root / "phone.png"
+            original.write_bytes(b"original")
+
+            def snapshots(*args, **kwargs):
+                variant = (cache / "layout-variant.txt").read_text()
+                return [{"variant": variant, "capturedAt": now[0]}]
+
+            def sleep(seconds):
+                now[0] += seconds
+
+            with patch.object(smoke.time, "time", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke, "read_layout_snapshots", side_effect=snapshots), \
+                    patch.object(smoke, "simctl", side_effect=lambda *args, **kwargs: captures.append(args)):
+                results = smoke.capture_viewport_experiments("owned-device", cache, root, "phone")
+            self.assertEqual([entry["variant"] for entry in results], [
+                "frontend-ready", "document-dvh", "document-percent", "relayout", "resize-never",
+                "never", "automatic", "zero-insets", "resize"])
+            self.assertEqual(len(captures), 9)
+            self.assertGreaterEqual(now[0], 145)
+            self.assertEqual(original.read_bytes(), b"original")
+            self.assertEqual(json.loads((root / "phone.experiments.json").read_text()), results)
+
+    def test_viewport_comparison_rejects_stale_variant(self):
+        now = [0.0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def sleep(seconds):
+                now[0] += seconds
+            with patch.object(smoke.time, "time", return_value=100), \
+                    patch.object(smoke.time, "monotonic", side_effect=lambda: now[0]), \
+                    patch.object(smoke.time, "sleep", side_effect=sleep), \
+                    patch.object(smoke, "read_layout_snapshots", return_value=[{"variant": "baseline", "capturedAt": 200}]), \
+                    patch.object(smoke, "simctl") as capture:
+                with self.assertRaisesRegex(RuntimeError, "viewport"):
+                    smoke.capture_viewport_experiments("owned-device", root, root, "phone")
+                capture.assert_not_called()
+
+    def test_layout_snapshots_exclude_unrelated_cache_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-2-0.json").write_text('{"delaySeconds":2}')
+            (cache / "layout-10-0.json").write_text(json.dumps({"delaySeconds": 10, "dom": {"rects": [
+                {"selector": "#root", "height": 800}, {"selector": ".app--mobile", "height": 800}]}}))
+            (cache / "unrelated.json").write_text('not a layout snapshot')
+            snapshots = smoke.read_layout_snapshots(cache, timeout=0)
+            self.assertEqual({entry["delaySeconds"] for entry in snapshots}, {2, 10})
+
+    def test_layout_snapshots_do_not_claim_success_without_native_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "未產生"):
+                smoke.read_layout_snapshots(Path(directory), timeout=0)
+
+    def test_layout_snapshots_require_rendered_app_geometry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-10-0.json").write_text('{"delaySeconds":10,"dom":{"rects":[{"selector":"#root"}]}}')
+            with self.assertRaisesRegex(RuntimeError, "早於前端"):
+                smoke.read_layout_snapshots(cache, timeout=0)
+
+    def test_failed_frontend_preserves_early_layout_as_partial_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            (cache / "layout-2-0.json").write_text('{"delaySeconds":2}')
+            self.assertEqual(smoke.read_layout_snapshots(cache, timeout=0, require_ready=False), [{"delaySeconds": 2}])
+
     def test_failure_probes_do_not_conflate_ocr_and_simulator_stalls(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -104,6 +763,189 @@ class RuntimeSelectionTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 2)
                 self.assertEqual(previous.read_text(), "previous successful run")
                 command.assert_not_called()
+
+
+class KeyboardPreferenceReadinessTests(unittest.TestCase):
+    def test_confirmed_write_is_not_repeated_when_read_times_out(self):
+        clock = [0.0]
+        operations = []
+        def run(command, **kwargs):
+            self.assertEqual(command[:5], ["xcrun", "simctl", "spawn", "owned-device", "defaults"])
+            self.assertEqual(kwargs["timeout"], 15)
+            operations.append(command[5])
+            clock[0] += 5
+            if operations == ["write", "read"]:
+                clock[0] += 10
+                raise subprocess.TimeoutExpired(command, 15, b"partial", b"busy")
+            return subprocess.CompletedProcess(command, 0, "1", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)):
+            root = Path(directory)
+            smoke.wait_for_keyboard_preference("owned-device", root, "phone")
+            self.assertEqual(operations, ["write", "read", "read"])
+            report = json.loads((root / "phone.keyboard-readiness.json").read_text())
+            self.assertEqual((report["status"], report["readback"]), ("ready", "1"))
+            self.assertEqual(report["attempts"][1]["operation"], "read")
+            record = json.loads((root / report["attempts"][1]["commandFile"]).read_text())
+            self.assertEqual((record["status"], record["stdout"], record["stderr"]), ("timeout", "partial", "busy"))
+
+    def test_write_timeout_retries_only_same_owned_preference(self):
+        operations = []
+        def run(command, **kwargs):
+            operations.append(command[5])
+            if len(operations) == 1:
+                raise subprocess.TimeoutExpired(command, 15)
+            return subprocess.CompletedProcess(command, 0, "1", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), patch.object(smoke.time, "sleep"):
+            smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+        self.assertEqual(operations, ["write", "write", "read"])
+
+    def test_read_stall_exhausts_shared_budget_without_accepting_write(self):
+        clock = [0.0]
+        operations = []
+        def run(command, **kwargs):
+            operations.append(command[5])
+            if command[5] == "write":
+                clock[0] += 5
+                return subprocess.CompletedProcess(command, 0, "", "")
+            clock[0] += kwargs["timeout"]
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)):
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "讀回"):
+                smoke.wait_for_keyboard_preference("owned-device", root, "phone")
+            report = json.loads((root / "phone.keyboard-readiness.json").read_text())
+            self.assertEqual((report["status"], report["stopReason"]), ("failed", "deadline"))
+            self.assertEqual(operations, ["write", "read", "read", "read", "read"])
+            self.assertEqual(clock[0], 60)
+
+    def test_nonzero_exit_is_not_retried(self):
+        error = subprocess.CalledProcessError(70, "defaults", "", "service unavailable")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=error) as run, \
+                patch.object(smoke.time, "sleep") as sleep:
+            with self.assertRaises(subprocess.CalledProcessError):
+                smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+            self.assertEqual(run.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_incorrect_readback_is_not_retried_or_accepted(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "0", "")) as run:
+            with self.assertRaisesRegex(RuntimeError, "前置設定未生效"):
+                smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+            self.assertEqual(run.call_count, 2)
+
+    def test_late_readback_cannot_pass_deadline(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            if command[5] == "read":
+                clock[0] = 61
+            return subprocess.CompletedProcess(command, 0, "1", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]):
+            root = Path(directory)
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_keyboard_preference("owned-device", root, "phone")
+            report = json.loads((root / "phone.keyboard-readiness.json").read_text())
+            self.assertEqual((report["status"], report["stopReason"]), ("failed", "deadline"))
+
+    def test_fourth_attempt_success_is_accepted_within_budget(self):
+        operations = []
+        def run(command, **kwargs):
+            operations.append(command[5])
+            if len(operations) < 4:
+                raise subprocess.TimeoutExpired(command, 15)
+            return subprocess.CompletedProcess(command, 0, "1", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run), patch.object(smoke.time, "sleep"):
+            smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+        self.assertEqual(operations, ["write"] * 4 + ["read"])
+
+    def test_timeout_returning_past_budget_does_not_retry(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            clock[0] = 61
+            raise subprocess.TimeoutExpired(command, 15)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run) as run, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep") as sleep:
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+            self.assertEqual(run.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_write_using_entire_budget_does_not_start_read(self):
+        clock = [0.0]
+        def run(command, **kwargs):
+            clock[0] = 60
+            return subprocess.CompletedProcess(command, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=run) as run, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]):
+            with self.assertRaises(RuntimeError):
+                smoke.wait_for_keyboard_preference("owned-device", Path(directory), "phone")
+            self.assertEqual(run.call_count, 1)
+
+    def test_read_error_is_preserved_without_rewriting(self):
+        error = subprocess.CalledProcessError(1, "defaults read", "", "not found")
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke.subprocess, "run", side_effect=[subprocess.CompletedProcess([], 0, "", ""), error]) as run:
+            root = Path(directory)
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                smoke.wait_for_keyboard_preference("owned-device", root, "phone")
+            self.assertIs(raised.exception, error)
+            self.assertEqual(run.call_count, 2)
+            report = json.loads((root / "phone.keyboard-readiness.json").read_text())
+            self.assertEqual((report["status"], report["operation"], report["stopReason"]), ("failed", "read", "command-error"))
+
+
+class KeyboardReadinessIntegrationTests(unittest.TestCase):
+    def test_failed_readback_never_installs_or_launches_product(self):
+        owned = iter(("new-phone", "new-tablet"))
+        operations = []
+        def command(*args, **kwargs):
+            operations.append(args[0])
+            if args[0] == "create":
+                return next(owned)
+            if args[0] == "spawn":
+                self.assertEqual(args[2:4], ("defaults", "write" if operations.count("spawn") % 2 else "read"))
+                return "0"
+            return ""
+        with tempfile.TemporaryDirectory() as directory, patch.dict(smoke.os.environ, {"CI": "true"}), \
+                patch.object(smoke, "simctl", side_effect=command), \
+                patch.object(smoke.subprocess, "run") as host, patch.object(smoke, "capture_failure") as capture:
+            root = Path(directory)
+            args = Namespace(app=root / "App.app", output=root, store_screenshots=False,
+                             boot_timeout=180, interaction_checks=True)
+            devices = [{"name": name, "deviceTypeIdentifier": name} for name in ("iPhone", "iPad")]
+            with self.assertRaises(RuntimeError):
+                smoke.check_simulators(args, "runtime", devices, None)
+            self.assertEqual(operations, ["create", "boot", "bootstatus", "spawn", "spawn", "shutdown", "delete"] * 2)
+            self.assertTrue(all(call.args[2] == "keyboard-setup" for call in capture.call_args_list))
+            host.assert_not_called()
+
+    def test_failure_report_retains_current_keyboard_readiness_but_not_stale(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(smoke, "failure_diagnostics", return_value={}), patch.object(smoke, "simctl", return_value=""):
+            root = Path(directory)
+            (root / "phone.startup.json").write_text(json.dumps({"startedAt": 1000}))
+            readiness = root / "phone.keyboard-readiness.json"
+            readiness.write_text(json.dumps({"startedAt": 1001, "status": "failed", "operation": "read"}))
+            smoke.capture_failure("owned-device", "phone", "keyboard-setup", RuntimeError("busy"), root)
+            report = json.loads((root / "phone.failure.json").read_text())
+            self.assertEqual(report["keyboardReadiness"]["operation"], "read")
+            readiness.write_text(json.dumps({"startedAt": 999, "status": "ready"}))
+            smoke.capture_failure("owned-device", "phone", "keyboard-setup", RuntimeError("busy"), root)
+            self.assertNotIn("keyboardReadiness", json.loads((root / "phone.failure.json").read_text()))
 
 
 class FrontendVisibilityTests(unittest.TestCase):

@@ -36,6 +36,7 @@ impl AtomicWriteError {
         }
     }
 
+    #[cfg(unix)]
     pub(crate) fn after_replace(error: impl ToString) -> Self {
         Self {
             detail: error.to_string(),
@@ -168,7 +169,7 @@ pub(crate) fn durable_remove_private(path: &Path) -> Result<(), String> {
         if moved == 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
-        return tombstone.close().map_err(|error| error.to_string());
+        tombstone.close().map_err(|error| error.to_string())
     }
 
     #[cfg(unix)]

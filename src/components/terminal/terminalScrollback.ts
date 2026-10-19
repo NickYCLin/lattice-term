@@ -23,6 +23,12 @@ export function attachTerminalScrollback(terminal: Terminal, refit?: () => void,
   };
   element?.addEventListener("wheel", onWheel, { capture: true, passive: false });
   const update = () => {
+    if (element) {
+      element.dataset.terminalBuffer = terminal.buffer.active.type;
+      element.dataset.terminalHistoryRows = String(terminal.buffer.active.baseY);
+      element.dataset.terminalRows = String(terminal.rows);
+      element.dataset.terminalCols = String(terminal.cols);
+    }
     if (terminal.buffer.active.type !== "normal" || terminal.buffer.active.baseY === 0) wheelRemainder = 0;
     element?.classList.toggle("has-scrollbar", terminal.options.scrollbar?.showScrollbar !== false);
     element?.classList.toggle(
@@ -58,5 +64,11 @@ export function attachTerminalScrollback(terminal: Terminal, refit?: () => void,
     fonts?.removeEventListener("loadingdone", fontsChanged);
     element?.classList.remove("has-scrollback");
     element?.classList.remove("has-scrollbar");
+    if (element) {
+      delete element.dataset.terminalBuffer;
+      delete element.dataset.terminalHistoryRows;
+      delete element.dataset.terminalRows;
+      delete element.dataset.terminalCols;
+    }
   };
 }

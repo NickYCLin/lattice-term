@@ -85,7 +85,7 @@ pub fn prepare(
     key: Option<&str>,
     proxy_id: Option<&str>,
 ) -> Option<ModelCatalog> {
-    let version = codex_version(program, prefix)?;
+    let version = codex_version(program, prefix).ok()?;
     if !supports_layered_profiles(&version) {
         return None;
     }
@@ -93,7 +93,33 @@ pub fn prepare(
     ModelCatalog::write(&models, proxy_id).ok()
 }
 
-fn codex_version(program: &std::ffi::OsStr, prefix: &[std::ffi::OsString]) -> Option<String> {
+#[derive(Debug)]
+enum VersionProbeError {
+    Spawn(std::io::Error),
+    Wait(std::io::Error),
+    Exit(std::process::ExitStatus),
+    Timeout,
+    MissingOutput,
+    Read(std::io::Error),
+}
+
+impl std::fmt::Display for VersionProbeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spawn(error) => write!(formatter, "spawn: {error}"),
+            Self::Wait(error) => write!(formatter, "wait: {error}"),
+            Self::Exit(status) => write!(formatter, "exit: {status}"),
+            Self::Timeout => write!(formatter, "timeout after {VERSION_TIMEOUT:?}"),
+            Self::MissingOutput => formatter.write_str("stdout pipe missing"),
+            Self::Read(error) => write!(formatter, "stdout read: {error}"),
+        }
+    }
+}
+
+fn codex_version(
+    program: &std::ffi::OsStr,
+    prefix: &[std::ffi::OsString],
+) -> Result<String, VersionProbeError> {
     let mut command = Command::new(program);
     command
         .args(prefix)
@@ -107,16 +133,21 @@ fn codex_version(program: &std::ffi::OsStr, prefix: &[std::ffi::OsString]) -> Op
         // This probe also runs while restoring proxy sessions in a GUI app.
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = command.spawn().ok()?;
+    let mut child = command.spawn().map_err(VersionProbeError::Spawn)?;
     let deadline = Instant::now() + VERSION_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) | Err(_) => return None,
+            Ok(Some(status)) => return Err(VersionProbeError::Exit(status)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(VersionProbeError::Wait(error));
+            }
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Err(VersionProbeError::Timeout);
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
         }
@@ -124,11 +155,12 @@ fn codex_version(program: &std::ffi::OsStr, prefix: &[std::ffi::OsString]) -> Op
     let mut output = String::new();
     child
         .stdout
-        .take()?
+        .take()
+        .ok_or(VersionProbeError::MissingOutput)?
         .take(MAX_VERSION_OUTPUT)
         .read_to_string(&mut output)
-        .ok()?;
-    Some(output)
+        .map_err(VersionProbeError::Read)?;
+    Ok(output)
 }
 
 /// Launches may run on an async worker, so the request gets its own runtime
@@ -293,10 +325,47 @@ mod tests {
     #[test]
     fn version_probe_has_no_console_even_through_a_cmd_shim() {
         let fixture = tempfile::tempdir().unwrap();
+        let compiler = fixture.path().join("compile.ps1");
+        std::fs::write(
+            &compiler,
+            r#"$ErrorActionPreference = 'Stop'
+Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+"#,
+        )
+        .unwrap();
+        let mut compile = Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&compiler)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        while compile.try_wait().unwrap().is_none() {
+            if started.elapsed() >= Duration::from_secs(60) {
+                let _ = compile.kill();
+                let _ = compile.wait();
+                panic!("console fixture compilation timed out after 60s");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let output = compile.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "console fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let script = fixture.path().join("probe.ps1");
         std::fs::write(
             &script,
-            r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
+            r#"Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
 if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
 Write-Output 'codex-cli 0.134.0'
 "#,
@@ -314,7 +383,8 @@ Write-Output 'codex-cli 0.134.0'
         .map(Into::into)
         .chain(std::iter::once(script.into_os_string()))
         .collect();
-        let version = codex_version(std::ffi::OsStr::new("powershell.exe"), &prefix).unwrap();
+        let version = codex_version(std::ffi::OsStr::new("powershell.exe"), &prefix)
+            .unwrap_or_else(|error| panic!("direct PowerShell probe failed: {error}"));
         assert!(supports_layered_profiles(&version));
 
         let shim = fixture.path().join("probe.cmd");
@@ -324,7 +394,8 @@ Write-Output 'codex-cli 0.134.0'
         )
         .unwrap();
         let (program, prefix) = crate::agent::launch_parts(&shim);
-        let version = codex_version(&program, &prefix).unwrap();
+        let version = codex_version(&program, &prefix)
+            .unwrap_or_else(|error| panic!("cmd shim probe failed: {error}"));
         assert!(supports_layered_profiles(&version));
     }
 
