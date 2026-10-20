@@ -56,7 +56,7 @@ png = "0.18.1"
 zune-jpeg = "0.5"
 if-addrs = "0.15"
 tauri-plugin-opener = "2"
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "mysql"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "sqlite", "postgres", "mysql"] }
 tiberius = { version = "0.12.3", default-features = false, features = ["rustls", "tds73"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
@@ -72,14 +72,10 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-clipboard-manager = "2.3.2"
 
 [target.'cfg(target_os = "ios")'.dependencies]
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite-unbundled"] }
 # `keyring` selects the Apple-native provider on iOS. The provider has no
 # default feature, but iOS only exposes the protected-data store.
 apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIView"] }
-
-[target.'cfg(not(target_os = "ios"))'.dependencies]
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"

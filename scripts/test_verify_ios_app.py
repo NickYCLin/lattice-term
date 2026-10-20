@@ -17,11 +17,11 @@ class BundleVerificationTests(unittest.TestCase):
     def test_sqlite_linkage_is_platform_scoped(self):
         manifest = Path(__file__).resolve().parent.parent / "src-tauri/Cargo.toml"
         cargo = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        self.assertNotIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
+        self.assertIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
         self.assertNotIn("sqlite-unbundled", cargo["dependencies"]["sqlx"]["features"])
-        targets = cargo["target"]
-        self.assertEqual(targets['cfg(target_os = "ios")']["dependencies"]["sqlx"]["features"], ["sqlite-unbundled"])
-        self.assertEqual(targets['cfg(not(target_os = "ios"))']["dependencies"]["sqlx"]["features"], ["sqlite"])
+        wrapper = Path(__file__).with_name("ios-sqlite-build.sh").read_text(encoding="utf-8")
+        self.assertIn("export LIBSQLITE3_SYS_USE_PKG_CONFIG=1", wrapper)
+        self.assertIn("export SQLITE3_STATIC=0", wrapper)
 
     @unittest.skipIf(os.name == "nt", "Xcode SDK wrapper runs on macOS")
     def test_sqlite_build_uses_selected_sdk_and_preserves_arguments(self):
