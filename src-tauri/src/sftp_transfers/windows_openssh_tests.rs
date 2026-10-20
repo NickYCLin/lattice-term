@@ -94,7 +94,7 @@ impl WindowsServer {
         });
         let transfers = TransferRegistry::new();
         transfers.insert(Arc::clone(&entry)).unwrap();
-        for chunk in bytes.chunks(REMOTE_CHUNK) {
+        for chunk in bytes.chunks(4 * 1024 * 1024) {
             let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
             upload_chunk(&transfers, &QuietSink, "windows-upload", &encoded)
                 .await
@@ -203,13 +203,16 @@ async fn windows_openssh_path_uploads_empty_large_and_changed_files() {
 async fn windows_openssh_uploads_new_and_replacement_files() {
     bounded(async {
         let server = WindowsServer::start().await;
-        let payload = vec![0x5a; REMOTE_CHUNK * 3 + 17];
+        let payload = vec![0x5a; 4 * 1024 * 1024 + 17];
         for overwrite in [false, true] {
-            let (transfers, entry) = server.prepare("report.txt", &payload, overwrite).await;
+            let (transfers, entry) = server.prepare("部署 測試.txt", &payload, overwrite).await;
             finish_upload(&transfers, &QuietSink, "windows-upload")
                 .await
                 .unwrap();
-            assert_eq!(std::fs::read(server.path("report.txt")).unwrap(), payload);
+            assert_eq!(
+                std::fs::read(server.path("部署 測試.txt")).unwrap(),
+                payload
+            );
             let state = entry.state.lock().unwrap();
             assert_eq!(state.state, "done");
             assert!(state.detail.as_ref().unwrap().contains("ACL"));

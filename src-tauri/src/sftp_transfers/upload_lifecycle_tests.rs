@@ -15,6 +15,7 @@ struct LifecycleServer {
     pause_at: PauseAt,
     entered: Arc<Notify>,
     resume: Arc<Notify>,
+    fail_close: bool,
 }
 
 fn ok_status(id: u32) -> Status {
@@ -83,6 +84,9 @@ impl russh_sftp::server::Handler for LifecycleServer {
     }
 
     async fn close(&mut self, id: u32, _handle: String) -> Result<Status, Self::Error> {
+        if self.fail_close {
+            return Err(StatusCode::Failure);
+        }
         if matches!(self.pause_at, PauseAt::Close) {
             self.entered.notify_one();
             self.resume.notified().await;
@@ -126,6 +130,7 @@ async fn path_upload_serializes_cancellation_with_close_and_publication() {
                     pause_at,
                     entered: Arc::clone(&entered),
                     resume: Arc::clone(&resume),
+                    fail_close: false,
                 },
             ));
             let session = Arc::new(SftpSession::new(client).await.unwrap());
@@ -199,6 +204,58 @@ async fn path_upload_serializes_cancellation_with_close_and_publication() {
             peer.abort();
             let _ = peer.await;
         }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn upload_cleanup_reports_close_failure_and_removes_staging() {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let files = Arc::new(Mutex::new(HashMap::new()));
+        let (client, server) = tokio::io::duplex(8192);
+        let peer = tokio::spawn(russh_sftp::server::run(
+            server,
+            LifecycleServer {
+                files: Arc::clone(&files),
+                pause_at: PauseAt::Rename,
+                entered: Arc::default(),
+                resume: Arc::default(),
+                fail_close: true,
+            },
+        ));
+        let session = Arc::new(SftpSession::new(client).await.unwrap());
+        let file = create_upload_staging(&session, "/srv/.upload", false)
+            .await
+            .unwrap();
+        let entry = TransferEntry {
+            state: Mutex::new(TransferState {
+                transfer_id: "cleanup".into(),
+                session_id: "test".into(),
+                kind: "upload",
+                name: "report.bin".into(),
+                remote_path: "/srv/report.bin".into(),
+                local_path: None,
+                bytes_done: 0,
+                total_bytes: Some(4),
+                state: "running",
+                detail: None,
+            }),
+            cancel: AtomicBool::new(false),
+            upload: AsyncMutex::new(Some(file)),
+            upload_session: Some(session),
+            windows_permissions: false,
+            target_snapshot: None,
+            staging_path: Some("/srv/.upload".into()),
+            overwrite: false,
+            target_gate: Arc::default(),
+        };
+        let result = abort_upload(&entry, &QuietSink, "cancelled", "cancelled").await;
+        assert!(!files.lock().unwrap().contains_key("/srv/.upload"));
+        assert!(result.contains("could not close the incomplete remote upload"));
+        assert!(entry.state.lock().unwrap().detail.is_some());
+        peer.abort();
+        let _ = peer.await;
     })
     .await
     .unwrap();

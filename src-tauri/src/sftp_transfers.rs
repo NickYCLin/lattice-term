@@ -395,19 +395,31 @@ async fn abort_upload(
         // staging file to this owner instead of deleting it twice.
         transfer.state = state;
     }
-    upload.take();
+    let close_error = if let Some(mut file) = upload.take() {
+        file.shutdown()
+            .await
+            .err()
+            .map(|error| format!("could not close the incomplete remote upload: {error}"))
+    } else {
+        None
+    };
     drop(upload);
     let cleanup_error = remove_staging_file(entry).await.err();
-    let combined = cleanup_error
-        .as_ref()
-        .map(|cleanup| format!("{detail}; {cleanup}"))
-        .unwrap_or_else(|| detail.to_string());
+    let mut combined = detail.to_string();
+    for error in [close_error.as_ref(), cleanup_error.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        combined.push_str("; ");
+        combined.push_str(error);
+    }
     entry.update(sink, |transfer| {
-        transfer.detail = if state == "cancelled" && cleanup_error.is_none() {
-            None
-        } else {
-            Some(combined.clone())
-        };
+        transfer.detail =
+            if state == "cancelled" && close_error.is_none() && cleanup_error.is_none() {
+                None
+            } else {
+                Some(combined.clone())
+            };
     });
     combined
 }
@@ -1118,7 +1130,6 @@ pub async fn upload_chunk(
     .await;
 
     if let Err(detail) = write {
-        *slot = None;
         drop(slot);
         return Err(abort_upload(&entry, sink, "error", &detail).await);
     }
