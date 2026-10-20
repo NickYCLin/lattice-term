@@ -345,7 +345,7 @@ export function useAgentChat(
           if (disposed) return;
           const known = ids.filter(
             (id): id is ChatDefinitionId =>
-              id === "claude" || id === "codex" || id === "gemini",
+              FALLBACK_SUPPORTED.some((definitionId) => definitionId === id),
           );
           if (known.length > 0) setSupported(known);
         })
