@@ -210,7 +210,7 @@ npm run ios:build -- --build-number 1
 
 - `src-tauri/Info.ios.plist` 是區域網路用途說明的來源，Tauri 建置時會合併進 App。直接手改生成的 plist 不足以保證下次建置保留。
 - `PrivacyInfo.xcprivacy` 列出本機檔案中繼資料（容器與使用者選取檔案）、計時／逾時用途；宣告不做追蹤。Xcode 專案的 Resources 階段必須包含它。
-- iOS 原生建置透過 `scripts/ios-sqlite-build.sh`，以 `LIBSQLITE3_SYS_USE_PKG_CONFIG=1`、`SQLITE3_STATIC=0` 及 Xcode SDK 路徑連結系統 SQLite，沿用套件提供的 Rust bindings，不在交叉編譯時執行 bindgen；其餘平台保留 bundled SQLite。2026-10-20 新增資料庫後，bundled SQLite 的 Darwin 檔案系統判斷帶入 `fstatfs`，使 Release bundle 被 DiskSpace API 檢查擋下；此路徑讀取檔案系統類型，不應為了通過檢查填入不符實際用途的磁碟空間理由。模擬器與實機產物仍須通過嚴格 API 檢查。
+- iOS 的 SQLite 唯讀連線使用 rusqlite，停用擴充載入與 unlock-notify，透過 `scripts/ios-sqlite-build.sh` 指定 Xcode SDK 的系統 SQLite；使用預先產生的 Rust bindings，不在交叉編譯時執行 bindgen。檔案以唯讀模式開啟，查詢在背景執行緒執行，其他平台仍使用 SQLx 與 bundled SQLite。SQLx SQLite 會引用 iOS 系統庫未提供的 `sqlite3_load_extension`、`sqlite3_unlock_notify`，不能只改連結路徑。bundled SQLite 的 Darwin 檔案系統判斷則帶入 `fstatfs`；此用途不應填入磁碟空間隱私理由。模擬器與實機產物仍須通過嚴格 API 檢查。
 - 檔案 API 對應 `backup.rs`、`sftp_transfers.rs` 的 metadata 與安全寫入；計時對應 `tunnel.rs`、`remote.rs` 的 Tokio timeout。最終送件須再檢查 Xcode Privacy Report 與連結進入的 SDK，不能只檢查原始碼。批准理由見 [Apple Required Reason API 文件](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)。
 - 2026-09-05 的 x86_64 Debug 模擬器 bundle 含 `fstatfs`、`fstatvfs`、`statvfs` 匯入與 `nix` 檔案系統符號；[Release 模擬器 CI](https://github.com/NickYCLin/lattice-term/actions/runs/33957302485) 的最佳化產物已通過未宣告 API 檢查。實機 Release 仍須單獨驗證，不能直接填入與實際行為不符的 DiskSpace 理由。`--check-api-symbols` 會將未宣告類別列為 `needs_review`；`--require-store-sdk` 會自動盤點並拒絕含未宣告類別的產物。這是保守的 C API 檢查，未涵蓋所有 Objective-C／Swift API，也不取代 Apple 的報告。
 - App Store Connect 的 App Privacy 表單與 bundle 的 privacy manifest 是兩份不同資料。依最終產品與第三方服務行為填寫；若之後加入遙測、雲端帳號或代管中繼，需重新盤點。

@@ -1,6 +1,8 @@
 mod drivers;
 #[cfg(test)]
 mod network_tests;
+#[cfg(any(target_os = "ios", test))]
+mod sqlite;
 #[cfg(test)]
 mod tests;
 

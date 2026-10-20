@@ -56,13 +56,17 @@ png = "0.18.1"
 zune-jpeg = "0.5"
 if-addrs = "0.15"
 tauri-plugin-opener = "2"
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "sqlite", "postgres", "mysql"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "mysql"] }
 tiberius = { version = "0.12.3", default-features = false, features = ["rustls", "tds73"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.32.1", default-features = false, features = ["modern_sqlite"] }
 # Paused-clock tests keep heartbeat and idle-timeout checks instant.
 tokio = { version = "1.53.1", features = ["test-util"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
@@ -72,6 +76,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-clipboard-manager = "2.3.2"
 
 [target.'cfg(target_os = "ios")'.dependencies]
+rusqlite = { version = "0.32.1", default-features = false, features = ["modern_sqlite"] }
 # `keyring` selects the Apple-native provider on iOS. The provider has no
 # default feature, but iOS only exposes the protected-data store.
 apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }

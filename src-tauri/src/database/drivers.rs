@@ -8,11 +8,14 @@ type TextRows = Vec<Vec<Option<String>>>;
 enum Client {
     Postgres(sqlx::PgConnection),
     Mysql(sqlx::MySqlConnection),
+    #[cfg(not(target_os = "ios"))]
     Sqlite(sqlx::SqliteConnection),
+    #[cfg(target_os = "ios")]
+    Sqlite(super::sqlite::ReadOnlyConnection),
     SqlServer(Box<tiberius::Client<Compat<tokio::net::TcpStream>>>),
 }
 
-fn failed() -> String {
+pub(super) fn failed() -> String {
     "資料庫操作失敗。請檢查服務、連接埠、帳密、資料庫名稱、唯讀權限與 TLS 憑證；伺服器原始錯誤不會回傳，以免洩漏敏感資料。".into()
 }
 
@@ -72,6 +75,11 @@ impl Client {
                     .map_err(|_| failed())?;
                 Ok(Self::Mysql(connection))
             }
+            #[cfg(target_os = "ios")]
+            Engine::Sqlite => Ok(Self::Sqlite(
+                super::sqlite::ReadOnlyConnection::open(profile.sqlite_path.clone()).await?,
+            )),
+            #[cfg(not(target_os = "ios"))]
             Engine::Sqlite => {
                 let options = sqlx::sqlite::SqliteConnectOptions::new()
                     .filename(&profile.sqlite_path)
@@ -178,7 +186,10 @@ impl Client {
                     })
                     .collect()
             }
+            #[cfg(not(target_os = "ios"))]
             Self::Sqlite(connection) => fetch!(connection),
+            #[cfg(target_os = "ios")]
+            Self::Sqlite(connection) => connection.query(statement, parameters).await,
             Self::SqlServer(connection) => {
                 let parameters: Vec<&dyn tiberius::ToSql> = parameters
                     .iter()
@@ -372,6 +383,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "ios"))]
     async fn sqlite_driver_itself_rejects_writes() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("readonly.sqlite");

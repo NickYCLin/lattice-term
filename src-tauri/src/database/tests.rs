@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(not(target_os = "ios"))]
 use sqlx::Connection;
 
 fn profile(directory: &Path, id: &str) -> DatabaseProfile {
@@ -178,6 +179,7 @@ fn ca_input_rejects_private_keys_invalid_data_and_oversized_input() {
 }
 
 #[tokio::test]
+#[cfg(not(target_os = "ios"))]
 async fn sqlite_reads_real_tables_with_explicit_mcp_grants_and_no_write_access() {
     let directory = tempfile::tempdir().unwrap();
     let registry = DatabaseRegistry::new(directory.path().into());

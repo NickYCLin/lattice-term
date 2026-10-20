@@ -17,8 +17,12 @@ class BundleVerificationTests(unittest.TestCase):
     def test_sqlite_linkage_is_platform_scoped(self):
         manifest = Path(__file__).resolve().parent.parent / "src-tauri/Cargo.toml"
         cargo = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        self.assertIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
+        self.assertNotIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
         self.assertNotIn("sqlite-unbundled", cargo["dependencies"]["sqlx"]["features"])
+        self.assertIn("sqlite", cargo["target"]['cfg(not(target_os = "ios"))']["dependencies"]["sqlx"]["features"])
+        ios = cargo["target"]['cfg(target_os = "ios")']["dependencies"]
+        self.assertEqual(ios["rusqlite"]["features"], ["modern_sqlite"])
+        self.assertFalse(ios["rusqlite"]["default-features"])
         wrapper = Path(__file__).with_name("ios-sqlite-build.sh").read_text(encoding="utf-8")
         self.assertIn("export LIBSQLITE3_SYS_USE_PKG_CONFIG=1", wrapper)
         self.assertIn("export SQLITE3_STATIC=0", wrapper)
@@ -32,7 +36,7 @@ class BundleVerificationTests(unittest.TestCase):
         environment = {**os.environ, "SDKROOT": str(sdk), "BINDGEN_EXTRA_CLANG_ARGS": "-DTEST=1"}
         command = ['sh', str(script), 'sh', '-c', 'printf "%s\\n" "$SQLITE3_INCLUDE_DIR" "$SQLITE3_LIB_DIR" "$BINDGEN_EXTRA_CLANG_ARGS" "$1"', 'test', 'argument with spaces']
         result = run_command(command, env=environment, text=True, capture_output=True, check=True)
-        self.assertEqual(result.stdout.splitlines(), [str(sdk / "usr/include"), str(sdk / "usr/lib"), f'-DTEST=1 -isysroot "{sdk}"', 'argument with spaces'])
+        self.assertEqual(result.stdout.splitlines(), [str(sdk / "usr/include"), str(sdk / "usr/lib"), '-DTEST=1', 'argument with spaces'])
         environment["SDKROOT"] = str(sdk / "missing")
         self.assertNotEqual(run_command(command, env=environment, capture_output=True).returncode, 0)
 
