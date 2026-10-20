@@ -4,6 +4,39 @@
 
 ---
 
+## [2026.10.21](https://github.com/NickYCLin/lattice-term/compare/v2026.10.20...v2026.10.21) (2026-10-20)
+
+
+### 🚀 新增功能
+
+* **connections:** 支援刪除整張卡片或單一連線方式 ([0f39b23](https://github.com/NickYCLin/lattice-term/commit/0f39b23768447c825ffac53cb44a97b1e7c57df0))
+* **connections:** 支援選填內外網連線位址 ([7f1d6f2](https://github.com/NickYCLin/lattice-term/commit/7f1d6f23e11563c4b47c78ad9cdd97762b9ad3cc))
+* **database:** 新增多資料庫連線與 MCP 唯讀瀏覽 ([d29d096](https://github.com/NickYCLin/lattice-term/commit/d29d0969bae995de1b90f8dd0d3f57491d68065e))
+* **models:** 統一顯示來源回報的模型能力 ([0633d69](https://github.com/NickYCLin/lattice-term/commit/0633d694896afefbee62ffda39adc9559e24345c))
+* **sessions:** 新增 CLI 啟動權限選項 ([8fd6b11](https://github.com/NickYCLin/lattice-term/commit/8fd6b114f7b059d11d99e1a1dfb2b979651e45b7))
+* **updates:** 顯示助理更新進度與目前項目 ([63d4c93](https://github.com/NickYCLin/lattice-term/commit/63d4c936f10bc7dc517af591bd7d92dc6624fb42))
+
+
+### 🛠️ 問題修正
+
+* **agent:** 補上 Codex 0.163 原生控制資格 ([fdda409](https://github.com/NickYCLin/lattice-term/commit/fdda4098f42187682c102b0a735e89ef1a92f8c8))
+* **chat:** 保留還原對話並補齊原生工具歷史 ([af13c83](https://github.com/NickYCLin/lattice-term/commit/af13c83394dc89e94021d40104ac91275f18f48e))
+* **chat:** 修正 Antigravity 已安裝卻無法對話 ([5bcebc7](https://github.com/NickYCLin/lattice-term/commit/5bcebc7d2137a3c7a00c643f482c924033a9ac0c))
+* **chat:** 修正切換模型時誤關對話的問題 ([34be6b9](https://github.com/NickYCLin/lattice-term/commit/34be6b93aeb27443642854ee142ea2b951604b57))
+* **chat:** 簡化圖片附件資訊並統一排列 ([499d0a8](https://github.com/NickYCLin/lattice-term/commit/499d0a830367ce097f6d6c6f0cb708a9810317ee))
+* **chat:** 補齊無 CLI 時的代理對話入口 ([6a325fe](https://github.com/NickYCLin/lattice-term/commit/6a325fe5f285d4f407829d48c3c494200fb45fc2))
+* **ci:** 修正資料庫的跨平台建置檢查 ([6bbe32f](https://github.com/NickYCLin/lattice-term/commit/6bbe32fdd89ff62ab150b7abef98901613c0d095))
+* **connections:** 調整卡片分層避免資訊被按鈕擠壓 ([d6308d4](https://github.com/NickYCLin/lattice-term/commit/d6308d4ac5ab7320ef177176ee4739ea5686b622))
+* **database:** 修正 MySQL 讀取並支援自訂 CA ([8019373](https://github.com/NickYCLin/lattice-term/commit/801937353001d71a815d5a77d61d4c398767902e))
+* **database:** 移除 SQL Server 的舊版 TLS 相依 ([836036f](https://github.com/NickYCLin/lattice-term/commit/836036f5ca65f10ad71f2b3220dc2a987d94f966))
+* **ios:** 指定系統 SQLite 的 SDK 搜尋路徑 ([b3167fc](https://github.com/NickYCLin/lattice-term/commit/b3167fc7d1292cc68d6e6e08e3db80eafd8bb173))
+* **ios:** 改用相容系統 SQLite 的唯讀驅動 ([74e9aa7](https://github.com/NickYCLin/lattice-term/commit/74e9aa7bd9ca36d4fa8582a6fe8c6f277001ebe4))
+* **ios:** 改用預先產生的 SQLite 繫結 ([a3d552f](https://github.com/NickYCLin/lattice-term/commit/a3d552ff679ccaec221f9477e700beaf04e9332f))
+* **ios:** 補上 Xcode 的系統 SQLite 連結 ([45ee0f0](https://github.com/NickYCLin/lattice-term/commit/45ee0f0c97f90edd07b3fa9a7f77cd01505ffc33))
+* **sftp:** 修正 Windows MCP 根目錄與上傳限制 ([05e8aa3](https://github.com/NickYCLin/lattice-term/commit/05e8aa3c43cc0430e05074799b3f4752fb6db50f))
+* **sftp:** 補齊上傳中止的關檔與錯誤回報 ([7f7b2a5](https://github.com/NickYCLin/lattice-term/commit/7f7b2a537e766def14decf35b8cd51381094aabd))
+* **ui:** 提高各主題按鈕與選中狀態對比 ([aa0b5cc](https://github.com/NickYCLin/lattice-term/commit/aa0b5cc3d9178e20adf221f9a9b84ca8d1dbe28a))
+
 ## [2026.10.20](https://github.com/NickYCLin/lattice-term/compare/v2026.10.19...v2026.10.20) (2026-10-19)
 
 
