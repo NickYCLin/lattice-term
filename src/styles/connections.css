@@ -92,8 +92,9 @@
 .connection-card {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "head primary" "meta foot";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "meta" "primary" "foot";
+  align-content: start;
   align-items: center;
   min-width: 0;
   gap: var(--space-2) var(--space-3);
@@ -148,23 +149,25 @@
 }
 
 .connection-card__name {
+  overflow-wrap: anywhere;
   font-size: var(--text-sm);
   font-weight: 650;
   color: var(--text);
 }
 
 .connection-card__target {
+  overflow-wrap: anywhere;
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
 .connection-card__meta {
   display: flex;
+  flex-wrap: wrap;
   grid-area: meta;
   min-width: 0;
   align-items: center;
   gap: var(--space-1);
-  overflow: hidden;
   min-height: 1.375rem;
 }
 
@@ -193,17 +196,19 @@
 .connection-card__primary {
   display: flex;
   grid-area: primary;
-  justify-content: flex-end;
-  max-width: 9rem;
+  justify-content: stretch;
   min-width: 0;
 }
 
 .connection-card__foot {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   grid-area: foot;
-  justify-self: end;
   align-items: center;
   min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-2);
 }
 
 /* Buttons sit above the card-wide open target. */
@@ -235,6 +240,10 @@
 
 .connection-card__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 2px;
   margin-left: auto;
@@ -243,8 +252,8 @@
 }
 
 .connection-card__actions .icon-button {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 .connection-card:hover .connection-card__actions,
@@ -260,10 +269,6 @@
 
 :root[data-density="compact"] .connection-grid {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-}
-
-.app--mobile .connection-card {
-  grid-template-areas: "head primary" "meta meta" "foot foot";
 }
 
 /* Mobile already has padding around the workspace. Reusing the desktop list
@@ -2997,14 +3002,19 @@
 
 .connection-card__go {
   pointer-events: auto;
+  flex: 1;
+  min-height: 2.25rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* One button per route when several connections reach the same computer. */
 .connection-card__routes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  gap: var(--space-2);
   min-width: 0;
+  width: 100%;
 }
 
 .connection-card__routes .connection-card__go {
@@ -3015,11 +3025,13 @@
 }
 
 .connection-card__add-route {
-  grid-column: 1 / -1;
-  justify-self: start;
   position: relative;
   z-index: 1;
   max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
 }
 
 .connection-drawer__routes {

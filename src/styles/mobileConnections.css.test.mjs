@@ -23,16 +23,24 @@ describe("mobile connection layout", () => {
     expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty \.empty-state__text\s*\{ max-width: none; \}/);
     expect(mobileStyles).toContain(".app--mobile .button { min-height: 2.75rem; }");
   });
-  it("packs desktop cards into two rows without shrinking mobile touch targets", () => {
+  it("separates card details, connection routes and management without shrinking touch targets", () => {
     expect(connectionStyles).toMatch(
-      /\.connection-card\s*\{[^}]*grid-template-areas:\s*"head primary" "meta foot";/s,
+      /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "primary" "foot";/s,
     );
     expect(connectionStyles).toMatch(
-      /\.app--mobile \.connection-card\s*\{[^}]*grid-template-areas:\s*"head primary" "meta meta" "foot foot";/s,
+      /\.connection-card__foot\s*\{[^}]*flex-wrap:\s*wrap;/s,
     );
     expect(mobileStyles).toMatch(
       /\.app--mobile \.icon-button--sm\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/s,
     );
+  });
+
+  it("allows routes and metadata to wrap without squeezing the host heading", () => {
+    expect(connectionStyles).toMatch(/\.connection-card__actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*max-width:\s*100%;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__meta\s*\{[^}]*flex-wrap:\s*wrap;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__routes\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 6rem\), 1fr\)\);/s);
+    expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
+    expect(connectionStyles).not.toMatch(/\.connection-card__primary\s*\{[^}]*max-width:/s);
   });
 
   it("uses a shrinkable single-column grid without desktop gutters", () => {

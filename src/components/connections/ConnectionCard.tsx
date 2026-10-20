@@ -81,14 +81,14 @@ export function ConnectionCard({
       <div className="connection-card__head">
         <ProtocolTile protocol={profile.protocol} size="sm" />
         <span className="connection-card__text">
-          <span className="connection-card__name truncate" title={profile.name}>
+          <span className="connection-card__name" title={profile.name}>
             {profile.name}
           </span>
-          <span className="connection-card__target mono truncate" title={connectionTarget(profile)}>
+          <span className="connection-card__target mono" title={connectionTarget(profile)}>
             {connectionTarget(profile)}
           </span>
           {linked.length > 0 && (
-            <span className="connection-card__target truncate">
+            <span className="connection-card__target">
               {t("row.sameMachine", {
                 names: linked.map((route) => route.profile.name).join("、"),
               })}
@@ -176,6 +176,16 @@ export function ConnectionCard({
       </div>
 
       <div className="connection-card__foot">
+        {onAddRoute && (
+          <button
+            type="button"
+            className="button button--ghost button--sm connection-card__add-route"
+            onClick={onAddRoute}
+          >
+            <PlusIcon size={13} />
+            {t("form.route.add")}
+          </button>
+        )}
         <div className="connection-card__actions">
           <button
             type="button"
@@ -223,16 +233,6 @@ export function ConnectionCard({
           </button>
         </div>
       </div>
-      {onAddRoute && (
-        <button
-          type="button"
-          className="button button--ghost button--sm connection-card__add-route"
-          onClick={onAddRoute}
-        >
-          <PlusIcon size={13} />
-          {t("form.route.add")}
-        </button>
-      )}
     </li>
   );
 }

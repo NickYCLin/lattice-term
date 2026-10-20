@@ -81,6 +81,9 @@ describe("same-computer card", () => {
     const markup = renderCard({ onAddRoute: vi.fn(), unavailableReason: "desktop-only" });
     expect(markup).toContain("connection-card__add-route");
     expect(markup).toContain("新增連線方式</button>");
+    const footer = markup.slice(markup.indexOf('class="connection-card__foot"'));
+    expect(footer).toContain("connection-card__add-route");
+    expect(footer.indexOf("connection-card__add-route")).toBeLessThan(footer.indexOf("connection-card__actions"));
     expect(markup).toContain("桌面版限定");
     expect(renderCard({})).not.toContain("connection-card__add-route");
   });
@@ -96,6 +99,9 @@ describe("same-computer card", () => {
     });
 
     expect(markup).toContain("同一台電腦：蘋果筆電");
+    expect(markup).not.toContain("connection-card__name truncate");
+    expect(markup).not.toContain("connection-card__target mono truncate");
+    expect(markup).not.toContain("connection-card__target truncate");
     expect(markup).toContain("用 RDP 連到「Office PC」");
     expect(markup).toContain(`用 ${remoteAcronym()} 連到「蘋果筆電」`);
     expect(markup).not.toContain(">連線</button>");
