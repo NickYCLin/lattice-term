@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
-import { displayPath } from "../../app/displayPath";
+import { imageFileName } from "../../app/chatImages";
 import { useI18n } from "../../i18n/context";
 import { useModalFocus } from "../overlays/modalFocus";
 import { CloseIcon } from "../icons";
@@ -15,6 +15,7 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const imageName = imageFileName(name);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState(initialUrl ?? null);
   const [loading, setLoading] = useState(!initialUrl);
@@ -36,14 +37,14 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
     if (event.target === event.currentTarget) onClose();
   }}>
     <div ref={dialogRef} className="chat-image-preview__dialog" role="dialog" aria-modal="true"
-      aria-label={t("chat.images.preview", { name })} tabIndex={-1}>
+      aria-label={t("chat.images.preview", { name: imageName })} tabIndex={-1}>
       <header>
-        <span title={displayPath(path)}>{name}</span>
+        <span>{imageName}</span>
         <button type="button" className="icon-button" aria-label={t("common.close")} onClick={onClose}><CloseIcon /></button>
       </header>
       <div className="chat-image-preview__content">
         {loading ? <p role="status">{t("common.loading")}</p>
-          : url ? <img src={url} alt={name} onError={() => setUrl(null)} />
+          : url ? <img src={url} alt={imageName} onError={() => setUrl(null)} />
             : <p role="alert">{t("chat.images.unavailable")}</p>}
       </div>
     </div>

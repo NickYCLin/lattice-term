@@ -978,7 +978,6 @@
 .agent-session-images__dialog h2 { flex: 1; margin: 0; font-size: var(--text-md); }
 .agent-session-images__content { overflow: auto; min-height: 0; padding: var(--space-3); }
 .agent-session-images__content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-session-images__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr)); gap: var(--space-3); }
 .agent-session-images__tile {
   display: flex;
   flex-direction: column;

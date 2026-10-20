@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../i18n/context";
+import { imageFileName, orderedImagePaths } from "../../app/chatImages";
 import { ChatImagePreview } from "../chat/ChatImagePreview";
 import { CloseIcon, ImageFileIcon } from "../icons";
 import { useModalFocus } from "../overlays/modalFocus";
@@ -23,7 +24,7 @@ function SessionImageTile({ path, sessionId, onSelect }: {
   const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const name = path.split(/[\/]/).pop() ?? path;
+  const name = imageFileName(path);
   useEffect(() => {
     let cancelled = false;
     void invoke<string | null>("chat_image_preview", { path, workingDirectory: "", threadId: sessionId })
@@ -65,7 +66,11 @@ function SessionImageGallery({ sessionId, revision, onClose }: {
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [sessionId, revision, refresh]);
-  const pages = Math.max(1, Math.ceil((snapshot?.paths.length ?? 0) / PAGE_SIZE));
+  const paths = orderedImagePaths([
+    ...(snapshot?.paths ?? []),
+    ...(snapshot?.observed?.flatMap(image => image.paths) ?? []),
+  ]);
+  const pages = Math.max(1, Math.ceil(paths.length / PAGE_SIZE));
   return createPortal(<div className="scrim scrim--center agent-session-images" onMouseDown={event => {
     if (event.target === event.currentTarget) onClose();
   }}>
@@ -83,10 +88,9 @@ function SessionImageGallery({ sessionId, revision, onClose }: {
             : snapshot && <>
               {!snapshot.historyAvailable && <p role="status">{t("agents.images.waiting")}</p>}
               {snapshot.truncated && <p role="status">{t("agents.images.limited")}</p>}
-              <h3>{t("agents.images.uploaded")}</h3>
-              {snapshot.paths.length === 0 ? <p>{t("agents.images.empty")}</p>
+              {paths.length === 0 ? <p>{t("agents.images.empty")}</p>
                 : <div className="agent-session-images__grid">
-                  {snapshot.paths.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(path =>
+                  {paths.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(path =>
                     <SessionImageTile key={path} path={path} sessionId={sessionId}
                       onSelect={(path, url) => setSelected({ path, url })} />)}
                 </div>}
@@ -97,17 +101,10 @@ function SessionImageGallery({ sessionId, revision, onClose }: {
                 <button type="button" className="button" disabled={page + 1 >= pages}
                   onClick={() => setPage(value => value + 1)}>{t("agents.images.next")}</button>
               </nav>}
-              <h3>{t("agents.images.observed")}</h3>
-              {snapshot.observed?.length ? snapshot.observed.map((image, index) => <section key={`${image.tool}:${image.at}:${index}`}>
-                <p>{image.tool}{image.stepId ? ` · ${image.stepId}` : ""} · {image.at ?? t("conversation.meta.unknown")} · {t(image.localReference ? "agents.images.localReference" : "agents.images.snapshot")}</p>
-                {image.paths.length ? <div className="agent-session-images__grid">{image.paths.map(path =>
-                  <SessionImageTile key={path} path={path} sessionId={sessionId} onSelect={(path, url) => setSelected({ path, url })} />)}</div>
-                  : <p>{t("agents.images.unavailableObserved")}</p>}
-              </section>) : <p>{t("agents.images.unavailableObserved")}</p>}
             </>}
       </div>
     </div>
-    {selected && <ChatImagePreview path={selected.path} name={selected.path.split(/[\/]/).pop() ?? selected.path}
+    {selected && <ChatImagePreview path={selected.path} name={imageFileName(selected.path)}
       workingDirectory="" threadId={sessionId} initialUrl={selected.url ?? undefined} onClose={() => setSelected(null)} />}
   </div>, document.body);
 }

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { mentionedImagePaths } from "../../app/chatImages";
+import { imageFileName, mentionedImagePaths, orderedImagePaths } from "../../app/chatImages";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
-import { displayPath } from "../../app/displayPath";
 import { ChatImagePreview } from "./ChatImagePreview";
 
 /**
@@ -24,12 +23,12 @@ export function ChatImageStrip({
   const { t } = useI18n();
   const [images, setImages] = useState<{ path: string; url: string }[]>([]);
   const [selected, setSelected] = useState<{ path: string; url: string } | null>(null);
-  const key = paths.join("\n");
+  const key = JSON.stringify(orderedImagePaths(paths));
 
   useEffect(() => {
     setImages([]);
     setSelected(null);
-    const wanted = key ? key.split("\n") : [];
+    const wanted: string[] = JSON.parse(key);
     if ((!workingDirectory && !threadId) || wanted.length === 0 || !hasDesktopBackend()) {
       setImages([]);
       return;
@@ -62,14 +61,14 @@ export function ChatImageStrip({
             type="button"
             onClick={() => setSelected(image)}
             title={t("chat.images.enlarge")}
-            aria-label={t("chat.images.preview", { name: image.path.split(/[\\/]/).pop() ?? image.path })}
+            aria-label={t("chat.images.preview", { name: imageFileName(image.path) })}
           >
-            <img src={image.url} alt={image.path} loading="lazy" />
+            <img src={image.url} alt={imageFileName(image.path)} loading="lazy" />
           </button>
-          {captions && <figcaption title={displayPath(image.path)}>{displayPath(image.path)}</figcaption>}
+          {captions && <figcaption>{imageFileName(image.path)}</figcaption>}
         </figure>
       ))}
-      {selected && <ChatImagePreview path={selected.path} name={selected.path.split(/[\\/]/).pop() ?? selected.path}
+      {selected && <ChatImagePreview path={selected.path} name={imageFileName(selected.path)}
         workingDirectory={workingDirectory} threadId={threadId} initialUrl={selected.url} onClose={() => setSelected(null)} />}
     </div>
   );

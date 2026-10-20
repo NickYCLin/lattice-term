@@ -66,6 +66,7 @@ import type { AgentAutomationsApi } from "../app/useAgentAutomations";
 import { AutomationPane, describeSchedule } from "../components/chat/AutomationPane";
 import type { AgentApi, AgentDefinition } from "../app/useAgentSessions";
 import { displayPath } from "../app/displayPath";
+import { imageFileName } from "../app/chatImages";
 import {
   profileCapable,
   profilesFor,
@@ -1433,9 +1434,9 @@ function ThreadPane({
             {attachments.length > 0 && (
               <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
                 {attachments.map((attachment) => (
-                  <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
+                  <span className="chat-attachment" key={attachment.path} title={attachment.isImage ? undefined : displayPath(attachment.path)}>
                     {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
-                    <span>{attachment.name}</span>
+                    <span>{attachment.isImage ? imageFileName(attachment.name) : attachment.name}</span>
                     <button
                       type="button"
                       className="chat-attachment__remove"
@@ -1444,7 +1445,7 @@ function ThreadPane({
                           current.filter((candidate) => candidate.path !== attachment.path),
                         )
                       }
-                      aria-label={t("chat.attachment.remove", { name: attachment.name })}
+                      aria-label={t("chat.attachment.remove", { name: attachment.isImage ? imageFileName(attachment.name) : attachment.name })}
                       disabled={steering}
                     >
                       <CloseIcon size={12} />

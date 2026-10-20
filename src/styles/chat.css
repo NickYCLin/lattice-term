@@ -2165,9 +2165,10 @@ button.chat-diff__line.is-commentable:focus-visible {
   font-size: var(--text-2xs);
 }
 
-.chat-images {
-  display: flex;
-  flex-wrap: wrap;
+.chat-images,
+.agent-session-images__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr));
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
@@ -2175,7 +2176,7 @@ button.chat-diff__line.is-commentable:focus-visible {
 .chat-images figure {
   display: grid;
   gap: 4px;
-  width: 10rem;
+  min-width: 0;
   margin: 0;
 }
 
@@ -2191,7 +2192,7 @@ button.chat-diff__line.is-commentable:focus-visible {
 .chat-images img {
   display: block;
   width: 100%;
-  max-height: 32rem;
+  height: 9rem;
   object-fit: contain;
 }
 

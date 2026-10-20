@@ -78,7 +78,7 @@ const renderImages = (sessionId = "owner", active = true) => <I18nProvider local
   <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} />
 </I18nProvider>;
 
-it("distinguishes saved user attachments, historical pixels and unavailable tool references", async () => {
+it("hides tool metadata and empty observed records", async () => {
   const host = installHostDom();
   const root = createRoot(host as unknown as Element);
   invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: true, observed: [
@@ -88,10 +88,12 @@ it("distinguishes saved user attachments, historical pixels and unavailable tool
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={0} /></I18nProvider>));
     await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={1} /></I18nProvider>));
-    expect(host.textContent).toContain("本機檔案參照");
-    expect(host.textContent).toContain("當時靜態圖片");
-    expect(host.textContent).toContain("未保存可讀像素");
-    expect(host.textContent).toContain("synthetic-time");
+    expect(host.textContent).not.toContain("本機檔案參照");
+    expect(host.textContent).not.toContain("當時靜態圖片");
+    expect(host.textContent).not.toContain("未保存可讀像素");
+    expect(host.textContent).not.toContain("synthetic-time");
+    expect(host.textContent).not.toContain("view_image");
+    expect(host.textContent).toContain("尚未找到可查看的圖片");
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -175,6 +177,29 @@ it("reports errors and reloads instead of silently showing an empty gallery", as
     await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "重新讀取")!)());
     expect(container.textContent).toContain("不是完整圖片紀錄");
     expect(container.textContent).not.toContain("read denied");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("merges attachments and viewed images in first-seen order without paths or metadata", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
+    ? { paths: ["C:\\private\\z.png", "/private/a.png"], truncated: false, historyAvailable: true, observed: [
+      { tool: "view_image", stepId: "call-private", at: "synthetic-time", paths: ["/private/a.png", "/private/b.png"], localReference: true },
+      { tool: "capture", at: null, paths: [], localReference: false },
+    ] }
+    : "data:image/png;base64,fixture");
+  try {
+    await act(async () => root.render(renderImages()));
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    const tiles = allNodes(container).filter(node => node.attributes.class === "agent-session-images__tile");
+    expect(tiles.map(node => node.textContent)).toEqual(["z.png", "a.png", "b.png"]);
+    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(3);
+    expect(container.textContent).not.toMatch(/private|view_image|call-private|synthetic-time/);
+    expect(allNodes(container).some(node => /private/.test(JSON.stringify(node.attributes)))).toBe(false);
+    await act(async () => onClick(tiles[0])());
+    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(2);
+    expect(container.textContent).not.toContain("private");
   } finally { await act(async () => root.unmount()); }
 });
 

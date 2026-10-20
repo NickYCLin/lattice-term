@@ -24,6 +24,7 @@ import {
 } from "../icons";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
+import { imageFileName } from "../../app/chatImages";
 import { switchesModelInPlace } from "../../app/sessionModelSwitch";
 import { SessionModelPicker } from "./SessionModelPicker";
 import { useChatClipboardFallback } from "../../app/chatClipboard";
@@ -48,9 +49,9 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   onRemove?: () => void;
   removeLabel?: string;
 }) {
-  return <span className="chat-attachment" title={displayPath(attachment.path)}>
+  return <span className="chat-attachment" title={attachment.isImage ? undefined : displayPath(attachment.path)}>
     {attachment.isImage ? <ImageFileIcon size={14} /> : <FileIcon size={14} />}
-    <span>{attachment.name}</span>
+    <span>{attachment.isImage ? imageFileName(attachment.name) : attachment.name}</span>
     {onRemove && <button type="button" className="chat-attachment__remove" onClick={onRemove}
       aria-label={removeLabel} title={removeLabel}><CloseIcon size={12} /></button>}
   </span>;

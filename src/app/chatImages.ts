@@ -7,6 +7,14 @@ const IMAGE_PATH =
 
 export const MAX_IMAGE_PREVIEWS = 6;
 
+export function imageFileName(path: string): string {
+  return path.split(/[\\/]/).pop() || "image";
+}
+
+export function orderedImagePaths(paths: readonly string[]): string[] {
+  return [...new Set(paths.filter(path => path.trim().length > 0))];
+}
+
 export function mentionedImagePaths(text: string): string[] {
   const found: string[] = [];
   for (const match of text.matchAll(IMAGE_PATH)) {

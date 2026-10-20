@@ -7,6 +7,7 @@ import { NativeHistoryContext, type NativeHistory } from "../../app/useNativeCon
 import { I18nProvider } from "../../i18n";
 import { NativeConversationRows } from "./NativeConversationRows";
 import { SentAttachments } from "./SentAttachments";
+import { ChatImageStrip } from "./ChatImagePreviews";
 import { ConversationReadProgress } from "./ConversationReadProgress";
 import { ChatThreadTree } from "./ChatThreadTree";
 import { chatConversationSidebar, nativeConversationNodeId } from "../../app/chatConversationSidebar";
@@ -205,12 +206,32 @@ it("opens sent images in a dialog using the owning thread and reports missing fi
       attachments={[{ isImage: true, name: "shot.png", path: "/work/shot.png" }, { isImage: false, name: "notes.txt", path: "/work/notes.txt" }]}
       workingDirectory="/work" threadId="owner" /></I18nProvider>));
     expect(allNodes(container).filter(node => node.tagName === "BUTTON")).toHaveLength(1);
+    expect(allNodes(container).find(node => node.tagName === "BUTTON")!.attributes.title).toBeUndefined();
     await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
     expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/work/shot.png", workingDirectory: "/work", threadId: "owner" });
     expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(true);
     expect(container.textContent).toContain("無法載入圖片");
     await act(async () => onClick(allNodes(container).find(node => node.attributes["aria-label"] === "關閉")!)());
     expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("keeps thumbnail order and hides image paths in captions and the enlarged preview", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  invoke.mockResolvedValue("data:image/png;base64,fixture");
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatImageStrip
+      paths={["C:\\private\\z.png", "/private/a.png", "C:\\private\\z.png"]}
+      workingDirectory="/private" threadId="owner" /></I18nProvider>));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(allNodes(container).filter(node => node.tagName === "FIGCAPTION").map(node => node.textContent)).toEqual(["z.png", "a.png"]);
+    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(2);
+    expect(allNodes(container).some(node => /private/.test(JSON.stringify(node.attributes)))).toBe(false);
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(true);
+    expect(container.textContent).not.toContain("private");
+    expect(allNodes(container).some(node => /private/.test(JSON.stringify(node.attributes)))).toBe(false);
   } finally { await act(async () => root.unmount()); }
 });
 

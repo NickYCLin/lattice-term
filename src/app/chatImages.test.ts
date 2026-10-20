@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { mentionedImagePaths } from "./chatImages";
+import { imageFileName, mentionedImagePaths, orderedImagePaths } from "./chatImages";
+
+it("shows only the file name for Windows and Unix image paths", () => {
+  expect(imageFileName("C:\\private\\photo.png")).toBe("photo.png");
+  expect(imageFileName("/private/photo.png")).toBe("photo.png");
+  expect(imageFileName("photo.png")).toBe("photo.png");
+});
+
+it("keeps first-seen image order without duplicates or empty records", () => {
+  expect(orderedImagePaths(["z.png", "", "a.png", "z.png", " ", "b.png"])).toEqual(["z.png", "a.png", "b.png"]);
+});
 
 describe("images a reply mentions", () => {
   it("finds Markdown images and bare paths, once each", () => {
