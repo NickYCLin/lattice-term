@@ -111,6 +111,46 @@
   gap: var(--space-4);
 }
 
+.connection-addresses {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.connection-addresses__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.connection-addresses__row > .field {
+  min-width: 0;
+}
+
+.connection-addresses__row .field__label {
+  flex-wrap: wrap;
+}
+
+.connection-addresses__row .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.connection-addresses__hint {
+  margin: 0;
+  line-height: 1.6;
+}
+
+@media (max-width: 400px) {
+  .connection-addresses__row {
+    grid-template-columns: minmax(0, 1fr) 5.5rem;
+  }
+}
+
 .form-section__title {
   display: flex;
   align-items: center;

@@ -425,7 +425,7 @@ export function ConnectionDrawer({
 
           <section className="form-section">
             <h3 className="form-section__title">{t("form.step.target")}</h3>
-            <div className="field-grid field-grid--even">
+            <div className={relayEntry ? "field-grid field-grid--even" : "field"}>
               <div className="field">
                 <label className="field__label" htmlFor={`${formId}-name`}>
                   {t("form.name")}
@@ -464,69 +464,90 @@ export function ConnectionDrawer({
                     {formatDeviceId(draft.deviceId ?? "")}
                   </p>
                 </div>
-              ) : (
-                <div className="field">
-                  <label className="field__label" htmlFor={`${formId}-host`}>
-                    {t(
-                      draft.protocol === "lattice"
-                        ? "form.remoteAddress"
-                        : "form.hostname",
-                    )}
-                  </label>
-                  <input
-                    id={`${formId}-host`}
-                    data-field="hostname"
-                    className={`input mono${errors.hostname ? " is-invalid" : ""}`}
-                    value={draft.hostname}
-                    onChange={(event) =>
-                      patch({ hostname: event.currentTarget.value }, "hostname")
-                    }
-                    placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    aria-invalid={Boolean(errors.hostname)}
-                  />
-                  {error("hostname") && (
-                    <p className="field__error">
-                      <AlertIcon size={12} />
-                      {error("hostname")}
-                    </p>
-                  )}
-                </div>
-              )}
+              ) : null}
             </div>
 
-            {!relayEntry && <div className="field-grid">
-              <div className="field">
-                <label className="field__label" htmlFor={`${formId}-additional-host`}>{t("form.additionalHostname")}</label>
-                <input id={`${formId}-additional-host`} data-field="additional-hostname"
-                  className={`input mono${additionalErrors.hostname ? " is-invalid" : ""}`}
-                  value={additionalHostname} placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
-                  autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                  aria-invalid={Boolean(additionalErrors.hostname)}
-                  onChange={event => {
-                    setAdditionalHostname(event.currentTarget.value);
-                    setAdditionalErrors({});
-                    setErrors(current => clearValidationError(current, "hostname"));
-                    if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
-                  }} />
-                {additionalErrors.hostname && <p className="field__error">{t(additionalErrors.hostname.key, additionalErrors.hostname.values)}</p>}
-                <p className="field__hint">{t("form.additionalHostnameHint")}</p>
+            {!relayEntry && (
+              <div className="connection-addresses" role="group" aria-label={t("form.hostname")} aria-describedby={`${formId}-addresses-hint`}>
+                <div className="connection-addresses__row">
+                  <div className="field">
+                    <label className="field__label" htmlFor={`${formId}-host`}>
+                      {t(
+                        draft.protocol === "lattice"
+                          ? "form.remoteAddress"
+                          : "form.hostname",
+                      )}
+                    </label>
+                    <input
+                      id={`${formId}-host`}
+                      data-field="hostname"
+                      className={`input mono${errors.hostname ? " is-invalid" : ""}`}
+                      value={draft.hostname}
+                      onChange={(event) =>
+                        patch({ hostname: event.currentTarget.value }, "hostname")
+                      }
+                      placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-invalid={Boolean(errors.hostname)}
+                    />
+                    {error("hostname") && (
+                      <p className="field__error">
+                        <AlertIcon size={12} />
+                        {error("hostname")}
+                      </p>
+                    )}
+                  </div>
+                  <div className="field">
+                    <label className="field__label" htmlFor={`${formId}-port`}>{t("form.port")}</label>
+                    <input
+                      id={`${formId}-port`} data-field="port" type="number" inputMode="numeric"
+                      min={limits.minPort} max={limits.maxPort}
+                      className={`input mono${errors.port ? " is-invalid" : ""}`}
+                      value={Number.isFinite(draft.port) ? draft.port : ""}
+                      onChange={event => patch({ port: Number(event.currentTarget.value) }, "port")}
+                      aria-invalid={Boolean(errors.port)}
+                    />
+                    {error("port") && <p className="field__error"><AlertIcon size={12} />{error("port")}</p>}
+                  </div>
+                </div>
+
+                <div className="connection-addresses__row">
+                  <div className="field">
+                    <label className="field__label" htmlFor={`${formId}-additional-host`}>
+                      {t("form.additionalHostname")}<span className="field__optional">{t("common.optional")}</span>
+                    </label>
+                    <input id={`${formId}-additional-host`} data-field="additional-hostname"
+                      className={`input mono${additionalErrors.hostname ? " is-invalid" : ""}`}
+                      value={additionalHostname} placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
+                      autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                      aria-invalid={Boolean(additionalErrors.hostname)}
+                      onChange={event => {
+                        setAdditionalHostname(event.currentTarget.value);
+                        setAdditionalErrors({});
+                        setErrors(current => clearValidationError(current, "hostname"));
+                        if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
+                      }} />
+                    {additionalErrors.hostname && <p className="field__error">{t(additionalErrors.hostname.key, additionalErrors.hostname.values)}</p>}
+                  </div>
+                  <div className="field">
+                    <label className="field__label" htmlFor={`${formId}-additional-port`}>{t("form.port")}</label>
+                    <input id={`${formId}-additional-port`} data-field="additional-port" type="number"
+                      inputMode="numeric" aria-label={t("form.additionalPort")}
+                      className={`input mono${additionalErrors.port ? " is-invalid" : ""}`}
+                      min={limits.minPort} max={limits.maxPort} step={1}
+                      value={additionalPort} placeholder={String(draft.port)}
+                      aria-invalid={Boolean(additionalErrors.port)}
+                      onChange={event => { setAdditionalPort(event.currentTarget.value); setAdditionalErrors({});
+                        if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
+                      }} />
+                    {additionalErrors.port && <p className="field__error">{t(additionalErrors.port.key, additionalErrors.port.values)}</p>}
+                  </div>
+                </div>
+                <p id={`${formId}-addresses-hint`} className="field__hint connection-addresses__hint">{t("form.additionalHostnameHint")}</p>
               </div>
-              <div className="field">
-                <label className="field__label" htmlFor={`${formId}-additional-port`}>{t("form.additionalPort")}</label>
-                <input id={`${formId}-additional-port`} data-field="additional-port" type="number"
-                  className={`input mono${additionalErrors.port ? " is-invalid" : ""}`}
-                  min={limits.minPort} max={limits.maxPort} step={1}
-                  value={additionalPort} placeholder={String(draft.port)}
-                  aria-invalid={Boolean(additionalErrors.port)}
-                  onChange={event => { setAdditionalPort(event.currentTarget.value); setAdditionalErrors({});
-                    if (!draft.hostname.trim()) credential.setAllowMcpRead(false);
-                  }} />
-                {additionalErrors.port && <p className="field__error">{t(additionalErrors.port.key, additionalErrors.port.values)}</p>}
-              </div>
-            </div>}
+            )}
 
             {relayEntry && (
               <div className="field">
@@ -560,14 +581,7 @@ export function ConnectionDrawer({
               </div>
             )}
 
-            <div
-              className={`field-grid${
-                !protocolUsesUsername(draft.protocol)
-                  ? " field-grid--port-only"
-                  : ""
-              }`}
-            >
-              {protocolUsesUsername(draft.protocol) && (
+            {protocolUsesUsername(draft.protocol) && (
                 <div className="field">
                   <label className="field__label" htmlFor={`${formId}-user`}>
                     {t("form.username")}
@@ -593,38 +607,7 @@ export function ConnectionDrawer({
                     </p>
                   )}
                 </div>
-              )}
-
-              {/* A relay entry has no port of its own; the relay carries
-                  the session. */}
-              {!relayEntry && (
-              <div className="field field--port">
-                <label className="field__label" htmlFor={`${formId}-port`}>
-                  {t("form.port")}
-                </label>
-                <input
-                  id={`${formId}-port`}
-                  data-field="port"
-                  type="number"
-                  inputMode="numeric"
-                  min={limits.minPort}
-                  max={limits.maxPort}
-                  className={`input mono${errors.port ? " is-invalid" : ""}`}
-                  value={Number.isFinite(draft.port) ? draft.port : ""}
-                  onChange={(event) =>
-                    patch({ port: Number(event.currentTarget.value) }, "port")
-                  }
-                  aria-invalid={Boolean(errors.port)}
-                />
-                {error("port") && (
-                  <p className="field__error">
-                    <AlertIcon size={12} />
-                    {error("port")}
-                  </p>
-                )}
-              </div>
-              )}
-            </div>
+            )}
 
             {draft.protocol === "lattice" && !relayEntry && (
               <Callout tone="info" title={t("form.remoteDirect.title")}>

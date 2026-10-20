@@ -32,6 +32,20 @@ function renderDrawer(
 }
 
 describe("connection drawer", () => {
+  it("pairs each address with its port and shares the hint outside both rows", () => {
+    const markup = renderDrawer();
+    const rows = markup.split('class="connection-addresses__row"');
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toContain('data-field="hostname"');
+    expect(rows[1]).toContain('data-field="port"');
+    expect(rows[1]).not.toContain('data-field="username"');
+    expect(rows[2]).toContain('data-field="additional-hostname"');
+    expect(rows[2]).toContain('data-field="additional-port"');
+    expect(markup.match(/connection-addresses__hint/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="另一個位址的連接埠（選填）"');
+    expect(markup).not.toContain("另一個主機位址（選填）");
+  });
+
   it("offers a masked offline login record and makes only save submit the form", () => {
     const markup = renderDrawer();
     expect(markup).toContain('type="password"');
