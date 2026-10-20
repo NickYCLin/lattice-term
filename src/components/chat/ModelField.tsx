@@ -2,6 +2,7 @@
  * chooses the CLI that owns it, so people never have to switch a brand first. */
 
 import { useEffect } from "react";
+import { ModelCapabilityHint } from "./ModelCapabilityHint";
 import { effortChoices, type ChatDefinitionId, type ChatModelList } from "../../app/agentChat";
 import { useI18n } from "../../i18n/context";
 
@@ -124,13 +125,7 @@ export function ModelField({
           );
         })}
       </select>
-      {selectedModel?.description && <small className="field__hint">{selectedModel.description}</small>}
-      <small className="field__hint" role="status">
-        {t("chat.model.capabilities.reasoning", {
-          levels: efforts.length ? efforts.map(effort => effort.value).join(" / ") : t("chat.model.capabilities.unknown"),
-        })}
-        {" · "}{t("chat.model.capabilities.unreported")}
-      </small>
+      <ModelCapabilityHint model={selectedModel} levels={efforts.map(effort => effort.value)} />
     </label>
   );
 }

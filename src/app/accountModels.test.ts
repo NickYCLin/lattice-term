@@ -103,6 +103,17 @@ describe("account-aware model choices", () => {
     expect(() => accountModelLaunchSettings({ definitionId: "claude", accountProfileId: "b", model: "" }, [profile])).toThrow("missing-account");
   });
 
+  it("carries reported default-model capabilities without guessing capabilities for another account", () => {
+    const targets = accountModelTargets([definition], [profile], {}, "Default");
+    const reported = { ...model, isDefault: true, inputModalities: ["text", "image"], serviceTiers: ["fast"] };
+    const options = accountModelOptions(targets, {
+      [accountModelTargetKey(targets[0])]: { state: "ready", models: [reported] },
+    }, labels);
+    expect(options.find(option => option.accountProfileId === null && option.model === "")?.modelInfo)
+      .toMatchObject({ inputModalities: ["text", "image"], serviceTiers: ["fast"] });
+    expect(options.find(option => option.accountProfileId === "b")?.modelInfo?.inputModalities).toBeUndefined();
+  });
+
   it("offers each proxy once and retains only the selected legacy account", () => {
     const targets = accountModelTargets([definition, fakeDefinition({ id: "claude", label: "Claude Code" })], [profile], { b: status }, "Default");
     expect(accountModelOptions(targets, {}, labels).some((option) => option.provider)).toBe(false);

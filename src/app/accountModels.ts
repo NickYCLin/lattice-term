@@ -1,4 +1,4 @@
-import type { ChatDefinitionId, ChatModelList } from "./agentChat";
+import type { ChatDefinitionId, ChatModelChoice, ChatModelList } from "./agentChat";
 import { profilesFor, type ChatAccountProfile } from "./chatAccountProfiles";
 import type { AccountProfileStatuses } from "./useAccountProfileStatus";
 import {
@@ -41,6 +41,7 @@ export interface AccountModelOption extends AccountModelSelection {
   sourceLabel?: string;
   /** The model half of the label, shown once a source is chosen. */
   modelLabel?: string;
+  modelInfo?: ChatModelChoice;
   disabled: boolean;
   /** Listed with the CLIProxyAPI sources, though its models come from its CLI. */
   viaCliProxy?: boolean;
@@ -157,7 +158,9 @@ export function accountModelOptions(
     const list = lists[accountModelTargetKey(target)];
     const choices = list?.state === "ready" ? [...list.models] : [];
     if (!choices.some((choice) => choice.value === "")) {
-      choices.unshift({ value: "", label: list?.state === "loading" ? labels.loading : labels.defaultModel, description: null, isDefault: true });
+      const reportedDefault = choices.find(choice => choice.isDefault);
+      choices.unshift({ ...reportedDefault, value: "", label: list?.state === "loading" ? labels.loading : labels.defaultModel,
+        description: reportedDefault?.description ?? null, isDefault: true });
     }
     if (!selected?.provider && selected?.definitionId === target.definitionId && selected.accountProfileId === target.accountProfileId && selected.model && !choices.some((choice) => choice.value === selected.model)) {
       choices.push({ value: selected.model, label: selected.model, description: null, isDefault: false });
@@ -171,6 +174,7 @@ export function accountModelOptions(
       label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + signedOut,
       sourceLabel,
       modelLabel: choice.label,
+      modelInfo: choice,
       disabled: target.signedOut,
       ...(target.viaCliProxy ? { viaCliProxy: true } : {}),
     })) : [];

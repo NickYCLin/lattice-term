@@ -10,6 +10,23 @@ const spare: AccountModelOption = { ...proxy, proxyId: "7f3a91", label: "備援�
 const attr = (key: string) => key.replace(/"/g, "&quot;");
 
 describe("Fleet account model picker", () => {
+  it("keeps reported capabilities scoped to the selected account and never borrows them for a proxy", () => {
+    const reported = { ...normal, modelInfo: { value: normal.model, label: "Reported", description: "CLI metadata",
+      isDefault: true, inputModalities: ["text", "image"], serviceTiers: ["fast"],
+      efforts: [{ value: "high", description: null }] } };
+    const other = { ...normal, accountProfileId: "other" };
+    const render = (value: AccountModelOption) => renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <AccountModelField options={[reported, other, proxy]} value={value} allowCliProxyApi onChange={vi.fn()} />
+    </I18nProvider>);
+    expect(render(reported)).toContain("圖片輸入：支援（CLI 回報）");
+    expect(render(reported)).toContain("服務等級：fast");
+    expect(render(reported)).toContain("推理強度：high");
+    for (const value of [other, proxy, { ...other, model: "missing" }]) {
+      expect(render(value)).toContain("CLI 未提供能力資訊");
+      expect(render(value)).not.toContain("服務等級：fast");
+    }
+  });
+
   it("puts every proxy account before native models without changing the selection", () => {
     const teamNormal = { ...normal, accountProfileId: "team", label: "團隊 · Codex · GPT-5.6", disabled: true };
     const teamProxy = { ...proxy, accountProfileId: "team", label: "團隊 · 工作代理" };

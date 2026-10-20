@@ -2,6 +2,7 @@ import { CLI_PROXY_DEFAULT_ID, cliProxyMessageKey, cliProxyStatusCode, groupCliP
 import type { CliProxyModelList, CliProxyModelLists } from "../../app/useCliProxyApi";
 import { accountModelKey, accountModelSourceKey, type AccountModelOption, type AccountModelSelection } from "../../app/accountModels";
 import { useI18n } from "../../i18n/context";
+import { ModelCapabilityHint } from "../chat/ModelCapabilityHint";
 
 const MANUAL = "\u0000manual";
 
@@ -153,5 +154,7 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
     {allowCliProxyApi && value?.provider === "cliproxyapi" &&
       <CliProxyModel value={value} models={listFor(value.proxyId)} disabled={disabled} onChange={onChange}
         onReload={onReloadProxyModels} />}
+    {value && <ModelCapabilityHint model={source && !source.proxy
+      ? source.options.find(option => accountModelKey(option) === selectedKey)?.modelInfo : undefined} />}
   </div>;
 }

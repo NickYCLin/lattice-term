@@ -56,6 +56,8 @@ export interface ChatModelChoice {
   /** Reasoning levels this model offers, when its CLI lists them per model. */
   efforts?: { value: string; description: string | null }[];
   defaultEffort?: string;
+  inputModalities?: string[];
+  serviceTiers?: string[];
 }
 
 /** Claude Code's documented `--effort` levels, the same for every model. */

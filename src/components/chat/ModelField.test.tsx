@@ -132,4 +132,17 @@ describe("ModelField", () => {
     expect(markup).toContain("推理強度：尚未確認");
     expect(markup).toContain("CLI 未提供能力資訊");
   });
+
+  it.each([true, false])("shows reported image support (%s) and service tiers", supportsImages => {
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW">
+      <ModelField definitionId="codex" definitionIds={["codex"]} cliLabel={id => id}
+        value="reported" models={{ ...models, codex: { state: "ready", models: [{
+          value: "reported", label: "Reported", isDefault: true, description: null,
+          inputModalities: supportsImages ? ["text", "image"] : ["text"], serviceTiers: ["fast"],
+        }] } }} loadModels={vi.fn()} onChange={vi.fn()} />
+    </I18nProvider>);
+    expect(markup).toContain(`圖片輸入：${supportsImages ? "支援" : "不支援"}（CLI 回報）`);
+    expect(markup).toContain("服務等級：fast");
+    expect(markup).toContain("搜尋：尚未確認");
+  });
 });

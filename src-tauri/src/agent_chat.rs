@@ -950,6 +950,10 @@ pub struct ChatModelChoice {
     pub efforts: Vec<ChatEffortChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_modalities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tiers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1175,6 +1179,8 @@ fn gemini_model_choices() -> Vec<ChatModelChoice> {
             is_default: true,
             efforts: Vec::new(),
             default_effort: None,
+            input_modalities: None,
+            service_tiers: None,
         },
         ChatModelChoice {
             value: "pro".to_string(),
@@ -1183,6 +1189,8 @@ fn gemini_model_choices() -> Vec<ChatModelChoice> {
             is_default: false,
             efforts: Vec::new(),
             default_effort: None,
+            input_modalities: None,
+            service_tiers: None,
         },
         ChatModelChoice {
             value: "flash".to_string(),
@@ -1191,6 +1199,8 @@ fn gemini_model_choices() -> Vec<ChatModelChoice> {
             is_default: false,
             efforts: Vec::new(),
             default_effort: None,
+            input_modalities: None,
+            service_tiers: None,
         },
         ChatModelChoice {
             value: "flash-lite".to_string(),
@@ -1199,6 +1209,8 @@ fn gemini_model_choices() -> Vec<ChatModelChoice> {
             is_default: false,
             efforts: Vec::new(),
             default_effort: None,
+            input_modalities: None,
+            service_tiers: None,
         },
     ]
 }
@@ -1391,6 +1403,8 @@ fn models_from_reply(
                             is_default,
                             efforts: Vec::new(),
                             default_effort: None,
+                            input_modalities: None,
+                            service_tiers: None,
                         })
                     })
                     .collect(),
@@ -1440,6 +1454,14 @@ fn models_from_reply(
                                 .unwrap_or_default(),
                             default_effort: str_field(model, "defaultReasoningEffort")
                                 .map(str::to_string),
+                            input_modalities: reported_model_values(
+                                model.get("inputModalities"),
+                                None,
+                            ),
+                            service_tiers: reported_model_values(
+                                model.get("serviceTiers"),
+                                Some("id"),
+                            ),
                         })
                     })
                     .collect(),
@@ -1447,6 +1469,27 @@ fn models_from_reply(
         }
         Dialect::Gemini | Dialect::Antigravity => None,
     }
+}
+
+fn reported_model_values(value: Option<&Value>, field: Option<&str>) -> Option<Vec<String>> {
+    let entries = value?.as_array()?;
+    if entries.len() > 32 {
+        return None;
+    }
+    let mut values = Vec::new();
+    for entry in entries {
+        let text = match field {
+            Some(field) => entry.get(field)?.as_str()?,
+            None => entry.as_str()?,
+        };
+        if text.is_empty() || text.len() > 128 || text.chars().any(char::is_control) {
+            return None;
+        }
+        if !values.iter().any(|value| value == text) {
+            values.push(text.to_string());
+        }
+    }
+    Some(values)
 }
 
 /// Drains a child's stderr, keeping only the tail that explains a failure.
@@ -3075,6 +3118,8 @@ fn parse_antigravity_models(raw: &str) -> Vec<ChatModelChoice> {
             is_default,
             efforts: Vec::new(),
             default_effort: None,
+            input_modalities: None,
+            service_tiers: None,
         });
     }
     choices
@@ -3719,6 +3764,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["low", "high"]
         );
+    }
+
+    #[test]
+    fn model_capabilities_use_only_complete_reported_metadata() {
+        let reply = serde_json::json!({"id": 3, "result": {"data": [
+            {"id": "text-only", "inputModalities": ["text"], "serviceTiers": []},
+            {"id": "vision", "inputModalities": ["text", "image", "image"],
+             "serviceTiers": [{"id": "fast", "name": "Fast", "description": "Reported by CLI"}]},
+            {"id": "image-search-pro"},
+            {"id": "malformed", "inputModalities": ["text", null], "serviceTiers": [{"name": "missing id"}]}
+        ]}});
+        let models = models_from_reply(Dialect::Codex, &reply, "3").unwrap();
+        assert_eq!(
+            models[0].input_modalities.as_deref(),
+            Some(["text".into()].as_slice())
+        );
+        assert_eq!(models[0].service_tiers, Some(vec![]));
+        assert_eq!(
+            models[1].input_modalities,
+            Some(vec!["text".into(), "image".into()])
+        );
+        assert_eq!(models[1].service_tiers, Some(vec!["fast".into()]));
+        for model in &models[2..] {
+            assert!(model.input_modalities.is_none());
+            assert!(model.service_tiers.is_none());
+        }
+        assert!(reported_model_values(Some(&serde_json::json!(["bad\nvalue"])), None).is_none());
+        assert!(reported_model_values(Some(&serde_json::json!(vec!["text"; 33])), None).is_none());
     }
 
     #[test]
