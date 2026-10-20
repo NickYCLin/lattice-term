@@ -416,7 +416,33 @@ describe("storage", () => {
     saveStoredThreads(storage, [{ ...proxy, definitionId: "claude" }]);
     expect(loadStoredThreads(storage)[0].provider).toBe("cliproxyapi");
     saveStoredThreads(storage, [{ ...proxy, definitionId: "antigravity" }]);
-    expect(loadStoredThreads(storage)[0]?.provider).toBeUndefined();
+    const restored = loadStoredThreads(storage);
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({ definitionId: "antigravity", model: "proxy-model", nativeSessionId: "proxy-native" });
+    expect(restored[0].provider).toBeUndefined();
+  });
+
+  it.each(["claude", "codex", "gemini", "antigravity"] as const)("restores %s identity and history without restarting a turn", (definitionId) => {
+    const storage = memoryStorage();
+    const original = thread({
+      definitionId,
+      nativeSessionId: "native-thread",
+      accountProfileId: "saved-account",
+      handoff: { sourceDefinitionId: definitionId, transcript: "待接續的內容" },
+      items: [{ type: "user", id: "saved-prompt", text: "保留對話", at: 1000 }],
+      runningTurnId: "interrupted-turn",
+    });
+    expect(saveStoredThreads(storage, [original])).toBe(true);
+    const restored = loadStoredThreads(storage);
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({
+      definitionId,
+      nativeSessionId: original.nativeSessionId,
+      accountProfileId: original.accountProfileId,
+      handoff: original.handoff,
+      items: original.items,
+      runningTurnId: null,
+    });
   });
 
   it("drops entries that are not threads", () => {

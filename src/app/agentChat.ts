@@ -337,10 +337,44 @@ export interface ChatThread {
   unread: boolean;
 }
 
-/** Text-only view of a conversation kept in a CLI's own history. */
 export interface NativeHistoryMessage {
   role: "user" | "assistant";
   text: string;
+  tool?: { callId: string; name: string | null; kind: "call" | "result" };
+}
+
+export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at: number, offset = 0): ChatItem[] {
+  const items: ChatItem[] = [];
+  const calls = new Map<string, Extract<ChatItem, { type: "tool" }>>();
+  const imageCalls = new Set(messages.flatMap(message => message.tool?.name &&
+    /(?:^|\.)view_image$/.test(message.tool.name) ? [message.tool.callId] : []));
+  messages.forEach((message, index) => {
+    const id = `history:${offset + index}`;
+    const tool = message.tool;
+    if (tool) {
+      if (imageCalls.has(tool.callId)) return;
+      const call = calls.get(tool.callId);
+      if (call) {
+        if (tool.kind === "result") call.output = message.text;
+        else {
+          call.name = tool.name ?? call.name;
+          call.summary = message.text;
+        }
+        return;
+      }
+      const item: Extract<ChatItem, { type: "tool" }> = {
+        type: "tool", id: `history:tool:${encodeURIComponent(tool.callId)}`, name: tool.name ?? tool.callId,
+        summary: tool.kind === "call" ? message.text : "",
+        output: tool.kind === "result" ? message.text : null, done: true, isError: false,
+      };
+      items.push(item);
+      calls.set(tool.callId, item);
+    } else {
+      items.push(message.role === "user" ? { type: "user", id, text: message.text, at }
+        : { type: "text", id, text: message.text });
+    }
+  });
+  return items;
 }
 
 export function importNativeConversation(
@@ -370,11 +404,7 @@ export function importNativeConversation(
     nativeSessionId: settings.nativeSessionId,
     nativeHistorySource: true,
     accountProfileId: settings.accountProfileId,
-    items: settings.messages.slice(-MAX_STORED_ITEMS).map((message, index) =>
-      message.role === "user"
-        ? { type: "user" as const, id: `history:${index}`, text: message.text, at: now }
-        : { type: "text" as const, id: `history:${index}`, text: message.text },
-    ),
+    items: nativeHistoryItems(settings.messages.slice(-MAX_STORED_ITEMS), now),
   };
 }
 
@@ -998,7 +1028,8 @@ function isThread(value: unknown): value is ChatThread {
     typeof thread.id === "string" &&
     (thread.definitionId === "claude" ||
       thread.definitionId === "codex" ||
-      thread.definitionId === "gemini") &&
+      thread.definitionId === "gemini" ||
+      thread.definitionId === "antigravity") &&
     typeof thread.workingDirectory === "string" &&
     chatPermissions.includes(thread.permission as ChatPermission) &&
     Array.isArray(thread.items)
@@ -1058,7 +1089,8 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
         typeof thread.handoff === "object" &&
         (thread.handoff.sourceDefinitionId === "claude" ||
           thread.handoff.sourceDefinitionId === "codex" ||
-          thread.handoff.sourceDefinitionId === "gemini") &&
+          thread.handoff.sourceDefinitionId === "gemini" ||
+          thread.handoff.sourceDefinitionId === "antigravity") &&
         typeof thread.handoff.transcript === "string"
           ? {
               sourceDefinitionId: thread.handoff.sourceDefinitionId,

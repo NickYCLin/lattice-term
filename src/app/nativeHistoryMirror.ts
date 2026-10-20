@@ -1,4 +1,5 @@
 import type { ChatItem, ChatThread, NativeHistoryMessage } from "./agentChat";
+import { nativeHistoryItems } from "./agentChat";
 import type { LocalConversation } from "./localConversationSessions";
 import type { NativeMessageSnapshot } from "./useNativeConversations";
 
@@ -20,6 +21,12 @@ function sameMessage(left: NativeHistoryMessage, right: NativeHistoryMessage) {
 }
 
 export function nativeMessageTail(items: readonly ChatItem[], messages: readonly NativeHistoryMessage[]): number | null {
+  const positions = messages.flatMap((message, index) => message.tool ? [] : [index]);
+  const tail = textMessageTail(items, positions.map(index => messages[index]));
+  return tail === null ? null : positions[tail - 1] + 1;
+}
+
+function textMessageTail(items: readonly ChatItem[], messages: readonly NativeHistoryMessage[]): number | null {
   const local = items.flatMap((item): NativeHistoryMessage[] => item.type === "user"
     ? [{ role: "user", text: item.text }]
     : item.type === "text" ? [{ role: "assistant", text: item.text }] : []);
@@ -60,16 +67,27 @@ export function refreshNativeHistoryMirror(thread: ChatThread, entry: LocalConve
   if (!isNativeHistoryMirror(thread) || thread.runningTurnId || thread.pendingInputs?.length ||
     thread.definitionId !== entry.definitionId || thread.nativeSessionId !== entry.nativeSessionId ||
     thread.accountProfileId !== entry.profileId) return thread;
-  const imported = thread.items.every(item => item.id.startsWith("history:") && (item.type === "user" || item.type === "text"));
+  const imported = thread.items.every(item => item.id.startsWith("history:") && (item.type === "user" || item.type === "text" || item.type === "tool"));
   const tail = imported ? 0 : nativeMessageTail(thread.items, snapshot.messages);
   if (!imported && tail === null) return thread.nativeSyncPending ? thread : { ...thread, nativeSyncPending: true };
-  const added = tail === null ? [] : snapshot.messages.slice(tail).map((message, index): ChatItem => message.role === "user"
-    ? { type: "user", id: `history:${imported ? index : thread.items.length + index}`, text: message.text, at: thread.createdAt }
-    : { type: "text", id: `history:${imported ? index : thread.items.length + index}`, text: message.text });
-  const items = imported ? added : added.length ? [...thread.items, ...added] : thread.items;
+  const added = tail === null ? [] : nativeHistoryItems(snapshot.messages.slice(tail), thread.createdAt,
+    imported ? 0 : thread.items.reduce((offset, item) => item.id.startsWith("history:")
+      && Number.isFinite(Number(item.id.slice(8)))
+      ? Math.max(offset, Number(item.id.slice(8)) + 1) : offset, thread.items.length));
+  const items = imported ? added : added.length ? [...thread.items] : thread.items;
+  if (!imported) for (const item of added) {
+    const existing = item.type === "tool" ? items.findIndex(old => old.id === item.id) : -1;
+    const old = items[existing];
+    if (existing >= 0 && old.type === "tool" && item.type === "tool") {
+      items[existing] = { ...old, ...(item.summary ? { name: item.name, summary: item.summary } : {}),
+        output: item.output ?? old.output };
+    } else {
+      items.push(item);
+    }
+  }
   const sameText = items === thread.items || items.length === thread.items.length && items.every((item, index) => {
     const old = thread.items[index];
-    return old.type === item.type && "text" in old && "text" in item && old.text === item.text;
+    return JSON.stringify(old) === JSON.stringify(item);
   });
   const archived = snapshot.archived ?? entry.archived === true;
   if (sameText && !thread.nativeSyncPending && thread.title === entry.title && Boolean(thread.nativeHistoryArchived) === archived &&

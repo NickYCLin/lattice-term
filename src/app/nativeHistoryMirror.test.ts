@@ -109,3 +109,65 @@ it("does not poll cloud imports or active terminal handoffs", () => {
   expect(isNativeHistoryMirror({ ...continued(), archived: true })).toBe(false);
   expect(isNativeHistoryMirror({ ...continued(), continuedInSession: true })).toBe(false);
 });
+
+it("imports tool input and output as one read-only historical card and refreshes it", () => {
+  const messages: NativeHistoryMessage[] = [
+    { role: "user", text: "inspect" },
+    { role: "assistant", text: '{"command":"pwd"}', tool: { callId: "call-1", name: "shell", kind: "call" } },
+    { role: "assistant", text: "/work", tool: { callId: "call-1", name: null, kind: "result" } },
+    { role: "assistant", text: "done" },
+  ];
+  const first = refreshNativeHistoryMirror(mirror(), entry, { messages, truncated: false });
+  expect(first.items).toHaveLength(3);
+  expect(first.items[1]).toMatchObject({ type: "tool", name: "shell", output: "/work", done: true });
+  expect(refreshNativeHistoryMirror(first, entry, { messages, truncated: false })).toBe(first);
+  const changed = messages.map(message => message.tool?.kind === "result" ? { ...message, text: "/new" } : message);
+  expect(refreshNativeHistoryMirror(first, entry, { messages: changed, truncated: false }).items[1])
+    .toMatchObject({ type: "tool", output: "/new" });
+  expect(first.items[1]).toMatchObject({ output: "/work" });
+});
+
+it("aligns locally continued messages across native tools without treating tools as assistant replies", () => {
+  const messages: NativeHistoryMessage[] = [nativeMessages[0],
+    { role: "assistant", text: "args", tool: { callId: "call-1", name: "shell", kind: "call" } },
+    { role: "assistant", text: "result", tool: { callId: "call-1", name: null, kind: "result" } },
+    ...nativeMessages.slice(1),
+  ];
+  expect(nativeMessageTail(continued().items, messages)).toBe(4);
+  const next = refreshNativeHistoryMirror(continued(), entry, { messages, truncated: false });
+  expect(next.items.slice(-2)).toMatchObject([{ type: "user", text: nativeMessages[2].text }, { type: "text", text: nativeMessages[3].text }]);
+  expect(refreshNativeHistoryMirror(next, entry, { messages, truncated: false })).toBe(next);
+});
+
+it("does not duplicate trailing tools when a locally continued transcript is polled again", () => {
+  const messages: NativeHistoryMessage[] = [...nativeMessages,
+    { role: "assistant", text: "args", tool: { callId: "trailing", name: "shell", kind: "call" } },
+    { role: "assistant", text: "result", tool: { callId: "trailing", name: null, kind: "result" } },
+  ];
+  const first = refreshNativeHistoryMirror(continued(), entry, { messages, truncated: false });
+  expect(first.items.filter(item => item.type === "tool")).toHaveLength(1);
+  expect(refreshNativeHistoryMirror(first, entry, { messages, truncated: false })).toBe(first);
+});
+
+it("omits historical image path calls and pixel-unavailable placeholders", () => {
+  const messages: NativeHistoryMessage[] = [
+    { role: "user", text: "inspect" },
+    { role: "assistant", text: '{"path":"/private/photo.png"}', tool: { callId: "image-1", name: "functions.view_image", kind: "call" } },
+    { role: "assistant", text: "pixels unavailable", tool: { callId: "image-1", name: null, kind: "result" } },
+    { role: "assistant", text: "done" },
+  ];
+  const result = refreshNativeHistoryMirror(mirror(), entry, { messages, truncated: false });
+  expect(result.items).toHaveLength(2);
+  expect(JSON.stringify(result.items)).not.toMatch(/private|photo.png|pixels unavailable|view_image/);
+});
+
+it("keeps one stable tool card for repeated or reordered historical rows", () => {
+  const messages: NativeHistoryMessage[] = [
+    { role: "assistant", text: "result", tool: { callId: "same", name: null, kind: "result" } },
+    { role: "assistant", text: "args", tool: { callId: "same", name: "shell", kind: "call" } },
+    { role: "assistant", text: "result", tool: { callId: "same", name: null, kind: "result" } },
+  ];
+  const result = refreshNativeHistoryMirror(mirror(), entry, { messages, truncated: false });
+  expect(result.items).toHaveLength(1);
+  expect(result.items[0]).toMatchObject({ type: "tool", name: "shell", summary: "args", output: "result" });
+});

@@ -246,6 +246,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
             const name = tool.name ?? conversation.messages.slice(0, index).reverse()
               .find(candidate => candidate.tool?.kind === "call" && candidate.tool.callId === tool.callId)
               ?.tool?.name;
+            if (name && /(?:^|\.)view_image$/.test(name)) return null;
             return <details key={index} className="chat-card chat-card--tool">
               <summary>
                 <span className="chat-card__label">{name ?? t("sessionChat.tool")}</span>

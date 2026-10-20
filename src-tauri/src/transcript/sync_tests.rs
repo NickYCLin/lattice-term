@@ -67,6 +67,23 @@ fn session_tools_follow_exact_identity_without_changing_history_or_handoff() {
         )
         .unwrap();
     }
+    let before = fs::read(&path).unwrap();
+    let snapshot =
+        read_local_conversation_snapshot("codex", "tools", Some("test"), &profiles(home.path()))
+            .unwrap();
+    assert_eq!(snapshot.messages.len(), 5);
+    assert_eq!(
+        snapshot.messages[1].tool.as_ref().unwrap().call_id,
+        "exec-1"
+    );
+    assert_eq!(snapshot.messages[2].text, "Exit code: 1\nfailed");
+    assert_eq!(
+        read_local_conversation("codex", "tools", Some("test"), &profiles(home.path()))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
     let messages =
         read_session_conversation("codex", "", Some("tools"), Some(home.path())).unwrap();
     assert_eq!(messages.len(), 5);
@@ -114,7 +131,7 @@ fn session_tool_parser_rejects_unknown_rows_and_invalid_shapes() {
 #[test]
 fn session_tool_snapshots_keep_existing_count_and_text_limits() {
     let home = tempfile::tempdir().unwrap();
-    let path = fixture(home.path(), "bounded", 0);
+    let path = fixture(home.path(), "bounded", 1);
     let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
     for index in 0..=HISTORY_MAX_MESSAGES {
         writeln!(
@@ -130,6 +147,10 @@ fn session_tool_snapshots_keep_existing_count_and_text_limits() {
         read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, true).unwrap();
     assert!(snapshot.truncated);
     assert_eq!(snapshot.messages.len(), HISTORY_MAX_MESSAGES);
+    let text_only =
+        read_local_conversation("codex", "bounded", Some("test"), &profiles(home.path())).unwrap();
+    assert_eq!(text_only.len(), 1);
+    assert_eq!(text_only[0].text, "bounded message 0");
     assert!(
         read_session_conversation_snapshot("codex", "", Some("bounded"), Some(home.path()))
             .unwrap()

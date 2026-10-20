@@ -1707,8 +1707,14 @@ pub fn read_local_conversation(
     profile_id: Option<&str>,
     profiles: &[HistoryProfile],
 ) -> Result<Vec<LocalConversationMessage>, String> {
-    read_local_conversation_snapshot(definition_id, session_id, profile_id, profiles)
-        .map(|snapshot| snapshot.messages)
+    read_local_conversation_snapshot_with_tools(
+        definition_id,
+        session_id,
+        profile_id,
+        profiles,
+        false,
+    )
+    .map(|snapshot| snapshot.messages)
 }
 
 pub fn read_local_conversation_snapshot(
@@ -1716,6 +1722,22 @@ pub fn read_local_conversation_snapshot(
     session_id: &str,
     profile_id: Option<&str>,
     profiles: &[HistoryProfile],
+) -> Result<LocalConversationSnapshot, String> {
+    read_local_conversation_snapshot_with_tools(
+        definition_id,
+        session_id,
+        profile_id,
+        profiles,
+        true,
+    )
+}
+
+fn read_local_conversation_snapshot_with_tools(
+    definition_id: &str,
+    session_id: &str,
+    profile_id: Option<&str>,
+    profiles: &[HistoryProfile],
+    include_tools: bool,
 ) -> Result<LocalConversationSnapshot, String> {
     // Resolve the exact identity inside the selected account. The latest-100
     // preview is not an authorization list and must not hide older records.
@@ -1765,7 +1787,7 @@ pub fn read_local_conversation_snapshot(
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
     }
     .ok_or("The local conversation is no longer available.")?;
-    let mut snapshot = read_conversation_snapshot(&path, kind)?;
+    let mut snapshot = read_conversation_snapshot_with_tools(&path, kind, include_tools)?;
     snapshot.archived = Some(
         kind == TranscriptKind::Codex
             && history_root_with_archive(kind, profile, true)
@@ -1954,6 +1976,7 @@ pub struct LocalConversationSnapshot {
     pub archived: Option<bool>,
 }
 
+#[cfg(test)]
 fn read_conversation_snapshot(
     path: &Path,
     kind: TranscriptKind,

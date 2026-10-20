@@ -117,6 +117,17 @@ describe("session chat output disclosure", () => {
     expect(html.match(/apply_patch/g)).toHaveLength(1);
     expect(html.match(/chat-card__label">工具/g)).toHaveLength(2);
   });
+
+  it("hides historical image paths and unavailable-pixel tool placeholders", () => {
+    conversation.messages = [
+      { role: "assistant", text: '{"path":"/private/photo.png"}', tool: { callId: "image-1", name: "view_image", kind: "call" } },
+      { role: "assistant", text: "pixels unavailable", tool: { callId: "image-1", name: null, kind: "result" } },
+      { role: "assistant", text: "可讀回覆" },
+    ];
+    const html = render("done");
+    expect(html).toContain("可讀回覆");
+    expect(html).not.toMatch(/private|photo.png|view_image|pixels unavailable|image-1/);
+  });
 });
   it("renders replies with the same avatar, assistant name and Markdown as built-in chat", () => {
     const text = "已完成 **測試**";

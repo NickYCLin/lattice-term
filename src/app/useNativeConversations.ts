@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useChatAccountProfiles } from "./useChatAccountProfiles";
 import type { LocalConversation } from "./localConversationSessions";
 import { nativeConversationKey, useDismissedNativeConversations } from "./nativeConversationDismissals";
+import type { NativeHistoryMessage } from "./agentChat";
 
 export { nativeConversationKey };
 
@@ -57,7 +58,7 @@ export function useSerialNativeRead<T>(key: string, enabled: boolean, interval: 
 }
 
 export interface NativeHistoryPage { entries: LocalConversation[]; hasMore: boolean; incomplete: boolean }
-export interface NativeMessageSnapshot { messages: { role: "user" | "assistant"; text: string }[]; truncated: boolean; archived?: boolean }
+export interface NativeMessageSnapshot { messages: NativeHistoryMessage[]; truncated: boolean; archived?: boolean }
 
 export function useNativeConversations(enabled: boolean) {
   const profiles = useChatAccountProfiles();
