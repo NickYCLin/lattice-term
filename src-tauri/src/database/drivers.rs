@@ -109,19 +109,8 @@ impl Client {
                     password,
                 ));
                 config.encryption(tiberius::EncryptionLevel::Required);
-                let mut ca_file = None;
                 if !profile.tls_ca_pem.is_empty() {
-                    use std::io::Write;
-                    let mut file = tempfile::Builder::new()
-                        .prefix("latticeterm-ca-")
-                        .suffix(".pem")
-                        .tempfile()
-                        .map_err(|_| failed())?;
-                    file.write_all(profile.tls_ca_pem.as_bytes())
-                        .map_err(|_| failed())?;
-                    file.flush().map_err(|_| failed())?;
-                    config.trust_cert_ca(file.path().to_string_lossy());
-                    ca_file = Some(file);
+                    config.trust_cert_ca_bundle(profile.tls_ca_pem.as_bytes());
                 }
                 let socket =
                     tokio::net::TcpStream::connect((profile.hostname.as_str(), profile.port))
@@ -131,7 +120,6 @@ impl Client {
                 let mut connection = tiberius::Client::connect(config, socket.compat_write())
                     .await
                     .map_err(|_| failed())?;
-                drop(ca_file);
                 connection
                     .simple_query("SET LOCK_TIMEOUT 15000; SET TEXTSIZE 4096")
                     .await

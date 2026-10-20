@@ -28,6 +28,14 @@ async fn isolated_network_databases_verify_tls_and_readonly_queries() {
         "untrusted CA must fail"
     );
     let mut mismatched = profile.clone();
+    let mut malformed = profile.clone();
+    malformed.tls_ca_pem = "-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----".into();
+    assert!(
+        drivers::read(&malformed, &fixture.password, &version)
+            .await
+            .is_err(),
+        "invalid CA must not fall back to unverified TLS"
+    );
     mismatched.hostname = "127.0.0.1".into();
     assert!(
         drivers::read(&mismatched, &fixture.password, &version)

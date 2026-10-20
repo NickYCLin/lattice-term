@@ -57,8 +57,17 @@ zune-jpeg = "0.5"
 if-addrs = "0.15"
 tauri-plugin-opener = "2"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "mysql"] }
-tiberius = { version = "0.12.3", default-features = false, features = ["rustls", "tds73"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+
+[target.'cfg(windows)'.dependencies.tiberius]
+version = "0.13.0"
+default-features = false
+features = ["native-tls", "tds73"]
+
+[target.'cfg(not(windows))'.dependencies.tiberius]
+version = "0.13.0"
+default-features = false
+features = ["rustls", "tds73"]
 
 [dev-dependencies]
 rusqlite = { version = "0.32.1", default-features = false, features = ["modern_sqlite"] }
