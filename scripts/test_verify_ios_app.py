@@ -1,5 +1,7 @@
 import importlib.util
+import os
 import plistlib
+from subprocess import run as run_command
 import tempfile
 import tomllib
 import unittest
@@ -20,6 +22,19 @@ class BundleVerificationTests(unittest.TestCase):
         targets = cargo["target"]
         self.assertEqual(targets['cfg(target_os = "ios")']["dependencies"]["sqlx"]["features"], ["sqlite-unbundled"])
         self.assertEqual(targets['cfg(not(target_os = "ios"))']["dependencies"]["sqlx"]["features"], ["sqlite"])
+
+    @unittest.skipIf(os.name == "nt", "Xcode SDK wrapper runs on macOS")
+    def test_sqlite_build_uses_selected_sdk_and_preserves_arguments(self):
+        script = Path(__file__).with_name("ios-sqlite-build.sh")
+        sdk = Path(self.directory.name) / "Selected SDK"
+        (sdk / "usr/include").mkdir(parents=True)
+        (sdk / "usr/include/sqlite3.h").write_text("test header")
+        environment = {**os.environ, "SDKROOT": str(sdk), "BINDGEN_EXTRA_CLANG_ARGS": "-DTEST=1"}
+        command = ['sh', str(script), 'sh', '-c', 'printf "%s\\n" "$SQLITE3_INCLUDE_DIR" "$SQLITE3_LIB_DIR" "$BINDGEN_EXTRA_CLANG_ARGS" "$1"', 'test', 'argument with spaces']
+        result = run_command(command, env=environment, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), [str(sdk / "usr/include"), str(sdk / "usr/lib"), f'-DTEST=1 -isysroot "{sdk}"', 'argument with spaces'])
+        environment["SDKROOT"] = str(sdk / "missing")
+        self.assertNotEqual(run_command(command, env=environment, capture_output=True).returncode, 0)
 
     def setUp(self):
         self.nm = patch.object(module.subprocess, "run").start()
