@@ -1,0 +1,92 @@
+:is(
+  .chat-mode__tab.is-active,
+  .inspector__tab.is-active,
+  .session-header__files-button.is-active,
+  .session-composer__icon.is-active,
+  .capture-button.is-active:not(:disabled),
+  .terminal-keybar__key.is-armed,
+  .ssh-pane-switch [aria-pressed="true"]
+) {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: none;
+}
+
+:is(
+  .connection-card.is-selected,
+  .agents-broadcast__target.is-selected,
+  .project-launcher__cli.is-selected,
+  .cli-switch__pill.is-active,
+  .protocol-option.is-selected,
+  .language-option.is-selected,
+  .theme-option.is-selected,
+  .remote-host-mode__option.is-active
+) {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.capture-button.is-active:not(:disabled),
+.terminal-keybar__key.is-armed {
+  border-color: var(--accent);
+}
+
+:is(
+  .capture-button,
+  .protocol-option,
+  .language-option,
+  .theme-option,
+  .remote-host-mode__option,
+  .project-launcher__cli,
+  .cli-switch__pill,
+  .filter-chip
+):not(.is-selected):not(.is-active):not(.is-on) {
+  border-color: var(--control-line);
+}
+
+:is(button, [role="button"], a.button):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--canvas-deep);
+}
+
+.segmented__option:disabled,
+.button:disabled {
+  cursor: not-allowed;
+}
+
+.rail__item,
+.sidebar__search-clear,
+.chat-tree__action {
+  color: var(--text-muted);
+}
+
+.rail__item.is-active,
+.cli-switch__pill.is-active {
+  color: var(--accent);
+  background: var(--surface-selected);
+}
+
+.filter-chip.is-on {
+  background: color-mix(in srgb, var(--tile-color, var(--badge-color, var(--accent))) 8%, var(--surface-solid));
+}
+
+.button--ghost.button--danger:hover,
+.icon-button--danger:hover,
+.chat-tree__action--danger:hover {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid));
+}
+
+.cli-switch__pill.is-active .cli-switch__model {
+  opacity: 1;
+}
+
+.capture-button--stop {
+  border-color: var(--danger);
+}
+
+.chat-mode__tab.is-active .chat-mode__badge {
+  background: var(--surface-solid);
+  color: var(--accent);
+}

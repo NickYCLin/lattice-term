@@ -44,7 +44,7 @@
 
 .button--secondary {
   background: var(--surface-raised);
-  border-color: var(--line-strong);
+  border-color: var(--control-line);
   color: var(--text);
 }
 
@@ -63,11 +63,11 @@
 
 .button--danger {
   background: var(--danger);
-  color: var(--canvas-deep);
+  color: var(--danger-ink);
 }
 
 .button--danger:hover {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--danger) 92%, var(--text));
 }
 
 .button--ghost.button--danger {
@@ -332,13 +332,14 @@ select.select:disabled {
   display: inline-flex;
   padding: 3px;
   gap: 2px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: var(--radius-pill);
   background: var(--surface-hover);
   flex-wrap: wrap;
 }
 
-.segmented__option {
+.segmented__option,
+.segmented__btn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -352,14 +353,16 @@ select.select:disabled {
     color var(--duration-fast) var(--ease);
 }
 
-.segmented__option:hover {
+.segmented__option:hover,
+.segmented__btn:hover {
   color: var(--text);
   background: var(--surface-hover);
 }
 
-.segmented__option.is-selected {
-  background: var(--surface-raised);
-  color: var(--text);
+.segmented__option.is-selected,
+.segmented__btn[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--text-on-accent);
   box-shadow: var(--shadow-1);
   font-weight: 600;
 }

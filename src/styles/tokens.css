@@ -72,6 +72,9 @@
   --surface-sunken: var(--canvas-deep);
   --text-subtle: var(--text-muted);
   --text-on-accent: var(--accent-ink);
+  --accent-strong: var(--accent);
+  --control-line: var(--text-faint);
+  --danger-ink: var(--accent-ink);
   --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
   --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
   --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
