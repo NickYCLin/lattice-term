@@ -9,7 +9,7 @@ enum Client {
     Postgres(sqlx::PgConnection),
     Mysql(sqlx::MySqlConnection),
     Sqlite(sqlx::SqliteConnection),
-    SqlServer(tiberius::Client<Compat<tokio::net::TcpStream>>),
+    SqlServer(Box<tiberius::Client<Compat<tokio::net::TcpStream>>>),
 }
 
 fn failed() -> String {
@@ -131,7 +131,7 @@ impl Client {
                     .into_results()
                     .await
                     .map_err(|_| failed())?;
-                Ok(Self::SqlServer(connection))
+                Ok(Self::SqlServer(Box::new(connection)))
             }
         }
     }

@@ -1,6 +1,7 @@
 import importlib.util
 import plistlib
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,15 @@ spec.loader.exec_module(module)
 
 
 class BundleVerificationTests(unittest.TestCase):
+    def test_sqlite_linkage_is_platform_scoped(self):
+        manifest = Path(__file__).resolve().parent.parent / "src-tauri/Cargo.toml"
+        cargo = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        self.assertNotIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
+        self.assertNotIn("sqlite-unbundled", cargo["dependencies"]["sqlx"]["features"])
+        targets = cargo["target"]
+        self.assertEqual(targets['cfg(target_os = "ios")']["dependencies"]["sqlx"]["features"], ["sqlite-unbundled"])
+        self.assertEqual(targets['cfg(not(target_os = "ios"))']["dependencies"]["sqlx"]["features"], ["sqlite"])
+
     def setUp(self):
         self.nm = patch.object(module.subprocess, "run").start()
         self.addCleanup(patch.stopall)
