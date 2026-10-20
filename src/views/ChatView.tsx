@@ -328,9 +328,10 @@ export function ChatView({
         previous && permissionsFor(definitionId).includes(previous.permission)
           ? previous.permission
           : defaultPermission(definitionId),
-      model: previous?.definitionId === definitionId ? previous.model : "",
+      model: previous?.definitionId === definitionId && (installed.length > 0 || previous.provider === "cliproxyapi") ? previous.model : "",
       provider: proxies.length > 0 && installed.length === 0 ? "cliproxyapi" : previous?.definitionId === definitionId ? previous.provider : undefined,
-      proxyId: previous?.definitionId === definitionId ? previous.proxyId : proxies[0]?.id,
+      proxyId: previous?.definitionId === definitionId && previous.provider === "cliproxyapi"
+        && proxies.some(proxy => proxy.id === previous.proxyId) ? previous.proxyId : proxies[0]?.id,
       accountProfileId: installed.length > 0 && previous?.definitionId === definitionId ? previous.accountProfileId : null,
     });
   }

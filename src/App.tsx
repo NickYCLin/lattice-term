@@ -1196,6 +1196,11 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                       setChatWorkspaceSessionId(sessionId);
                       setView("chat");
                     }}
+                    onStartApiChat={chatRuntime ? (selection, workingDirectory) => {
+                      chatRuntime.chat.createThread({ ...selection, definitionId: "codex", workingDirectory, permission: "ask" });
+                      setChatWorkspaceSessionId(null);
+                      setView("chat");
+                    } : undefined}
                   />
                 </div>
               </Suspense>

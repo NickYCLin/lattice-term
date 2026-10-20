@@ -21,6 +21,7 @@ import { NativeHistoryContext, type NativeHistory } from "../app/useNativeConver
 import type { LocalConversation } from "../app/localConversationSessions";
 import { I18nProvider } from "../i18n";
 import { ChatView } from "./ChatView";
+import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 
 function render(
   chat = fakeChatApi(),
@@ -243,6 +244,23 @@ describe("ChatView", () => {
     expect(markup).toContain("CLIProxyAPI 模型 ID");
     expect(markup).toContain('value="proxy-model"');
     expect(markup).not.toContain('chat-settings__warning');
+  });
+
+  it.each([{ catalog: [] }, { catalog: [fakeDefinition({ installed: false, installedPath: null })] }])("allows direct API chat without an installed CLI: $catalog", ({ catalog }) => {
+    restoreStorage = installFakeStorage({ [CLI_PROXY_SETTINGS_KEY]: JSON.stringify({ proxies: [
+      { id: "default", label: "工作代理", baseUrl: "http://localhost:8317" },
+    ] }) });
+    const agents = fakeAgentApi({ catalog });
+    const empty = render(fakeChatApi(), agents);
+    expect(empty).toContain("新對話");
+    const thread = fakeThread({ provider: "cliproxyapi", proxyId: "default", model: "proxy-model", nativeSessionId: null });
+    const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), agents);
+    expect(markup).toContain('value="proxy-model"');
+    expect(markup).toContain('placeholder="想做什麼都可以"');
+    expect(markup).not.toContain('chat-settings__warning');
+    const composer = markup.match(/<textarea[^>]*placeholder="想做什麼都可以"[^>]*>/)?.[0];
+    expect(composer).toBeDefined();
+    expect(composer).not.toContain("disabled");
   });
 
   it("always exposes delete from the conversation row", () => {

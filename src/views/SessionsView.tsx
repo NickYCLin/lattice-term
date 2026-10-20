@@ -254,6 +254,7 @@ export function SessionsView({
   mobile = false,
   visible = true,
   onOpenInChat,
+  onStartApiChat,
   ...recovery
 }: {
   agents: AgentApi;
@@ -272,6 +273,7 @@ export function SessionsView({
   visible?: boolean;
   /** Show this terminal's conversation on the chat page. */
   onOpenInChat?: (sessionId: string) => void;
+  onStartApiChat?: (selection: AccountModelSelection, workingDirectory: string) => void;
 } & WorkspaceRecoveryProps) {
   const { t, tag } = useI18n();
   const sessionTabsId = useId();
@@ -524,15 +526,21 @@ export function SessionsView({
   // their default CLI here. Chat mode keeps those accounts disabled.
   const modelOptions = accountModelOptions(modelTargets, modelLists, {
     defaultModel: t("terminal.model.pending"), loading: t("chat.model.loading"), signedOut: t("agents.account.signedOut"),
-  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, cliProxySettings.proxies).map((option) => ({ ...option, disabled: false }));
+  }, (addCliFor ? selectedAddModel : selectedProjectModel) ?? undefined, cliProxySettings.proxies,
+    addCliFor === null && Boolean(onStartApiChat)).map((option) => ({ ...option, disabled: false }));
   const defaultModelSelection = (definitionId?: string): AccountModelSelection | null => {
     const candidates = modelTargets.filter((target) => !definitionId || target.definitionId === definitionId);
     const target = candidates.find((candidate) => !candidate.signedOut) ?? candidates[0];
-    return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" } : null;
+    return target ? { definitionId: target.definitionId, accountProfileId: target.accountProfileId, model: "" }
+      : !definitionId && onStartApiChat && cliProxySettings.proxies[0]
+        ? { definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: cliProxySettings.proxies[0].id }
+        : null;
   };
   const sessionCliLabel = (session: AgentSessionSummary) => accountSessionLabel(session, modelTargets, t("accountModel.missing"), cliProxySettings.proxies);
   const modelAvailable = (selection: AccountModelSelection | null) => selection !== null && (!selection.provider || validCliProxyModel(selection.model)) && modelOptions.some((option) => accountModelKey(option) === accountModelKey(selection));
   const projectModelAvailable = modelAvailable(selectedProjectModel);
+  const directProjectChat = selectedProjectModel?.provider === "cliproxyapi" && Boolean(onStartApiChat)
+    && !installedAgents.some(definition => definition.id === selectedProjectModel.definitionId);
 
   async function chooseProjectDirectory(droppedPath?: string) {
     setChoosingProject(true);
@@ -1051,6 +1059,15 @@ export function SessionsView({
 
   async function launchNewProject() {
     if (!newProjectDirectory?.trim() || !selectedProjectModel || !projectModelAvailable || launchingProjectCli || choosingProject) return;
+    if (directProjectChat && onStartApiChat) {
+      try {
+        onStartApiChat(selectedProjectModel, newProjectDirectory.trim());
+        closeNewProjectDialog();
+      } catch (reason) {
+        setNewProjectError(reason instanceof Error ? reason.message : String(reason));
+      }
+      return;
+    }
     const definition = installedAgents.find(
       (candidate) => candidate.id === selectedProjectModel.definitionId,
     );
@@ -1101,7 +1118,7 @@ export function SessionsView({
             <FolderIcon size={18} />
           </span>
           <h2 className="dialog__title" id="new-project-title">
-            {t("terminal.projects.launchTitle")}
+            {t(directProjectChat ? "chat.new" : "terminal.projects.launchTitle")}
           </h2>
         </header>
         <div className="dialog__stack">
@@ -1131,7 +1148,8 @@ export function SessionsView({
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
-          {installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
+          {directProjectChat ? <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>
+            : installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
           {newProjectError && (
             <Callout tone="danger" title={t("terminal.projects.launchFailed")}>
               <span className="mono">{newProjectError}</span>
@@ -1155,7 +1173,7 @@ export function SessionsView({
             >
               {launchingProjectCli
                 ? t("terminal.projects.launching")
-                : t("terminal.projects.launch")}
+                : t(directProjectChat ? "chat.new" : "terminal.projects.launch")}
             </button>
           </div>
         </div>
@@ -2050,7 +2068,7 @@ export function SessionsView({
                     {t("terminal.projects.import")}
                   </button>
                   </FileDropZone>
-                  {homeDirectory && installedAgents.length > 0 && (
+                  {homeDirectory && (installedAgents.length > 0 || (onStartApiChat && cliProxySettings.proxies.length > 0)) && (
                   <div className="terminal-empty-quick">
                     <small>{t("terminal.empty.quickChat")}</small>
                     <div className="terminal-empty-quick__list">
