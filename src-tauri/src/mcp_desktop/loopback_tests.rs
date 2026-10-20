@@ -12,11 +12,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 mod fleet;
 #[cfg(unix)]
 mod openssh;
+#[cfg(windows)]
+mod windows_openssh;
 
 #[derive(Clone)]
 enum SftpMode {
     Disabled,
     Files,
+    #[cfg(windows)]
+    WindowsOpenSsh {
+        directory: Arc<std::path::PathBuf>,
+    },
     Fleet {
         data: Arc<std::path::PathBuf>,
         directory: Arc<std::path::PathBuf>,
@@ -160,6 +166,34 @@ impl server::Handler for Handler {
                 self.sftp_channels.insert(channel_id);
                 session.channel_success(channel_id)?;
                 tokio::spawn(russh_sftp::server::run(channel.into_stream(), FilesPeer));
+            }
+            #[cfg(windows)]
+            SftpMode::WindowsOpenSsh { directory } => {
+                let index = self
+                    .channels
+                    .iter()
+                    .position(|channel| channel.id() == channel_id)
+                    .unwrap();
+                let channel = self.channels.swap_remove(index);
+                let executable = std::env::var_os("LATTICETERM_TEST_WINDOWS_SFTP_SERVER")
+                    .expect("verified Windows OpenSSH executable");
+                let mut child = tokio::process::Command::new(executable)
+                    .current_dir(directory.as_ref())
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn()
+                    .unwrap();
+                let mut stream =
+                    tokio::io::join(child.stdout.take().unwrap(), child.stdin.take().unwrap());
+                self.sftp_channels.insert(channel_id);
+                session.channel_success(channel_id)?;
+                tokio::spawn(async move {
+                    let _ = tokio::io::copy_bidirectional(&mut channel.into_stream(), &mut stream)
+                        .await;
+                    let _ = child.kill().await;
+                });
             }
             SftpMode::Fleet { .. } => session.channel_failure(channel_id)?,
             #[cfg(unix)]
@@ -336,12 +370,18 @@ impl Peer {
             first_trusted_at: 1,
             last_seen_at: 1,
         };
-        let config = Arc::new(server::Config {
+        #[allow(unused_mut)]
+        let mut config = server::Config {
             keys: vec![key],
             auth_rejection_time: Duration::from_millis(1),
             inactivity_timeout: Some(Duration::from_secs(15)),
             ..Default::default()
-        });
+        };
+        #[cfg(windows)]
+        if matches!(sftp_mode, SftpMode::WindowsOpenSsh { .. }) {
+            config.server_id = russh::SshId::Standard("SSH-2.0-OpenSSH_for_Windows_9.5".into());
+        }
+        let config = Arc::new(config);
         let password = opaque_id().unwrap();
         let execs = Arc::new(AtomicUsize::new(0));
         let authentications = Arc::new(AtomicUsize::new(0));

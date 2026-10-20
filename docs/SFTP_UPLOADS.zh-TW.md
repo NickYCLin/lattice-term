@@ -28,9 +28,15 @@ Linux、macOS 及未識別的伺服器仍要求暫存檔回報一般檔案與 `6
 非 Windows 伺服器忽略私有權限要求時仍拒絕上傳，不會看到 `666`
 就自動套用 Windows 相容處理。
 
-MCP 上傳與使用者在桌面選檔上傳是不同授權邊界。MCP 不套用 Windows
-桌面相容政策；已識別為 Windows 的伺服器因無法透過 SFTP 驗證
-owner-only ACL，仍拒絕自動化上傳。核准根目錄與不得覆寫限制不變。
+MCP 上傳仍須具備上傳權限，以及核准的本機與遠端根目錄，只能建立
+新檔，不得覆寫。已驗證為 Windows OpenSSH 時，與桌面上傳採相同的
+目的資料夾 ACL 政策；操作結果的 `permissionNotice` 會說明無法透過
+POSIX mode 驗證 owner-only ACL。Unix 與未識別伺服器仍要求 `600`。
+這不會修改主機 ACL，也不會繞過暫停、撤回、取消與路徑檢查。
+
+核准根目錄支援 Windows OpenSSH 的 `/C:/資料夾` 格式；只在根目錄開頭
+接受單一磁碟機代號，不接受整顆磁碟、UNC、替代資料流或相對路徑中的
+冒號。每層仍檢查連結與型態，不會以路徑格式推測伺服器權限政策。
 
 ## 隔離驗證
 
@@ -53,3 +59,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib windows_openssh_ -- --igno
 
 這是 Windows SFTP 子系統實測，不代替已安裝桌面程式、遠端 SSH
 登入或使用者實際部署目錄的驗收。
+
+其中 `windows_openssh_mcp_` 測試會加上隔離的 loopback SSH 傳輸與
+主機金鑰驗證，確認 Windows 根目錄授權、MCP 上下載、空檔／多區塊、
+ACL 提示、拒絕覆寫及撤回授權；仍不使用系統帳號或對外監聽。

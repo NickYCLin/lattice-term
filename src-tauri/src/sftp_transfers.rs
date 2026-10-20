@@ -996,12 +996,8 @@ pub async fn begin_upload(
     sink: &dyn TransferSink,
     plan: UploadPlan,
 ) -> Result<TransferState, String> {
-    if sessions.windows_server(&plan.session_id)? {
-        return Err(
-            "MCP upload refused: an owner-only Windows ACL cannot be verified through SFTP.".into(),
-        );
-    }
-    begin_upload_with_permissions(transfers, sessions, sink, plan, false).await
+    let windows_permissions = sessions.windows_server(&plan.session_id)?;
+    begin_upload_with_permissions(transfers, sessions, sink, plan, windows_permissions).await
 }
 
 pub async fn begin_desktop_upload(

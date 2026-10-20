@@ -74,7 +74,17 @@ fn absolute_remote(path: &str) -> Result<String, ServiceError> {
         return Err(path_error());
     }
     let relative = path.trim_start_matches('/').trim_end_matches('/');
-    relative_components(relative, false)?;
+    let tail = if relative.as_bytes().get(1) == Some(&b':')
+        && relative.as_bytes()[0].is_ascii_alphabetic()
+    {
+        relative
+            .get(2..)
+            .and_then(|tail| tail.strip_prefix('/'))
+            .ok_or_else(path_error)?
+    } else {
+        relative
+    };
+    relative_components(tail, false)?;
     // A whole filesystem is not a useful, bounded MCP workspace grant.
     if relative.is_empty() {
         return Err(path_error());
@@ -497,7 +507,15 @@ pub(super) async fn transfer(
             still_allowed(&revoked, &cancel)?;
             crate::sftp_transfers::finish_upload(&cleanup.transfers, &QuietSink, &cleanup.id).await.map_err(|_| ServiceError::new("unknown_outcome", "The upload did not return a confirmed result; inspect the destination before retrying."))?;
             cleanup.complete = true;
-            Ok(json!({ "count": bytes.len(), "sha256": sha256(&bytes) }))
+            let notice = cleanup
+                .transfers
+                .list()
+                .into_iter()
+                .find(|entry| entry.transfer_id == cleanup.id)
+                .and_then(|entry| entry.detail);
+            Ok(
+                json!({ "count": bytes.len(), "sha256": sha256(&bytes), "permissionNotice": notice }),
+            )
         }
         TransferDirection::Download => {
             let destination = local_path(local, local_relative, false)?;
@@ -568,6 +586,22 @@ mod tests {
         assert!(absolute_remote("/").is_err());
         assert!(absolute_remote("//host/root").is_err());
         assert_eq!(absolute_remote("/tmp/project/").unwrap(), "/tmp/project");
+        assert_eq!(
+            absolute_remote("/C:/Users/test/workspace/").unwrap(),
+            "/C:/Users/test/workspace"
+        );
+        for bad in [
+            "/C:",
+            "/C:/",
+            "/C:/../other",
+            "/C:/safe/file:stream",
+            "/C:/safe\\other",
+            "/C:relative",
+            "/CC:/safe",
+            "/C:/safe//other",
+        ] {
+            assert!(absolute_remote(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

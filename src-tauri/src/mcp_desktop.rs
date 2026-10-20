@@ -2181,7 +2181,7 @@ impl DesktopService {
                     )
                     .await?;
                     Ok(
-                        json!({ "operationId": lease.id, "state": "completed", "bytes": result["count"], "sha256": result["sha256"], "overwrite": false }),
+                        json!({ "operationId": lease.id, "state": "completed", "bytes": result["count"], "sha256": result["sha256"], "overwrite": false, "permissionNotice": result["permissionNotice"] }),
                     )
                 }
                 _ => Err(ServiceError::invalid()),
