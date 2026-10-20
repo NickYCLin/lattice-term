@@ -11,6 +11,14 @@ export interface CliUpdate {
   updatable?: boolean;
 }
 
+export interface CliUpdateProgress {
+  activeId: string | null;
+  label: string;
+  completed: number;
+  total: number;
+  phase: "updating" | "checking";
+}
+
 function needsAttention(items: CliUpdate[]) {
   return items.some(
     (item) => item.status === "available" || item.status === "error",
@@ -20,6 +28,8 @@ function needsAttention(items: CliUpdate[]) {
 export function useCliUpdates(enabled: boolean) {
   const checked = useRef(false);
   const checking = useRef(false);
+  const updateRunning = useRef(false);
+  const [progress, setProgress] = useState<CliUpdateProgress | null>(null);
   const [busy, setBusy] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -48,15 +58,18 @@ export function useCliUpdates(enabled: boolean) {
 
   const updateCli = useCallback(
     async (id: string): Promise<boolean> => {
-      if (updating !== null) return false;
+      if (updateRunning.current) return false;
+      updateRunning.current = true;
       setUpdating(id);
       setUpdateError(null);
       const label = items.find((item) => item.id === id)?.label ?? id;
+      setProgress({ activeId: id, label, completed: 0, total: 1, phase: "updating" });
       try {
         await invoke<string>("agent_update_cli", { id });
         setUpdated((current) =>
           current.includes(label) ? current : [...current, label],
         );
+        setProgress({ activeId: null, label, completed: 1, total: 1, phase: "checking" });
         const refreshed = await check();
         if (refreshed && !needsAttention(refreshed)) setDismissed(true);
         return true;
@@ -64,18 +77,21 @@ export function useCliUpdates(enabled: boolean) {
         setUpdateError(err instanceof Error ? err.message : String(err));
         return false;
       } finally {
+        updateRunning.current = false;
+        setProgress(null);
         setUpdating(null);
       }
     },
-    [check, items, updating],
+    [check, items],
   );
 
   const updateAll = useCallback(async () => {
-    if (updating !== null) return;
+    if (updateRunning.current) return;
     const targets = items.filter(
       (item) => item.status === "available" && item.updatable !== false,
     );
     if (targets.length === 0) return;
+    updateRunning.current = true;
     setUpdating("all");
     setUpdateError(null);
     // One failing CLI must not leave the rest un-updated or the list stale.
@@ -83,6 +99,11 @@ export function useCliUpdates(enabled: boolean) {
     const succeeded: string[] = [];
     try {
       for (const target of targets) {
+        setProgress({
+          activeId: target.id, label: target.label,
+          completed: succeeded.length + failures.length, total: targets.length,
+          phase: "updating",
+        });
         try {
           await invoke<string>("agent_update_cli", { id: target.id });
           succeeded.push(target.label);
@@ -99,14 +120,20 @@ export function useCliUpdates(enabled: boolean) {
         ]);
       }
       if (failures.length > 0) setUpdateError(failures.join("\n"));
+      setProgress({
+        activeId: null, label: "", completed: targets.length,
+        total: targets.length, phase: "checking",
+      });
       const refreshed = await check();
       if (failures.length === 0 && refreshed && !needsAttention(refreshed)) {
         setDismissed(true);
       }
     } finally {
+      updateRunning.current = false;
+      setProgress(null);
       setUpdating(null);
     }
-  }, [check, items, updating]);
+  }, [check, items]);
 
   useEffect(() => {
     if (!enabled || checked.current) return;
@@ -118,6 +145,7 @@ export function useCliUpdates(enabled: boolean) {
     items,
     busy,
     updating,
+    progress,
     error,
     updateError,
     updated,

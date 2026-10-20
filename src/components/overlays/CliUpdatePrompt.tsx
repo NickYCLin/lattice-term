@@ -44,6 +44,32 @@ export function CliUpdatePrompt({
           {t("cliUpdates.title")}
         </h2>
         <p className="dialog__body">{t("cliUpdates.hint")}</p>
+        {updates.progress && (
+          <div className="cli-update-progress">
+            <p id="cli-update-progress-status" role="status">
+              {updates.progress.phase === "checking"
+                ? t("cliUpdates.verifying")
+                : t("cliUpdates.activeUpdate", { name: updates.progress.label })}
+            </p>
+            <progress aria-labelledby="cli-update-progress-status" />
+            {updates.updating === "all" && (
+              <>
+                <p id="cli-update-batch-status">
+                  {t("cliUpdates.processed", {
+                    completed: updates.progress.completed,
+                    total: updates.progress.total,
+                  })}
+                </p>
+                <progress
+                  aria-labelledby="cli-update-batch-status"
+                  value={updates.progress.completed}
+                  max={updates.progress.total}
+                />
+              </>
+            )}
+            <small>{t("cliUpdates.progressHint")}</small>
+          </div>
+        )}
         <div className="update-prompt__notes" aria-live="polite">
           {updates.error && <p role="alert">{t("cliUpdates.error")}</p>}
           {updates.updated.length > 0 && (
@@ -60,7 +86,7 @@ export function CliUpdatePrompt({
           )}
           {updates.items.map((item) => {
             const isUpdatingThis =
-              updates.updating === item.id || updates.updating === "all";
+              updates.progress?.activeId === item.id;
             const canDirectUpdate =
               item.status === "available" && item.updatable !== false;
             return (
