@@ -55,7 +55,6 @@ import { useVault } from "./app/useVault";
 import { useVaultAutoLock } from "./app/useVaultAutoLock";
 import { useWindowTheme } from "./app/useWindowTheme";
 import { useWorkspace } from "./app/useWorkspace";
-import { useCredentialDeleteGuard } from "./app/useSavedCredential";
 import type { ConnectionCredentialDraft } from "./app/connectionCredentialRecord";
 import {
   draftFromProfile,
@@ -74,7 +73,8 @@ import { ViewHeader } from "./components/shell/ViewHeader";
 import { ConnectionInspector } from "./components/connections/ConnectionInspector";
 import { useHostMetrics } from "./app/useHostMetrics";
 import type { Command } from "./components/overlays/CommandPalette";
-import { ConfirmDialog } from "./components/overlays/ConfirmDialog";
+import { ConnectionDeleteDialog } from "./components/connections/ConnectionDeleteDialog";
+import { cardRouteProfiles } from "./app/connectionRoutes";
 import { DesktopBackendRequiredDialog } from "./components/overlays/DesktopBackendRequiredDialog";
 import { UpdatePrompt } from "./components/overlays/UpdatePrompt";
 import { CliUpdatePrompt } from "./components/overlays/CliUpdatePrompt";
@@ -391,11 +391,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     routeSourceId?: string;
     routeProtocol?: Protocol;
   }>({ open: false, profileId: null });
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [removingProfile, setRemovingProfile] = useState(false);
-  const [profileDeleteError, setProfileDeleteError] = useState<string | null>(
-    null,
-  );
+  const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
   const [quickConnectOpen, setQuickConnectOpen] = useState(false);
   const [connectTarget, setConnectTarget] = useState<ConnectionProfile | null>(
@@ -778,16 +774,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     [profiles, drawer.profileId],
   );
 
-  const deleting = useMemo(
-    () => profiles.find((entry) => entry.id === pendingDelete) ?? null,
-    [profiles, pendingDelete],
-  );
-  const deleteGuard = useCredentialDeleteGuard(deleting);
-
   const requestDelete = useCallback((id: string) => {
-    setProfileDeleteError(null);
-    setPendingDelete(id);
-  }, []);
+    const targets = cardRouteProfiles(profiles, id);
+    if (targets.length > 0) setPendingDelete(targets);
+  }, [profiles]);
 
   const openCreate = useCallback(() => {
     setView("connections");
@@ -1347,70 +1337,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         />
       )}
 
-      {deleting && (
-        <ConfirmDialog
-          title={
-            deleteGuard.mode === "saved"
-              ? t("confirm.delete.credential.title", { name: deleting.name })
-              : deleteGuard.mode === "unavailable" || profileDeleteError
-                ? t("confirm.delete.credential.unavailable.title")
-                : t("confirm.delete.title", { name: deleting.name })
-          }
-          body={
-            deleteGuard.mode === "saved"
-              ? t("confirm.delete.credential.body", {
-                  provider: deleteGuard.provider,
-                })
-              : deleteGuard.mode === "unavailable" || profileDeleteError
-                ? t("confirm.delete.credential.unavailable.body", {
-                    detail:
-                      profileDeleteError ??
-                      (deleteGuard.mode === "unavailable"
-                        ? deleteGuard.detail
-                        : ""),
-                  })
-                : deleteGuard.mode === "loading"
-                  ? t("confirm.delete.credential.loading")
-                  : t("confirm.delete.body", { host: deleting.hostname })
-          }
-          confirmLabel={
-            deleteGuard.mode === "saved"
-              ? t("confirm.delete.credential.openVault")
-              : deleteGuard.mode === "loading"
-                ? t("confirm.delete.credential.checking")
-                : deleteGuard.mode === "unavailable" || profileDeleteError
-                  ? t("confirm.delete.credential.blocked")
-                  : t("confirm.delete.confirm", { name: deleting.name })
-          }
-          confirmDisabled={
-            deleteGuard.mode === "loading" ||
-            deleteGuard.mode === "unavailable" ||
-            profileDeleteError !== null
-          }
-          tone={deleteGuard.mode === "saved" ? "default" : "danger"}
-          cancelLabel={t("common.cancel")}
-          busy={removingProfile}
-          onConfirm={() => {
-            if (removingProfile) return;
-            if (deleteGuard.mode === "saved") {
-              setView("vault");
-              setProfileDeleteError(null);
-              setPendingDelete(null);
-              return;
-            }
-            setRemovingProfile(true);
-            void removeProfile(deleting.id)
-              .then(() => setPendingDelete(null))
-              .catch((reason: unknown) => {
-                setProfileDeleteError(
-                  reason instanceof Error ? reason.message : String(reason),
-                );
-              })
-              .finally(() => setRemovingProfile(false));
-          }}
-          onCancel={() => {
-            if (removingProfile) return;
-            setProfileDeleteError(null);
+      {pendingDelete && (
+        <ConnectionDeleteDialog
+          profiles={pendingDelete}
+          onRemove={removeProfile}
+          onClose={() => setPendingDelete(null)}
+          onOpenVault={() => {
+            setView("vault");
             setPendingDelete(null);
           }}
         />

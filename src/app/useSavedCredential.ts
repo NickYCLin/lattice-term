@@ -279,49 +279,37 @@ export function useSavedCredential(
 }
 
 export function useCredentialDeleteGuard(
-  profile: ConnectionProfile | null,
+  profile: ConnectionProfile | ConnectionProfile[] | null,
 ): CredentialDeleteGuardState {
-  const [state, setState] = useState<CredentialDeleteGuardState>({
-    mode: "clear",
-    provider: null,
-    detail: null,
-  });
+  const profiles = profile ? (Array.isArray(profile) ? profile : [profile]) : [];
+  const key = JSON.stringify(profiles.map((entry) => [entry.id, credentialKindFor(entry)]));
+  const [result, setResult] = useState<{ key: string; state: CredentialDeleteGuardState } | null>(null);
 
   useEffect(() => {
-    if (!profile || !hasDesktopBackend()) {
-      setState({ mode: "clear", provider: null, detail: null });
-      return;
-    }
-
-    const kind = credentialKindFor(profile);
-    if (!kind) {
-      setState({ mode: "clear", provider: null, detail: null });
-      return;
-    }
-
     let cancelled = false;
-    setState({ mode: "loading", provider: null, detail: null });
-    void readState(profile.id, kind).then((next) => {
+    async function check() {
+      const states = await Promise.all(profiles.map(async (entry) => {
+        const kind = credentialKindFor(entry);
+        return kind ? readState(entry.id, kind) : null;
+      }));
       if (cancelled) return;
-      if (next.mode === "saved") {
-        setState({
-          mode: "saved",
-          provider: next.provider,
-          detail: null,
-        });
-      } else if (next.mode === "unavailable") {
-        setState(next);
-      } else {
-        setState({ mode: "clear", provider: null, detail: null });
-      }
-    });
+      const blocked = states.find((state) => state?.mode === "unavailable")
+        ?? states.find((state) => state?.mode === "saved");
+      setResult({ key, state: blocked?.mode === "unavailable"
+        ? blocked
+        : blocked?.mode === "saved"
+          ? { mode: "saved", provider: blocked.provider, detail: null }
+          : { mode: "clear", provider: null, detail: null } });
+    }
+    if (profiles.length === 0 || !hasDesktopBackend()) {
+      setResult({ key, state: { mode: "clear", provider: null, detail: null } });
+    } else {
+      void check();
+    }
+    return () => { cancelled = true; };
+  }, [key]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [profile]);
-
-  return state;
+  return result?.key === key ? result.state : { mode: "loading", provider: null, detail: null };
 }
 
 export function useCredentialInventory(profiles: ConnectionProfile[]) {

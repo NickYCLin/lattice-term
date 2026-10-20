@@ -484,6 +484,18 @@ export const zhTW = {
   "validation.tagTooLong": "每個標籤最多 {max} 個字元。",
 
   // 刪除確認 --------------------------------------------------------------
+  "confirm.delete.scope": "刪除範圍",
+  "confirm.delete.routeTitle": "刪除這項連線方式？",
+  "confirm.delete.routeAction": "刪除這項連線方式",
+  "confirm.delete.card": "整張卡片（全部 {count} 項連線方式）",
+  "confirm.delete.cardTitle": "刪除「{name}」整張卡片？",
+  "confirm.delete.cardBody": "將刪除下列全部 {count} 項連線設定，不會刪除遠端檔案。",
+  "confirm.delete.cardAction": "刪除整張卡片",
+  "confirm.delete.cardCredentialTitle": "這張卡片還有已儲存的認證資料",
+  "confirm.delete.cardCredentialBody": "選取的連線方式中仍有儲存在 {provider} 的認證資料，請先到金鑰保管庫明確移除，再刪除卡片。",
+  "confirm.delete.routeBody": "只刪除下列連線設定，同卡片的其他連線方式與遠端檔案不受影響。",
+  "confirm.delete.choose": "刪除卡片或其中一項連線方式",
+  "confirm.delete.partial": "已刪除 {count} 項；其餘尚未刪除。原因：{detail}",
   "confirm.delete.title": "要刪除「{name}」嗎？",
   "confirm.delete.body": "只會從這個工作區移除 {host} 的設定，遠端主機本身不會有任何變動。",
   "confirm.delete.confirm": "刪除「{name}」",

@@ -1,5 +1,12 @@
 import { emptyDraft, findProtocol, protocolCatalog, protocolUsesUsername, type ConnectionProfile, type Protocol } from "../domain/connection";
 
+export function cardRouteProfiles(profiles: readonly ConnectionProfile[], id: string): ConnectionProfile[] {
+  const target = profiles.find((profile) => profile.id === id);
+  if (!target) return [];
+  return [target, ...profiles.filter((profile) =>
+    profile.id !== id && target.machineId && profile.machineId === target.machineId)];
+}
+
 export function newRouteDraft(source: ConnectionProfile, profiles: readonly ConnectionProfile[], requestedProtocol?: Protocol) {
   const used = new Set(profiles.filter(profile => profile.id === source.id ||
     (source.machineId && profile.machineId === source.machineId)).map(profile => profile.protocol));

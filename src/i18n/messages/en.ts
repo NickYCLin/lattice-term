@@ -494,6 +494,18 @@ export const en: Messages = {
   "validation.tagTooLong": "Each tag must be {max} characters or fewer.",
 
   // Delete confirmation ---------------------------------------------------
+  "confirm.delete.scope": "Delete scope",
+  "confirm.delete.routeTitle": "Delete this connection method?",
+  "confirm.delete.routeAction": "Delete this connection method",
+  "confirm.delete.card": "Entire card (all {count} connection methods)",
+  "confirm.delete.cardTitle": "Delete the entire “{name}” card?",
+  "confirm.delete.cardBody": "All {count} connection settings listed below will be deleted. Remote files will not be deleted.",
+  "confirm.delete.cardAction": "Delete entire card",
+  "confirm.delete.cardCredentialTitle": "This card still has saved credentials",
+  "confirm.delete.cardCredentialBody": "Some selected connection methods still have credentials in {provider}. Explicitly remove them in the Key Vault before deleting the card.",
+  "confirm.delete.routeBody": "Only the connection setting below will be deleted. Other methods on this card and remote files are kept.",
+  "confirm.delete.choose": "Delete the card or one connection method",
+  "confirm.delete.partial": "Deleted {count} methods; the rest have not been deleted. Reason: {detail}",
   "confirm.delete.title": "Delete {name}?",
   "confirm.delete.body":
     "This removes the entry for {host} from this workspace. The remote machine is not touched.",

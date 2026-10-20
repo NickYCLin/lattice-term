@@ -6,6 +6,39 @@ import { useWorkspace } from "./useWorkspace";
 import { createConnectionProfile, emptyDraft } from "../domain/connection";
 import { newRouteDraft, savedRouteProfiles } from "./connectionRoutes";
 
+it("preserves peer routes after deleting the representative and keeps failed deletions in storage", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const primary = createConnectionProfile({ ...emptyDraft(), name: "Fixture SSH", hostname: "lan.invalid", machineId: "machine" }, "ssh");
+  const secondary = createConnectionProfile({ ...emptyDraft("rdp"), name: "Fixture RDP", hostname: "wan.invalid", machineId: "machine" }, "rdp");
+  const unrelated = { ...primary, id: "other", machineId: undefined };
+  let database = [primary, secondary, unrelated];
+  let fail = false;
+  let api!: ReturnType<typeof useWorkspace>;
+  function Fixture() { api = useWorkspace(); return null; }
+  native.invoke.mockImplementation(async (command: string, args: Record<string, any>) => {
+    if (command === "list_connection_profiles") return database;
+    if (command === "delete_connection_profile") {
+      if (fail) throw new Error("fixture delete failure");
+      database = database.filter((profile) => profile.id !== args.id);
+    }
+  });
+  try {
+    await act(async () => root.render(<Fixture />));
+    await act(async () => api.setSelectedId(primary.id));
+    await act(async () => api.removeProfile(primary.id));
+    expect(api.profiles).toEqual([secondary, unrelated]);
+    expect(api.selectedId).toBeNull();
+    await act(async () => api.refreshProfiles());
+    expect(api.profiles).toEqual([secondary, unrelated]);
+    fail = true;
+    await act(async () => {
+      await expect(api.removeProfile(secondary.id)).rejects.toThrow("fixture delete failure");
+    });
+    expect(api.profiles).toEqual([secondary, unrelated]);
+    expect(database).toEqual([secondary, unrelated]);
+  } finally { await act(async () => root.unmount()); }
+});
+
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 

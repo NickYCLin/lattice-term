@@ -123,6 +123,13 @@
   z-index: 0;
 }
 
+.connection-delete__targets {
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow-y: auto;
+  padding-inline-start: var(--space-5);
+}
+
 .connection-card__head,
 .connection-card__meta,
 .connection-card__primary,

@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { createConnectionProfile, emptyDraft, protocolCatalog } from "../domain/connection";
-import { newRouteDraft, savedRouteProfiles } from "./connectionRoutes";
+import { cardRouteProfiles, newRouteDraft, savedRouteProfiles } from "./connectionRoutes";
 
 const source = createConnectionProfile({ ...emptyDraft(), name: "合成主機", hostname: "fixture.invalid", username: "fixture" }, "ssh-route");
 
 describe("same-machine route records", () => {
+  it("collects the whole card across groups and addresses but excludes unrelated hosts", () => {
+    const primary = { ...source, machineId: "machine" };
+    const secondary = { ...primary, id: "wan", hostname: "wan.invalid", group: "Other group" };
+    const unrelated = { ...source, id: "other", machineId: "another-machine" };
+    expect(cardRouteProfiles([primary, secondary, unrelated], secondary.id)).toEqual([secondary, primary]);
+    expect(cardRouteProfiles([source, { ...source, id: "same-host" }], source.id)).toEqual([source]);
+    expect(cardRouteProfiles([source], "missing")).toEqual([]);
+  });
   it("adds the requested RDP protocol without inheriting the custom SSH port", () => {
     const original = { ...source, port: 2222 };
     const draft = newRouteDraft(original, [original], "rdp");

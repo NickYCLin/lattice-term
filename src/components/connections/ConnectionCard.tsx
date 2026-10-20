@@ -226,8 +226,8 @@ export function ConnectionCard({
             type="button"
             className="icon-button icon-button--sm icon-button--danger"
             onClick={onDelete}
-            aria-label={t("row.delete", { name: profile.name })}
-            data-tooltip={t("common.delete")}
+            aria-label={t("row.delete", { name: profile.name }) + (linked.length > 0 ? ` · ${t("confirm.delete.choose")}` : "")}
+            data-tooltip={linked.length > 0 ? t("confirm.delete.choose") : t("common.delete")}
           >
             <TrashIcon size={14} />
           </button>
