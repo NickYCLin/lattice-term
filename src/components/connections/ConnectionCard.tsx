@@ -41,6 +41,7 @@ export function ConnectionCard({
   onSelect,
   onEdit,
   onAddRoute,
+  onDatabases,
   onDuplicate,
   onDelete,
   onToggleFavorite,
@@ -53,6 +54,7 @@ export function ConnectionCard({
   onSelect: () => void;
   onEdit: () => void;
   onAddRoute?: () => void;
+  onDatabases?: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onToggleFavorite: () => void;
@@ -176,6 +178,7 @@ export function ConnectionCard({
       </div>
 
       <div className="connection-card__foot">
+        {onDatabases && <button type="button" className="button button--secondary button--sm" onClick={onDatabases}>資料庫</button>}
         {onAddRoute && (
           <button
             type="button"

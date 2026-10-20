@@ -244,6 +244,9 @@ pub struct SavedConnectionView {
 /// the book as unavailable rather than as an empty book.
 pub trait ConnectionBook: Send + Sync {
     fn profiles(&self) -> Vec<ConnectionProfile>;
+    fn database(&self, _action: crate::database::DatabaseAction) -> CredentialReadFuture {
+        Box::pin(async { Err(ServiceError::unavailable()) })
+    }
     fn read_credential(&self, _profile_id: String) -> CredentialReadFuture {
         Box::pin(async { Err(ServiceError::credential_unavailable()) })
     }
@@ -251,6 +254,9 @@ pub trait ConnectionBook: Send + Sync {
         Box::pin(async { Err(ServiceError::unavailable()) })
     }
 }
+
+#[cfg(test)]
+mod database_tests;
 
 pub type CredentialReadFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ServiceError>> + Send>>;
@@ -265,6 +271,9 @@ pub type CredentialReadFuture =
 pub enum DesktopOperation {
     ListConnections,
     ListSavedConnections,
+    Database {
+        action: crate::database::DatabaseAction,
+    },
     ReadSavedCredential {
         profile_id: String,
     },
@@ -379,6 +388,7 @@ impl DesktopOperation {
         "desktopChat",
         "listConnections",
         "listSavedConnections",
+        "database",
         "readSavedCredential",
         "connectSaved",
         "fleet",
@@ -419,6 +429,7 @@ impl DesktopOperation {
             Self::DesktopChat { .. } => "desktopChat",
             Self::ListConnections => "listConnections",
             Self::ListSavedConnections => "listSavedConnections",
+            Self::Database { .. } => "database",
             Self::ReadSavedCredential { .. } => "readSavedCredential",
             Self::ConnectSaved { .. } => "connectSaved",
             Self::Fleet { .. } => "fleet",
@@ -442,6 +453,7 @@ impl DesktopOperation {
     pub fn target_id(&self) -> Option<&str> {
         match self {
             Self::ListConnections
+            | Self::Database { .. }
             | Self::ListSavedConnections
             | Self::ReadSavedCredential { .. }
             | Self::ConnectSaved { .. } => None,
@@ -496,6 +508,7 @@ impl DesktopOperation {
             } => Some(Scope::Download),
             // Cancellation/status require ownership of the original operation.
             Self::ListConnections
+            | Self::Database { .. }
             | Self::ListSavedConnections
             | Self::ReadSavedCredential { .. }
             | Self::ConnectSaved { .. }
@@ -1653,6 +1666,21 @@ impl DesktopService {
                 .ok_or_else(ServiceError::credential_unavailable)?;
             return book.read_credential(profile_id.clone()).await;
         }
+        if let DesktopOperation::Database { action } = &operation {
+            if !self.connection_book_shared() {
+                return Err(ServiceError::denied());
+            }
+            let result = self
+                .book
+                .as_ref()
+                .ok_or_else(ServiceError::unavailable)?
+                .database(action.clone())
+                .await;
+            if !self.connection_book_shared() {
+                return Err(ServiceError::denied());
+            }
+            return result;
+        }
         if let DesktopOperation::ConnectSaved {
             profile_id,
             request_id,
@@ -1865,6 +1893,7 @@ impl DesktopService {
                 action.validate()?;
             }
             DesktopOperation::ListConnections
+            | DesktopOperation::Database { .. }
             | DesktopOperation::ListSavedConnections
             | DesktopOperation::ReadSavedCredential { .. }
             | DesktopOperation::ConnectSaved { .. }
@@ -3086,6 +3115,9 @@ mod tests {
     #[test]
     fn every_operation_kind_is_announced_and_matches_its_wire_tag() {
         let samples = [
+            DesktopOperation::Database {
+                action: crate::database::DatabaseAction::List {},
+            },
             DesktopOperation::DesktopChat {
                 target_id: "t".into(),
                 action: DesktopChatAction::State {},
@@ -3175,7 +3207,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 21);
+        assert_eq!(DesktopOperation::KINDS.len(), 22);
     }
 
     #[test]

@@ -361,7 +361,7 @@ try {
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
       "get_capabilities", "list_agent_sessions", "read_agent_output", "wait_agent_state",
       "list_launch_plans", "launch_agent", "send_agent_prompt", "cancel_agent_task",
-      "list_authorized_connections", "list_saved_connections", "get_host_metrics", "sftp_list_directory",
+      "list_authorized_connections", "list_saved_connections", "database", "get_host_metrics", "sftp_list_directory",
       "connect_saved_connection", "read_saved_connection_credential", "desktop_agent", "desktop_chat",
       "sftp_read_text", "sftp_find_files",
       "ssh_exec_job", "ssh_run_command", "remote_run_command", "remote_file_transfer", "sftp_transfer", "capture_remote_screen", "send_remote_input", "remote_fleet", "get_remote_operation",

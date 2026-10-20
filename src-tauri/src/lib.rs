@@ -16,6 +16,7 @@ pub mod clipboard;
 pub mod cliproxy;
 mod connection_credentials;
 pub mod credentials;
+pub mod database;
 mod desktop_autostart;
 pub mod desktop_notification;
 pub mod domain;
@@ -544,6 +545,9 @@ async fn mcp_remote_targets(
 struct DesktopConnectionBook(tauri::AppHandle);
 
 impl mcp_desktop::ConnectionBook for DesktopConnectionBook {
+    fn database(&self, action: database::DatabaseAction) -> mcp_desktop::CredentialReadFuture {
+        database::from_desktop(self.0.clone(), action)
+    }
     fn read_credential(&self, profile_id: String) -> mcp_desktop::CredentialReadFuture {
         let app = self.0.clone();
         Box::pin(async move {
@@ -5487,6 +5491,7 @@ pub fn run() {
             crate::credentials::initialize(dir.clone());
             let storage = FileStorage::open(&dir)?;
             app.manage(Mutex::new(storage));
+            app.manage(database::DatabaseRegistry::new(dir.clone()));
             let agent_plans = FileAgentPlanStore::open(&dir).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(agent_plans));
             app.manage(McpPlanSync::default());
@@ -5611,6 +5616,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            database::database_profiles,
+            database::database_save,
+            database::database_delete,
+            database::database_cleanup,
+            database::database_read,
             local_path_info,
             local_file_read_text,
             runtime_summary,

@@ -1,0 +1,51 @@
+.database-manager {
+  width: min(72rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+}
+.database-manager__header,
+.database-manager__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.database-manager__header { justify-content: space-between; }
+.database-manager__layout {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(0, 3fr);
+  gap: var(--space-4);
+}
+.database-manager__list { list-style: none; padding: 0; }
+.database-manager__list li { margin-block: var(--space-2); }
+.database-manager__list button { width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.database-manager__fields {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.database-manager label { display: grid; gap: var(--space-1); }
+.database-manager input:not([type="checkbox"]),
+.database-manager select {
+  min-width: 0;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-md);
+}
+.database-manager .button { height: auto; min-height: var(--control-height); padding-block: var(--space-2); white-space: normal; }
+.database-manager__permission { grid-template-columns: auto 1fr; align-items: start; }
+.database-manager__result { overflow: auto; max-height: 24rem; margin-block: var(--space-3); }
+.database-manager__result table { border-collapse: collapse; width: 100%; }
+.database-manager__result td,
+.database-manager__result th { padding: var(--space-2); text-align: start; border: 1px solid currentColor; max-width: 24rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.database-manager__error { font-weight: 600; }
+@media (max-width: 700px) {
+  .database-manager__layout { grid-template-columns: minmax(0, 1fr); }
+}

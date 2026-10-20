@@ -12,6 +12,8 @@
 
 ## 從需求找程式碼
 
+資料庫連線、多版本執行個體與 MCP 唯讀瀏覽，請看 [資料庫使用說明](DATABASES.zh-TW.md)。
+
 | 想了解或修改的範圍 | 前端入口 | Rust／協定入口 | 延伸文件 |
 | --- | --- | --- | --- |
 | 應用程式導覽、頁面切換與全域狀態 | `src/App.tsx`、`src/views/` | `src-tauri/src/lib.rs` | [介面實作現況](UI_IMPLEMENTATION.zh-TW.md) |

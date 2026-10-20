@@ -211,6 +211,7 @@ pub enum CredentialKind {
     LatticePairingCode,
     LatticeHostPairingCode,
     CliProxyApiKey,
+    DatabasePassword,
 }
 
 impl CredentialKind {
@@ -223,6 +224,7 @@ impl CredentialKind {
             Self::LatticePairingCode => "lattice-pairing-code",
             Self::LatticeHostPairingCode => "lattice-host-pairing-code",
             Self::CliProxyApiKey => "cliproxyapi-key",
+            Self::DatabasePassword => "database-password",
         }
     }
 
@@ -231,6 +233,7 @@ impl CredentialKind {
     fn protocol(self) -> Option<Protocol> {
         match self {
             Self::SshPassword => Some(Protocol::Ssh),
+            Self::DatabasePassword => Some(Protocol::Ssh),
             Self::SftpPassword => Some(Protocol::Sftp),
             Self::RdpPassword => Some(Protocol::Rdp),
             Self::VncPassword => Some(Protocol::Vnc),

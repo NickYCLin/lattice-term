@@ -250,6 +250,7 @@ impl Bridge {
                     if matches!(
                         operation,
                         DesktopOperation::ListSavedConnections
+                            | DesktopOperation::Database { .. }
                             | DesktopOperation::ReadSavedCredential { .. }
                             | DesktopOperation::ConnectSaved { .. }
                     ) {

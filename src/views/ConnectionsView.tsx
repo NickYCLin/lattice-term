@@ -24,6 +24,7 @@ import type { ImportIssue } from "../domain/export";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/context";
 import { ConnectionCard } from "../components/connections/ConnectionCard";
+import { DatabaseManager } from "../components/connections/DatabaseManager";
 import { Callout, EmptyState } from "../components/common/Callout";
 import {
   ChevronRightIcon,
@@ -74,6 +75,7 @@ export function ConnectionsView({
   platform?: string;
 }) {
   const { t } = useI18n();
+  const [databaseScope, setDatabaseScope] = useState<{ hostKeys?: string[] } | null>(null);
   const {
     profiles,
     visibleGroups,
@@ -230,9 +232,14 @@ export function ConnectionsView({
     />
   );
 
+  const databaseManager = databaseScope && <DatabaseManager profiles={profiles} hostKeys={databaseScope.hostKeys} onClose={() => setDatabaseScope(null)} />;
+  const databaseButton = backendAvailable && !mobile && <button type="button" className="button button--secondary button--sm" onClick={() => setDatabaseScope({})}>管理所有資料庫</button>;
+
   if (profiles.length === 0) {
     return (
       <div className="connections connections--empty">
+        {databaseManager}
+        {databaseButton}
         {filePicker}
         <div style={{ padding: "var(--space-5) var(--space-6) 0" }}>
           {notice && (
@@ -282,6 +289,7 @@ export function ConnectionsView({
 
   return (
     <div className="connections">
+      {databaseManager}
       {filePicker}
 
       <div className="connections__toolbar">
@@ -295,6 +303,7 @@ export function ConnectionsView({
         </p>
 
         <div className="connections__tools">
+          {databaseButton}
           <label className="select">
             <span className="select__label">{t("connections.sortBy")}</span>
             <select
@@ -388,6 +397,7 @@ export function ConnectionsView({
                       const linked = cardFor.get(profile.id) ?? [];
                       return (
                         <ConnectionCard
+                          onDatabases={backendAvailable && !mobile ? () => setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
                           key={profile.id}
                           profile={profile}
                           linked={linked.map((peer) => ({
