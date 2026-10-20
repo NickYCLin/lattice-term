@@ -88,7 +88,8 @@ describe("Agent session folder relocation", () => {
 
   it("restarts the group in the new folder before closing the old sessions", async () => {
     const members = [
-      session({ profileConfigPath: "/profiles/b" }),
+      session({ profileConfigPath: "/profiles/b",
+        launchArguments: ["--model", "fixture", "--ask-for-approval", "never", "--sandbox", "danger-full-access"] }),
       session({
         sessionId: "agent-old-2",
         definitionId: "claude",
@@ -140,6 +141,7 @@ describe("Agent session folder relocation", () => {
         seedInput: null,
         restoreExistingSession: true,
         profileConfigPath: "/profiles/b",
+        arguments: ["--ask-for-approval", "never", "--sandbox", "danger-full-access"],
         workingDirectory: "D:\\new",
       }),
     );

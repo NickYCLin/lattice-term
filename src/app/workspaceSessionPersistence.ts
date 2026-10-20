@@ -1,4 +1,5 @@
 import { launchedThroughCliProxy } from "./cliProxyApi";
+import { restoredSessionPermissionArguments } from "./sessionPermissions";
 import type { AgentSessionSummary } from "./useAgentSessions";
 import type { SessionSummary as SshSessionSummary } from "./useSshSessions";
 
@@ -477,7 +478,7 @@ export function agentRestoreArguments(session: SavedAgentSession): string[] {
     // The native conversation does not retain our process-local provider/key.
     // Restore public proxy metadata; the desktop reloads the bound credential.
     return launchedThroughCliProxy(session.launchArguments)
-      ? [...session.launchArguments] : [];
+      ? [...session.launchArguments] : restoredSessionPermissionArguments(session.definitionId, session.launchArguments);
   }
   const launchArguments = agentFreshLaunchArguments(session);
   // Claude's --continue resumes the most recent conversation in this working

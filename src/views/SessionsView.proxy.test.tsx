@@ -7,6 +7,7 @@ import { installFakeDom } from "../app/testFixtures/hookDom";
 import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 import { SessionsView } from "./SessionsView";
 import { ChatView } from "./ChatView";
+import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
 
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: async () => "C:/Users/test", downloadDir: async () => "C:/Downloads", join: async (...parts: string[]) => parts.join("/") }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => [] }));
@@ -29,12 +30,14 @@ function props(node: TestNode): Record<string, any> {
 }
 
 it.each([
-  { catalog: [], direct: true, folder: false },
-  { catalog: [fakeDefinition({ installed: false, installedPath: null })], direct: true, folder: false },
-  { catalog: [fakeDefinition({ id: "claude", label: "Claude Code" })], direct: true, folder: false },
-  { catalog: [fakeDefinition()], direct: false, folder: false },
-  { catalog: [], direct: true, folder: true },
-])("launches the selected proxy from Sessions: $catalog, folder=$folder", async ({ catalog, direct, folder }) => {
+  { catalog: [], direct: true, folder: false, permission: "default" },
+  { catalog: [fakeDefinition({ installed: false, installedPath: null })], direct: true, folder: false, permission: "default" },
+  { catalog: [fakeDefinition({ id: "claude", label: "Claude Code" })], direct: true, folder: false, permission: "default" },
+  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "default" },
+  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "full" },
+  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "readOnly" },
+  { catalog: [], direct: true, folder: true, permission: "default" },
+])("launches the selected proxy from Sessions: folder=$folder, permission=$permission", async ({ catalog, direct, folder, permission }) => {
   const container = installFakeDom();
   const createElement = document.createElement.bind(document);
   vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
@@ -75,6 +78,15 @@ it.each([
     expect(agents.launch).not.toHaveBeenCalled();
     await act(async () => props(modelInput!).onChange({ currentTarget: { value: "proxy-model" } }));
     expect(props(launch()!).disabled).toBe(false);
+    const permissionSelect = elements(container).find(node => props(node)["aria-describedby"]?.endsWith("-hint")
+      && props(node).value === "default" && props(node).onChange);
+    if (direct) {
+      expect(permissionSelect).toBeUndefined();
+    } else {
+      expect(permissionSelect).toBeDefined();
+      await act(async () => props(permissionSelect!).onChange({ currentTarget: { value: permission } }));
+      if (permission === "full") expect(elements(container).some(node => String(props(node).children ?? "").includes("略過工具權限詢問"))).toBe(true);
+    }
     await act(async () => props(launch()!).onClick());
     if (direct) {
       expect(onStartApiChat).toHaveBeenCalledExactlyOnceWith({ definitionId: "codex", accountProfileId: null,
@@ -82,7 +94,12 @@ it.each([
       expect(agents.launch).not.toHaveBeenCalled();
     } else {
       expect(onStartApiChat).not.toHaveBeenCalled();
-      expect(agents.launch).toHaveBeenCalledWith(expect.objectContaining({ definitionId: "codex", workingDirectory: "C:/Users/test" }));
+      expect(agents.launch).toHaveBeenCalledWith(expect.objectContaining({ definitionId: "codex",
+        workingDirectory: folder ? "D:/project/test" : "C:/Users/test",
+        arguments: expect.arrayContaining(sessionPermissionArguments("codex", permission as SessionPermission)) }));
+      await act(async () => props(quick!).onClick());
+      const reopened = elements(container).find(node => props(node)["aria-describedby"]?.endsWith("-hint") && props(node).onChange);
+      expect(props(reopened!).value).toBe("default");
     }
   } finally {
     await act(async () => root.unmount());

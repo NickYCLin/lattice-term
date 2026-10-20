@@ -27,6 +27,7 @@ import type {
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
 import {
   accountModelKey,
+  cliProxyAgentFor,
   accountModelLaunchSettings,
   accountModelOptions,
   accountModelTargets,
@@ -40,6 +41,8 @@ import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
 import { QuickChatChoices } from "../components/sessions/QuickChatChoices";
+import { SessionPermissionField } from "../components/sessions/SessionPermissionField";
+import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
 import { displayPath } from "../app/displayPath";
 import type { SshApi } from "../app/useSshSessions";
 import type { SftpApi } from "../app/useSftpSessions";
@@ -376,7 +379,9 @@ export function SessionsView({
     Record<string, string>
   >({});
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
-  const [summaryHandoff, setSummaryHandoff] = useState<{ group: { groupId: string; members: AgentSessionSummary[] }; selection: AccountModelSelection; sourceId: string } | null>(null);
+  const [summaryHandoff, setSummaryHandoff] = useState<{ group: { groupId: string; members: AgentSessionSummary[] }; selection: AccountModelSelection; sourceId: string; permission: SessionPermission } | null>(null);
+  const [projectPermission, setProjectPermission] = useState<SessionPermission>("default");
+  const [addPermission, setAddPermission] = useState<SessionPermission>("default");
   const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
   const addCliButtonRef = useRef<HTMLButtonElement>(null);
@@ -414,6 +419,12 @@ export function SessionsView({
   const [newProjectDirectory, setNewProjectDirectory] = useState<string | null>(
     null,
   );
+  useEffect(() => {
+    if (newProjectDirectory === null) setProjectPermission("default");
+  }, [newProjectDirectory]);
+  useEffect(() => {
+    if (addCliFor === null) setAddPermission("default");
+  }, [addCliFor]);
   const [selectedProjectModel, setSelectedProjectModel] = useState<AccountModelSelection | null>(
     null,
   );
@@ -881,7 +892,7 @@ export function SessionsView({
     setAddCliFor(null);
     setAddCliError(null);
     if (carryContext) {
-      setSummaryHandoff({ group, selection, sourceId: activeMemberId(group) });
+      setSummaryHandoff({ group, selection, sourceId: activeMemberId(group), permission: addPermission });
       return;
     }
     const workingDirectory = group.members[0]?.workingDirectory ?? "";
@@ -891,7 +902,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies, installedAgents.map((definition) => definition.id)),
+        ...sessionLaunchSettings(selection, addPermission),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -1057,6 +1068,18 @@ export function SessionsView({
     </div>
   ) : null;
 
+  function sessionDefinitionId(selection: AccountModelSelection | null): string {
+    return selection?.provider === "cliproxyapi"
+      ? cliProxyAgentFor(selection.model, installedAgents.map(definition => definition.id))
+      : selection?.definitionId ?? "";
+  }
+
+  function sessionLaunchSettings(selection: AccountModelSelection, permission: SessionPermission) {
+    const settings = accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies,
+      installedAgents.map(definition => definition.id));
+    return { ...settings, arguments: [...settings.arguments, ...sessionPermissionArguments(settings.definitionId, permission)] };
+  }
+
   async function launchNewProject() {
     if (!newProjectDirectory?.trim() || !selectedProjectModel || !projectModelAvailable || launchingProjectCli || choosingProject) return;
     if (directProjectChat && onStartApiChat) {
@@ -1079,7 +1102,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...accountModelLaunchSettings(selectedProjectModel, accountProfiles, cliProxySettings.proxies, installedAgents.map((definition) => definition.id)),
+        ...sessionLaunchSettings(selectedProjectModel, projectPermission),
         resumeSessionId: null,
         groupId: null,
         seedInput: null,
@@ -1146,8 +1169,10 @@ export function SessionsView({
             proxyModels={cliProxyModels}
             onReloadProxyModels={reloadCliProxyModels}
             disabled={launchingProjectCli !== null}
-            onChange={setSelectedProjectModel}
+            onChange={selection => { setSelectedProjectModel(selection); setProjectPermission("default"); }}
           />
+          {!directProjectChat && <SessionPermissionField definitionId={sessionDefinitionId(selectedProjectModel)}
+            value={projectPermission} onChange={setProjectPermission} disabled={launchingProjectCli !== null} />}
           {directProjectChat ? <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>
             : installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
           {newProjectError && (
@@ -2148,7 +2173,7 @@ export function SessionsView({
           const brief = `Source: ${source?.label ?? summaryHandoff.sourceId}\nSummary handoff, not native thread continuity.\n\n${summary}`;
           const path = await agents.writeHandoffFile(source?.label ?? "", brief);
           const session = await agents.launch({ label: "", executable: "",
-            ...accountModelLaunchSettings(target, accountProfiles, cliProxySettings.proxies, installedAgents.map(definition => definition.id)),
+            ...sessionLaunchSettings(target, summaryHandoff.permission),
             resumeSessionId: null, groupId: summaryHandoff.group.groupId,
             sandbox: source?.sandboxed !== false,
             seedInput: t("terminal.handoff.filePointer", { path, source: source?.label ?? summaryHandoff.sourceId }),
@@ -2581,8 +2606,10 @@ export function SessionsView({
                             allowCliProxyApi
                             proxyModels={cliProxyModels}
                             onReloadProxyModels={reloadCliProxyModels}
-                            onChange={setSelectedAddModel}
+                            onChange={selection => { setSelectedAddModel(selection); setAddPermission("default"); }}
                           />
+                          <SessionPermissionField definitionId={sessionDefinitionId(selectedAddModel)}
+                            value={addPermission} onChange={setAddPermission} />
                           {installed.length === 0 && (
                             <span className="cli-switch__menu-empty">
                               {t("terminal.addCli.none")}

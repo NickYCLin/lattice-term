@@ -4,6 +4,7 @@ import type {
   AgentLaunchRequest,
   AgentSessionSummary,
 } from "./useAgentSessions";
+import { restoredSessionPermissionArguments } from "./sessionPermissions";
 
 export type AgentRelocationContinuity =
   | "native"
@@ -105,7 +106,9 @@ export async function relocateAgentSessionGroup({
         label: session.label,
         executable: session.executable,
         arguments:
-          continuities[index] === "native" ? [] : session.launchArguments,
+          continuities[index] === "native"
+            ? restoredSessionPermissionArguments(session.definitionId, session.launchArguments)
+            : session.launchArguments,
         resumeSessionId:
           continuities[index] === "native"
             ? session.capturedSessionId
