@@ -16,11 +16,18 @@ fn failed() -> String {
     "資料庫操作失敗。請檢查服務、連接埠、帳密、資料庫名稱、唯讀權限與 TLS 憑證；伺服器原始錯誤不會回傳，以免洩漏敏感資料。".into()
 }
 
+fn mysql_text(value: Option<Vec<u8>>) -> Result<Option<String>, String> {
+    value
+        .map(String::from_utf8)
+        .transpose()
+        .map_err(|_| failed())
+}
+
 impl Client {
     async fn connect(profile: &DatabaseProfile, password: &str) -> Result<Self, String> {
         match profile.engine {
             Engine::Postgres => {
-                let options = sqlx::postgres::PgConnectOptions::new()
+                let mut options = sqlx::postgres::PgConnectOptions::new()
                     .host(&profile.hostname)
                     .port(profile.port)
                     .username(&profile.username)
@@ -28,6 +35,10 @@ impl Client {
                     .database(&profile.database)
                     .ssl_mode(sqlx::postgres::PgSslMode::VerifyFull)
                     .disable_statement_logging();
+                if !profile.tls_ca_pem.is_empty() {
+                    options =
+                        options.ssl_root_cert_from_pem(profile.tls_ca_pem.as_bytes().to_vec());
+                }
                 let mut connection = sqlx::PgConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
@@ -42,7 +53,7 @@ impl Client {
                 Ok(Self::Postgres(connection))
             }
             Engine::Mysql | Engine::Mariadb => {
-                let options = sqlx::mysql::MySqlConnectOptions::new()
+                let mut options = sqlx::mysql::MySqlConnectOptions::new()
                     .host(&profile.hostname)
                     .port(profile.port)
                     .username(&profile.username)
@@ -50,11 +61,13 @@ impl Client {
                     .database(&profile.database)
                     .ssl_mode(sqlx::mysql::MySqlSslMode::VerifyIdentity)
                     .disable_statement_logging();
+                if !profile.tls_ca_pem.is_empty() {
+                    options = options.ssl_ca_from_pem(profile.tls_ca_pem.as_bytes().to_vec());
+                }
                 let mut connection = sqlx::MySqlConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
-                sqlx::query("START TRANSACTION READ ONLY")
-                    .execute(&mut connection)
+                sqlx::Executor::execute(&mut connection, "START TRANSACTION READ ONLY")
                     .await
                     .map_err(|_| failed())?;
                 Ok(Self::Mysql(connection))
@@ -88,6 +101,20 @@ impl Client {
                     password,
                 ));
                 config.encryption(tiberius::EncryptionLevel::Required);
+                let mut ca_file = None;
+                if !profile.tls_ca_pem.is_empty() {
+                    use std::io::Write;
+                    let mut file = tempfile::Builder::new()
+                        .prefix("latticeterm-ca-")
+                        .suffix(".pem")
+                        .tempfile()
+                        .map_err(|_| failed())?;
+                    file.write_all(profile.tls_ca_pem.as_bytes())
+                        .map_err(|_| failed())?;
+                    file.flush().map_err(|_| failed())?;
+                    config.trust_cert_ca(file.path().to_string_lossy());
+                    ca_file = Some(file);
+                }
                 let socket =
                     tokio::net::TcpStream::connect((profile.hostname.as_str(), profile.port))
                         .await
@@ -96,6 +123,7 @@ impl Client {
                 let mut connection = tiberius::Client::connect(config, socket.compat_write())
                     .await
                     .map_err(|_| failed())?;
+                drop(ca_file);
                 connection
                     .simple_query("SET LOCK_TIMEOUT 15000; SET TEXTSIZE 4096")
                     .await
@@ -133,7 +161,23 @@ impl Client {
         }
         match self {
             Self::Postgres(connection) => fetch!(connection),
-            Self::Mysql(connection) => fetch!(connection),
+            Self::Mysql(connection) => {
+                let mut query = sqlx::query(statement);
+                for parameter in parameters {
+                    query = query.bind(*parameter);
+                }
+                query
+                    .fetch_all(connection)
+                    .await
+                    .map_err(|_| failed())?
+                    .into_iter()
+                    .map(|row| {
+                        (0..row.len())
+                            .map(|index| mysql_text(row.try_get(index).map_err(|_| failed())?))
+                            .collect()
+                    })
+                    .collect()
+            }
             Self::Sqlite(connection) => fetch!(connection),
             Self::SqlServer(connection) => {
                 let parameters: Vec<&dyn tiberius::ToSql> = parameters
@@ -303,8 +347,29 @@ pub(super) async fn read(
 }
 
 #[cfg(test)]
+pub(super) async fn write_is_rejected(profile: &DatabaseProfile, password: &str) -> bool {
+    Client::connect(profile, password)
+        .await
+        .unwrap()
+        .query("INSERT INTO sample VALUES (99, 'unexpected')", &[])
+        .await
+        .is_err()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mysql_metadata_accepts_binary_collation_but_requires_valid_utf8() {
+        assert_eq!(mysql_text(None).unwrap(), None);
+        assert_eq!(mysql_text(Some(vec![])).unwrap(), Some(String::new()));
+        assert_eq!(
+            mysql_text(Some("繁體中文🙂".as_bytes().to_vec())).unwrap(),
+            Some("繁體中文🙂".into())
+        );
+        assert!(mysql_text(Some(vec![0xff])).is_err());
+    }
 
     #[tokio::test]
     async fn sqlite_driver_itself_rejects_writes() {
@@ -331,6 +396,7 @@ mod tests {
             username: String::new(),
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
+            tls_ca_pem: String::new(),
             allow_mcp_read: false,
         };
         let Client::Sqlite(mut connection) = Client::connect(&profile, "").await.unwrap() else {

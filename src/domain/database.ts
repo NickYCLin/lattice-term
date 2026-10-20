@@ -18,6 +18,7 @@ export interface DatabaseProfile {
   username: string;
   database: string;
   sqlitePath: string;
+  tlsCaPem?: string;
   allowMcpRead: boolean;
 }
 
@@ -53,6 +54,6 @@ export function changeDatabaseEngine(profile: DatabaseProfile, engine: DatabaseE
     hostname: engine === "sqlite" ? "" : profile.hostname,
     username: engine === "sqlite" ? "" : profile.username,
     database: engine === "sqlite" ? "" : profile.database,
-    sqlitePath: "", allowMcpRead: false,
+    sqlitePath: "", tlsCaPem: "", allowMcpRead: false,
   };
 }

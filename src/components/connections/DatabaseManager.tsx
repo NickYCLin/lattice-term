@@ -61,7 +61,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   }
 
   function update<Key extends keyof DatabaseProfile>(key: Key, value: DatabaseProfile[Key]) {
-    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
+    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
   }
 
   function save(event: FormEvent) {
@@ -69,7 +69,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
     if (!snapshot) return;
     void perform(async () => {
       const value = await invoke<DatabaseSnapshot>("database_save", { profile: draft, revision: snapshot.revision, password: password || null });
-      setSnapshot(value); setPassword(""); setTables([]); setTableIndex(""); setResult(null);
+      setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setTables([]); setTableIndex(""); setResult(null);
       setNotice("連線已儲存；尚未代表已連線成功，請按測試連線確認。");
     });
   }
@@ -144,6 +144,8 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
                 <label>資料庫名稱<input required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
                 <label>帳號<input required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
                 <label>密碼（留白保留；變更端點須重填）<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+                <label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
+                <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p>
               </>}
               <label className="database-manager__permission"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
               <p>密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>

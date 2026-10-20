@@ -12,9 +12,10 @@ describe("database profiles", () => {
     expect(databaseEngines.map((entry) => entry.value)).toEqual(["postgres", "mysql", "mariadb", "sqlServer", "sqlite"]);
   });
   it("resets the port and permission when switching engines and removes incompatible fields", () => {
-    const original = { ...emptyDatabase("host", "database.invalid"), username: "reader", database: "sample", allowMcpRead: true };
+    const original = { ...emptyDatabase("host", "database.invalid"), username: "reader", database: "sample", tlsCaPem: "old CA", allowMcpRead: true };
     const sqlite = changeDatabaseEngine(original, "sqlite");
     expect(sqlite).toMatchObject({ id: original.id, hostKey: "host", hostname: "", username: "", database: "", port: 0, allowMcpRead: false });
+    expect(sqlite.tlsCaPem).toBe("");
     expect(changeDatabaseEngine({ ...sqlite, sqlitePath: "C:/sample.sqlite" }, "sqlServer")).toMatchObject({ port: 1433, sqlitePath: "", allowMcpRead: false });
   });
 });

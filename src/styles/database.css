@@ -29,6 +29,7 @@
 }
 .database-manager label { display: grid; gap: var(--space-1); }
 .database-manager input:not([type="checkbox"]),
+.database-manager textarea,
 .database-manager select {
   min-width: 0;
   width: 100%;

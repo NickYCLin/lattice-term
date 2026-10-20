@@ -12,6 +12,7 @@ vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
 
 type Host = Record<string, unknown> & { childNodes?: Host[] };
 type Props = {
+  rows?: number;
   children?: unknown; value?: unknown; type?: string; checked?: boolean; disabled?: boolean;
   onClick?: () => void;
   onSubmit?: (event: { preventDefault: () => void }) => void;
@@ -93,6 +94,17 @@ it("requires a specific delete confirmation and leaves the other version alone",
   await click("確認刪除此連線");
   expect(invoke).toHaveBeenCalledWith("database_delete", { profileId: "first", revision: "original" });
   expect(hostProps(container).some((props) => Array.isArray(props.children) && props.children.includes("另一個版本"))).toBe(true);
+});
+
+it("revokes MCP when CA changes and accepts canonical saved profiles after clearing it", async () => {
+  snapshot.profiles[0] = { ...database, tlsCaPem: "old CA", allowMcpRead: true };
+  await render(); await click("測試資料庫");
+  await change((props) => props.rows === 5, { value: "" });
+  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+  invoke.mockResolvedValueOnce({ ...snapshot, profiles: [database], revision: "saved" });
+  await submit();
+  expect(hostProps(container).find((props) => props.children === "測試連線／讀取版本")!.disabled).toBe(false);
+  await click("測試連線／讀取版本");
 });
 
 it("uses structured read requests with saved identities and bounded pagination", async () => {

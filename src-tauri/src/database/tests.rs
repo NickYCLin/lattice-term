@@ -14,6 +14,7 @@ fn profile(directory: &Path, id: &str) -> DatabaseProfile {
         username: String::new(),
         database: String::new(),
         sqlite_path: path.to_string_lossy().into_owned(),
+        tls_ca_pem: String::new(),
         allow_mcp_read: false,
     }
 }
@@ -149,6 +150,31 @@ fn credentials_are_bound_to_engine_endpoint_account_and_database() {
     changed.port = 9999;
     assert_ne!(identity, changed.credential_profile().id);
     assert!(identity.len() <= 128);
+    changed = original.clone();
+    changed.tls_ca_pem = "different trust anchor".into();
+    assert_ne!(identity, changed.credential_profile().id);
+    assert!(!original.same_endpoint(&changed));
+}
+
+#[test]
+fn ca_input_rejects_private_keys_invalid_data_and_oversized_input() {
+    assert!(validate_ca("").is_ok());
+    for pem in [
+        "not a certificate",
+        "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+        "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----",
+    ] {
+        assert!(validate_ca(pem).is_err());
+    }
+    assert!(validate_ca(&"x".repeat(16385)).is_err());
+    let directory = tempfile::tempdir().unwrap();
+    let original = profile(directory.path(), "legacy");
+    let raw = serde_json::to_value(&original).unwrap();
+    assert!(raw.get("tlsCaPem").is_none());
+    assert_eq!(
+        serde_json::from_value::<DatabaseProfile>(raw).unwrap(),
+        original
+    );
 }
 
 #[tokio::test]

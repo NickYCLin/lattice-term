@@ -1,5 +1,7 @@
 mod drivers;
 #[cfg(test)]
+mod network_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::credentials::{self, CredentialKind};
@@ -41,6 +43,8 @@ pub struct DatabaseProfile {
     pub username: String,
     pub database: String,
     pub sqlite_path: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tls_ca_pem: String,
     pub allow_mcp_read: bool,
 }
 
@@ -49,9 +53,14 @@ impl DatabaseProfile {
         identifier(&self.id, 80)?;
         identifier(&self.host_key, 128)?;
         identifier(&self.name, 100)?;
+        validate_ca(&self.tls_ca_pem)?;
         if self.engine == Engine::Sqlite {
             validate_sqlite_path(&self.sqlite_path)?;
-            if !self.hostname.is_empty() || !self.username.is_empty() || !self.database.is_empty() {
+            if !self.hostname.is_empty()
+                || !self.username.is_empty()
+                || !self.database.is_empty()
+                || !self.tls_ca_pem.is_empty()
+            {
                 return Err("SQLite 請只設定本機檔案，不要填入伺服器欄位。".into());
             }
         } else {
@@ -74,7 +83,7 @@ impl DatabaseProfile {
     }
 
     fn credential_profile(&self) -> ConnectionProfile {
-        let binding = serde_json::to_vec(&(
+        let mut binding = serde_json::to_vec(&(
             self.engine,
             &self.hostname,
             self.port,
@@ -83,6 +92,9 @@ impl DatabaseProfile {
             &self.sqlite_path,
         ))
         .unwrap_or_default();
+        if !self.tls_ca_pem.is_empty() {
+            binding.extend_from_slice(self.tls_ca_pem.as_bytes());
+        }
         let digest: String = Sha256::digest(binding)
             .iter()
             .take(12)
@@ -116,7 +128,27 @@ impl DatabaseProfile {
             && self.username == other.username
             && self.database == other.database
             && self.sqlite_path == other.sqlite_path
+            && self.tls_ca_pem == other.tls_ca_pem
     }
+}
+
+fn validate_ca(pem: &str) -> Result<(), String> {
+    use rustls::pki_types::{pem::PemObject, CertificateDer};
+    if pem.is_empty() {
+        return Ok(());
+    }
+    let invalid = || "CA 必須是一張有效的 PEM 憑證（最多 16 KiB），不可包含私鑰。".to_string();
+    if pem.len() > 16 * 1024
+        || pem.matches("-----BEGIN ").count() != 1
+        || !pem.trim_start().starts_with("-----BEGIN CERTIFICATE-----")
+        || !pem.trim_end().ends_with("-----END CERTIFICATE-----")
+    {
+        return Err(invalid());
+    }
+    let certificate = CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|_| invalid())?;
+    rustls::RootCertStore::empty()
+        .add(certificate)
+        .map_err(|_| invalid())
 }
 
 fn identifier(value: &str, max: usize) -> Result<(), String> {
