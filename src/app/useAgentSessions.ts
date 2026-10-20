@@ -752,7 +752,7 @@ export interface AgentApi {
   maxActiveSessions: number | null;
   setMaxActiveSessions: (limit: number | null) => Promise<void>;
   resize: (sessionId: string, cols: number, rows: number) => Promise<void>;
-  disconnect: (sessionId: string) => Promise<void>;
+  disconnect: (sessionId: string, options?: { retainSession?: boolean }) => Promise<void>;
   clearLastClosed: () => void;
   onData: (
     sessionId: string,
@@ -808,6 +808,7 @@ export function useAgentSessions(): AgentApi {
   const outputTailHandlers = useRef(new Map<string, Set<(text: string) => void>>());
   const sessionsRef = useRef(sessions);
   const intentionalDisconnects = useRef(new Set<string>());
+  const retainedDisconnects = useRef(new Set<string>());
   const launchRaceGuard = useRef(new AgentLaunchRaceGuard());
   const launchRequests = useRef(new Map<string, AgentLaunchRequest>());
   const codexUpdateRetryRequests = useRef(new WeakSet<AgentLaunchRequest>());
@@ -1008,7 +1009,7 @@ export function useAgentSessions(): AgentApi {
             }
           }
           setSessions((current) => {
-            const next = intentional
+            const next = intentional && !retainedDisconnects.current.has(sessionId)
               ? current.filter((session) => session.sessionId !== sessionId)
               : markAgentSessionClosed(current, sessionId, event.payload.reason);
             sessionsRef.current = next;
@@ -1649,11 +1650,13 @@ export function useAgentSessions(): AgentApi {
     [],
   );
 
-  const disconnect = useCallback(async (sessionId: string) => {
+  const disconnect = useCallback(async (sessionId: string, options?: { retainSession?: boolean }) => {
     const closed = sessionsRef.current.some(
       (session) => session.sessionId === sessionId && session.closedReason,
     );
     if (closed) {
+      if (options?.retainSession) return;
+      retainedDisconnects.current.delete(sessionId);
       setSessions((current) => {
         const next = current.filter((session) => session.sessionId !== sessionId);
         sessionsRef.current = next;
@@ -1670,14 +1673,22 @@ export function useAgentSessions(): AgentApi {
       return;
     }
     intentionalDisconnects.current.add(sessionId);
+    if (options?.retainSession) retainedDisconnects.current.add(sessionId);
     try {
       const { invoke } = await core();
       await invoke("agent_disconnect", { sessionId });
-      setSessions((current) =>
-        current.filter((session) => session.sessionId !== sessionId),
-      );
+      const update = (current: AgentSessionSummary[]) => options?.retainSession
+        ? markAgentSessionClosed(current, sessionId, "Disconnected for model switch")
+        : current.filter((session) => session.sessionId !== sessionId);
+      sessionsRef.current = update(sessionsRef.current);
+      setSessions(current => {
+        const next = update(current);
+        sessionsRef.current = next;
+        return next;
+      });
     } catch (reason) {
       intentionalDisconnects.current.delete(sessionId);
+      retainedDisconnects.current.delete(sessionId);
       throw reason;
     }
   }, []);

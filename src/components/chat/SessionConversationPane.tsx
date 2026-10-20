@@ -366,7 +366,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
             <SessionModelPicker session={session} agents={agents}
-              disabled={Boolean(session.closedReason) || waitingForReady || (working && !switchesModelInPlace(session))}
+              disabled={waitingForReady || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
               blocked={blocked || pasting || waitingForReady} working={working} sending={conversation.sending} canSend={canSend}

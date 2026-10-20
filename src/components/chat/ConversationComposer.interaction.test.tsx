@@ -1,4 +1,4 @@
-import { act, createRef } from "react";
+import { act, createRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
@@ -10,13 +10,16 @@ import { SessionConversationPane } from "./SessionConversationPane";
 import { desktopChatAccess } from "../../app/desktopChat";
 import { removeConversationDraft } from "../../app/useConversationDraft";
 import { QueuedPromptEditor } from "./QueuedPromptEditor";
+import { findRunningCodexResumeSession, markAgentSessionClosed, type AgentSessionSummary } from "../../app/useAgentSessions";
+import { CLI_PROXY_SETTINGS_KEY, cliProxyLaunchArguments } from "../../app/cliProxyApi";
 
 const clipboard = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: clipboard.invoke, convertFileSrc: (path: string) => path }));
-const sessionConversation = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn() }));
+const sessionConversation = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn(),
+  messages: [] as { role: "user" | "assistant"; text: string }[] }));
 vi.mock("../../app/useSessionConversation", () => ({
   useSessionConversation: () => ({
-    messages: [], availability: "ready", truncated: false, readError: null, loading: false,
+    messages: sessionConversation.messages, availability: "ready", truncated: false, readError: null, loading: false,
     slow: false, output: "", outputError: null, sendError: null, sending: false, queued: null,
     send: sessionConversation.send, acknowledge: sessionConversation.acknowledge,
     approval: null, answering: false, answerError: null, answer: vi.fn(),
@@ -159,6 +162,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   clipboard.invoke.mockReset().mockResolvedValue(null);
   sessionConversation.send.mockReset().mockResolvedValue(true);
+  sessionConversation.messages = [];
   voice.listening = false;
   voice.start.mockReset();
   voice.stop.mockReset();
@@ -182,6 +186,110 @@ function inputProps(container: HostNode) {
     onPaste: (event: { clipboardData: { items: { kind: string; type: string }[]; getData: () => string }; preventDefault: () => void }) => void;
   }>)[key];
 }
+
+it.each([
+  ["codex", false], ["gemini", false], ["codex", true], ["gemini", true],
+] as const)("keeps the chat selected through 20 successive %s model switches (proxy=%s) and failed retries", async (definitionId, proxy) => {
+  vi.stubGlobal("__TAURI_INTERNALS__", {});
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => key === CLI_PROXY_SETTINGS_KEY && proxy
+      ? JSON.stringify({ proxies: [{ id: "default", label: "Fixture", baseUrl: "http://127.0.0.1:8317" }] }) : null,
+    setItem() {}, removeItem() {},
+  });
+  clipboard.invoke.mockImplementation(async (command: string) => command === "cliproxy_models"
+    ? [{ id: "fixture-a", ownedBy: null }, { id: "fixture-b", ownedBy: null }]
+    : [{ value: "fixture-a", label: "fixture-a" }, { value: "fixture-b", label: "fixture-b" }]);
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const original = fakeSession({ definitionId, capturedSessionId: "native-fixture", model: "fixture-a", stateSource: "integration",
+    launchArguments: proxy ? cliProxyLaunchArguments("http://127.0.0.1:8317") : [] });
+  sessionConversation.messages = [{ role: "user", text: "Fixture question" }, { role: "assistant", text: "Fixture reply" }];
+  const thread = fakeThread({ definitionId, nativeSessionId: "native-fixture" });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  let currentSessions: AgentSessionSummary[] = [];
+  let failLaunch = false;
+  let failDisconnect = false;
+  let reuseSession = false;
+  let exitDuringLaunch = false;
+  let updateSessions!: (update: (sessions: AgentSessionSummary[]) => AgentSessionSummary[]) => void;
+  const launch = vi.fn(async request => {
+    expect(request.resumeSessionId).toBe(original.capturedSessionId);
+    expect(request.definitionId).toBe(definitionId);
+    expect(request.arguments.slice(0, -1)).toEqual([...(proxy ? original.launchArguments : []), "--model"]);
+    expect(currentSessions.find(session => !session.closedReason)).toBeUndefined();
+    expect(findRunningCodexResumeSession(currentSessions, request)).toBeUndefined();
+    if (failLaunch) throw new Error("fixture launch failed");
+    if (reuseSession) return currentSessions[0];
+    const next = { ...original, sessionId: `switch-${launch.mock.calls.length}`, model: request.arguments.at(-1),
+      ...(exitDuringLaunch ? { closedReason: "fixture startup exited" } : {}) };
+    updateSessions(sessions => [...sessions, next]);
+    return next;
+  });
+  const disconnect = vi.fn(async (sessionId: string, options?: { retainSession?: boolean }) => {
+    if (failDisconnect) throw new Error("fixture disconnect failed");
+    updateSessions(sessions => options?.retainSession
+      ? markAgentSessionClosed(sessions, sessionId, "fixture disconnected")
+      : sessions.filter(session => session.sessionId !== sessionId));
+  });
+  function Harness() {
+    const [sessions, setSessions] = useState([original]);
+    const [selected, setSelected] = useState<string | null>(proxy ? null : original.sessionId);
+    currentSessions = sessions;
+    updateSessions = update => { currentSessions = update(currentSessions); setSessions(currentSessions); };
+    return <I18nProvider locale="zh-TW"><ChatView
+      agents={fakeAgentApi({ sessions, launch, disconnect })} chat={chat}
+      workspaceSessionId={selected} onSelectWorkspaceSession={setSelected}
+      automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+    </I18nProvider>;
+  }
+  async function pick(model: string) {
+    await act(async () => onClick(allNodes(container).find(node => node.attributes.class === "session-composer__model")!)());
+    const choice = allNodes(container).find(node => node.attributes.role === "menuitemradio" && node.attributes.title === model)!;
+    expect(choice).toBeDefined();
+    await act(async () => { onClick(choice)(); onClick(choice)(); });
+  }
+  try {
+    await act(async () => root.render(<Harness />));
+    for (let index = 0; index < 20; index++) {
+      const model = index % 2 === 0 ? "fixture-b" : "fixture-a";
+      await pick(model);
+      expect(launch).toHaveBeenCalledTimes(index + 1);
+      expect(currentSessions).toHaveLength(1);
+      expect(currentSessions[0].model).toBe(model);
+      expect(currentSessions[0].capturedSessionId).toBe("native-fixture");
+      expect(container.textContent).not.toContain("這個工作階段已結束");
+      if (definitionId === "codex") expect(container.textContent).toContain("Fixture reply");
+    }
+    failDisconnect = true;
+    await pick("fixture-b");
+    expect(container.textContent).toContain("fixture disconnect failed");
+    expect(launch).toHaveBeenCalledTimes(20);
+    expect(currentSessions[0].closedReason).toBeUndefined();
+    failDisconnect = false;
+    failLaunch = true;
+    await pick("fixture-b");
+    expect(container.textContent).toContain("fixture launch failed");
+    if (definitionId === "codex") expect(container.textContent).toContain("Fixture reply");
+    expect(allNodes(container).some(node => node.attributes.class === "session-composer__model")).toBe(true);
+    expect(currentSessions).toHaveLength(1);
+    expect(currentSessions[0].closedReason).toBeTruthy();
+    failLaunch = false;
+    reuseSession = true;
+    await pick("fixture-b");
+    expect(currentSessions).toHaveLength(1);
+    expect(currentSessions[0].closedReason).toBeTruthy();
+    reuseSession = false;
+    exitDuringLaunch = true;
+    await pick("fixture-b");
+    expect(container.textContent).toContain("fixture startup exited");
+    expect(currentSessions).toHaveLength(1);
+    exitDuringLaunch = false;
+    await pick("fixture-b");
+    expect(currentSessions).toHaveLength(1);
+    expect(currentSessions[0].closedReason).toBeUndefined();
+    expect(currentSessions[0].model).toBe("fixture-b");
+  } finally { await act(async () => root.unmount()); }
+});
 
 it.each(["thread", "session"] as const)("keeps unsent text, files and screenshots in the %s composer after switching pages", async kind => {
   const container = installHostDom();

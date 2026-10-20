@@ -94,6 +94,50 @@ describe("Agent Fleet hydration and MCP permissions", () => {
     });
   });
 
+  it.each(["before", "after"])("retains a model-switch session when its close event arrives %s the reply", async timing => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const original = fakeSession({ capturedSessionId: "native-fixture" });
+    host.listeners.get("agent://launched")!({ payload: original });
+    render();
+    const close = () => host.listeners.get("agent://closed")!({ payload: { sessionId: original.sessionId, reason: "Exit 0" } });
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    host.invoke.mockImplementation(async (command, args) => {
+      if (command === "agent_disconnect") {
+        if (timing === "before") close();
+        return;
+      }
+      return originalInvoke(command, args);
+    });
+    await render().disconnect(original.sessionId, { retainSession: true });
+    if (timing === "after") close();
+    expect(render().sessions).toHaveLength(1);
+    expect(render().sessions[0].closedReason).toBeTruthy();
+    expect(render().lastClosed).toBeNull();
+    await render().disconnect(original.sessionId);
+    expect(render().sessions).toEqual([]);
+  });
+
+  it("releases Codex ownership before a model relaunch without waiting for a React render", async () => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const original = fakeSession({ capturedSessionId: "native-fixture" });
+    host.listeners.get("agent://launched")!({ payload: original });
+    const api = render();
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    host.invoke.mockImplementation(async (command, args) => {
+      if (command === "agent_disconnect") return;
+      if (command === "agent_launch") return { ...original, sessionId: "replacement", model: "fixture-new" };
+      return originalInvoke(command, args);
+    });
+    await api.disconnect(original.sessionId, { retainSession: true });
+    const next = await api.launch({ definitionId: "codex", label: "Fixture", executable: "codex",
+      arguments: ["--model", "fixture-new"], resumeSessionId: "native-fixture",
+      workingDirectory: "/work", cols: 120, rows: 32 });
+    expect(next.sessionId).toBe("replacement");
+    expect(render().sessions.map(session => session.sessionId)).toEqual([original.sessionId, "replacement"]);
+  });
+
   it("keeps UTF-8 characters intact when terminal events split their bytes", async () => {
     render();
     await vi.waitFor(() => expect(render().mode).toBe("ready"));

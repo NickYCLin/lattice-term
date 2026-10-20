@@ -33,6 +33,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
   const [accountChoices, setAccountChoices] = useState<Choices>({ state: "idle" });
   const menuRef = useRef<HTMLDivElement>(null);
   const proxyId = cliProxyIdFromArguments(session.launchArguments);
@@ -81,12 +82,14 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
           : { state: "unavailable", reason: t("sessionChat.model.none") };
 
   async function pick(model: string) {
+    if (disabled || switchingRef.current) return;
     setOpen(false);
-    if (model === session.model) return;
+    if (model === session.model && !session.closedReason) return;
+    switchingRef.current = true;
     onNotice(null);
     setSwitching(true);
     try {
-      if (switchesModelInPlace(session)) {
+      if (switchesModelInPlace(session) && !session.closedReason) {
         await agents.enqueue(session.sessionId, `/model ${model}`);
         return;
       }
@@ -95,19 +98,24 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
         onNotice(t("sessionChat.model.notYet"));
         return;
       }
+      onReplaced(session.sessionId);
+      await agents.disconnect(session.sessionId, { retainSession: true });
       const next = await agents.launch(request);
-      // The new process already holds the conversation; a failed close only
-      // leaves the old one running in its tab.
-      await agents.disconnect(session.sessionId).catch(() => undefined);
+      if (next.closedReason || next.sessionId === session.sessionId) {
+        if (next.sessionId !== session.sessionId) await agents.disconnect(next.sessionId).catch(() => undefined);
+        throw new Error(next.closedReason || t("sessionChat.model.notYet"));
+      }
       onReplaced(next.sessionId);
+      await agents.disconnect(session.sessionId).catch(() => undefined);
     } catch (reason) {
       onNotice(t("sessionChat.model.failed", { detail: errorText(reason) }));
     } finally {
+      switchingRef.current = false;
       setSwitching(false);
     }
   }
 
-  const inPlace = switchesModelInPlace(session);
+  const inPlace = switchesModelInPlace(session) && !session.closedReason;
   return (
     <div ref={menuRef} className="session-composer__model-picker">
       <button type="button" className="session-composer__model" disabled={disabled || switching}
