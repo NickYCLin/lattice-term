@@ -16,7 +16,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub(crate) const SUPPORTED_VERSIONS: &[&str] = &["codex-cli 0.153.4", "codex-cli 0.162.1"];
+pub(crate) const SUPPORTED_VERSIONS: &[&str] = &[
+    "codex-cli 0.153.4",
+    "codex-cli 0.162.1",
+    "codex-cli 0.163.0",
+];
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOTAL_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
 // The supported native Windows 0.153.4 executable is about 282 MiB. Keep a
@@ -1363,6 +1367,9 @@ mod tests {
             "codex-cli 0.162.2",
             "codex-cli 0.153.40",
             "codex-cli 0.162.1-custom",
+            "codex-cli 0.163.0-alpha.1",
+            "codex-cli 0.163.0-custom",
+            "codex-cli 0.163.1",
             "codex-cli 0.162.1\nunverified",
             "",
         ] {

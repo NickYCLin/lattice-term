@@ -847,6 +847,7 @@ mod tests {
     #[test]
     #[ignore = "requires exact npm CLI; isolated Node TUI, proxy profile and loopback model"]
     fn codex_control_native_npm_profile_same_thread_acceptance() {
+        eprintln!("npm acceptance: resolving launcher");
         let fixture = MockProvider::start();
         let (_directory, mut context) = model_fixture_context(&fixture);
         let shim = PathBuf::from(
@@ -871,6 +872,7 @@ mod tests {
             .clone();
         std::fs::write(PathBuf::from(home).join("latticeterm-cliproxyapi.config.toml"),
             format!("model='latticeterm-profile-probe'\nmodel_reasoning_effort='medium'\n[projects.{}]\ntrust_level='trusted'\n", toml::Value::String(context.cwd.to_string_lossy().into()))).unwrap();
+        eprintln!("npm acceptance: starting original thread server");
         let (original, _) = CodexControl::start(&context).unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         let mut client = original.client(deadline).unwrap();
@@ -894,11 +896,13 @@ mod tests {
             assert!(Instant::now() < deadline, "fixture thread did not finish");
             std::thread::sleep(Duration::from_millis(100));
         }
+        eprintln!("npm acceptance: stopping original thread server");
         original.shutdown();
         drop(original);
         context
             .arguments
             .extend([OsString::from("resume"), OsString::from(&thread_id)]);
+        eprintln!("npm acceptance: resuming original thread in TUI");
         assert_tui_same_thread(
             context,
             fixture,
@@ -914,7 +918,9 @@ mod tests {
         expected_model: &str,
         expected_thread: Option<&str>,
     ) {
+        eprintln!("TUI acceptance: starting control server");
         let (control, profile) = CodexControl::start(&context).unwrap();
+        eprintln!("TUI acceptance: starting terminal");
         let terminal = NativeTerminal::start(&context, control.endpoint());
         let deadline = Instant::now() + Duration::from_secs(30);
         let snapshot = loop {
@@ -977,6 +983,86 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
         assert!(fixture.received.try_recv().is_err());
+        eprintln!("TUI acceptance: stopping terminal");
+        drop(terminal);
+        eprintln!("TUI acceptance: stopping control server");
+        control.shutdown();
+        eprintln!("TUI acceptance: dropping control server");
+        drop(control);
+        eprintln!("TUI acceptance: stopping provider");
+        drop(fixture);
+        eprintln!("TUI acceptance: complete");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires exact native CLI; isolated TUI cancellation and owned loopback model"]
+    fn codex_control_native_tui_interrupt_acceptance() {
+        let fixture = MockProvider::start_with_response_timeout(Duration::from_secs(60));
+        let (_directory, mut context) = model_fixture_context(&fixture);
+        context.arguments = ["--no-alt-screen"]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+        let (control, _) = CodexControl::start(&context).unwrap();
+        let terminal = NativeTerminal::start(&context, control.endpoint());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let snapshot = loop {
+            if let Ok(Some(snapshot)) = control.snapshot(None) {
+                if snapshot.state == State::Idle {
+                    break snapshot;
+                }
+            }
+            assert!(Instant::now() < deadline, "native TUI did not become ready");
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        control
+            .send(
+                &snapshot.thread_id,
+                "cancel this owned fixture turn",
+                || true,
+            )
+            .unwrap();
+        fixture
+            .received
+            .recv_timeout(Duration::from_secs(12))
+            .unwrap();
+        assert_eq!(
+            control
+                .snapshot(Some(&snapshot.thread_id))
+                .unwrap()
+                .unwrap()
+                .state,
+            State::Working
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !terminal.output().contains("cancel this owned fixture turn") {
+            assert!(
+                Instant::now() < deadline,
+                "native TUI did not render the cancellation prompt"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        terminal.press_escape();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let current = control
+                .snapshot(Some(&snapshot.thread_id))
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.thread_id, snapshot.thread_id);
+            if current.state == State::Idle {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Escape did not interrupt the native turn: {}",
+                terminal.output()
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        fixture.release.send(()).unwrap();
+        assert!(fixture.received.try_recv().is_err());
         drop(terminal);
         control.shutdown();
         drop(control);
@@ -988,6 +1074,7 @@ mod tests {
         child: Box<dyn portable_pty::Child + Send + Sync>,
         master: Option<Box<dyn portable_pty::MasterPty + Send>>,
         output: std::sync::Arc<Mutex<Vec<u8>>>,
+        writer: std::sync::Arc<Mutex<Option<Box<dyn std::io::Write + Send>>>>,
         job: Option<ProcessJob>,
     }
 
@@ -1022,7 +1109,8 @@ mod tests {
             let job = ProcessJob::attach_pty(child.as_ref()).unwrap();
             drop(pair.slave);
             let mut reader = pair.master.try_clone_reader().unwrap();
-            let mut writer = pair.master.take_writer().unwrap();
+            let writer = std::sync::Arc::new(Mutex::new(Some(pair.master.take_writer().unwrap())));
+            let reply_writer = std::sync::Arc::clone(&writer);
             let output = std::sync::Arc::new(Mutex::new(Vec::new()));
             let capture = std::sync::Arc::clone(&output);
             std::thread::spawn(move || {
@@ -1034,8 +1122,10 @@ mod tests {
                     }
                     let (reply, bytes) = cursor.feed(&buffer[..count]);
                     if reply {
-                        let _ = writer.write_all(b"\x1b[1;1R");
-                        let _ = writer.flush();
+                        if let Some(writer) = reply_writer.lock().unwrap().as_mut() {
+                            let _ = writer.write_all(b"\x1b[1;1R");
+                            let _ = writer.flush();
+                        }
                     }
                     let mut capture = capture.lock().unwrap();
                     if capture.len() + bytes.len() <= 1024 * 1024 {
@@ -1047,6 +1137,7 @@ mod tests {
                 child,
                 master: Some(pair.master),
                 output,
+                writer,
                 job: Some(job),
             }
         }
@@ -1054,15 +1145,30 @@ mod tests {
         fn output(&self) -> String {
             super::super::strip_ansi(&String::from_utf8_lossy(&self.output.lock().unwrap()))
         }
+
+        fn press_escape(&self) {
+            use std::io::Write;
+            let mut writer = self.writer.lock().unwrap();
+            let writer = writer.as_mut().unwrap();
+            writer.write_all(b"\x1b").unwrap();
+            writer.flush().unwrap();
+        }
     }
 
     #[cfg(windows)]
     impl Drop for NativeTerminal {
         fn drop(&mut self) {
-            self.master.take();
+            eprintln!("TUI cleanup: closing job");
             self.job.take();
+            eprintln!("TUI cleanup: killing child");
             let _ = self.child.kill();
+            eprintln!("TUI cleanup: waiting for child");
             let _ = self.child.wait();
+            eprintln!("TUI cleanup: closing input");
+            self.writer.lock().unwrap().take();
+            eprintln!("TUI cleanup: closing console");
+            self.master.take();
+            eprintln!("TUI cleanup: complete");
         }
     }
 
@@ -1162,6 +1268,10 @@ stream_max_retries = 0
     #[cfg(windows)]
     impl MockProvider {
         fn start() -> Self {
+            Self::start_with_response_timeout(Duration::from_secs(12))
+        }
+
+        fn start_with_response_timeout(response_timeout: Duration) -> Self {
             use std::io::{BufRead, Read, Write};
             use std::sync::atomic::{AtomicBool, Ordering};
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1230,7 +1340,7 @@ stream_max_retries = 0
                     });
                     if !is_title {
                         let _ = sender.send(value);
-                        let _ = wait.recv_timeout(Duration::from_secs(12));
+                        let _ = wait.recv_timeout(response_timeout);
                     }
                     let text = if is_title {
                         "{\"title\":\"Native probe\"}"
