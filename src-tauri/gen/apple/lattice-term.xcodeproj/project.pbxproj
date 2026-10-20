@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E8C20DB68F074774A3B52601 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E8C20DB68F074774A3B52602 /* libsqlite3.tbd */; };
 		AABBCC001122334455667701 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AABBCC001122334455667702 /* PrivacyInfo.xcprivacy */; };
 		080C1781C37EB7B7714654B0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A623DBBAD42E7E69F33EFAEE /* Assets.xcassets */; };
 		1CD51BAF6B858BD7A631345D /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E56DBC029F9C57E74C244F2B /* QuartzCore.framework */; };
@@ -23,6 +24,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E8C20DB68F074774A3B52602 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		AABBCC001122334455667702 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		00AD44390AE6DDBD631E6BDB /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		03E544812A46C6CD4E7D0CFA /* agent_plans.rs */ = {isa = PBXFileReference; path = agent_plans.rs; sourceTree = "<group>"; };
@@ -80,6 +82,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8955851B00FE1C7F58DF73B4 /* libapp.a in Frameworks */,
+				E8C20DB68F074774A3B52601 /* libsqlite3.tbd in Frameworks */,
 				99B6BC7B80EC7DF53D172F2D /* CoreGraphics.framework in Frameworks */,
 				7EA71BEF32F5A5E86C10DADB /* Metal.framework in Frameworks */,
 				E99BC8475CE93FEF9710A7A1 /* MetalKit.framework in Frameworks */,
@@ -163,6 +166,7 @@
 		B239660C9FC2ED003E8C1F01 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				E8C20DB68F074774A3B52602 /* libsqlite3.tbd */,
 				1F37AA242F9769F0A0187210 /* CoreGraphics.framework */,
 				DE85EC2608114E4CDC091A13 /* libapp.a */,
 				FAAC1CEF2C078308340312C8 /* Metal.framework */,

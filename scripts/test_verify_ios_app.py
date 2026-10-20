@@ -23,6 +23,11 @@ class BundleVerificationTests(unittest.TestCase):
         ios = cargo["target"]['cfg(target_os = "ios")']["dependencies"]
         self.assertEqual(ios["rusqlite"]["features"], ["modern_sqlite"])
         self.assertFalse(ios["rusqlite"]["default-features"])
+        apple = manifest.parent / "gen/apple"
+        self.assertIn("- sdk: libsqlite3.tbd", (apple / "project.yml").read_text(encoding="utf-8"))
+        project = (apple / "lattice-term.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        self.assertIn("path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT;", project)
+        self.assertEqual(project.count("/* libsqlite3.tbd in Frameworks */"), 2)
         wrapper = Path(__file__).with_name("ios-sqlite-build.sh").read_text(encoding="utf-8")
         self.assertIn("export LIBSQLITE3_SYS_USE_PKG_CONFIG=1", wrapper)
         self.assertIn("export SQLITE3_STATIC=0", wrapper)
