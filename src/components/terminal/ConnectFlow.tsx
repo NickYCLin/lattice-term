@@ -133,7 +133,8 @@ export function ConnectFlow({
   );
   const passwordRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const busy = phase.step === "connecting";
+  const operationInFlight = useRef(false);
+  const busy = phase.step === "connecting" || removingCredential || choosingKey;
 
   useModalFocus({
     dialogRef,
@@ -179,69 +180,86 @@ export function ConnectFlow({
   }, [busy]);
 
   async function attempt(secret: string) {
-    setPhase({ step: "connecting" });
-    setProblem(null);
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    try {
+      setPhase({ step: "connecting" });
+      setProblem(null);
 
-    const usingPassword = method === "password";
-    const outcome = await ssh.connect({
-      profileId: profile.id,
-      hostname: profile.hostname,
-      port: profile.port,
-      username: profile.username,
-      auth: usingPassword
-        ? { kind: "password", password: useSavedPassword ? "" : secret }
-        : {
-            kind: "privateKey",
-            path: keyPath.trim(),
-            passphrase: passphrase.length > 0 ? passphrase : undefined,
-          },
-      useSavedPassword: usingPassword && useSavedPassword,
-      rememberPassword: usingPassword && !useSavedPassword && rememberPassword,
-      // A sensible starting size; the pane corrects it the moment it mounts.
-      cols: 80,
-      rows: 24,
-    });
+      const usingPassword = method === "password";
+      const outcome = await ssh.connect({
+        profileId: profile.id,
+        hostname: profile.hostname,
+        port: profile.port,
+        username: profile.username,
+        auth: usingPassword
+          ? { kind: "password", password: useSavedPassword ? "" : secret }
+          : {
+              kind: "privateKey",
+              path: keyPath.trim(),
+              passphrase: passphrase.length > 0 ? passphrase : undefined,
+            },
+        useSavedPassword: usingPassword && useSavedPassword,
+        rememberPassword: usingPassword && !useSavedPassword && rememberPassword,
+        // A sensible starting size; the pane corrects it the moment it mounts.
+        cols: 80,
+        rows: 24,
+      });
 
-    switch (outcome.outcome) {
-      case "connected":
-        // The secrets have done their job; drop them rather than keep them in
-        // state. What is remembered is only the method and the key path.
-        setPassword("");
-        setPassphrase("");
-        saveAuthPref(profile.id, { method, keyPath: keyPath.trim() });
-        onConnected(outcome.sessionId);
-        return;
-      case "hostUnknown":
-        setPhase({ step: "unknownHost", outcome });
-        return;
-      case "hostChanged":
-        setPhase({ step: "changedHost", outcome });
-        return;
-      case "authFailed":
-        setPhase({ step: "password" });
-        if (useSavedPassword) setUseSavedPassword(false);
-        setProblem({
-          title: t("connect.failed.title"),
-          body: t(
-            method === "privateKey"
-              ? "connect.keyRejected"
-              : "connect.authFailed",
-          ),
-        });
-        return;
-      default:
-        setPhase({ step: "password" });
-        setProblem({
-          title: t("connect.failed.title"),
-          body: t("connect.failed.body", {
-            stage: t(stageKey(outcome.stage)),
-            detail: outcome.detail,
-          }),
-        });
+      switch (outcome.outcome) {
+        case "connected":
+          // The secrets have done their job; drop them rather than keep them in
+          // state. What is remembered is only the method and the key path.
+          setPassword("");
+          setPassphrase("");
+          saveAuthPref(profile.id, { method, keyPath: keyPath.trim() });
+          onConnected(outcome.sessionId);
+          return;
+        case "hostUnknown":
+          setPhase({ step: "unknownHost", outcome });
+          return;
+        case "hostChanged":
+          setPhase({ step: "changedHost", outcome });
+          return;
+        case "authFailed":
+          setPhase({ step: "password" });
+          if (useSavedPassword) setUseSavedPassword(false);
+          setProblem({
+            title: t("connect.failed.title"),
+            body: t(
+              method === "privateKey"
+                ? "connect.keyRejected"
+                : "connect.authFailed",
+            ),
+          });
+          return;
+        default:
+          setPhase({ step: "password" });
+          setProblem({
+            title: t("connect.failed.title"),
+            body: t("connect.failed.body", {
+              stage: t(stageKey(outcome.stage)),
+              detail: outcome.detail,
+            }),
+          });
+      }
+    } catch (reason) {
+      setPhase({ step: "password" });
+      setProblem({
+        title: t("connect.failed.title"),
+        body: t("connect.failed.body", {
+          stage: t(stageKey("invoke")),
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      });
+    } finally {
+      operationInFlight.current = false;
     }
   }
 
   async function removeSavedCredential() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setRemovingCredential(true);
     setProblem(null);
     try {
@@ -253,11 +271,14 @@ export function ConnectFlow({
         body: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
+      operationInFlight.current = false;
       setRemovingCredential(false);
     }
   }
 
   async function chooseKey() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setChoosingKey(true);
     setProblem(null);
     try {
@@ -271,6 +292,7 @@ export function ConnectFlow({
         }),
       });
     } finally {
+      operationInFlight.current = false;
       setChoosingKey(false);
     }
   }
@@ -281,6 +303,9 @@ export function ConnectFlow({
     algorithm: string,
     fingerprint: string,
   ) {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    setPhase({ step: "connecting" });
     try {
       await ssh.trustHost(host, port, algorithm, fingerprint);
     } catch (reason) {
@@ -293,6 +318,8 @@ export function ConnectFlow({
         }),
       });
       return;
+    } finally {
+      operationInFlight.current = false;
     }
     await attempt(password);
   }
@@ -596,7 +623,7 @@ export function ConnectFlow({
               {t("common.cancel")}
             </button>
             <button type="submit" className="button button--primary" disabled={busy}>
-              {busy ? t("connect.connecting") : t("connect.submit")}
+              {phase.step === "connecting" ? t("connect.connecting") : t("connect.submit")}
             </button>
           </div>
         </form>

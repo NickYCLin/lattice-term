@@ -25,10 +25,12 @@ export function VncConnectFlow({
   const [useSavedPassword, setUseSavedPassword] = useState(false);
   const [rememberPassword, setRememberPassword] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [connecting, setBusy] = useState(false);
+  const busy = connecting || removingCredential;
   const [problem, setProblem] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const operationInFlight = useRef(false);
 
   useModalFocus({
     dialogRef,
@@ -53,37 +55,50 @@ export function VncConnectFlow({
   }, [busy]);
 
   async function attempt() {
-    setBusy(true);
-    setProblem(null);
-    const outcome = await vnc.connect({
-      profileId: profile.id,
-      hostname: profile.hostname,
-      port: profile.port,
-      password: useSavedPassword ? "" : password,
-      useSavedPassword,
-      rememberPassword: !useSavedPassword && rememberPassword,
-    });
-    setBusy(false);
-    if (outcome.outcome === "connected") {
-      setPassword("");
-      onConnected(outcome.sessionId);
-    } else if (outcome.outcome === "authFailed") {
-      if (useSavedPassword) setUseSavedPassword(false);
-      setProblem(t("vnc.connect.authFailed"));
-    } else {
-      if (outcome.stage === "credential" && useSavedPassword) {
-        setUseSavedPassword(false);
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    try {
+      setBusy(true);
+      setProblem(null);
+      const outcome = await vnc.connect({
+        profileId: profile.id,
+        hostname: profile.hostname,
+        port: profile.port,
+        password: useSavedPassword ? "" : password,
+        useSavedPassword,
+        rememberPassword: !useSavedPassword && rememberPassword,
+      });
+      if (outcome.outcome === "connected") {
+        setPassword("");
+        onConnected(outcome.sessionId);
+      } else if (outcome.outcome === "authFailed") {
+        if (useSavedPassword) setUseSavedPassword(false);
+        setProblem(t("vnc.connect.authFailed"));
+      } else {
+        if (outcome.stage === "credential" && useSavedPassword) {
+          setUseSavedPassword(false);
+        }
+        setProblem(
+          t("vnc.connect.failedBody", {
+            stage: outcome.stage,
+            detail: outcome.detail,
+          }),
+        );
       }
-      setProblem(
-        t("vnc.connect.failedBody", {
-          stage: outcome.stage,
-          detail: outcome.detail,
-        }),
-      );
+    } catch (reason) {
+      setProblem(t("vnc.connect.failedBody", {
+        stage: "invoke",
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
+    } finally {
+      operationInFlight.current = false;
+      setBusy(false);
     }
   }
 
   async function removeSavedCredential() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setRemovingCredential(true);
     setProblem(null);
     try {
@@ -96,6 +111,7 @@ export function VncConnectFlow({
         }),
       );
     } finally {
+      operationInFlight.current = false;
       setRemovingCredential(false);
     }
   }
@@ -247,7 +263,7 @@ export function VncConnectFlow({
             </button>
             <button type="submit" className="button button--primary" disabled={busy}>
               <ScreenShareIcon size={14} />
-              {busy ? t("vnc.connect.connecting") : t("vnc.connect.submit")}
+              {connecting ? t("vnc.connect.connecting") : t("vnc.connect.submit")}
             </button>
           </div>
         </form>

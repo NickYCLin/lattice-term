@@ -89,7 +89,8 @@ export function SftpConnectFlow({
   );
   const passwordRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const busy = phase.step === "connecting";
+  const operationInFlight = useRef(false);
+  const busy = phase.step === "connecting" || removingCredential;
 
   useModalFocus({
     dialogRef,
@@ -115,50 +116,67 @@ export function SftpConnectFlow({
   }, [busy]);
 
   async function attempt(secret: string) {
-    setPhase({ step: "connecting" });
-    setProblem(null);
-    const outcome = await sftp.connect({
-      profileId: profile.id,
-      hostname: profile.hostname,
-      port: profile.port,
-      username: profile.username,
-      auth: { kind: "password", password: useSavedPassword ? "" : secret },
-      useSavedPassword,
-      rememberPassword: !useSavedPassword && rememberPassword,
-    });
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    try {
+      setPhase({ step: "connecting" });
+      setProblem(null);
+      const outcome = await sftp.connect({
+        profileId: profile.id,
+        hostname: profile.hostname,
+        port: profile.port,
+        username: profile.username,
+        auth: { kind: "password", password: useSavedPassword ? "" : secret },
+        useSavedPassword,
+        rememberPassword: !useSavedPassword && rememberPassword,
+      });
 
-    switch (outcome.outcome) {
-      case "connected":
-        setPassword("");
-        onConnected(outcome.session.sessionId);
-        return;
-      case "hostUnknown":
-        setPhase({ step: "unknownHost", outcome });
-        return;
-      case "hostChanged":
-        setPhase({ step: "changedHost", outcome });
-        return;
-      case "authFailed":
-        setPhase({ step: "password" });
-        if (useSavedPassword) setUseSavedPassword(false);
-        setProblem({
-          title: t("connect.failed.title"),
-          body: t("connect.authFailed"),
-        });
-        return;
-      default:
-        setPhase({ step: "password" });
-        setProblem({
-          title: t("connect.failed.title"),
-          body: t("connect.failed.body", {
-            stage: t(stageKey(outcome.stage)),
-            detail: outcome.detail,
-          }),
-        });
+      switch (outcome.outcome) {
+        case "connected":
+          setPassword("");
+          onConnected(outcome.session.sessionId);
+          return;
+        case "hostUnknown":
+          setPhase({ step: "unknownHost", outcome });
+          return;
+        case "hostChanged":
+          setPhase({ step: "changedHost", outcome });
+          return;
+        case "authFailed":
+          setPhase({ step: "password" });
+          if (useSavedPassword) setUseSavedPassword(false);
+          setProblem({
+            title: t("connect.failed.title"),
+            body: t("connect.authFailed"),
+          });
+          return;
+        default:
+          setPhase({ step: "password" });
+          setProblem({
+            title: t("connect.failed.title"),
+            body: t("connect.failed.body", {
+              stage: t(stageKey(outcome.stage)),
+              detail: outcome.detail,
+            }),
+          });
+      }
+    } catch (reason) {
+      setPhase({ step: "password" });
+      setProblem({
+        title: t("connect.failed.title"),
+        body: t("connect.failed.body", {
+          stage: t(stageKey("invoke")),
+          detail: reason instanceof Error ? reason.message : String(reason),
+        }),
+      });
+    } finally {
+      operationInFlight.current = false;
     }
   }
 
   async function removeSavedCredential() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setRemovingCredential(true);
     setProblem(null);
     try {
@@ -170,6 +188,7 @@ export function SftpConnectFlow({
         body: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
+      operationInFlight.current = false;
       setRemovingCredential(false);
     }
   }
@@ -180,6 +199,9 @@ export function SftpConnectFlow({
     algorithm: string,
     fingerprint: string,
   ) {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    setPhase({ step: "connecting" });
     try {
       await sftp.trustHost(host, port, algorithm, fingerprint);
     } catch (reason) {
@@ -192,6 +214,8 @@ export function SftpConnectFlow({
         }),
       });
       return;
+    } finally {
+      operationInFlight.current = false;
     }
     await attempt(password);
   }
@@ -391,7 +415,7 @@ export function SftpConnectFlow({
               className="button button--primary"
               disabled={busy}
             >
-              {busy ? t("connect.connecting") : t("connect.submit")}
+              {phase.step === "connecting" ? t("connect.connecting") : t("connect.submit")}
             </button>
           </div>
         </form>

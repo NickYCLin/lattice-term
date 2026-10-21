@@ -53,11 +53,13 @@ export function RemoteConnectFlow({
   // goes stale on its own. Offering the field only after the relay actually
   // failed keeps the usual connection down to one input.
   const [relayUnreachable, setRelayUnreachable] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [connecting, setBusy] = useState(false);
+  const busy = connecting || removingCredential;
   const [problem, setProblem] = useState<string | null>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const relayRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const operationInFlight = useRef(false);
 
   useModalFocus({
     dialogRef,
@@ -123,7 +125,7 @@ export function RemoteConnectFlow({
   }
 
   async function connect() {
-    if (vault?.busy) return;
+    if (operationInFlight.current || vault?.busy) return;
     if (useSavedPairingCode && !storageReady) {
       setProblem(t("vault.encrypted.lockedWarnBody"));
       return;
@@ -132,56 +134,68 @@ export function RemoteConnectFlow({
       setProblem(t(relay ? "remote.connect.relayCodeInvalid" : "remote.connect.codeInvalid"));
       return;
     }
-    setBusy(true);
-    setProblem(null);
-    const attempted = relayAddress.trim();
-    const outcome = await remote.connect({
-      profileId: profile.id,
-      hostname: profile.hostname,
-      port: profile.port,
-      pairingCode: useSavedPairingCode ? "" : normalizedToken!,
-      useSavedPairingCode,
-      legacyPairing: false,
-      rememberPairingCode:
-        relay && storageReady && !useSavedPairingCode && rememberPairingCode,
-      // A remembered device has no address of its own; the relay finds it by
-      // identity, exactly as the connect-by-ID dialog does.
-      ...(relay ? { deviceId: profile.deviceId, relayAddress: attempted } : {}),
-    });
-    // Drop the one-time secret immediately after the IPC call resolves.
-    setPairingCode("");
-    setBusy(false);
+    operationInFlight.current = true;
+    try {
+      setBusy(true);
+      setProblem(null);
+      const attempted = relayAddress.trim();
+      const outcome = await remote.connect({
+        profileId: profile.id,
+        hostname: profile.hostname,
+        port: profile.port,
+        pairingCode: useSavedPairingCode ? "" : normalizedToken!,
+        useSavedPairingCode,
+        legacyPairing: false,
+        rememberPairingCode:
+          relay && storageReady && !useSavedPairingCode && rememberPairingCode,
+        // A remembered device has no address of its own; the relay finds it by
+        // identity, exactly as the connect-by-ID dialog does.
+        ...(relay ? { deviceId: profile.deviceId, relayAddress: attempted } : {}),
+      });
+      // Drop the one-time secret immediately after the IPC call resolves.
+      setPairingCode("");
 
-    const followUp = relayConnectFollowUp({
-      relayEntry: relay,
-      savedAddress: profile.relayAddress ?? "",
-      attemptedAddress: attempted,
-      outcome,
-    });
-    if (followUp.addressToSave) onRelayAddressChanged?.(followUp.addressToSave);
+      const followUp = relayConnectFollowUp({
+        relayEntry: relay,
+        savedAddress: profile.relayAddress ?? "",
+        attemptedAddress: attempted,
+        outcome,
+      });
+      if (followUp.addressToSave) onRelayAddressChanged?.(followUp.addressToSave);
 
-    if (outcome.outcome === "connected") {
-      onConnected(outcome.sessionId);
-      return;
+      if (outcome.outcome === "connected") {
+        onConnected(outcome.sessionId);
+        return;
+      }
+      if (
+        useSavedPairingCode &&
+        (outcome.stage === "credential" || outcome.stage === "pairing")
+      ) {
+        setUseSavedPairingCode(false);
+      }
+      if (followUp.offerAddressRepair) setRelayUnreachable(true);
+      setProblem(
+        outcome.stage === "legacyTrust" ? t("remote.connect.legacyUntrusted") :
+        outcome.stage === "identityChanged" ? t("remote.connect.identityChanged") :
+        t("remote.connect.failedBody", {
+          stage: outcome.stage,
+          detail: outcome.detail,
+        }),
+      );
+    } catch (reason) {
+      setProblem(t("remote.connect.failedBody", {
+        stage: "invoke",
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
+    } finally {
+      operationInFlight.current = false;
+      setBusy(false);
     }
-    if (
-      useSavedPairingCode &&
-      (outcome.stage === "credential" || outcome.stage === "pairing")
-    ) {
-      setUseSavedPairingCode(false);
-    }
-    if (followUp.offerAddressRepair) setRelayUnreachable(true);
-    setProblem(
-      outcome.stage === "legacyTrust" ? t("remote.connect.legacyUntrusted") :
-      outcome.stage === "identityChanged" ? t("remote.connect.identityChanged") :
-      t("remote.connect.failedBody", {
-        stage: outcome.stage,
-        detail: outcome.detail,
-      }),
-    );
   }
 
   async function removeSavedCredential() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setRemovingCredential(true);
     setProblem(null);
     try {
@@ -194,6 +208,7 @@ export function RemoteConnectFlow({
         }),
       );
     } finally {
+      operationInFlight.current = false;
       setRemovingCredential(false);
     }
   }
@@ -374,7 +389,7 @@ export function RemoteConnectFlow({
               {t("common.cancel")}
             </button>
             <button type="submit" className="button button--primary" disabled={busy || vault?.busy}>
-              {busy ? t("remote.connect.connecting") : t("remote.connect.submit")}
+              {connecting ? t("remote.connect.connecting") : t("remote.connect.submit")}
             </button>
           </div>
         </form>

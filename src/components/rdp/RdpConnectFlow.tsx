@@ -27,10 +27,12 @@ export function RdpConnectFlow({
   const [rememberPassword, setRememberPassword] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
   const [domain, setDomain] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [connecting, setBusy] = useState(false);
+  const busy = connecting || removingCredential;
   const [problem, setProblem] = useState<string | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const operationInFlight = useRef(false);
 
   useModalFocus({
     dialogRef,
@@ -55,43 +57,56 @@ export function RdpConnectFlow({
   }, [busy]);
 
   async function attempt() {
+    if (operationInFlight.current) return;
     if (!profile.username.trim()) {
       setProblem(t("rdp.connect.noUsername"));
       return;
     }
-    setBusy(true);
-    setProblem(null);
-    const outcome = await rdp.connect({
-      profileId: profile.id,
-      hostname: profile.hostname,
-      port: profile.port,
-      username: profile.username,
-      password: useSavedPassword ? "" : password,
-      useSavedPassword,
-      rememberPassword: !useSavedPassword && rememberPassword,
-      domain: domain.trim() || undefined,
-      width: 1280,
-      height: 720,
-    });
-    setBusy(false);
-    if (outcome.outcome === "connected") {
-      setPassword("");
-      onConnected(outcome.sessionId);
-    } else {
-      const credentialFailure = rdpCredentialFailure(outcome.detail);
-      if ((outcome.stage === "credential" || credentialFailure) && useSavedPassword) {
-        setUseSavedPassword(false);
+    operationInFlight.current = true;
+    try {
+      setBusy(true);
+      setProblem(null);
+      const outcome = await rdp.connect({
+        profileId: profile.id,
+        hostname: profile.hostname,
+        port: profile.port,
+        username: profile.username,
+        password: useSavedPassword ? "" : password,
+        useSavedPassword,
+        rememberPassword: !useSavedPassword && rememberPassword,
+        domain: domain.trim() || undefined,
+        width: 1280,
+        height: 720,
+      });
+      if (outcome.outcome === "connected") {
+        setPassword("");
+        onConnected(outcome.sessionId);
+      } else {
+        const credentialFailure = rdpCredentialFailure(outcome.detail);
+        if ((outcome.stage === "credential" || credentialFailure) && useSavedPassword) {
+          setUseSavedPassword(false);
+        }
+        setProblem(
+          (credentialFailure ? t(`rdp.connect.${credentialFailure}`) + "\n\n" : "") + t("rdp.connect.failedBody", {
+            stage: outcome.stage,
+            detail: outcome.detail,
+          }),
+        );
       }
-      setProblem(
-        (credentialFailure ? t(`rdp.connect.${credentialFailure}`) + "\n\n" : "") + t("rdp.connect.failedBody", {
-          stage: outcome.stage,
-          detail: outcome.detail,
-        }),
-      );
+    } catch (reason) {
+      setProblem(t("rdp.connect.failedBody", {
+        stage: "invoke",
+        detail: reason instanceof Error ? reason.message : String(reason),
+      }));
+    } finally {
+      operationInFlight.current = false;
+      setBusy(false);
     }
   }
 
   async function removeSavedCredential() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setRemovingCredential(true);
     setProblem(null);
     try {
@@ -104,6 +119,7 @@ export function RdpConnectFlow({
         }),
       );
     } finally {
+      operationInFlight.current = false;
       setRemovingCredential(false);
     }
   }
@@ -266,7 +282,7 @@ export function RdpConnectFlow({
             </button>
             <button type="submit" className="button button--primary" disabled={busy}>
               <ShieldIcon size={14} />
-              {busy ? t("rdp.connect.connecting") : t("rdp.connect.submit")}
+              {connecting ? t("rdp.connect.connecting") : t("rdp.connect.submit")}
             </button>
           </div>
         </form>
