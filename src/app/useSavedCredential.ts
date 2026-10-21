@@ -314,6 +314,7 @@ export function useCredentialDeleteGuard(
 
 export function useCredentialInventory(profiles: ConnectionProfile[]) {
   const readGeneration = useRef(0);
+  const activeRefresh = useRef<(() => Promise<void>) | null>(null);
   const [state, setState] = useState<CredentialInventoryState>({
     mode: "loading",
     provider: null,
@@ -334,8 +335,10 @@ export function useCredentialInventory(profiles: ConnectionProfile[]) {
   }, [profiles]);
 
   useEffect(() => {
+    activeRefresh.current = refresh;
     void refresh();
     return () => {
+      activeRefresh.current = null;
       readGeneration.current += 1;
     };
   }, [refresh]);
@@ -343,13 +346,7 @@ export function useCredentialInventory(profiles: ConnectionProfile[]) {
   const remove = useCallback(
     async (entry: CredentialInventoryEntry) => {
       await removeCredential(entry.profileId, entry.kind);
-      setState((current) => ({
-        ...current,
-        entries: current.entries.filter(
-          (item) =>
-            item.profileId !== entry.profileId || item.kind !== entry.kind,
-        ),
-      }));
+      await activeRefresh.current?.();
     },
     [],
   );
