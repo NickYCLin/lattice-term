@@ -408,8 +408,45 @@ pub(super) async fn steer(
                 .into(),
         )
     });
-    server.state().pending_steers.remove(&id);
+    finish_steer(&server, id).await;
     result
+}
+
+async fn finish_steer(server: &Arc<CodexServer>, id: u64) {
+    server.state().pending_steers.remove(&id);
+    server.release_after_turn().await;
+}
+
+async fn publish_finished<S: ChatSink>(
+    server: Arc<CodexServer>,
+    sink: Arc<S>,
+    turn_id: String,
+    mut event: ChatEvent,
+) {
+    let deadline = Instant::now() + Duration::from_secs(35);
+    loop {
+        server.release_after_turn().await;
+        if server.state().exited || !server.running() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    server.wait_exit().await;
+    if server.running() && server.state().exited {
+        server.kill();
+        server.wait_exit().await;
+    }
+    if server.running() {
+        if let ChatEvent::Finished { error, .. } = &mut event {
+            if error.is_none() {
+                *error = Some("Codex finished answering, but its process has not released the conversation yet. Check the conversation before sending again.".into());
+            }
+        }
+    }
+    sink.event(&server.thread_id, &turn_id, event);
 }
 
 fn rpc_line(id: u64, method: &str, params: Value) -> String {
@@ -514,7 +551,10 @@ pub(super) async fn send_turn<S: ChatSink>(
             let mut state = server.state();
             if state.exited {
                 None
-            } else if state.active.is_some() || state.queued.is_some() {
+            } else if state.active.is_some()
+                || state.queued.is_some()
+                || !state.pending_steers.is_empty()
+            {
                 return Err("This conversation is still answering.".to_string());
             } else if server.browser_enabled != request.browser_enabled
                 || server.proxy_identity != request.proxy.map(|proxy| proxy.identity())
@@ -724,7 +764,16 @@ pub(super) async fn send_turn<S: ChatSink>(
                 reader_server.release_after_turn().await;
             }
             for (turn_id, event) in outcome.events {
-                reader_sink.event(&reader_server.thread_id, &turn_id, event);
+                if matches!(event, ChatEvent::Finished { .. }) {
+                    tauri::async_runtime::spawn(publish_finished(
+                        Arc::clone(&reader_server),
+                        Arc::clone(&reader_sink),
+                        turn_id,
+                        event,
+                    ));
+                } else {
+                    reader_sink.event(&reader_server.thread_id, &turn_id, event);
+                }
             }
             for reply in outcome.writes {
                 if reader_server.write_line(&reply).await.is_err() {
@@ -745,9 +794,10 @@ pub(super) async fn send_turn<S: ChatSink>(
         };
         if let Some((turn, codex_thread_id)) = unfinished {
             let detail = tail.trim();
-            reader_sink.event(
-                &reader_server.thread_id,
-                &turn.turn_id,
+            publish_finished(
+                Arc::clone(&reader_server),
+                Arc::clone(&reader_sink),
+                turn.turn_id,
                 ChatEvent::Finished {
                     native_session_id: codex_thread_id,
                     usage: turn.usage,
@@ -759,7 +809,8 @@ pub(super) async fn send_turn<S: ChatSink>(
                         detail.to_string()
                     }),
                 },
-            );
+            )
+            .await;
         }
         if let Ok(mut child) = reader_server.child.lock() {
             if let Some(child) = child.as_mut() {
@@ -1835,6 +1886,128 @@ mod tests {
             assert!(!server.state().exited);
             assert!(server.stdin.lock().await.is_some());
         });
+    }
+
+    #[tokio::test]
+    async fn completion_is_published_only_after_the_native_process_exits() {
+        let mut state = steer_ready_state();
+        state.active = None;
+        let mut server = server_with(state);
+        let (child, stdin) = fake_stdin();
+        server.child = Mutex::new(Some(child));
+        server.stdin = Arc::new(tokio::sync::Mutex::new(Some(stdin)));
+        let server = Arc::new(server);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        publish_finished(
+            Arc::clone(&server),
+            Arc::new(RecordingSink(sender)),
+            "lattice-turn".into(),
+            ChatEvent::Finished {
+                native_session_id: Some("native-thread".into()),
+                usage: None,
+                cost_usd: None,
+                duration_ms: None,
+                error: None,
+            },
+        )
+        .await;
+        assert!(!server.running());
+        assert!(server.state().exited);
+        assert!(server.stdin.lock().await.is_none());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok((_, ChatEvent::Finished { error: None, .. }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn completed_turn_releases_after_a_missing_steering_receipt_is_removed() {
+        let mut state = steer_ready_state();
+        state.active = None;
+        let (reply, receipt) = oneshot::channel();
+        state.pending_steers.insert(
+            20,
+            PendingSteer {
+                codex_turn_id: "native-turn".into(),
+                reply,
+            },
+        );
+        let server = Arc::new(server_with(state));
+        server.release_after_turn().await;
+        assert!(!server.state().exited);
+        finish_steer(&server, 20).await;
+        assert!(receipt.await.is_err());
+        assert!(server.state().exited);
+        assert!(server.stdin.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn missing_steering_receipt_does_not_release_an_active_turn() {
+        let mut state = steer_ready_state();
+        let (reply, receipt) = oneshot::channel();
+        state.pending_steers.insert(
+            20,
+            PendingSteer {
+                codex_turn_id: "native-turn".into(),
+                reply,
+            },
+        );
+        let server = Arc::new(server_with(state));
+        finish_steer(&server, 20).await;
+        assert!(receipt.await.is_err());
+        assert!(!server.state().exited);
+        assert!(server.state().active.is_some());
+        assert!(server.stdin.lock().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn completion_waits_for_steering_without_blocking_receipt_processing() {
+        let mut state = steer_ready_state();
+        state.active = None;
+        let (reply, receipt) = oneshot::channel();
+        state.pending_steers.insert(
+            20,
+            PendingSteer {
+                codex_turn_id: "native-turn".into(),
+                reply,
+            },
+        );
+        let mut server = server_with(state);
+        let (child, stdin) = fake_stdin();
+        server.child = Mutex::new(Some(child));
+        server.stdin = Arc::new(tokio::sync::Mutex::new(Some(stdin)));
+        let server = Arc::new(server);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let completion = tokio::spawn(publish_finished(
+            Arc::clone(&server),
+            Arc::new(RecordingSink(sender)),
+            "lattice-turn".into(),
+            ChatEvent::Finished {
+                native_session_id: Some("native-thread".into()),
+                usage: None,
+                cost_usd: None,
+                duration_ms: None,
+                error: None,
+            },
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(receiver.try_recv().is_err());
+        assert!(!server.state().exited);
+        let response = handle_line(
+            &server,
+            &serde_json::json!({"id":20,"result":{"turnId":"native-turn"}}),
+        );
+        assert!(response.idle);
+        assert_eq!(receipt.await.unwrap(), Ok(()));
+        tokio::time::timeout(Duration::from_secs(12), completion)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!server.running());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok((_, ChatEvent::Finished { error: None, .. }))
+        ));
     }
 
     #[test]
