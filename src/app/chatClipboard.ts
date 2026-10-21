@@ -17,7 +17,7 @@ export function createChatClipboardFallback(readText: () => Promise<string | nul
     },
     onPaste(event: { clipboardData: DataTransfer; preventDefault: () => void }) {
       const items = event.clipboardData.items;
-      if (pasteContainsImage(items) || pasteContainsFiles(items)) {
+      if (pasteContainsImage(items) || pasteContainsFiles(items, event.clipboardData.getData("text/uri-list"))) {
         gesture += 1;
         event.preventDefault();
         paste();

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createChatClipboardFallback } from "./chatClipboard";
 
 const shortcut = { key: "v", ctrlKey: true, metaKey: false, altKey: false, repeat: false, isComposing: false };
-function pasteEvent(type: string, text = "") {
+function pasteEvent(type: string, text = type === "text/uri-list" ? "file:///work/report.pdf" : "") {
   return {
     clipboardData: { items: type ? [{ kind: type.startsWith("image/") ? "file" : "string", type }] : [], getData: () => text } as unknown as DataTransfer,
     preventDefault: vi.fn(),
@@ -21,6 +21,24 @@ describe("chat clipboard native fallback", () => {
     const paste = vi.fn();
     const fallback = createChatClipboardFallback(async () => "hello", paste);
     const event = pasteEvent("text/plain", "hello");
+    fallback.onKeyDown(shortcut);
+    fallback.onPaste(event);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(paste).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://example.com/report", "https://example.com/report\r\nhttps://example.com/photo"])("leaves copied web links to normal paste: %s", async url => {
+    const paste = vi.fn();
+    const fallback = createChatClipboardFallback(async () => null, paste);
+    const event = {
+      clipboardData: {
+        items: [{ kind: "string", type: "text/uri-list" }, { kind: "string", type: "text/plain" }],
+        getData: (type: string) => type === "text/uri-list" || type === "text/plain" ? url : "",
+      } as unknown as DataTransfer,
+      preventDefault: vi.fn(),
+    };
     fallback.onKeyDown(shortcut);
     fallback.onPaste(event);
     await Promise.resolve();

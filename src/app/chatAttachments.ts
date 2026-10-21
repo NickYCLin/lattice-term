@@ -17,10 +17,11 @@ export function mergeAttachmentPaths(current: readonly ChatAttachment[], paths: 
 }
 
 /** Files copied in a file manager arrive as a URI list (or as file items). */
-export function pasteContainsFiles(items: ArrayLike<Pick<DataTransferItem, "kind" | "type">>): boolean {
+export function pasteContainsFiles(items: ArrayLike<Pick<DataTransferItem, "kind" | "type">>, uriList = ""): boolean {
+  const uris = uriList.split(/\r?\n/).map(uri => uri.trim()).filter(uri => uri && !uri.startsWith("#"));
   return Array.from(items).some(
     (item) =>
-      item.type === "text/uri-list" ||
+      (item.type === "text/uri-list" && uris.length > 0 && uris.every(uri => /^file:\/\//i.test(uri))) ||
       item.type === "x-special/gnome-copied-files" ||
       (item.kind === "file" && !item.type.startsWith("image/")),
   );

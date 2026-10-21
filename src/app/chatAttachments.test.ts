@@ -31,11 +31,20 @@ describe("chat attachments", () => {
 
 describe("pasted files", () => {
   it("recognises files copied in a file manager but not a plain image", () => {
-    expect(pasteContainsFiles([{ kind: "string", type: "text/uri-list" }])).toBe(true);
+    expect(pasteContainsFiles([{ kind: "string", type: "text/uri-list" }], "file:///work/report.pdf")).toBe(true);
     expect(pasteContainsFiles([{ kind: "string", type: "x-special/gnome-copied-files" }])).toBe(true);
     expect(pasteContainsFiles([{ kind: "file", type: "application/pdf" }])).toBe(true);
     expect(pasteContainsFiles([{ kind: "file", type: "image/png" }])).toBe(false);
     expect(pasteContainsFiles([{ kind: "string", type: "text/plain" }])).toBe(false);
+  });
+
+  it.each(["", "# copied links", "https://example.com/report", "file:///work/report.pdf\nhttps://example.com/report"])("does not treat a non-file URI list as attachments: %s", uriList => {
+    expect(pasteContainsFiles([{ kind: "string", type: "text/uri-list" }], uriList)).toBe(false);
+  });
+
+  it("accepts local URI lists with comments, CRLF and encoded filenames", () => {
+    expect(pasteContainsFiles([{ kind: "string", type: "text/uri-list" }],
+      "# copied files\r\nfile:///C:/work/report%20one.pdf\r\n\r\nfile:///work/photo.png\r\n")).toBe(true);
   });
 });
 
