@@ -4,6 +4,43 @@
 
 ---
 
+## [2026.10.22](https://github.com/NickYCLin/lattice-term/compare/v2026.10.21...v2026.10.22) (2026-10-21)
+
+
+### 🚀 新增功能
+
+* **chat:** 加入 Herdr 對話檢視與續聊 ([a67f148](https://github.com/NickYCLin/lattice-term/commit/a67f148f9cadbfd67ec57779a8c31828a97b8be6))
+* **connections:** 在遠端設定下方整合資料庫 ([5c45784](https://github.com/NickYCLin/lattice-term/commit/5c45784068b62e5d5b44a1ac682795152fc370fc))
+
+
+### 🛠️ 問題修正
+
+* **accounts:** 避免舊查詢覆蓋目前登入狀態 ([7edc53b](https://github.com/NickYCLin/lattice-term/commit/7edc53bdfeda44d2e4140c649a1c9208185cf466))
+* **agents:** 避免遠端附件重複傳送與沿用失效確認 ([2eba975](https://github.com/NickYCLin/lattice-term/commit/2eba975a5d5795be58921a2e9c7a86d3b053baba))
+* **chat:** 自動釋放 Codex 對話占用 ([2c6e549](https://github.com/NickYCLin/lattice-term/commit/2c6e549b40ab19ab5a1b98bd5c85c65077657c2b))
+* **chat:** 避免 MCP 確認重複開頁 ([8de9c82](https://github.com/NickYCLin/lattice-term/commit/8de9c82aa466ff3f5b4cb402fc1e9c379e5b864c))
+* **chat:** 避免停止操作影響新回合 ([ba67964](https://github.com/NickYCLin/lattice-term/commit/ba67964fc5600cdecef06fc9f5be802c2df47a69))
+* **chat:** 避免助理回覆後持續占用對話 ([1169b41](https://github.com/NickYCLin/lattice-term/commit/1169b415e0d9fb093f0327c44ae6fb23a00b431e))
+* **chat:** 避免權限回答重送與跨回合誤套 ([d30799b](https://github.com/NickYCLin/lattice-term/commit/d30799b8d52076106bc199ba69ce54a9bf8ea372))
+* **chat:** 避免貼上連結被誤判成附件 ([78e0c6c](https://github.com/NickYCLin/lattice-term/commit/78e0c6c960029747e459158927fe6fa99b995b69))
+* **codex:** 自動解除舊診斷模型清單覆寫 ([755fa6a](https://github.com/NickYCLin/lattice-term/commit/755fa6aead93636b566a8a1cbc6d9067160691b2))
+* **connections:** 整理雙位址表單排版 ([ef94f29](https://github.com/NickYCLin/lattice-term/commit/ef94f2958e614be4a7b3af6d95bd6ad1ae6a935c))
+* **connections:** 讓資料庫新增入口更清楚 ([31fd989](https://github.com/NickYCLin/lattice-term/commit/31fd989e4217824237b877c7371a6c6ba101fe53))
+* **connections:** 避免舊密碼讀取意外開啟明文 ([c999184](https://github.com/NickYCLin/lattice-term/commit/c9991846a0b9e117d5c9a2ebdc06b127a91b623f))
+* **connection:** 避免連線與憑證操作重複送出 ([4c926c3](https://github.com/NickYCLin/lattice-term/commit/4c926c39ccc957542bab43369e2ca8e1146729eb))
+* **credentials:** 避免舊刪除結果改動新連線狀態 ([7d12e17](https://github.com/NickYCLin/lattice-term/commit/7d12e17152743e4862fa606320f2e47b9abadadb))
+* **database:** 避免資料庫操作重複送出 ([6a2ad08](https://github.com/NickYCLin/lattice-term/commit/6a2ad0806d84d6e6562eb3a19363149851b4542a))
+* **files:** 避免拖放停用後仍套用舊附件與路徑 ([6d2d318](https://github.com/NickYCLin/lattice-term/commit/6d2d318f585278b19d4bab63afff082560c0179a))
+* **models:** 重新開啟選單時刷新帳號模型 ([c584a5e](https://github.com/NickYCLin/lattice-term/commit/c584a5e6f0af4f1fd1898f65d5308dd67fe103fc))
+* **remote:** 目錄查詢失敗時停用上傳 ([07fff45](https://github.com/NickYCLin/lattice-term/commit/07fff45dc11bbff5ccf12c2daf51e905e2281d46))
+* **remote:** 補齊上傳取消與傳輸清除保護 ([56d1e1a](https://github.com/NickYCLin/lattice-term/commit/56d1e1a812609d67d05aefa03643c3b3b7096f08))
+* **remote:** 避免上傳批次跨連線繼續執行 ([168bc7a](https://github.com/NickYCLin/lattice-term/commit/168bc7a1095fcebc02b2e4aa29d8a5393fcf1f70))
+* **session:** 避免舊權限回覆干擾新提示 ([6157977](https://github.com/NickYCLin/lattice-term/commit/615797752846d83fadc7ad0e10feea387df144d0))
+* **sftp:** 避免傳輸列復活與連線卡片重複 ([5b8234c](https://github.com/NickYCLin/lattice-term/commit/5b8234c7555d7c9930238bd5001241cfc63a69a7))
+* **updates:** 等待舊檢查結束後重新驗證版本 ([2bb50cf](https://github.com/NickYCLin/lattice-term/commit/2bb50cf938ce9b67c9605f1c5680518a0ec8f30c))
+* **vault:** 避免已刪憑證被舊清單帶回 ([387453b](https://github.com/NickYCLin/lattice-term/commit/387453b357295adaf449426b2b11d9d4d38875ca))
+* **vault:** 避免舊讀取覆蓋最新憑證清單 ([76103aa](https://github.com/NickYCLin/lattice-term/commit/76103aacd85f833a59a1eb5bbb491be645fd8b01))
+
 ## [2026.10.21](https://github.com/NickYCLin/lattice-term/compare/v2026.10.20...v2026.10.21) (2026-10-20)
 
 
