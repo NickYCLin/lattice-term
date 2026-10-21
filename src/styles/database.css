@@ -47,6 +47,25 @@
 .database-manager__result td,
 .database-manager__result th { padding: var(--space-2); text-align: start; border: 1px solid currentColor; max-width: 24rem; overflow-wrap: anywhere; white-space: pre-wrap; }
 .database-manager__error { font-weight: 600; }
+.connection-drawer__remote-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.database-manager--embedded {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+}
+.database-manager--embedded .database-manager__layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.database-manager--embedded .database-manager__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.database-manager--embedded .database-manager__list li { margin: 0; }
 @media (max-width: 700px) {
   .database-manager__layout { grid-template-columns: minmax(0, 1fr); }
 }

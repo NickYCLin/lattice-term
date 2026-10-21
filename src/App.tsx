@@ -1337,6 +1337,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           profiles={profiles}
           supportedProtocols={supportedProtocols}
           mobile={onMobile}
+          databaseAvailable={runtime.host === "tauri"}
           onSave={saveDraft}
           onClose={() => setDrawer({ open: false, profileId: null })}
         />

@@ -7,10 +7,12 @@ import {
 } from "../../domain/database";
 import { useModalFocus } from "../overlays/modalFocus";
 
-export function DatabaseManager({ profiles, hostKeys, onClose }: {
+export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange }: {
   profiles: ConnectionProfile[];
   hostKeys?: string[];
   onClose: () => void;
+  embedded?: boolean;
+  onStateChange?: (state: { busy: boolean; dirty: boolean }) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
@@ -22,6 +24,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
   const [draft, setDraft] = useState(() => emptyDatabase(hostKey, initialHost?.hostname));
   const [password, setPassword] = useState("");
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -34,7 +37,8 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   const [previousOffsets, setPreviousOffsets] = useState<number[]>([]);
   const saved = snapshot?.profiles.find((profile) => profile.id === draft.id);
   const dirty = !saved || JSON.stringify(saved) !== JSON.stringify(draft) || password.length > 0;
-  useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: busy });
+  useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: busy, active: !embedded });
+  useEffect(() => { onStateChange?.({ busy, dirty: touched && dirty }); }, [busy, dirty, touched, onStateChange]);
 
   useEffect(() => {
     const request = ++generation.current;
@@ -51,6 +55,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   }, []);
 
   function reset(profile = emptyDatabase(hostKey, initialHost?.hostname)) {
+    setTouched(false);
     setDraft(profile); setPassword(""); setResult(null); setResultKind(null); setTables([]);
     setTableIndex(""); setOffset(0); setDeleting(null); setError(""); setNotice("");
   }
@@ -68,6 +73,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   }
 
   function update<Key extends keyof DatabaseProfile>(key: Key, value: DatabaseProfile[Key]) {
+    setTouched(true);
     setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
   }
 
@@ -77,6 +83,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
     void perform(async () => {
       const value = await invoke<DatabaseSnapshot>("database_save", { profile: draft, revision: snapshot.revision, password: password || null });
       setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setTables([]); setTableIndex(""); setResult(null);
+      setTouched(false);
       setNotice("連線已儲存；尚未代表已連線成功，請按測試連線確認。");
     });
   }
@@ -101,11 +108,11 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   }
 
   return (
-    <div className="scrim scrim--center" role="presentation">
-      <div className="dialog database-manager" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} ref={dialogRef} tabIndex={-1}>
+    <div className={embedded ? undefined : "scrim scrim--center"} role={embedded ? undefined : "presentation"}>
+      <div className={embedded ? "database-manager database-manager--embedded" : "dialog database-manager"} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby={titleId} aria-busy={busy} ref={dialogRef} tabIndex={-1}>
         <header className="database-manager__header">
-          <h2 className="dialog__title" id={titleId}>資料庫連線</h2>
-          <button type="button" className="button button--secondary" onClick={onClose} disabled={busy}>關閉</button>
+          {embedded ? <h4 id={titleId}>資料庫設定與唯讀瀏覽</h4> : <h2 className="dialog__title" id={titleId}>資料庫連線</h2>}
+          {!embedded && <button type="button" className="button button--secondary" onClick={onClose} disabled={busy}>關閉</button>}
         </header>
         <p>同一台主機可新增多個種類、版本或執行個體；以名稱及連接埠區分。此處只讀資料，部署仍走原有的 SSH／SFTP。</p>
         <p>伺服器連線強制驗證 TLS 憑證，請使用唯讀帳號。不自動探索 instance 連接埠，也不會傳回密碼。</p>
@@ -140,6 +147,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
                 {[...hosts].map(([key, profile]) => <option key={key} value={key}>{profile.name}</option>)}
               </select></label>
               <label>資料庫種類<select value={draft.engine} onChange={(event) => {
+                setTouched(true);
                 setDraft(changeDatabaseEngine(draft, event.target.value as DatabaseProfile["engine"]));
                 setPassword(""); setResult(null); setTables([]); setTableIndex("");
               }}>{databaseEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}</select></label>
@@ -150,14 +158,14 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
                 <label>連接埠<input required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
                 <label>資料庫名稱<input required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
                 <label>帳號<input required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
-                <label>密碼（留白保留；變更端點須重填）<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+                <label>密碼（留白保留；變更端點須重填）<input type="password" autoComplete="new-password" value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label>
                 <label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
                 <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p>
               </>}
               <label className="database-manager__permission"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
               <p>密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>
               <div className="database-manager__actions">
-                <button type="submit" className="button button--primary" disabled={!dirty}>儲存連線</button>
+                <button type="submit" className="button button--primary" disabled={!dirty}>{embedded ? "儲存資料庫連線" : "儲存連線"}</button>
                 {saved && <button type="button" className="button button--danger" onClick={() => setDeleting(saved.id)}>刪除此資料庫連線</button>}
               </div>
               {deleting && <div role="group" aria-label="確認刪除資料庫連線">

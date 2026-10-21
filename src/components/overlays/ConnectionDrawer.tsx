@@ -43,6 +43,7 @@ import { clearValidationError } from "./connectionValidation";
 import { moveRadioGroupFocus } from "./radioNavigation";
 import { useModalFocus } from "./modalFocus";
 import { useConnectionCredentialDraft } from "../../app/useConnectionCredentialDraft";
+import { DatabaseManager } from "../connections/DatabaseManager";
 import { newRouteDraft } from "../../app/connectionRoutes";
 import { connectionAddressDrafts, validateAdditionalAddress } from "../../app/connectionAddresses";
 import {
@@ -90,6 +91,7 @@ export function ConnectionDrawer({
   profiles,
   supportedProtocols,
   mobile,
+  databaseAvailable = false,
   onSave,
   onClose,
 }: {
@@ -104,6 +106,7 @@ export function ConnectionDrawer({
   supportedProtocols: readonly string[];
   /** Mobile packages show only usable protocols when creating a profile. */
   mobile: boolean;
+  databaseAvailable?: boolean;
   onSave: (
     draft: ConnectionDraft,
     connectAfterSave: boolean,
@@ -136,6 +139,12 @@ export function ConnectionDrawer({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [databaseState, setDatabaseState] = useState({ busy: false, dirty: false });
+  const databaseHost = profile ?? routeSource;
+  const databaseHostKeys = useMemo(() => databaseHost ? [...new Set([
+    databaseHost.machineId ?? databaseHost.id, databaseHost.id,
+    ...profiles.filter((entry) => (entry.machineId ?? entry.id) === (databaseHost.machineId ?? databaseHost.id)).map((entry) => entry.id),
+  ])] : undefined, [databaseHost, profiles]);
   const [advancedOpen, setAdvancedOpen] = useState(
     () =>
       (initial.environment ?? "unassigned") !== "unassigned" ||
@@ -149,7 +158,7 @@ export function ConnectionDrawer({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const dirty =
-    credential.dirty || Boolean(additionalHostname || additionalPort) || !sameDraft(draft, initial) ||
+    databaseState.dirty || credential.dirty || Boolean(additionalHostname || additionalPort) || !sameDraft(draft, initial) ||
     parseTags(tagInput).join(",") !== (initial.tags ?? []).join(",");
   const protocolOptions = useMemo(
     () =>
@@ -172,7 +181,7 @@ export function ConnectionDrawer({
 
   function requestClose() {
     navigation.current = null;
-    if (savingRef.current) return;
+    if (savingRef.current || databaseState.busy) return;
     if (dirty) {
       setConfirmDiscard(true);
       return;
@@ -181,7 +190,7 @@ export function ConnectionDrawer({
   }
 
   function navigate(action: () => void) {
-    if (savingRef.current) return;
+    if (savingRef.current || databaseState.busy) return;
     if (dirty) { navigation.current = action; setConfirmDiscard(true); }
     else action();
   }
@@ -282,7 +291,7 @@ export function ConnectionDrawer({
   }
 
   async function save(connectAfterSave: boolean) {
-    if (savingRef.current || credential.loading || pendingProtocol) return;
+    if (savingRef.current || credential.loading || pendingProtocol || databaseState.busy || databaseState.dirty) return;
     if (Object.keys(validateNow()).length > 0) return;
     savingRef.current = true;
     setSaving(true);
@@ -350,7 +359,8 @@ export function ConnectionDrawer({
           </button>
         </header>
 
-        <form className="drawer__body" id={formId} onSubmit={submit} noValidate inert={saving}>
+        <div className="drawer__body" inert={saving}>
+        <form className="connection-drawer__remote-form" id={formId} onSubmit={submit} noValidate inert={databaseState.busy}>
           {(profile || routeSource) && <section className="form-section">
             <h3 className="form-section__title">{t("form.route.title")}</h3>
             <p>{t("form.route.hint")}</p>
@@ -815,6 +825,15 @@ export function ConnectionDrawer({
             </div>
           </details>
         </form>
+        {databaseAvailable && !mobile && <section className="form-section connection-drawer__database">
+          <h3 className="form-section__title">資料庫連線</h3>
+          {databaseHost ? <>
+            <p>資料庫設定為選填，可新增多種資料庫與版本。資料庫與上方遠端連線分開儲存，不影響原有遠端連線。</p>
+            {databaseState.dirty && <p role="status">資料庫設定尚未儲存，請先按「儲存資料庫連線」，再使用底部按鈕儲存遠端連線。</p>}
+            <DatabaseManager embedded profiles={profiles} hostKeys={databaseHostKeys} onClose={requestClose} onStateChange={setDatabaseState} />
+          </> : <p>請先儲存遠端連線，再從這張主機卡片開啟編輯，即可在這裡新增資料庫。</p>}
+        </section>}
+        </div>
 
         {confirmDiscard ? (
           <div className="drawer__foot drawer__foot--confirm">
@@ -833,7 +852,8 @@ export function ConnectionDrawer({
               <button
                 type="button"
                 className="button button--danger"
-                onClick={() => { const action = navigation.current; navigation.current = null; if (action) action(); else onClose(); }}
+                disabled={databaseState.busy}
+                onClick={() => { if (databaseState.busy) return; const action = navigation.current; navigation.current = null; if (action) action(); else onClose(); }}
               >
                 {t("form.discard.confirm")}
               </button>
@@ -878,7 +898,7 @@ export function ConnectionDrawer({
                 className={`button ${
                   connectSupported ? "button--secondary" : "button--primary"
                 }`}
-                disabled={saving || credential.loading}
+                disabled={saving || credential.loading || databaseState.busy || databaseState.dirty}
               >
                 {t("form.submit.saveOnly")}
               </button>
@@ -886,7 +906,7 @@ export function ConnectionDrawer({
                 <button
                   type="button"
                   className="button button--primary"
-                  disabled={saving || credential.loading}
+                  disabled={saving || credential.loading || databaseState.busy || databaseState.dirty}
                   onClick={() => void save(true)}
                 >
                   {t("form.submit.saveAndConnect")}
