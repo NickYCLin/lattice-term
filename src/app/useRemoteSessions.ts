@@ -575,9 +575,10 @@ export async function streamRemoteFileUpload(
   transferId: string,
   invoke: RemoteInvoke,
 ): Promise<void> {
-  const reader = file.stream().getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let pending = new Uint8Array(0);
   try {
+    reader = file.stream().getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -608,7 +609,7 @@ export async function streamRemoteFileUpload(
     await invoke("remote_file_upload_finish", { sessionId, transferId });
   } catch (reason) {
     try {
-      await reader.cancel(reason);
+      await reader?.cancel(reason);
     } catch {
       // The backend cancellation below owns authoritative remote cleanup.
     }
@@ -619,7 +620,7 @@ export async function streamRemoteFileUpload(
     }
     throw reason;
   } finally {
-    reader.releaseLock();
+    reader?.releaseLock();
   }
 }
 
@@ -699,6 +700,16 @@ export function useRemoteSessions(): RemoteApi {
   const eventReadiness = useRef(new SessionEventReadinessGate());
   const reconnectRequests = useRef(new Map<string, RemoteConnectRequest>());
   const stoppedReconnects = useRef(new Set<string>());
+  const dismissedTransferIds = useRef(new Set<string>());
+  const recordTransfer = useCallback((transfer: RemoteFileTransfer) => {
+    setTransfers((current) => {
+      if (dismissedTransferIds.current.has(transfer.transferId)) return current;
+      return {
+        ...current,
+        [transfer.transferId]: reconcileRemoteFileTransfer(current[transfer.transferId], transfer),
+      };
+    });
+  }, []);
   const connectRef = useRef<
     ((request: RemoteConnectRequest) => Promise<RemoteConnectOutcome>) | null
   >(null);
@@ -847,13 +858,7 @@ export function useRemoteSessions(): RemoteApi {
         const stopTransfers = await listen<RemoteFileTransfer>(
           "remote://file-transfer",
           (event) => {
-            setTransfers((current) => ({
-              ...current,
-              [event.payload.transferId]: reconcileRemoteFileTransfer(
-                current[event.payload.transferId],
-                event.payload,
-              ),
-            }));
+            recordTransfer(event.payload);
           },
         );
         if (!keep(stopTransfers)) {
@@ -887,6 +892,7 @@ export function useRemoteSessions(): RemoteApi {
           setTransfers((current) => {
             const next = { ...current };
             for (const transfer of existingTransfers) {
+              if (dismissedTransferIds.current.has(transfer.transferId)) continue;
               next[transfer.transferId] = reconcileRemoteFileTransfer(
                 next[transfer.transferId],
                 transfer,
@@ -914,7 +920,7 @@ export function useRemoteSessions(): RemoteApi {
       readinessAttempt.fail();
       for (const dispose of disposers) dispose();
     };
-  }, []);
+  }, [recordTransfer]);
 
   const connect = useCallback(
     async (request: RemoteConnectRequest): Promise<RemoteConnectOutcome> => {
@@ -1056,15 +1062,9 @@ export function useRemoteSessions(): RemoteApi {
       "remote_file_download_start",
       { sessionId, path },
     );
-    setTransfers((current) => ({
-      ...current,
-      [transfer.transferId]: reconcileRemoteFileTransfer(
-        current[transfer.transferId],
-        transfer,
-      ),
-    }));
+    recordTransfer(transfer);
     return transfer;
-  }, []);
+  }, [recordTransfer]);
 
   const uploadFile = useCallback(
     async (
@@ -1085,13 +1085,7 @@ export function useRemoteSessions(): RemoteApi {
           overwrite,
         },
       );
-      setTransfers((current) => ({
-        ...current,
-        [transfer.transferId]: reconcileRemoteFileTransfer(
-          current[transfer.transferId],
-          transfer,
-        ),
-      }));
+      recordTransfer(transfer);
       onStarted?.(transfer);
       if ("nativePath" in file) {
         await invoke("remote_file_upload_path", { sessionId, transferId: transfer.transferId, path: file.nativePath, size: file.size });
@@ -1104,7 +1098,7 @@ export function useRemoteSessions(): RemoteApi {
         invoke as RemoteInvoke,
       );
     },
-    [],
+    [recordTransfer],
   );
 
   const cancelFileTransfer = useCallback(
@@ -1119,6 +1113,11 @@ export function useRemoteSessions(): RemoteApi {
     async (sessionId: string, transferId: string) => {
       const { invoke } = await core();
       await invoke("remote_file_transfer_dismiss", { sessionId, transferId });
+      dismissedTransferIds.current.add(transferId);
+      if (dismissedTransferIds.current.size > 1024) {
+        const oldest = dismissedTransferIds.current.values().next().value;
+        if (oldest !== undefined) dismissedTransferIds.current.delete(oldest);
+      }
       setTransfers((current) => {
         const next = { ...current };
         delete next[transferId];

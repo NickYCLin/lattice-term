@@ -67,6 +67,22 @@ function transfer(
 }
 
 describe("Lattice Remote file uploads", () => {
+  it.each(["stream", "reader"])("cancels staging when acquiring the %s fails", async (failure) => {
+    const commands: string[] = [];
+    const file = {
+      stream() {
+        if (failure === "stream") throw new Error("stream unavailable");
+        const stream = new ReadableStream<Uint8Array<ArrayBuffer>>();
+        stream.getReader();
+        return stream;
+      },
+    };
+    await expect(streamRemoteFileUpload(file, "remote-1", "remote-file-3", async (command) => {
+      commands.push(command);
+    })).rejects.toThrow();
+    expect(commands).toEqual(["remote_file_transfer_cancel"]);
+  });
+
   it("splits browser streams at the encrypted protocol boundary", async () => {
     const commands: Array<{ command: string; data?: string }> = [];
     const bytes = new Uint8Array(48 * 1024 + 7).fill(0x5a);
