@@ -1085,7 +1085,7 @@ function ThreadPane({
 
   async function stop() {
     try {
-      await chat.stop(thread.id);
+      await chat.stop(thread.id, thread.runningTurnId ?? undefined);
     } catch (reason) {
       setNotice(
         t("chat.stop.failed", {

@@ -819,16 +819,21 @@ export function useAgentChat(
   }, []);
 
   const stopTurn = useCallback(async (id: string, expectedTurnId?: string) => {
+    const thread = threadsRef.current.find(entry => entry.id === id);
+    if (expectedTurnId !== undefined && thread?.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before stopping it.");
+    if (!thread) return;
+    const turnId = thread.runningTurnId;
     completionTracker.current.cancel(id);
     changeThreads(current => current.map(thread => thread.id === id ? { ...thread, queuePaused: true } : thread));
+    if (!turnId) return;
     // A subtask on another machine has nothing running here to stop.
-    const remote = threadsRef.current.find(thread => thread.id === id)?.remote;
+    const remote = thread.remote;
     if (remote) {
       await cancelFleetTurn(remote.targetId, remote.sessionId);
       return;
     }
     const { invoke } = await core();
-    await invoke<boolean>("agent_chat_stop", { threadId: id, expectedTurnId: expectedTurnId ?? null });
+    await invoke<boolean>("agent_chat_stop", { threadId: id, expectedTurnId: turnId });
   }, []);
 
   const enqueue = useCallback((id: string, prompt: string, attachments: readonly ChatAttachment[], profileConfigPath: string | null = null, mentions: readonly ChatMention[] = []) => {
