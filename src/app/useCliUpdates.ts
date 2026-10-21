@@ -28,6 +28,7 @@ function needsAttention(items: CliUpdate[]) {
 export function useCliUpdates(enabled: boolean) {
   const checked = useRef(false);
   const checking = useRef(false);
+  const checkFinished = useRef<Promise<void> | null>(null);
   const updateRunning = useRef(false);
   const [progress, setProgress] = useState<CliUpdateProgress | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,6 +42,8 @@ export function useCliUpdates(enabled: boolean) {
   const check = useCallback(async (): Promise<CliUpdate[] | null> => {
     if (checking.current) return null;
     checking.current = true;
+    let finish!: () => void;
+    checkFinished.current = new Promise(resolve => { finish = resolve; });
     setBusy(true);
     setError(false);
     try {
@@ -53,6 +56,7 @@ export function useCliUpdates(enabled: boolean) {
     } finally {
       checking.current = false;
       setBusy(false);
+      finish();
     }
   }, []);
 
@@ -70,6 +74,7 @@ export function useCliUpdates(enabled: boolean) {
           current.includes(label) ? current : [...current, label],
         );
         setProgress({ activeId: null, label, completed: 1, total: 1, phase: "checking" });
+        while (checking.current) await checkFinished.current;
         const refreshed = await check();
         if (refreshed && !needsAttention(refreshed)) setDismissed(true);
         return true;
@@ -124,6 +129,7 @@ export function useCliUpdates(enabled: boolean) {
         activeId: null, label: "", completed: targets.length,
         total: targets.length, phase: "checking",
       });
+      while (checking.current) await checkFinished.current;
       const refreshed = await check();
       if (failures.length === 0 && refreshed && !needsAttention(refreshed)) {
         setDismissed(true);

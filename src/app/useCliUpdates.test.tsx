@@ -110,6 +110,76 @@ it("honors startup settings, deduplicates checks and lets users dismiss failures
   }
 });
 
+it("waits for a fresh verification when an older version check overlaps an update", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useCliUpdates>;
+  function Probe() { api = useCliUpdates(false); return null; }
+  let finishOldCheck!: (items: CliUpdate[]) => void;
+  let finishVerification!: (items: CliUpdate[]) => void;
+  const stale: CliUpdate[] = [{ id: "codex", label: "Codex", currentVersion: "1.0.0", latestVersion: "2.0.0", status: "available", sourceUrl: "" }];
+  try {
+    await act(async () => root.render(<Probe />));
+    invoke.mockImplementationOnce(() => new Promise(resolve => { finishOldCheck = resolve; }))
+      .mockResolvedValueOnce("ok")
+      .mockImplementationOnce(() => new Promise(resolve => { finishVerification = resolve; }));
+    let check!: Promise<CliUpdate[] | null>;
+    let update!: Promise<boolean>;
+    let completed = false;
+    await act(async () => {
+      check = api.check();
+      update = api.updateCli("codex").then(success => { completed = true; return success; });
+    });
+    expect(completed).toBe(false);
+    expect(api.progress?.phase).toBe("checking");
+    await act(async () => { finishOldCheck(stale); await check; });
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_check_updates")).toHaveLength(2);
+    expect(completed).toBe(false);
+    await act(async () => { finishVerification([]); expect(await update).toBe(true); });
+    expect(api.items).toEqual([]);
+    expect(api.progress).toBeNull();
+    expect(api.visible).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    vi.clearAllMocks();
+  }
+});
+
+it("waits for the older check before verifying a batch update", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useCliUpdates>;
+  function Probe() { api = useCliUpdates(false); return null; }
+  const stale: CliUpdate[] = [{ id: "codex", label: "Codex", currentVersion: "1.0.0", latestVersion: "2.0.0", status: "available", sourceUrl: "", updatable: true }];
+  let finishOldCheck!: (items: CliUpdate[]) => void;
+  let finishVerification!: (items: CliUpdate[]) => void;
+  try {
+    await act(async () => root.render(<Probe />));
+    invoke.mockResolvedValueOnce(stale);
+    await act(async () => { await api.check(); });
+    invoke.mockImplementationOnce(() => new Promise(resolve => { finishOldCheck = resolve; }))
+      .mockResolvedValueOnce("ok")
+      .mockImplementationOnce(() => new Promise(resolve => { finishVerification = resolve; }));
+    let oldCheck!: Promise<CliUpdate[] | null>;
+    let update!: Promise<void>;
+    let completed = false;
+    await act(async () => {
+      oldCheck = api.check();
+      update = api.updateAll().then(() => { completed = true; });
+    });
+    expect(completed).toBe(false);
+    expect(api.progress?.phase).toBe("checking");
+    await act(async () => { finishOldCheck(stale); await oldCheck; });
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_check_updates")).toHaveLength(3);
+    expect(completed).toBe(false);
+    await act(async () => { finishVerification([]); await update; });
+    expect(api.items).toEqual([]);
+    expect(api.visible).toBe(false);
+    expect(api.progress).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    vi.clearAllMocks();
+  }
+});
+
 it("supports updating individual CLIs and update-all", async () => {
   const root = createRoot(installFakeDom() as unknown as Element);
   let api!: ReturnType<typeof useCliUpdates>;
