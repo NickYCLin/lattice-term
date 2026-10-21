@@ -14,6 +14,7 @@ mod chat_attachments;
 pub mod chat_images;
 pub mod clipboard;
 pub mod cliproxy;
+mod codex_config;
 mod connection_credentials;
 pub mod credentials;
 pub mod database;

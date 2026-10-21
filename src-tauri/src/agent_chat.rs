@@ -1274,6 +1274,9 @@ pub async fn list_models(
     let executable = crate::agent::catalog_executable(definition_id)
         .ok_or_else(|| "This CLI is not installed.".to_string())?;
     let profile_config_directory = profile_config_directory(dialect, profile_config_path)?;
+    if dialect == Dialect::Codex {
+        crate::codex_config::repair_legacy_catalog(profile_config_directory.as_deref())?;
+    }
     if dialect == Dialect::Gemini {
         // Gemini's documented aliases are deliberately stable while their
         // concrete targets can change with account access and CLI updates.
@@ -1622,6 +1625,9 @@ fn send_with_retry<S: ChatSink>(
         let working_directory = validate_working_directory(&request.working_directory)?;
         let profile_config_directory =
             profile_config_directory(dialect, request.profile_config_path.as_deref())?;
+        if dialect == Dialect::Codex && request.cli_proxy_base_url.is_none() {
+            crate::codex_config::repair_legacy_catalog(profile_config_directory.as_deref())?;
+        }
         if request.cli_proxy_base_url.is_some() {
             if !crate::agent::proxy_capable(&request.definition_id) {
                 return Err(crate::agent::PROXY_UNSUPPORTED_CLI.into());

@@ -7645,6 +7645,9 @@ pub fn launch_with_replay(
         })
         .transpose()?;
     let mut proxy_catalog = None;
+    if definition_id == "codex" && proxy.is_none() {
+        crate::codex_config::repair_legacy_catalog(profile_config_path.as_deref())?;
+    }
     if let (true, Some(proxy), Some(target)) = (definition_id == "codex", &proxy, &proxy_target) {
         proxy.prepare_desktop_resume(
             profile_config_path.as_deref(),
