@@ -417,6 +417,49 @@ struct RunningTurn {
     pending_inputs: HashMap<String, Value>,
 }
 
+async fn cleanup_completed_turn(
+    registry: &AgentChatRegistry,
+    thread_id: &str,
+    turn_id: &str,
+    grace: std::time::Duration,
+) {
+    tokio::time::sleep(grace).await;
+    let mut running = registry.lock();
+    if let Some(turn) = running.get_mut(thread_id) {
+        if turn.turn_id == turn_id && !matches!(turn.child.try_wait(), Ok(Some(_))) {
+            let _ = kill_turn(&mut turn.child);
+        }
+    }
+}
+
+async fn wait_for_turn_exit(
+    registry: &AgentChatRegistry,
+    thread_id: &str,
+    turn_id: &str,
+) -> Option<std::process::ExitStatus> {
+    loop {
+        {
+            let mut running = registry.lock();
+            let turn = running.get_mut(thread_id)?;
+            if turn.turn_id != turn_id {
+                return None;
+            }
+            match turn.child.try_wait() {
+                Ok(Some(status)) => {
+                    running.remove(thread_id);
+                    return Some(status);
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    running.remove(thread_id);
+                    return None;
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
 /// The turns currently running, one per thread at most.
 #[derive(Default)]
 pub struct AgentChatRegistry {
@@ -1739,6 +1782,7 @@ fn send_with_retry<S: ChatSink>(
             });
 
             let mut state = TurnState::default();
+            let mut completion_cleanup_started = false;
             let mut had_progress = false;
             let mut reader = BufReader::new(stdout);
             let mut line = Vec::new();
@@ -1803,6 +1847,21 @@ fn send_with_retry<S: ChatSink>(
                     state.pending_inputs.clear();
                 }
                 if state.turn_complete {
+                    if !completion_cleanup_started {
+                        completion_cleanup_started = true;
+                        let cleanup_registry = Arc::clone(&registry);
+                        let cleanup_thread = thread_id.clone();
+                        let cleanup_turn = turn_id.clone();
+                        tauri::async_runtime::spawn(async move {
+                            cleanup_completed_turn(
+                                &cleanup_registry,
+                                &cleanup_thread,
+                                &cleanup_turn,
+                                std::time::Duration::from_secs(30),
+                            )
+                            .await;
+                        });
+                    }
                     if let Some(stdin) = shared_stdin.take() {
                         // The reply is in. Closing stdin is what ends a
                         // bidirectional CLI; it keeps waiting for input otherwise.
@@ -1819,17 +1878,7 @@ fn send_with_retry<S: ChatSink>(
                 }
             }
 
-            let child = {
-                let mut running = registry.lock();
-                match running.get(&thread_id) {
-                    Some(turn) if turn.turn_id == turn_id => running.remove(&thread_id),
-                    _ => None,
-                }
-            };
-            let status = match child {
-                Some(mut turn) => turn.child.wait().await.ok(),
-                None => None,
-            };
+            let status = wait_for_turn_exit(&registry, &thread_id, &turn_id).await;
             let stderr_tail = stderr_task.await.unwrap_or_default();
 
             let mut error = state.error.take();
@@ -3556,11 +3605,103 @@ mod tests {
 
     #[test]
     fn a_result_marks_the_turn_complete_so_stdin_can_close() {
-        let (state, _) = lines(
-            Dialect::Claude,
-            r#"{"type":"result","subtype":"success","is_error":false,"session_id":"s"}"#,
-        );
-        assert!(state.turn_complete);
+        for (dialect, result) in [
+            (
+                Dialect::Claude,
+                r#"{"type":"result","subtype":"success","is_error":false,"session_id":"s"}"#,
+            ),
+            (Dialect::Gemini, r#"{"type":"result","status":"success"}"#),
+            (
+                Dialect::Antigravity,
+                r#"{"event":"result","result":{"status":"SUCCESS"}}"#,
+            ),
+        ] {
+            let (state, events) = lines(dialect, result);
+            assert!(state.turn_complete, "{dialect:?}");
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| matches!(event, ChatEvent::Finished { .. })),
+                "{dialect:?}"
+            );
+        }
+    }
+
+    fn waiting_test_turn(turn_id: &str) -> RunningTurn {
+        #[cfg(windows)]
+        let mut command = headless_command(Path::new("powershell.exe"));
+        #[cfg(windows)]
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 60",
+        ]);
+        #[cfg(not(windows))]
+        let mut command = headless_command(Path::new("sleep"));
+        #[cfg(not(windows))]
+        command.arg("60");
+        let child = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        RunningTurn {
+            turn_id: turn_id.into(),
+            child,
+            stdin: None,
+            pending_inputs: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn completed_process_stays_reserved_until_it_exits() {
+        let registry = Arc::new(AgentChatRegistry::default());
+        registry
+            .lock()
+            .insert("thread".into(), waiting_test_turn("turn"));
+        let waiting_registry = Arc::clone(&registry);
+        let waiting =
+            tokio::spawn(
+                async move { wait_for_turn_exit(&waiting_registry, "thread", "turn").await },
+            );
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        assert!(!waiting.is_finished());
+        assert!(registry.lock().contains_key("thread"));
+        cleanup_completed_turn(&registry, "thread", "turn", std::time::Duration::ZERO).await;
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(status.is_some());
+        assert!(!registry.lock().contains_key("thread"));
+    }
+
+    #[tokio::test]
+    async fn late_completion_cleanup_does_not_stop_a_new_turn() {
+        let registry = AgentChatRegistry::default();
+        registry
+            .lock()
+            .insert("thread".into(), waiting_test_turn("new-turn"));
+        cleanup_completed_turn(&registry, "thread", "old-turn", std::time::Duration::ZERO).await;
+        assert!(wait_for_turn_exit(&registry, "thread", "old-turn")
+            .await
+            .is_none());
+        {
+            let mut running = registry.lock();
+            let turn = running.get_mut("thread").unwrap();
+            assert_eq!(turn.turn_id, "new-turn");
+            assert!(turn.child.try_wait().unwrap().is_none());
+        }
+        registry.stop("thread").unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            wait_for_turn_exit(&registry, "thread", "new-turn")
+        )
+        .await
+        .unwrap()
+        .is_some());
     }
 
     #[test]

@@ -55,12 +55,12 @@ it("opens an empty history mirror immediately, blocks sending until read and ret
   } finally { await act(async () => root.unmount()); }
 });
 
-it("polls locally created native conversations and appends external replies without launching a CLI", async () => {
+it.each(["claude", "codex", "gemini", "antigravity"] as const)("polls %s native conversations and appends external replies without launching a CLI", async definitionId => {
   vi.useFakeTimers();
   const container = installFakeDom();
   vi.stubGlobal("addEventListener", () => {});
   vi.stubGlobal("removeEventListener", () => {});
-  const thread: ChatThread = { ...createThread({ definitionId: "codex", model: "", permission: "ask", workingDirectory: "/work" }),
+  const thread: ChatThread = { ...createThread({ definitionId, model: "", permission: "ask", workingDirectory: "/work" }),
     nativeSessionId: "native", items: [
       { type: "user", id: "local:user", text: "local question", at: 1 },
       { type: "tool", id: "local:tool", name: "read", summary: "local tool", output: "keep this", isError: false, done: true },
@@ -78,8 +78,8 @@ it("polls locally created native conversations and appends external replies with
   ];
   invoke.mockImplementation(async command => command === "agent_chat_local_history_snapshot"
     ? { messages, truncated: false, archived: false }
-    : command === "agent_chat_supported" ? ["codex"] : undefined);
-  const history = { entries: [{ definitionId: "codex", profileId: null, nativeSessionId: "native",
+    : command === "agent_chat_supported" ? [definitionId] : undefined);
+  const history = { entries: [{ definitionId, profileId: null, nativeSessionId: "native",
     title: thread.title, workingDirectory: "/work", updatedAt: 1, resumable: true }], profileKey: "[]" } as unknown as NativeHistory;
   let chat!: AgentChatApi;
   function Probe() { chat = useAgentChat(); return null; }
@@ -89,7 +89,7 @@ it("polls locally created native conversations and appends external replies with
     expect(chat.getThread(thread.id)?.items.slice(0, 3)).toEqual(thread.items);
     expect(chat.getThread(thread.id)?.items.slice(3)).toMatchObject([{ type: "user", text: "native question" }, { type: "text", text: "native reply" }]);
     expect(invoke).toHaveBeenCalledWith("agent_chat_local_history_snapshot", {
-      definitionId: "codex", nativeSessionId: "native", profileId: null, profiles: [],
+      definitionId, nativeSessionId: "native", profileId: null, profiles: [],
     });
     messages = [...messages, { role: "user", text: "another native question" }, { role: "assistant", text: "another native reply" }];
     await act(async () => { await vi.advanceTimersByTimeAsync(NATIVE_MESSAGE_REFRESH_MS); });
