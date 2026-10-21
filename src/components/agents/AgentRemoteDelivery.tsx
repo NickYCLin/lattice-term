@@ -89,6 +89,20 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const cancelRequestedRef = useRef(false);
+  const mounted = useRef(true);
+  const latestSessions = useRef(sessions);
+  latestSessions.current = sessions;
+  const operation = useRef<{
+    sessionId: string;
+    phase: "checking" | "sending";
+  } | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      operation.current = null;
+    };
+  }, []);
   const [delivered, setDelivered] = useState<{
     name: string;
     destination: string;
@@ -102,13 +116,31 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
     : 0;
 
   useEffect(() => {
+    if (
+      pending &&
+      !sessions.some((session) => session.sessionId === pending.session.sessionId)
+    ) {
+      setPending(null);
+    }
+    if (
+      operation.current?.phase === "checking" &&
+      !sessions.some((session) => session.sessionId === operation.current?.sessionId)
+    ) {
+      operation.current = null;
+      setPhase(null);
+    }
     if (sessions.some((session) => session.sessionId === sessionId)) return;
     setSessionId(sessions[0]?.sessionId ?? "");
-  }, [sessionId, sessions]);
+  }, [sessionId, sessions, pending]);
 
   async function review() {
-    const session = sessions.find((candidate) => candidate.sessionId === sessionId);
-    if (!session || !file) return;
+    const session = latestSessions.current.find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!mounted.current || operation.current || pending || !session || !file) return;
+    const request = { sessionId: session.sessionId, phase: "checking" as const };
+    operation.current = request;
+    const current = () => mounted.current && operation.current === request;
     setPhase("checking");
     setProblem(null);
     setDelivered(null);
@@ -117,6 +149,10 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
         session.sessionId,
         parent.trim() || "/",
       );
+      if (
+        !current() ||
+        !latestSessions.current.some((candidate) => candidate.sessionId === session.sessionId)
+      ) return;
       const target = inspectRemoteDeliveryTarget(directory, file.name);
       if (target.blocked) {
         setProblem(t("remote.files.cannotOverwrite", { name: file.name }));
@@ -130,15 +166,24 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
         overwrite: target.overwrite,
       });
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      if (current()) setProblem(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setPhase(null);
+      if (current()) {
+        operation.current = null;
+        setPhase(null);
+      }
     }
   }
 
   async function deliver() {
     const request = pending;
-    if (!request) return;
+    if (
+      !mounted.current || operation.current || !request ||
+      !latestSessions.current.some((session) => session.sessionId === request.session.sessionId)
+    ) return;
+    const sending = { sessionId: request.session.sessionId, phase: "sending" as const };
+    operation.current = sending;
+    const current = () => mounted.current && operation.current === sending;
     setPending(null);
     setPhase("sending");
     setActive(null);
@@ -151,13 +196,17 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
         request.parent,
         request.file,
         request.overwrite,
-        (transfer) =>
-          setActive({
-            sessionId: request.session.sessionId,
-            destination: remoteDeliveryPath(request.parent, request.file.name),
-            initialTransfer: transfer,
-          }),
+        (transfer) => {
+          if (current()) {
+            setActive({
+              sessionId: request.session.sessionId,
+              destination: remoteDeliveryPath(request.parent, request.file.name),
+              initialTransfer: transfer,
+            });
+          }
+        },
       );
+      if (!current()) return;
       setProblem(null);
       setDelivered({
         name: request.file.name,
@@ -166,19 +215,26 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (reason) {
-      if (!cancelRequestedRef.current) {
+      if (current() && !cancelRequestedRef.current) {
         setProblem(reason instanceof Error ? reason.message : String(reason));
       }
     } finally {
-      cancelRequestedRef.current = false;
-      setCancelling(false);
-      setActive(null);
-      setPhase(null);
+      if (current()) {
+        operation.current = null;
+        cancelRequestedRef.current = false;
+        setCancelling(false);
+        setActive(null);
+        setPhase(null);
+      }
     }
   }
 
   async function cancelDelivery() {
-    if (!active || !activeTransfer || activeTransfer.state !== "running") return;
+    if (
+      !mounted.current || cancelling || cancelRequestedRef.current ||
+      !active || !activeTransfer || activeTransfer.state !== "running"
+    ) return;
+    const sending = operation.current;
     cancelRequestedRef.current = true;
     setCancelling(true);
     setProblem(null);
@@ -189,6 +245,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
         active.initialTransfer.transferId,
       );
     } catch (reason) {
+      if (!mounted.current || operation.current !== sending) return;
       cancelRequestedRef.current = false;
       setCancelling(false);
       setProblem(reason instanceof Error ? reason.message : String(reason));
@@ -220,7 +277,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
             <select
               className="input"
               value={sessionId}
-              disabled={busy}
+              disabled={busy || pending !== null}
               onChange={(event) => {
                 setSessionId(event.currentTarget.value);
                 setProblem(null);
@@ -250,7 +307,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
             <input
               className="input mono"
               value={parent}
-              disabled={busy}
+              disabled={busy || pending !== null}
               onChange={(event) => {
                 setParent(event.currentTarget.value);
                 setProblem(null);
@@ -269,6 +326,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
               ref={fileInputRef}
               type="file"
               hidden
+              disabled={busy || pending !== null}
               aria-label={t("agents.delivery.choose")}
               onChange={(event) => {
                 setFile(event.currentTarget.files?.[0] ?? null);
@@ -281,7 +339,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={busy}
+                disabled={busy || pending !== null}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <ImportIcon size={13} />
@@ -302,7 +360,7 @@ export function AgentRemoteDelivery({ remote }: { remote: DeliveryRemoteApi }) {
           <button
             type="button"
             className="button button--primary agents-delivery__submit"
-            disabled={busy || !sessionId || !file}
+            disabled={busy || pending !== null || !sessionId || !file}
             onClick={() => void review()}
           >
             <TransferIcon size={13} />
