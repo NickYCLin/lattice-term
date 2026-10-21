@@ -69,6 +69,29 @@ async function submit() {
   await act(async () => hostProps(container).find((props) => props.onSubmit)!.onSubmit!({ preventDefault() {} }));
 }
 
+it.each(["save", "delete", "read"])("serializes same-turn database %s requests and unlocks after failure", async (operation) => {
+  await render(); await click("測試資料庫");
+  let run: () => void;
+  if (operation === "save") {
+    await change((props) => props.value === "測試資料庫", { value: "更新名稱" });
+    const form = hostProps(container).find((props) => props.onSubmit)!;
+    run = () => form.onSubmit!({ preventDefault() {} });
+  } else {
+    if (operation === "delete") await click("刪除此資料庫連線");
+    const label = operation === "delete" ? "確認刪除此連線" : "測試連線／讀取版本";
+    run = hostProps(container).find((props) => props.children === label)!.onClick!;
+  }
+  let rejectRequest!: (reason: Error) => void;
+  invoke.mockImplementationOnce(() => new Promise((_, reject) => { rejectRequest = reject; }));
+  const command = `database_${operation}`;
+  await act(async () => { run(); run(); });
+  expect(invoke.mock.calls.filter(([name]) => name === command)).toHaveLength(1);
+  await act(async () => rejectRequest(new Error("temporary failure")));
+  expect(hostProps(container).some((props) => props.children === "Error: temporary failure")).toBe(true);
+  await act(async () => run());
+  expect(invoke.mock.calls.filter(([name]) => name === command)).toHaveLength(2);
+});
+
 it("keeps metadata separate from passwords and saves explicit MCP permission", async () => {
   await render(); await click("測試資料庫");
   expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");

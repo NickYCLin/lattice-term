@@ -14,6 +14,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
+  const operationBusy = useRef(false);
   const titleId = useId();
   const hostKey = hostKeys?.[0] ?? "local";
   const hosts = new Map(profiles.map((profile) => [profile.machineId ?? profile.id, profile]));
@@ -37,12 +38,15 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
 
   useEffect(() => {
     const request = ++generation.current;
+    operationBusy.current = true;
     setBusy(true);
     void invoke<DatabaseSnapshot>("database_profiles").then((value) => {
       if (generation.current === request) setSnapshot(value);
     }).catch((reason: unknown) => {
       if (generation.current === request) setError(String(reason));
-    }).finally(() => { if (generation.current === request) setBusy(false); });
+    }).finally(() => {
+      if (generation.current === request) { operationBusy.current = false; setBusy(false); }
+    });
     return () => { generation.current++; };
   }, []);
 
@@ -52,12 +56,15 @@ export function DatabaseManager({ profiles, hostKeys, onClose }: {
   }
 
   async function perform(operation: () => Promise<void>) {
-    if (busy) return;
+    if (operationBusy.current) return;
+    operationBusy.current = true;
     const request = ++generation.current;
     setBusy(true); setError(""); setNotice("");
     try { await operation(); }
     catch (reason) { if (generation.current === request) setError(String(reason)); }
-    finally { if (generation.current === request) setBusy(false); }
+    finally {
+      if (generation.current === request) { operationBusy.current = false; setBusy(false); }
+    }
   }
 
   function update<Key extends keyof DatabaseProfile>(key: Key, value: DatabaseProfile[Key]) {
