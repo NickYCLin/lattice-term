@@ -1073,7 +1073,7 @@ function ThreadPane({
   async function answer(requestId: string, allow: boolean, message?: string) {
     setNotice(null);
     try {
-      await chat.respond(thread.id, requestId, allow, message);
+      await chat.respond(thread.id, requestId, allow, message, thread.runningTurnId ?? undefined);
     } catch (reason) {
       setNotice(
         t("chat.approval.failed", {

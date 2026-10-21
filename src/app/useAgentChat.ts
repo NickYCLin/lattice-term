@@ -288,6 +288,7 @@ export function useAgentChat(
   }, [threads, setStoredLayout]);
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
+  const pendingApprovals = useRef(new Map<string, Promise<void>>());
   threadsRef.current = threads;
   const changeThreads = useCallback((update: (current: ChatThread[]) => ChatThread[]) => {
     const next = update(threadsRef.current);
@@ -765,15 +766,24 @@ export function useAgentChat(
   }, []);
 
   const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => {
-    const { invoke } = await core();
-    await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: expectedTurnId ?? null });
-    changeThreads((current) =>
-      current.map((entry) =>
-        entry.id === id
-          ? decideApproval(entry, requestId, allow ? "allowed" : "denied")
-          : entry,
-      ),
-    );
+    const thread = threadsRef.current.find(entry => entry.id === id);
+    if (expectedTurnId !== undefined && thread?.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before answering.");
+    const turnId = thread?.runningTurnId;
+    if (!turnId || !thread.items.some(item => item.type === "approval"
+      && item.id === `${turnId}:approval:${requestId}` && item.decision === "pending")) {
+      throw new Error("This approval is no longer waiting for an answer.");
+    }
+    const key = JSON.stringify([id, turnId, requestId]);
+    const previous = pendingApprovals.current.get(key);
+    if (previous) return previous;
+    const pending = (async () => {
+      const { invoke } = await core();
+      await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: turnId });
+      changeThreads(current => current.map(entry => entry.id === id && entry.runningTurnId === turnId
+        ? decideApproval(entry, requestId, allow ? "allowed" : "denied") : entry));
+    })();
+    pendingApprovals.current.set(key, pending);
+    try { await pending; } finally { pendingApprovals.current.delete(key); }
   }, []);
 
   const loadModels = useCallback((definitionId: ChatDefinitionId) => {
