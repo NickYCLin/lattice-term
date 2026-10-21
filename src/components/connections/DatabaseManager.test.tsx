@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installFakeDom } from "../../app/testFixtures/hookDom";
 import { createConnectionProfile, emptyDraft } from "../../domain/connection";
-import type { DatabaseProfile, DatabaseSnapshot } from "../../domain/database";
+import { databaseEngines, type DatabaseProfile, type DatabaseSnapshot } from "../../domain/database";
 import { DatabaseManager } from "./DatabaseManager";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -13,6 +13,8 @@ vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
 type Host = Record<string, unknown> & { childNodes?: Host[] };
 type Props = {
   rows?: number;
+  autoComplete?: string;
+  maxLength?: number;
   children?: unknown; value?: unknown; type?: string; checked?: boolean; disabled?: boolean;
   onClick?: () => void;
   onSubmit?: (event: { preventDefault: () => void }) => void;
@@ -41,7 +43,9 @@ beforeEach(() => {
   invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     if (command === "database_profiles") return snapshot;
     if (command === "database_save") {
-      snapshot = { ...snapshot, profiles: snapshot.profiles.map((profile) => profile.id === (args!.profile as DatabaseProfile).id ? args!.profile as DatabaseProfile : profile), revision: "updated" };
+      const savedProfile = args!.profile as DatabaseProfile;
+      const exists = snapshot.profiles.some((profile) => profile.id === savedProfile.id);
+      snapshot = { ...snapshot, profiles: exists ? snapshot.profiles.map((profile) => profile.id === savedProfile.id ? savedProfile : profile) : [...snapshot.profiles, savedProfile], revision: "updated" };
       return snapshot;
     }
     if (command === "database_delete") return { ...snapshot, profiles: snapshot.profiles.filter((profile) => profile.id !== args!.profileId) };
@@ -68,6 +72,51 @@ async function change(predicate: (props: Props) => boolean, target: { value?: st
 async function submit() {
   await act(async () => hostProps(container).find((props) => props.onSubmit)!.onSubmit!({ preventDefault() {} }));
 }
+
+it.each(databaseEngines)("creates and reopens a $value connection without replacing another version", async (engine) => {
+  await render();
+  await click("測試資料庫");
+  await click("新增資料庫");
+  await change((props) => props.value === "postgres" && Array.isArray(props.children), { value: engine.value });
+  await change((props) => props.maxLength === 100, { value: "新資料庫" });
+  if (engine.value === "sqlite") {
+    await change((props) => props.maxLength === 2048, { value: "C:/test/sample.sqlite" });
+  } else {
+    await change((props) => props.maxLength === 128 && props.autoComplete !== "off", { value: "sample" });
+    await change((props) => props.autoComplete === "off", { value: "reader" });
+    await change((props) => props.type === "password", { value: "test-only-password" });
+  }
+  await submit();
+  const savedProfile = snapshot.profiles.find((profile) => profile.name === "新資料庫")!;
+  expect(savedProfile).toMatchObject({ hostKey: "host", engine: engine.value, port: engine.port, allowMcpRead: false });
+  expect(savedProfile.id).not.toBe(database.id);
+  expect(savedProfile).not.toHaveProperty("password");
+  expect(snapshot.profiles).toHaveLength(3);
+  expect(snapshot.profiles[0]).toEqual(database);
+  expect(invoke).toHaveBeenCalledWith("database_save", { profile: savedProfile, revision: "original", password: engine.value === "sqlite" ? null : "test-only-password" });
+  expect(hostProps(container).find((props) => props.children === "測試連線／讀取版本")!.disabled).toBe(false);
+  await click("另一個版本");
+  await click("新資料庫");
+  expect(hostProps(container).some((props) => props.value === "新資料庫")).toBe(true);
+  if (engine.value !== "sqlite") expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
+  await click("測試連線／讀取版本");
+  expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: savedProfile.id } });
+});
+
+it("does not carry a password or MCP grant across database engine changes", async () => {
+  snapshot.profiles[0] = { ...database, allowMcpRead: true };
+  await render(); await click("測試資料庫");
+  await change((props) => props.type === "password", { value: "test-only-password" });
+  await change((props) => props.value === "postgres" && Array.isArray(props.children), { value: "mysql" });
+  expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
+  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+  expect(hostProps(container).find((props) => props.type === "number")!.value).toBe(3306);
+  await change((props) => props.value === "mysql" && Array.isArray(props.children), { value: "sqlite" });
+  expect(hostProps(container).some((props) => props.type === "password")).toBe(false);
+  await change((props) => props.value === "sqlite" && Array.isArray(props.children), { value: "postgres" });
+  expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
+  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+});
 
 it.each(["save", "delete", "read"])("serializes same-turn database %s requests and unlocks after failure", async (operation) => {
   await render(); await click("測試資料庫");
