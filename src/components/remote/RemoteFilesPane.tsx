@@ -40,9 +40,10 @@ export function RemoteFilesPane({
   const { t, tag } = useI18n();
   const editor = useRemoteTextEditor();
   const mounted = useRef(true);
+  const listingGeneration = useRef(0);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => { mounted.current = false; listingGeneration.current += 1; };
   }, []);
   const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
   const [pathInput, setPathInput] = useState("/");
@@ -55,21 +56,28 @@ export function RemoteFilesPane({
     .sort((left, right) => left.transferId.localeCompare(right.transferId));
 
   async function open(path: string) {
+    const generation = ++listingGeneration.current;
     setLoading(true);
     setProblem(null);
+    setDirectory(null);
+    setPathInput(path);
     try {
       const next = await remote.listFiles(session.sessionId, path);
+      if (!mounted.current || generation !== listingGeneration.current) return;
       setDirectory(next);
       setPathInput(next.path);
     } catch (reason) {
-      setProblem(localFileError(reason, t));
+      if (mounted.current && generation === listingGeneration.current) {
+        setProblem(localFileError(reason, t));
+      }
     } finally {
-      setLoading(false);
+      if (mounted.current && generation === listingGeneration.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     void open("/");
+    return () => { listingGeneration.current += 1; };
   }, [session.sessionId]);
 
   function submitPath(event: FormEvent<HTMLFormElement>) {
@@ -168,16 +176,16 @@ export function RemoteFilesPane({
           <button
             type="button"
             className="button button--ghost button--sm"
-            disabled={loading || busy || !directory || directory.path === "/"}
-            onClick={() => directory && void open(parentPath(directory.path))}
+            disabled={loading || busy || (directory?.path ?? pathInput) === "/"}
+            onClick={() => void open(parentPath(directory?.path ?? pathInput))}
           >
             {t("remote.files.up")}
           </button>
           <button
             type="button"
             className="icon-button icon-button--sm"
-            disabled={loading || busy || !directory}
-            onClick={() => directory && void open(directory.path)}
+            disabled={loading || busy}
+            onClick={() => void open(directory?.path ?? pathInput)}
             aria-label={t("remote.files.refresh")}
             data-tooltip={t("remote.files.refresh")}
           >
