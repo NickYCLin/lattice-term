@@ -47,17 +47,24 @@ export function useConnectionCredentialDraft(profile: ConnectionProfile | null) 
     setAllowMcpReadValue(value);
   }
 
+  function invalidateReveal() {
+    secretRevision.current += 1;
+  }
+
   async function reveal() {
-    if (!profile || revealing || secretChanged) return;
+    if (!profile || revealing || secretChanged) return false;
     const current = generation.current;
     const revision = secretRevision.current;
     setRevealing(true);
     setError(null);
     try {
       const value = await readConnectionCredential(profile.id);
-      if (generation.current === current && secretRevision.current === revision) setSecretValue(value);
+      if (generation.current !== current || secretRevision.current !== revision) return false;
+      setSecretValue(value);
+      return true;
     } catch (reason) {
-      if (generation.current === current) setError(String(reason));
+      if (generation.current === current && secretRevision.current === revision) setError(String(reason));
+      return false;
     } finally {
       if (generation.current === current) setRevealing(false);
     }
@@ -68,5 +75,5 @@ export function useConnectionCredentialDraft(profile: ConnectionProfile | null) 
     ? { secret: secretChanged && secret.length > 0 ? secret : null, allowMcpRead }
     : undefined;
 
-  return { native, secret, setSecret, allowMcpRead, setAllowMcpRead, saved, loading, revealing, error, reveal, dirty, credential };
+  return { native, secret, setSecret, allowMcpRead, setAllowMcpRead, saved, loading, revealing, error, reveal, invalidateReveal, dirty, credential };
 }

@@ -197,6 +197,8 @@ export function ConnectionDrawer({
     changedField?: keyof ValidationErrors,
   ) {
     if (["hostname", "username", "port", "deviceId", "relayAddress"].some(field => Object.prototype.hasOwnProperty.call(next, field))) {
+      credential.invalidateReveal();
+      setShowSecret(false);
       credential.setAllowMcpRead(false);
     }
     setDraft((current) => ({ ...current, ...next }));
@@ -309,7 +311,8 @@ export function ConnectionDrawer({
 
   async function toggleSecret() {
     if (!showSecret && credential.saved && savedCredentialTarget && !credential.secret) {
-      await credential.reveal();
+      if (await credential.reveal()) setShowSecret(true);
+      return;
     }
     setShowSecret(current => !current);
   }

@@ -8,7 +8,7 @@ import { createConnectionProfile, emptyDraft, type ConnectionDraft } from "../..
 vi.mock("./modalFocus", () => ({ useModalFocus: () => {} }));
 vi.mock("../../app/useConnectionCredentialDraft", () => ({ useConnectionCredentialDraft: () => ({
   native: false, dirty: false, loading: false, secret: "", saved: false, allowMcpRead: false,
-  setSecret() {}, setAllowMcpRead() {}, reveal() {},
+  setSecret() {}, setAllowMcpRead() {}, reveal() {}, invalidateReveal() {},
 }) }));
 
 class HostNode {

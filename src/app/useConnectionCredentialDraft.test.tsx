@@ -88,10 +88,11 @@ it("does not replace a newly typed password with an older reveal response", asyn
   native.invoke.mockImplementation(async command => command === "connection_credential_status" ? { saved: true, allowMcpRead: false } : new Promise<string>(resolve => { finish = resolve; }));
   const view = await probe();
   try {
-    let reveal!: Promise<void>;
+    let reveal!: Promise<boolean>;
     await act(async () => { reveal = view.api().reveal(); });
     await act(async () => view.api().setSecret("new-test-password"));
     await act(async () => { finish("old-test-password"); await reveal; });
+    expect(await reveal).toBe(false);
     expect(view.api().secret).toBe("new-test-password");
   } finally { await view.dispose(); }
 });
