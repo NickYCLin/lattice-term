@@ -304,6 +304,16 @@ export function useSftpSessions(): SftpApi {
   const disconnectedSessionIds = useRef(new Set<string>());
   const dismissedTransferIds = useRef(new Set<string>());
 
+  const recordTransfer = useCallback((transfer: SftpTransfer) => {
+    setTransfers((current) => {
+      if (dismissedTransferIds.current.has(transfer.transferId)) return current;
+      return {
+        ...current,
+        [transfer.transferId]: reconcileSftpTransferUpdate(current[transfer.transferId], transfer),
+      };
+    });
+  }, []);
+
   // One listener carries every transfer's progress; a snapshot fetch fills in
   // whatever moved before this view mounted.
   useEffect(() => {
@@ -319,14 +329,7 @@ export function useSftpSessions(): SftpApi {
 
         // Listen first so a progress event that races with the snapshots wins.
         const unlisten = await listen<SftpTransfer>("sftp://transfer", (event) => {
-          if (dismissedTransferIds.current.has(event.payload.transferId)) return;
-          setTransfers((current) => ({
-            ...current,
-            [event.payload.transferId]: reconcileSftpTransferUpdate(
-              current[event.payload.transferId],
-              event.payload,
-            ),
-          }));
+          recordTransfer(event.payload);
         });
         if (cancelled) {
           unlisten();
@@ -363,7 +366,7 @@ export function useSftpSessions(): SftpApi {
       cancelled = true;
       stop?.();
     };
-  }, []);
+  }, [recordTransfer]);
 
   const connect = useCallback(
     async (request: SftpConnectRequest): Promise<SftpConnectOutcome> => {
@@ -373,7 +376,7 @@ export function useSftpSessions(): SftpApi {
           request,
         });
         if (outcome.outcome === "connected") {
-          setSessions((current) => [...current, outcome.session]);
+          setSessions((current) => reconcileSessionSnapshot(current, [outcome.session], disconnectedSessionIds.current));
         }
         return outcome;
       } catch (reason) {
@@ -395,7 +398,7 @@ export function useSftpSessions(): SftpApi {
           sshSessionId,
         });
         if (outcome.outcome === "connected") {
-          setSessions((current) => [...current, outcome.session]);
+          setSessions((current) => reconcileSessionSnapshot(current, [outcome.session], disconnectedSessionIds.current));
         }
         return outcome;
       } catch (reason) {
@@ -496,16 +499,10 @@ export function useSftpSessions(): SftpApi {
         sessionId,
         remotePath,
       });
-      setTransfers((current) => ({
-        ...current,
-        [transfer.transferId]: reconcileSftpTransferUpdate(
-          current[transfer.transferId],
-          transfer,
-        ),
-      }));
+      recordTransfer(transfer);
       return transfer;
     },
-    [],
+    [recordTransfer],
   );
 
   const uploadStream = useCallback(
@@ -525,16 +522,10 @@ export function useSftpSessions(): SftpApi {
           overwrite,
         },
       });
-      setTransfers((current) => ({
-        ...current,
-        [transfer.transferId]: reconcileSftpTransferUpdate(
-          current[transfer.transferId],
-          transfer,
-        ),
-      }));
+      recordTransfer(transfer);
       await streamSftpUpload(file, transfer.transferId, invoke);
     },
-    [],
+    [recordTransfer],
   );
 
   const uploadPath = useCallback(
@@ -551,16 +542,10 @@ export function useSftpSessions(): SftpApi {
         localPath,
         overwrite,
       });
-      setTransfers((current) => ({
-        ...current,
-        [transfer.transferId]: reconcileSftpTransferUpdate(
-          current[transfer.transferId],
-          transfer,
-        ),
-      }));
+      recordTransfer(transfer);
       return transfer;
     },
-    [],
+    [recordTransfer],
   );
 
   const cancelTransfer = useCallback(async (transferId: string) => {
