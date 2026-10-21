@@ -41,6 +41,13 @@ export function RemoteFilesPane({
   const editor = useRemoteTextEditor();
   const mounted = useRef(true);
   const listingGeneration = useRef(0);
+  const sessionScope = useRef({ sessionId: session.sessionId });
+  if (sessionScope.current.sessionId !== session.sessionId) {
+    sessionScope.current = { sessionId: session.sessionId };
+  }
+  const scope = sessionScope.current;
+  const current = () => mounted.current && sessionScope.current === scope;
+  const uploading = useRef<object | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; listingGeneration.current += 1; };
@@ -56,6 +63,7 @@ export function RemoteFilesPane({
     .sort((left, right) => left.transferId.localeCompare(right.transferId));
 
   async function open(path: string) {
+    if (!current()) return;
     const generation = ++listingGeneration.current;
     setLoading(true);
     setProblem(null);
@@ -63,19 +71,21 @@ export function RemoteFilesPane({
     setPathInput(path);
     try {
       const next = await remote.listFiles(session.sessionId, path);
-      if (!mounted.current || generation !== listingGeneration.current) return;
+      if (!current() || generation !== listingGeneration.current) return;
       setDirectory(next);
       setPathInput(next.path);
     } catch (reason) {
-      if (mounted.current && generation === listingGeneration.current) {
+      if (current() && generation === listingGeneration.current) {
         setProblem(localFileError(reason, t));
       }
     } finally {
-      if (mounted.current && generation === listingGeneration.current) setLoading(false);
+      if (current() && generation === listingGeneration.current) setLoading(false);
     }
   }
 
   useEffect(() => {
+    uploading.current = null;
+    setBusy(false);
     void open("/");
     return () => { listingGeneration.current += 1; };
   }, [session.sessionId]);
@@ -90,7 +100,7 @@ export function RemoteFilesPane({
     try {
       await remote.downloadFile(session.sessionId, entry.path);
     } catch (reason) {
-      setProblem(localFileError(reason, t));
+      if (current()) setProblem(localFileError(reason, t));
     }
   }
 
@@ -99,18 +109,17 @@ export function RemoteFilesPane({
       path: entry.path,
       read: () => remote.readTextFile(session.sessionId, entry.path),
       save: (content, revision) => remote.saveTextFile(session.sessionId, entry.path, content, revision),
-      onClosed: () => { if (mounted.current && directory) void open(directory.path); },
+      onClosed: () => { if (current() && directory) void open(directory.path); },
     });
   }
 
   const { confirm, dialogs } = useAppDialogs();
 
   async function upload(file: UploadFile | undefined) {
-    if (!file || !directory) return;
+    if (!current() || !file || !directory) return;
     const existing = directory.entries.find((entry) => entry.name === file.name);
     if (existing?.kind === "directory" || existing?.kind === "symlink") {
       setProblem(t("remote.files.cannotOverwrite", { name: file.name }));
-      if (uploadRef.current) uploadRef.current.value = "";
       return;
     }
     if (
@@ -122,32 +131,47 @@ export function RemoteFilesPane({
         cancelLabel: t("common.cancel"),
       }))
     ) {
-      if (uploadRef.current) uploadRef.current.value = "";
       return;
     }
+    if (!current()) return;
+    await remote.uploadFile(
+      session.sessionId,
+      directory.path,
+      file,
+      Boolean(existing),
+    );
+    if (current()) await open(directory.path);
+  }
+
+  async function uploadBatch(sources: Array<UploadFile | string>) {
+    if (!current() || uploading.current || loading || editor.active || !directory) return;
+    const batch = {};
+    uploading.current = batch;
     setBusy(true);
     setProblem(null);
     try {
-      await remote.uploadFile(
-        session.sessionId,
-        directory.path,
-        file,
-        Boolean(existing),
-      );
-      await open(directory.path);
+      for (const source of sources) {
+        if (!current()) return;
+        const file = typeof source === "string" ? await droppedUpload(source) : source;
+        if (!current()) return;
+        await upload(file);
+      }
     } catch (reason) {
-      setProblem(localFileError(reason, t));
+      if (current()) setProblem(localFileError(reason, t));
     } finally {
-      setBusy(false);
-      if (uploadRef.current) uploadRef.current.value = "";
+      if (uploading.current === batch) uploading.current = null;
+      if (current()) {
+        setBusy(false);
+        if (uploadRef.current) uploadRef.current.value = "";
+      }
     }
   }
 
   const dropRef = useRef<HTMLDivElement>(null);
   const { dragging, ...dropHandlers } = useFileDrop({
     ref: dropRef, disabled: busy || loading || editor.active || !directory,
-    onPaths: async paths => { for (const path of paths) await upload(await droppedUpload(path)); },
-    onFiles: async files => { for (const file of files) await upload(file); },
+    onPaths: uploadBatch,
+    onFiles: uploadBatch,
     onError: error => setProblem(localFileError(error, t)),
   });
 
@@ -205,8 +229,9 @@ export function RemoteFilesPane({
             type="file"
             multiple
             hidden
+            disabled={loading || busy || !directory}
             aria-label={t("remote.files.upload")}
-            onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); void (async () => { for (const file of files) await upload(file); })(); }}
+            onChange={(event) => { void uploadBatch(Array.from(event.currentTarget.files ?? [])); }}
           />
         </div>
       </header>
