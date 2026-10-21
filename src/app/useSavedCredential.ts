@@ -244,6 +244,7 @@ export function useSavedCredential(
   kind: CredentialKind,
 ) {
   const readGeneration = useRef(0);
+  const scopeGeneration = useRef(0);
   const [state, setState] = useState<SavedCredentialState>({
     mode: "loading",
     provider: null,
@@ -260,12 +261,15 @@ export function useSavedCredential(
   useEffect(() => {
     void refresh();
     return () => {
+      scopeGeneration.current += 1;
       readGeneration.current += 1;
     };
   }, [refresh]);
 
   const remove = useCallback(async () => {
+    const scope = scopeGeneration.current;
     await removeCredential(profileId, kind);
+    if (scope !== scopeGeneration.current) return;
     readGeneration.current += 1;
     setState((current) => ({
       mode: "missing",
