@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { useFileDrop } from "../../app/fileDrop";
+import { useFileDrop, useFileDropLifetime } from "../../app/fileDrop";
 import { inspectLocalPath, localFileError } from "../../app/localFiles";
 import { useI18n } from "../../i18n/context";
 
@@ -14,12 +14,16 @@ export function PathDropZone({ kind, disabled = false, compact = false, onSelect
   const ref = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const [problem, setProblem] = useState<string | null>(null);
+  const captureLifetime = useFileDropLifetime(disabled);
   const { dragging } = useFileDrop({
     ref, disabled,
     onPaths: async paths => {
+      const current = captureLifetime();
+      if (!current()) return;
       setProblem(null);
       if (paths.length !== 1) throw new Error("localFile.single");
       const info = await inspectLocalPath(paths[0]);
+      if (!current()) return;
       if (info.kind !== kind) throw new Error(kind === "file" ? "localFile.expectedFile" : "localFile.expectedDirectory");
       await onSelect(paths[0]);
     },

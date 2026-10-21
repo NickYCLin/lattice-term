@@ -54,6 +54,23 @@ function bindNative() {
   })();
 }
 
+export function useFileDropLifetime(disabled: boolean) {
+  const mounted = useRef(false);
+  const lifetime = useRef({ disabled });
+  if (lifetime.current.disabled !== disabled) lifetime.current = { disabled };
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      lifetime.current = { disabled: lifetime.current.disabled };
+    };
+  }, []);
+  return () => {
+    const scope = lifetime.current;
+    return () => mounted.current && !scope.disabled && lifetime.current === scope;
+  };
+}
+
 export function useFileDrop<T extends HTMLElement>({
   ref, disabled = false, onPaths, onFiles, onError,
 }: {
@@ -66,11 +83,13 @@ export function useFileDrop<T extends HTMLElement>({
   const [dragging, setDragging] = useState(false);
   const latest = useRef({ disabled, onPaths, onFiles, onError });
   latest.current = { disabled, onPaths, onFiles, onError };
+  const captureLifetime = useFileDropLifetime(disabled);
   const busy = useRef(false);
   const run = async (action: () => void | Promise<void>) => {
-    if (busy.current || latest.current.disabled) return;
+    const current = captureLifetime();
+    if (busy.current || !current()) return;
     busy.current = true;
-    try { await action(); } catch (error) { latest.current.onError(error); }
+    try { await action(); } catch (error) { if (current()) latest.current.onError(error); }
     finally { busy.current = false; }
   };
   useEffect(() => {
