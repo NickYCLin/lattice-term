@@ -133,6 +133,118 @@ it("answers the terminal's permission prompt by its own id", async () => {
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
 });
 
+it.each(["accepted", "elsewhere", "failed"])("preserves a newer permission prompt after an older answer is %s", async outcome => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let waiting = { requestId: "first", toolName: "Bash", summary: "first command" };
+  let resolveAnswer!: (accepted: boolean) => void;
+  let rejectAnswer!: (reason: Error) => void;
+  const pending = new Promise<boolean>((resolve, reject) => { resolveAnswer = resolve; rejectAnswer = reject; });
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") return Promise.resolve(waiting);
+    if (command === "agent_answer_approval") return pending;
+    return Promise.resolve(snapshot());
+  });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    let answer!: Promise<void>;
+    await act(async () => { answer = api.answer(true); });
+    waiting = { ...waiting, requestId: "second", summary: "second command" };
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(api.approval?.requestId).toBe("second");
+    await act(async () => {
+      if (outcome === "failed") rejectAnswer(new Error("old answer failed"));
+      else resolveAnswer(outcome === "accepted");
+      await answer;
+    });
+    expect(api.approval?.requestId).toBe("second");
+    expect(api.answerError).toBeNull();
+    expect(api.answering).toBe(false);
+  } finally { await act(async () => { root.unmount(); }); vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("submits only one permission answer before React renders the busy state", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let finish!: (accepted: boolean) => void;
+  const pending = new Promise<boolean>(resolve => { finish = resolve; });
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") return Promise.resolve({ requestId: "first", toolName: "Bash", summary: "command" });
+    if (command === "agent_answer_approval") return pending;
+    return Promise.resolve(snapshot());
+  });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => {
+      const first = api.answer(true);
+      const second = api.answer(false);
+      finish(true);
+      await Promise.all([first, second]);
+    });
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_answer_approval")).toHaveLength(1);
+  } finally { await act(async () => { root.unmount(); }); vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("does not restore an answered permission prompt from an older poll", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const prompt = { requestId: "first", toolName: "Bash", summary: "command" };
+  let finishRead!: (value: typeof prompt) => void;
+  let reads = 0;
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") {
+      reads += 1;
+      if (reads === 1) return Promise.resolve(prompt);
+      return new Promise<typeof prompt>(resolve => { finishRead = resolve; });
+    }
+    if (command === "agent_answer_approval") return Promise.resolve(true);
+    return Promise.resolve(snapshot());
+  });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await api.answer(true); });
+    expect(api.approval).toBeNull();
+    await act(async () => { finishRead(prompt); });
+    expect(api.approval).toBeNull();
+  } finally { await act(async () => { root.unmount(); }); vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("allows retry after a failed permission answer and clears the error for a new prompt", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let waiting = { requestId: "first", toolName: "Bash", summary: "command" };
+  let attempts = 0;
+  invoke.mockImplementation((command: string) => {
+    if (command === "agent_session_approval") return Promise.resolve(waiting);
+    if (command === "agent_answer_approval") {
+      attempts += 1;
+      return attempts === 1 ? Promise.reject(new Error("retry needed")) : Promise.resolve(true);
+    }
+    return Promise.resolve(snapshot());
+  });
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { await api.answer(true); });
+    expect(api.answerError).toBe("retry needed");
+    expect(api.answering).toBe(false);
+    waiting = { ...waiting, requestId: "second" };
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(api.answerError).toBeNull();
+    await act(async () => { await api.answer(false); });
+    expect(attempts).toBe(2);
+    expect(api.approval).toBeNull();
+  } finally { await act(async () => { root.unmount(); }); vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
 it("ignores late previews from an older output snapshot or a different session", async () => {
   vi.useFakeTimers();
   const root = createRoot(installFakeDom() as unknown as Element);

@@ -47,20 +47,29 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   const [approval, setApproval] = useState<SessionApprovalRequest | null>(null);
   const [answering, setAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  const answeringRef = useRef(false);
+  const approvalRef = useRef<SessionApprovalRequest | null>(null);
+  const approvalRevision = useRef(0);
 
   // A prompt is short-lived and may be answered in the terminal at any
   // moment, so it is read more often than the transcript.
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
+    approvalRef.current = null;
     setApproval(null);
+    setAnswerError(null);
     async function read() {
+      const revision = approvalRevision.current;
       try {
         const next = await invoke<SessionApprovalRequest | null>("agent_session_approval", { sessionId });
-        if (!disposed) setApproval((current) =>
-          current?.requestId === next?.requestId ? current : next ?? null);
+        if (!disposed && revision === approvalRevision.current) {
+          if (approvalRef.current?.requestId !== next?.requestId) setAnswerError(null);
+          approvalRef.current = next ?? null;
+          setApproval((current) => current?.requestId === next?.requestId ? current : next ?? null);
+        }
       } catch {
-        if (!disposed) setApproval(null);
+        if (!disposed && revision === approvalRevision.current) { approvalRef.current = null; setApproval(null); }
       } finally {
         if (!disposed) timer = setTimeout(() => void read(), 1000);
       }
@@ -70,18 +79,26 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   }, [sessionId]);
 
   async function answer(allow: boolean): Promise<void> {
-    if (!approval || answering) return;
+    if (!approval || answeringRef.current || approvalRef.current?.requestId !== approval.requestId) return;
+    answeringRef.current = true;
     setAnswering(true);
     setAnswerError(null);
+    const isCurrent = () => selectedSession.current === sessionId
+      && approvalRef.current?.requestId === approval.requestId;
     try {
       const accepted = await invoke<boolean>("agent_answer_approval", {
         sessionId, requestId: approval.requestId, allow,
       });
-      if (!accepted) setAnswerError("answered-elsewhere");
-      setApproval(null);
+      if (isCurrent()) {
+        approvalRevision.current += 1;
+        if (!accepted) setAnswerError("answered-elsewhere");
+        approvalRef.current = null;
+        setApproval(null);
+      }
     } catch (reason) {
-      setAnswerError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrent()) setAnswerError(reason instanceof Error ? reason.message : String(reason));
     } finally {
+      answeringRef.current = false;
       setAnswering(false);
     }
   }
