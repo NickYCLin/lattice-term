@@ -233,13 +233,12 @@ export function ConnectionsView({
   );
 
   const databaseManager = databaseScope && <DatabaseManager profiles={profiles} hostKeys={databaseScope.hostKeys} onClose={() => setDatabaseScope(null)} />;
-  const databaseButton = backendAvailable && !mobile && <button type="button" className="button button--secondary button--sm" onClick={() => setDatabaseScope({})}>管理所有資料庫</button>;
+  const databaseButton = backendAvailable && !mobile && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => setDatabaseScope({})}>新增／管理資料庫</button>;
 
   if (profiles.length === 0) {
     return (
       <div className="connections connections--empty">
         {databaseManager}
-        {databaseButton}
         {filePicker}
         <div style={{ padding: "var(--space-5) var(--space-6) 0" }}>
           {notice && (
@@ -262,6 +261,7 @@ export function ConnectionsView({
                 <PlusIcon size={15} />
                 {t("connections.add")}
               </button>
+              {databaseButton}
               <button
                 type="button"
                 className="button button--secondary"

@@ -42,7 +42,7 @@ function workspaceWith(profiles: ConnectionProfile[]): Workspace {
   return partial as unknown as Workspace;
 }
 
-function render(profiles: ConnectionProfile[]): string {
+function render(profiles: ConnectionProfile[], options: { backendAvailable?: boolean; mobile?: boolean } = {}): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
       <ConnectionsView
@@ -53,19 +53,38 @@ function render(profiles: ConnectionProfile[]): string {
         onDelete={vi.fn()}
         onConnect={vi.fn()}
         supportedProtocols={["ssh", "sftp"]}
-        backendAvailable
-        mobile={false}
+        backendAvailable={options.backendAvailable ?? true}
+        mobile={options.mobile ?? false}
       />
     </I18nProvider>,
   );
 }
 
 describe("ConnectionsView", () => {
+  it.each([{ profiles: [] }, { profiles: [profile] }])("shows an explicit database creation entry for %j", ({ profiles }) => {
+    const markup = render(profiles);
+    expect(markup).toContain("新增／管理資料庫</button>");
+    if (profiles.length) expect(markup).toContain("資料庫設定</button>");
+  });
+
+  it.each([
+    { backendAvailable: false, mobile: false },
+    { backendAvailable: true, mobile: true },
+    { backendAvailable: false, mobile: true },
+  ])("does not offer unsupported database actions: %j", options => {
+    for (const profiles of [[], [profile]]) {
+      const markup = render(profiles, options);
+      expect(markup).not.toContain("新增／管理資料庫</button>");
+      expect(markup).not.toContain("資料庫設定</button>");
+    }
+  });
+
   it("offers a way to start when the workspace is empty", () => {
     const markup = render([]);
     expect(markup).toContain("還沒有任何連線");
     expect(markup).toContain("新增連線");
     expect(markup).toContain("載入範例");
+    expect(markup.indexOf("新增／管理資料庫</button>")).toBeGreaterThan(markup.indexOf("empty-state__actions"));
   });
 
   it("lists a saved profile by name and host", () => {

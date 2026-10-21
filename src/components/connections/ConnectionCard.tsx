@@ -178,7 +178,7 @@ export function ConnectionCard({
       </div>
 
       <div className="connection-card__foot">
-        {onDatabases && <button type="button" className="button button--secondary button--sm" onClick={onDatabases}>資料庫</button>}
+        {onDatabases && <button type="button" className="button button--secondary button--sm" title="設定此主機的資料庫，可新增多個種類與版本" onClick={onDatabases}>資料庫設定</button>}
         {onAddRoute && (
           <button
             type="button"
