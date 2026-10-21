@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
 
@@ -222,10 +222,13 @@ export function McpElicitation({
   const { t } = useI18n();
   const [draft, setDraft] = useState(() => initialDraft(request.fields));
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState("");
   const answer = elicitationAnswer(request.fields, draft);
 
   async function run(action: () => Promise<void>) {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -233,6 +236,7 @@ export function McpElicitation({
     } catch (reason) {
       setError(String(reason));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
