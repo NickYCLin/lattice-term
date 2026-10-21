@@ -1,0 +1,50 @@
+.herdr-host:not([hidden]) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.herdr-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.herdr-pane label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.herdr-pane__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.herdr-pane__output {
+  min-height: 160px;
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--output-font-size);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-deep);
+  user-select: text;
+}
+
+.herdr-pane__composer {
+  display: grid;
+  gap: 8px;
+}

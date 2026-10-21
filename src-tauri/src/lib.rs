@@ -23,6 +23,7 @@ pub mod domain;
 mod durable_file;
 pub mod file_exports;
 pub mod git_changes;
+mod herdr;
 pub mod hostkeys;
 mod jev;
 #[cfg(target_os = "linux")]
@@ -5616,6 +5617,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            herdr::herdr_agents,
+            herdr::herdr_read,
+            herdr::herdr_prompt,
             database::database_profiles,
             database::database_save,
             database::database_delete,

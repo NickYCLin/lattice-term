@@ -9,6 +9,21 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "herdr.back": "Back to LatticeTerm conversations",
+  "herdr.disclosure": "Connect to Herdr running on this computer under the same account. Shows the latest 500 terminal lines, not complete native history. Closing this page does not stop Herdr.",
+  "herdr.session": "Herdr session name",
+  "herdr.connect": "Connect",
+  "herdr.refresh": "Refresh",
+  "herdr.empty": "No running agents in this Herdr session. Start a conversation in Herdr first.",
+  "herdr.agent": "Herdr conversation",
+  "herdr.choose": "Select a conversation",
+  "herdr.output": "Herdr recent terminal output",
+  "herdr.message": "Send to the original Herdr conversation",
+  "herdr.sendHint": "Sends single-line text only while the agent is idle and interactive. Does not launch another CLI. Attachments and approval responses are not supported; handle those in Herdr.",
+  "herdr.send": "Send to Herdr",
+  "herdr.sending": "Sending…",
+  "herdr.sent": "Herdr accepted the message. Replies appear in the terminal output.",
+  "herdr.uncertain": "Draft preserved. If delivery is uncertain, check Herdr before sending again.",
   "tunnels.storageError.title": "Tunnel settings could not be loaded",
   "tunnels.storageError.body": "The saved data has not been overwritten. Adding tunnels is disabled to protect it. Repair the local tunnel settings, then restart LatticeTerm to reload them.",
   "chat.archive.done": "Archived in Codex (recoverable, not permanently deleted)",

@@ -6,6 +6,21 @@
  */
 
 export const zhTW = {
+  "herdr.back": "回到 LatticeTerm 對話",
+  "herdr.disclosure": "連接同一台電腦、同一帳號正在執行的 Herdr。顯示最近 500 行終端輸出，不是完整原生對話紀錄；關閉此頁不會停止 Herdr。",
+  "herdr.session": "Herdr 工作階段名稱",
+  "herdr.connect": "連線",
+  "herdr.refresh": "重新整理",
+  "herdr.empty": "這個 Herdr 工作階段沒有執行中的 agent，請先在 Herdr 啟動對話。",
+  "herdr.agent": "Herdr 對話",
+  "herdr.choose": "選擇要查看的對話",
+  "herdr.output": "Herdr 最近終端輸出",
+  "herdr.message": "傳送到原本的 Herdr 對話",
+  "herdr.sendHint": "僅在對話閒置且可互動時送出單行文字，不另開 CLI。不支援附件或代答授權提示；需要人工處理時請回 Herdr。",
+  "herdr.send": "送到 Herdr",
+  "herdr.sending": "正在送出…",
+  "herdr.sent": "Herdr 已接受訊息，回覆會顯示在終端輸出中。",
+  "herdr.uncertain": "草稿已保留。若無法確認是否送達，請先查看 Herdr，避免重複送出。",
   "chat.archive.done": "已封存到 Codex（可還原，非永久刪除）",
   "chat.archive.restore": "還原這次封存",
   "chat.archive.confirm.body": "這會透過 Codex 官方介面封存同一帳號的原生對話，不是永久刪除。可在此還原最近一次封存，也可由其他支援封存的工具還原。",

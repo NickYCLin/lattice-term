@@ -1,4 +1,5 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
+import { HerdrPane } from "../components/chat/HerdrPane";
 import { ChatArchiveStatus } from "../components/chat/ChatArchiveStatus";
 import { ConversationHandoffDialog } from "../components/agents/ConversationHandoffDialog";
 import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
@@ -168,6 +169,7 @@ export function ChatView({
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
   const selectedSessionId = onSelectWorkspaceSession ? workspaceSessionId : localSessionId;
   function setSelectedSessionId(id: string | null) {
+    setShowHerdr(false);
     setLocalSessionId(id);
     onSelectWorkspaceSession?.(id);
   }
@@ -177,6 +179,8 @@ export function ChatView({
     chat.setActiveThreadId(id);
   }
   const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
+  const [showHerdr, setShowHerdr] = useState(false);
+  const [herdrOpened, setHerdrOpened] = useState(false);
   const modeTabs = useFittingTabs<HTMLDivElement>();
   // A project picked in the projects tab narrows the conversation list to it.
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
@@ -337,6 +341,7 @@ export function ChatView({
   }
 
   function startAutomation() {
+    setShowHerdr(false);
     setSelectedAutomationId(null);
     setComposingAutomation(true);
     setMode("automations");
@@ -399,6 +404,8 @@ export function ChatView({
         }} />}
       <aside className="chat-threads">
         {archiveStatus}
+        <button type="button" className="button button--ghost" aria-pressed={showHerdr}
+          onClick={() => { setHerdrOpened(true); setShowHerdr(current => !current); }}>{showHerdr ? t("herdr.back") : "Herdr"}</button>
         {(shownSession || active) && <button type="button" className="button" disabled={!shownSession && Boolean(active?.runningTurnId)}
           onClick={() => {
             summaryDestination.current = null;
@@ -413,7 +420,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "threads"}
               className={`chat-mode__tab${mode === "threads" ? " is-active" : ""}`}
-              onClick={() => setMode("threads")}
+              onClick={() => { setShowHerdr(false); setMode("threads"); }}
               title={t("chat.title")}
             >
               <ChatIcon />
@@ -424,7 +431,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "projects"}
               className={`chat-mode__tab${mode === "projects" ? " is-active" : ""}`}
-              onClick={() => setMode("projects")}
+              onClick={() => { setShowHerdr(false); setMode("projects"); }}
               title={t("chat.projects")}
             >
               <FolderIcon />
@@ -435,7 +442,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "automations"}
               className={`chat-mode__tab${mode === "automations" ? " is-active" : ""}`}
-              onClick={() => setMode("automations")}
+              onClick={() => { setShowHerdr(false); setMode("automations"); }}
               title={t("automation.title")}
             >
               <ClockIcon />
@@ -688,8 +695,11 @@ export function ChatView({
       </aside>
 
       <div className="chat-main">
+        <div className="herdr-host" hidden={!showHerdr}>
+          {herdrOpened && <HerdrPane enabled={showHerdr && agents.mode === "ready"} />}
+        </div>
         {(chat.removal?.error || chat.archivedReceipt) && <div className="chat-archive-status--mobile">{archiveStatus}</div>}
-        {mode === "automations" && agents.mode !== "unavailable" ? (
+        {showHerdr ? null : mode === "automations" && agents.mode !== "unavailable" ? (
           composingAutomation || selectedAutomationId ? (
             <AutomationPane
               automations={automations}
