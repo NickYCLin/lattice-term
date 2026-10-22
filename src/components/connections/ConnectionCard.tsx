@@ -111,16 +111,6 @@ export function ConnectionCard({
             {findProtocol(route.profile.protocol).acronym}
           </span>
         ))}
-        <span className="connection-card__tags" title={profile.tags.join("、")}>
-          {profile.tags.slice(0, 1).map((tag) => (
-            <TagChip key={tag} label={tag} />
-          ))}
-          {profile.tags.length > 1 && (
-            <span className="badge badge--tag connection-card__tag-count">
-              +{profile.tags.length - 1}
-            </span>
-          )}
-        </span>
       </div>
 
       <div className="connection-card__primary">
@@ -236,6 +226,13 @@ export function ConnectionCard({
           </button>
         </div>
       </div>
+      {profile.tags.length > 0 && (
+        <div className="connection-card__tags">
+          {profile.tags.map((tag) => (
+            <TagChip key={tag} label={tag} />
+          ))}
+        </div>
+      )}
     </li>
   );
 }

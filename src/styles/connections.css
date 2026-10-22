@@ -133,6 +133,7 @@
 .connection-card__head,
 .connection-card__meta,
 .connection-card__primary,
+.connection-card__tags,
 .connection-card__foot {
   position: relative;
   z-index: 1;
@@ -184,20 +185,20 @@
 
 .connection-card__tags {
   display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
   min-width: 0;
   gap: var(--space-1);
-  overflow: hidden;
 }
 
 .connection-card__tags .badge {
   min-width: 0;
-  max-width: 5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.connection-card__tags .connection-card__tag-count {
-  flex: none;
+  max-width: 100%;
+  height: auto;
+  min-height: 1.375rem;
+  padding-block: var(--space-1);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .connection-card__primary {

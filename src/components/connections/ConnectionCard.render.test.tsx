@@ -22,7 +22,7 @@ function renderCard(
   options: Pick<
     Parameters<typeof ConnectionCard>[0],
     "onConnect" | "unavailableReason" | "linked" | "onAddRoute"
-  >,
+  > & Partial<Pick<Parameters<typeof ConnectionCard>[0], "profile">>,
 ) {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
@@ -41,6 +41,22 @@ function renderCard(
 }
 
 describe("connection card runtime capability", () => {
+  it("shows every tag in a separate row after the management controls", () => {
+    const tags = ["正式服務平台與維運環境的完整標籤", "service.example.com/" + "long-name".repeat(12), "第三個標籤"];
+    const markup = renderCard({ profile: { ...profile, tags } });
+    const tagsStart = markup.indexOf('class="connection-card__tags"');
+    expect(tagsStart).toBeGreaterThan(markup.indexOf('class="connection-card__actions"'));
+    const tagsMarkup = markup.slice(tagsStart);
+    for (const tag of tags) expect(tagsMarkup).toContain(`>${tag}</span>`);
+    expect(tagsMarkup.match(/badge--tag/g)).toHaveLength(3);
+    expect(markup).not.toContain("connection-card__tag-count");
+    expect(markup.slice(0, markup.indexOf('class="connection-card__primary"'))).not.toContain("badge--tag");
+  });
+
+  it("does not reserve a tag row for a connection without tags", () => {
+    expect(renderCard({ profile: { ...profile, tags: [] } })).not.toContain('class="connection-card__tags"');
+  });
+
   it("distinguishes same-protocol address buttons without needing hover", () => {
     const markup = renderCard({ onConnect: vi.fn(), linked: [{
       profile: { ...profile, id: "wan", hostname: "wan.example.com", port: 3390 }, onConnect: vi.fn(),
