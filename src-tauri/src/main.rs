@@ -1,6 +1,9 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod windows_elevation;
+
 fn main() {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some(code) = latticeterm_lib::cliproxy::desktop::run_cli(arguments.iter()) {
@@ -22,6 +25,16 @@ fn main() {
     }
     if let Some(code) = latticeterm_lib::agent_daemon::mcp::run_cli(std::env::args_os().skip(1)) {
         std::process::exit(code);
+    }
+
+    #[cfg(windows)]
+    match windows_elevation::ensure_elevated(&arguments) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            windows_elevation::show_error(&error);
+            std::process::exit(1);
+        }
     }
 
     #[cfg(target_os = "linux")]
