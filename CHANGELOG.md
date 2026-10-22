@@ -4,6 +4,19 @@
 
 ---
 
+## [2026.10.23](https://github.com/NickYCLin/lattice-term/compare/v2026.10.22...v2026.10.23) (2026-10-22)
+
+
+### 🚀 新增功能
+
+* **windows:** 桌面啟動預設要求管理員權限 ([67c3f77](https://github.com/NickYCLin/lattice-term/commit/67c3f7734a42bb4fddcfaff070f001a9c3554099))
+
+
+### 🛠️ 問題修正
+
+* **connections:** 將標籤移到卡片底部完整顯示 ([983b561](https://github.com/NickYCLin/lattice-term/commit/983b561c154390cdbd2d38909a18c7818a4395af))
+* **connections:** 將每個標籤上限提高至128字元 ([9e9cdfd](https://github.com/NickYCLin/lattice-term/commit/9e9cdfda02fcd5c4f9f12c5217455f590ebd1794))
+
 ## [2026.10.22](https://github.com/NickYCLin/lattice-term/compare/v2026.10.21...v2026.10.22) (2026-10-21)
 
 
