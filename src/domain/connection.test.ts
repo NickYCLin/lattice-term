@@ -238,6 +238,18 @@ describe("draft validation", () => {
     });
   });
 
+  it.each(["a", "標", "😀"])("accepts 128 tag characters and rejects 129: %s", (character) => {
+    const draft = { ...emptyDraft(), name: "Tagged host", hostname: "tagged.example.com" };
+    const tag = character.repeat(128);
+    expect(validateConnectionDraft({ ...draft, tags: [tag] }).tags).toBeUndefined();
+    const profile = createConnectionProfile({ ...draft, tags: [tag] }, "tagged-host");
+    expect(profile.tags).toEqual([tag]);
+    expect(draftFromProfile(profile).tags).toEqual([tag]);
+    expect(validateConnectionDraft({ ...draft, tags: [character.repeat(129)] }).tags).toEqual({
+      key: "validation.tagTooLong", values: { max: 128 },
+    });
+  });
+
   it("accepts a complete draft", () => {
     expect(
       validateConnectionDraft({

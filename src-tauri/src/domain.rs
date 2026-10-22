@@ -13,10 +13,37 @@ pub const MAX_NAME_LENGTH: usize = 60;
 pub const MAX_HOSTNAME_LENGTH: usize = 253;
 pub const MAX_USERNAME_LENGTH: usize = 64;
 pub const MAX_GROUP_LENGTH: usize = 40;
-pub const MAX_TAG_LENGTH: usize = 24;
+pub const MAX_TAG_LENGTH: usize = 128;
 pub const MAX_TAG_COUNT: usize = 6;
 pub const MIN_PORT: u16 = 1;
 pub const MAX_PORT: u16 = 65535;
+
+#[cfg(test)]
+mod tag_length_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_128_tag_characters_and_rejects_129() {
+        for character in ["a", "標", "😀"] {
+            let mut draft: ConnectionDraft = serde_json::from_value(serde_json::json!({
+                "name": "Tagged host",
+                "protocol": "ssh",
+                "hostname": "tagged.example.com",
+                "port": 22,
+                "tags": [character.repeat(128)]
+            }))
+            .unwrap();
+            assert!(validate_connection_draft(&draft).is_empty());
+            let profile = ConnectionProfile::from_draft(draft.clone(), "tagged-host".into());
+            assert_eq!(profile.tags, draft.tags);
+            draft.tags = vec![character.repeat(129)];
+            assert_eq!(
+                validate_connection_draft(&draft).tags.as_deref(),
+                Some("Each tag must be 128 characters or fewer.")
+            );
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

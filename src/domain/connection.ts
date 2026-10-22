@@ -72,7 +72,7 @@ export const limits = {
   hostnameLength: 253,
   usernameLength: 64,
   groupLength: 40,
-  tagLength: 24,
+  tagLength: 128,
   tagCount: 6,
   minPort: 1,
   maxPort: 65535,
@@ -313,7 +313,7 @@ export function validateConnectionDraft(
       key: "validation.tagsTooMany",
       values: { max: limits.tagCount },
     };
-  } else if (tags.some((tag) => tag.length > limits.tagLength)) {
+  } else if (tags.some((tag) => Array.from(tag).length > limits.tagLength)) {
     errors.tags = {
       key: "validation.tagTooLong",
       values: { max: limits.tagLength },
