@@ -4,6 +4,13 @@
 
 ---
 
+## [2026.10.24](https://github.com/NickYCLin/lattice-term/compare/v2026.10.23...v2026.10.24) (2026-10-23)
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 保留背景服務連線失敗階段 ([d5902d7](https://github.com/NickYCLin/lattice-term/commit/d5902d7da3ae1f95030383ad665c5367ba1b1163))
+
 ## [2026.10.23](https://github.com/NickYCLin/lattice-term/compare/v2026.10.22...v2026.10.23) (2026-10-22)
 
 
