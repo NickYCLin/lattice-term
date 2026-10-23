@@ -174,10 +174,27 @@ B 階段工具的語意：
 | `limit_reached` | 碰到上限（同時啟動數、遠端同時操作數） | 先停掉一個，不要輪詢重試 |
 | `unsupported` | 這個組合在這裡就是不支援（例如 Windows Codex 的輸入設定已失效） | 別自動重試或重啟 |
 | `unknown_outcome` | 做了沒做不確定 | 用同一個 `requestId` 重查，先核對實際狀態 |
-| `daemon_unavailable` | 背景服務沒在跑或連不上 | 請使用者開啟 LatticeTerm |
+| `daemon_unavailable` | 無法連上或完成背景服務握手 | 先查看 `attachmentError`，不要直接認定服務未啟動或放寬權限 |
 | `failed` | 其他 | 看 `error` 說明 |
 
 遠端（SSH／SFTP）的失敗由桌面判定後照原樣帶回，不會被重新歸類；桌面自有而這裡沒有的代碼會對應到上表最接近的一個。
+
+背景服務連線失敗時，`attachmentError` 保留安全的診斷欄位；
+`get_capabilities` 與兩個背景清單工具仍保留原有離線回應，不會因此改成工具錯誤。
+`daemonRunning: false` 表示 adapter 未完成連線，不足以證明服務程序已停止。
+
+| `attachmentError.stage` | 失敗階段 |
+| --- | --- |
+| `socket_connect` | 本機 socket／named pipe 連線或端點存取失敗 |
+| `peer_identity` | Unix 私有目錄、socket 權限或對端使用者驗證失敗 |
+| `credential_access` | 無法安全存取服務憑證 |
+| `observer_handshake` | 觀察者身分驗證或協定握手失敗 |
+| `attach_timeout` | 在連線期限內未完成附掛 |
+
+有底層 I/O 錯誤時，另帶 `errorKind` 與可取得的數字 `errno`；
+errno 依作業系統解讀，不回傳原始錯誤文字、路徑、token 或握手內容。
+請比較宿主與隔離環境的實際欄位再判斷原因，不能只憑
+`daemon_unavailable` 要求重啟或調整權限。`--no-autostart` 仍不啟動背景服務。
 
 ### Windows Codex 的受控輸入限制
 

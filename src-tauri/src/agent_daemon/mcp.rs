@@ -40,6 +40,10 @@ use tokio::task::JoinSet;
 #[path = "mcp_startup.rs"]
 mod startup;
 
+#[cfg(test)]
+#[path = "mcp_attachment_tests.rs"]
+mod attachment_tests;
+
 /// MCP protocol revisions this adapter speaks. The newest is offered when a
 /// client asks for something unknown, as the specification says to do.
 const MCP_PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -96,9 +100,12 @@ where
         }
     }
     let default_dir = super::default_data_dir();
-    let auto_start = !no_autostart
-        && workspace_directory.is_none()
-        && startup::is_default_directory(data_dir.as_deref(), default_dir.as_deref());
+    let auto_start = startup::automatic_startup(
+        no_autostart,
+        workspace_directory.as_deref(),
+        data_dir.as_deref(),
+        default_dir.as_deref(),
+    );
     let data_dir = match data_dir.or_else(super::default_data_dir) {
         Some(dir) => dir,
         None => {
@@ -560,6 +567,14 @@ impl McpServer {
                 let (message, code) = super::failure_payload(&message);
                 tool_result(json!({ "error": message, "code": code }), true)
             }
+            Err(ToolError::Attachment(failure)) => tool_result(
+                json!({
+                    "error": "Could not attach to the LatticeTerm background service. See attachmentError for the failure stage.",
+                    "code": super::error_code::DAEMON_UNAVAILABLE,
+                    "attachmentError": failure,
+                }),
+                true,
+            ),
         })
     }
 
@@ -614,7 +629,10 @@ impl McpServer {
     }
 
     async fn get_capabilities(&self) -> Result<Value, ToolError> {
-        let connection = self.attached().await;
+        let (connection, attachment_error) = match self.attached().await {
+            Ok(connection) => (Some(connection), None),
+            Err(failure) => (None, Some(failure)),
+        };
         let mut launched = Value::Null;
         let (shared, readable, controlled, launch_enabled, plans) = match &connection {
             Some(connection) => {
@@ -653,6 +671,7 @@ impl McpServer {
             "protocolVersion": OBSERVER_PROTOCOL_VERSION,
             "server": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
             "daemonRunning": connection.is_some(),
+            "attachmentError": attachment_error,
             "automaticStartup": self.auto_start,
             "platform": std::env::consts::OS,
             "backends": [
@@ -768,9 +787,7 @@ impl McpServer {
         let operation =
             serde_json::from_value::<crate::mcp_desktop::DesktopOperation>(Value::Object(value))
                 .map_err(|_| ToolError::Invalid("Invalid remote operation arguments".into()))?;
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         if connection.desktop_bridge_protocol.load(Ordering::Relaxed)
             != super::desktop_bridge::PROTOCOL
         {
@@ -808,8 +825,13 @@ impl McpServer {
     }
 
     async fn list_launch_plans(&self) -> Result<Value, ToolError> {
-        let Some(connection) = self.attached().await else {
-            return Ok(json!({ "daemonRunning": false, "enabled": false, "plans": [] }));
+        let connection = match self.attached().await {
+            Ok(connection) => connection,
+            Err(failure) => {
+                return Ok(
+                    json!({ "daemonRunning": false, "enabled": false, "plans": [], "attachmentError": failure }),
+                )
+            }
         };
         let mut plans = connection.plans().await?;
         if let Some(object) = plans.as_object_mut() {
@@ -826,9 +848,7 @@ impl McpServer {
             .map(str::to_string)
             .ok_or_else(|| ToolError::Invalid("planId is required".into()))?;
         let request_id = request_id(arguments)?;
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         let value = connection
             .request(Request::LaunchPlan {
                 plan_id,
@@ -865,9 +885,7 @@ impl McpServer {
             Some(_) => return Err(ToolError::Invalid("mode must be queue or now".into())),
         };
         let request_id = request_id(arguments)?;
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         Ok(connection
             .request(Request::Prompt {
                 session_id,
@@ -891,9 +909,7 @@ impl McpServer {
             }
         };
         let request_id = request_id(arguments)?;
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         Ok(connection
             .request(Request::Cancel {
                 session_id,
@@ -904,8 +920,13 @@ impl McpServer {
     }
 
     async fn list_agent_sessions(&self) -> Result<Value, ToolError> {
-        let Some(connection) = self.attached().await else {
-            return Ok(json!({ "daemonRunning": false, "sessions": [] }));
+        let connection = match self.attached().await {
+            Ok(connection) => connection,
+            Err(failure) => {
+                return Ok(
+                    json!({ "daemonRunning": false, "sessions": [], "attachmentError": failure }),
+                )
+            }
         };
         let sessions: Vec<SessionView> = connection
             .sessions()
@@ -951,9 +972,7 @@ impl McpServer {
             })
             .transpose()?
             .unwrap_or(true);
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         // Ask for a little more than the page so a character or control
         // sequence the cap would cut can be finished instead of held back.
         let mut access = connection.begin_output_read(&session_id)?;
@@ -990,9 +1009,7 @@ impl McpServer {
                 })
             })
             .transpose()?;
-        let Some(connection) = self.attached().await else {
-            return Err(ToolError::Failed(DAEMON_NOT_RUNNING.into()));
-        };
+        let connection = self.attached().await?;
         // Subscribe first, then read the current state, so a change between
         // the two is seen either way.
         let mut events = connection.events.subscribe();
@@ -1134,13 +1151,11 @@ impl McpServer {
         }
     }
 
-    /// The daemon connection, reopened when the previous one died; `None`
-    /// when no daemon is running and automatic startup is disabled or failed.
-    async fn attached(&self) -> Option<Arc<Connection>> {
+    async fn attached(&self) -> Result<Arc<Connection>, AttachFailure> {
         let mut guard = self.connection.lock().await;
         if let Some(connection) = guard.as_ref() {
             if connection.alive.load(Ordering::Relaxed) {
-                return Some(Arc::clone(connection));
+                return Ok(Arc::clone(connection));
             }
         }
         *guard = None;
@@ -1148,41 +1163,50 @@ impl McpServer {
         // environment that put its socket elsewhere.
         let paths = DaemonPaths::for_client(&self.paths.data_dir);
         #[cfg(unix)]
-        if !self.auto_start && !paths.socket.exists() {
-            return None;
+        if !self.auto_start {
+            std::fs::metadata(&paths.socket)
+                .map_err(|error| AttachFailure::io("socket_connect", &error))?;
         }
         let client = self.client.lock().ok().and_then(|client| client.clone());
-        if let Ok(Ok(connection)) = tokio::time::timeout(
-            ATTACH_TIMEOUT,
-            Connection::open_scoped(&paths, client.clone(), self.workspace_directory.clone()),
+        let mut failure = match Connection::attach_until(
+            &paths,
+            client.clone(),
+            self.workspace_directory.clone(),
+            tokio::time::Instant::now() + ATTACH_TIMEOUT,
         )
         .await
         {
-            *guard = Some(Arc::clone(&connection));
-            return Some(connection);
-        }
+            Ok(connection) => {
+                *guard = Some(Arc::clone(&connection));
+                return Ok(connection);
+            }
+            Err(failure) => failure,
+        };
         if !self.auto_start || self.start_attempted.swap(true, Ordering::Relaxed) {
-            return None;
+            return Err(failure);
         }
-        super::client::spawn_daemon(&self.paths).ok()?;
+        if super::client::spawn_daemon(&self.paths).is_err() {
+            return Err(failure);
+        }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            if let Ok(Ok(connection)) = tokio::time::timeout_at(
+            match Connection::attach_until(
+                &DaemonPaths::for_client(&self.paths.data_dir),
+                client.clone(),
+                self.workspace_directory.clone(),
                 deadline,
-                Connection::open_scoped(
-                    &DaemonPaths::for_client(&self.paths.data_dir),
-                    client.clone(),
-                    self.workspace_directory.clone(),
-                ),
             )
             .await
             {
-                *guard = Some(Arc::clone(&connection));
-                return Some(connection);
+                Ok(connection) => {
+                    *guard = Some(Arc::clone(&connection));
+                    return Ok(connection);
+                }
+                Err(current) => failure = current,
             }
         }
-        None
+        Err(failure)
     }
 }
 
@@ -2021,12 +2045,48 @@ impl RpcFailure {
     }
 }
 
+#[derive(Debug)]
 enum ToolError {
     /// The caller's arguments are wrong: a JSON-RPC error.
     Invalid(String),
     /// The call was fine but could not be served: a tool result with
     /// `isError`, so the model sees why and can adapt.
     Failed(String),
+    Attachment(AttachFailure),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachFailure {
+    stage: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    errno: Option<i32>,
+}
+
+impl AttachFailure {
+    fn stage(stage: &'static str) -> Self {
+        Self {
+            stage,
+            error_kind: None,
+            errno: None,
+        }
+    }
+
+    fn io(stage: &'static str, error: &std::io::Error) -> Self {
+        Self {
+            stage,
+            error_kind: Some(format!("{:?}", error.kind())),
+            errno: error.raw_os_error(),
+        }
+    }
+}
+
+impl From<AttachFailure> for ToolError {
+    fn from(failure: AttachFailure) -> Self {
+        Self::Attachment(failure)
+    }
 }
 
 impl From<String> for ToolError {
@@ -2111,22 +2171,38 @@ impl Connection {
         }
     }
 
+    async fn attach_until(
+        paths: &DaemonPaths,
+        client: Option<String>,
+        workspace_directory: Option<String>,
+        deadline: tokio::time::Instant,
+    ) -> Result<Arc<Connection>, AttachFailure> {
+        tokio::time::timeout_at(
+            deadline,
+            Self::open_scoped(paths, client, workspace_directory),
+        )
+        .await
+        .unwrap_or_else(|_| Err(AttachFailure::stage("attach_timeout")))
+    }
+
     async fn open_scoped(
         paths: &DaemonPaths,
         client: Option<String>,
         workspace_directory: Option<String>,
-    ) -> Result<Arc<Connection>, String> {
-        let token = read_or_create_token(paths)?;
-        let stream = transport::connect(paths)
+    ) -> Result<Arc<Connection>, AttachFailure> {
+        let token =
+            read_or_create_token(paths).map_err(|_| AttachFailure::stage("credential_access"))?;
+        let stream = transport::connect_diagnosed(paths)
             .await
-            .map_err(|error| format!("Cannot reach the background service: {error}"))?;
+            .map_err(|failure| AttachFailure::io(failure.stage, &failure.error))?;
         let connection = Self::from_stream(stream);
-        if let Err(error) = connection
+        if connection
             .greet_scoped(token, client, workspace_directory)
             .await
+            .is_err()
         {
             connection.lost();
-            return Err(format!("MCP could not negotiate observer access: {error} Finish background sessions before restarting an outdated service."));
+            return Err(AttachFailure::stage("observer_handshake"));
         }
         Ok(connection)
     }
@@ -2418,6 +2494,22 @@ pub use crate::agent_mcp::{launch_for, McpLaunch};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn attachment_diagnostics_passive_adapter_reports_missing_socket_without_starting() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DaemonPaths::new(&directory.path().join("uncreated"));
+        let server = McpServer::new(paths.clone());
+        let capabilities = server
+            .get_capabilities()
+            .await
+            .unwrap_or_else(|_| panic!("capabilities unavailable"));
+        assert_eq!(capabilities["daemonRunning"], false);
+        assert_eq!(capabilities["attachmentError"]["stage"], "socket_connect");
+        assert_eq!(capabilities["attachmentError"]["errorKind"], "NotFound");
+        assert!(!server.start_attempted.load(Ordering::Relaxed));
+        assert!(!paths.data_dir.exists());
+    }
 
     #[test]
     fn metadata_visibility_and_control_do_not_imply_permission_to_read_output() {
@@ -3693,10 +3785,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(read["result"]["isError"], true);
-        assert!(read["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("not running"));
+        assert_eq!(
+            read["result"]["structuredContent"]["code"],
+            "daemon_unavailable"
+        );
+        assert_eq!(
+            read["result"]["structuredContent"]["attachmentError"]["stage"],
+            "socket_connect"
+        );
 
         let bad = server
             .handle(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call",

@@ -1,6 +1,15 @@
 //! Local default MCP can bring up the desktop, without focusing an open window.
 use super::*;
 
+pub(super) fn automatic_startup(
+    no_autostart: bool,
+    workspace: Option<&str>,
+    requested: Option<&std::path::Path>,
+    default: Option<&std::path::Path>,
+) -> bool {
+    !no_autostart && workspace.is_none() && is_default_directory(requested, default)
+}
+
 pub(super) fn is_default_directory(
     requested: Option<&std::path::Path>,
     default: Option<&std::path::Path>,
@@ -128,11 +137,30 @@ mod tests {
     async fn library_and_workspace_adapters_never_start_processes() {
         let data = tempfile::tempdir().unwrap();
         let local = McpServer::new(DaemonPaths::new(data.path()));
-        assert!(local.attached().await.is_none());
+        assert!(local.attached().await.is_err());
         assert!(!local.start_attempted.load(Ordering::Relaxed));
         let scoped = McpServer::workspace(DaemonPaths::new(data.path()), "/approved".into());
-        assert!(scoped.attached().await.is_none());
+        assert!(scoped.attached().await.is_err());
         assert!(!scoped.start_attempted.load(Ordering::Relaxed));
         assert!(!scoped.auto_start);
+    }
+
+    #[tokio::test]
+    async fn explicit_no_autostart_on_default_directory_never_attempts_a_spawn() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("uncreated");
+        let mut server = McpServer::new(DaemonPaths::new(&data));
+        server.auto_start = automatic_startup(true, None, Some(&data), Some(&data));
+        assert!(!server.auto_start);
+        assert!(server.attached().await.is_err());
+        assert!(!server.start_attempted.load(Ordering::Relaxed));
+        assert!(!data.exists());
+        assert!(automatic_startup(false, None, Some(&data), Some(&data)));
+        assert!(!automatic_startup(
+            false,
+            Some("/approved"),
+            Some(&data),
+            Some(&data)
+        ));
     }
 }

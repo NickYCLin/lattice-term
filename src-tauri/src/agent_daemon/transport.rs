@@ -16,6 +16,42 @@ pub use unix::{accept, bind, connect, ClientStream};
 #[allow(unused_imports)]
 pub use windows::{accept, bind, connect, ClientStream};
 
+#[derive(Debug)]
+pub struct ConnectFailure {
+    pub stage: &'static str,
+    pub error: io::Error,
+}
+
+impl ConnectFailure {
+    fn socket(error: io::Error) -> Self {
+        Self {
+            stage: "socket_connect",
+            error,
+        }
+    }
+
+    #[cfg(unix)]
+    fn identity(error: io::Error) -> Self {
+        Self {
+            stage: "peer_identity",
+            error,
+        }
+    }
+}
+
+pub async fn connect_diagnosed(paths: &DaemonPaths) -> Result<ClientStream, ConnectFailure> {
+    #[cfg(unix)]
+    {
+        unix::connect_diagnosed(paths).await
+    }
+    #[cfg(windows)]
+    {
+        windows::connect(paths)
+            .await
+            .map_err(ConnectFailure::socket)
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -74,32 +110,44 @@ mod unix {
     }
 
     pub async fn connect(paths: &DaemonPaths) -> io::Result<Stream> {
+        connect_diagnosed(paths)
+            .await
+            .map_err(|failure| failure.error)
+    }
+
+    pub async fn connect_diagnosed(paths: &DaemonPaths) -> Result<Stream, ConnectFailure> {
         use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-        let directory = paths.socket.parent().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "missing daemon socket directory",
-            )
-        })?;
-        prepare_private_dir(directory)?;
-        let metadata = std::fs::symlink_metadata(&paths.socket)?;
+        let directory = paths
+            .socket
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "missing daemon socket directory",
+                )
+            })
+            .map_err(ConnectFailure::socket)?;
+        prepare_private_dir(directory).map_err(ConnectFailure::identity)?;
+        let metadata = std::fs::symlink_metadata(&paths.socket).map_err(ConnectFailure::socket)?;
         // SAFETY: geteuid has no preconditions.
         let uid = unsafe { libc::geteuid() };
         if !metadata.file_type().is_socket()
             || metadata.uid() != uid
             || metadata.permissions().mode() & 0o077 != 0
         {
-            return Err(io::Error::new(
+            return Err(ConnectFailure::identity(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "the daemon socket is not private to this user",
-            ));
+            )));
         }
-        let stream = UnixStream::connect(&paths.socket).await?;
-        if stream.peer_cred()?.uid() != uid {
-            return Err(io::Error::new(
+        let stream = UnixStream::connect(&paths.socket)
+            .await
+            .map_err(ConnectFailure::socket)?;
+        if stream.peer_cred().map_err(ConnectFailure::identity)?.uid() != uid {
+            return Err(ConnectFailure::identity(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "the daemon peer belongs to another user",
-            ));
+            )));
         }
         Ok(stream)
     }
