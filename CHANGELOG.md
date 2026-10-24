@@ -4,6 +4,13 @@
 
 ---
 
+## [2026.10.25](https://github.com/NickYCLin/lattice-term/compare/v2026.10.24...v2026.10.25) (2026-10-24)
+
+
+### 🛠️ 問題修正
+
+* **mcp:** 避免連線失敗時建立背景服務憑證 ([1b83697](https://github.com/NickYCLin/lattice-term/commit/1b83697783f70a135dbfc31e9fdd407e834911f7))
+
 ## [2026.10.24](https://github.com/NickYCLin/lattice-term/compare/v2026.10.23...v2026.10.24) (2026-10-23)
 
 
