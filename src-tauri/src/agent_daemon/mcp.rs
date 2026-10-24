@@ -2190,11 +2190,11 @@ impl Connection {
         client: Option<String>,
         workspace_directory: Option<String>,
     ) -> Result<Arc<Connection>, AttachFailure> {
-        let token =
-            read_or_create_token(paths).map_err(|_| AttachFailure::stage("credential_access"))?;
         let stream = transport::connect_diagnosed(paths)
             .await
             .map_err(|failure| AttachFailure::io(failure.stage, &failure.error))?;
+        let token =
+            read_or_create_token(paths).map_err(|_| AttachFailure::stage("credential_access"))?;
         let connection = Self::from_stream(stream);
         if connection
             .greet_scoped(token, client, workspace_directory)
@@ -2509,6 +2509,25 @@ mod tests {
         assert_eq!(capabilities["attachmentError"]["errorKind"], "NotFound");
         assert!(!server.start_attempted.load(Ordering::Relaxed));
         assert!(!paths.data_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn attachment_diagnostics_missing_socket_preserves_existing_invalid_token() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = DaemonPaths::new(directory.path());
+        std::fs::write(&paths.token, "invalid-token\n").unwrap();
+        let server = McpServer::new(paths.clone());
+        let capabilities = server
+            .get_capabilities()
+            .await
+            .unwrap_or_else(|_| panic!("capabilities unavailable"));
+        assert_eq!(capabilities["daemonRunning"], false);
+        assert_eq!(capabilities["attachmentError"]["stage"], "socket_connect");
+        assert!(!server.start_attempted.load(Ordering::Relaxed));
+        assert_eq!(
+            std::fs::read_to_string(&paths.token).unwrap(),
+            "invalid-token\n"
+        );
     }
 
     #[test]
