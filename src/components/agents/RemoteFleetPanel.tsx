@@ -38,6 +38,9 @@ export function RemoteFleetPanel() {
   const [plans, setPlans] = useState<FleetPlan[]>([]);
   const [error, setError] = useState("");
   const [openIds, setOpenIds] = useState<string[]>([]);
+  const [launching, setLaunching] = useState(new Set<string>());
+  const pendingLaunches = useRef(new Set<string>());
+  const viewGeneration = useRef(0);
   const target = targets.find((entry) => entry.id === targetId) ?? null;
   const targetRequest = useRef(0);
   const sessionRequest = useRef(0);
@@ -83,6 +86,7 @@ export function RemoteFleetPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    viewGeneration.current += 1;
     sessionRequest.current += 1;
     setSessions([]);
     setPlans([]);
@@ -96,10 +100,31 @@ export function RemoteFleetPanel() {
     const timer = window.setInterval(() => void loadSessions(), 5000);
     return () => {
       cancelled = true;
+      viewGeneration.current += 1;
       sessionRequest.current += 1;
       window.clearInterval(timer);
     };
   }, [targetId, target?.scopes.fleetLaunch, target?.scopes.fleetRead, loadSessions]);
+
+  async function launch(planId: string) {
+    if (!mounted.current || !target?.scopes.fleetLaunch) return;
+    const key = JSON.stringify([targetId, planId]);
+    if (pendingLaunches.current.has(key)) return;
+    pendingLaunches.current.add(key);
+    setLaunching(new Set(pendingLaunches.current));
+    const generation = viewGeneration.current;
+    const current = () => mounted.current && activeTarget.current === targetId && generation === viewGeneration.current;
+    setError("");
+    try {
+      await launchFleetPlan(targetId, planId);
+      if (current()) await loadSessions();
+    } catch (reason) {
+      if (current()) setError(String(reason));
+    } finally {
+      pendingLaunches.current.delete(key);
+      if (mounted.current) setLaunching(new Set(pendingLaunches.current));
+    }
+  }
 
   if (!hasDesktopBackend()) return null;
 
@@ -139,11 +164,8 @@ export function RemoteFleetPanel() {
                   key={plan.planId}
                   type="button"
                   className="button button--secondary button--sm"
-                  onClick={() =>
-                    void launchFleetPlan(targetId, plan.planId)
-                      .then(() => loadSessions())
-                      .catch((reason: unknown) => setError(String(reason)))
-                  }
+                  disabled={launching.has(JSON.stringify([targetId, plan.planId]))}
+                  onClick={() => void launch(plan.planId)}
                 >
                   {t("agents.remoteFleet.launch", { label: plan.label })}
                 </button>
@@ -213,11 +235,14 @@ function RemoteFleetPane({
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const acting = useRef(false);
+  const mounted = useRef(false);
   const cursor = useRef(0);
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     let cancelled = false;
+    mounted.current = true;
     let timer = 0;
     const poll = async () => {
       try {
@@ -238,6 +263,7 @@ function RemoteFleetPane({
     void poll();
     return () => {
       cancelled = true;
+      mounted.current = false;
       window.clearTimeout(timer);
     };
   }, [targetId, session.sessionId]);
@@ -248,14 +274,17 @@ function RemoteFleetPane({
   }, [output]);
 
   async function act(action: () => Promise<unknown>) {
+    if (acting.current || !mounted.current || !canControl) return;
+    acting.current = true;
     setBusy(true);
     setError("");
     try {
       await action();
     } catch (reason) {
-      setError(String(reason));
+      if (mounted.current) setError(String(reason));
     } finally {
-      setBusy(false);
+      acting.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -287,7 +316,7 @@ function RemoteFleetPane({
             if (!text) return;
             void act(async () => {
               await sendFleetPrompt(targetId, session.sessionId, text);
-              setPrompt("");
+              if (mounted.current) setPrompt(current => current.trim() === text ? "" : current);
             });
           }}
         >

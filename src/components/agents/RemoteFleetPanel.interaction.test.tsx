@@ -124,3 +124,75 @@ it("shows a target discovery failure even when no targets were loaded", async ()
     expect(host.textContent).toContain("Target discovery unavailable");
   } finally { await unmount(); }
 });
+
+it("starts a saved plan only once for a rapid double click and allows retry after failure", async () => {
+  const pending = deferred<{ session: FleetSession | null; duplicate: boolean }>();
+  vi.mocked(fleet.listFleetPlans).mockResolvedValue([{ planId: "plan", label: "Test plan" }]);
+  vi.mocked(fleet.launchFleetPlan).mockReturnValueOnce(pending.promise).mockResolvedValue({ session: null, duplicate: false });
+  const { host, unmount } = await mount();
+  try {
+    const launch = () => button(host, "Test plan");
+    await act(async () => { props(launch()).onClick(); props(launch()).onClick(); });
+    expect(fleet.launchFleetPlan).toHaveBeenCalledTimes(1);
+    expect(props(launch()).disabled).toBe(true);
+    await act(async () => pending.reject(new Error("Launch interrupted")));
+    expect(host.textContent).toContain("Launch interrupted");
+    await act(async () => props(launch()).onClick());
+    expect(fleet.launchFleetPlan).toHaveBeenCalledTimes(2);
+  } finally { await unmount(); }
+});
+
+it("does not show a failed launch from a host that was left and then selected again", async () => {
+  const pending = deferred<{ session: FleetSession | null; duplicate: boolean }>();
+  vi.mocked(fleet.listFleetPlans).mockResolvedValue([{ planId: "plan", label: "Test plan" }]);
+  vi.mocked(fleet.launchFleetPlan).mockReturnValue(pending.promise);
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "Test plan")).onClick());
+    await selectTarget(host, "beta");
+    await selectTarget(host, "alpha");
+    await act(async () => pending.reject(new Error("Old launch failure")));
+    expect(host.textContent).not.toContain("Old launch failure");
+  } finally { await unmount(); }
+});
+
+it("sends a prompt once, blocks concurrent cancellation and preserves the draft on failure", async () => {
+  const pending = deferred<Record<string, unknown>>();
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  vi.mocked(fleet.sendFleetPrompt).mockReturnValueOnce(pending.promise).mockResolvedValue({});
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const input = allNodes(host).find(node => node.tagName === "INPUT")!;
+    await act(async () => props(input).onChange({ target: { value: "Test prompt" } }));
+    const form = allNodes(host).find(node => node.tagName === "FORM")!;
+    await act(async () => {
+      props(form).onSubmit({ preventDefault() {} });
+      props(form).onSubmit({ preventDefault() {} });
+      props(button(host, "取消這一輪")).onClick();
+    });
+    expect(fleet.sendFleetPrompt).toHaveBeenCalledTimes(1);
+    expect(fleet.cancelFleetTurn).not.toHaveBeenCalled();
+    await act(async () => pending.reject(new Error("Send interrupted")));
+    expect(props(input).value).toBe("Test prompt");
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(fleet.sendFleetPrompt).toHaveBeenCalledTimes(2);
+    expect(props(input).value).toBe("");
+  } finally { await unmount(); }
+});
+
+it("deduplicates cancellation before React disables the button", async () => {
+  const pending = deferred<Record<string, unknown>>();
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  vi.mocked(fleet.cancelFleetTurn).mockReturnValue(pending.promise);
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    await act(async () => {
+      props(button(host, "取消這一輪")).onClick();
+      props(button(host, "取消這一輪")).onClick();
+    });
+    expect(fleet.cancelFleetTurn).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({}));
+  } finally { await unmount(); }
+});
