@@ -39,42 +39,67 @@ export function RemoteFleetPanel() {
   const [error, setError] = useState("");
   const [openIds, setOpenIds] = useState<string[]>([]);
   const target = targets.find((entry) => entry.id === targetId) ?? null;
+  const targetRequest = useRef(0);
+  const sessionRequest = useRef(0);
+  const activeTarget = useRef(targetId);
+  activeTarget.current = targetId;
+  const mounted = useRef(false);
 
   const loadTargets = useCallback(async () => {
     if (!hasDesktopBackend()) return;
+    const request = ++targetRequest.current;
     try {
       const next = await listFleetTargets();
+      if (!mounted.current || request !== targetRequest.current) return;
       setTargets(next);
       setTargetId((current) => (next.some((entry) => entry.id === current) ? current : next[0]?.id ?? ""));
     } catch (reason) {
-      setError(String(reason));
+      if (mounted.current && request === targetRequest.current) setError(String(reason));
     }
   }, []);
 
   const loadSessions = useCallback(async () => {
-    if (!targetId) return;
+    if (!mounted.current || !targetId || activeTarget.current !== targetId) return;
+    const request = ++sessionRequest.current;
     try {
-      setSessions(await listFleetSessions(targetId));
+      const next = await listFleetSessions(targetId);
+      if (!mounted.current || activeTarget.current !== targetId || request !== sessionRequest.current) return;
+      setSessions(next);
       setError("");
     } catch (reason) {
-      setError(String(reason));
+      if (mounted.current && activeTarget.current === targetId && request === sessionRequest.current) setError(String(reason));
     }
   }, [targetId]);
 
   useEffect(() => {
+    mounted.current = true;
     void loadTargets();
+    return () => {
+      mounted.current = false;
+      targetRequest.current += 1;
+      sessionRequest.current += 1;
+    };
   }, [loadTargets]);
 
   useEffect(() => {
+    let cancelled = false;
+    sessionRequest.current += 1;
     setSessions([]);
     setPlans([]);
     setOpenIds([]);
+    setError("");
     if (!targetId) return;
     void loadSessions();
-    if (target?.scopes.fleetLaunch) void listFleetPlans(targetId).then(setPlans).catch(() => {});
+    if (target?.scopes.fleetLaunch) void listFleetPlans(targetId).then(next => {
+      if (!cancelled && activeTarget.current === targetId) setPlans(next);
+    }).catch(() => {});
     const timer = window.setInterval(() => void loadSessions(), 5000);
-    return () => window.clearInterval(timer);
-  }, [targetId, target?.scopes.fleetLaunch, loadSessions]);
+    return () => {
+      cancelled = true;
+      sessionRequest.current += 1;
+      window.clearInterval(timer);
+    };
+  }, [targetId, target?.scopes.fleetLaunch, target?.scopes.fleetRead, loadSessions]);
 
   if (!hasDesktopBackend()) return null;
 
@@ -91,6 +116,7 @@ export function RemoteFleetPanel() {
           {t("agents.remoteFleet.refresh")}
         </button>
       </div>
+      {error && <p className="field__error">{error}</p>}
       {targets.length === 0 ? (
         <p className="agents-running__empty">{t("agents.remoteFleet.none")}</p>
       ) : (
@@ -106,7 +132,6 @@ export function RemoteFleetPanel() {
               ))}
             </select>
           </label>
-          {error && <p className="field__error">{error}</p>}
           {plans.length > 0 && (
             <div className="agents-remote-fleet__plans">
               {plans.map((plan) => (
@@ -134,7 +159,7 @@ export function RemoteFleetPanel() {
                   <span className={`agent-state-dot state-${session.state}`} aria-hidden="true" />
                   <strong>{session.label}</strong>
                   <span className="chat-chip">{t(stateKey[session.state] ?? "agents.state.idle")}</span>
-                  {session.readOutput && (
+                  {session.readOutput && target?.scopes.fleetRead && (
                     <button
                       type="button"
                       className="button button--ghost button--sm"
@@ -157,9 +182,9 @@ export function RemoteFleetPanel() {
             <div className="agents-remote-fleet__panes">
               {openIds.map((sessionId) => {
                 const session = sessions.find((entry) => entry.sessionId === sessionId);
-                return session ? (
+                return session?.readOutput && target?.scopes.fleetRead ? (
                   <RemoteFleetPane
-                    key={sessionId}
+                    key={`${targetId}:${sessionId}`}
                     targetId={targetId}
                     session={session}
                     canControl={session.access === "control" && target?.scopes.fleetControl === true}
@@ -199,6 +224,7 @@ function RemoteFleetPane({
         // Drain what is there, a few pages at a time, then wait.
         for (let page = 0; page < 8 && !cancelled; page += 1) {
           const next = await readFleetOutput(targetId, session.sessionId, cursor.current);
+          if (cancelled) return;
           cursor.current = next.nextCursor;
           if (next.text) setOutput((current) => appendBounded(current, next.text));
           if (!next.hasMore) break;
