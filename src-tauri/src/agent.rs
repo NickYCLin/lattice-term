@@ -8519,6 +8519,17 @@ fn observe_desktop_input(input: &mut AgentInputControl, bytes: &[u8]) -> bool {
                     sequence if is_terminal_status_reply(sequence) => {
                         input.last_input_kind = Some("terminal_status_reply");
                     }
+                    sequence
+                        if input.startup_seed_pending
+                            && !input.desktop_editing
+                            && !input.desktop_paste
+                            && is_startup_focus_click(sequence) =>
+                    {
+                        // Clicking the empty composer while startup is still
+                        // settling must not cancel its one-off seed. Keep
+                        // ordinary mouse input conservative once it is sent.
+                        input.last_input_kind = Some("startup_focus_click");
+                    }
                     _ => {
                         input.last_input_kind = Some(if sequence.starts_with(b"\x1b[<") {
                             "mouse_or_unknown_csi"
@@ -8571,6 +8582,26 @@ fn is_passive_mouse_motion(bytes: &[u8]) -> bool {
         return false;
     };
     matches!((number(button), number(x), number(y)), (Some(b), Some(1..=999999), Some(1..=999999)) if b & !28 == 35)
+}
+
+/// Only unmodified SGR left-button press/release with valid coordinates.
+/// Wheel, drag, modified clicks and unknown mouse protocols may navigate or
+/// edit the composer, so they must still cancel startup delivery.
+fn is_startup_focus_click(bytes: &[u8]) -> bool {
+    let Some(body) = bytes
+        .strip_prefix(b"\x1b[<0;")
+        .and_then(|body| body.strip_suffix(b"M").or_else(|| body.strip_suffix(b"m")))
+    else {
+        return false;
+    };
+    let mut coordinates = body.split(|byte| *byte == b';');
+    (0..2).all(|_| {
+        coordinates.next().is_some_and(|coordinate| {
+            (1..=6).contains(&coordinate.len())
+                && coordinate.iter().all(u8::is_ascii_digit)
+                && coordinate.iter().any(|byte| *byte != b'0')
+        })
+    }) && coordinates.next().is_none()
 }
 
 fn is_terminal_status_reply(bytes: &[u8]) -> bool {
@@ -14601,6 +14632,100 @@ notify = ["notify.exe", "turn-ended"]"#,
             Duration::from_secs(3)
         ));
         registry.stop_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_seed_survives_a_focus_click_before_the_prompt_is_ready() {
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Startup focus fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        entry.input.lock().unwrap().startup_seed_pending = true;
+
+        // xterm forwards SGR left-button press/release when the CLI enables
+        // mouse reporting. A click to focus the empty composer is not typing.
+        for byte in b"\x1b[<0;12;8M\x1b[<0;12;8m" {
+            send_bytes(sink.as_ref(), &registry, id, &[*byte]).unwrap();
+        }
+        assert!(entry.input.lock().unwrap().startup_seed_pending);
+        assert!(!entry.input.lock().unwrap().desktop_busy());
+        assert_eq!(
+            try_deliver_startup_seed(
+                sink.as_ref(),
+                &registry,
+                id,
+                &startup_seed_payload("handoff-after-focus")
+            )
+            .unwrap(),
+            StartupSeedDelivery::Delivered
+        );
+        assert!(received_within(
+            &collector,
+            id,
+            "handoff-after-focus",
+            Duration::from_secs(3)
+        ));
+        assert!(!registry.list()[0].startup_input_unconfirmed);
+        registry.stop_all();
+    }
+
+    #[test]
+    fn startup_focus_click_exception_does_not_release_other_desktop_input() {
+        for sequence in [b"\x1b[<0;12;8M".as_slice(), b"\x1b[<0;12;8m"] {
+            for split in 0..=sequence.len() {
+                let mut input = AgentInputControl {
+                    startup_seed_pending: true,
+                    ..Default::default()
+                };
+                assert!(!observe_desktop_input(&mut input, &sequence[..split]));
+                assert!(!observe_desktop_input(&mut input, &sequence[split..]));
+                assert!(!input.desktop_busy());
+                input.desktop_editing = true;
+                assert!(observe_desktop_input(&mut input, sequence));
+                assert!(
+                    input.desktop_busy(),
+                    "a click cannot clear an existing draft"
+                );
+
+                input.desktop_editing = false;
+                input.desktop_paste = true;
+                assert!(observe_desktop_input(&mut input, sequence));
+                assert!(
+                    input.desktop_busy(),
+                    "a click cannot clear an unfinished paste"
+                );
+
+                let mut input = AgentInputControl::default();
+                assert!(observe_desktop_input(&mut input, sequence));
+                assert!(
+                    input.desktop_busy(),
+                    "ordinary MCP input stays conservative"
+                );
+            }
+        }
+        for sequence in [
+            b"\x1b[<0;0;8M".as_slice(),
+            b"\x1b[<0;12;8;1M",
+            b"\x1b[<0;1000000;8M",
+            b"\x1b[<0;x;8M",
+            b"\x1b[<4;12;8M",  // Modified click.
+            b"\x1b[<32;12;8M", // Drag.
+            b"\x1b[<64;12;8M", // Wheel can navigate history.
+            b"\x1b[<2;12;8M",  // Right click.
+            b"\x1b[A",         // History key.
+            b"\x1b[200~draft\x1b[201~",
+            b"draft",
+        ] {
+            let mut input = AgentInputControl {
+                startup_seed_pending: true,
+                ..Default::default()
+            };
+            assert!(observe_desktop_input(&mut input, sequence));
+            assert!(input.desktop_busy());
+        }
     }
 
     #[cfg(unix)]
