@@ -4,6 +4,15 @@
 
 ---
 
+## [2026.10.26](https://github.com/NickYCLin/lattice-term/compare/v2026.10.25...v2026.10.26) (2026-10-25)
+
+
+### 🛠️ 問題修正
+
+* 修正遠端 Fleet 切換主機後清單錯置 ([71b754e](https://github.com/NickYCLin/lattice-term/commit/71b754eec35008aaa8ca9e4175630331bf24c54b))
+* 修正點擊終端導致啟動交接取消 ([05297e0](https://github.com/NickYCLin/lattice-term/commit/05297e0701d3e8b1d1305034b6771e59ba9c2ca0))
+* 避免遠端 Fleet 連點時重複送出操作 ([298d81a](https://github.com/NickYCLin/lattice-term/commit/298d81a2fe26fc347a712860a99253961cd2edaf))
+
 ## [2026.10.25](https://github.com/NickYCLin/lattice-term/compare/v2026.10.24...v2026.10.25) (2026-10-24)
 
 
