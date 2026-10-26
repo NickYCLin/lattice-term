@@ -19,6 +19,20 @@ it("persists separate output and control permissions and learns the native ident
     .toMatchObject({ access: "full", readOutput: false, nativeSessionId: "native-1" });
 });
 
+it("follows a corrected native identity in the same tab so a restart still restores sharing", () => {
+  const disk = storage();
+  const preferences = new AgentMcpPreferences(disk);
+  const session = fakeSession({ capturedSessionId: "temporary-thread" });
+  preferences.remember(session, "view");
+  const corrected = { ...session, capturedSessionId: "conversation" };
+  expect(preferences.find(corrected)).toBeDefined();
+  preferences.updateIdentity(corrected);
+  const restarted = new AgentMcpPreferences(disk);
+  const restored = { ...session, sessionId: "restored", capturedSessionId: "conversation", restoreExistingSession: true };
+  expect(restarted.find(restored)).toMatchObject({ access: "view", nativeSessionId: "conversation" });
+  expect(restarted.find({ ...restored, capturedSessionId: "temporary-thread" })).toBeUndefined();
+});
+
 it("does not guess the identity of a fresh replacement or another account", () => {
   const disk = storage();
   const preferences = new AgentMcpPreferences(disk);

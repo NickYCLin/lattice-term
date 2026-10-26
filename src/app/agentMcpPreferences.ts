@@ -27,9 +27,9 @@ function identityMatches(entry: AgentMcpPreference, session: AgentSessionSummary
 
 export function mcpPreferenceMatches(entry: AgentMcpPreference, session: AgentSessionSummary): boolean {
   if (session.closedReason || !identityMatches(entry, session)) return false;
-  if (entry.sessionId === session.sessionId) {
-    return !entry.nativeSessionId || !session.capturedSessionId || entry.nativeSessionId === session.capturedSessionId;
-  }
+  // The same live tab keeps its sharing even when the agent reports a different native conversation, so
+  // updateIdentity can replace an id that was captured too early instead of stranding the choice on it.
+  if (entry.sessionId === session.sessionId) return true;
   return session.restoreExistingSession === true && !!entry.nativeSessionId &&
     entry.nativeSessionId === session.capturedSessionId;
 }

@@ -5067,16 +5067,41 @@ fn codex_turn_complete_notification(payload: &OsStr) -> Option<CodexNotification
         .filter(|notification| notification.kind == "agent-turn-complete")
 }
 
+/// How long the reporter waits for Codex to flush the record of a thread
+/// that just finished a turn before deciding it was never written down.
+const CODEX_THREAD_RECORD_ATTEMPTS: u32 = 10;
+const CODEX_THREAD_RECORD_RETRY: Duration = Duration::from_millis(100);
+
 /// The thread that just finished a turn is what `codex resume` needs. Codex
 /// prints its id only on exit, which a closed application never reaches.
 fn codex_notification_thread_id(notification: &CodexNotificationKind) -> Option<String> {
+    codex_notification_thread_id_with(notification, |thread_id| {
+        let mut attempt = 0;
+        loop {
+            let recorded = crate::transcript::codex_thread_is_conversation(thread_id);
+            attempt += 1;
+            if recorded.is_some() || attempt >= CODEX_THREAD_RECORD_ATTEMPTS {
+                return recorded;
+            }
+            std::thread::sleep(CODEX_THREAD_RECORD_RETRY);
+        }
+    })
+}
+
+/// Only a thread Codex recorded as a person's conversation can be resumed.
+/// Codex also finishes turns on threads that are never written to history,
+/// such as the temporary threads the TUI starts in the background after it
+/// has been idle, and a subagent's own thread. Their notifications carry
+/// their own ids; keeping one would make the restored tab run
+/// `codex resume <id>` against a thread that does not exist.
+fn codex_notification_thread_id_with(
+    notification: &CodexNotificationKind,
+    is_conversation: impl FnOnce(&str) -> Option<bool>,
+) -> Option<String> {
     let thread_id = notification.thread_id.as_deref()?;
     let characters: Vec<char> = thread_id.chars().collect();
     let thread_id = is_uuid_shaped(&characters).then(|| thread_id.to_ascii_lowercase())?;
-    // A subagent finishing its own turn must not replace the conversation
-    // the tab will resume.
-    (crate::transcript::codex_thread_is_conversation(&thread_id) != Some(false))
-        .then_some(thread_id)
+    (is_conversation(&thread_id) == Some(true)).then_some(thread_id)
 }
 
 /// Handle the tiny reporter subcommand before Tauri starts.
@@ -7624,13 +7649,23 @@ fn adopt_latest_codex_thread(
         return Ok(());
     }
     let profile = profile_config_directory("codex", request.profile_config_path.as_deref())?;
+    // Earlier versions could save the id of a temporary thread Codex never
+    // writes down. `codex resume` exits at once for such an id, so the tab is
+    // treated as one whose id was never reported.
+    let mut unrecorded = false;
     if let Some(saved) = request.resume_session_id.as_deref() {
-        let proxied_tab =
-            crate::cliproxy::launch::base_from_arguments(&request.arguments)?.is_some();
-        let native_thread = crate::transcript::codex_session_provider(saved, profile.as_deref())?
-            .is_some_and(|provider| !crate::cliproxy::launch::is_managed_provider(&provider));
-        if !(proxied_tab && native_thread) {
-            return Ok(());
+        unrecorded =
+            crate::transcript::codex_thread_recorded(saved, profile.as_deref()) == Some(false);
+        if !unrecorded {
+            let proxied_tab =
+                crate::cliproxy::launch::base_from_arguments(&request.arguments)?.is_some();
+            let native_thread =
+                crate::transcript::codex_session_provider(saved, profile.as_deref())?.is_some_and(
+                    |provider| !crate::cliproxy::launch::is_managed_provider(&provider),
+                );
+            if !(proxied_tab && native_thread) {
+                return Ok(());
+            }
         }
     }
     let mut arguments = request.arguments.clone();
@@ -7657,6 +7692,10 @@ fn adopt_latest_codex_thread(
     ) {
         request.arguments = arguments;
         request.resume_session_id = Some(thread_id);
+    } else if unrecorded {
+        // Nothing in this project can be resumed; a fresh conversation keeps
+        // the tab usable instead of exiting with "No saved session found".
+        request.resume_session_id = None;
     }
     Ok(())
 }
@@ -11557,6 +11596,63 @@ model = "gpt-5.3-codex"
     }
 
     #[test]
+    fn codex_restore_replaces_a_saved_thread_codex_never_recorded() {
+        let profile = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let sessions = profile.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let plan = normalize_launch_plan(
+            "unrecorded-thread".into(),
+            AgentLaunchPlanDraft {
+                definition_id: "codex".into(),
+                label: String::new(),
+                executable: String::new(),
+                arguments: Vec::new(),
+                resume_session_id: None,
+                note: String::new(),
+                sandbox: false,
+                detached: false,
+                working_directory: workspace.path().display().to_string(),
+            },
+        )
+        .unwrap();
+        let restore = |saved: &str| {
+            let mut request = launch_request_from_plan(&plan, 80, 24).unwrap();
+            request.profile_config_path = Some(profile.path().display().to_string());
+            request.resume_session_id = Some(saved.into());
+            request.restore_existing_session = true;
+            adopt_latest_codex_thread(&mut request, &AgentRegistry::default()).unwrap();
+            request.resume_session_id
+        };
+
+        // Nothing recorded in this project: start fresh instead of exiting.
+        assert_eq!(restore("01a1785f-d47c-74d0-99e1-3ad7758a01a1"), None);
+
+        let meta = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": "conversation-thread", "cwd": workspace.path(),
+                "source": "cli", "originator": "codex-tui", "model_provider": "openai"
+            }
+        });
+        std::fs::write(
+            sessions.join("rollout-conversation-thread.jsonl"),
+            format!("{meta}\n"),
+        )
+        .unwrap();
+        // A temporary thread id gives way to the project's real conversation.
+        assert_eq!(
+            restore("01a1785f-d47c-74d0-99e1-3ad7758a01a1").as_deref(),
+            Some("conversation-thread")
+        );
+        // A recorded thread is still resumed exactly as saved.
+        assert_eq!(
+            restore("conversation-thread").as_deref(),
+            Some("conversation-thread")
+        );
+    }
+
+    #[test]
     fn native_resume_rejects_invalid_permission_arguments() {
         for (definition_id, arguments) in [
             ("codex", vec!["--sandbox"]),
@@ -12895,14 +12991,31 @@ model = "gpt-5.3-codex"
         ))
         .unwrap();
         assert_eq!(
-            codex_notification_thread_id(&with_thread).as_deref(),
+            codex_notification_thread_id_with(&with_thread, |id| {
+                assert_eq!(id, "01a10abd-5836-7110-a3e7-910fffc8e5a6");
+                Some(true)
+            })
+            .as_deref(),
             Some("01a10abd-5836-7110-a3e7-910fffc8e5a6")
+        );
+        // A temporary thread Codex never writes down, or a subagent, must not
+        // become the id the tab resumes after a restart.
+        assert_eq!(
+            codex_notification_thread_id_with(&with_thread, |_| None),
+            None
+        );
+        assert_eq!(
+            codex_notification_thread_id_with(&with_thread, |_| Some(false)),
+            None
         );
         let unusable = codex_turn_complete_notification(OsStr::new(
             r#"{"type":"agent-turn-complete","thread-id":"--last"}"#,
         ))
         .unwrap();
-        assert_eq!(codex_notification_thread_id(&unusable), None);
+        assert_eq!(
+            codex_notification_thread_id_with(&unusable, |_| Some(true)),
+            None
+        );
         assert_eq!(
             run_reporter_cli(["agent-notify", "", r#"{"type":"tool-complete"}"#]),
             Some(0),

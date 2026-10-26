@@ -1921,6 +1921,28 @@ pub(crate) fn codex_thread_is_conversation(thread_id: &str) -> Option<bool> {
     read_codex_session_meta(&path).map(|meta| meta.source_is_interactive)
 }
 
+/// Whether Codex wrote down a thread with this id in this account, in its
+/// active or archived history. `None` when neither history can be read, so
+/// a caller never discards an id it simply cannot check.
+pub(crate) fn codex_thread_recorded(
+    thread_id: &str,
+    profile_directory: Option<&Path>,
+) -> Option<bool> {
+    let roots = [
+        history_root(TranscriptKind::Codex, profile_directory),
+        history_root_with_archive(TranscriptKind::Codex, profile_directory, true),
+    ];
+    if roots.iter().all(Option::is_none) {
+        return None;
+    }
+    Some(
+        roots
+            .iter()
+            .flatten()
+            .any(|root| locate_codex_in(root, "", Some(thread_id)).is_some()),
+    )
+}
+
 /// The newest Codex conversation of this project and account, whether it
 /// was held in a terminal, on the chat page or in Codex Desktop, that went
 /// through the same kind of provider, for a saved tab whose id was never
