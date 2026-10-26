@@ -357,7 +357,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn archive_and_restore_use_the_selected_profile_and_official_protocol() {
-        use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
         for archived in [true, false] {
             let method = if archived {
@@ -366,15 +365,20 @@ mod tests {
                 "thread/unarchive"
             };
             let script = format!("#!/bin/sh\n[ \"$1\" = app-server ] || exit 1\n[ \"$CODEX_HOME\" = \"{}\" ] || exit 2\nread -r initialize\nprintf '%s\\n' '{{\"id\":1,\"result\":{{}}}}'\nread -r initialized\nread -r operation\ncase \"$operation\" in *\"{method}\"*synthetic-thread*) ;; *) exit 3 ;; esac\nprintf '%s\\n' '{{\"id\":2,\"result\":{{}}}}'\n", directory.path().display());
-            // Publish a closed, distinct inode instead of rewriting a program
-            // while other parallel process tests may be forking.
-            let mut executable = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
-            std::io::Write::write_all(&mut executable, script.as_bytes()).unwrap();
-            executable
-                .as_file()
-                .set_permissions(std::fs::Permissions::from_mode(0o700))
+            // A parent-thread writable handle can be inherited by another
+            // test's fork before close-on-exec runs, producing ETXTBSY even
+            // after this thread closes it. Only this isolated child opens the
+            // fixture for writing; wait for it before executing the script.
+            let executable = directory.path().join(method.replace('/', "-"));
+            let mut writer = std::process::Command::new("/bin/sh")
+                .args(["-c", "cat > \"$1\" && chmod 700 \"$1\"", "fixture"])
+                .arg(&executable)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
                 .unwrap();
-            let executable = executable.into_temp_path();
+            std::io::Write::write_all(&mut writer.stdin.take().unwrap(), script.as_bytes())
+                .unwrap();
+            assert!(writer.wait().unwrap().success());
             set_archived(
                 &executable,
                 Some(directory.path()),
