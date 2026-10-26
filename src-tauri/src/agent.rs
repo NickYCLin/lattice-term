@@ -6644,7 +6644,7 @@ fn normalize_resume_session_id(
             spec.label
         ));
     }
-    let can_resume = only_a_model_choice(arguments)
+    let can_resume = native_resume_arguments_supported(spec.id, arguments)
         || (proxy_capable(spec.id)
             && crate::cliproxy::launch::base_from_arguments(arguments)?.is_some());
     if !can_resume {
@@ -7469,16 +7469,63 @@ fn has_actionable_attention_prompt(text: &str) -> bool {
     })
 }
 
-/// Nothing, or just `--model X` / `-m X`. A native restore by id carries no
-/// other startup flags: resuming a conversation on another model is the one
-/// change it allows, and any other flag keeps the tab's original launch
-/// rather than being silently discarded.
+/// After removing supported permission flags, a native restore accepts only
+/// an optional `--model X` / `-m X`, never a prompt or another subcommand.
 fn only_a_model_choice(arguments: &[String]) -> bool {
     match arguments {
         [] => true,
-        [flag, model] => (flag == "--model" || flag == "-m") && !model.starts_with('-'),
+        [flag, model] => {
+            (flag == "--model" || flag == "-m")
+                && !model.trim().is_empty()
+                && !model.starts_with('-')
+        }
         _ => false,
     }
+}
+
+/// Keep the explicit permission choices emitted by the session UI on restore.
+/// Unknown flags, missing values and flags from another CLI remain rejected.
+fn native_resume_arguments_supported(definition_id: &str, arguments: &[String]) -> bool {
+    let mut seen = HashSet::new();
+    let mut index = 0;
+    while index < arguments.len() {
+        let flag = arguments[index].as_str();
+        let key = if flag == "-m" { "--model" } else { flag };
+        if !seen.insert(key) {
+            return false;
+        }
+        if key == "--model" {
+            let Some(pair) = arguments.get(index..index + 2) else {
+                return false;
+            };
+            if !only_a_model_choice(pair) {
+                return false;
+            }
+            index += 2;
+            continue;
+        }
+        let allowed: &[&str] = match (definition_id, flag) {
+            ("codex", "--ask-for-approval") => &["on-request", "never"],
+            ("codex", "--sandbox") => &["read-only", "workspace-write", "danger-full-access"],
+            ("claude", "--permission-mode") => {
+                &["manual", "plan", "acceptEdits", "bypassPermissions"]
+            }
+            ("gemini", "--approval-mode") => &["default", "plan", "auto_edit", "yolo"],
+            _ => &[],
+        };
+        if !allowed.is_empty() {
+            let Some(value) = arguments.get(index + 1) else {
+                return false;
+            };
+            if !allowed.contains(&value.as_str()) {
+                return false;
+            }
+            index += 2;
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 fn codex_resume_root(profile: Option<&Path>) -> Option<PathBuf> {
@@ -7535,7 +7582,7 @@ fn adopt_latest_codex_thread(
         return Ok(());
     }
     let through_proxy = crate::cliproxy::launch::base_from_arguments(&arguments)?.is_some();
-    if !through_proxy && !only_a_model_choice(&arguments) {
+    if !through_proxy && !native_resume_arguments_supported("codex", &arguments) {
         return Ok(());
     }
     // Two saved tabs of one project must not both reopen the same thread.
@@ -7550,7 +7597,7 @@ fn adopt_latest_codex_thread(
         through_proxy,
         &taken,
     ) {
-        request.arguments = if through_proxy { arguments } else { Vec::new() };
+        request.arguments = arguments;
         request.resume_session_id = Some(thread_id);
     }
     Ok(())
@@ -11241,6 +11288,182 @@ model = "gpt-5.3-codex"
         assert!(!only_a_model_choice(&args(&["--model", "--yolo"])));
         assert!(!only_a_model_choice(&args(&["--yolo"])));
         assert!(!only_a_model_choice(&args(&["--model", "gpt-6", "--yolo"])));
+    }
+
+    #[test]
+    fn native_resume_preserves_session_permission_choices() {
+        for (definition_id, flag, values) in [
+            (
+                "codex",
+                "--sandbox",
+                vec!["read-only", "workspace-write", "danger-full-access"],
+            ),
+            ("codex", "--ask-for-approval", vec!["on-request", "never"]),
+            (
+                "claude",
+                "--permission-mode",
+                vec!["manual", "plan", "acceptEdits", "bypassPermissions"],
+            ),
+            (
+                "gemini",
+                "--approval-mode",
+                vec!["default", "plan", "auto_edit", "yolo"],
+            ),
+        ] {
+            let spec = AGENTS
+                .iter()
+                .find(|agent| agent.id == definition_id)
+                .unwrap();
+            for value in values {
+                let mut arguments = vec![flag.to_string(), value.to_string()];
+                for with_model in [false, true] {
+                    if with_model {
+                        arguments.extend(["--model".into(), "fixture-model".into()]);
+                    }
+                    assert_eq!(
+                        normalize_resume_session_id(Some(spec), Some("session-42"), &arguments)
+                            .unwrap()
+                            .as_deref(),
+                        Some("session-42")
+                    );
+                    let plan = normalize_launch_plan(
+                        "permission-restore".into(),
+                        AgentLaunchPlanDraft {
+                            definition_id: definition_id.into(),
+                            label: String::new(),
+                            executable: String::new(),
+                            arguments: arguments.clone(),
+                            resume_session_id: Some("session-42".into()),
+                            note: String::new(),
+                            sandbox: false,
+                            detached: false,
+                            working_directory: std::env::current_dir()
+                                .unwrap()
+                                .display()
+                                .to_string(),
+                        },
+                    )
+                    .unwrap();
+                    let request = launch_request_from_plan(&plan, 80, 24).unwrap();
+                    assert_eq!(request.arguments, arguments);
+                    assert_eq!(request.resume_session_id.as_deref(), Some("session-42"));
+                    assert!(request.restore_existing_session);
+                }
+            }
+        }
+        let combined = [
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "danger-full-access",
+        ]
+        .map(String::from);
+        assert!(native_resume_arguments_supported("codex", &combined));
+        for model_flag in ["--model", "-m"] {
+            for arguments in [
+                vec![model_flag, "fixture-model", "--sandbox", "read-only"],
+                vec!["--sandbox", "read-only", model_flag, "fixture-model"],
+            ] {
+                assert!(native_resume_arguments_supported(
+                    "codex",
+                    &arguments.into_iter().map(String::from).collect::<Vec<_>>()
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn codex_latest_restore_keeps_explicit_permissions() {
+        let profile = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let sessions = profile.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let meta = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": "permission-thread", "cwd": workspace.path(),
+                "source": "cli", "originator": "codex-tui", "model_provider": "openai"
+            }
+        });
+        std::fs::write(
+            sessions.join("rollout-permission.jsonl"),
+            format!("{meta}\n"),
+        )
+        .unwrap();
+        let permissions = vec![
+            "--ask-for-approval".to_string(),
+            "never".to_string(),
+            "--sandbox".to_string(),
+            "danger-full-access".to_string(),
+        ];
+        let plan = normalize_launch_plan(
+            "latest-permissions".into(),
+            AgentLaunchPlanDraft {
+                definition_id: "codex".into(),
+                label: String::new(),
+                executable: String::new(),
+                arguments: Vec::new(),
+                resume_session_id: None,
+                note: String::new(),
+                sandbox: false,
+                detached: false,
+                working_directory: workspace.path().display().to_string(),
+            },
+        )
+        .unwrap();
+        for latest_prefix in [false, true] {
+            let mut request = launch_request_from_plan(&plan, 80, 24).unwrap();
+            request.profile_config_path = Some(profile.path().display().to_string());
+            request.arguments = if latest_prefix {
+                vec!["resume".into(), "--last".into()]
+            } else {
+                vec![]
+            };
+            request.arguments.extend(permissions.clone());
+            adopt_latest_codex_thread(&mut request, &AgentRegistry::default()).unwrap();
+            assert_eq!(
+                request.resume_session_id.as_deref(),
+                Some("permission-thread")
+            );
+            assert_eq!(request.arguments, permissions);
+        }
+    }
+
+    #[test]
+    fn native_resume_rejects_invalid_permission_arguments() {
+        for (definition_id, arguments) in [
+            ("codex", vec!["--sandbox"]),
+            ("codex", vec!["--sandbox", "--model"]),
+            ("codex", vec!["--sandbox", "unknown"]),
+            ("codex", vec!["--permission-mode", "plan"]),
+            ("claude", vec!["--approval-mode", "yolo"]),
+            ("gemini", vec!["--approval-mode", "unknown"]),
+            ("cursor", vec!["--sandbox", "read-only"]),
+            ("codex", vec!["--sandbox", "read-only", "unexpected prompt"]),
+            ("codex", vec!["--sandbox", "read-only", "--full-auto"]),
+            (
+                "codex",
+                vec!["--model", "--sandbox", "read-only", "fixture-model"],
+            ),
+            ("codex", vec!["--model", ""]),
+            ("codex", vec!["--model", "   "]),
+            ("codex", vec!["--model"]),
+            ("codex", vec!["--model", "one", "-m", "two"]),
+            (
+                "codex",
+                vec!["--sandbox", "read-only", "--sandbox", "danger-full-access"],
+            ),
+        ] {
+            let spec = AGENTS
+                .iter()
+                .find(|agent| agent.id == definition_id)
+                .unwrap();
+            let arguments = arguments.into_iter().map(String::from).collect::<Vec<_>>();
+            assert!(
+                normalize_resume_session_id(Some(spec), Some("session-42"), &arguments).is_err(),
+                "{definition_id}: {arguments:?}"
+            );
+        }
     }
 
     #[test]
