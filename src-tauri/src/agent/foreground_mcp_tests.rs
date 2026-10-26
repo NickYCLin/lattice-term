@@ -37,6 +37,75 @@ impl ForegroundFixture {
 }
 impl Drop for ForegroundFixture { fn drop(&mut self) { self.registry.stop_all(); } }
 
+impl ForegroundFixture {
+    fn unreported_prompt(&self) {
+        let entry = self.registry.get(&self.id).unwrap();
+        { let mut summary = entry.summary.lock().unwrap();
+          summary.state = AgentLifecycle::Idle;
+          summary.state_source = AgentStateSource::Heuristic; }
+        self.registry.record_output(&self.id, "\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h› ".as_bytes()).unwrap();
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    }
+}
+
+#[tokio::test]
+async fn unreported_idle_desktop_prompt_sends_once_without_releasing_background_queue_rules() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    f.unreported_prompt();
+    let state = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(state["promptReadiness"]["ready"], true);
+    assert_eq!(state["promptReadiness"]["basis"], "stable_empty_terminal_prompt");
+    assert!(mcp_prompt(f.sink.as_ref(), &f.registry, &f.id, "background still needs integration", true).is_err());
+    let prompt = Action::Prompt { text:"one foreground prompt".into(), request_id:"unreported-once".into() };
+    assert_eq!(f.call(&target, prompt.clone()).await.unwrap()["sentImmediately"], true);
+    assert_eq!(f.call(&target, prompt).await.unwrap()["duplicate"], true);
+    assert!(f.call(&target, Action::Prompt { text:"changed".into(), request_id:"unreported-once".into() }).await.is_err());
+    // Even if a watchdog later calls this idle, quiet cannot finish a turn.
+    f.unreported_prompt();
+    assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"terminal_turn_unconfirmed"));
+}
+
+#[tokio::test]
+async fn unreported_desktop_rejects_work_approval_drafts_unknown_and_unsettled_screens() {
+    for case in ["working", "attention", "approval", "draft", "paste", "escape", "startup", "unknown", "output", "queue"] {
+        let f = ForegroundFixture::new();
+        let target = f.share(true, true).await;
+        f.unreported_prompt();
+        let entry = f.registry.get(&f.id).unwrap();
+        match case {
+            "working" => entry.summary.lock().unwrap().state = AgentLifecycle::Working,
+            "attention" => entry.summary.lock().unwrap().state = AgentLifecycle::NeedsAttention,
+            "approval" => { f.registry.approvals.open(&f.id, approval::ApprovalAsk { tool_name:"fixture".into(), summary:"approval pending".into() }, "pending".into()).unwrap(); },
+            "draft" => entry.input.lock().unwrap().desktop_editing = true,
+            "paste" => entry.input.lock().unwrap().desktop_paste = true,
+            "escape" => entry.input.lock().unwrap().desktop_escape = vec![27],
+            "startup" => entry.input.lock().unwrap().startup_seed_pending = true,
+            "unknown" => { f.registry.record_output(&f.id, b"\x1b[2J\x1b[Hunknown").unwrap(); entry.prompt_screen.lock().unwrap().settle_for_test(); },
+            "output" => { f.registry.record_output(&f.id, b"\x1b[0m").unwrap(); },
+            "queue" => entry.queued_prompts.lock().unwrap().push_back(QueuedPrompt { id:"waiting".into(), delivery_error:None, bytes:b"queued\r".to_vec(), mcp_grant_epoch:current_mcp_grant(&entry) }),
+            _ => unreachable!(),
+        }
+        let state = f.call(&target, Action::State {}).await.unwrap();
+        assert_eq!(state["promptReadiness"]["ready"], false, "{case}");
+        assert!(f.call(&target, Action::Prompt { text:"must not send".into(), request_id:format!("blocked-{case}") }).await.is_err(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn desktop_rechecks_terminal_after_state_and_preserves_official_ready_behavior() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    f.unreported_prompt();
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], true);
+    f.registry.record_output(&f.id, b"\r\npermission required").unwrap();
+    assert!(f.call(&target, Action::Prompt { text:"stale snapshot".into(), request_id:"stale-state".into() }).await.is_err());
+    f.registry.update_state(&f.id, AgentLifecycle::Done, AgentStateSource::Integration);
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["basis"], "official_integration");
+    assert_eq!(f.call(&target, Action::Prompt { text:"officially ready".into(), request_id:"official".into() }).await.unwrap()["sentImmediately"], true);
+}
+
 #[tokio::test(flavor="multi_thread", worker_threads=2)]
 async fn desktop_mcp_shares_original_identity_and_separates_read_from_control() {
     let f = ForegroundFixture::new();

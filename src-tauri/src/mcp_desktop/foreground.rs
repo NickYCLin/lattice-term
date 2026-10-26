@@ -231,7 +231,7 @@ impl DesktopService {
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
                 "state":summary.state,"stateSource":summary.state_source,"queuedPrompts":summary.queued_prompts,
-                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
+                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"basis":registry.mcp_readiness_basis(&grant.session_id).map_err(|_| ServiceError::unavailable())?,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
                 "configuration":launch_identity(&summary),"readOutput":grant.view.scopes.fleet_read,"control":grant.view.scopes.fleet_control}))
             }
             DesktopAgentAction::Read { cursor, max_bytes } => {
@@ -250,7 +250,7 @@ impl DesktopService {
                 let revoked = grant.revoked.subscribe();
                 let queued = tokio::task::spawn_blocking(move || {
                     if *revoked.borrow() { return Err(agent::MCP_GRANT_CHANGED.to_owned()); }
-                    agent::mcp_prompt(sink.as_ref(), &registry, &session_id, &text, true)
+                    agent::mcp_foreground_prompt(sink.as_ref(), &registry, &session_id, &text)
                 }).await.map_err(|_| ServiceError::new("unknown_outcome", "The prompt worker ended without confirming delivery; inspect output and reuse the same requestId."))?
                         .map_err(|error| {
                             let code = match error.as_str() {

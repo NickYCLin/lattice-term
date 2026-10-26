@@ -34,8 +34,9 @@ AI 只提供已儲存項目的 ID，由 LatticeTerm 使用本機登入資料連�
 
 ### Fleet 各家 CLI 都能自動收指示嗎？
 
-Fleet 的 13 個內建項目都可以手動操作終端；MCP 自動派送則必須有正式
-就緒回報，目前不能說 13 家都完成。Codex、Claude Code、Gemini、Qwen、
+Fleet 的 13 個內建項目都可以手動操作終端；背景 MCP 自動派送仍須正式
+就緒回報，前景分享另有下述保守畫面判定。目前不能說 13 家都完成。
+Codex、Claude Code、Gemini、Qwen、
 Copilot、Hermes、OpenCode、Cursor、Droid 已有原生或 hook 橋接。
 Aider 的通知無法區分一般輸入與確認問題；Antigravity、Kimi、Grok 尚未
 接入正式就緒回報，所以不讓 AI 用推測閒置狀態硬送文字。
@@ -422,7 +423,40 @@ JSON 裡的 Windows 反斜線要寫成兩個（`\\`）。
 
 恢復原對話時若另外指定 `--sandbox`、`--ask-for-approval` 或其他權限旗標，Codex 的遠端模式會拒絕啟動。LatticeTerm 會保留原終端啟動方式，不刪掉權限參數來換取 MCP 控制；請確認是否仍需要這些額外旗標。
 
-`integration_not_reported` 表示尚無正式的 CLI 空閒／完成回報，與版本資格是不同檢查。更新程式不會替換正在跑的對話，也不會恢復既有程序已失效的輸入資格。
+`integration_not_reported` 表示尚無正式的 CLI 空閒／完成回報，而且前景
+畫面也未符合以下就緒規則；與 Windows 輸入版本資格是不同檢查。
+更新程式不會替換正在跑的對話，也不會恢復已失效的輸入資格。
+
+#### 前景尚無整合回報時的就緒規則
+
+已分享的 `desktop_agent` 可以在第一次提示前，以終端畫面補足就緒依據，
+不必先手動送一句話。必須同時符合：
+
+- 狀態是 `idle`，CLI 為 Codex、Claude Code 或 Gemini，沒有待核准項目。
+- 即時終端解析器看見 bracketed paste 已啟用、游標可見，且游標位於
+  已辨識輸入列的空白起點。接受 `› `、`❯ `、`> ` 各自對應的 CLI；
+  Codex 另外接受有限清單內、全部淡色且游標仍在起點的預設 placeholder。
+  自訂提示、未知 placeholder、非空白輸入、選單與不明頁尾均拒絕。
+- 至少兩秒沒有任何輸出；不以歷史輸出中曾出現提示符號作依據。
+  未完成 UTF-8／控制碼／同步繪圖、無法重建的影像、隱藏游標均拒絕。
+  視窗改大小後，還要收到完整清畫面重繪。
+  超過 300 欄或 120 列時不使用此判定，避免畫面解析無限增大。
+- 沒有人工草稿、未完成貼上或 escape、待送啟動內容及既有佇列。
+  授權、Windows 輸入資格與 requestId 去重仍依原規則檢查。
+
+`promptReadiness.basis` 回傳 `official_integration`、
+`stable_empty_terminal_prompt` 或 `unconfirmed`，說明就緒來源；不回傳草稿
+或畫面內容。`blockers` 會保留 `integration_not_reported`，並附上例如
+`terminal_output_unsettled`（輸出尚未靜止）、`terminal_input_not_empty`
+（輸入列不是已辨識空白形狀）、`terminal_dialog_or_work`（工作／對話框）、
+`terminal_screen_unknown`（畫面不明）或 `terminal_turn_unconfirmed`
+（先前送出的工作尚無完成回報）。
+
+此規則只補足前景首次派送；觀察到工作或送出過提示後，不能只靠靜止畫面宣告完成，
+必須等待正式 idle／done 回報。背景 Fleet、排隊釋放及原本正式 idle／done
+路徑維持原規則。`state` 仍是 `snapshotOnly`；送出時會在輸入鎖下重新
+檢查，因此讀到 ready 後畫面或授權改變，仍可能回 `not_ready`／拒絕授權。
+未知外觀維持拒絕，不能用這項本機判定宣稱所有 CLI／平台已實機驗收。
 
 ### 遠端主機的 Agent Fleet
 

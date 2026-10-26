@@ -28,6 +28,7 @@ mod codex_input_profile;
 mod codex_launcher;
 mod codex_resume;
 mod fleet_hooks;
+mod prompt_screen;
 
 pub use approval::AgentApprovalRequest;
 #[cfg(any(windows, test))]
@@ -1059,6 +1060,9 @@ struct AgentSessionEntry {
     /// answer it with the dialog's own keys.
     codex_prompt: Mutex<approval::CodexPromptScan>,
     output: Mutex<OutputBuffer>,
+    prompt_screen: Mutex<prompt_screen::PromptScreen>,
+    /// A quiet screen cannot prove that a previously submitted turn finished.
+    terminal_turn_started: AtomicBool,
     startup_gate: StartupGate,
     completion_gate: Mutex<CompletionReadiness>,
     /// When this PTY last produced output, used to release a heuristic
@@ -2461,6 +2465,9 @@ impl AgentRegistry {
         }
         summary.state = next;
         summary.state_source = source;
+        if next == AgentLifecycle::Working {
+            entry.terminal_turn_started.store(true, Ordering::Release);
+        }
         true
     }
 
@@ -2486,6 +2493,7 @@ impl AgentRegistry {
         }
         summary.state = AgentLifecycle::Working;
         summary.state_source = AgentStateSource::Heuristic;
+        entry.terminal_turn_started.store(true, Ordering::Release);
         true
     }
 
@@ -2696,11 +2704,14 @@ impl AgentRegistry {
 
     fn record_output(&self, session_id: &str, bytes: &[u8]) -> Result<u64, String> {
         let entry = self.get(session_id)?;
-        let offset = entry
-            .output
+        let mut output = entry.output.lock().map_err(|error| error.to_string())?;
+        let offset = output.append(bytes);
+        entry
+            .prompt_screen
             .lock()
             .map_err(|error| error.to_string())?
-            .append(bytes);
+            .feed(bytes, Instant::now());
+        drop(output);
         Ok(offset)
     }
 
@@ -2965,7 +2976,10 @@ impl AgentRegistry {
             reasons.push("startup_seed_pending");
         }
         if summary.state_source != AgentStateSource::Integration {
-            reasons.push("integration_not_reported");
+            if let Some(reason) = self.foreground_terminal_blocker(&entry, &summary) {
+                reasons.push("integration_not_reported");
+                reasons.push(reason);
+            }
         } else if !releases_queued_prompt(summary.state, summary.state_source) {
             reasons.push("lifecycle_not_ready");
         }
@@ -2978,6 +2992,50 @@ impl AgentRegistry {
             reasons.push("queued_prompts_pending");
         }
         Ok(reasons)
+    }
+
+    fn foreground_terminal_blocker(
+        &self,
+        entry: &AgentSessionEntry,
+        summary: &AgentSessionSummary,
+    ) -> Option<&'static str> {
+        if summary.state != AgentLifecycle::Idle {
+            return Some("lifecycle_not_ready");
+        }
+        if self.approvals.current(&summary.session_id).is_some() {
+            return Some("approval_pending");
+        }
+        if entry.terminal_turn_started.load(Ordering::Acquire) {
+            return Some("terminal_turn_unconfirmed");
+        }
+        if entry
+            .last_output_at
+            .lock()
+            .map_or(true, |at| at.elapsed() < prompt_screen::QUIET)
+        {
+            return Some("terminal_output_unsettled");
+        }
+        match entry.prompt_screen.lock() {
+            Ok(screen) => screen.blocker(&summary.definition_id, Instant::now()),
+            Err(_) => Some("terminal_screen_unknown"),
+        }
+    }
+
+    pub(crate) fn mcp_readiness_basis(&self, session_id: &str) -> Result<&'static str, String> {
+        let entry = self.get(session_id)?;
+        let _input = entry.input.lock().map_err(|e| e.to_string())?;
+        let summary = entry.summary.lock().map_err(|e| e.to_string())?;
+        Ok(
+            if releases_queued_prompt(summary.state, summary.state_source) {
+                "official_integration"
+            } else if summary.state_source != AgentStateSource::Integration
+                && self.foreground_terminal_blocker(&entry, &summary).is_none()
+            {
+                "stable_empty_terminal_prompt"
+            } else {
+                "unconfirmed"
+            },
+        )
     }
 
     pub(crate) fn mcp_input_profile_diagnostic(
@@ -8172,6 +8230,8 @@ pub fn launch_with_replay(
         output: Mutex::new(OutputBuffer::from_tail(
             restored_output.as_deref().unwrap_or_default(),
         )),
+        prompt_screen: Mutex::new(prompt_screen::PromptScreen::new(size.rows, size.cols)),
+        terminal_turn_started: AtomicBool::new(false),
         startup_gate: StartupGate::default(),
         completion_gate: Mutex::new(CompletionReadiness::default()),
         input: Mutex::new(AgentInputControl {
@@ -8807,7 +8867,11 @@ fn record_sent_input(
             (false, true) => PromptSubmission::BareEnter,
         },
     };
+    if submission == PromptSubmission::Text {
+        entry.terminal_turn_started.store(true, Ordering::Release);
+    }
     if registry.mark_working_from_input(session_id, submission) {
+        entry.terminal_turn_started.store(true, Ordering::Release);
         sink.state(
             session_id,
             AgentLifecycle::Working,
@@ -9057,6 +9121,9 @@ fn send_prompt_bytes_locked(
     if !prompt_grant_matches(&entry, grant) || entry.stopping.load(Ordering::Acquire) {
         return Err("This session is not under active MCP control.".to_string());
     }
+    // Native app-server submissions bypass record_sent_input. Unknown write
+    // outcomes also need an official completion before another fallback.
+    entry.terminal_turn_started.store(true, Ordering::Release);
     #[cfg(windows)]
     if let Some(control) = entry.codex_control.as_ref().filter(|_| {
         grant.is_some() || (bytes.starts_with(b"\x1b[200~") && bytes.ends_with(b"\x1b[201~\r"))
@@ -9640,8 +9707,8 @@ pub fn set_mcp_control(
 }
 
 /// Natural-language MCP prompts never carry arbitrary terminal key input.
-/// Even immediate delivery requires an official ready report, and never
-/// appends to a prompt the user is editing.
+/// Background delivery requires an official ready report and never appends
+/// to a prompt the user is editing. Foreground has a separate screen gate.
 pub fn mcp_prompt(
     sink: &dyn AgentSink,
     registry: &AgentRegistry,
@@ -9652,6 +9719,29 @@ pub fn mcp_prompt(
     mcp_prompt_with_grant_observer(sink, registry, session_id, text, send_now, || {})
 }
 
+/// Only desktop_agent may use terminal evidence before the first turn.
+pub(crate) fn mcp_foreground_prompt(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    text: &str,
+) -> Result<usize, String> {
+    mcp_prompt_inner(
+        sink,
+        registry,
+        session_id,
+        text,
+        McpPromptMode::Foreground,
+        || {},
+    )
+}
+
+enum McpPromptMode {
+    Immediate,
+    Queued,
+    Foreground,
+}
+
 // The no-op production observer lets regression tests pause at the exact
 // original-grant boundary, without sleeps or a global cross-test hook.
 fn mcp_prompt_with_grant_observer(
@@ -9660,6 +9750,28 @@ fn mcp_prompt_with_grant_observer(
     session_id: &str,
     text: &str,
     send_now: bool,
+    after_grant_snapshot: impl FnOnce(),
+) -> Result<usize, String> {
+    mcp_prompt_inner(
+        sink,
+        registry,
+        session_id,
+        text,
+        if send_now {
+            McpPromptMode::Immediate
+        } else {
+            McpPromptMode::Queued
+        },
+        after_grant_snapshot,
+    )
+}
+
+fn mcp_prompt_inner(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    text: &str,
+    mode: McpPromptMode,
     after_grant_snapshot: impl FnOnce(),
 ) -> Result<usize, String> {
     let bytes = mcp_prompt_payload(text)?;
@@ -9697,11 +9809,16 @@ fn mcp_prompt_with_grant_observer(
             .map_err(|error| error.to_string())?
             .definition_id,
     )?;
-    if send_now {
+    if !matches!(mode, McpPromptMode::Queued) {
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
         if input.desktop_busy()
             || input.startup_seed_pending
-            || !releases_queued_prompt(summary.state, summary.state_source)
+            || !(releases_queued_prompt(summary.state, summary.state_source)
+                || (matches!(mode, McpPromptMode::Foreground)
+                    && summary.state_source != AgentStateSource::Integration
+                    && registry
+                        .foreground_terminal_blocker(&entry, &summary)
+                        .is_none()))
         {
             return Err(MCP_NOT_READY.to_string());
         }
@@ -9932,6 +10049,13 @@ pub fn resize(
         .map_err(|error| error.to_string())?
         .resize(size)
         .map_err(|error| format!("Cannot resize the agent terminal: {error}"));
+    if result.is_ok() {
+        entry
+            .prompt_screen
+            .lock()
+            .map_err(|e| e.to_string())?
+            .resize(size.rows, size.cols);
+    }
     result
 }
 

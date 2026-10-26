@@ -1498,6 +1498,22 @@ struct Unit {
     kind: UnitKind,
 }
 
+/// A streaming screen must not authorize input while a redraw is incomplete.
+pub(crate) fn complete_terminal_prefix(bytes: &[u8]) -> usize {
+    scan_units(bytes)
+        .into_iter()
+        .take_while(|unit| unit.kind != UnitKind::Incomplete)
+        .last()
+        .map_or(0, |unit| unit.end)
+}
+
+pub(crate) fn terminal_controls(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    scan_units(bytes)
+        .into_iter()
+        .filter(|unit| unit.kind == UnitKind::Control)
+        .map(|unit| &bytes[unit.start..unit.end])
+}
+
 /// Splits raw terminal bytes into characters and escape sequences.
 /// Recognises CSI (`ESC [ … final`), OSC (`ESC ] … BEL|ST`), the string
 /// controls DCS/SOS/PM/APC (`ESC P|X|^|_ … ST`), `ESC` + intermediates +
