@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use glib::clone::Downgrade as _;
 use glib::{Downgrade, Object};
 
 #[test]
@@ -30,4 +31,27 @@ fn derive_downgrade() {
         This(Object, PhantomData<T>),
         That(Object, PhantomData<T>),
     }
+
+    let object = Object::new::<Object>();
+    let _ = NewType(object.clone()).downgrade();
+    let _ = Struct {
+        o1: object.clone(),
+        o2: std::rc::Rc::new(1),
+    }
+    .downgrade();
+    for value in [
+        Enum::None,
+        Enum::Pair {
+            x: object.clone(),
+            y: object.clone(),
+        },
+        Enum::Unit(),
+        Enum::SingleUnnamed(object.clone()),
+        Enum::MultipleUnnamed(object.clone(), object.clone(), object.clone()),
+    ] {
+        let _ = value.downgrade();
+    }
+    let _ = TypedWrapper::<u32>(object.clone(), PhantomData).downgrade();
+    let _ = TypedEnum::<u32>::This(object.clone(), PhantomData).downgrade();
+    let _ = TypedEnum::<u32>::That(object, PhantomData).downgrade();
 }
