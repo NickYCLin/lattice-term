@@ -359,7 +359,6 @@ mod tests {
     async fn archive_and_restore_use_the_selected_profile_and_official_protocol() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
-        let executable = directory.path().join("synthetic-codex");
         for archived in [true, false] {
             let method = if archived {
                 "thread/archive"
@@ -367,8 +366,15 @@ mod tests {
                 "thread/unarchive"
             };
             let script = format!("#!/bin/sh\n[ \"$1\" = app-server ] || exit 1\n[ \"$CODEX_HOME\" = \"{}\" ] || exit 2\nread -r initialize\nprintf '%s\\n' '{{\"id\":1,\"result\":{{}}}}'\nread -r initialized\nread -r operation\ncase \"$operation\" in *\"{method}\"*synthetic-thread*) ;; *) exit 3 ;; esac\nprintf '%s\\n' '{{\"id\":2,\"result\":{{}}}}'\n", directory.path().display());
-            std::fs::write(&executable, script).unwrap();
-            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            // Publish a closed, distinct inode instead of rewriting a program
+            // while other parallel process tests may be forking.
+            let mut executable = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+            std::io::Write::write_all(&mut executable, script.as_bytes()).unwrap();
+            executable
+                .as_file()
+                .set_permissions(std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            let executable = executable.into_temp_path();
             set_archived(
                 &executable,
                 Some(directory.path()),
