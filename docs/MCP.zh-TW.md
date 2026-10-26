@@ -129,7 +129,7 @@ Gemini CLI、Cursor 等使用 `mcpServers` JSON 的工具：
 | `read_agent_output` | `sessionId`（必填，需 `readOutput: true`）、`cursor`（位元組位移，預設 0）、`maxBytes`（分頁大小，預設 16384，上限 65536，可超額至多 4096） 、`stripControlSequences`（預設 true） | `text`、`cursor`（實際起點）、`nextCursor`、`endOffset`、`availableFrom`、`truncated`、`hasMore` |
 | `wait_agent_state` | `sessionId`（必填）、`timeoutMs`（預設 30000，上限 120000）、`state`（上次看到的狀態） | `session`（同 list 的單筆）、`changed`、`closed`（附 `reason`）、`revoked`（使用者取消分享，附 `reason`）、`timedOut` |
 | `list_launch_plans` | 無 | `enabled` 與 `plans[]`：`planId`、`label`、`note`、`definitionId`、`workingDirectory`、`sandbox`。不含指令與參數 |
-| `launch_agent` | `planId`、`requestId`（皆必填） | `session`（同 list 的單筆，`access: control`）、`duplicate` |
+| `launch_agent` | `requestId`，另選 `planId` 或 `workingDirectory`＋`cli`；沿用權限時另帶 `planId` | `session`（同 list 的單筆，`access: control`）、`duplicate` |
 | `send_agent_prompt` | `sessionId`（必填，需 `access: control`）、`text`（必填，≤16000 字元）、`mode`（`queue` 預設／`now`）、`requestId`（必填） | `sentImmediately`、`queued`（還在排隊的數量）、`state`、`stateSource`、`duplicate` |
 | `capture_remote_screen` | `targetId`（必填，需 `screen` 授權） | MCP `image` 內容（JPEG）加上 `frameId`、`capturedAt`、`width`、`height`、`mimeType` |
 | `cancel_agent_task` | `sessionId`（必填，需 `access: control`）、`scope`（`turn`／`queue`／`session`）、`requestId`（必填） | `turn`：`interrupted`（Codex／Claude）；`queue`：`dropped`；`session`：`ended` |
@@ -154,7 +154,7 @@ B 階段工具的語意：
   - `queue` 丟掉還沒送出的 MCP 指示，保留使用者排隊的工作與正在跑的回合。
   - `session` 結束整個 CLI 程序，不可復原，結束後自動取消分享。
   沒有列在 `turnInterrupt` 的 CLI 不會用猜的按鍵去試，一律回 `unsupported`；要中斷請使用者自己在終端機操作，或用 `session` 整個結束。
-- `launch_agent` 只能啟動 `list_launch_plans` 給的項目，永遠是背景工作階段；請求本身由桌面依保存的項目準備好交給背景服務，client 給不了任何指令或參數。
+- `launch_agent` 可啟動保存項目；獨立的 `projectLaunch.enabled` 授權開啟後，也可用 `workingDirectory`＋`cli` 建立當次計畫。目錄必須在桌面登記的根目錄內，CLI 限 Codex／Claude／Gemini；不接受任意執行檔或參數。詳細設定、全權限風險與範例見 [操作指南](MCP_GUIDE.zh-TW.md)。
 - **啟動有數量上限。** 同一個 client 最多同時持有 4 個由它啟動且仍存活的工作階段，所有 client 合計最多 8 個；超過就拒絕，回 `limit_reached`，要先停掉一個再啟動。使用者自己開的工作階段、以及手動分享給 MCP 的工作階段都不計入。能讀輸出的 CLI 可能在輸出裡看到「再開一個 agent」這種指示，上限由背景服務把關，不看模型自制。目前用量與上限在 `list_launch_plans` 與 `get_capabilities`（`launchedSessions`、`limits`）。
 - **request ID 去重**：三個寫入工具都必須帶非空、最多 128 bytes 的 `requestId`。同一個 client（以 `initialize.clientInfo` 名稱與版本區分）同時重送完全相同的請求，只執行一次；完成後 15 分鐘內回傳原結果並標 `duplicate: true`。同 id 換工具、目標或內容會拒絕。背景服務最多保留 256 筆；額滿時拒絕新的寫入，不提早淘汰尚在保留期的結果。重送仍需通過目前授權檢查；已結束工作階段的取消結果可重取。
 - **逾時不是未執行。** 原請求仍在執行或結果無法確認時，回覆會指出 outcome unknown；請保留相同 client 身分、相同 id 與相同內容重查，不要換新 id 盲目重送。背景服務重啟或結果超過保留期後不保證去重，必須先核對工作階段與輸出。
@@ -249,7 +249,7 @@ daemon 端另外限制 observer：回覆與事件佇列最多 64 筆、每條連
 
 桌面只在握手確認 `mcpHistory: true` 後才送查詢。舊版沒有這個能力欄位時不送新指令，避免舊服務因不認得 request 而斷線，影響正在使用的背景工作階段。
 
-紀錄只供桌面使用，observer 不能讀取，也不新增對外 MCP 工具。每 10 秒重新取得一次；舊背景服務或連線失敗會顯示「無法取得」，不假裝成空清單。只記 client 名稱、動作、時間、結果類別與已知工作階段 ID，不保存指示內容、request ID、原始錯誤、啟動參數或憑證。失敗目標若不在 registry 裡，不把呼叫者傳入的任意字串存為工作階段 ID。
+紀錄只供桌面使用，observer 不能讀取，也不新增對外 MCP 工具。每 10 秒重新取得一次；舊背景服務或連線失敗會顯示「無法取得」，不假裝成空清單。記 client 名稱、動作、時間、結果類別與已知工作階段 ID；專案建立與啟動另記正規化目錄、CLI、權限模式及 sandbox，不保存指示內容、request ID、原始錯誤、啟動參數或憑證。失敗目標若不在 registry 裡，不把呼叫者傳入的任意字串存為工作階段 ID。
 
 同一 request ID 的每次回覆各占一筆；成功的去重回覆標「重送」，不表示執行第二次。已接受只代表伺服器接受操作，不代表模型完成工作或測試通過；失敗也不保證沒有副作用。遠端操作另記已知的 opaque target ID，不記原始主機、指令或路徑。遠端授權／撤權會記錄；exec／傳檔完成結果由 `get_remote_operation` 查詢，不另追加背景完成事件。Agent 輸出讀取以五分鐘窗口折疊記錄次數；未回覆的在途呼叫、adapter 端拒絕的參數與 Agent 授權變更不在這份紀錄內。
 

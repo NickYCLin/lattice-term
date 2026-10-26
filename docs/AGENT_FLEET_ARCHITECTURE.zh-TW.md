@@ -300,3 +300,37 @@ MCP Fleet 的 SSH transport 沿用主機信任與認證；Relay transport 使用
 - 通用 Lattice Remote 已有固定配對碼無人值守；Fleet 授權不隨該密碼保存或自動恢復，重新分享須重新授權。這不是團隊帳號或角色權限系統，外部主機與安裝版仍須另行驗收。
 
 Windows 遠端 Fleet 沿用相同工作區與多 PTY 契約，以固定 PowerShell 啟動器跨接 Windows OpenSSH 的 cmd／PowerShell shell；平台由使用者授權，並以遠端能力握手核對。具名管道與 ConPTY 的 CI 不代替外部 Windows 主機驗收，見 [驗收紀錄](MCP-WINDOWS-FLEET-ACCEPTANCE.zh-TW.md)。
+
+
+## MCP 依專案目錄建立工作階段
+
+`launch_agent` 除了保存的 `planId`，也接受 `workingDirectory`、`cli` 與
+`requestId`。桌面將獨立的 `mcpProjectLaunch` 授權、正規化專案根目錄及
+預設權限模式保存於工作區檔案，透過 desktop-only `McpPlansReplace`
+同步到 daemon。預設關閉；observer 不能修改此授權。背景 MCP 協定版本
+升至 3，舊服務必須重啟，避免舊服務忽略新授權欄位卻讓介面誤認已套用。
+
+`ProjectLaunchPolicy` 只建立當次使用的記憶體計畫，固定支援 Codex、Claude、
+Gemini，不接受模型提供的任意參數或執行檔。先拒絕相對路徑、`..` 與控制
+字元，再 canonicalize 目錄與登記根目錄、檢查 component containment；
+根目錄遭替換成外部 symlink 時拒絕。限定工作區的 adapter 還要經過原有
+workspace 授權。這些檢查限制起始位置，不是檔案存取沙箱，也不抵禦
+同一作業系統帳號在驗證與程序啟動間惡意競爭修改檔案系統。
+
+預設固定附加全權限旗標並關閉 LatticeTerm sandbox；另一模式只從相同 CLI
+的保存項目抽取權限旗標及 sandbox 值，找不到來源即拒絕。新程序不續接
+原生對話。成功後沿用共享、輸出讀取及控制 grant，所有已通過本機服務
+驗證的 observer 仍遵循現有分享邊界；client 顯示名稱不是安全主體。
+
+兩種啟動共用同一把啟動鎖、每 client／全體存活上限，以及 `once` 的
+requestId 快取。重送前重驗授權與控制，並刷新輸出讀取權限；內容不同
+不能重用 ID。設定異動遞增 generation；啟動完成後在 grant lock 內核對
+授權與 generation，不符就停止新程序。關閉不終止既有成功啟動的程序。
+
+操作紀錄另保存 createPlan 與 launch 的有界 metadata（目錄、CLI、權限、
+sandbox），只供桌面讀取，沿用安全、具外部衝突偵測的 audit store。
+工作區檔案改用獨占隨機暫存檔與原子替換，拒絕連結與外部內容衝突。
+
+專案啟動的背景工作階段可使用前景既有的穩定空白提示判定，僅限首次
+回合送出前；檢查與 PTY 寫入仍在相同輸入鎖內。此例外不釋放背景佇列，
+不推論回合完成，也不放寬其他背景工作階段或 Windows 的輸入資格。
