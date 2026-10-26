@@ -10043,6 +10043,9 @@ pub fn resize(
 ) -> Result<(), String> {
     let size = validated_size(cols, rows)?;
     let entry = registry.get(session_id)?;
+    // A foreground readiness check and its write must not overlap a terminal
+    // resize that makes the inspected cursor coordinates obsolete.
+    let _input = entry.input.lock().map_err(|error| error.to_string())?;
     let result = entry
         .master
         .lock()

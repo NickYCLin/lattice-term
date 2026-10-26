@@ -69,7 +69,7 @@ async fn unreported_idle_desktop_prompt_sends_once_without_releasing_background_
 
 #[tokio::test]
 async fn unreported_desktop_rejects_work_approval_drafts_unknown_and_unsettled_screens() {
-    for case in ["working", "attention", "approval", "draft", "paste", "escape", "startup", "unknown", "output", "queue"] {
+    for case in ["working", "attention", "approval", "draft", "paste", "escape", "startup", "unknown", "output", "resize", "queue"] {
         let f = ForegroundFixture::new();
         let target = f.share(true, true).await;
         f.unreported_prompt();
@@ -84,6 +84,7 @@ async fn unreported_desktop_rejects_work_approval_drafts_unknown_and_unsettled_s
             "startup" => entry.input.lock().unwrap().startup_seed_pending = true,
             "unknown" => { f.registry.record_output(&f.id, b"\x1b[2J\x1b[Hunknown").unwrap(); entry.prompt_screen.lock().unwrap().settle_for_test(); },
             "output" => { f.registry.record_output(&f.id, b"\x1b[0m").unwrap(); },
+            "resize" => resize(&f.registry, &f.id, 81, 24).unwrap(),
             "queue" => entry.queued_prompts.lock().unwrap().push_back(QueuedPrompt { id:"waiting".into(), delivery_error:None, bytes:b"queued\r".to_vec(), mcp_grant_epoch:current_mcp_grant(&entry) }),
             _ => unreachable!(),
         }
