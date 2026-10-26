@@ -309,7 +309,7 @@ struct Store {
     directory_handle: File,
     directory_identity: Identity,
     // A second cooperating daemon fails immediately instead of waiting.
-    _lock: File,
+    _lock: crate::durable_file::FileLockGuard,
     expected: Option<Revision>,
 }
 
@@ -338,7 +338,7 @@ impl Store {
             Err(_) => return Err(Reason::IoFailure),
         };
         check_private(&lock, false)?;
-        lock.try_lock().map_err(|_| Reason::Busy)?;
+        let lock = crate::durable_file::FileLockGuard::acquire(lock).map_err(|_| Reason::Busy)?;
         let mut store = Self {
             directory,
             directory_handle,

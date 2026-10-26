@@ -9,6 +9,23 @@ use std::path::Path;
 
 const DELETE_TOMBSTONE_PREFIX: &str = ".latticeterm-delete-";
 
+/// Explicitly unlock before close: a concurrent fork can temporarily retain
+/// the same open file description even when the parent's File is dropped.
+pub(crate) struct FileLockGuard(std::fs::File);
+
+impl FileLockGuard {
+    pub(crate) fn acquire(file: std::fs::File) -> std::io::Result<Self> {
+        file.try_lock()?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 #[cfg(windows)]
 fn wide_path(path: &Path) -> Result<Vec<u16>, String> {
     use std::iter;
@@ -247,6 +264,21 @@ fn persist_synced(temporary: tempfile::NamedTempFile, path: &Path) -> Result<(),
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn releasing_lock_does_not_wait_for_a_duplicated_handle_to_close() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let guard = super::FileLockGuard::acquire(file.reopen().unwrap()).unwrap();
+        let inherited = guard.0.try_clone().unwrap();
+        assert!(file.reopen().unwrap().try_lock().is_err());
+        drop(guard);
+        let next = super::FileLockGuard::acquire(file.reopen().unwrap()).unwrap();
+        drop(inherited);
+        // Closing the older duplicate cannot release a newer owner's lock.
+        assert!(file.reopen().unwrap().try_lock().is_err());
+        drop(next);
+        assert!(super::FileLockGuard::acquire(file.reopen().unwrap()).is_ok());
+    }
     use super::*;
 
     #[test]

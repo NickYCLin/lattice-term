@@ -366,7 +366,7 @@ impl DatabaseRegistry {
             .truncate(false)
             .open(lock_path)
             .map_err(|_| "無法鎖定資料庫設定。")?;
-        lock.try_lock()
+        let _file_lock = crate::durable_file::FileLockGuard::acquire(lock)
             .map_err(|_| "其他程式正在修改資料庫設定，請稍後重試。")?;
         let mut snapshot = self.snapshot()?;
         if snapshot.revision != expected {
