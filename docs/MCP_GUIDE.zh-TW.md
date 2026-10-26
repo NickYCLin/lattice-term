@@ -504,6 +504,11 @@ AI 先呼叫 `list_launch_plans`，確認 `projectLaunch.enabled: true` 與 `roo
   已辨識輸入列的空白起點。接受 `› `、`❯ `、`> ` 各自對應的 CLI；
   Codex 另外接受有限清單內、全部淡色且游標仍在起點的預設 placeholder。
   自訂提示、未知 placeholder、非空白輸入、選單與不明頁尾均拒絕。
+- Codex 0.164 的閒置畫面另有兩項固定特徵可以放行：開頭標頭框內、
+  緊接版本與目錄之後那一行完全等於 `permissions: YOLO mode`；
+  輸入列下方的狀態列 `<模型> <推理強度> · <目錄>[ · <對話標題>]`，
+  可再接 `⚠ N warning(s) · f2 to view`。其餘含 permission、核准、
+  選項、Working、Thinking 等字樣的畫面仍視為對話框或執行中。
 - 至少兩秒沒有任何輸出；不以歷史輸出中曾出現提示符號作依據。
   未完成 UTF-8／控制碼／同步繪圖、無法重建的影像、隱藏游標均拒絕。
   視窗改大小後，還要收到完整清畫面重繪。

@@ -122,7 +122,19 @@ impl PromptScreen {
         if !screen.bracketed_paste() || screen.hide_cursor() {
             return Some("terminal_prompt_unconfirmed");
         }
-        let text = screen.contents().to_lowercase();
+        let rows: Vec<_> = screen.rows(0, screen.size().1.get()).collect();
+        // Rebuild the screen text like `contents()`, leaving out only the
+        // exact Codex start-up header line that names its permission mode.
+        let mut text = String::new();
+        for (index, line) in rows.iter().enumerate() {
+            if !(definition == "codex" && is_codex_permission_header(screen, &rows, index)) {
+                text.push_str(line);
+            }
+            if !u16::try_from(index).is_ok_and(|row| screen.row_wrapped(row)) {
+                text.push('\n');
+            }
+        }
+        let text = text.to_lowercase();
         if super::has_explicit_working_status(&text)
             || super::has_attention_marker(&text)
             || super::has_actionable_attention_prompt(&text)
@@ -151,7 +163,6 @@ impl PromptScreen {
             return Some("terminal_dialog_or_work");
         }
         let (row, col) = screen.cursor_position();
-        let rows: Vec<_> = screen.rows(0, screen.size().1.get()).collect();
         let Some(line) = rows.get(usize::from(row)) else {
             return Some("terminal_screen_unknown");
         };
@@ -172,6 +183,7 @@ impl PromptScreen {
                         | "Summarize recent commits"
                         | "Improve documentation in @filename"
                         | "Run /review on my current changes"
+                        | "Ask Codex to do anything"
                 ) && (2..screen.size().1.get()).all(|column| {
                     screen
                         .cell(row, column)
@@ -188,7 +200,8 @@ impl PromptScreen {
             return Some("terminal_input_not_empty");
         }
         // A menu or continuation below the cursor cannot be mistaken for the
-        // main composer. Only the exact known shortcut footer is permitted.
+        // main composer. Only the exact known shortcut footer and, for Codex,
+        // its model/directory status line are permitted.
         if rows.iter().skip(usize::from(row) + 1).any(|line| {
             let line = line.trim();
             let percentage = line.strip_prefix("? for shortcuts").unwrap_or(line).trim();
@@ -196,6 +209,7 @@ impl PromptScreen {
                 && !percentage
                     .strip_suffix("% context left")
                     .is_some_and(|number| number.parse::<u8>().is_ok_and(|number| number <= 100))
+                && !(definition == "codex" && is_codex_status_line(line))
         }) {
             return Some("terminal_screen_unknown");
         }
@@ -206,6 +220,68 @@ impl PromptScreen {
     pub(super) fn settle_for_test(&mut self) {
         self.last_output = Instant::now() - QUIET;
     }
+}
+
+/// Codex 0.164 prints `permissions: YOLO mode` in its start-up header box,
+/// directly under the version and working directory. Only that exact,
+/// unwrapped line below the header counts; any other "permission" text on
+/// screen, including approval prompts, keeps blocking.
+fn is_codex_permission_header(screen: &vt100::Screen, rows: &[String], index: usize) -> bool {
+    let wrapped = |index: usize| u16::try_from(index).map_or(true, |row| screen.row_wrapped(row));
+    rows[index].trim() == "permissions: YOLO mode"
+        && !wrapped(index)
+        && (index == 0 || !wrapped(index - 1))
+        && rows[index.saturating_sub(3)..index]
+            .iter()
+            .any(|line| line.trim_start().starts_with(">_ OpenAI Codex (v"))
+}
+
+/// Codex 0.164 status line below the composer:
+/// `<model> <effort> · <directory>[ · <thread>]`, optionally followed by
+/// `⚠ N warning(s) · f2 to view`. The thread title is still covered by the
+/// whole-screen dialog and work markers checked before this.
+fn is_codex_status_line(line: &str) -> bool {
+    let (status, warnings) = match line.split_once('⚠') {
+        Some((status, warnings)) => (status, Some(warnings)),
+        None => (line, None),
+    };
+    let warnings_ok = warnings.is_none_or(|warnings| {
+        warnings
+            .trim()
+            .strip_suffix(" · f2 to view")
+            .and_then(|count| {
+                count
+                    .strip_suffix(" warnings")
+                    .or_else(|| count.strip_suffix(" warning"))
+            })
+            .is_some_and(|count| count.parse::<u16>().is_ok_and(|count| count > 0))
+    });
+    if !warnings_ok || (warnings.is_some() && !status.is_empty() && !status.ends_with(' ')) {
+        return false;
+    }
+    let status = status.trim();
+    if status.is_empty() {
+        return warnings.is_some();
+    }
+    let mut segments = status.split(" · ");
+    let model_ok = segments.next().is_some_and(|segment| {
+        let mut words = segment.split(' ');
+        let model = words.next().unwrap_or_default();
+        let effort = words.next().unwrap_or_default();
+        words.next().is_none()
+            && !model.is_empty()
+            && model
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            && matches!(
+                effort,
+                "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+            )
+    });
+    model_ok
+        && segments
+            .next()
+            .is_some_and(|directory| directory.starts_with('/') || directory.starts_with('~'))
 }
 
 #[cfg(test)]
@@ -339,5 +415,148 @@ mod tests {
             Some("terminal_screen_unknown")
         );
         assert_eq!(s.parser.screen().size().0.get(), MAX_ROWS);
+    }
+
+    /// Bytes recorded from a fresh Codex 0.164 start-up redraw (100 columns),
+    /// with the working directory replaced by a neutral path.
+    const CODEX_0164_FRESH_IDLE: &str = "\x1b]7501;state=working:app=codex\x1b\\\x1b[?2026h\x1b[1;1H\x1b[J\x1b[1;24r\x1b[1;1H\x1bM\x1bM\x1bM\x1bM\x1bM\x1bM\x1bM\x1b[r\x1b[1;7r\x1b[1;1H\r\n\x1b[K\x1b[0m\r\n\x1b[K  >_ \x1b[1mOpenAI Codex\x1b[22m\x1b[2m\x1b[2m (v0.164.0)\x1b[0m\r\n\x1b[K     \x1b[2m/home/user/projects\x1b[0m\r\n\x1b[K\x1b[2m  permissions: \x1b[22m\x1b[1mYOLO mode\x1b[0m\r\n\x1b[K\x1b[0m\r\n\x1b[K  \x1b[1mTip:\x1b[22m Maximize usage with GPT-6.1 Sol. Try it on complex work for near-Astra performance at a lower\x1b[0m\r\n\x1b[K  cost.\x1b[0m\x1b[r\x1b[7;3H\x1b[?25l\x1b[8;2H\x1b[0m\x1b[K\x1b[9;2H\x1b[0m\x1b[K\x1b[10;27H\x1b[0m\x1b[K\x1b[11;2H\x1b[0m\x1b[K\x1b[12;56H\x1b[0m\x1b[K\x1b[8;1H \x1b[9;1H \x1b[10;1H\x1b[1m›\x1b[22m \x1b[2mAsk Codex to do anything\x1b[11;1H\x1b[22m \x1b[12;1H  gpt-test default · /home/user/projects · \x1b[1m←\x1b[22m for agents\x1b[0m\x1b[8;1H\x1b[0 q\x1b[8;1H \x1b[0m\x1b[10;3H\x1b[?25h\x1b[?2026l\x1b]0;projects\x07\x1b]7501;state=idle:app=codex\x1b\\\x1b[?2026h\x1b[0m\x1b[10;3H\x1b[?25h\x1b[?2026l";
+
+    /// A resumed Codex 0.164 session as rendered in a desktop tab: start-up
+    /// header, earlier transcript, the empty composer and the new status line.
+    fn codex_0164_resumed(composer: &str, lower: &str) -> String {
+        format!(
+            "\r\n  >_ \x1b[1mOpenAI Codex\x1b[22m\x1b[2m (v0.164.0)\x1b[0m\r\n\
+             \x20    \x1b[2m/home/user/project\x1b[0m\r\n\
+             \x1b[2m  permissions: \x1b[22m\x1b[1mYOLO mode\x1b[0m\r\n\r\n\
+             \x20 \x1b[1mTip:\x1b[22m Use the desktop app.\x1b[0m\r\n\r\n\
+             \x1b[1m›\x1b[22m 1\r\n\r\n\
+             • 目前只收到「1」，請說明要執行的工作。\r\n\r\n\
+             \x20 Worked for 4s • Oct 23 at 3:28 PM\r\n\r\n\
+             {composer}\r\n\r\n{lower}\x1b[14;3H"
+        )
+    }
+
+    const CODEX_0164_COMPOSER: &str = "\x1b[1m›\x1b[22m \x1b[2mAsk Codex to do anything\x1b[22m";
+    const CODEX_0164_STATUS: &str = "  GPT-6.1-Sol medium · /home/user/project · 整理提交流程                 ⚠ 2 warnings · f2 to view";
+
+    fn wide_screen(body: &str) -> PromptScreen {
+        let mut screen = PromptScreen::new(24, 100);
+        screen.feed(
+            format!("\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h{body}").as_bytes(),
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        screen
+    }
+
+    #[test]
+    fn accepts_codex_0164_idle_header_placeholder_and_status_line() {
+        assert_eq!(
+            wide_screen(CODEX_0164_FRESH_IDLE).blocker("codex", Instant::now()),
+            None
+        );
+        for status in [
+            CODEX_0164_STATUS,
+            "  gpt-6.1-sol medium · ~                                   ⚠ 1 warning · f2 to view",
+            "  gpt-6.1-sol high · /home/user/project · 落實程式碼檢查與提交推送…",
+            "  gpt-test default · /home/user/project · \x1b[1m←\x1b[22m for agents",
+            "  gpt-6.1-sol medium · /home/user/project",
+        ] {
+            let body = codex_0164_resumed(CODEX_0164_COMPOSER, status);
+            assert_eq!(
+                wide_screen(&body).blocker("codex", Instant::now()),
+                None,
+                "{status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_0164_dialogs_drafts_menus_and_work_still_block() {
+        let blocked = |composer: &str, lower: &str| {
+            wide_screen(&codex_0164_resumed(composer, lower)).blocker("codex", Instant::now())
+        };
+        // Real text in the composer, including slash commands.
+        assert_eq!(
+            blocked("\x1b[1m›\x1b[22m fix the build", CODEX_0164_STATUS),
+            Some("terminal_input_not_empty")
+        );
+        assert_eq!(
+            blocked(
+                "\x1b[1m›\x1b[22m Ask Codex to do anything",
+                CODEX_0164_STATUS
+            ),
+            Some("terminal_input_not_empty")
+        );
+        assert!(blocked(
+            "\x1b[1m›\x1b[22m /",
+            "  /model    choose what model and reasoning effort to use\r\n  /review   review my current changes"
+        )
+        .is_some());
+        // Option menus and unknown rows below the composer.
+        for lower in [
+            "  1. Yes, proceed\r\n  2. No, and tell Codex what to do differently",
+            "  gpt-6.1-sol medium · not-a-directory",
+            "  gpt-6.1-sol turbo · /home/user/project",
+            "  gpt-6.1-sol medium /home/user/project",
+            "  gpt-6.1-sol medium · /home/user/project · 整理⚠ 2 warnings · f2 to view",
+            "  ⚠ two warnings · f2 to view",
+            "  ⚠ 0 warnings · f2 to view",
+            "  gpt-6.1-sol medium · /home/user/project   ⚠ 2 warnings · f3 to view",
+            "  gpt-6.1-sol medium · /home/user/project\r\n  unknown menu",
+        ] {
+            let expected = if lower.contains("1. ") {
+                "terminal_dialog_or_work"
+            } else {
+                "terminal_screen_unknown"
+            };
+            assert_eq!(
+                blocked(CODEX_0164_COMPOSER, lower),
+                Some(expected),
+                "{lower:?}"
+            );
+        }
+        // Approval dialogs, running turns and reasoning stay dialog/work.
+        for screen_text in [
+            "\x1b[2J\x1b[HWould you like to run the following command?\r\n\r\n  $ cargo test\r\n\r\n› 1. Yes, proceed (y)\r\n  2. No (esc)\x1b[5;3H",
+            "\x1b[2J\x1b[H  >_ OpenAI Codex (v0.164.0)\r\n     /home/user/project\r\n  permissions: YOLO mode\r\n\r\nPermission required: allow network access?\r\n\r\n› \r\n\r\n  gpt-6.1-sol medium · /home/user/project\x1b[7;3H",
+            "\x1b[2J\x1b[H• Working (12s • esc to interrupt)\r\n\r\n› \r\n\r\n  gpt-6.1-sol medium · /home/user/project\x1b[3;3H",
+            "\x1b[2J\x1b[H• Thinking\r\n\r\n› \r\n\r\n  gpt-6.1-sol medium · /home/user/project\x1b[3;3H",
+            "\x1b[2J\x1b[H  Select a model\r\n› 1. gpt-6.1-sol\r\n  2. gpt-test\x1b[2;3H",
+        ] {
+            assert_eq!(
+                wide_screen(screen_text).blocker("codex", Instant::now()),
+                Some("terminal_dialog_or_work"),
+                "{screen_text:?}"
+            );
+        }
+        // The header exemption is exact and only under the Codex header.
+        for header in [
+            "  permissions: YOLO mode — approve?",
+            "  permissions: on-request",
+            "  >_ OpenAI Codex (v0.164.0)\r\n  permissions: YOLO mode\r\n  permission required",
+        ] {
+            let body =
+                format!("{header}\r\n\r\n› \x1b[2mAsk Codex to do anything\x1b[22m\x1b[5;3H");
+            assert_eq!(
+                wide_screen(&body).blocker("codex", Instant::now()),
+                Some("terminal_dialog_or_work"),
+                "{header:?}"
+            );
+        }
+        assert_eq!(
+            wide_screen("  permissions: YOLO mode\r\n\r\n› \x1b[3;3H")
+                .blocker("codex", Instant::now()),
+            Some("terminal_dialog_or_work")
+        );
+        // Codex-only allowances do not extend to other CLIs.
+        assert!(wide_screen("❯ \r\n  gpt-6.1-sol medium · ~\x1b[1;3H")
+            .blocker("claude", Instant::now())
+            .is_some());
+        assert!(wide_screen(
+            "  >_ OpenAI Codex (v0.164.0)\r\n  permissions: YOLO mode\r\n❯ \x1b[3;3H"
+        )
+        .blocker("claude", Instant::now())
+        .is_some());
     }
 }
