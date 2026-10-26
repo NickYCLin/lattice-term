@@ -33,7 +33,8 @@ export interface AgentMcpHistory {
     id: number;
     at: number;
     client: string;
-    action: "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteCommand" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "remoteScreen" | "remoteInput" | "remoteFleet" | "grant" | "revoke" | "read" | "interrupt";
+    projectLaunch?: { workingDirectory: string; cli: string; permission: "full" | "savedPlan"; sandbox: boolean };
+    action: "createPlan" | "launch" | "prompt" | "queue" | "clearQueue" | "stop" | "remoteMetrics" | "remoteList" | "remoteExec" | "remoteCommand" | "remoteUpload" | "remoteDownload" | "remoteCancel" | "remoteStatus" | "remoteScreen" | "remoteInput" | "remoteFleet" | "grant" | "revoke" | "read" | "interrupt";
     outcome: "accepted" | "replayed" | "failed" | "unknown";
     sessionId: string | null;
     targetId?: string | null;

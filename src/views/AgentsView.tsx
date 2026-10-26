@@ -1,3 +1,4 @@
+import { ProjectLaunchSettings } from "../components/agents/ProjectLaunchSettings";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentMcpHistory } from "../components/agents/AgentMcpHistory";
@@ -905,6 +906,7 @@ export function AgentsView({
                 </span>
               </span>
             </label>
+            <ProjectLaunchSettings policy={agents.mcpProjectLaunch} disabled={daemon.status.mcpNeedsRestart} save={agents.updateProjectLaunch} reportError={reportMcpFailure} />
             <p className="agents-field-hint">{t("agents.mcp.docs")}</p>
             <AgentMcpHistory history={daemon.status.history} />
           </details>

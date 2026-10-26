@@ -640,7 +640,7 @@ impl McpServer {
                 let controlled = sessions.iter().filter(|s| s.mcp_control).count();
                 let readable = sessions.iter().filter(|s| s.mcp_read_output).count();
                 let plans = connection.plans().await?;
-                let enabled = plans["enabled"].as_bool().unwrap_or(false);
+                let enabled = plans["enabled"] == true || plans["projectLaunch"]["enabled"] == true;
                 let count = plans["plans"].as_array().map(Vec::len).unwrap_or(0);
                 launched = plans.clone();
                 (sessions.len(), readable, controlled, enabled, count)
@@ -693,6 +693,7 @@ impl McpServer {
             "mcpOutputScopes": connection.as_ref().is_some_and(|c| c.output_scopes.load(Ordering::Relaxed)),
             "controlledSessions": controlled,
             "launchEnabled": launch_enabled,
+            "projectLaunch": launched["projectLaunch"].clone(),
             "launchablePlans": plans,
             "desktopBridgeAvailable": desktop_bridge,
             "backgroundServiceVersion": connection.as_ref().and_then(|c| {
@@ -754,7 +755,7 @@ impl McpServer {
             },
             "limitations": [
                 "The background session tools expose only background sessions explicitly shared in LatticeTerm; controllable sessions accept prompts or cancels. Existing desktop PTYs use the separate desktop_agent tool.",
-                "launch_agent starts only saved launch plans the user allowed for MCP, always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
+                "launch_agent starts saved plans or, with separate projectLaunch authorization, creates an ephemeral plan using workingDirectory and cli (codex/claude/gemini), always in the background; a session it starts is shared and controllable by this client. Each client may hold a bounded number of sessions it started, and all clients together a smaller-still total; see limits. Stop one before starting another rather than retrying.",
                 "Existing desktop Fleet PTYs, including CLIProxyAPI, are available only after the person explicitly shares that session. Find backend desktopAgent in list_authorized_connections, then use desktop_agent to verify identity, read and prompt the same process. Standalone chat threads use desktop_chat after explicit per-thread sharing; discover backend desktopChat. Desktop disconnection revokes foreground grants; no automatic relaunch or replacement.",
                 "list_saved_connections reports saved names while connection-book sharing is enabled. Use connect_saved_connection with its profile ID to open SSH, SFTP, RDP, VNC or Lattice Remote using saved credentials. Host verification, missing credentials and RDP domain context still require user action. Local default MCP starts the service and desktop as needed; custom data directories and remote workspace adapters stay passive.",
                 "Use ssh_run_command for SSH or remote_run_command for Lattice Remote, never paste shell commands through screen input. Commands require their own grant. SSH trust settings apply only to SSH. Remote commands and remote_file_transfer run without a card by default, subject to the independent Remote approval setting and the sharing host's advertised capability. When approval is required, refusal, silence for two minutes or revocation before dispatch means nothing runs.",
@@ -841,20 +842,39 @@ impl McpServer {
     }
 
     async fn launch_agent(&self, arguments: &Value) -> Result<Value, ToolError> {
+        let request_id = request_id(arguments)?;
         let plan_id = arguments
             .get("planId")
             .and_then(Value::as_str)
-            .filter(|id| !id.is_empty() && id.len() <= 128)
-            .map(str::to_string)
-            .ok_or_else(|| ToolError::Invalid("planId is required".into()))?;
-        let request_id = request_id(arguments)?;
-        let connection = self.attached().await?;
-        let value = connection
-            .request(Request::LaunchPlan {
+            .map(str::to_string);
+        let request = if let Some(directory) =
+            arguments.get("workingDirectory").and_then(Value::as_str)
+        {
+            let cli = arguments
+                .get("cli")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ToolError::Invalid("cli is required for project launch".into()))?;
+            Request::LaunchProject {
+                working_directory: directory.into(),
+                cli: cli.into(),
                 plan_id,
                 request_id,
-            })
-            .await?;
+            }
+        } else {
+            if arguments.get("cli").is_some() {
+                return Err(ToolError::Invalid(
+                    "workingDirectory is required with cli".into(),
+                ));
+            }
+            Request::LaunchPlan {
+                plan_id: plan_id
+                    .filter(|id| !id.is_empty() && id.len() <= 128)
+                    .ok_or_else(|| ToolError::Invalid("planId is required".into()))?,
+                request_id,
+            }
+        };
+        let connection = self.attached().await?;
+        let value = connection.request(request).await?;
         let duplicate = value["duplicate"].as_bool().unwrap_or(false);
         let read_output = value["mcpReadOutput"].as_bool().unwrap_or(true);
         let summary: AgentSessionSummary =
@@ -1302,12 +1322,12 @@ Call list_agent_sessions first; read output incrementally with read_agent_output
 use wait_agent_state to block until a session's lifecycle changes instead of polling. \
 Sharing status does not authorize conversation access: read_agent_output requires readOutput=true. \
 access=metadata exposes state only; access=control does not imply readOutput=true. \
-Only sessions with access \"control\" accept send_agent_prompt and cancel_agent_task; launch_agent starts only \
-the saved plans list_launch_plans returns. Pass a fresh requestId to every launch, prompt and cancel and reuse \
+Only sessions with access \"control\" accept send_agent_prompt and cancel_agent_task; launch_agent starts \
+saved plans or project directories when list_launch_plans.projectLaunch.enabled is true. Pass a fresh requestId to every launch, prompt and cancel and reuse \
 it when retrying after a lost reply. \
 A state with stateSource \"heuristic\" is a guess from terminal output, not a report from the CLI. Both immediate \
 and queued prompts require a CLI integration report that it is free and no unfinished human input; a CLI \
-without these reports cannot receive MCP prompts. Prompts are text, not terminal control keys. \
+without these reports normally cannot receive MCP prompts. Project-launched sessions alone may send a first prompt when a live, quiet, recognized empty terminal prompt passes the same conservative foreground screen gate; this never confirms turn completion. Prompts are text, not terminal control keys. \
 Windows Codex MCP prompts must be a single line without tabs: CR, LF and TAB are rejected before queueing \
 or writing in both now and queue modes; @ and $ and leading / or ! commands or text starting with ? are also rejected. \
 Windows Codex requires a launch-verified default keymap with Vim off. Human input or an unknown input profile \
@@ -1936,22 +1956,25 @@ fn tool_definitions() -> Value {
             },
             {
                 "name": "list_launch_plans",
-                "title": "List launchable saved plans",
-                "description": "Lists the saved launch plans the user allowed MCP clients to start (planId, label, note, CLI, working directory, sandbox), plus how many sessions this client and all clients have started and the ceilings for both. Empty with enabled=false when the user has not allowed launching.",
+                "title": "List launch permissions and saved plans",
+                "description": "Lists authorized saved plans and the separate projectLaunch grant (enabled, roots, fullPermissions). When projectLaunch.enabled is true, launch_agent accepts workingDirectory and cli even if plans is empty. Also returns how many sessions this client and all clients have started and the ceilings for both. Empty with enabled=false when the user has not allowed launching.",
                 "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
                 "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
             },
             {
                 "name": "launch_agent",
-                "title": "Launch a saved plan in the background",
-                "description": "Starts one of the plans from list_launch_plans as a background Agent Fleet session, exactly as the user saved it (CLI, arguments, working directory, sandbox). The new session is shared with and controllable by this client. Pass a unique requestId; retrying with the same requestId returns the first launch instead of starting another.",
+                "title": "Launch a project or saved plan in the background",
+                "description": "Starts a saved plan, or creates an ephemeral project plan using workingDirectory and cli when list_launch_plans.projectLaunch.enabled is true. Project launches default to full permissions (approval bypass and no LatticeTerm sandbox); the desktop user can require saved-plan permissions instead. Project roots restrict startup location, not CLI file access. The new session is shared with and controllable by this client. Pass a unique requestId; retrying with the same requestId returns the first launch instead of starting another.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "planId": { "type": "string", "description": "A planId from list_launch_plans." },
+                        "workingDirectory": { "type": "string", "description": "Absolute directory under a registered project root; requires separate desktop project-launch authorization." },
+                        "cli": { "type": "string", "enum": ["codex", "claude", "gemini"] },
+                        "planId": { "type": "string", "description": "Saved plan to launch, or permission source when projectLaunch.fullPermissions is false." },
                         "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Required idempotency key, at most 128 UTF-8 bytes. Reuse only for an identical retry." }
                     },
-                    "required": ["planId", "requestId"],
+                    "required": ["requestId"],
+                    "anyOf": [{"required": ["planId"]}, {"required": ["workingDirectory", "cli"]}],
                     "additionalProperties": false
                 },
                 "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false }
@@ -1959,7 +1982,7 @@ fn tool_definitions() -> Value {
             {
                 "name": "send_agent_prompt",
                 "title": "Send a prompt to a controlled session",
-                "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Neither submits over unfinished human input, working/attention states, or a heuristic guess. Terminal control keys are rejected. Windows Codex requires a launch-verified default keymap with Vim off and no subsequent human input; regranting cannot restore an invalidated profile. It accepts only a single line without tabs: CR, LF and TAB, @ and $, and leading / or ! commands or text starting with ? are rejected before queueing or writing in both modes. Do not automatically restart, retry, flatten or rewrite rejected text. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
+                "description": "Submits plain prompt text to a session with access \"control\". mode \"queue\" (default) waits for the CLI's own hooks to report idle or done; mode \"now\" requires that report already. Project-launched background sessions additionally allow a first prompt at a verified stable empty terminal prompt before the first integration report. Neither submits over unfinished human input or working/attention states, and terminal silence never confirms turn completion. Terminal control keys are rejected. Windows Codex requires a launch-verified default keymap with Vim off and no subsequent human input; regranting cannot restore an invalidated profile. It accepts only a single line without tabs: CR, LF and TAB, @ and $, and leading / or ! commands or text starting with ? are rejected before queueing or writing in both modes. Do not automatically restart, retry, flatten or rewrite rejected text. Returns whether it was sent or queued and the session's state afterwards. A unique requestId is required; reuse it only for an identical retry.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

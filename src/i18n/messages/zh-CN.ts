@@ -2145,5 +2145,15 @@ export const messages: Messages = {
   "remote.fleet.directoryPlaceholder": "留空 = 整个主目录",
   "remote.fleet.sharedDirectory": "实际共享：{directory}",
   "remote.fleet.hint": "允许已配对的控制端通过 MCP 查看一个工作区。读取输出、控制工作阶段与启动已保存计划需在下方分别授权，也需通过后台服务的 MCP 权限。终端机共享与已保存的配对密码不会授予 Fleet 权限。停止共享即撤销权限，已接受的任务仍会继续。目录限制用于选择工作区，不是操作系统沙箱。",
-  "remote.fleet.clientHint": "使用 Remote 主机明确共享的工作区。目录由主机选定，不会发送远程可执行文件或路径，仍需通过主机的 MCP 工作阶段与启动权限。重新连接后需重新授权。此处提供 MCP 编排，暂不包含远程 Fleet 分屏。"
+  "remote.fleet.clientHint": "使用 Remote 主机明确共享的工作区。目录由主机选定，不会发送远程可执行文件或路径，仍需通过主机的 MCP 工作阶段与启动权限。重新连接后需重新授权。此处提供 MCP 编排，暂不包含远程 Fleet 分屏。",
+  "agents.mcp.project.title": "Launch sessions by project directory",
+  "agents.mcp.project.risk": "All authorized MCP clients connected to this service can create sessions with output access and control. Full permissions bypass CLI approvals and disable the LatticeTerm sandbox. Project roots restrict startup location, not file access or commands. Disabling blocks future launches; revoke access or stop existing sessions separately.",
+  "agents.mcp.project.roots": "Allowed project roots (absolute paths, one per line)",
+  "agents.mcp.project.permissions": "New session permissions",
+  "agents.mcp.project.full": "Full permissions by default",
+  "agents.mcp.project.saved": "Inherit saved plan permissions",
+  "agents.mcp.project.enable": "Allow authorized MCP clients to create sessions (off by default)",
+  "agents.mcp.project.save": "Save project launch settings",
+  "agents.mcp.project.revoke": "Disable project launches now",
+  "agents.mcp.history.action.createPlan": "Create project launch plan",
 };

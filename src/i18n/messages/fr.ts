@@ -2145,5 +2145,15 @@ export const messages: Messages = {
   "remote.fleet.directoryPlaceholder": "Vide = tout votre dossier personnel",
   "remote.fleet.sharedDirectory": "Partagé : {directory}",
   "remote.fleet.hint": "Permet aux observateurs appairés d'examiner un espace de travail via MCP. La lecture de la sortie, le contrôle des sessions et le lancement de plans enregistrés nécessitent les autorisations distinctes ci-dessous ainsi que les autorisations MCP du service d'arrière-plan. Le partage du terminal et les mots de passe d'appairage enregistrés n'accordent pas l'accès à Fleet. Arrêtez le partage pour révoquer l'accès ; les tâches déjà acceptées continuent. Le répertoire est une limite de routage, pas un bac à sable du système d'exploitation.",
-  "remote.fleet.clientHint": "Utilise l'espace de travail explicitement partagé par l'hôte Remote. L'hôte choisit le répertoire ; aucun exécutable ni chemin distant n'est envoyé. Ses autorisations MCP de session et de lancement s'appliquent toujours. Une reconnexion nécessite une nouvelle autorisation locale. Il s'agit d'orchestration MCP ; les volets Fleet distants ne sont pas inclus."
+  "remote.fleet.clientHint": "Utilise l'espace de travail explicitement partagé par l'hôte Remote. L'hôte choisit le répertoire ; aucun exécutable ni chemin distant n'est envoyé. Ses autorisations MCP de session et de lancement s'appliquent toujours. Une reconnexion nécessite une nouvelle autorisation locale. Il s'agit d'orchestration MCP ; les volets Fleet distants ne sont pas inclus.",
+  "agents.mcp.project.title": "Launch sessions by project directory",
+  "agents.mcp.project.risk": "All authorized MCP clients connected to this service can create sessions with output access and control. Full permissions bypass CLI approvals and disable the LatticeTerm sandbox. Project roots restrict startup location, not file access or commands. Disabling blocks future launches; revoke access or stop existing sessions separately.",
+  "agents.mcp.project.roots": "Allowed project roots (absolute paths, one per line)",
+  "agents.mcp.project.permissions": "New session permissions",
+  "agents.mcp.project.full": "Full permissions by default",
+  "agents.mcp.project.saved": "Inherit saved plan permissions",
+  "agents.mcp.project.enable": "Allow authorized MCP clients to create sessions (off by default)",
+  "agents.mcp.project.save": "Save project launch settings",
+  "agents.mcp.project.revoke": "Disable project launches now",
+  "agents.mcp.history.action.createPlan": "Create project launch plan",
 };

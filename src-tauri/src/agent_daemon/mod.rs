@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 pub const PROTOCOL_VERSION: u32 = 1;
 /// Legacy desktop daemons ignore the role field. A distinct version makes
 /// them reject observer greetings before returning any private session data.
-pub const OBSERVER_PROTOCOL_VERSION: u32 = 2;
+pub const OBSERVER_PROTOCOL_VERSION: u32 = 3;
 /// Session ids minted by the daemon's registry. The desktop routes every
 /// command by this prefix, so the two registries can never collide.
 pub const SESSION_ID_PREFIX: &str = "agent-bg-session-";
@@ -559,6 +559,8 @@ pub enum Request {
     McpPlansReplace {
         enabled: bool,
         plans: Vec<McpPlan>,
+        #[serde(default)]
+        project_policy: crate::agent_project_launch::ProjectLaunchPolicy,
     },
     /// Observer: the plans it may launch.
     Plans,
@@ -567,6 +569,12 @@ pub enum Request {
     LaunchPlan {
         plan_id: String,
         #[serde(default)]
+        request_id: String,
+    },
+    LaunchProject {
+        working_directory: String,
+        cli: String,
+        plan_id: Option<String>,
         request_id: String,
     },
     /// Observer: hand a controlled session a prompt.

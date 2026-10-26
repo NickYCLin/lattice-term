@@ -183,11 +183,15 @@ export interface AgentPlanRecovery {
   backupPath: string;
 }
 
+export interface ProjectLaunchPolicy { enabled: boolean; roots: string[]; fullPermissions: boolean }
+export const defaultProjectLaunchPolicy: ProjectLaunchPolicy = { enabled: false, roots: [], fullPermissions: true };
+
 interface AgentPlanSnapshot {
   workspaceName: string;
   startupInstructions: string;
   /** MCP clients may start the saved plans marked "keep in the background". */
   mcpLaunch?: boolean;
+  mcpProjectLaunch?: ProjectLaunchPolicy;
   plans: AgentLaunchPlan[];
   recovery: AgentPlanRecovery | null;
 }
@@ -707,6 +711,8 @@ export interface AgentApi {
   startupInstructions: string;
   /** Whether MCP clients may start saved background plans. */
   mcpLaunch: boolean;
+  mcpProjectLaunch: ProjectLaunchPolicy;
+  updateProjectLaunch: (policy: ProjectLaunchPolicy) => Promise<ProjectLaunchPolicy>;
   plans: AgentLaunchPlan[];
   planRecovery: AgentPlanRecovery | null;
   refreshCatalog: () => Promise<void>;
@@ -791,6 +797,7 @@ export function useAgentSessions(): AgentApi {
   const [startupInstructions, setStartupInstructions] = useState("");
   const [plans, setPlans] = useState<AgentLaunchPlan[]>([]);
   const [mcpLaunch, setMcpLaunch] = useState(false);
+  const [mcpProjectLaunch, setProjectLaunch] = useState<ProjectLaunchPolicy>(defaultProjectLaunchPolicy);
   const [planRecovery, setPlanRecovery] = useState<AgentPlanRecovery | null>(
     null,
   );
@@ -824,6 +831,7 @@ export function useAgentSessions(): AgentApi {
     setWorkspaceName(snapshot.workspaceName);
     setStartupInstructions(snapshot.startupInstructions);
     setMcpLaunch(snapshot.mcpLaunch === true);
+    setProjectLaunch(snapshot.mcpProjectLaunch ?? defaultProjectLaunchPolicy);
     setPlans(snapshot.plans);
     setPlanRecovery(snapshot.recovery);
   }, []);
@@ -1451,6 +1459,12 @@ export function useAgentSessions(): AgentApi {
     return saved;
   }, [mutatePlanSettings]);
 
+  const updateProjectLaunch = useCallback(async (policy: ProjectLaunchPolicy) => {
+    const saved = await mutatePlanSettings<ProjectLaunchPolicy>("agent_workspace_project_launch_update", { policy });
+    setProjectLaunch(saved);
+    return saved;
+  }, [mutatePlanSettings]);
+
   const updateMcpLaunch = useCallback(async (enabled: boolean) => {
     const saved = await mutatePlanSettings<boolean>("agent_workspace_mcp_launch_update", { enabled });
     setMcpLaunch(saved);
@@ -1750,6 +1764,8 @@ export function useAgentSessions(): AgentApi {
     workspaceName,
     startupInstructions,
     mcpLaunch,
+    mcpProjectLaunch,
+    updateProjectLaunch,
     plans,
     planRecovery,
     refreshCatalog,

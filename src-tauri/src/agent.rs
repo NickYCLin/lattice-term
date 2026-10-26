@@ -9758,7 +9758,8 @@ pub fn mcp_prompt(
     mcp_prompt_with_grant_observer(sink, registry, session_id, text, send_now, || {})
 }
 
-/// Only desktop_agent may use terminal evidence before the first turn.
+/// Shared foreground sessions and explicitly project-launched background
+/// sessions may use terminal evidence before the first turn.
 pub(crate) fn mcp_foreground_prompt(
     sink: &dyn AgentSink,
     registry: &AgentRegistry,
@@ -9773,6 +9774,34 @@ pub(crate) fn mcp_foreground_prompt(
         McpPromptMode::Foreground,
         || {},
     )
+}
+
+/// Project-launched background sessions use the same conservative first-turn
+/// screen evidence as foreground sessions. Recheck under the input lock; never
+/// release a queued prompt or infer a finished turn from terminal silence.
+pub(crate) fn mcp_project_prompt(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    text: &str,
+    send_now: bool,
+) -> Result<usize, String> {
+    let unreported = registry
+        .session_summary(session_id)
+        .ok_or("Agent session no longer exists.")?
+        .state_source
+        != AgentStateSource::Integration;
+    if send_now || unreported {
+        // Do not enqueue an initial prompt waiting for the very integration
+        // event that cannot occur until the first prompt has been submitted.
+        mcp_foreground_prompt(sink, registry, session_id, text).map_err(|error| {
+            if unreported && error == MCP_NOT_READY {
+                "The project CLI has not reached a verified stable empty prompt. Wait for startup to settle; no prompt was queued or sent.".into()
+            } else { error }
+        })
+    } else {
+        mcp_prompt(sink, registry, session_id, text, false)
+    }
 }
 
 enum McpPromptMode {

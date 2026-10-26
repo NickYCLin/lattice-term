@@ -6,6 +6,7 @@ pub mod agent_instructions;
 mod agent_mcp;
 pub mod agent_plans;
 mod agent_process;
+mod agent_project_launch;
 mod agent_updates;
 #[cfg(desktop)]
 pub mod app_menu;
@@ -2883,6 +2884,22 @@ async fn agent_workspace_mcp_launch_update(
     .await
 }
 
+#[tauri::command]
+async fn agent_workspace_project_launch_update(
+    policy: crate::agent_project_launch::ProjectLaunchPolicy,
+    plans: State<'_, AppAgentPlans>,
+    daemon: State<'_, AppDaemon>,
+    sync: State<'_, McpPlanSync>,
+) -> Result<crate::agent_project_launch::ProjectLaunchPolicy, String> {
+    change_mcp_plan_settings(
+        &plans,
+        &sync,
+        |store| store.update_project_launch(policy),
+        |snapshot| publish_mcp_plans(snapshot, &daemon),
+    )
+    .await
+}
+
 /// Hands the background service the saved plans MCP clients may launch:
 /// only those marked "keep in the background", already prepared the way
 /// a restore prepares them, and only while the user allows launching.
@@ -2948,9 +2965,10 @@ where
         {
             return Ok(());
         }
-        if previous.mcp_launch {
+        if previous.mcp_launch || previous.mcp_project_launch.enabled {
             let mut disabled = previous;
             disabled.mcp_launch = false;
+            disabled.mcp_project_launch.enabled = false;
             disabled.plans.clear();
             publish(disabled).await?;
         }
@@ -2979,8 +2997,15 @@ where
     let persisted = plans
         .lock()
         .map_err(|error| error.to_string())
-        .and_then(|mut store| store.update_mcp_launch(false));
+        .and_then(|mut store| {
+            store.update_mcp_launch(false).and_then(|_| {
+                let mut policy = store.snapshot().mcp_project_launch;
+                policy.enabled = false;
+                store.update_project_launch(policy).map(|_| false)
+            })
+        });
     snapshot.mcp_launch = false;
+    snapshot.mcp_project_launch.enabled = false;
     snapshot.plans.clear();
     let revoked = publish(snapshot).await;
     let mut reason = format!("MCP launch settings could not be synchronized: {error}");
@@ -2998,7 +3023,9 @@ where
 fn prepare_mcp_plans(
     snapshot: &AgentPlanSnapshot,
 ) -> Result<Vec<crate::agent_daemon::McpPlan>, String> {
-    if !snapshot.mcp_launch {
+    if !snapshot.mcp_launch
+        && !(snapshot.mcp_project_launch.enabled && !snapshot.mcp_project_launch.full_permissions)
+    {
         return Ok(Vec::new());
     }
     snapshot
@@ -3024,15 +3051,16 @@ fn prepare_mcp_plans(
 async fn publish_mcp_plans(snapshot: AgentPlanSnapshot, daemon: &AppDaemon) -> Result<(), String> {
     let enabled = snapshot.mcp_launch;
     let prepared = prepare_mcp_plans(&snapshot)?;
-    if !enabled && !daemon.is_running().await {
+    if !enabled && !snapshot.mcp_project_launch.enabled && !daemon.is_running().await {
         return Ok(());
     }
     daemon
         .request(
-            enabled,
+            enabled || snapshot.mcp_project_launch.enabled,
             crate::agent_daemon::Request::McpPlansReplace {
                 enabled,
                 plans: prepared,
+                project_policy: snapshot.mcp_project_launch,
             },
         )
         .await?;
@@ -5724,6 +5752,7 @@ pub fn run() {
             agent_mcp_control,
             agent_mcp_plans_sync,
             agent_workspace_mcp_launch_update,
+            agent_workspace_project_launch_update,
             agent_automations_sync,
             agent_automations_state,
             agent_automations_take_runs,

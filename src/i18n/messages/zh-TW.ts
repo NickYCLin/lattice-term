@@ -2550,6 +2550,16 @@ export const zhTW = {
   "remote.commands.state.timedOut": "已達時間上限",
   "remote.commands.state.outputLimit": "已達 512 KiB 輸出上限並停止",
   "remote.commands.state.failed": "執行失敗",
+  "agents.mcp.project.title": "依專案目錄啟動工作階段",
+  "agents.mcp.project.risk": "開啟後，所有已授權連入此背景服務的 MCP 客戶端都能建立工作階段，並預設讀取輸出及控制。全權限會略過 CLI 核准並停用 LatticeTerm 沙箱；專案根目錄只限制啟動位置，不限制 CLI 存取其他檔案或執行命令。關閉只阻止後續啟動；既有工作階段請另外撤銷 MCP 權限或結束。",
+  "agents.mcp.project.roots": "允許的專案根目錄（絕對路徑，每行一個）",
+  "agents.mcp.project.permissions": "新工作階段的權限",
+  "agents.mcp.project.full": "預設全權限",
+  "agents.mcp.project.saved": "沿用存好的計畫權限",
+  "agents.mcp.project.enable": "允許已授權 MCP 客戶端建立工作階段（預設關閉）",
+  "agents.mcp.project.save": "儲存專案啟動設定",
+  "agents.mcp.project.revoke": "立即關閉專案啟動",
+  "agents.mcp.history.action.createPlan": "建立專案啟動計畫",
 } as const;
 
 export type MessageKey = keyof typeof zhTW;

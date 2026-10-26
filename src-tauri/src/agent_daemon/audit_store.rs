@@ -18,7 +18,8 @@ const LOCK_NAME: &str = "writer.lock";
 /// 2 added the folded-read fields. A file from 1 still loads: the fields
 /// are optional and absent means "one operation".
 const VERSION: u32 = 2;
-const MAX_BYTES: u64 = 256 * 1024;
+// Includes JSON escaping of up to 256 directory names of 4096 bytes each.
+const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const DROP_FLUSH: Duration = Duration::from_millis(250);
 
 #[cfg(windows)]
@@ -86,6 +87,17 @@ impl DiskHistory {
                     id.is_empty()
                         || id.len() > 128
                         || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                })
+                || entry.project_launch.as_ref().is_some_and(|metadata| {
+                    metadata.working_directory.len() > 4096
+                        || metadata.working_directory.chars().any(char::is_control)
+                        || !Path::new(&metadata.working_directory).is_absolute()
+                        || !["codex", "claude", "gemini"].contains(&metadata.cli.as_str())
+                        || !["full", "savedPlan"].contains(&metadata.permission.as_str())
+                        || !matches!(
+                            entry.action,
+                            super::Action::CreatePlan | super::Action::Launch
+                        )
                 })
                 || (entry.session_id.is_some() && entry.target_id.is_some())
                 || entry.repeated.is_some_and(|repeated| repeated < 2)
@@ -907,6 +919,7 @@ mod tests {
 
     fn entry(id: u64) -> Entry {
         Entry {
+            project_launch: None,
             id,
             at: 1,
             client: "test client".into(),

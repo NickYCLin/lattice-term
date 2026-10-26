@@ -799,6 +799,7 @@ async fn a_controlling_observer_prompts_launches_and_cancels_once_per_request() 
     );
     desktop
         .request(Request::McpPlansReplace {
+            project_policy: Default::default(),
             enabled: true,
             plans: vec![super::McpPlan {
                 plan_id: "agent-plan-1".to_string(),
@@ -1183,6 +1184,7 @@ async fn one_client_cannot_launch_past_its_ceiling() {
         .unwrap();
     desktop
         .request(Request::McpPlansReplace {
+            project_policy: Default::default(),
             enabled: true,
             plans: vec![super::McpPlan {
                 plan_id: "agent-plan-1".to_string(),
@@ -1285,4 +1287,111 @@ async fn one_client_cannot_launch_past_its_ceiling() {
         .expect("the daemon stops when told")
         .unwrap()
         .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_project_launch_enforces_desktop_grant_and_paths_over_real_transport() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let paths = DaemonPaths::new(dir.path());
+    let token = read_or_create_token(&paths).unwrap();
+    let sink = Arc::new(DaemonSink::default());
+    let registry = Arc::new(AgentRegistry::new());
+    let server = tokio::spawn(serve(
+        paths.clone(),
+        token.clone(),
+        registry.clone(),
+        sink.clone(),
+        Arc::new(super::automations::Scheduler::open(dir.path())),
+        Arc::new(crate::agent_chat::AgentChatRegistry::new()),
+        Duration::from_secs(600),
+        Arc::new(Logger::silent()),
+    ));
+    for _ in 0..50 {
+        if paths.socket.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let mut desktop = RawClient::connect(&paths).await;
+    desktop
+        .request(Request::Hello {
+            workspace_directory: None,
+            token,
+            protocol: PROTOCOL_VERSION,
+            role: ClientRole::Desktop,
+            client: None,
+        })
+        .await
+        .unwrap();
+    let adapter = super::mcp::McpServer::new(paths);
+    adapter.handle(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"project fixture","version":"1"}}})).await.unwrap();
+    let call = |path: String, id: u64| {
+        serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{
+        "name":"launch_agent","arguments":{"workingDirectory":path,"cli":"codex","requestId":format!("project-{id}")}}})
+    };
+    let denied = adapter
+        .handle(call(root.path().display().to_string(), 2))
+        .await
+        .unwrap();
+    assert_eq!(denied["result"]["isError"], true);
+    desktop
+        .request(Request::McpPlansReplace {
+            enabled: false,
+            plans: vec![],
+            project_policy: crate::agent_project_launch::ProjectLaunchPolicy {
+                enabled: true,
+                roots: vec![root.path().display().to_string()],
+                full_permissions: true,
+            },
+        })
+        .await
+        .unwrap();
+    let listed = adapter.handle(serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_launch_plans","arguments":{}}})).await.unwrap();
+    assert_eq!(
+        listed["result"]["structuredContent"]["projectLaunch"]["enabled"],
+        true
+    );
+    assert_eq!(
+        listed["result"]["structuredContent"]["plans"],
+        serde_json::json!([])
+    );
+    std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
+    for (index, path) in [
+        outside.path().to_path_buf(),
+        root.path().join("../escape"),
+        root.path().join("escape"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            adapter
+                .handle(call(path.display().to_string(), 4 + index as u64))
+                .await
+                .unwrap()["result"]["isError"],
+            true
+        );
+    }
+    assert!(registry.list().is_empty());
+    desktop
+        .request(Request::McpPlansReplace {
+            enabled: false,
+            plans: vec![],
+            project_policy: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        adapter
+            .handle(call(root.path().display().to_string(), 8))
+            .await
+            .unwrap()["result"]["isError"],
+        true
+    );
+    desktop.request(Request::Shutdown).await.unwrap();
+    server.await.unwrap().unwrap();
 }

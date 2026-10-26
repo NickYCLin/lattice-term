@@ -71,6 +71,8 @@ export function fakeAgentApi(overrides: Partial<AgentApi> = {}): AgentApi {
     workspaceName: "",
     startupInstructions: "",
     mcpLaunch: false,
+    mcpProjectLaunch: { enabled: false, roots: [], fullPermissions: true },
+    updateProjectLaunch: async (policy) => policy,
     plans: [],
     planRecovery: null,
     refreshCatalog: vi.fn(async () => {}),

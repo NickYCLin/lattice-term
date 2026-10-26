@@ -961,6 +961,7 @@ mod history_tests {
                 control: false,
             },
             Request::McpPlansReplace {
+                project_policy: Default::default(),
                 enabled: false,
                 plans: vec![],
             },

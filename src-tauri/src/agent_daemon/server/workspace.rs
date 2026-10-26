@@ -129,6 +129,19 @@ pub(super) fn authorize(context: &Context, request: &Request) -> Result<(), Stri
                 Err(DENIED.into())
             }
         }
+        Request::LaunchProject {
+            working_directory, ..
+        } => {
+            if context
+                .workspace
+                .as_ref()
+                .is_some_and(|scope| scope.contains(working_directory))
+            {
+                Ok(())
+            } else {
+                Err(DENIED.into())
+            }
+        }
         Request::LaunchPlan { plan_id, .. } => {
             let plan = context.sink.plan(plan_id).ok_or(DENIED)?;
             authorize_plan(context, &plan)
@@ -144,9 +157,38 @@ pub(super) fn plans_view(context: &Context, client: &str) -> Value {
             plans.retain(|view| {
                 view["planId"]
                     .as_str()
-                    .and_then(|id| context.sink.plan(id))
+                    .and_then(|id| {
+                        context
+                            .sink
+                            .plans
+                            .lock()
+                            .ok()?
+                            .plans
+                            .iter()
+                            .find(|plan| plan.plan_id == id)
+                            .cloned()
+                    })
                     .is_some_and(|plan| authorize_plan(context, &plan).is_ok())
             });
+        }
+        if let Some(scope) = &context.workspace {
+            let roots = value["projectLaunch"]["roots"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            value["projectLaunch"]["roots"] = json!(roots
+                .into_iter()
+                .filter_map(|root| {
+                    let root = root.as_str()?;
+                    if scope.contains(root) {
+                        Some(root.to_string())
+                    } else if scope.root.starts_with(root) {
+                        Some(scope.root.display().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>());
         }
         // Limits are global, but counts for other workspaces are not disclosed.
         if let Some(object) = value.as_object_mut() {

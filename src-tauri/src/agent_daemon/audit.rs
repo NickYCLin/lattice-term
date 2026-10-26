@@ -21,6 +21,7 @@ const READ_FOLD_WINDOW: u64 = 5 * 60 * 1000;
 #[serde(rename_all = "camelCase")]
 pub enum Action {
     Launch,
+    CreatePlan,
     Prompt,
     Queue,
     ClearQueue,
@@ -57,7 +58,18 @@ pub enum Outcome {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectLaunch {
+    pub working_directory: String,
+    pub cli: String,
+    pub permission: String,
+    pub sandbox: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Entry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_launch: Option<ProjectLaunch>,
     pub id: u64,
     pub at: u64,
     pub client: String,
@@ -213,6 +225,7 @@ impl History {
             self.discarded = self.discarded.saturating_add(1);
         }
         self.entries.push_back(Entry {
+            project_launch: None,
             id: self.next,
             at,
             client: sanitize_client(client),
@@ -223,6 +236,22 @@ impl History {
             repeated: None,
             first_at: None,
         });
+        self.persist();
+    }
+
+    pub fn record_project(
+        &mut self,
+        client: &str,
+        action: Action,
+        outcome: Outcome,
+        session_id: Option<String>,
+        metadata: ProjectLaunch,
+        at: u64,
+    ) {
+        self.record(client, action, outcome, session_id, at);
+        if let Some(entry) = self.entries.back_mut() {
+            entry.project_launch = Some(metadata);
+        }
         self.persist();
     }
 

@@ -236,3 +236,21 @@ fn passive_mouse_motion_preserves_drafts_without_creating_an_edit() {
         assert!(input.desktop_busy());
     }
 }
+
+#[tokio::test]
+async fn project_background_first_prompt_uses_the_same_screen_gate_and_never_guesses_turn_completion() {
+    for send_now in [true, false] {
+        let f = ForegroundFixture::new();
+        f.share(true, true).await;
+        f.unreported_prompt();
+        let entry = f.registry.get(&f.id).unwrap();
+        *entry.last_output_at.lock().unwrap() = Instant::now();
+        assert!(mcp_project_prompt(f.sink.as_ref(), &f.registry, &f.id, "startup must not queue", send_now).is_err());
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        f.unreported_prompt();
+        assert_eq!(mcp_project_prompt(f.sink.as_ref(), &f.registry, &f.id, "first project message", send_now).unwrap(), 0);
+        f.unreported_prompt();
+        assert!(mcp_project_prompt(f.sink.as_ref(), &f.registry, &f.id, "unconfirmed next turn", true).is_err());
+        assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"terminal_turn_unconfirmed"));
+    }
+}

@@ -2145,5 +2145,15 @@ export const messages: Messages = {
   "remote.fleet.directoryPlaceholder": "Em branco = toda a sua pasta pessoal",
   "remote.fleet.sharedDirectory": "Compartilhando: {directory}",
   "remote.fleet.hint": "Permite que visualizadores pareados inspecionem um espaço de trabalho via MCP. Ler a saída, controlar sessões e iniciar planos salvos exigem as autorizações separadas abaixo, além das permissões MCP do serviço em segundo plano. O compartilhamento do terminal e as senhas de pareamento salvas não concedem acesso ao Fleet. Pare de compartilhar para revogar o acesso; tarefas já aceitas continuam em execução. O diretório é um limite de roteamento, não uma sandbox do sistema operacional.",
-  "remote.fleet.clientHint": "Usa o espaço de trabalho compartilhado explicitamente pelo host Remote. O host escolhe o diretório; nenhum executável ou caminho remoto é enviado. As permissões MCP de sessão e inicialização do host continuam valendo. Reconectar exige uma nova autorização local. Isto é orquestração MCP; painéis remotos do Fleet não estão incluídos."
+  "remote.fleet.clientHint": "Usa o espaço de trabalho compartilhado explicitamente pelo host Remote. O host escolhe o diretório; nenhum executável ou caminho remoto é enviado. As permissões MCP de sessão e inicialização do host continuam valendo. Reconectar exige uma nova autorização local. Isto é orquestração MCP; painéis remotos do Fleet não estão incluídos.",
+  "agents.mcp.project.title": "Launch sessions by project directory",
+  "agents.mcp.project.risk": "All authorized MCP clients connected to this service can create sessions with output access and control. Full permissions bypass CLI approvals and disable the LatticeTerm sandbox. Project roots restrict startup location, not file access or commands. Disabling blocks future launches; revoke access or stop existing sessions separately.",
+  "agents.mcp.project.roots": "Allowed project roots (absolute paths, one per line)",
+  "agents.mcp.project.permissions": "New session permissions",
+  "agents.mcp.project.full": "Full permissions by default",
+  "agents.mcp.project.saved": "Inherit saved plan permissions",
+  "agents.mcp.project.enable": "Allow authorized MCP clients to create sessions (off by default)",
+  "agents.mcp.project.save": "Save project launch settings",
+  "agents.mcp.project.revoke": "Disable project launches now",
+  "agents.mcp.history.action.createPlan": "Create project launch plan",
 };

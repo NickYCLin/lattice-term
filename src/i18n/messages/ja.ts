@@ -2145,5 +2145,15 @@ export const messages: Messages = {
   "remote.fleet.directoryPlaceholder": "空欄 = ホームフォルダー全体",
   "remote.fleet.sharedDirectory": "共有中: {directory}",
   "remote.fleet.hint": "ペアリング済みの閲覧側が MCP を通じて 1 つのワークスペースを確認できるようにします。出力の読み取り、セッションの操作、保存済みプランの起動には、下で個別の許可とバックグラウンドサービスの MCP 権限が必要です。端末共有や保存済みのペアリングパスワードでは Fleet へのアクセスは許可されません。共有を停止するとアクセスは取り消されますが、受け付け済みのタスクは継続します。ディレクトリはルーティングの境界であり、OS のサンドボックスではありません。",
-  "remote.fleet.clientHint": "Remote ホストが明示的に共有したワークスペースを使用します。ディレクトリはホストが選択し、リモートの実行ファイルやパスは送信されません。ホストの MCP セッションと起動の権限も引き続き適用されます。再接続時には新たなローカル許可が必要です。これは MCP によるオーケストレーションで、リモートの Fleet ペインは含まれません。"
+  "remote.fleet.clientHint": "Remote ホストが明示的に共有したワークスペースを使用します。ディレクトリはホストが選択し、リモートの実行ファイルやパスは送信されません。ホストの MCP セッションと起動の権限も引き続き適用されます。再接続時には新たなローカル許可が必要です。これは MCP によるオーケストレーションで、リモートの Fleet ペインは含まれません。",
+  "agents.mcp.project.title": "Launch sessions by project directory",
+  "agents.mcp.project.risk": "All authorized MCP clients connected to this service can create sessions with output access and control. Full permissions bypass CLI approvals and disable the LatticeTerm sandbox. Project roots restrict startup location, not file access or commands. Disabling blocks future launches; revoke access or stop existing sessions separately.",
+  "agents.mcp.project.roots": "Allowed project roots (absolute paths, one per line)",
+  "agents.mcp.project.permissions": "New session permissions",
+  "agents.mcp.project.full": "Full permissions by default",
+  "agents.mcp.project.saved": "Inherit saved plan permissions",
+  "agents.mcp.project.enable": "Allow authorized MCP clients to create sessions (off by default)",
+  "agents.mcp.project.save": "Save project launch settings",
+  "agents.mcp.project.revoke": "Disable project launches now",
+  "agents.mcp.history.action.createPlan": "Create project launch plan",
 };

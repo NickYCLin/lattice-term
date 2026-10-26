@@ -5,18 +5,20 @@
 //! text stored here is the user's explicit workspace-wide startup instruction.
 //! Restoring always starts new CLI processes after an explicit confirmation.
 
+pub use crate::agent_project_launch::ProjectLaunchPolicy;
+
 use crate::agent::{
     normalize_launch_plan, AgentLaunchPlan, AgentLaunchPlanDraft, MAX_SAVED_AGENT_PLANS,
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const STORE_VERSION: u32 = 4;
+const STORE_VERSION: u32 = 5;
 const STORE_FILE: &str = "agent-workspaces.json";
-const TEMP_FILE: &str = "agent-workspaces.json.tmp";
 const MAX_STARTUP_INSTRUCTIONS_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,6 +30,8 @@ struct StoreFile {
     startup_instructions: String,
     #[serde(default, rename = "mcpLaunch")]
     mcp_launch: bool,
+    #[serde(default, rename = "mcpProjectLaunch")]
+    mcp_project_launch: ProjectLaunchPolicy,
     plans: Vec<AgentLaunchPlan>,
 }
 
@@ -47,6 +51,7 @@ pub struct AgentPlanSnapshot {
     /// background".
     #[serde(default)]
     pub mcp_launch: bool,
+    pub mcp_project_launch: ProjectLaunchPolicy,
     pub plans: Vec<AgentLaunchPlan>,
     pub recovery: Option<AgentPlanRecovery>,
 }
@@ -54,22 +59,41 @@ pub struct AgentPlanSnapshot {
 #[derive(Debug)]
 pub struct FileAgentPlanStore {
     path: PathBuf,
+    last_saved: RefCell<Option<Vec<u8>>>,
     workspace_name: String,
     startup_instructions: String,
     mcp_launch: bool,
+    mcp_project_launch: ProjectLaunchPolicy,
     plans: Vec<AgentLaunchPlan>,
     recovery: Option<AgentPlanRecovery>,
+}
+
+fn reject_unsafe_store_path(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err("The workspace file must be a regular file, not a link.".into())
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 impl FileAgentPlanStore {
     pub fn open(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        let path = dir.join(STORE_FILE);
+        let path = dir
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+            .join(STORE_FILE);
+        reject_unsafe_store_path(&path)?;
         let mut store = Self {
             path,
+            last_saved: RefCell::new(None),
             workspace_name: String::new(),
             startup_instructions: String::new(),
             mcp_launch: false,
+            mcp_project_launch: ProjectLaunchPolicy::default(),
             plans: Vec::new(),
             recovery: None,
         };
@@ -91,7 +115,9 @@ impl FileAgentPlanStore {
                         store.workspace_name = name;
                         store.startup_instructions = instructions;
                         store.mcp_launch = file.mcp_launch;
+                        store.mcp_project_launch = file.mcp_project_launch;
                         store.plans = file.plans;
+                        *store.last_saved.borrow_mut() = Some(raw.as_bytes().to_vec());
                     }
                     (Err(error), _) => {
                         store.recovery = Some(store.set_aside(format!(
@@ -157,6 +183,7 @@ impl FileAgentPlanStore {
             workspace_name: self.workspace_name.clone(),
             startup_instructions: self.startup_instructions.clone(),
             mcp_launch: self.mcp_launch,
+            mcp_project_launch: self.mcp_project_launch.clone(),
             plans: self.plans.clone(),
         })
         .map_err(|error| error.to_string())?;
@@ -164,15 +191,33 @@ impl FileAgentPlanStore {
             .path
             .parent()
             .ok_or_else(|| "Agent plan store path has no directory.".to_string())?;
-        let temporary = directory.join(TEMP_FILE);
-        {
-            let mut handle = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-            handle
-                .write_all(json.as_bytes())
-                .and_then(|_| handle.sync_all())
-                .map_err(|error| error.to_string())?;
-        }
-        fs::rename(&temporary, &self.path).map_err(|error| error.to_string())
+        let check_current = || -> Result<(), String> {
+            reject_unsafe_store_path(&self.path)?;
+            let current = match fs::read(&self.path) {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e.to_string()),
+            };
+            if current != *self.last_saved.borrow() {
+                return Err("The workspace file changed externally; reload before saving.".into());
+            }
+            Ok(())
+        };
+        check_current()?;
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".agent-workspaces-")
+            .tempfile_in(directory)
+            .map_err(|e| e.to_string())?;
+        temporary
+            .write_all(json.as_bytes())
+            .and_then(|_| temporary.as_file().sync_all())
+            .map_err(|e| e.to_string())?;
+        check_current()?;
+        temporary
+            .persist(&self.path)
+            .map_err(|e| e.error.to_string())?;
+        *self.last_saved.borrow_mut() = Some(json.into_bytes());
+        Ok(())
     }
 
     pub fn snapshot(&self) -> AgentPlanSnapshot {
@@ -180,6 +225,7 @@ impl FileAgentPlanStore {
             workspace_name: self.workspace_name.clone(),
             startup_instructions: self.startup_instructions.clone(),
             mcp_launch: self.mcp_launch,
+            mcp_project_launch: self.mcp_project_launch.clone(),
             plans: self.plans.clone(),
             recovery: self.recovery.clone(),
         }
@@ -209,6 +255,19 @@ impl FileAgentPlanStore {
             return Err(error);
         }
         Ok(instructions)
+    }
+
+    pub fn update_project_launch(
+        &mut self,
+        policy: ProjectLaunchPolicy,
+    ) -> Result<ProjectLaunchPolicy, String> {
+        let policy = policy.normalized()?;
+        let previous = std::mem::replace(&mut self.mcp_project_launch, policy.clone());
+        if let Err(error) = self.persist() {
+            self.mcp_project_launch = previous;
+            return Err(error);
+        }
+        Ok(policy)
     }
 
     pub fn update_mcp_launch(&mut self, enabled: bool) -> Result<bool, String> {
@@ -464,7 +523,7 @@ mod tests {
             vec!["agent-plan-second", "agent-plan-first"]
         );
         let raw = fs::read_to_string(directory.join(STORE_FILE)).unwrap();
-        assert!(raw.contains("\"version\": 4"));
+        assert!(raw.contains("\"version\": 5"));
         assert!(raw.contains("\"workspaceName\": \"Release crew\""));
     }
 
@@ -492,7 +551,7 @@ mod tests {
         assert_eq!(saved.note, "接手上週的重構");
 
         let raw = fs::read_to_string(directory.join(STORE_FILE)).unwrap();
-        assert!(raw.contains("\"version\": 4"));
+        assert!(raw.contains("\"version\": 5"));
         assert!(raw.contains("\"resumeSessionId\": \"architecture review\""));
         assert!(raw.contains("\"note\": \"接手上週的重構\""));
     }
@@ -588,9 +647,51 @@ mod tests {
     fn failed_writes_roll_back_the_in_memory_change() {
         let directory = temp_dir("rollback");
         let mut store = FileAgentPlanStore::open(&directory).unwrap();
-        fs::create_dir_all(directory.join(TEMP_FILE)).unwrap();
+        fs::write(directory.join(STORE_FILE), "external change").unwrap();
 
         assert!(store.save(draft(&directory, "Review agent")).is_err());
         assert!(store.snapshot().plans.is_empty());
+    }
+    #[test]
+    fn project_grant_persists_and_external_changes_do_not_overwrite_or_enable_it() {
+        let directory = temp_dir("project-grant");
+        let mut store = FileAgentPlanStore::open(&directory).unwrap();
+        let policy = ProjectLaunchPolicy {
+            enabled: true,
+            roots: vec![directory.display().to_string()],
+            full_permissions: true,
+        };
+        store.update_project_launch(policy.clone()).unwrap();
+        assert_eq!(
+            FileAgentPlanStore::open(&directory)
+                .unwrap()
+                .snapshot()
+                .mcp_project_launch,
+            policy
+        );
+        let mut external = FileAgentPlanStore::open(&directory).unwrap();
+        store
+            .update_project_launch(ProjectLaunchPolicy::default())
+            .unwrap();
+        let before = fs::read(directory.join(STORE_FILE)).unwrap();
+        assert!(external.update_project_launch(policy).is_err());
+        assert_eq!(fs::read(directory.join(STORE_FILE)).unwrap(), before);
+        assert!(
+            !FileAgentPlanStore::open(&directory)
+                .unwrap()
+                .snapshot()
+                .mcp_project_launch
+                .enabled
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn project_grant_store_rejects_symlinks_without_touching_the_target() {
+        let directory = temp_dir("project-grant-link");
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "preserve").unwrap();
+        std::os::unix::fs::symlink(outside.path(), directory.join(STORE_FILE)).unwrap();
+        assert!(FileAgentPlanStore::open(&directory).is_err());
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "preserve");
     }
 }

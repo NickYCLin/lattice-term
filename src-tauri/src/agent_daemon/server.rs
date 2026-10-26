@@ -6,6 +6,8 @@
 //! it exits by itself once it has had nothing to own and nobody attached for
 //! [`super::IDLE_EXIT`].
 
+#[cfg(all(test, unix))]
+mod project_launch_tests;
 mod workspace;
 
 use super::audit;
@@ -766,7 +768,9 @@ pub fn dispatch_as(
     };
     let descriptor = if role == ClientRole::Observer {
         match &body {
-            Request::LaunchPlan { .. } => Some((audit::Action::Launch, None)),
+            Request::LaunchPlan { .. } | Request::LaunchProject { .. } => {
+                Some((audit::Action::Launch, None))
+            }
             Request::Prompt {
                 session_id, mode, ..
             } => Some((
@@ -877,6 +881,45 @@ fn dispatch_as_inner(
                 result
             }
             Request::Plans => Ok(workspace::plans_view(context, client)),
+            Request::LaunchProject {
+                working_directory,
+                cli,
+                plan_id,
+                request_id,
+            } => once(
+                context,
+                client,
+                &request_id,
+                &json!(["projectLaunch", working_directory, cli, plan_id]),
+                || {
+                    project_request(context, &working_directory, &cli, plan_id.as_deref())
+                        .map(|_| ())
+                },
+                || {
+                    launch_project(
+                        context,
+                        client,
+                        &working_directory,
+                        &cli,
+                        plan_id.as_deref(),
+                    )
+                },
+                |value| {
+                    project_request(context, &working_directory, &cli, plan_id.as_deref())?;
+                    require_control(
+                        context,
+                        value["sessionId"]
+                            .as_str()
+                            .ok_or("Missing launch session")?,
+                    )
+                },
+            )
+            .map(|mut value| {
+                value["mcpReadOutput"] = json!(value["sessionId"]
+                    .as_str()
+                    .is_some_and(|id| context.sink.output_access(id).is_ok()));
+                value
+            }),
             Request::LaunchPlan {
                 plan_id,
                 request_id,
@@ -1012,7 +1055,7 @@ fn require_control(context: &Context, session_id: &str) -> Result<(), String> {
     }
 }
 
-fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, String> {
+fn check_launch_limits(context: &Context, client: &str) -> Result<(), String> {
     let (mine, total) = context.sink.launched_counts(&context.registry, client);
     if mine >= MAX_LAUNCHED_PER_CLIENT {
         return Err(format!(
@@ -1024,6 +1067,170 @@ fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, 
             "{LAUNCH_LIMIT_REACHED} MCP clients together already started {total} of at most {MAX_LAUNCHED_TOTAL} live sessions. Stop one before starting another."
         ));
     }
+    Ok(())
+}
+
+fn project_request(
+    context: &Context,
+    directory: &str,
+    cli: &str,
+    plan_id: Option<&str>,
+) -> Result<(agent::AgentLaunchRequest, u64, bool), String> {
+    let plans = context.sink.plans.lock().map_err(|e| e.to_string())?;
+    let saved = plan_id.and_then(|id| plans.plans.iter().find(|p| p.plan_id == id));
+    let request = plans
+        .project_policy
+        .request(directory, cli, saved.map(|p| &p.request))?;
+    if context
+        .workspace
+        .as_ref()
+        .is_some_and(|scope| !scope.contains(&request.working_directory))
+    {
+        return Err(workspace::DENIED.into());
+    }
+    Ok((
+        request,
+        plans.generation,
+        plans.project_policy.full_permissions,
+    ))
+}
+
+fn launch_project(
+    context: &Context,
+    client: &str,
+    directory: &str,
+    cli: &str,
+    plan_id: Option<&str>,
+) -> Result<Value, String> {
+    launch_project_with(context, client, directory, cli, plan_id, |request| {
+        agent::launch_with_replay(
+            Arc::clone(&context.sink) as Arc<dyn AgentSink>,
+            Arc::clone(&context.registry),
+            request,
+            None,
+        )
+    })
+}
+
+fn launch_project_with(
+    context: &Context,
+    client: &str,
+    directory: &str,
+    cli: &str,
+    plan_id: Option<&str>,
+    launch: impl FnOnce(agent::AgentLaunchRequest) -> Result<AgentSessionSummary, String>,
+) -> Result<Value, String> {
+    let _launch = context.sink.launch_lock.lock().map_err(|e| e.to_string())?;
+    check_launch_limits(context, client)?;
+    let (request, generation, full) = project_request(context, directory, cli, plan_id)?;
+    let metadata = audit::ProjectLaunch {
+        working_directory: request.working_directory.clone(),
+        cli: cli.to_string(),
+        permission: if full { "full" } else { "savedPlan" }.into(),
+        sandbox: request.sandbox,
+    };
+    // Creation is ephemeral: no model-authored persistent plans or arbitrary arguments.
+    context
+        .sink
+        .history
+        .lock()
+        .map_err(|e| e.to_string())?
+        .record_project(
+            client,
+            audit::Action::CreatePlan,
+            audit::Outcome::Accepted,
+            None,
+            metadata.clone(),
+            now_millis(),
+        );
+    let summary = match launch(request) {
+        Ok(summary) => detached(summary),
+        Err(error) => {
+            let mut history = context.sink.history.lock().map_err(|e| e.to_string())?;
+            history.record_project(
+                client,
+                audit::Action::Launch,
+                audit::Outcome::Failed,
+                None,
+                metadata,
+                now_millis(),
+            );
+            return Err(error);
+        }
+    };
+    let result = (|| {
+        let _grant = context.sink.grant_change_lock(&summary.session_id)?;
+        let _grant = _grant.lock().map_err(|e| e.to_string())?;
+        let plans = context.sink.plans.lock().map_err(|e| e.to_string())?;
+        if !plans.project_policy.enabled || plans.generation != generation {
+            return Err("Project launch authorization changed while starting.".to_string());
+        }
+        agent::set_mcp_control(
+            context.sink.as_ref(),
+            &context.registry,
+            &summary.session_id,
+            true,
+        )?;
+        context.sink.set_shared(&summary.session_id, true);
+        context.sink.set_control(&summary.session_id, true)
+    })();
+    if let Err(error) = result {
+        let _ = agent::disconnect(
+            context.sink.as_ref(),
+            &context.registry,
+            &summary.session_id,
+        );
+        context
+            .sink
+            .history
+            .lock()
+            .map_err(|e| e.to_string())?
+            .record_project(
+                client,
+                audit::Action::Launch,
+                audit::Outcome::Failed,
+                Some(summary.session_id.clone()),
+                metadata,
+                now_millis(),
+            );
+        return Err(error);
+    }
+    context
+        .sink
+        .project_launched
+        .lock()
+        .map_err(|e| e.to_string())?
+        .retain(|id| context.registry.session_summary(id).is_some());
+    context
+        .sink
+        .project_launched
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(summary.session_id.clone());
+    context.sink.note_launch(client, &summary.session_id);
+    context
+        .sink
+        .note_activity(&summary.session_id, client, "launch");
+    context
+        .sink
+        .history
+        .lock()
+        .map_err(|e| e.to_string())?
+        .record_project(
+            client,
+            audit::Action::Launch,
+            audit::Outcome::Accepted,
+            Some(summary.session_id.clone()),
+            metadata,
+            now_millis(),
+        );
+    context.sink.broadcast("launched", to_value(&summary)?);
+    to_value(&observer_summary(summary))
+}
+
+fn launch_plan(context: &Context, client: &str, plan_id: &str) -> Result<Value, String> {
+    let _launch = context.sink.launch_lock.lock().map_err(|e| e.to_string())?;
+    check_launch_limits(context, client)?;
     let Some((plan, generation)) = context.sink.plan_with_generation(plan_id) else {
         return Err(if context.sink.plans_enabled() {
             PLAN_NOT_AVAILABLE.to_string()
@@ -1102,7 +1309,17 @@ fn prompt(
     let before = registry
         .session_summary(session_id)
         .ok_or_else(|| "Agent session no longer exists.".to_string())?;
-    let queued = agent::mcp_prompt(sink, registry, session_id, text, mode == PromptMode::Now)?;
+    let project_session = context
+        .sink
+        .project_launched
+        .lock()
+        .map_err(|e| e.to_string())?
+        .contains(session_id);
+    let queued = if project_session {
+        agent::mcp_project_prompt(sink, registry, session_id, text, mode == PromptMode::Now)?
+    } else {
+        agent::mcp_prompt(sink, registry, session_id, text, mode == PromptMode::Now)?
+    };
     let sent_now = queued == 0;
     context.sink.note_activity(
         session_id,
@@ -1350,7 +1567,23 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
                 .map_err(|error| error.to_string())?;
             to_value(&history.snapshot())
         }
-        Request::McpPlansReplace { enabled, plans } => {
+        Request::McpPlansReplace {
+            enabled,
+            plans,
+            project_policy,
+        } => {
+            if project_policy.enabled && project_policy.clone().normalized()? != project_policy {
+                return Err(
+                    "Registered project roots changed; register them again in the desktop.".into(),
+                );
+            }
+            {
+                let mut current = context.sink.plans.lock().map_err(|e| e.to_string())?;
+                if current.project_policy != project_policy {
+                    current.project_policy = project_policy;
+                    current.generation = current.generation.wrapping_add(1);
+                }
+            }
             context.log.line(&format!(
                 "desktop: observers may launch {} saved plan(s)",
                 if enabled { plans.len() } else { 0 }
@@ -1359,6 +1592,7 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Request::Plans
+        | Request::LaunchProject { .. }
         | Request::LaunchPlan { .. }
         | Request::Prompt { .. }
         | Request::Cancel { .. } => Err("These requests are for observers.".to_string()),
@@ -1452,9 +1686,11 @@ pub struct DaemonSink {
     shared: Mutex<HashMap<String, ShareEntry>>,
     /// Saved plans the user allowed observers to launch.
     plans: Mutex<LaunchPlans>,
+    launch_lock: Mutex<()>,
     /// Sessions each observer started, so a client cannot fan out beyond
     /// its ceiling. Entries go when the session ends.
     launched: Mutex<HashMap<String, HashSet<String>>>,
+    project_launched: Mutex<HashSet<String>>,
     /// Outcomes of recent observer actions, by client and request id.
     recent: Mutex<VecDeque<Arc<RecentOutcome>>>,
     next: AtomicU64,
@@ -1614,6 +1850,7 @@ impl OutputAccess {
 struct LaunchPlans {
     enabled: bool,
     generation: u64,
+    project_policy: crate::agent_project_launch::ProjectLaunchPolicy,
     plans: Vec<McpPlan>,
 }
 
@@ -1867,7 +2104,13 @@ impl DaemonSink {
 
     pub fn plans_replace(&self, enabled: bool, plans: Vec<McpPlan>) {
         if let Ok(mut current) = self.plans.lock() {
-            let plans = if enabled { plans } else { Vec::new() };
+            let plans = if enabled
+                || (current.project_policy.enabled && !current.project_policy.full_permissions)
+            {
+                plans
+            } else {
+                Vec::new()
+            };
             if current.enabled == enabled
                 && serde_json::to_value(&current.plans).ok() == serde_json::to_value(&plans).ok()
             {
@@ -1882,7 +2125,7 @@ impl DaemonSink {
     pub fn plans_enabled(&self) -> bool {
         self.plans
             .lock()
-            .map(|plans| plans.enabled)
+            .map(|plans| plans.enabled || plans.project_policy.enabled)
             .unwrap_or(false)
     }
 
@@ -1919,6 +2162,9 @@ impl DaemonSink {
     }
 
     fn forget_launch(&self, session_id: &str) {
+        if let Ok(mut sessions) = self.project_launched.lock() {
+            sessions.remove(session_id);
+        }
         if let Ok(mut launched) = self.launched.lock() {
             launched.retain(|_, sessions| {
                 sessions.remove(session_id);
@@ -1952,6 +2198,7 @@ impl DaemonSink {
             .unwrap_or_default();
         let (mine, total) = self.launched_counts(registry, client);
         json!({
+            "projectLaunch": self.plans.lock().ok().map(|p| p.project_policy.clone()),
             "enabled": enabled,
             "launchedByYou": mine,
             "launchedTotal": total,

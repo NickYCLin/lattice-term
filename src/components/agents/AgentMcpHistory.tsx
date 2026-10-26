@@ -45,6 +45,7 @@ export function AgentMcpHistory({ history }: { history: History | null }) {
                     })}</>
                   ) : null}
                 </span>
+                {entry.projectLaunch && <span className="mono agents-field-hint">{entry.projectLaunch.cli} · {entry.projectLaunch.workingDirectory} · {t(entry.projectLaunch.permission === "full" ? "agents.mcp.project.full" : "agents.mcp.project.saved")}</span>}
                 <span className="mono agents-field-hint">
                   {entry.sessionId ?? entry.targetId ?? t("agents.mcp.history.noSession")}
                 </span>
