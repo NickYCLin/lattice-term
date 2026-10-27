@@ -329,7 +329,7 @@ async fn run_session(
                         return Ok(());
                     }
                     Some(RdpOutputEvent::Terminated(result)) => {
-                        let reason = result.map(|reason| reason.to_string()).unwrap_or_else(|error| error.to_string());
+                        let reason = result.map(|reason| reason.to_string()).unwrap_or_else(|error| error.report().to_string());
                         emit(stdout, &Event::Closed { reason }).await?;
                         return Ok(());
                     }

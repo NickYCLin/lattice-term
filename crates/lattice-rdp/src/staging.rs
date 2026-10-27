@@ -190,6 +190,84 @@ impl RdpdrBackend for StagingBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ironrdp::core::encode_vec;
+    use ironrdp::rdpdr::Rdpdr;
+    use ironrdp::svc::SvcProcessor;
+
+    fn initialized_channel(root: &Path) -> Rdpdr {
+        let factory = StagingFactory::new(root.to_str().unwrap()).unwrap();
+        let (backend, drives) = factory.build_rdpdr_backend().unwrap().into_parts();
+        let mut channel = Rdpdr::new(backend, "test".into())
+            .with_drives(Some(drives.into_iter().map(|d| d.into_parts()).collect()));
+        for kind in [
+            VersionAndIdPduKind::ServerAnnounceRequest,
+            VersionAndIdPduKind::ServerClientIdConfirm,
+        ] {
+            channel
+                .process(
+                    &encode_vec(&RdpdrPdu::VersionAndIdPdu(VersionAndIdPdu {
+                        version_major: 1,
+                        version_minor: VERSION_MINOR_12,
+                        client_id: 0x1234,
+                        kind,
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+        let announcements = channel
+            .process(&encode_vec(&RdpdrPdu::UserLoggedon).unwrap())
+            .unwrap();
+        let announcement = announcements[0].encode_unframed_pdu().unwrap();
+        assert_eq!(&announcement[28..], b"LatticeDeploy\0");
+        channel
+            .process(
+                &encode_vec(&RdpdrPdu::ServerDeviceAnnounceResponse(
+                    ServerDeviceAnnounceResponse {
+                        device_id: 1,
+                        result_code: NtStatus::SUCCESS,
+                    },
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+        channel
+    }
+
+    fn query_packet(declared: u32, data: &[u8]) -> Vec<u8> {
+        let mut packet = encode_vec(&RdpdrPdu::DeviceIoRequest(request(
+            1,
+            MajorFunction::QueryInformation,
+        )))
+        .unwrap();
+        packet.extend(4u32.to_le_bytes()); // FileBasicInformation
+        packet.extend(declared.to_le_bytes());
+        packet.extend([0xa5; 24]); // Reserved bytes may contain any value.
+        packet.extend(data);
+        packet
+    }
+
+    #[test]
+    fn wire_queries_consume_reserved_fields_and_declared_buffer() {
+        let root = tempfile::tempdir().unwrap();
+        let mut channel = initialized_channel(root.path());
+        // The native backend may reject the nonexistent handle, but the
+        // channel must return a completion, not terminate the RDP session.
+        for packet in [query_packet(0, &[]), query_packet(3, &[1, 2, 3])] {
+            assert_eq!(channel.process(&packet).unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn wire_queries_still_reject_truncation_and_undeclared_trailing_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let mut channel = initialized_channel(root.path());
+        let full = query_packet(0, &[]);
+        assert!(channel.process(&full[..full.len() - 1]).is_err());
+        assert!(channel.process(&full[..28]).is_err());
+        assert!(channel.process(&query_packet(1, &[])).is_err());
+        assert!(channel.process(&query_packet(0, &[1])).is_err());
+    }
     fn request(file_id: u32, major_function: MajorFunction) -> DeviceIoRequest {
         DeviceIoRequest {
             device_id: 1,

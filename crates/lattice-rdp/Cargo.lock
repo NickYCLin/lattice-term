@@ -1548,7 +1548,6 @@ dependencies = [
 [[package]]
 name = "ironrdp-rdpdr"
 version = "0.7.0"
-source = "git+https://github.com/Devolutions/IronRDP?rev=476b897129634c7f39d5679a80265258d506c1d3#476b897129634c7f39d5679a80265258d506c1d3"
 dependencies = [
  "bitflags 2.13.1",
  "getrandom 0.3.4",

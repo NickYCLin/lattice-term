@@ -1,0 +1,25 @@
+[package]
+name = "ironrdp-rdpdr"
+version = "0.7.0"
+readme = "README.md"
+description = "RDPDR channel implementation."
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/Devolutions/IronRDP"
+repository = "https://github.com/Devolutions/IronRDP"
+authors = ["Devolutions Inc. <infos@devolutions.net>", "Teleport <goteleport.com>"]
+keywords = ["rdp", "remote-desktop", "network", "client", "protocol"]
+categories = ["network-programming"]
+
+[lib]
+doctest = false
+
+[dependencies]
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP", rev = "476b897129634c7f39d5679a80265258d506c1d3", version = "0.2" } # public
+ironrdp-error = { git = "https://github.com/Devolutions/IronRDP", rev = "476b897129634c7f39d5679a80265258d506c1d3", version = "0.2" } # public
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP", rev = "476b897129634c7f39d5679a80265258d506c1d3", version = "0.9" } # public
+ironrdp-svc = { git = "https://github.com/Devolutions/IronRDP", rev = "476b897129634c7f39d5679a80265258d506c1d3", version = "0.8" } # public
+tracing = { version = "0.1", features = ["log"] }
+bitflags = "2.11"
+getrandom = { version = "0.3", features = ["std"] }

@@ -1,5 +1,7 @@
 # RDP 部署檔案通道驗證
 
+後續實機驗收發現並修正 RDPDR 相容問題，更新結果見 [RDP 部署實機相容驗證](2026-10-27-rdp-deployment-compat.zh-TW.md)。
+
 ## 修改範圍
 
 Windows 客戶端新增 `rdp_stage_file`，逐檔核准後將完整快照放入該連線專用的唯讀 RDPDR 分享，並回傳 SHA-256 與 tsclient 路徑。實際複製與部署仍透過獨立授權的遠端桌面操作完成。原有 JPEG RGB 修正另行提交。

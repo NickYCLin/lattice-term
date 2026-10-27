@@ -24,3 +24,6 @@ ironrdp-rdpdr-native = { git = "https://github.com/Devolutions/IronRDP", rev = "
 
 [dev-dependencies]
 tempfile = "3"
+
+[patch."https://github.com/Devolutions/IronRDP"]
+ironrdp-rdpdr = { path = "../../vendor/ironrdp-rdpdr" }
