@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
@@ -18,6 +18,10 @@ function isCliState(state: string): state is CliState {
 }
 
 export function RemoteCliPane({ session, theme, active = true }: { session: RemoteSessionSummary; theme: ThemeId; active?: boolean }) {
+  return <RemoteCliWorkspace key={session.sessionId} session={session} theme={theme} active={active} />;
+}
+
+function RemoteCliWorkspace({ session, theme, active }: { session: RemoteSessionSummary; theme: ThemeId; active: boolean }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<RemoteCliSession[]>([]);
   const [selected, setSelected] = useState<RemoteCliSession | null>(null);
@@ -26,6 +30,20 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
   const [generation, refresh] = useState(0);
   const [filter, setFilter] = useState<RemoteCliFilter>("all");
   const [query, setQuery] = useState("");
+  const pane = useRef<HTMLElement>(null);
+  const listScroll = useRef(0);
+  useLayoutEffect(() => {
+    if (pane.current) pane.current.scrollTop = selected ? 0 : listScroll.current;
+  }, [selected, filter, query]);
+  function selectSession(item: RemoteCliSession) {
+    listScroll.current = pane.current?.scrollTop ?? 0;
+    setSelected(item);
+  }
+  function clearFilters() {
+    listScroll.current = 0;
+    setQuery("");
+    setFilter("all");
+  }
   const visible = remoteCliList(sessions, filter, query);
   const counts = Object.fromEntries(CLI_STATES.map(state => [state, sessions.filter(item => item.state === state).length]));
   useEffect(() => {
@@ -42,7 +60,7 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
     void poll();
     return () => { stopped = true; clearTimeout(timer); };
   }, [active, session.sessionId, session.cli, selected, generation]);
-  return <section className="remote-cli-pane" aria-label={t("remote.cli.title")}>
+  return <section ref={pane} className="remote-cli-pane" aria-label={t("remote.cli.title")}>
     <header className="remote-pane-header">
       {selected ? <button className="button button--secondary button--sm" onClick={() => setSelected(null)}>{t("remote.cli.back")}</button> : <strong>{t("remote.cli.title")}</strong>}
       <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(false); refresh(value => value + 1); }}><RefreshIcon size={15} /></button>
@@ -50,15 +68,16 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
     {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
       <div className="remote-cli-tools">
         <input type="search" className="input remote-cli-search" aria-label={t("remote.cli.search")}
-          placeholder={t("remote.cli.search")} value={query} onChange={event => setQuery(event.currentTarget.value)} />
+          placeholder={t("remote.cli.search")} value={query} onChange={event => { listScroll.current = 0; setQuery(event.currentTarget.value); }} />
         <div className="remote-cli-filters" role="group" aria-label={t("remote.cli.filter")}>
           {(["all", ...CLI_STATES] as const).map(state => <button type="button" key={state}
             className={`remote-cli-filter${filter === state ? " is-active" : ""}`}
-            aria-pressed={filter === state} onClick={() => setFilter(state)}>
+            aria-pressed={filter === state} onClick={() => { listScroll.current = 0; setFilter(state); }}>
             {state === "all" ? t("remote.cli.all") : t(`agents.state.${state}`)}
             <span>{state === "all" ? sessions.length : counts[state]}</span>
           </button>)}
         </div>
+        {(filter !== "all" || query !== "") && <button type="button" className="button button--ghost button--sm remote-cli-clear" onClick={clearFilters}>{t("remote.cli.clearFilters")}</button>}
       </div>
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
       {!problem && (!loaded || sessions.length === 0) && <p role="status">{!loaded ? t("remote.cli.loading") : t("remote.cli.empty")}</p>}
@@ -70,7 +89,7 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
         const place = card.place.split(" · ").filter(value => value !== card.title && value !== folder).join(" · ");
         return <div key={item.id}>
           {isCliState(item.state) && visible[index - 1]?.state !== item.state && <h3 className="remote-cli-group-title">{t(`agents.state.${item.state}`)}</h3>}
-          <button className="remote-chat-thread remote-cli-card" onClick={() => setSelected(item)}>
+          <button className="remote-chat-thread remote-cli-card" onClick={() => selectSession(item)}>
           <div className="remote-cli-card__head"><strong>{card.title}</strong>
             {isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
           </div>

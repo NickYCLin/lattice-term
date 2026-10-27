@@ -17,6 +17,7 @@
 .remote-cli-state--done { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .remote-cli-tools { display: grid; gap: 8px; flex: none; position: sticky; top: 0; z-index: 1; background: var(--surface); padding-block: 4px; }
 .remote-cli-search { width: 100%; min-height: 44px; }
+.remote-cli-clear { justify-self: start; min-height: 44px; }
 .remote-cli-filters { display: flex; gap: 6px; overflow-x: auto; }
 .remote-cli-filter { display: inline-flex; align-items: center; flex: none; gap: 6px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text-muted); cursor: pointer; font: inherit; font-size: var(--text-sm); white-space: nowrap; }
 .remote-cli-filter span { font-variant-numeric: tabular-nums; }

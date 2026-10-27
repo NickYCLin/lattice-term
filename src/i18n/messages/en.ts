@@ -2566,6 +2566,7 @@ export const en: Messages = {
   "remote.cli.filter": "Filter sessions by status",
   "remote.cli.all": "All",
   "remote.cli.noMatches": "No matching sessions. Try another status or search.",
+  "remote.cli.clearFilters": "Clear filters",
   "remote.cli.tab": "Agents",
   "remote.chat.attachImage": "Image",
   "remote.chat.images": "Images to send",

@@ -2478,6 +2478,7 @@ export const zhTW = {
   "remote.cli.filter": "依工作階段狀態篩選",
   "remote.cli.all": "全部",
   "remote.cli.noMatches": "沒有符合的工作階段，試試其他狀態或搜尋文字。",
+  "remote.cli.clearFilters": "清除篩選",
   "remote.cli.tab": "助理",
   "remote.chat.attachImage": "圖片",
   "remote.chat.images": "要送出的圖片",
