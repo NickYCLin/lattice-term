@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   credentialKindFor,
+  useCredentialDeleteGuard,
   useSavedCredential,
   type CredentialKind,
   type SavedCredentialState,
@@ -70,6 +71,25 @@ describe("credentialKindFor", () => {
 });
 
 describe("saved host credential probe", () => {
+  it("probes usable viewer codes separately from strict deletion inventory", async () => {
+    backend.invoke.mockImplementation(async (command: string) => {
+      if (command === "credential_status") return { ready:true, provider:"iOS Keychain", detail:null };
+      if (command === "remote_pairing_code_available") return false;
+      if (command === "credential_exists") throw new Error("secondary vault is locked");
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const mounted = await mountCredential("latticePairingCode");
+    let guard: { mode:string } | undefined;
+    const root = createRoot(hookContainer());
+    function Guard() { guard = useCredentialDeleteGuard(profile("lattice")); return null; }
+    try {
+      expect(mounted.state().mode).toBe("missing");
+      await act(async () => root.render(createElement(Guard)));
+      expect(guard?.mode).toBe("unavailable");
+      expect(backend.invoke).toHaveBeenCalledWith("remote_pairing_code_available", { profileId:"remote-host" });
+      expect(backend.invoke).toHaveBeenCalledWith("credential_exists", { profileId:"profile-1", kind:"latticePairingCode" });
+    } finally { await act(async () => { mounted.root.unmount(); root.unmount(); }); }
+  });
   it("checks cleanup and the marker-selected backend before current backend readiness", async () => {
     backend.invoke.mockImplementation(async (command: string) => {
       if (command === "remote_host_pairing_code_cleanup_pending") return true;

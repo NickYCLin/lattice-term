@@ -2149,6 +2149,10 @@ export const en: Messages = {
   // Lattice Remote ---------------------------------------------------------
   "remote.connect.title": "Connect to {name}",
   "remote.connect.securityTitle": "Encrypted pairing and secure storage",
+  "remote.connect.deviceStorageTitle": "Remember the pairing code on this iPhone",
+  "remote.connect.deviceStorageBody": "Choose iOS secure storage to save the pairing code and reuse it after reopening the app. Newly saved passwords will also use iOS Keychain. Existing encrypted vault entries stay where they are and are not migrated automatically.",
+  "remote.connect.useDeviceStorage": "Use iOS secure storage",
+  "remote.connect.useEncryptedVault": "Use the encrypted vault instead",
   "remote.connect.securityBody":
     "The code is used only for the Noise handshake and is not saved by default. Only relay connections with a permanent device ID can save it after your explicit choice; the host still authorises keyboard control and file access independently.",
   "remote.connect.savedCodeTitle": "Pairing code stored securely",

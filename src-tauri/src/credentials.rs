@@ -893,6 +893,18 @@ pub fn exists(profile_id: &str, kind: CredentialKind) -> Result<bool, String> {
     )
 }
 
+/// Probe only the selected store, matching the provider shown by the viewer.
+/// A locked secondary vault must not prevent a new Keychain save, and an old
+/// vault copy must not be advertised as already saved in Keychain.
+/// Inventory/deletion still use exists() and account for both stores.
+pub fn remote_pairing_code_available(profile_id: &str) -> Result<bool, String> {
+    exists_in_backend(
+        preferred_backend(),
+        profile_id,
+        CredentialKind::LatticePairingCode,
+    )
+}
+
 /// New secrets go to the preferred backend only.
 fn store(profile_id: &str, kind: CredentialKind, secret: &str) -> Result<(), String> {
     store_in_backend(preferred_backend(), profile_id, kind, secret)

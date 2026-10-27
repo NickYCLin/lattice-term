@@ -27,6 +27,7 @@ export function RemoteConnectFlow({
   profile,
   remote,
   vault,
+  platform,
   onConnected,
   onRelayAddressChanged,
   onCancel,
@@ -34,6 +35,7 @@ export function RemoteConnectFlow({
   profile: ConnectionProfile;
   remote: RemoteApi;
   vault?: VaultApi;
+  platform?: string;
   onConnected: (sessionId: string) => void;
   /** Persists a corrected relay address back onto the saved entry. */
   onRelayAddressChanged?: (relayAddress: string) => void;
@@ -48,13 +50,14 @@ export function RemoteConnectFlow({
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
+  const [switchingStorage, setSwitchingStorage] = useState(false);
   const [relayAddress, setRelayAddress] = useState(profile.relayAddress ?? "");
   // A quick tunnel hands out a new hostname every restart, so a saved address
   // goes stale on its own. Offering the field only after the relay actually
   // failed keeps the usual connection down to one input.
   const [relayUnreachable, setRelayUnreachable] = useState(false);
   const [connecting, setBusy] = useState(false);
-  const busy = connecting || removingCredential;
+  const busy = connecting || removingCredential || switchingStorage;
   const [problem, setProblem] = useState<string | null>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const relayRef = useRef<HTMLInputElement>(null);
@@ -213,6 +216,24 @@ export function RemoteConnectFlow({
     }
   }
 
+  async function useDeviceStorage() {
+    if (operationInFlight.current || vault?.busy || !vault) return;
+    operationInFlight.current = true;
+    setSwitchingStorage(true);
+    setProblem(null);
+    try {
+      if (await vault.setBackend("osKeyring")) {
+        setRememberPairingCode(true);
+        await savedCredential.refresh();
+      }
+    } catch (reason) {
+      setProblem(t("credential.unavailable.body", { detail: reason instanceof Error ? reason.message : String(reason) }));
+    } finally {
+      operationInFlight.current = false;
+      setSwitchingStorage(false);
+    }
+  }
+
   return (
     <div
       className="scrim scrim--center"
@@ -292,9 +313,22 @@ export function RemoteConnectFlow({
             </Callout>
           )}
 
-          {relay && vaultUnavailable && vault && (
-            <CredentialVaultAccess vault={vault} disabled={busy} onReady={savedCredential.refresh} />
+          {relay && platform === "ios" && vault?.backend === "vault" && (
+            <Callout tone="info" title={t("remote.connect.deviceStorageTitle")}>
+              <p>{t("remote.connect.deviceStorageBody")}</p>
+              {vault.problem && <p role="alert">{vault.problem}</p>}
+              <button type="button" className="button button--secondary" disabled={busy || vault.busy}
+                onClick={() => void useDeviceStorage()}>
+                {t("remote.connect.useDeviceStorage")}
+              </button>
+            </Callout>
           )}
+
+          {relay && vaultUnavailable && vault && (platform === "ios"
+            ? <details className="remote-storage-choice"><summary>{t("remote.connect.useEncryptedVault")}</summary>
+              <CredentialVaultAccess vault={vault} disabled={busy} onReady={savedCredential.refresh} />
+            </details>
+            : <CredentialVaultAccess vault={vault} disabled={busy} onReady={savedCredential.refresh} />)}
 
           {relay && !vaultUnavailable && savedCredential.state.mode === "unavailable" && (
             <Callout tone="warn" title={t("credential.unavailable.title")}>

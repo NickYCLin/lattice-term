@@ -113,6 +113,7 @@ async function hostCleanupPending(kind: CredentialKind): Promise<boolean> {
 async function readState(
   profileId: string,
   kind: CredentialKind,
+  forConnection = false,
 ): Promise<SavedCredentialState> {
   if (!hasDesktopBackend()) {
     return {
@@ -159,8 +160,10 @@ async function readState(
       };
     }
 
-    const saved =
-      kind === "latticeHostPairingCode" ? false : await exists(profileId, kind);
+    const saved = kind === "latticeHostPairingCode" ? false
+      : kind === "latticePairingCode" && forConnection
+        ? await (await core()).invoke<boolean>("remote_pairing_code_available", { profileId })
+        : await exists(profileId, kind);
     return {
       mode: saved ? "saved" : "missing",
       provider: status.provider,
@@ -254,7 +257,7 @@ export function useSavedCredential(
   const refresh = useCallback(async () => {
     const generation = ++readGeneration.current;
     setState({ mode: "loading", provider: null, detail: null });
-    const next = await readState(profileId, kind);
+    const next = await readState(profileId, kind, true);
     if (generation === readGeneration.current) setState(next);
   }, [kind, profileId]);
 

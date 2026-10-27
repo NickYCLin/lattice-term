@@ -2080,6 +2080,10 @@ export const zhTW = {
   // Lattice Remote ---------------------------------------------------------
   "remote.connect.title": "連線到 {name}",
   "remote.connect.securityTitle": "加密配對與安全儲存",
+  "remote.connect.deviceStorageTitle": "在這支 iPhone 記住配對碼",
+  "remote.connect.deviceStorageBody": "選擇 iOS 安全儲存區後，可保存配對碼，重新開啟 App 也能沿用。之後新增的密碼也會改存 iOS Keychain；原本的加密保管庫內容保留，不會自動搬移。",
+  "remote.connect.useDeviceStorage": "使用 iOS 安全儲存區保存",
+  "remote.connect.useEncryptedVault": "改用加密保管庫",
   "remote.connect.securityBody": "配對碼只用於 Noise 加密交握，預設不保存。只有永久裝置 ID 的 Relay 連線可在你明確選擇後保存；能否操控鍵鼠或瀏覽檔案仍由主機端分別授權。",
   "remote.connect.savedCodeTitle": "配對碼已安全保存",
   "remote.connect.useSavedCode": "使用 {provider} 中已儲存的配對碼",

@@ -77,13 +77,13 @@ function fakeVault(state: "locked" | "notCreated" | "unlocked" = "locked"): Vaul
     refresh: vi.fn(async () => {}), create: vi.fn(async () => true), unlock: vi.fn(async () => true), lock: vi.fn(async () => {}),
     changePassword: vi.fn(async () => true), setBackend: vi.fn(async () => true) };
 }
-function harness(vault = fakeVault()) {
+function harness(vault = fakeVault(), platform?: string) {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);
   const connect = vi.fn(async () => ({ outcome: "connected", sessionId: "test-session" }));
   const connected = vi.fn();
   const render = () => root.render(<I18nProvider locale="zh-TW"><RemoteConnectFlow profile={profile}
-    remote={{ connect } as unknown as RemoteApi} vault={vault} onConnected={connected} onCancel={vi.fn()} /></I18nProvider>);
+    remote={{ connect } as unknown as RemoteApi} vault={vault} platform={platform} onConnected={connected} onCancel={vi.fn()} /></I18nProvider>);
   const input = (id: string) => allNodes(container).find(node => node.attributes.id === id)!;
   const change = async (id: string, value: string) => {
     await act(async () => { const node = input(id); node.value = value; props(node).onChange?.({ currentTarget: { value, checked: false } }); });
@@ -96,6 +96,52 @@ beforeEach(() => {
   credential.refresh.mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
+
+it("lets iPhone explicitly select Keychain and remember without unlocking the other vault", async () => {
+  const test = harness(fakeVault(), "ios");
+  vi.mocked(test.vault.setBackend).mockImplementation(async backend => {
+    test.vault.backend = backend;
+    credential.state = { mode: "missing", provider: "iOS Keychain", detail: null };
+    return true;
+  });
+  try {
+    await act(async () => test.render());
+    expect(test.vault.setBackend).not.toHaveBeenCalled();
+    await test.change("remote-pairing-code", "test-only-pairing");
+    await act(async () => props(test.button("使用 iOS 安全儲存區保存")).onClick!());
+    await act(async () => test.render());
+    expect(test.vault.setBackend).toHaveBeenCalledExactlyOnceWith("osKeyring");
+    expect(test.vault.unlock).not.toHaveBeenCalled();
+    expect(test.connect).not.toHaveBeenCalled();
+    expect(test.container.textContent).toContain("成功配對後將配對碼保存到 iOS Keychain");
+    const remember = allNodes(test.container).find(node => node.tagName === "INPUT" && props(node).type === "checkbox")!;
+    expect(props(remember).checked).toBe(true);
+    await act(async () => props(allNodes(test.container).find(node => node.tagName === "FORM")!).onSubmit!({ preventDefault: vi.fn() }));
+    expect(test.connect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pairingCode:"test-only-pairing", rememberPairingCode:true }));
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("does not claim a failed native store selection was saved", async () => {
+  const test = harness(fakeVault(), "ios");
+  vi.mocked(test.vault.setBackend).mockResolvedValue(false);
+  try {
+    await act(async () => test.render());
+    await act(async () => props(test.button("使用 iOS 安全儲存區保存")).onClick!());
+    expect(test.vault.backend).toBe("vault");
+    expect(test.container.textContent).not.toContain("成功配對後將配對碼保存");
+    expect(test.connect).not.toHaveBeenCalled();
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("reuses the saved iPhone pairing code without asking for it again", async () => {
+  const vault = fakeVault(); vault.backend = "osKeyring";
+  credential.state = { mode: "saved", provider: "iOS Keychain", detail: null };
+  const test = harness(vault, "ios");
+  try {
+    await act(async () => test.render());
+    expect(test.connect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pairingCode:"", useSavedPairingCode:true }));
+  } finally { await act(async () => test.root.unmount()); }
+});
 
 it("unlocks in place without sending a connection or losing the entered pairing code", async () => {
   const test = harness();

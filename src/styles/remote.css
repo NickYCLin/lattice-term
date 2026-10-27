@@ -1,4 +1,7 @@
 /* Lattice Remote view-only session. */
+.remote-storage-choice > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--text-muted); }
+.remote-storage-choice > summary::before { content: "▸"; margin-inline-end: 8px; }
+.remote-storage-choice[open] > summary::before { content: "▾"; }
 
 /* Collapsed relay field: the address stays saved and out of sight, day-to-day
    flows only deal with device ID and pairing code. */

@@ -3904,6 +3904,11 @@ async fn credential_exists(profile_id: String, kind: CredentialKind) -> Result<b
 }
 
 #[tauri::command]
+async fn remote_pairing_code_available(profile_id: String) -> Result<bool, String> {
+    credential_call(move || crate::credentials::remote_pairing_code_available(&profile_id)).await
+}
+
+#[tauri::command]
 async fn credential_delete(profile_id: String, kind: CredentialKind) -> Result<bool, String> {
     if kind == CredentialKind::LatticeHostPairingCode {
         return Err("Use the dedicated Lattice Remote host password removal command.".to_string());
@@ -5799,6 +5804,7 @@ pub fn run() {
             terminal_clipboard_write_text,
             app_restart_safely,
             credential_exists,
+            remote_pairing_code_available,
             save_connection_record,
             connection_credential_status,
             connection_credential_read,

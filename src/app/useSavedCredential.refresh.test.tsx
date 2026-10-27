@@ -17,7 +17,7 @@ it("ignores an older locked status after a successful unlock refresh", async () 
   let reads = 0;
   native.invoke.mockImplementation(async (command: string) => {
     if (command === "credential_status") return ++reads === 1 ? pending : { ready: true, provider: "Encrypted vault", detail: null };
-    if (command === "credential_exists") return true;
+    if (command === "remote_pairing_code_available") return true;
     return null;
   });
   function Probe() { api = useSavedCredential("test-device", "latticePairingCode"); return null; }
@@ -38,7 +38,7 @@ it("does not replace another device's credential state with an earlier refresh",
   let reads = 0;
   native.invoke.mockImplementation(async (command: string, args: { profileId?: string }) => {
     if (command === "credential_status") return ++reads === 2 ? pending : { ready: true, provider: "Encrypted vault", detail: null };
-    if (command === "credential_exists") return args.profileId === "device-a";
+    if (command === "remote_pairing_code_available") return args.profileId === "device-a";
     return null;
   });
   function Probe({ id }: { id: string }) { api = useSavedCredential(id, "latticePairingCode"); return null; }
