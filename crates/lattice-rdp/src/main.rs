@@ -126,32 +126,32 @@ fn validate_certificate_pin(
     accepted
 }
 
-fn rgba_frame(buffer: &[u32], width: u16, height: u16) -> Result<Vec<u8>, String> {
+fn rgb_frame(buffer: &[u32], width: u16, height: u16) -> Result<Vec<u8>, String> {
     let expected = usize::from(width) * usize::from(height);
     if buffer.len() != expected {
         return Err("IronRDP returned an invalid framebuffer size.".to_string());
     }
 
-    let mut rgba = Vec::with_capacity(expected * 4);
+    let mut rgb = Vec::with_capacity(expected * 3);
     for pixel in buffer {
         // IronRDP stores each pixel as 0x00RRGGBB. Converting the integer with
         // the host's byte order would swap red and blue on little-endian
-        // machines and leave a zero alpha channel.
+        // machines. JPEG requires RGB without an alpha channel.
         let [_, red, green, blue] = pixel.to_be_bytes();
-        rgba.extend_from_slice(&[red, green, blue, u8::MAX]);
+        rgb.extend_from_slice(&[red, green, blue]);
     }
-    Ok(rgba)
+    Ok(rgb)
 }
 
 fn encode_frame(buffer: &[u32], width: u16, height: u16) -> Result<Vec<u8>, String> {
-    let rgba = rgba_frame(buffer, width, height)?;
+    let rgb = rgb_frame(buffer, width, height)?;
     let mut jpeg = Vec::new();
     JpegEncoder::new_with_quality(&mut jpeg, 78)
         .write_image(
-            &rgba,
+            &rgb,
             u32::from(width),
             u32::from(height),
-            ExtendedColorType::Rgba8,
+            ExtendedColorType::Rgb8,
         )
         .map_err(|error| error.to_string())?;
     Ok(jpeg)
@@ -440,14 +440,42 @@ mod tests {
     }
 
     #[test]
-    fn converts_ironrdp_pixels_to_opaque_rgba_without_swapping_colours() {
-        let rgba = rgba_frame(&[0x00FF_0000, 0x0000_00FF], 2, 1).expect("valid frame");
+    fn converts_ironrdp_pixels_to_rgb_without_swapping_colours() {
+        let rgb = rgb_frame(&[0x00FF_0000, 0x0000_00FF], 2, 1).expect("valid frame");
 
-        assert_eq!(rgba, [255, 0, 0, 255, 0, 0, 255, 255]);
+        assert_eq!(rgb, [255, 0, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn framebuffer_encodes_as_a_decodable_jpeg_with_correct_colours() {
+        let width = 16;
+        let height = 8;
+        let buffer: Vec<u32> = (0..height)
+            .flat_map(|_| {
+                (0..width).map(|x| {
+                    if x < width / 2 {
+                        0x00FF_0000
+                    } else {
+                        0x0000_00FF
+                    }
+                })
+            })
+            .collect();
+
+        let jpeg = encode_frame(&buffer, width, height).expect("frame must encode as JPEG");
+        let decoded = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)
+            .expect("frame must decode as JPEG")
+            .to_rgb8();
+
+        assert_eq!(decoded.dimensions(), (u32::from(width), u32::from(height)));
+        let red = decoded.get_pixel(3, 4).0;
+        let blue = decoded.get_pixel(12, 4).0;
+        assert!(red[0] > 200 && red[1] < 40 && red[2] < 40, "{red:?}");
+        assert!(blue[0] < 40 && blue[1] < 40 && blue[2] > 200, "{blue:?}");
     }
 
     #[test]
     fn rejects_a_framebuffer_with_the_wrong_pixel_count() {
-        assert!(rgba_frame(&[0], 2, 1).is_err());
+        assert!(rgb_frame(&[0], 2, 1).is_err());
     }
 }
