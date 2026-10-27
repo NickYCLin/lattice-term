@@ -214,7 +214,19 @@ fn program_display(path: &Path, arguments: &[String]) -> String {
 fn failure_message(detail: &str, command: &str) -> String {
     let lines: Vec<&str> = detail.lines().collect();
     let tail = lines[lines.len().saturating_sub(8)..].join("\n");
-    if detail.contains("EACCES") || detail.contains("EPERM") {
+    if detail.lines().any(|line| {
+        let line = line.trim().to_ascii_lowercase();
+        line.contains("npm error 'node'") || line.contains("'node' is not recognized")
+    }) {
+        format!("更新失敗：安裝腳本找不到 Node.js。請確認 Node.js 已安裝，並檢查 Windows PATH 是否過長。\n{tail}")
+    } else if detail.lines().any(|line| {
+        let line = line.trim().to_ascii_uppercase();
+        !line.contains("WARN CLEANUP")
+            && ((line.starts_with("NPM ERROR")
+                && (line.contains("EACCES") || line.contains("EPERM")))
+                || line.starts_with("EACCES:")
+                || line.starts_with("EPERM:"))
+    }) {
         let elevate = if cfg!(windows) {
             "以系統管理員身分開啟終端機"
         } else {
@@ -224,6 +236,41 @@ fn failure_message(detail: &str, command: &str) -> String {
     } else {
         format!("更新失敗: {tail}")
     }
+}
+
+// cmd.exe cannot expand an oversized PATH even though CreateProcess and
+// PowerShell can. npm uses cmd.exe for lifecycle scripts, so compact only
+// this npm child's PATH; never change the user's environment or the CLI's
+// interactive sessions. Keep relative/unexpanded entries and ordering.
+#[cfg(windows)]
+fn npm_script_path(path: &std::ffi::OsStr, limit: usize) -> Result<std::ffi::OsString, String> {
+    use std::os::windows::ffi::OsStrExt;
+    if path.encode_wide().count() <= limit {
+        return Ok(path.to_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let paths: Vec<_> = std::env::split_paths(path)
+        .filter(|entry| {
+            let text = entry.as_os_str().to_string_lossy();
+            // Keep UNC paths without probing a potentially unavailable host.
+            // Preserve inaccessible entries too: only discard confirmed missing
+            // local directories, never infer that an access error means absent.
+            if entry.is_absolute()
+                && !text.contains('%')
+                && !text.starts_with(r"\\")
+                && matches!(std::fs::metadata(entry), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+            {
+                return false;
+            }
+            seen.insert(text.to_lowercase())
+        })
+        .collect();
+    let compact =
+        std::env::join_paths(paths).map_err(|_| "無法準備 npm 更新環境的 PATH。".to_string())?;
+    if compact.encode_wide().count() > limit {
+        return Err("Windows PATH 過長，npm 安裝腳本無法啟動。請整理 PATH 後再更新。".into());
+    }
+    Ok(compact)
 }
 
 pub async fn update(id: &str) -> Result<String, String> {
@@ -239,6 +286,16 @@ pub async fn update(id: &str) -> Result<String, String> {
     .map_err(|_| "無法檢查已安裝的助理。".to_string())??;
     let (program, prefix_args) = crate::agent::launch_parts(&exe_path);
     let mut command = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    if exe_path
+        .file_stem()
+        .is_some_and(|name| name.eq_ignore_ascii_case("npm"))
+    {
+        if let Some(path) = std::env::var_os("PATH") {
+            // Leave headroom for npm's per-package node_modules/.bin entries.
+            command.env("PATH", npm_script_path(&path, 7000)?);
+        }
+    }
     command
         .args(prefix_args)
         .args(&arguments)
@@ -346,6 +403,11 @@ mod tests {
         assert!(message.contains("EACCES"));
         assert!(!message.contains("line 1\n"));
         assert_eq!(failure_message("boom", "codex update"), "更新失敗: boom");
+        let cleanup_failure =
+            "npm warn cleanup Error: EPERM\nnpm error command failed\nnpm error 'node' not found";
+        let message = failure_message(cleanup_failure, "npm install -g x");
+        assert!(message.contains("找不到 Node.js"));
+        assert!(!message.contains("沒有權限寫入"));
         assert_eq!(
             program_display(
                 Path::new("/usr/bin/npm"),
@@ -353,6 +415,23 @@ mod tests {
             ),
             "npm install -g x"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn oversized_npm_path_preserves_existing_order_and_is_bounded() {
+        let root = std::env::temp_dir();
+        let missing = root.join("lattice-update-missing-path-test");
+        let relative = PathBuf::from("relative-bin");
+        let path = std::env::join_paths([&root, &missing, &root, &relative]).unwrap();
+        let unchanged = npm_script_path(&path, 7000).unwrap();
+        assert_eq!(unchanged, path);
+        let compact = npm_script_path(&path, path.len() - 1).unwrap();
+        assert_eq!(
+            std::env::split_paths(&compact).collect::<Vec<_>>(),
+            vec![root, relative]
+        );
+        assert!(npm_script_path(&path, 1).is_err());
     }
 
     #[tokio::test]
