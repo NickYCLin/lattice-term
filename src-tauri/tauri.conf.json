@@ -43,6 +43,11 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    },
     "externalBin": [
       "binaries/lattice-rdp-engine",
       "binaries/lattice-vnc-engine",
