@@ -165,11 +165,12 @@ Codex 的原生帳號。Fleet 終端機仍須安裝 Codex CLI，由它提供工�
 `/model` 的選擇會寫進 `$CODEX_HOME/latticeterm-cliproxyapi*.config.toml`
 這個專用 profile，不會把代理的模型 ID 寫成原生 Codex 的預設模型。
 
-這需要 Codex 0.134.0 以後的分層 `--profile`；版本較舊、代理讀不到或
-逾時（5 秒）時照舊啟動，`/model` 仍是 Codex 原生清單，而實際使用的
-模型依然是啟動時選的那一個。對話頁有自己的模型選單，不受影響。
-Windows 上帶 `--profile` 的 Codex 不在 MCP 輸入驗證支援範圍，這類代理
-工作階段需手動輸入。
+這需要 Codex 支援分層 `--profile`。啟動前在獨立暫存帳號目錄以
+`debug prompt-input` 檢查指定設定是否實際生效，不根據版本號推斷；
+此檢查不讀取使用者帳號資料或啟動模型回合。能力不明、檢查失敗、
+代理讀不到或逾時時照舊啟動，`/model` 仍是 Codex 原生清單，實際
+模型仍是啟動時的選擇。對話頁有自己的模型選單，不受影響。Windows
+MCP 傳訊另依原生通訊與設定能力驗證。
 
 對話頁切換終端工作階段的 Codex 或 Gemini 模型時，先停止舊程序並保留
 畫面，再以同一個原生對話 ID 啟動新程序；成功切過去後才移除舊卡片。

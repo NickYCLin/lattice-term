@@ -23,14 +23,12 @@ use super::ProxyModel;
 /// openai/codex (Apache-2.0); see `vendor/openai-codex-prompt`.
 const UPSTREAM_PROMPT: &str = include_str!("../../../vendor/openai-codex-prompt/prompt.md");
 
-/// `--profile` layers `<name>.config.toml` on the user config from 0.134.0.
-/// Earlier releases read a legacy `[profiles]` table instead, where the same
-/// flag would fail or write into the user's own configuration file.
-const LAYERED_PROFILE_SINCE: (u64, u64, u64) = (0, 134, 0);
+// Probe the actual isolated profile behavior without reading the user's home.
 const PROFILE_PREFIX: &str = "latticeterm-cliproxyapi";
-const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const PROFILE_PROBE_MARKER: &str = "latticeterm-profile-capability-probe";
+const PROFILE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_PROFILE_OUTPUT: u64 = 2 * 1024 * 1024;
 const MODELS_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_VERSION_OUTPUT: u64 = 4096;
 
 /// Owns the catalog file for as long as the Codex process may read it.
 pub struct ModelCatalog {
@@ -85,82 +83,128 @@ pub fn prepare(
     key: Option<&str>,
     proxy_id: Option<&str>,
 ) -> Option<ModelCatalog> {
-    let version = codex_version(program, prefix).ok()?;
-    if !supports_layered_profiles(&version) {
+    if !supports_layered_profiles(program, prefix) {
         return None;
     }
     let models = fetch_models(base_url, key.map(|key| Zeroizing::new(key.to_string())))?;
     ModelCatalog::write(&models, proxy_id).ok()
 }
 
-#[derive(Debug)]
-enum VersionProbeError {
-    Spawn(std::io::Error),
-    Wait(std::io::Error),
-    Exit(std::process::ExitStatus),
-    Timeout,
-    MissingOutput,
-    Read(std::io::Error),
+/// Check the profile layer in an isolated home. A fixed marker must appear as
+/// a developer instruction in the CLI's locally rendered prompt; no model
+/// turn, user credentials or real configuration is needed. Unknown or failed
+/// probes keep the ordinary launch without a proxy model catalog.
+fn supports_layered_profiles(program: &std::ffi::OsStr, prefix: &[std::ffi::OsString]) -> bool {
+    probe_layered_profiles(program, prefix).unwrap_or(false)
 }
 
-impl std::fmt::Display for VersionProbeError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Spawn(error) => write!(formatter, "spawn: {error}"),
-            Self::Wait(error) => write!(formatter, "wait: {error}"),
-            Self::Exit(status) => write!(formatter, "exit: {status}"),
-            Self::Timeout => write!(formatter, "timeout after {VERSION_TIMEOUT:?}"),
-            Self::MissingOutput => formatter.write_str("stdout pipe missing"),
-            Self::Read(error) => write!(formatter, "stdout read: {error}"),
-        }
-    }
-}
-
-fn codex_version(
+fn probe_layered_profiles(
     program: &std::ffi::OsStr,
     prefix: &[std::ffi::OsString],
-) -> Result<String, VersionProbeError> {
+) -> Option<bool> {
+    let root = tempfile::Builder::new()
+        .prefix("lt-profile-probe-")
+        .tempdir()
+        .ok()?;
+    std::fs::write(
+        root.path().join("capability.config.toml"),
+        format!("developer_instructions = \"{PROFILE_PROBE_MARKER}\"\n"),
+    )
+    .ok()?;
+    let output_path = root.path().join("output.json");
+    let output_file = std::fs::File::create(&output_path).ok()?;
     let mut command = Command::new(program);
     command
         .args(prefix)
-        .arg("--version")
+        .args(["--profile", "capability", "debug", "prompt-input", "probe"])
+        .current_dir(root.path())
+        .env_clear();
+    for name in [
+        "PATH",
+        "SystemRoot",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "PATHEXT",
+        "ComSpec",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command
+        .env("CODEX_HOME", root.path())
+        .env("HOME", root.path())
+        .env("USERPROFILE", root.path())
+        .env("XDG_CONFIG_HOME", root.path())
+        .env("XDG_CACHE_HOME", root.path())
+        .env("XDG_DATA_HOME", root.path())
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(output_file))
         .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // This probe also runs while restoring proxy sessions in a GUI app.
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        command.creation_flags(0x08000000);
     }
-    let mut child = command.spawn().map_err(VersionProbeError::Spawn)?;
-    let deadline = Instant::now() + VERSION_TIMEOUT;
+    let mut child = command.spawn().ok()?;
+    let deadline = Instant::now() + PROFILE_PROBE_TIMEOUT;
     loop {
+        if std::fs::metadata(&output_path)
+            .ok()
+            .is_some_and(|metadata| metadata.len() > MAX_PROFILE_OUTPUT)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(Some(status)) => return Err(VersionProbeError::Exit(status)),
-            Err(error) => {
+            Ok(Some(_)) => return None,
+            Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(VersionProbeError::Wait(error));
+                return None;
             }
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(VersionProbeError::Timeout);
+                return None;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
         }
     }
-    let mut output = String::new();
-    child
-        .stdout
-        .take()
-        .ok_or(VersionProbeError::MissingOutput)?
-        .take(MAX_VERSION_OUTPUT)
-        .read_to_string(&mut output)
-        .map_err(VersionProbeError::Read)?;
-    Ok(output)
+    let file = std::fs::File::open(output_path).ok()?;
+    if file.metadata().ok()?.len() > MAX_PROFILE_OUTPUT {
+        return None;
+    }
+    let mut output = Vec::new();
+    file.take(MAX_PROFILE_OUTPUT + 1)
+        .read_to_end(&mut output)
+        .ok()?;
+    if output.len() as u64 > MAX_PROFILE_OUTPUT {
+        return None;
+    }
+    Some(profile_probe_response(&output))
+}
+
+fn profile_probe_response(output: &[u8]) -> bool {
+    let Ok(Value::Array(items)) = serde_json::from_slice(output) else {
+        return false;
+    };
+    items.iter().any(|item| {
+        item.get("role").and_then(Value::as_str) == Some("developer")
+            && item
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|parts| {
+                    parts.iter().any(|part| {
+                        part.get("type").and_then(Value::as_str) == Some("input_text")
+                            && part.get("text").and_then(Value::as_str)
+                                == Some(PROFILE_PROBE_MARKER)
+                    })
+                })
+    })
 }
 
 /// Launches may run on an async worker, so the request gets its own runtime
@@ -182,26 +226,6 @@ fn fetch_models(base_url: &str, key: Option<Zeroizing<String>>) -> Option<Vec<Pr
     .join()
     .ok()
     .flatten()
-}
-
-pub fn supports_layered_profiles(version_output: &str) -> bool {
-    let Some(version) = version_output
-        .split_whitespace()
-        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
-    else {
-        return false;
-    };
-    // "0.156.1" or "0.156.1-alpha.2"; anything else is not a version.
-    let core = version.split(['-', '+']).next().unwrap_or_default();
-    let parts: Vec<u64> = core
-        .split('.')
-        .map(str::parse)
-        .collect::<Result<_, _>>()
-        .unwrap_or_default();
-    let [major, minor, patch] = parts[..] else {
-        return false;
-    };
-    (major, minor, patch) >= LAYERED_PROFILE_SINCE
 }
 
 pub fn catalog(models: &[ProxyModel]) -> Value {
@@ -323,7 +347,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn version_probe_has_no_console_even_through_a_cmd_shim() {
+    fn capability_probe_has_no_console_even_through_a_cmd_shim() {
         let fixture = tempfile::tempdir().unwrap();
         let compiler = fixture.path().join("compile.ps1");
         std::fs::write(
@@ -367,7 +391,7 @@ Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefin
             &script,
             r#"Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
 if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
-Write-Output 'codex-cli 0.134.0'
+Write-Output '[{"role":"developer","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]'
 "#,
         )
         .unwrap();
@@ -383,9 +407,10 @@ Write-Output 'codex-cli 0.134.0'
         .map(Into::into)
         .chain(std::iter::once(script.into_os_string()))
         .collect();
-        let version = codex_version(std::ffi::OsStr::new("powershell.exe"), &prefix)
-            .unwrap_or_else(|error| panic!("direct PowerShell probe failed: {error}"));
-        assert!(supports_layered_profiles(&version));
+        assert!(supports_layered_profiles(
+            std::ffi::OsStr::new("powershell.exe"),
+            &prefix
+        ));
 
         let shim = fixture.path().join("probe.cmd");
         std::fs::write(
@@ -394,9 +419,7 @@ Write-Output 'codex-cli 0.134.0'
         )
         .unwrap();
         let (program, prefix) = crate::agent::launch_parts(&shim);
-        let version = codex_version(&program, &prefix)
-            .unwrap_or_else(|error| panic!("cmd shim probe failed: {error}"));
-        assert!(supports_layered_profiles(&version));
+        assert!(supports_layered_profiles(&program, &prefix));
     }
 
     fn model(id: &str, owner: Option<&str>) -> ProxyModel {
@@ -407,20 +430,21 @@ Write-Output 'codex-cli 0.134.0'
     }
 
     #[test]
-    fn only_layered_profile_releases_qualify() {
-        for (output, expected) in [
-            ("codex-cli 0.156.1\n", true),
-            ("codex-cli 0.134.0", true),
-            ("codex-cli 1.0.0", true),
-            ("codex-cli 0.200.0-alpha.3", true),
-            ("codex-cli 0.133.9", false),
-            ("codex-cli 0.99.0", false),
-            ("codex-cli", false),
-            ("codex-cli 0.156", false),
-            ("", false),
-        ] {
-            assert_eq!(supports_layered_profiles(output), expected, "{output:?}");
-        }
+    fn profile_probe_checks_actual_developer_instruction() {
+        assert!(profile_probe_response(br#"[{"type":"message","role":"developer","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]"#));
+        assert!(!profile_probe_response(br#"[{"role":"user","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]"#));
+        assert!(!profile_probe_response(
+            br#"[{"role":"developer","content":[{"type":"input_text","text":"wrong"}]}]"#
+        ));
+        assert!(!profile_probe_response(b"not json"));
+    }
+
+    #[test]
+    #[ignore = "opt-in local Codex capability probe in an isolated temporary home"]
+    fn real_codex_profile_capability_probe() {
+        let executable = crate::agent::find_executable("codex").expect("Codex is not installed");
+        let (program, prefix) = crate::agent::launch_parts(&executable);
+        assert!(supports_layered_profiles(&program, &prefix));
     }
 
     #[test]
@@ -506,16 +530,21 @@ Write-Output 'codex-cli 0.134.0'
         );
     }
 
-    /// A stand-in `codex` that only answers `--version`. It is run through
+    /// A stand-in `codex` that returns a capability result. It is run through
     /// `sh` so a freshly written file is never executed directly, which can
     /// fail with "text file busy" while other tests fork.
     #[cfg(unix)]
     fn fake_codex(
         directory: &Path,
-        version: &str,
+        supported: bool,
     ) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
-        let path = directory.join(format!("codex-{version}"));
-        std::fs::write(&path, format!("echo 'codex-cli {version}'\n")).unwrap();
+        let path = directory.join(format!("codex-{supported}"));
+        let payload = if supported {
+            r#"[{"role":"developer","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]"#
+        } else {
+            "[]"
+        };
+        std::fs::write(&path, format!("echo '{payload}'\n")).unwrap();
         ("/bin/sh".into(), vec![path.into_os_string()])
     }
 
@@ -548,9 +577,9 @@ Write-Output 'codex-cli 0.134.0'
 
     #[cfg(unix)]
     #[test]
-    fn a_current_codex_gets_the_proxy_models_it_can_switch_between() {
+    fn capable_codex_gets_the_proxy_models_it_can_switch_between() {
         let directory = tempfile::tempdir().unwrap();
-        let (sh, codex) = fake_codex(directory.path(), "0.156.1");
+        let (sh, codex) = fake_codex(directory.path(), true);
         let (address, served) = serve_models_once(
             r#"{"data":[{"id":"claude-opus-5","owned_by":"anthropic"},{"id":"gemini-3-pro"}]}"#,
         );
@@ -577,20 +606,19 @@ Write-Output 'codex-cli 0.134.0'
 
     #[cfg(unix)]
     #[test]
-    fn older_codex_or_an_unreachable_proxy_keeps_the_plain_launch() {
+    fn unverified_capability_or_unreachable_proxy_keeps_the_plain_launch() {
         let directory = tempfile::tempdir().unwrap();
-        // Before layered profiles the picker would write into the user's own
-        // configuration, so the proxy is not even asked.
-        let (sh, old) = fake_codex(directory.path(), "0.133.0");
+        // Do not ask the proxy unless the profile capability is verified.
+        let (sh, unsupported) = fake_codex(directory.path(), false);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
-        assert!(prepare(&sh, &old, &address, None, None).is_none());
+        assert!(prepare(&sh, &unsupported, &address, None, None).is_none());
         assert!(listener.accept().is_err());
         drop(listener);
 
-        let (_, current) = fake_codex(directory.path(), "0.156.1");
-        assert!(prepare(&sh, &current, &address, None, None).is_none());
+        let (_, supported) = fake_codex(directory.path(), true);
+        assert!(prepare(&sh, &supported, &address, None, None).is_none());
         let missing = directory.path().join("missing-codex").into_os_string();
         assert!(prepare(&missing, &[], &address, None, None).is_none());
     }
