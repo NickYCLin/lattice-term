@@ -3,6 +3,26 @@ import { CLI_PROXY_NAME } from "./cliProxyApi";
 import type { RemoteChatResponse } from "./remoteChat";
 /** `model`, `project`, `directory` and `proxy` are absent from hosts before 2026.9.30. */
 export interface RemoteCliSession { id: string; label: string; groupLabel: string; agent: string; state: string; detached: boolean; model?: string; project?: string; directory?: string; proxy?: boolean }
+export const REMOTE_CLI_STATES = ["working", "needsAttention", "idle", "done"] as const;
+export type RemoteCliFilter = "all" | (typeof REMOTE_CLI_STATES)[number];
+
+/** Keep the host's order within each status so polling does not shuffle cards. */
+export function remoteCliList(sessions: readonly RemoteCliSession[], filter: RemoteCliFilter, query: string) {
+  const search = query.trim().toLocaleLowerCase();
+  return sessions.filter(item => (filter === "all" || item.state === filter)
+    && (!search || [item.label, item.groupLabel, item.agent, agentDisplayName(item.agent), item.model, item.project, item.directory,
+      item.proxy ? CLI_PROXY_NAME : ""].some(value => value?.toLocaleLowerCase().includes(search))))
+    .sort((a, b) => {
+      const rank = (state: string) => { const index = REMOTE_CLI_STATES.indexOf(state as typeof REMOTE_CLI_STATES[number]); return index < 0 ? REMOTE_CLI_STATES.length : index; };
+      return rank(a.state) - rank(b.state);
+    });
+}
+
+export function remoteCliFolder(session: RemoteCliSession): string {
+  const path = (session.directory || session.project || "").replace(/[\\/]+$/, "");
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 export interface RemoteCard { title: string; detail: string; place: string }
 /**
  * Mirrors the desktop sidebar: the project (or a name the user gave the tab)

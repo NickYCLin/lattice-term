@@ -2,16 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { ThemeId } from "../../app/themes";
-import { RemoteCliChannel, remoteCliCard, requestRemoteCli, type RemoteCliOperation, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
+import { RemoteCliChannel, remoteCliCard, remoteCliList, remoteCliFolder, REMOTE_CLI_STATES, requestRemoteCli, type RemoteCliFilter, type RemoteCliOperation, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
 import { REMOTE_ATTACHMENT_CHUNK } from "../../app/remoteChat";
 import { displayPath } from "../../app/displayPath";
-import { ImageFileIcon, KeyboardIcon, RefreshIcon } from "../icons";
+import { FolderIcon, ImageFileIcon, KeyboardIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import { readRemoteImage, type PickedImage } from "./remoteImage";
 import "./RemoteCliPane.css";
 
-const CLI_STATES = ["working", "needsAttention", "idle", "done"] as const;
+const CLI_STATES = REMOTE_CLI_STATES;
 type CliState = (typeof CLI_STATES)[number];
 function isCliState(state: string): state is CliState {
   return (CLI_STATES as readonly string[]).includes(state);
@@ -24,6 +24,10 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
   const [problem, setProblem] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [generation, refresh] = useState(0);
+  const [filter, setFilter] = useState<RemoteCliFilter>("all");
+  const [query, setQuery] = useState("");
+  const visible = remoteCliList(sessions, filter, query);
+  const counts = Object.fromEntries(CLI_STATES.map(state => [state, sessions.filter(item => item.state === state).length]));
   useEffect(() => {
     if (!active || !session.cli || selected) return;
     let stopped = false;
@@ -44,20 +48,39 @@ export function RemoteCliPane({ session, theme, active = true }: { session: Remo
       <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(false); refresh(value => value + 1); }}><RefreshIcon size={15} /></button>
     </header>
     {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
-      <p className="muted">{t("remote.cli.hint")}</p>
+      <div className="remote-cli-tools">
+        <input type="search" className="input remote-cli-search" aria-label={t("remote.cli.search")}
+          placeholder={t("remote.cli.search")} value={query} onChange={event => setQuery(event.currentTarget.value)} />
+        <div className="remote-cli-filters" role="group" aria-label={t("remote.cli.filter")}>
+          {(["all", ...CLI_STATES] as const).map(state => <button type="button" key={state}
+            className={`remote-cli-filter${filter === state ? " is-active" : ""}`}
+            aria-pressed={filter === state} onClick={() => setFilter(state)}>
+            {state === "all" ? t("remote.cli.all") : t(`agents.state.${state}`)}
+            <span>{state === "all" ? sessions.length : counts[state]}</span>
+          </button>)}
+        </div>
+      </div>
       {problem && <p role="alert">{t("remote.cli.error")}</p>}
-      {!problem && <p role="status">{!loaded ? t("remote.cli.loading") : sessions.length === 0 ? t("remote.cli.empty") : ""}</p>}
+      {!problem && (!loaded || sessions.length === 0) && <p role="status">{!loaded ? t("remote.cli.loading") : t("remote.cli.empty")}</p>}
       {sessions.length > 0 && sessions.every(item => item.directory === undefined && item.project === undefined) && <p className="remote-host-outdated">{t("remote.cli.hostOutdated")}</p>}
-      <div className="remote-chat-list">{sessions.map(item => {
+      {loaded && sessions.length > 0 && visible.length === 0 && <p role="status">{t("remote.cli.noMatches")}</p>}
+      <div className="remote-chat-list remote-cli-list">{visible.map((item, index) => {
         const card = remoteCliCard(item, t("terminal.model.pending"));
-        return <button key={item.id} className="remote-chat-thread" onClick={() => setSelected(item)}>
-          <strong>{card.title}</strong>{card.detail && <span>{card.detail}</span>}
-          {(item.directory || item.project) && <span className="remote-card-path">{t("remote.cli.folder", { path: displayPath(item.directory || item.project || "") })}</span>}
-          <span className="remote-card-meta">
+        const folder = remoteCliFolder(item);
+        const place = card.place.split(" · ").filter(value => value !== card.title && value !== folder).join(" · ");
+        return <div key={item.id}>
+          {isCliState(item.state) && visible[index - 1]?.state !== item.state && <h3 className="remote-cli-group-title">{t(`agents.state.${item.state}`)}</h3>}
+          <button className="remote-chat-thread remote-cli-card" onClick={() => setSelected(item)}>
+          <div className="remote-cli-card__head"><strong>{card.title}</strong>
             {isCliState(item.state) && <span className={`remote-cli-state remote-cli-state--${item.state}`}>{t(`agents.state.${item.state}`)}</span>}
-            <small>{[card.place, item.detached ? t("remote.cli.background") : t("remote.cli.desktop")].filter(Boolean).join(" · ")}</small>
+          </div>
+          {(item.directory || item.project) && folder !== card.title && <span className="remote-cli-card__folder" title={displayPath(item.directory || item.project || "")}
+            aria-label={t("remote.cli.folder", { path: displayPath(item.directory || item.project || "") })}><FolderIcon size={14} />{folder}</span>}
+          {card.detail && <span className="remote-cli-card__detail" title={card.detail}>{card.detail}</span>}
+          <span className="remote-card-meta">
+            <small>{[place, item.detached ? t("remote.cli.background") : t("remote.cli.desktop")].filter(Boolean).join(" · ")}</small>
           </span>
-        </button>;
+        </button></div>;
       })}</div>
     </>}
   </section>;

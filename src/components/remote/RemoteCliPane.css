@@ -15,3 +15,17 @@
 .remote-cli-state--working { background: var(--info-soft); color: var(--info); border-color: transparent; }
 .remote-cli-state--needsAttention { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .remote-cli-state--done { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.remote-cli-tools { display: grid; gap: 8px; flex: none; position: sticky; top: 0; z-index: 1; background: var(--surface); padding-block: 4px; }
+.remote-cli-search { width: 100%; min-height: 44px; }
+.remote-cli-filters { display: flex; gap: 6px; overflow-x: auto; }
+.remote-cli-filter { display: inline-flex; align-items: center; flex: none; gap: 6px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text-muted); cursor: pointer; font: inherit; font-size: var(--text-sm); white-space: nowrap; }
+.remote-cli-filter span { font-variant-numeric: tabular-nums; }
+.remote-cli-filter.is-active { background: var(--info-soft); color: var(--info); border-color: currentColor; }
+.remote-cli-group-title { font-size: var(--text-sm); color: var(--text-muted); margin: 8px 0; }
+.remote-cli-card { width: 100%; gap: 4px; }
+.remote-cli-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.remote-cli-card__head strong { overflow-wrap: anywhere; min-width: 0; }
+.remote-cli-card > .remote-cli-card__folder { display: flex; align-items: center; gap: 6px; color: var(--text); overflow-wrap: anywhere; font-weight: 600; }
+.remote-cli-card__folder svg { flex: none; }
+.remote-cli-card > .remote-cli-card__detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.remote-cli-card .remote-card-meta { font-size: var(--text-xs); }

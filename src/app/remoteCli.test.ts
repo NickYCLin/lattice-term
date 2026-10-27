@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RemoteCliChannel, remoteCliCard, type RemoteCliOperation, type RemoteCliSession } from "./remoteCli";
+import { RemoteCliChannel, remoteCliCard, remoteCliList, remoteCliFolder, type RemoteCliOperation, type RemoteCliSession } from "./remoteCli";
 afterEach(() => vi.useRealTimers());
 describe("remote CLI input", () => {
   it("batches keystrokes, preserves Unicode and sends input before resize", async () => {
@@ -56,4 +56,23 @@ describe("remote CLI list card", () => {
     expect(remoteCliCard({ ...base, label: "", groupLabel: "" }, "預設模型")).toEqual({ title: "OpenAI Codex", detail: "", place: "" });
     expect(remoteCliCard({ ...base, model: "gpt-5.5" }, "預設模型").detail).toBe("gpt-5.5");
   });
+});
+
+it("puts working sessions first, filters and searches without shuffling the host order", () => {
+  const base: RemoteCliSession = { id:"idle", label:"Codex", groupLabel:"API", agent:"codex", state:"idle", detached:false };
+  const sessions = [base,
+    { ...base, id:"done", state:"done" },
+    { ...base, id:"working-a", state:"working", directory:"/work/Portal", model:"ExampleModel" },
+    { ...base, id:"attention", state:"needsAttention" },
+    { ...base, id:"working-b", state:"working", proxy:true, directory:"C:\\work\\Console\\" },
+    { ...base, id:"old", state:"unknown" }];
+  expect(remoteCliList(sessions, "all", "").map(item => item.id)).toEqual(["working-a","working-b","attention","idle","done","old"]);
+  expect(sessions[0].id).toBe("idle");
+  expect(remoteCliList(sessions, "working", " portal ").map(item => item.id)).toEqual(["working-a"]);
+  expect(remoteCliList(sessions, "all", "examplemodel").map(item => item.id)).toEqual(["working-a"]);
+  expect(remoteCliList(sessions, "all", "cliproxyapi").map(item => item.id)).toEqual(["working-b"]);
+  expect(remoteCliList(sessions, "done", "missing")).toEqual([]);
+  expect(remoteCliList([{...base,label:"",groupLabel:""}], "all", "OpenAI Codex")).toHaveLength(1);
+  expect(remoteCliFolder(sessions[4])).toBe("Console");
+  expect(remoteCliFolder(sessions[2])).toBe("Portal");
 });

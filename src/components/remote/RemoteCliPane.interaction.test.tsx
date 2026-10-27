@@ -36,6 +36,8 @@ class HostNode {
   removeChild(child: HostNode) { this.childNodes = this.childNodes.filter((node) => node !== child); child.parentNode = null; return child; }
   insertBefore(child: HostNode, before: HostNode) { this.childNodes.splice(this.childNodes.indexOf(before), 0, child); child.parentNode = this; return child; }
   setAttribute(name: string, value: string) { this.attributes[name] = value; }
+  getAttribute(name: string) { return this.attributes[name] ?? null; }
+  getAttributeNames() { return Object.keys(this.attributes); }
   setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
   removeAttribute(name: string) { delete this.attributes[name]; }
   addEventListener() {}
@@ -46,6 +48,46 @@ class HostNode {
 function allNodes(node: HostNode): HostNode[] {
   return [node, ...node.childNodes.flatMap(allNodes)];
 }
+
+it("finds working sessions first in a large list and combines status with project search", async () => {
+  vi.useFakeTimers();
+  await import("@tauri-apps/api/core");
+  const document: Record<string, unknown> = { nodeType:9, activeElement:null, addEventListener() {}, removeEventListener() {} };
+  document.createElement = (name:string) => new HostNode(name.toUpperCase(), document);
+  document.createElementNS = (_namespace:string, name:string) => new HostNode(name.toUpperCase(), document);
+  document.createTextNode = (text:string) => { const node = new HostNode("#text", document); node.nodeType=3; node.textContent=text; return node; };
+  const container = new HostNode("DIV", document);
+  document.body=container; document.documentElement=container;
+  const window = { __TAURI_INTERNALS__:{ invoke }, document, HTMLIFrameElement:class {}, localStorage:{ getItem:() => null }, setInterval, clearInterval };
+  document.defaultView=window;
+  vi.stubGlobal("window", window); vi.stubGlobal("document", document);
+  vi.stubGlobal("HTMLElement", HostNode); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const items = Array.from({length:30}, (_, index) => ({ id:`idle-${index}`, label:"Codex", groupLabel:`Idle ${index}`, agent:"codex", state:"idle", detached:false }));
+  items.push({ id:"active", label:"Codex", groupLabel:"Portal", agent:"codex", state:"working", detached:false });
+  invoke.mockImplementation(async (_command, { request }) => ({ id:request.id, value:items.map(item => ({...item})), error:null }));
+  const root = createRoot(container as unknown as Element);
+  const reactProps = (node:HostNode) => (node as unknown as Record<string, {onClick:()=>void; onChange:(event:unknown)=>void}>)[Object.keys(node).find(key => key.startsWith("__reactProps$"))!];
+  const cards = () => allNodes(container).filter(node => node.attributes.class?.split(" ").includes("remote-cli-card"));
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteCliPane session={{sessionId:"connection",cli:true} as RemoteSessionSummary} theme="dark" /></I18nProvider>));
+    for (let attempt=0; attempt<10 && cards().length===0; attempt++) await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(cards().length).toBe(31);
+    expect(cards()[0].textContent).toContain("Portal");
+    const working = allNodes(container).find(node => node.attributes["aria-pressed"] !== undefined && node.textContent.startsWith("執行中"))!;
+    await act(async () => reactProps(working).onClick());
+    expect(cards().length).toBe(1);
+    const search = allNodes(container).find(node => node.tagName==="INPUT")!;
+    await act(async () => reactProps(search).onChange({currentTarget:{value:"missing"}}));
+    expect(cards().length).toBe(0);
+    expect(container.textContent).toContain("沒有符合的工作階段");
+    await act(async () => reactProps(search).onChange({currentTarget:{value:"portal"}}));
+    expect(cards().length).toBe(1);
+    items[30].state="done";
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(cards().length).toBe(0);
+    expect(invoke.mock.calls.every(([, args]) => args.request.operation.kind === "cliList")).toBe(true);
+  } finally { await act(async () => root.unmount()); }
+});
 
 
 it("lists existing CLIs, replays output and sends ordered input in StrictMode", async () => {
