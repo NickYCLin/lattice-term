@@ -210,6 +210,8 @@
 
 ## 13. Web RDP Canvas
 
+- Windows 客戶端為每條連線建立部署暫存區，engine 透過 RDPDR 宣告唯讀 `LatticeDeploy` 磁碟。開啟與初始目錄查詢先加上暫存路徑前綴，再交給原生 backend，拒絕跳脫與 reparse point。MCP `rdp_stage_file` 逐檔核准後發佈完整快照，不覆寫同名檔；單檔最多 8 MiB，每條連線合計 128 MiB，程序結束清除。回傳 SHA-256 與 tsclient 路徑，不宣稱遠端已複製或部署；舊引擎未宣告能力時不提供 upload scope。詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md)。
+
 - `crates/lattice-rdp` 是每個工作階段一個程序的 IronRDP engine，用 NDJSON stdin/stdout 與 Tauri bridge 溝通，以隔離 russh 與 IronRDP 的密碼學相依。
 - 密碼只出現在連線對話框、單次 Tauri IPC 與 engine 記憶體，不寫入 profile、事件或程序參數；使用者明確勾選時，成功連線後才會寫入目前選定的認證後端。
 - TLS 預設嚴格驗證；自簽憑證第一次必定拒絕並回傳 SHA-256 指紋，只有使用者明確核對後才能針對同一指紋重試一次。

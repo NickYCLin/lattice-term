@@ -23,6 +23,8 @@ WebView 都拿不到憑證。更新前已經執行中的 CLI 不會在中途改�
 
 這是 [#180](https://github.com/NickYCLin/lattice-term/issues/180) 提案的 A、B 與 C 階段實作。C 需保持桌面開啟，範圍就是你目前連著的 SSH／SFTP 工作階段；D 同樣涵蓋 RDP／VNC／Lattice Remote 的單張畫面擷取與鍵鼠操作；另提供透過 SSH、限制工作區的多 Agent Fleet 操作。連線可由你在桌面建立，也可由 MCP 使用已保存的登入資料開啟，建立之後不需要再授權。實作、測試與實機驗收分開記錄，見文末。
 
+Windows 客戶端另提供 `rdp_stage_file`：每個檔案須經桌面核准，完整快照放入這次 RDP 連線專用的唯讀 `LatticeDeploy` 磁碟，回傳 tsclient 路徑與 SHA-256。需要獨立的 upload scope，鍵鼠仍需 input scope；沒有新增命令或下載權限。單檔最多 8 MiB、每條連線合計 128 MiB、不覆寫、斷線清除；暫存成功不表示遠端已複製或部署。操作與主機原則限制見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md)。
+
 ## 運作方式
 
 ```text

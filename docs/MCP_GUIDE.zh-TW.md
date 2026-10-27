@@ -23,6 +23,7 @@ LatticeTerm 本身可以當成一個 MCP 伺服器。接上之後，外部 AI �
 | SSH 主機資訊、指令 | 你**目前連著**的 SSH 連線 | 連上即開放；AI 臨時寫的指令每次都要你按同意 |
 | SFTP 列目錄、上傳、下載 | 你目前連著的 SFTP 連線 | 連上即開放 |
 | 看遠端畫面、操作鍵鼠 | 目前連著的 RDP、VNC、Lattice Remote 畫面 | 連上即開放畫面；鍵鼠要分享端允許控制 |
+| 只用 RDP 部署 | Windows 客戶端的 RDP 連線 | `rdp_stage_file` 逐檔核准後提供唯讀 tsclient 路徑；再從桌面複製、核對雜湊並部署，詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md) |
 | 讀連線簿 | 儲存連線的名稱、群組、標籤、協定、是否連線 | 預設開啟，可在設定頁關掉 |
 | 開啟儲存的連線 | SSH、SFTP、RDP、VNC、Lattice Remote | 先保存登入資料並完成主機驗證，之後 AI 可直接連 |
 | 遠端主機上的 Agent Fleet | 另一台已裝 LatticeTerm 的主機上的工作區 | 在設定頁另外設定（見[遠端 Fleet](#遠端主機的-agent-fleet)） |

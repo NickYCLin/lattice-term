@@ -1,5 +1,8 @@
 //! One-session IronRDP engine controlled by LatticeTerm over NDJSON.
 
+#[cfg(windows)]
+mod staging;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use image::codecs::jpeg::JpegEncoder;
@@ -29,6 +32,7 @@ enum Command {
         width: u16,
         height: u16,
         trusted_certificate_sha256: Option<String>,
+        staging_directory: Option<String>,
     },
     MouseMove {
         x: u16,
@@ -60,6 +64,7 @@ enum Event {
     Connected {
         width: u16,
         height: u16,
+        file_transfer: bool,
     },
     CertificateUnknown {
         fingerprint_sha256: String,
@@ -90,6 +95,7 @@ struct ConnectSettings {
     width: u16,
     height: u16,
     trusted_certificate_sha256: Option<String>,
+    staging_directory: Option<String>,
 }
 
 fn normalize_fingerprint(value: &str) -> Option<String> {
@@ -257,9 +263,25 @@ async fn run_session(
     if let Some(domain) = settings.domain.filter(|value| !value.trim().is_empty()) {
         builder = builder.with_domain(domain);
     }
+    #[cfg(windows)]
+    let staging = settings
+        .staging_directory
+        .as_deref()
+        .map(staging::StagingFactory::new)
+        .transpose()?;
+    #[cfg(windows)]
+    {
+        builder = builder.with_rdpdr(staging.is_some());
+    }
     let config = builder.build().map_err(|error| error.to_string())?;
     let (output_sender, mut output_receiver) = mpsc::channel::<RdpOutputEvent>(16);
     let client = RdpClient::new(config, output_sender).with_auto_reconnect(2);
+    #[cfg(windows)]
+    let client = if let Some(factory) = staging {
+        client.with_rdpdr_backend_factory(Box::new(factory))
+    } else {
+        client
+    };
     let input_sender: RdpInputSender = client.input_sender();
     tokio::task::spawn_local(client.run());
 
@@ -283,7 +305,7 @@ async fn run_session(
             output = output_receiver.recv() => {
                 match output {
                     Some(RdpOutputEvent::Connected) => {
-                        emit(stdout, &Event::Connected { width: settings.width, height: settings.height }).await?;
+                        emit(stdout, &Event::Connected { width: settings.width, height: settings.height, file_transfer: cfg!(windows) && settings.staging_directory.is_some() }).await?;
                     }
                     Some(RdpOutputEvent::Image { buffer, width, height }) => {
                         frame_id = frame_id.wrapping_add(1);
@@ -339,6 +361,7 @@ async fn main() {
             width,
             height,
             trusted_certificate_sha256,
+            staging_directory,
         })) => ConnectSettings {
             hostname,
             port,
@@ -348,6 +371,7 @@ async fn main() {
             width: width.clamp(640, 1920),
             height: height.clamp(480, 1200),
             trusted_certificate_sha256,
+            staging_directory,
         },
         Ok(_) => {
             let _ = emit(

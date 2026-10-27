@@ -69,7 +69,8 @@ pub enum Backend {
     DesktopChat,
     Ssh,
     Sftp,
-    /// Screen-only backends never gain shell or file capabilities.
+    /// Screen backends have independent capabilities; RDP may offer a
+    /// read-only staging drive but never a shell or arbitrary file access.
     Rdp,
     Vnc,
     /// Remote can also advertise separately authorized command/file channels.
@@ -356,6 +357,12 @@ pub enum DesktopOperation {
         remote_path: String,
         request_id: String,
     },
+    RdpStageFile {
+        target_id: String,
+        local_path: String,
+        name: String,
+        request_id: String,
+    },
     Transfer {
         target_id: String,
         root_id: String,
@@ -402,6 +409,7 @@ impl DesktopOperation {
         "execCommand",
         "remoteCommand",
         "remoteFileTransfer",
+        "rdpStageFile",
         "transfer",
         "cancel",
         "operationStatus",
@@ -443,6 +451,7 @@ impl DesktopOperation {
             Self::ExecCommand { .. } => "execCommand",
             Self::RemoteCommand { .. } => "remoteCommand",
             Self::RemoteFileTransfer { .. } => "remoteFileTransfer",
+            Self::RdpStageFile { .. } => "rdpStageFile",
             Self::Transfer { .. } => "transfer",
             Self::Cancel { .. } => "cancel",
             Self::OperationStatus { .. } => "operationStatus",
@@ -470,6 +479,7 @@ impl DesktopOperation {
             | Self::ExecCommand { target_id, .. }
             | Self::RemoteCommand { target_id, .. }
             | Self::RemoteFileTransfer { target_id, .. }
+            | Self::RdpStageFile { target_id, .. }
             | Self::Transfer { target_id, .. }
             | Self::Cancel { target_id, .. }
             | Self::ListOperations { target_id }
@@ -490,6 +500,7 @@ impl DesktopOperation {
             Self::Exec { .. } => Some(Scope::Exec),
             Self::ExecCommand { .. } => Some(Scope::Command),
             Self::RemoteCommand { .. } => Some(Scope::Command),
+            Self::RdpStageFile { .. } => Some(Scope::Upload),
             Self::Transfer {
                 direction: TransferDirection::Upload,
                 ..
@@ -529,6 +540,7 @@ impl DesktopOperation {
             | Self::ExecCommand { request_id, .. }
             | Self::RemoteCommand { request_id, .. }
             | Self::RemoteFileTransfer { request_id, .. }
+            | Self::RdpStageFile { request_id, .. }
             | Self::Transfer { request_id, .. }
             | Self::Cancel { request_id, .. } => Some(request_id),
             _ => None,
@@ -1114,6 +1126,16 @@ impl DesktopService {
                 "The sharing host must allow control before MCP input can be granted.",
             ));
         }
+        if request.backend == Backend::Rdp
+            && request.scopes.upload
+            && !self
+                .rdp
+                .list()
+                .iter()
+                .any(|s| s.session_id == request.session_id && s.file_transfer)
+        {
+            return Err(ServiceError::denied());
+        }
         if request.backend == Backend::Remote
             && request.scopes.command
             && !self.remote.list().iter().any(|session| {
@@ -1478,7 +1500,10 @@ impl DesktopService {
                 Backend::Rdp,
                 session.session_id,
                 session.host,
-                screen_scopes(controllable),
+                Scopes {
+                    upload: session.file_transfer,
+                    ..screen_scopes(controllable)
+                },
                 None,
             ));
         }
@@ -1714,6 +1739,7 @@ impl DesktopService {
                 | DesktopOperation::ExecCommand { .. }
                 | DesktopOperation::RemoteCommand { .. }
                 | DesktopOperation::RemoteFileTransfer { .. }
+                | DesktopOperation::RdpStageFile { .. }
                 | DesktopOperation::Transfer { .. }
         ) {
             let mut lease = lease.ok_or_else(ServiceError::invalid)?;
@@ -1824,6 +1850,20 @@ impl DesktopService {
                     return Err(ServiceError::denied());
                 }
                 remote_files::validate(*direction, local_path, remote_path)?;
+            }
+            DesktopOperation::RdpStageFile {
+                local_path, name, ..
+            } => {
+                if grant.view.backend != Backend::Rdp {
+                    return Err(ServiceError::denied());
+                }
+                if !crate::rdp::valid_staging_name(name)
+                    || local_path.len() > 4096
+                    || local_path.chars().any(char::is_control)
+                    || !std::path::Path::new(local_path).is_absolute()
+                {
+                    return Err(ServiceError::invalid());
+                }
             }
             DesktopOperation::ListDirectory { root_id, path, .. } => {
                 if !grant.roots.iter().any(|root| root.id == *root_id) {
@@ -2156,6 +2196,50 @@ impl DesktopService {
                     )
                     .await
                 }
+                DesktopOperation::RdpStageFile {
+                    local_path, name, ..
+                } => {
+                    let lease = lease.ok_or_else(ServiceError::invalid)?;
+                    let proposal = serde_json::to_string(&json!({"transport":"RDP", "operation":"stageFile", "localPath":local_path, "name":name, "readOnly":true, "remoteCopied":false}))
+                        .map_err(|_| ServiceError::invalid())?;
+                    self.await_approval(
+                        client,
+                        grant,
+                        &proposal,
+                        &lease.id,
+                        grant.revoked.subscribe(),
+                        lease.cancel.subscribe(),
+                    )
+                    .await?;
+                    let registry = Arc::clone(&self.rdp);
+                    let session = grant.session_id.clone();
+                    let generation = grant.identity as u64;
+                    let local = local_path.clone();
+                    let name = name.clone();
+                    let revoked = grant.revoked.subscribe();
+                    let cancel = lease.cancel.subscribe();
+                    let mut result = tokio::task::spawn_blocking(move || {
+                        if *revoked.borrow() || *cancel.borrow() {
+                            return Err(ServiceError::denied());
+                        }
+                        let bytes = paths::read_approved_local(&local)?;
+                        let digest = sha256(&bytes);
+                        let mut receipt =
+                            registry.stage_file(&session, generation, &name, &bytes, || {
+                                if *revoked.borrow() || *cancel.borrow() {
+                                    Err(ServiceError::denied())
+                                } else {
+                                    Ok(())
+                                }
+                            })?;
+                        receipt["sha256"] = json!(digest);
+                        Ok::<_, ServiceError>(receipt)
+                    })
+                    .await
+                    .map_err(|_| ServiceError::failed())??;
+                    result["operationId"] = json!(lease.id);
+                    Ok(result)
+                }
                 DesktopOperation::Transfer {
                     root_id,
                     direction,
@@ -2195,6 +2279,7 @@ impl DesktopService {
                 | DesktopOperation::ExecCommand { .. }
                 | DesktopOperation::RemoteCommand { .. }
                 | DesktopOperation::RemoteFileTransfer { .. }
+                | DesktopOperation::RdpStageFile { .. }
         ) {
             return work.await;
         }
@@ -2343,7 +2428,10 @@ impl DesktopService {
                     target_label: grant.view.label.clone(),
                     client: client.to_string(),
                     command: command.to_string(),
-                    requires_each_approval: grant.view.backend == Backend::Remote,
+                    requires_each_approval: matches!(
+                        grant.view.backend,
+                        Backend::Remote | Backend::Rdp
+                    ),
                     requested_at: Instant::now(),
                     decision: decision.0,
                 },
@@ -2627,7 +2715,8 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
             || request.scopes.list
             || request.scopes.exec
             || (request.scopes.command && request.backend != Backend::Remote)
-            || (request.scopes.upload && request.backend != Backend::Remote)
+            || (request.scopes.upload
+                && !matches!(request.backend, Backend::Remote | Backend::Rdp))
             || (request.scopes.download && request.backend != Backend::Remote)
             || !request.exec_plans.is_empty()
             || !request.roots.is_empty())
@@ -2678,7 +2767,7 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
     if (request.scopes.exec && request.exec_plans.is_empty())
         || ((request.scopes.list
             || ((request.scopes.upload || request.scopes.download)
-                && request.backend != Backend::Remote))
+                && !matches!(request.backend, Backend::Remote | Backend::Rdp)))
             && request.roots.is_empty())
     {
         return Err(ServiceError::invalid());
@@ -3186,6 +3275,12 @@ mod tests {
                 remote_path: "/file".into(),
                 request_id: "q".into(),
             },
+            DesktopOperation::RdpStageFile {
+                target_id: "t".into(),
+                local_path: "file".into(),
+                name: "site.zip".into(),
+                request_id: "q".into(),
+            },
             DesktopOperation::Cancel {
                 target_id: "t".into(),
                 operation_id: "o".into(),
@@ -3207,7 +3302,7 @@ mod tests {
         for kind in DesktopOperation::PROTOCOL_3_KINDS {
             assert!(DesktopOperation::KINDS.contains(kind), "{kind}");
         }
-        assert_eq!(DesktopOperation::KINDS.len(), 22);
+        assert_eq!(DesktopOperation::KINDS.len(), 23);
     }
 
     #[test]
@@ -3583,6 +3678,87 @@ mod tests {
             timeout_ms: 60_001,
         });
         assert!(validate_grant(&request).is_err());
+    }
+
+    #[test]
+    fn rdp_staging_grants_do_not_enable_shell_download_or_vnc_files() {
+        let mut grant = request();
+        grant.backend = Backend::Rdp;
+        grant.exec_plans.clear();
+        grant.roots.clear();
+        grant.scopes = Scopes {
+            screen: true,
+            upload: true,
+            ..Scopes::default()
+        };
+        assert!(validate_grant(&grant).is_ok());
+        grant.scopes.command = true;
+        assert!(validate_grant(&grant).is_err());
+        grant.scopes.command = false;
+        grant.scopes.download = true;
+        assert!(validate_grant(&grant).is_err());
+        grant.scopes.download = false;
+        grant.backend = Backend::Vnc;
+        assert!(validate_grant(&grant).is_err());
+        let op: DesktopOperation = serde_json::from_value(json!({"type":"rdpStageFile", "targetId":"t", "localPath":"file", "name":"site.zip", "requestId":"r"})).unwrap();
+        assert_eq!(op.required_scope(), Some(Scope::Upload));
+        assert_eq!(op.target_id(), Some("t"));
+        assert_eq!(op.request_id(), Some("r"));
+    }
+
+    #[tokio::test]
+    async fn rdp_staging_needs_each_approval_even_when_other_transports_are_trusted() {
+        let service = Arc::new(service());
+        service.set_trust_all_commands(true);
+        service.set_allow_remote_operations(true);
+        let grant = Arc::new(Grant {
+            fleet: None,
+            view: TargetView {
+                command_shells: vec![],
+                id: "rdp-stage".into(),
+                label: "test".into(),
+                backend: Backend::Rdp,
+                scopes: Scopes {
+                    screen: true,
+                    upload: true,
+                    ..Scopes::default()
+                },
+                plans: vec![],
+                roots: vec![],
+                connected: true,
+            },
+            session_id: "rdp-stage".into(),
+            identity: 1,
+            plans: vec![],
+            roots: vec![],
+            quiet_until: Mutex::new(Some(Instant::now() + Duration::from_secs(60))),
+            revoked: watch::channel(false).0,
+        });
+        let cancel = watch::channel(false).0;
+        let task_service = Arc::clone(&service);
+        let task_grant = Arc::clone(&grant);
+        let task = tokio::spawn(async move {
+            task_service
+                .await_approval(
+                    "test",
+                    &task_grant,
+                    "stage site.zip",
+                    "stage-op",
+                    task_grant.revoked.subscribe(),
+                    cancel.subscribe(),
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while service.pending_commands().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(service.pending_commands()[0].requires_each_approval);
+        service.decide_command("stage-op", CommandDecision::Deny, 0);
+        assert_eq!(task.await.unwrap().unwrap_err().code, "not_authorized");
     }
 
     #[test]

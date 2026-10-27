@@ -3,6 +3,10 @@
 //! The password is written once to the child process stdin. It is never placed
 //! in process arguments, session state, events, or logs.
 
+#[path = "rdp_staging.rs"]
+mod staging;
+pub(crate) use staging::valid_name as valid_staging_name;
+
 use crate::sidecar::{
     boxed_sidecar_stdin, desktop_sidecar_admission, terminate_sidecar, wait_for_sidecar_exit,
     wait_for_stop, write_json_line_timeboxed, write_locked_json_line_timeboxed, BoxedSidecarStdin,
@@ -59,6 +63,7 @@ pub struct RdpSessionSummary {
     pub width: u16,
     pub height: u16,
     pub interactive: bool,
+    pub file_transfer: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,6 +115,7 @@ enum EngineCommand {
         width: u16,
         height: u16,
         trusted_certificate_sha256: Option<String>,
+        staging_directory: Option<String>,
     },
     Close,
 }
@@ -120,6 +126,8 @@ enum EngineEvent {
     Connected {
         width: u16,
         height: u16,
+        #[serde(default)]
+        file_transfer: bool,
     },
     CertificateUnknown {
         fingerprint_sha256: String,
@@ -164,6 +172,7 @@ struct RdpSessionRecord {
     generation: u64,
     stdin: AsyncMutex<BoxedSidecarStdin>,
     stop: watch::Sender<bool>,
+    staging: Option<Arc<staging::StagingArea>>,
 }
 
 #[derive(Default)]
@@ -402,6 +411,32 @@ impl RdpRegistry {
             .map(|record| record.generation)
     }
 
+    pub(crate) fn stage_file(
+        &self,
+        session_id: &str,
+        generation: u64,
+        name: &str,
+        bytes: &[u8],
+        validate: impl FnOnce() -> Result<(), crate::mcp_desktop::ServiceError>,
+    ) -> Result<serde_json::Value, crate::mcp_desktop::ServiceError> {
+        use crate::mcp_desktop::ServiceError;
+        let record = self
+            .get(session_id)
+            .map_err(|_| ServiceError::unavailable())?
+            .filter(|record| record.generation == generation && record.summary.file_transfer)
+            .ok_or_else(ServiceError::unavailable)?;
+        record
+            .staging
+            .as_ref()
+            .ok_or_else(ServiceError::unavailable)?
+            .publish(name, bytes, || {
+                if *record.stop.borrow() || self.screen_generation(session_id) != Some(generation) {
+                    return Err(ServiceError::unavailable());
+                }
+                validate()
+            })
+    }
+
     pub fn list(&self) -> Vec<RdpSessionSummary> {
         let Ok(state) = self.state.lock() else {
             return Vec::new();
@@ -555,6 +590,7 @@ struct ConnectedEngine {
     lines: EngineLines,
     width: u16,
     height: u16,
+    file_transfer: bool,
 }
 
 enum EngineStartOutcome {
@@ -707,6 +743,7 @@ async fn start_engine_attempt(
     reservation: &mut RdpConnectReservation,
     request: &RdpConnectRequest,
     trusted_certificate_sha256: Option<String>,
+    staging_directory: Option<String>,
 ) -> EngineStartOutcome {
     let (mut child, mut stdin, stdout) = match spawn_engine() {
         Ok(parts) => parts,
@@ -726,6 +763,7 @@ async fn start_engine_attempt(
         width: request.width.clamp(640, 1920),
         height: request.height.clamp(480, 1200),
         trusted_certificate_sha256,
+        staging_directory,
     };
     let write_result = tokio::select! {
         biased;
@@ -789,15 +827,18 @@ async fn start_engine_attempt(
     };
 
     match first {
-        EngineEvent::Connected { width, height } => {
-            EngineStartOutcome::Connected(Box::new(ConnectedEngine {
-                child,
-                stdin,
-                lines,
-                width,
-                height,
-            }))
-        }
+        EngineEvent::Connected {
+            width,
+            height,
+            file_transfer,
+        } => EngineStartOutcome::Connected(Box::new(ConnectedEngine {
+            child,
+            stdin,
+            lines,
+            width,
+            height,
+            file_transfer,
+        })),
         EngineEvent::CertificateUnknown {
             fingerprint_sha256,
             detail: _,
@@ -846,7 +887,16 @@ pub async fn connect(
         Err(error) => return failed("session", error),
     };
 
-    let first = start_engine_attempt(&mut reservation, &request, None).await;
+    let staging = if cfg!(windows) {
+        match staging::StagingArea::new() {
+            Ok(area) => Some(Arc::new(area)),
+            Err(error) => return failed("staging", error),
+        }
+    } else {
+        None
+    };
+    let staging_path = staging.as_ref().map(|area| area.path());
+    let first = start_engine_attempt(&mut reservation, &request, None, staging_path.clone()).await;
     let connected = match first {
         EngineStartOutcome::Connected(connected) => connected,
         EngineStartOutcome::CertificateUnknown { fingerprint_sha256 } => {
@@ -877,7 +927,9 @@ pub async fn connect(
                 Err(error) => return failed("certificate", error),
             }
 
-            match start_engine_attempt(&mut reservation, &request, Some(approved_pin)).await {
+            match start_engine_attempt(&mut reservation, &request, Some(approved_pin), staging_path)
+                .await
+            {
                 EngineStartOutcome::Connected(connected) => connected,
                 EngineStartOutcome::CertificateUnknown { .. } => {
                     return failed(
@@ -896,6 +948,7 @@ pub async fn connect(
         mut lines,
         width,
         height,
+        file_transfer,
     } = *connected;
 
     let summary = RdpSessionSummary {
@@ -907,6 +960,7 @@ pub async fn connect(
         width,
         height,
         interactive: true,
+        file_transfer: file_transfer && staging.is_some(),
     };
     let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
     let record = Arc::new(RdpSessionRecord {
@@ -914,6 +968,7 @@ pub async fn connect(
         generation,
         stdin: AsyncMutex::new(stdin),
         stop: reservation.stop.clone(),
+        staging: staging.clone(),
     });
     let (admission, mut stop_receiver) = match registry.commit(&mut reservation, record) {
         Ok(committed) => committed,
@@ -927,6 +982,8 @@ pub async fn connect(
     let task_registry = Arc::clone(&registry);
     let task_app = app.clone();
     tokio::spawn(async move {
+        // Keep snapshots available until the engine has actually exited.
+        let _staging = staging;
         // The permit follows the actual worker through process reap, so rapid
         // connect/disconnect calls cannot bypass the cap.
         let _admission = admission;
@@ -1129,10 +1186,12 @@ mod tests {
                 width: 1280,
                 height: 720,
                 interactive: true,
+                file_transfer: false,
             },
             generation,
             stdin: AsyncMutex::new(Box::new(tokio::io::sink())),
             stop,
+            staging: None,
         })
     }
 
@@ -1142,6 +1201,38 @@ mod tests {
         let second = session_id();
         assert!(first.starts_with("rdp-"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn staging_rejects_old_generation_closed_and_unsupported_sessions() {
+        let registry = Arc::new(RdpRegistry::new());
+        let mut reservation = registry.reserve().unwrap();
+        let mut record = test_record("rdp-staging", 7, reservation.stop.clone());
+        let area = Arc::new(staging::StagingArea::new().unwrap());
+        Arc::get_mut(&mut record).unwrap().staging = Some(Arc::clone(&area));
+        let (_first_permit, _first_receiver) = registry
+            .commit(&mut reservation, Arc::clone(&record))
+            .unwrap();
+        assert!(registry
+            .stage_file("rdp-staging", 7, "site.zip", b"site", || Ok(()))
+            .is_err());
+        registry.begin_close("rdp-staging").unwrap();
+        drop(record);
+        let mut reservation = registry.reserve().unwrap();
+        let mut record = test_record("rdp-staging", 8, reservation.stop.clone());
+        Arc::get_mut(&mut record).unwrap().summary.file_transfer = true;
+        Arc::get_mut(&mut record).unwrap().staging = Some(area);
+        let (_permit, _receiver) = registry.commit(&mut reservation, record).unwrap();
+        assert!(registry
+            .stage_file("rdp-staging", 7, "site.zip", b"site", || Ok(()))
+            .is_err());
+        assert!(registry
+            .stage_file("rdp-staging", 8, "site.zip", b"site", || Ok(()))
+            .is_ok());
+        registry.begin_close("rdp-staging").unwrap();
+        assert!(registry
+            .stage_file("rdp-staging", 8, "later.zip", b"site", || Ok(()))
+            .is_err());
     }
 
     #[test]

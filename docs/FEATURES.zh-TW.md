@@ -19,6 +19,7 @@ Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
 
 | 範圍 | 狀態 | 現況與邊界 |
 | --- | --- | --- |
+| RDP 部署暫存 | **Windows 客戶端可用** | MCP 逐檔核准後，經唯讀 RDP 磁碟重新導向提供部署檔案；從遠端桌面複製並驗證部署結果，不需 SSH。 |
 | 桌面連線工作區 | **可用** | Windows、Linux 與 macOS 支援 SSH、SFTP、SSH Tunnel、Web RDP、VNC、主機資源與工作階段管理；SFTP 與新版 Lattice Remote（Linux／macOS 分享端）可線上編輯 1 MiB 以內的 UTF-8 純文字。 |
 | 安全與資料保護 | **可用** | 嚴格主機信任、作業系統認證儲存、主密碼加密保管庫、敏感剪貼簿與加密備份均已接入真實後端。 |
 | 本機 AI Agent Fleet | **可用** | 多 CLI PTY、Reporter、批次提示、同分頁加開 CLI 並帶入目前對話、安全啟動工作區與同程序重新 attach 已完成；另有不必打指令的對話模式（Claude Code、Codex 與 Gemini CLI，Claude 與 Codex 含逐項核准）與應用程式開著時執行的排程任務。 |
@@ -62,6 +63,7 @@ Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
 
   分享端只有中繼模式的固定密碼可選擇保存；區網直連碼與中繼隨機碼仍只供當次執行。原生層將認證綁定永久裝置 ID，明文不進 WebView settings、程序參數或日誌，只經 stdin 傳給 Agent。`credential_backend.json` 以權威位置標記與 `remoteHostCleanupPending` 持久日誌記錄狀態，主機不做跨後端 fallback。輪替先耐久撤銷與記錄兩端待清理，再寫選定後端、原子啟用新標記；刪除也先撤銷再清實體副本，中途失敗時仍不可達，介面會顯示並允許重試清理。OS 安全儲存區可供重啟後直接沿用；加密保管庫須先解鎖。刪除或備份還原後，目前執行中的 Agent 只可在本次停止或應用程式重啟前繼續使用記憶體密碼。備份不攜帶主機權威與清理日誌；還原會記錄兩個本機後端待清理，並關閉下次使用已保存密碼。
 - **Web RDP Canvas**：IronRDP 原生 engine 以 TLS/NLA 連到 Windows，畫面繪入內嵌 Canvas，並支援滑鼠、滾輪與鍵盤。密碼只經本機 stdin 傳給隔離 engine，也可在成功驗證後安全保存。
+- **RDP 部署暫存**：Windows 客戶端提供 `rdp_stage_file`，單檔上限 8 MiB、每條連線合計 128 MiB，檔案出現在專用唯讀 `LatticeDeploy` 分享中，斷線清除。遠端主機須允許磁碟重新導向；經獨立授權的鍵鼠操作複製與部署，暫存成功不代表部署成功。詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md)。
 - **Lattice Remote 命令介面**：Windows 分享端可獨立授權 cmd／PowerShell 指令；觀看端在畫面旁查看 stdout、stderr 與結束代碼，並可停止執行。指令受時間、輸出與併發限制，停止或斷線會清理所屬子程序。詳見 [命令操作與權限](REMOTE_COMMANDS.zh-TW.md)。
 
 - **使用者控制的截圖與錄影**：Lattice Remote、Web RDP 與 VNC 都可手動擷取 PNG，或開始、停止並下載遠端 Canvas 錄影；不會自動錄製或上傳。
@@ -81,6 +83,8 @@ Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
 - 狀態列由 Rust 核心回報認證儲存區的真實可用狀態，不用固定文案假裝就緒。
 
 ## 後續開發重點
+
+Windows 客戶端的 RDP 部署暫存已完成；其他客戶端平台與直接寫入遠端目的地尚未提供。
 
 1. **Lattice Remote 連線範圍**：鍵盤／滑鼠遠端控制已可用（由分享端明確授權）；免帳戶數字裝置 ID、自架 Relay（`docs/RELAY_SERVER.zh-TW.md`）、裝置金鑰釘選（TOFU）與固定配對碼無人值守已可用；接著加入 NAT 直連穿透。連線清單先保存在本機，帳戶只作為日後跨裝置同步與團隊權限的選配層。
 2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH 與 [Relay Fleet](RELAY_FLEET.zh-TW.md) 已提供 MCP 工作區與遠端多 PTY 操作；Relay 尚待外部主機與安裝版驗收，桌面遠端 panes 尚未提供。

@@ -1640,6 +1640,7 @@ fn remote_audit_action(operation: &crate::mcp_desktop::DesktopOperation) -> Opti
         Op::ReadText { .. } => audit::Action::RemoteDownload,
         Op::Exec { .. } => audit::Action::RemoteExec,
         Op::ExecCommand { .. } | Op::RemoteCommand { .. } => audit::Action::RemoteCommand,
+        Op::RdpStageFile { .. } => audit::Action::RemoteUpload,
         Op::Transfer {
             direction: TransferDirection::Upload,
             ..
