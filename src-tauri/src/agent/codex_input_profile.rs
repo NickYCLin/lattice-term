@@ -16,15 +16,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub(crate) const SUPPORTED_VERSIONS: &[&str] = &[
-    "codex-cli 0.153.4",
-    "codex-cli 0.162.1",
-    "codex-cli 0.163.0",
-];
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TOTAL_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
-// The supported native Windows 0.153.4 executable is about 282 MiB. Keep a
-// separate bounded binary limit; configuration files retain their small cap.
+// Keep a separate bounded binary limit; configuration files retain their
+// smaller cap regardless of the CLI release.
 const MAX_BINARY_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_SOURCES: usize = 192;
 const MAX_LINE: usize = 1024 * 1024;
@@ -58,7 +53,6 @@ impl ProbeContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UnavailableReason {
     UnsupportedLaunch,
-    UnsupportedVersion,
     UnsupportedSettings,
     UnverifiableSource,
     ConfigurationChanged,
@@ -71,7 +65,6 @@ impl UnavailableReason {
     pub(crate) fn code(self) -> &'static str {
         match self {
             Self::UnsupportedLaunch => "unsupported_launch",
-            Self::UnsupportedVersion => "unsupported_version",
             Self::UnsupportedSettings => "custom_keymap_or_vim",
             Self::UnverifiableSource => "unverifiable_configuration_source",
             Self::ConfigurationChanged => "configuration_changed",
@@ -85,7 +78,6 @@ impl UnavailableReason {
     pub(crate) fn message(self) -> &'static str {
         match self {
             Self::UnsupportedLaunch => "This Codex launch does not support verified MCP input.",
-            Self::UnsupportedVersion => "This Codex version does not support verified MCP input.",
             Self::UnsupportedSettings => {
                 "Custom Codex keybindings or Vim mode require manual input."
             }
@@ -152,18 +144,7 @@ impl SupportedProfile {
 /// Does not send thread/start, turn/start, model listing, MCP, or tool requests.
 /// App-server startup can maintain its normal local runtime/cache files; this
 /// probe never writes configuration or conversation/queue contents.
-pub(crate) fn inspect(context: &ProbeContext) -> Result<SupportedProfile> {
-    inspect_with_transport(context, true)
-}
-
 pub(super) fn inspect_protocol(context: &ProbeContext) -> Result<SupportedProfile> {
-    inspect_with_transport(context, false)
-}
-
-fn inspect_with_transport(
-    context: &ProbeContext,
-    terminal_input: bool,
-) -> Result<SupportedProfile> {
     let launch_sources = snapshot_launch_sources(context)?;
     let executable = stamp(&context.native_executable, MAX_BINARY_BYTES)?;
     if !matches!(executable, Stamp::File { .. })
@@ -177,22 +158,11 @@ fn inspect_with_transport(
         return Err(UnavailableReason::UnsupportedLaunch);
     }
     let mut source_paths = fallback_sources(context)?;
-    let mut display_configs = Vec::new();
-    if !terminal_input {
-        display_configs.push(user_config_path(context)?);
-        display_configs.extend(selected_managed_profile(context)?);
-    }
+    let mut display_configs = vec![user_config_path(context)?];
+    display_configs.extend(selected_managed_profile(context)?);
     let before = snapshot_with_display_state(&source_paths, &display_configs)?;
-    let arguments = if terminal_input {
-        probe_arguments(context)?
-    } else {
-        protocol_arguments(context)?
-    };
+    let arguments = protocol_arguments(context)?;
     let deadline = Instant::now() + TIMEOUT;
-    if terminal_input {
-        let version = capture_version(context, deadline)?;
-        validate_version(&version)?;
-    }
     let sources = read_configuration(
         context,
         &arguments,
@@ -205,7 +175,7 @@ fn inspect_with_transport(
         .any(|(path, value)| sources.get(path) != Some(value))
         || stamp(&context.native_executable, MAX_BINARY_BYTES)? != executable
         || snapshot_launch_sources(context)? != launch_sources
-        || arguments_for_transport(context, terminal_input)? != arguments
+        || protocol_arguments(context)? != arguments
     {
         return Err(UnavailableReason::ConfigurationChanged);
     }
@@ -217,14 +187,6 @@ fn inspect_with_transport(
         launch_sources,
         configuration_arguments: arguments,
     })
-}
-
-fn validate_version(version: &str) -> Result<()> {
-    if SUPPORTED_VERSIONS.contains(&version.trim()) {
-        Ok(())
-    } else {
-        Err(UnavailableReason::UnsupportedVersion)
-    }
 }
 
 fn context_digest(context: &ProbeContext) -> Result<[u8; 32]> {
@@ -274,6 +236,7 @@ fn environment(context: &ProbeContext, name: &str) -> Result<Option<PathBuf>> {
     Ok(result)
 }
 
+#[cfg(test)]
 pub(super) fn probe_arguments(context: &ProbeContext) -> Result<Vec<OsString>> {
     arguments_for_transport(context, true)
 }
@@ -1155,36 +1118,6 @@ impl Drop for ProbeChild {
     }
 }
 
-fn capture_version(context: &ProbeContext, deadline: Instant) -> Result<String> {
-    let mut probe = ProbeChild::spawn(context, &[OsString::from("--version")])?;
-    let mut output = Vec::new();
-    loop {
-        match probe.next(deadline)? {
-            Output::Line(line) => {
-                output.extend(line);
-                if output.len() > 256 {
-                    return Err(UnavailableReason::UnsupportedVersion);
-                }
-            }
-            Output::Eof => {
-                loop {
-                    match probe.child.try_wait() {
-                        Ok(Some(status)) if status.success() => break,
-                        Ok(Some(_)) | Err(_) => return Err(UnavailableReason::ProbeFailed),
-                        Ok(None) if Instant::now() >= deadline => {
-                            return Err(UnavailableReason::TimedOut);
-                        }
-                        Ok(None) => thread::sleep(Duration::from_millis(5)),
-                    }
-                }
-                return String::from_utf8(output)
-                    .map_err(|_| UnavailableReason::UnsupportedVersion);
-            }
-            Output::Failed(error) => return Err(error),
-        }
-    }
-}
-
 fn read_configuration(
     context: &ProbeContext,
     arguments: &[OsString],
@@ -1354,38 +1287,6 @@ mod tests {
             ],
             arguments: args.iter().map(OsString::from).collect(),
         }
-    }
-
-    #[test]
-    fn codex_input_profile_only_accepts_qualified_stable_versions() {
-        for version in SUPPORTED_VERSIONS {
-            assert!(validate_version(version).is_ok());
-            assert!(validate_version(&format!("{version}\r\n")).is_ok());
-        }
-        for version in [
-            "codex-cli 0.162.0-alpha.17.2",
-            "codex-cli 0.162.2",
-            "codex-cli 0.153.40",
-            "codex-cli 0.162.1-custom",
-            "codex-cli 0.163.0-alpha.1",
-            "codex-cli 0.163.0-custom",
-            "codex-cli 0.163.1",
-            "codex-cli 0.162.1\nunverified",
-            "",
-        ] {
-            assert_eq!(
-                validate_version(version),
-                Err(UnavailableReason::UnsupportedVersion)
-            );
-        }
-        assert_eq!(
-            UnavailableReason::UnsupportedVersion.code(),
-            "unsupported_version"
-        );
-        assert_eq!(
-            UnavailableReason::UnsupportedSettings.code(),
-            "custom_keymap_or_vim"
-        );
     }
 
     #[test]
@@ -1815,7 +1716,8 @@ mod tests {
             environment,
             arguments: Vec::new(),
         };
-        let profile = inspect(&ctx).unwrap_or_else(|reason| panic!("{}", reason.message()));
+        let profile =
+            inspect_protocol(&ctx).unwrap_or_else(|reason| panic!("{}", reason.message()));
         profile.revalidate(&ctx).unwrap();
         if selected_home.is_none() {
             // Only mutate this test's new empty home; an explicitly selected
@@ -1842,8 +1744,7 @@ mod tests {
 
     #[test]
     fn codex_input_profile_accepts_supported_native_binary_size_without_relaxing_config_limit() {
-        // Metadata measured from the pinned native Windows executable, not a
-        // fabricated small shell stub; avoid writing a huge fixture to disk.
+        // Representative native executable size; avoid writing a huge fixture.
         let supported_native_length = 295_408_944;
         assert!(validate_file_length(supported_native_length, MAX_BINARY_BYTES).is_ok());
         assert_eq!(

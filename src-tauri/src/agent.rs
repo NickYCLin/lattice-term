@@ -1177,9 +1177,17 @@ fn reserve_desktop_input_ticket(entry: &AgentSessionEntry) -> Result<u64, String
     Ok(ticket)
 }
 
+#[cfg(any(windows, test))]
+fn verified_codex_transport(has_profile: bool, has_control: bool) -> bool {
+    has_profile && has_control
+}
+
 fn mcp_input_profile_valid(entry: &AgentSessionEntry) -> bool {
     #[cfg(windows)]
-    let supported = entry.codex_input_profile.is_some() || {
+    let supported = verified_codex_transport(
+        entry.codex_input_profile.is_some(),
+        entry.codex_control.is_some(),
+    ) || {
         #[cfg(test)]
         {
             entry
@@ -3061,9 +3069,9 @@ impl AgentRegistry {
             Some(serde_json::json!({
                 "verified": verified,
                 "reason": reason,
-                "transport": if entry.codex_control.is_some() { "app_server_queue" } else { "terminal" },
-                "versionPinned": entry.codex_control.is_none(),
-                "supportedVersions": codex_input_profile::SUPPORTED_VERSIONS
+                "transport": if entry.codex_control.is_some() { "app_server_queue" } else { "unavailable" },
+                "versionPinned": false,
+                "supportedVersions": []
             }))
         }
         #[cfg(not(windows))]
@@ -8149,10 +8157,10 @@ pub fn launch_with_replay(
                         Some(Arc::new(control)),
                     )
                 }
-                Err(_) => match codex_input_profile::inspect(&context) {
-                    Ok(profile) => (Some(CodexInputAttestation { context, profile }), None, None),
-                    Err(reason) => (None, Some(reason), None),
-                },
+                // Without a verified native transport, version numbers cannot
+                // establish how this TUI interprets simulated terminal keys.
+                // Keep manual sessions usable but do not grant MCP input.
+                Err(reason) => (None, Some(reason), None),
             }
         } else {
             (
@@ -15989,6 +15997,14 @@ notify = ["notify.exe", "turn-ended"]"#,
             MCP_NOT_CONTROLLED
         );
         registry.stop_all();
+    }
+
+    #[test]
+    fn codex_mcp_submit_requires_verified_native_transport() {
+        assert!(!verified_codex_transport(false, false));
+        assert!(!verified_codex_transport(true, false));
+        assert!(!verified_codex_transport(false, true));
+        assert!(verified_codex_transport(true, true));
     }
 
     #[cfg(windows)]

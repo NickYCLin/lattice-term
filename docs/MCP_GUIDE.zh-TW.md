@@ -484,9 +484,9 @@ AI 先呼叫 `list_launch_plans`，確認 `projectLaunch.enabled: true` 與 `roo
 
 送給 Windows 上 Codex 背景工作階段的指示必須是**單行**：不能有換行或 Tab，不能出現 `@`、`$`，不能以 `/`、`!` 或 `?` 開頭。被拒時不要自己改寫內容或自動重試，把原因告訴使用者。使用者在那個終端機手動打過字之後，自動送指示會停用，重新授權也不會恢復。
 
-這些輸入資格限制也適用於已分享的前景 Codex 終端。Windows 新工作階段優先使用同一個原生 app-server 的佇列與回合介面，依實際通訊能力判斷，不再要求每個 CLI 新版都加入白名單；無法使用原生介面時，舊終端相容路徑仍只核准原生 CLI 0.153.4 與 0.162.1。兩條路徑仍須使用預設快捷鍵並關閉 Vim，也會保留人工草稿與授權失效檢查。若能讀到對話卻不能送訊息，先查看 `desktop_agent` 的 `state`：`promptReadiness.inputProfile.transport` 為 `app_server_queue` 且 `versionPinned` 為 `false`，才表示使用能力驗證的新路徑。`supportedVersions` 是舊終端路徑的版本清單，不能用來判斷原生介面是否支援目前版本。`reason` 會區分未支援版本、自訂按鍵、檢查失敗與資格失效，不要再要求使用者重複分享。更新程式不會替目前正在跑的舊終端補接服務，也不會中斷它；新路徑須在更新後新開的工作階段驗收。
+這些輸入資格限制也適用於已分享的前景 Codex 終端。Windows 工作階段使用同一個原生 app-server 的佇列與回合介面，依實際通訊能力判斷，不依 CLI 版本白名單；無法驗證原生介面時仍可手動使用終端，但不以未驗證的按鍵方式自動送出。預設快捷鍵、Vim 關閉、人工草稿與授權失效檢查仍適用。若能讀到對話卻不能送訊息，先查看 `desktop_agent` 的 `state`：`promptReadiness.inputProfile.transport` 為 `app_server_queue` 表示已取得原生通訊能力，`unavailable` 表示未取得；`reason` 說明檢查或資格失效原因。更新程式不會替目前正在跑的舊終端補接服務，也不會中斷它；新路徑須在更新後新開的工作階段驗收。
 
-若 CLIProxyAPI 工作階段在更新後仍顯示 `transport: terminal` 與 `reason: unsupported_launch`，先區分正在跑的舊程序與新啟動是否受支援。官方 npm 啟動器與 LatticeTerm 自動加入的代理 `--profile` 都必須一併驗證；不要手動刪掉 profile、改帳號、降版或跳過防護。舊程序無法直接補接原生服務。要改用新路徑，等原工作結束並保留原對話 ID，再以原帳號與原 CLIProxyAPI 連線恢復同一對話；不可在它仍執行時另開一份同 ID 的工作階段。
+若 CLIProxyAPI 工作階段在更新後仍顯示 `transport: unavailable` 與 `reason: unsupported_launch`，先區分正在跑的舊程序與新啟動是否受支援。官方 npm 啟動器與 LatticeTerm 自動加入的代理 `--profile` 都必須一併驗證；不要手動刪掉 profile、改帳號、降版或跳過防護。舊程序無法直接補接原生服務。要改用新路徑，等原工作結束並保留原對話 ID，再以原帳號與原 CLIProxyAPI 連線恢復同一對話；不可在它仍執行時另開一份同 ID 的工作階段。
 
 恢復原對話時若另外指定 `--sandbox`、`--ask-for-approval` 或其他權限旗標，Codex 的遠端模式會拒絕啟動。LatticeTerm 會保留原終端啟動方式，不刪掉權限參數來換取 MCP 控制；請確認是否仍需要這些額外旗標。
 
