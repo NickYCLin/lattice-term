@@ -1280,6 +1280,9 @@ impl FileJobRegistry {
     }
 }
 
+// Drop only after the worker's file resources and semaphore permit. The list,
+// download and text workers retain this in their closure captures (which outlive
+// body locals); the upload worker binds it before its local permit and files.
 struct FileJobRegistration {
     operation_id: u64,
     control: Arc<FileJobControl>,
@@ -4505,6 +4508,21 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_timeout_keeps_stuck_fd_and_global_permit_until_worker_returns() {
+        struct ObservedPermit {
+            _permit: OwnedSemaphorePermit,
+            registry: Arc<FileJobRegistry>,
+            observed: Option<tokio::sync::oneshot::Sender<usize>>,
+        }
+
+        impl Drop for ObservedPermit {
+            fn drop(&mut self) {
+                // Observe before returning the permit, independent of whether
+                // the idle waiter happens to run between the two drops.
+                let in_flight = self.registry.in_flight.load(Ordering::Acquire);
+                let _ = self.observed.take().unwrap().send(in_flight);
+            }
+        }
+
         let root = FileTestRoot::new("stuck-worker");
         let shared = root.shared();
         let upload = shared
@@ -4523,9 +4541,17 @@ mod tests {
         )
         .expect("stuck worker should be admitted");
         let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+        let permit = ObservedPermit {
+            _permit: permit,
+            registry: Arc::clone(&registry),
+            observed: Some(observed_tx),
+        };
         spawn_file_thread("lattice-file-stuck-test", move || {
-            let _permit = permit;
+            // Locals drop in reverse order: staging file, permit, registration.
+            // Match the production upload worker's cleanup-before-idle order.
             let _registration = registration;
+            let _permit = permit;
             let _upload = upload;
             let _ = release_rx.recv();
         })
@@ -4554,6 +4580,11 @@ mod tests {
             .expect("released worker should settle");
         assert_eq!(root.staging_files(), 0);
         assert_eq!(permits.available_permits(), 1);
+        assert_eq!(
+            observed_rx.await.expect("permit drop should be observed"),
+            1,
+            "registration must remain in flight until the permit is released"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
