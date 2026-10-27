@@ -4,6 +4,31 @@
 
 ---
 
+## [2026.10.27](https://github.com/NickYCLin/lattice-term/compare/v2026.10.26...v2026.10.27) (2026-10-27)
+
+
+### 🚀 新增功能
+
+* 開放授權的 MCP 專案工作階段啟動 ([e8e06d0](https://github.com/NickYCLin/lattice-term/commit/e8e06d05f34f4bf3fec729123792e4d10f5a157f))
+
+
+### 🛠️ 問題修正
+
+* **connections:** 整理多連線卡片並修正文字溢出 ([3753373](https://github.com/NickYCLin/lattice-term/commit/3753373ed51b2b27e60d9ebd275c0bb21bb03aa8))
+* 以實際能力判斷代理模型選單 ([613e86d](https://github.com/NickYCLin/lattice-term/commit/613e86dad15f94c339b822f0d0db10693bfa3973))
+* 以通訊能力判斷 MCP 傳訊資格 ([48a51be](https://github.com/NickYCLin/lattice-term/commit/48a51be6a5e9e26d3b1bc66e9b1e15bdf79d4796))
+* 保留原生對話還原的權限設定 ([9a8228b](https://github.com/NickYCLin/lattice-term/commit/9a8228b7fe902f501f227168ed9f76054751e1e9))
+* 修正 MCP 真實工作階段驗收設定 ([58c2ad5](https://github.com/NickYCLin/lattice-term/commit/58c2ad59670c5287a6827264cf5cc2500761fd41))
+* 修正檔案工作測試的釋放順序競態 ([8594944](https://github.com/NickYCLin/lattice-term/commit/85949448c5dbf477865ace4bbcbb0e66c998de92))
+* 修正過長 PATH 造成助理更新失敗 ([cb2a791](https://github.com/NickYCLin/lattice-term/commit/cb2a79174b88835fadce095bdf85c0dcafbe3c95))
+* 等待舊程序退出後再更新 Windows 版 ([7d960bc](https://github.com/NickYCLin/lattice-term/commit/7d960bcbbb33708e1f63778d9072f26131cc585a))
+* 讓 Codex 0.164 閒置畫面通過 MCP 提示就緒判定 ([65429ea](https://github.com/NickYCLin/lattice-term/commit/65429ea1ad1c9f490624232033353b5bc3b3c566))
+* 讓尚無整合回報的閒置終端接受 MCP 提示 ([d7cc701](https://github.com/NickYCLin/lattice-term/commit/d7cc701ff16ce9a6328baa67e96ce4813fe274f0))
+* 避免把 Codex 暫時執行緒記成續接對話 ([3c8ad75](https://github.com/NickYCLin/lattice-term/commit/3c8ad7558412042d0ddde5c1c727bdb620375f9d))
+* 避免終端縮放穿插 MCP 就緒檢查與送出 ([7d0da13](https://github.com/NickYCLin/lattice-term/commit/7d0da134af0c80ff21da3f31f29f4ae96fe3f01b))
+* 避免繼承的檔案控制代碼延長設定鎖 ([38d7b52](https://github.com/NickYCLin/lattice-term/commit/38d7b52c45f5c95bd675a036c8a2b4ef9a72e11f))
+* 閒置畫面判定不依賴 Codex 版本 ([39b8376](https://github.com/NickYCLin/lattice-term/commit/39b8376acaa41b78a97292ef8c1c643bb2d27860))
+
 ## [2026.10.26](https://github.com/NickYCLin/lattice-term/compare/v2026.10.25...v2026.10.26) (2026-10-25)
 
 
