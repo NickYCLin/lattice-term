@@ -38,9 +38,15 @@ describe("mobile connection layout", () => {
   it("allows routes and metadata to wrap without squeezing the host heading", () => {
     expect(connectionStyles).toMatch(/\.connection-card__actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*max-width:\s*100%;/s);
     expect(connectionStyles).toMatch(/\.connection-card__meta\s*\{[^}]*flex-wrap:\s*wrap;/s);
-    expect(connectionStyles).toMatch(/\.connection-card__routes\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(100%, 6rem\), 1fr\)\);/s);
+    expect(connectionStyles).toMatch(/\.connection-card__routes\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
     expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
     expect(connectionStyles).not.toMatch(/\.connection-card__primary\s*\{[^}]*max-width:/s);
+  });
+
+  it("gives route content natural height and keeps its target shrinkable", () => {
+    expect(connectionStyles).toMatch(/\.connection-card__route\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*3\.5rem;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__route-info\s*\{[^}]*min-width:\s*0;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__route-target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
   });
 
   it("uses a shrinkable single-column grid without desktop gutters", () => {

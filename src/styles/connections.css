@@ -3009,6 +3009,7 @@
 }
 
 .connection-card__go {
+  height: auto;
   pointer-events: auto;
   flex: 1;
   min-height: 2.25rem;
@@ -3019,17 +3020,52 @@
 /* One button per route when several connections reach the same computer. */
 .connection-card__routes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   min-width: 0;
   width: 100%;
 }
 
-.connection-card__routes .connection-card__go {
+.connection-card__route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
+  height: auto;
+  min-height: 3.5rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   white-space: normal;
+  text-align: start;
+  pointer-events: auto;
+}
+
+.connection-card__route-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.connection-card__route-protocol {
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.connection-card__route-target {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
   overflow-wrap: anywhere;
+}
+
+.connection-card__route-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--accent);
 }
 
 .connection-card__add-route {

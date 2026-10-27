@@ -9,12 +9,14 @@
 
 import {
   connectionTarget,
+  isRelayProfile,
   findProtocol,
   type ConnectionProfile,
 } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
 import { EnvironmentBadge, ProtocolTile, TagChip } from "../common/Badge";
 import {
+  ChevronRightIcon,
   DuplicateIcon,
   EditIcon,
   PlusIcon,
@@ -63,9 +65,11 @@ export function ConnectionCard({
   unavailableReason?: ConnectionUnavailableReason;
 }) {
   const { t } = useI18n();
-  const protocol = findProtocol(profile.protocol);
   const routes: LinkedRoute[] = [{ profile, onConnect }, ...linked];
   const connectable = routes.filter((route) => route.onConnect);
+  const protocols = [...new Set(routes.map((route) => route.profile.protocol))];
+  const linkedNames = [...new Set(linked.map((route) => route.profile.name))]
+    .filter((name) => name !== profile.name);
 
   return (
     <li
@@ -89,10 +93,10 @@ export function ConnectionCard({
           <span className="connection-card__target mono" title={connectionTarget(profile)}>
             {connectionTarget(profile)}
           </span>
-          {linked.length > 0 && (
+          {linkedNames.length > 0 && (
             <span className="connection-card__target">
               {t("row.sameMachine", {
-                names: linked.map((route) => route.profile.name).join("、"),
+                names: linkedNames.join("、"),
               })}
             </span>
           )}
@@ -101,14 +105,9 @@ export function ConnectionCard({
 
       <div className="connection-card__meta">
         <EnvironmentBadge environment={profile.environment} />
-        <span className="badge tone-neutral">{protocol.acronym}</span>
-        {linked.map((route) => (
-          <span
-            key={route.profile.id}
-            className="badge tone-neutral"
-            title={route.profile.name}
-          >
-            {findProtocol(route.profile.protocol).acronym}
+        {protocols.map((routeProtocol) => (
+          <span key={routeProtocol} className="badge tone-neutral">
+            {findProtocol(routeProtocol).acronym}
           </span>
         ))}
       </div>
@@ -120,7 +119,7 @@ export function ConnectionCard({
               <button
                 key={route.profile.id}
                 type="button"
-                className="button button--primary button--sm connection-card__go"
+                className="button button--secondary connection-card__route"
                 onClick={route.onConnect}
                 aria-label={t("row.connectVia", {
                   name: route.profile.name,
@@ -128,10 +127,20 @@ export function ConnectionCard({
                 }) + ` · ${connectionTarget(route.profile)}`}
                 title={connectionTarget(route.profile)}
               >
-                <TerminalIcon size={13} />
-                {findProtocol(route.profile.protocol).acronym}
-                {routes.filter(entry => entry.profile.protocol === route.profile.protocol).length > 1 &&
-                  ` · ${route.profile.hostname}:${route.profile.port}`}
+                <span className="connection-card__route-info">
+                  <span className="connection-card__route-protocol">
+                    {findProtocol(route.profile.protocol).acronym}
+                  </span>
+                  <span className="connection-card__route-target mono">
+                    {isRelayProfile(route.profile)
+                      ? connectionTarget(route.profile)
+                      : `${route.profile.hostname}:${route.profile.port}`}
+                  </span>
+                </span>
+                <span className="connection-card__route-action">
+                  {t("row.connect")}
+                  <ChevronRightIcon size={14} />
+                </span>
               </button>
             ))}
           </span>

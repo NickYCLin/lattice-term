@@ -61,8 +61,11 @@ describe("connection card runtime capability", () => {
     const markup = renderCard({ onConnect: vi.fn(), linked: [{
       profile: { ...profile, id: "wan", hostname: "wan.example.com", port: 3390 }, onConnect: vi.fn(),
     }] });
-    expect(markup).toContain("RDP · desktop.example.com:3389");
-    expect(markup).toContain("RDP · wan.example.com:3390");
+    expect(markup).toContain(">desktop.example.com:3389</span>");
+    expect(markup).toContain(">wan.example.com:3390</span>");
+    expect(markup.match(/class="badge tone-neutral"/g)).toHaveLength(1);
+    expect(markup.match(/connection-card__route-info/g)).toHaveLength(2);
+    expect(markup).not.toContain("同一台電腦：Office PC");
   });
   it("separates the primary action from compact management controls", () => {
     const markup = renderCard({ onConnect: vi.fn() });
