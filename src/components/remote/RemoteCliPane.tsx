@@ -114,6 +114,17 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   const picker = useRef<HTMLInputElement>(null);
   const [image, setImage] = useState<{ state: "uploading"; percent: number } | { state: "sent" | "failed" | "unreadable" } | null>(null);
   const channel = useMemo(() => new RemoteCliChannel(selected.id, operation => requestRemoteCli(connection.sessionId, operation), () => setProblem(true)), [connection.sessionId, selected.id]);
+  const uploadEpoch = useRef(0);
+  const uploadPending = useRef(false);
+  const uploadMounted = useRef(false);
+  useEffect(() => {
+    uploadMounted.current = true;
+    return () => {
+      uploadMounted.current = false;
+      uploadEpoch.current += 1;
+      uploadPending.current = false;
+    };
+  }, [channel]);
   const remote = useMemo(() => ({
     terminalInput: async (_id: string, data: string) => { channel.input(data); },
     terminalResize: async (_id: string, cols: number, rows: number) => { channel.resize(cols, rows); },
@@ -146,22 +157,35 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
   const gated = useMemo(() => ({ ...remote, terminalInput: async (id: string, data: string) => { if (ready && !problem) await remote.terminalInput(id, data); } }), [remote, ready, problem]);
   const uploading = image?.state === "uploading";
   async function sendImage(file: File) {
-    let picked: PickedImage;
-    try { picked = await readRemoteImage(file); } catch { setImage({ state: "unreadable" }); return; }
+    if (!uploadMounted.current || uploadPending.current || !ready || problem) return;
+    uploadPending.current = true;
+    const epoch = ++uploadEpoch.current;
+    const current = () => uploadMounted.current && epoch === uploadEpoch.current;
+    let decoded = false;
     setImage({ state: "uploading", percent: 0 });
     try {
-      await channel.settle();
+      const picked: PickedImage = await readRemoteImage(file);
+      decoded = true;
+      if (!current()) return;
+      if (!await channel.settle()) throw new Error("The preceding terminal input was not acknowledged.");
+      if (!current()) return;
       const uploadId = crypto.randomUUID();
       const bracketed = terminal.current?.modes.bracketedPasteMode ?? false;
       for (let start = 0; start < picked.data.length; start += REMOTE_ATTACHMENT_CHUNK) {
+        if (!current()) return;
         const operation: RemoteCliOperation = { kind: "cliAttach", sessionId: selected.id, uploadId, offset: start / 4 * 3, total: picked.bytes, data: picked.data.slice(start, start + REMOTE_ATTACHMENT_CHUNK), bracketed };
         // The host ignores a piece it already has, so one resend is safe.
         try { await requestRemoteCli(connection.sessionId, operation); }
-        catch { await requestRemoteCli(connection.sessionId, operation); }
+        catch {
+          if (!current()) return;
+          await requestRemoteCli(connection.sessionId, operation);
+        }
+        if (!current()) return;
         setImage({ state: "uploading", percent: Math.min(100, Math.round((start + REMOTE_ATTACHMENT_CHUNK) / picked.data.length * 100)) });
       }
       setImage({ state: "sent" });
-    } catch { setImage({ state: "failed" }); }
+    } catch { if (current()) setImage({ state: decoded ? "failed" : "unreadable" }); }
+    finally { if (current()) uploadPending.current = false; }
   }
   return <>
     <div className="remote-cli-heading"><strong>{card.title}</strong>{card.detail && <small>{card.detail}</small>}

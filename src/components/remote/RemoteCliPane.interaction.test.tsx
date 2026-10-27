@@ -1,18 +1,19 @@
 import { act, StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { RemoteCliPane } from "./RemoteCliPane";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { RemoteCliOperation } from "../../app/remoteCli";
-const { invoke, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null } }));
+const { invoke, readImage, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), readImage: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null } }));
 vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote }: { session: RemoteSessionSummary; remote: RemoteApi }) => {
   rendered.remote = remote;
   useEffect(() => remote.onTerminalData(session.sessionId, bytes => { rendered.text += new TextDecoder().decode(bytes); }), [session.sessionId]);
   return <div>Test terminal</div>;
 } }));
 const IMAGE = "A".repeat(16 * 1024) + "QUJD";
-vi.mock("./remoteImage", () => ({ readRemoteImage: async () => ({ key: "image", preview: "", data: IMAGE, bytes: IMAGE.length / 4 * 3 }) }));
+vi.mock("./remoteImage", () => ({ readRemoteImage: readImage }));
+beforeEach(() => { readImage.mockImplementation(async () => ({ key: "image", preview: "", data: IMAGE, bytes: IMAGE.length / 4 * 3 })); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); });
 class HostNode {
   nodeType = 1;
@@ -113,6 +114,83 @@ it("finds working sessions first in a large list and combines status with projec
     expect(allNodes(container).find(node => node.tagName === "INPUT")!.value).toBe("");
     expect(invoke.mock.calls.every(([, args]) => !["cliInput", "cliAttach"].includes(args.request.operation.kind))).toBe(true);
   } finally { await act(async () => root.unmount()); }
+});
+
+async function uploadHarness() {
+  vi.useFakeTimers();
+  await import("@tauri-apps/api/core");
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const operations: RemoteCliOperation[] = [];
+  let attach: (operation: RemoteCliOperation) => Promise<unknown> = async () => null;
+  let input: () => Promise<unknown> = async () => null;
+  invoke.mockImplementation(async (_command, { request }) => {
+    const op: RemoteCliOperation = request.operation;
+    operations.push(op);
+    const value = op.kind === "cliList" ? [{ id:"image-session", label:"Codex", groupLabel:"Image fixture", agent:"codex", state:"idle", detached:false }]
+      : op.kind === "cliRead" ? { sessionId:op.sessionId, cursor:op.cursor, nextCursor:0, endOffset:0, base64:"", truncated:false }
+      : op.kind === "cliAttach" ? await attach(op) : op.kind === "cliInput" ? await input() : null;
+    return { id:request.id, value, error:null };
+  });
+  const render = async (active = true, connection = "image-host") => {
+    await act(async () => root.render(<StrictMode><I18nProvider locale="zh-TW"><RemoteCliPane session={{sessionId:connection,cli:true} as RemoteSessionSummary} theme="dark" active={active} /></I18nProvider></StrictMode>));
+  };
+  const click = async (text:string) => { await act(async () => reactProps(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.includes(text))!).onClick()); };
+  await render();
+  await click("Image fixture");
+  expect(container.textContent).toContain("已接上原本的助理");
+  const pick = async () => {
+    await act(async () => {
+      reactProps(allNodes(container).find(node => node.tagName === "INPUT")!).onChange({target:{files:[{}],value:"fixture.png"}});
+      await vi.advanceTimersByTimeAsync(1);
+    });
+  };
+  return { container, root, operations, render, click, pick,
+    setAttach:(callback:typeof attach) => { attach = callback; }, setInput:(callback:typeof input) => { input = callback; } };
+}
+
+it.each(["hidden-success", "hidden-failure", "back-success", "switch-failure"])("stops image chunks and retries after leaving the terminal: %s", async scenario => {
+  const test = await uploadHarness();
+  let resolve!: () => void;
+  let reject!: (error:Error) => void;
+  const pending = new Promise<void>((yes, no) => { resolve=yes; reject=no; });
+  test.setAttach(() => pending);
+  try {
+    await test.pick();
+    expect(test.operations.filter(op => op.kind === "cliAttach")).toHaveLength(1);
+    if (scenario.startsWith("back")) await test.click("返回清單");
+    else await test.render(!scenario.startsWith("hidden"), scenario.startsWith("switch") ? "another-image-host" : "image-host");
+    await act(async () => {
+      if (scenario.endsWith("failure")) reject(new Error("old connection ended")); else resolve();
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    expect(test.operations.filter(op => op.kind === "cliAttach")).toHaveLength(1);
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("does not decode two selections at once or upload an image decoded after leaving", async () => {
+  const test = await uploadHarness();
+  let finish!: (value:unknown) => void;
+  readImage.mockReturnValue(new Promise(resolve => { finish=resolve; }));
+  try {
+    await test.pick();
+    await test.pick();
+    expect(readImage).toHaveBeenCalledTimes(1);
+    await test.render(false);
+    await act(async () => { finish({key:"late-image",data:IMAGE,bytes:IMAGE.length / 4 * 3}); await vi.advanceTimersByTimeAsync(5); });
+    expect(test.operations.filter(op => op.kind === "cliAttach")).toHaveLength(0);
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("does not send an image after its preceding terminal input failed", async () => {
+  const test = await uploadHarness();
+  test.setInput(async () => { throw new Error("input was not acknowledged"); });
+  try {
+    await act(async () => rendered.remote!.terminalInput("image-session", "text before image"));
+    await test.pick();
+    expect(test.operations.filter(op => op.kind === "cliInput")).toHaveLength(1);
+    expect(test.operations.filter(op => op.kind === "cliAttach")).toHaveLength(0);
+  } finally { await act(async () => test.root.unmount()); }
 });
 
 

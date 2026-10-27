@@ -109,6 +109,11 @@ export class RemoteCliChannel {
     if (this.size) this.resize(this.size.cols, this.size.rows);
   }
   /** Sends anything typed so far and waits for it, so a pasted image path lands after it. */
-  async settle() { this.flush(); await this.queue; }
+  async settle() {
+    const generation = this.generation;
+    this.flush();
+    await this.queue;
+    return this.active && !this.failed && generation === this.generation;
+  }
   stop() { this.generation++; this.pendingBytes = 0; this.active = false; this.buffered = ""; clearTimeout(this.timer); this.timer = undefined; }
 }
