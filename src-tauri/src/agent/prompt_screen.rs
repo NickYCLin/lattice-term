@@ -222,18 +222,21 @@ impl PromptScreen {
     }
 }
 
-/// Codex 0.164 prints `permissions: YOLO mode` in its start-up header box,
-/// directly under the version and working directory. Only that exact,
-/// unwrapped line below the header counts; any other "permission" text on
-/// screen, including approval prompts, keeps blocking.
+/// The exact unwrapped permission-mode line is safe only under a recognizable
+/// Codex header. Its optional parenthesized suffix is not a version check;
+/// approval prompts and other permission text continue to block.
 fn is_codex_permission_header(screen: &vt100::Screen, rows: &[String], index: usize) -> bool {
     let wrapped = |index: usize| u16::try_from(index).map_or(true, |row| screen.row_wrapped(row));
     rows[index].trim() == "permissions: YOLO mode"
         && !wrapped(index)
         && (index == 0 || !wrapped(index - 1))
-        && rows[index.saturating_sub(3)..index]
-            .iter()
-            .any(|line| line.trim_start().starts_with(">_ OpenAI Codex (v"))
+        && rows[index.saturating_sub(3)..index].iter().any(|line| {
+            let line = line.trim();
+            line == ">_ OpenAI Codex"
+                || line
+                    .strip_prefix(">_ OpenAI Codex (")
+                    .is_some_and(|suffix| !suffix.is_empty() && suffix.ends_with(')'))
+        })
 }
 
 /// Codex 0.164 status line below the composer:
@@ -469,6 +472,30 @@ mod tests {
                 "{status:?}"
             );
         }
+    }
+
+    #[test]
+    fn codex_idle_header_does_not_depend_on_version() {
+        let fixture = codex_0164_resumed(CODEX_0164_COMPOSER, CODEX_0164_STATUS);
+        for suffix in ["(v0.153.4)", "(v0.164.0)", "(v999.42.0)", ""] {
+            let body = fixture.replace("(v0.164.0)", suffix);
+            assert_eq!(
+                wide_screen(&body).blocker("codex", Instant::now()),
+                None,
+                "header suffix: {suffix:?}"
+            );
+            let dialog = body.replace("Tip:", "Permission required: allow access? Tip:");
+            assert_eq!(
+                wide_screen(&dialog).blocker("codex", Instant::now()),
+                Some("terminal_dialog_or_work"),
+                "header suffix: {suffix:?}"
+            );
+        }
+        let unrelated = fixture.replace("OpenAI Codex", "OpenAI Codex impostor");
+        assert_eq!(
+            wide_screen(&unrelated).blocker("codex", Instant::now()),
+            Some("terminal_dialog_or_work")
+        );
     }
 
     #[test]
