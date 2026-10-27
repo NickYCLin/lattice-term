@@ -29,6 +29,8 @@ import { stripVTControlCharacters } from "node:util";
 const { Terminal } = createRequire(import.meta.url)("@xterm/xterm");
 
 const MAX_LINE = 1024 * 1024;
+export const MCP_OBSERVER_PROTOCOL = 3;
+export const CODEX_LAUNCH_TIMEOUT_MS = 120_000;
 const BOOTSTRAP = "Do not use tools, read files, change files, or start background work. Reply with just READY.";
 const USAGE = "Pass exactly one of --preflight, --pty-preflight, --runtime-preflight, --input-preflight, or --run-live, and --lattice <native.exe>. Runtime/input preflight need no providers; the other modes require --claude and --codex native executable paths. Live --codex-only omits Claude. Live --codex-pair uses two Codex workers and requires --rustc <installed-native-rustc.exe>; --tsc <native-tsc.exe> is optional when repository TypeScript 7 is installed. Optional: --report <new.json>, --timeout-seconds <30..600>, --trust-owned-fixture (Claude dual-live only).";
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -834,7 +836,7 @@ async function main(args) {
     stage = "isolated-daemon-authenticate";
     const hello = await desktop.request({ type: "hello", protocol: 1, role: "desktop",
       token: readFileSync(join(data, "agent-daemon.token"), "utf8").trim() });
-    if (hello.mcpProtocol !== 2) fail("mcp-protocol-unavailable");
+    if (hello.mcpProtocol !== MCP_OBSERVER_PROTOCOL) fail("mcp-protocol-unavailable");
     if (options.mode === "run-live" && hello.mcpOutputScopes !== true) fail("mcp-output-scopes-unavailable");
     desktop.on("event", (event) => {
       const id = event.payload.sessionId;
@@ -941,9 +943,10 @@ async function main(args) {
         executable: entry.executable || (provider === "claude" ? claude : codex),
         label: `${name} acceptance`, arguments: entry.args || (entry.restrictedHelp ? ["--help", ...argumentsForCli] : argumentsForCli), workingDirectory: directory,
         cols: 180, rows: 40, detached: true, sandbox: false } }, undefined,
-      // Windows Codex now performs a bounded metadata-only profile preflight.
-      // This changes only launch RPC waiting, not the model-turn deadline.
-      definitionId === "codex" ? 30000 : 15000);
+      // Windows Codex checks executable/configuration fingerprints and probes
+      // native capabilities before the launch reply. Keep this deadline
+      // separate from the model-turn deadline and never retry a timeout.
+      definitionId === "codex" ? CODEX_LAUNCH_TIMEOUT_MS : 15000);
       sessionIds.add(session.sessionId);
       ownedSessionIds.add(session.sessionId);
       const launchedDiagnostic = diagnostics.get(session.sessionId) || { bytes: 0, tail: "", classes: new Set(), closed: false };

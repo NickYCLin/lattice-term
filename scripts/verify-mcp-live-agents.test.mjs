@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 import { cancellationWorkers, cancelPrerequisiteFailure, classifyProviderOutput, codexProgressSignals, compilerResultMatches, disabledMcpArguments, fixtureSnapshot, fixtureTrustArguments, liveChecksPassed, liveWorkers, makeFixtures, MCP_REVIEW_OUTPUT_OPTIONS, McpReviewVerifier, nativeExitClassification, nativeInputProbeScript, ownedCliCleanupEvidence, ownedFixtureTrustReady, pairCheckerScript, pairCodexArguments, pairCompilerArguments, pairPrompt, parseOptions, recordLifecycle, requiredLiveChecks, reviewPrompt, startupSignals, taskFailureSignals, TerminalQueryResponder, verifiedResult } from "./verify-mcp-live-agents.mjs";
 import { composerHints, recordTaskSignals, reportedCheckerFailures, settleDiagnosticParsers, taskSignalSnapshot } from "./verify-mcp-live-agents.mjs";
+import { MCP_OBSERVER_PROTOCOL } from "./verify-mcp-live-agents.mjs";
+
+test("live acceptance uses the daemon's observer protocol", () => {
+  const source = readFileSync(new URL("../src-tauri/src/agent_daemon/mod.rs", import.meta.url), "utf8");
+  const match = source.match(/pub const OBSERVER_PROTOCOL_VERSION: u32 = (\d+);/);
+  assert.ok(match);
+  assert.equal(MCP_OBSERVER_PROTOCOL, Number(match[1]));
+});
 
 test("an integer followed by sentence punctuation keeps the exact answer boundary", () => {
   const nonce = "88888888-2222-4333-8444-555555555555";
