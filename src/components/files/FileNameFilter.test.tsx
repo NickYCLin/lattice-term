@@ -42,8 +42,10 @@ it.each(["sftp", "remote"] as const)("filters %s locally, preserves refresh, cle
   const search = () => allNodes(host).find(node => node.tagName === "INPUT" && props(node).type === "search")!;
   const filter = async (value: string) => { await act(async () => props(search()).onChange({ currentTarget: { value } })); };
   const rows = () => allNodes(host).filter(node => node.tagName === "TBODY").map(node => node.textContent).join("");
+  const sortSelect = () => allNodes(host).find(node => node.tagName === "SELECT")!;
   try {
     await act(async () => render("first"));
+    await act(async () => props(sortSelect()).onChange({ currentTarget: { value: "largest" } }));
     await filter(" 報表.txt ");
     expect(rows()).toContain("報表.TXT");
     expect(rows()).not.toContain("hidden.txt");
@@ -61,9 +63,11 @@ it.each(["sftp", "remote"] as const)("filters %s locally, preserves refresh, cle
     await filter("Reports");
     await act(async () => props(allNodes(host).find(node => node.tagName === "BUTTON" && (props(node)["aria-label"] === "Refresh" || node.textContent === "Refresh"))!).onClick());
     expect(search().value).toBe("Reports");
+    expect(props(sortSelect()).value).toBe("largest");
     await act(async () => props(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "Reports")!).onClick());
     expect(list).toHaveBeenLastCalledWith("first", "/Reports");
     expect(search().value).toBe("");
+    expect(props(sortSelect()).value).toBe("largest");
     await filter("missing");
     await act(async () => render("second"));
     expect(search().value).toBe("");
@@ -81,11 +85,41 @@ it.each(["sftp", "remote"] as const)("disables %s filtering during listing and d
       : <RemoteFilesPane session={{ sessionId: "empty", fileRootLabel: "Shared" } as RemoteSessionSummary} remote={{ listFiles: list, transfers: {} } as unknown as RemoteApi} />}</I18nProvider>));
     const search = () => allNodes(host).find(node => node.tagName === "INPUT" && props(node).type === "search")!;
     expect(props(search()).disabled).toBe(true);
+    expect(props(allNodes(host).find(node => node.tagName === "SELECT")!).disabled).toBe(true);
     await act(async () => finish({ path: "/", entries: [] }));
     expect(props(search()).disabled).toBe(false);
+    expect(props(allNodes(host).find(node => node.tagName === "SELECT")!).disabled).toBe(false);
     await act(async () => props(search()).onChange({ currentTarget: { value: "anything" } }));
     expect(host.textContent).toContain("This folder is empty.");
     expect(host.textContent).not.toContain("No matching file names");
     expect(list).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each(["sftp", "remote"] as const)("reorders %s file rows locally without changing their operation paths", async kind => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  const entries: SftpEntry[] = [
+    { name: "file10", path: "/file10", kind: "file", size: 10, modifiedAt: 10, permissions: "" },
+    { name: "folder", path: "/folder", kind: "directory", size: 0, modifiedAt: 0, permissions: "" },
+    { name: "file2", path: "/file2", kind: "file", size: 20, modifiedAt: 20, permissions: "" },
+  ];
+  const list = vi.fn(async () => ({ path: "/", entries }));
+  const download = vi.fn();
+  try {
+    await act(async () => root.render(<I18nProvider locale="en">{kind === "sftp"
+      ? <SftpPane session={{ sessionId: "sort", currentPath: "/" } as SftpSessionSummary} sftp={{ list, downloadToDisk: download, transfers: {} } as unknown as SftpApi} />
+      : <RemoteFilesPane session={{ sessionId: "sort", fileRootLabel: "Shared" } as RemoteSessionSummary} remote={{ listFiles: list, downloadFile: download, transfers: {} } as unknown as RemoteApi} />}</I18nProvider>));
+    const names = () => allNodes(host).filter(node => node.tagName === "TBODY").flatMap(body =>
+      allNodes(body).filter(node => node.tagName === "BUTTON" && ["file2", "file10", "folder"].includes(node.textContent)).map(node => node.textContent));
+    expect(names()).toEqual(["folder", "file2", "file10"]);
+    await act(async () => props(allNodes(host).find(node => node.tagName === "SELECT")!).onChange({ currentTarget: { value: "nameDesc" } }));
+    expect(names()).toEqual(["folder", "file10", "file2"]);
+    await act(async () => props(allNodes(host).find(node => node.tagName === "SELECT")!).onChange({ currentTarget: { value: "largest" } }));
+    expect(names()).toEqual(["folder", "file2", "file10"]);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(entries.map(entry => entry.name)).toEqual(["file10", "folder", "file2"]);
+    await act(async () => props(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "file2")!).onClick());
+    expect(download).toHaveBeenCalledWith("sort", "/file2");
   } finally { await act(async () => root.unmount()); }
 });

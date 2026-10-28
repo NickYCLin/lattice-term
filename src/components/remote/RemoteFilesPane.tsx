@@ -1,6 +1,6 @@
 import { useFileDrop } from "../../app/fileDrop";
 import { droppedUpload, localFileError, type UploadFile } from "../../app/localFiles";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   RemoteApi,
   RemoteDirectory,
@@ -13,6 +13,7 @@ import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
 import { FileNameFilter, filterFileNames } from "../files/FileNameFilter";
+import { sortFileEntries, type FileSortOrder } from "../files/fileSorting";
 import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
@@ -55,7 +56,10 @@ export function RemoteFilesPane({
   }, []);
   const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
   const [fileQuery, setFileQuery] = useState("");
-  const visibleEntries = filterFileNames(directory?.entries ?? [], fileQuery);
+  const [fileSort, setFileSort] = useState<FileSortOrder>("nameAsc");
+  const visibleEntries = useMemo(() => sortFileEntries(
+    filterFileNames(directory?.entries ?? [], fileQuery), fileSort, tag,
+  ), [directory, fileQuery, fileSort, tag]);
   const [pathInput, setPathInput] = useState("/");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -258,7 +262,8 @@ export function RemoteFilesPane({
         </div>
       )}
 
-      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory} />
+      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory}
+        sortOrder={fileSort} onSortChange={setFileSort} />
       <div className="remote-files-list">
         {loading ? (
           <div className="remote-files-state">{t("remote.files.loading")}</div>

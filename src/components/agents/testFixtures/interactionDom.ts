@@ -19,9 +19,20 @@ export class HostNode {
   selected = false;
   get textContent(): string { return this.text + this.childNodes.map((child) => child.textContent).join(""); }
   set textContent(value: string) { this.text = value; this.childNodes = []; }
-  appendChild(child: HostNode) { this.childNodes.push(child); child.parentNode = this; return child; }
+  appendChild(child: HostNode) {
+    child.parentNode?.removeChild(child);
+    this.childNodes.push(child);
+    child.parentNode = this;
+    return child;
+  }
   removeChild(child: HostNode) { this.childNodes = this.childNodes.filter((node) => node !== child); child.parentNode = null; return child; }
-  insertBefore(child: HostNode, before: HostNode) { this.childNodes.splice(this.childNodes.indexOf(before), 0, child); child.parentNode = this; return child; }
+  insertBefore(child: HostNode, before: HostNode) {
+    if (child === before) return child;
+    child.parentNode?.removeChild(child);
+    this.childNodes.splice(this.childNodes.indexOf(before), 0, child);
+    child.parentNode = this;
+    return child;
+  }
   setAttribute(name: string, value: string) { this.attributes[name] = value; }
   setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
   removeAttribute(name: string) { delete this.attributes[name]; }

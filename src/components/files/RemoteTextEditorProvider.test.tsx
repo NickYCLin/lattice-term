@@ -12,6 +12,7 @@ import type { SftpApi, SftpSessionSummary } from "../../app/useSftpSessions";
 import type { RemoteTextEditorProps } from "./RemoteTextEditor";
 import { RemoteFilesPane } from "../remote/RemoteFilesPane";
 import { SftpPane } from "../sftp/SftpPane";
+import { HostNode } from "../agents/testFixtures/interactionDom";
 import { RemoteTextEditorProvider, useRemoteTextEditor } from "./RemoteTextEditorProvider";
 
 const editor = vi.hoisted(() => ({
@@ -56,31 +57,6 @@ vi.mock("./RemoteTextEditor", async () => {
     },
   };
 });
-
-class HostNode {
-  nodeType = 1;
-  namespaceURI = "http://www.w3.org/1999/xhtml";
-  childNodes: HostNode[] = [];
-  parentNode: HostNode | null = null;
-  style = {};
-  attributes: Record<string, string> = {};
-  ownerDocument: Record<string, unknown>;
-  private text = "";
-  constructor(readonly tagName: string, document: Record<string, unknown>) { this.ownerDocument = document; }
-  get nodeName() { return this.tagName; }
-  get firstChild() { return this.childNodes[0] ?? null; }
-  get textContent(): string { return this.text + this.childNodes.map((child) => child.textContent).join(""); }
-  set textContent(value: string) { this.text = value; this.childNodes = []; }
-  appendChild(child: HostNode) { this.childNodes.push(child); child.parentNode = this; return child; }
-  removeChild(child: HostNode) { this.childNodes = this.childNodes.filter((node) => node !== child); child.parentNode = null; return child; }
-  insertBefore(child: HostNode, before: HostNode) { this.childNodes.splice(this.childNodes.indexOf(before), 0, child); child.parentNode = this; return child; }
-  setAttribute(name: string, value: string) { this.attributes[name] = value; }
-  setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
-  removeAttribute(name: string) { delete this.attributes[name]; }
-  addEventListener() {}
-  removeEventListener() {}
-  focus() {}
-}
 
 function nodes(node: HostNode): HostNode[] { return [node, ...node.childNodes.flatMap(nodes)]; }
 function props(node: HostNode): { onClick: () => void; disabled: boolean; inert: boolean } {

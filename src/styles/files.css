@@ -25,6 +25,21 @@
   min-height: 44px;
 }
 
+.file-name-filter__sort {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.file-name-filter__sort .select {
+  min-width: 0;
+  min-height: 44px;
+  max-width: 100%;
+}
+
 .file-entry-icon {
   display: inline-flex;
   flex: 0 0 auto;

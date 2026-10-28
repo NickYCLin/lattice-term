@@ -2,6 +2,7 @@ import { useFileDrop } from "../../app/fileDrop";
 import { localFileError } from "../../app/localFiles";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -18,6 +19,7 @@ import { createSerialQueue } from "../../app/serialQueue";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
 import { FileNameFilter, filterFileNames } from "../files/FileNameFilter";
+import { sortFileEntries, type FileSortOrder } from "../files/fileSorting";
 import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
@@ -63,7 +65,10 @@ export function SftpPane({
   }, []);
   const [directory, setDirectory] = useState<SftpDirectory | null>(null);
   const [fileQuery, setFileQuery] = useState("");
-  const visibleEntries = filterFileNames(directory?.entries ?? [], fileQuery);
+  const [fileSort, setFileSort] = useState<FileSortOrder>("nameAsc");
+  const visibleEntries = useMemo(() => sortFileEntries(
+    filterFileNames(directory?.entries ?? [], fileQuery), fileSort, tag,
+  ), [directory, fileQuery, fileSort, tag]);
   const [pathInput, setPathInput] = useState(session.currentPath);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -414,7 +419,8 @@ export function SftpPane({
         </div>
       )}
 
-      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory} />
+      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory}
+        sortOrder={fileSort} onSortChange={setFileSort} />
       <div className="sftp-table-wrap">
         {loading ? (
           <div className="sftp-state">{t("sftp.loading")}</div>
