@@ -62,11 +62,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render(kind: string, viewOnly = false) {
+async function render(kind: string, viewOnly = false, inputDisabled = false) {
   await act(async () => root.render(<I18nProvider locale="zh-TW">
     {kind === "ssh"
       ? <TerminalPane sessionId="mobile-terminal" ssh={ssh} theme="dark" mobile onClosed={() => {}} />
-      : <RemoteTerminalView session={{ ...session, viewOnly }} remote={remote} theme="dark" />}
+      : <RemoteTerminalView session={{ ...session, viewOnly }} remote={remote} theme="dark" inputDisabled={inputDisabled} />}
   </I18nProvider>));
   return mocks.terminals[mocks.terminals.length - 1]!;
 }
@@ -110,6 +110,29 @@ describe.each(["ssh", "remote"])("%s mobile terminal", kind => {
     await act(async () => vi.runAllTimers());
     expect(send).not.toHaveBeenCalled();
   });
+});
+
+it("enables remote input in place after replay and blocks it again on disconnect", async () => {
+  const terminal = await render("remote", false, true);
+  const buttons = () => allNodes(container).filter(node => node.tagName === "BUTTON");
+  expect(buttons().every(node => props(node).disabled)).toBe(true);
+  expect(terminal.options.disableStdin).toBe(true);
+  terminal.input("blocked");
+  softKey(terminal, " ");
+  await render("remote");
+  await act(async () => vi.runAllTimers());
+  expect(send).not.toHaveBeenCalled();
+  expect(mocks.terminals).toHaveLength(1);
+  expect(terminal.options.disableStdin).toBe(false);
+  expect(buttons().every(node => !props(node).disabled)).toBe(true);
+  terminal.input("ready");
+  expect(send).toHaveBeenCalledExactlyOnceWith("mobile-terminal", "ready");
+  await render("remote", false, true);
+  terminal.input("disconnected");
+  softKey(terminal, "!");
+  await act(async () => vi.runAllTimers());
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(mocks.terminals).toHaveLength(1);
 });
 
 it("hides touch input controls and refuses input for a view-only remote", async () => {

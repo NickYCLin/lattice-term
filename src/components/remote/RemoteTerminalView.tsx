@@ -6,7 +6,7 @@
  * bytes, and the agent is told whenever the pane changes size.
  */
 
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import { attachTerminalTypography } from "../../app/typography";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -53,6 +53,8 @@ export function RemoteTerminalView({
   remote,
   theme,
   terminalRef,
+  inputDisabled = false,
+  toolbarActions,
 }: {
   session: RemoteSessionSummary;
   remote: RemoteApi;
@@ -60,6 +62,8 @@ export function RemoteTerminalView({
   theme: ThemeId;
   /** Lets touch controls open the software keyboard from a user gesture. */
   terminalRef?: MutableRefObject<Terminal | null>;
+  inputDisabled?: boolean;
+  toolbarActions?: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const ownRef = useRef<Terminal | null>(null);
@@ -69,6 +73,8 @@ export function RemoteTerminalView({
   const sessionId = session.sessionId;
   const viewOnly = session.viewOnly;
   const controlKey = useTerminalControlKey();
+  const inputDisabledRef = useRef(inputDisabled);
+  inputDisabledRef.current = inputDisabled;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -82,7 +88,7 @@ export function RemoteTerminalView({
       cursorBlink: false,
       scrollback: 5000,
       minimumContrastRatio: 4.5,
-      disableStdin: viewOnly,
+      disableStdin: viewOnly || inputDisabledRef.current,
       theme: terminalTheme(),
     });
 
@@ -124,9 +130,15 @@ export function RemoteTerminalView({
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
     const sendInput = (data: string) => {
-      if (viewOnly) return;
+      if (viewOnly || inputDisabledRef.current) return;
       void remoteRef.current.terminalInput(sessionId, controlKey.consume(data)).catch(() => {});
     };
+    const blockUnavailableInput = (event: Event) => {
+      if (!viewOnly && !inputDisabledRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    textarea?.addEventListener("beforeinput", blockUnavailableInput, true);
     const mobileInput = new MobileTerminalInput(textarea, sendInput);
 
     attachTerminalClipboard(
@@ -169,6 +181,7 @@ export function RemoteTerminalView({
       observer.disconnect();
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       textarea?.removeEventListener("input", handleInput);
+      textarea?.removeEventListener("beforeinput", blockUnavailableInput, true);
       imePresentation.dispose();
       mobileInput.dispose();
       imeFallback.dispose();
@@ -188,12 +201,17 @@ export function RemoteTerminalView({
     }
   }, [theme]);
 
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.disableStdin = viewOnly || inputDisabled;
+  }, [viewOnly, inputDisabled]);
+
   // Phones only raise the keyboard when focus happens inside the tap itself.
   return (
     <div className="terminal-pane-wrap remote-terminal">
       <div className="terminal-pane" ref={hostRef}
-        onClick={() => { if (!viewOnly) termRef.current?.focus(); }} />
+        onClick={() => { if (!viewOnly && !inputDisabled) termRef.current?.focus(); }} />
       {!viewOnly && <TerminalKeybar
+        disabled={inputDisabled}
         ctrlArmed={controlKey.armed}
         onToggleCtrl={() => { controlKey.toggle(); termRef.current?.focus(); }}
         onToggleKeyboard={() => {
@@ -205,7 +223,7 @@ export function RemoteTerminalView({
           termRef.current?.input(sequence);
           termRef.current?.focus();
         }}
-      />}
+      >{toolbarActions}</TerminalKeybar>}
     </div>
   );
 }

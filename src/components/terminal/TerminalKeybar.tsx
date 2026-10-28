@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/context";
 import { KeyboardIcon } from "../icons";
 
@@ -38,28 +38,31 @@ const keys = [
 ];
 
 export function TerminalKeybar({
-  ctrlArmed, onToggleCtrl, onToggleKeyboard, onInput,
+  ctrlArmed, onToggleCtrl, onToggleKeyboard, onInput, disabled = false, children,
 }: {
   ctrlArmed: boolean;
   onToggleCtrl: () => void;
   onToggleKeyboard: () => void;
   onInput: (sequence: string) => void;
+  disabled?: boolean;
+  children?: ReactNode;
 }) {
   const { t } = useI18n();
   return (
     <div className="terminal-keybar" role="toolbar" aria-label={t("terminal.keybar.label")}
       onPointerDown={(event) => event.preventDefault()}>
       <button type="button" className="terminal-keybar__key terminal-keybar__keyboard"
-        aria-label={t("terminal.keybar.keyboard")} onClick={onToggleKeyboard}>
+        disabled={disabled} aria-label={t("terminal.keybar.keyboard")} onClick={onToggleKeyboard}>
         <KeyboardIcon size={18} />
       </button>
       <button type="button" className={"terminal-keybar__key" + (ctrlArmed ? " is-armed" : "")}
-        aria-pressed={ctrlArmed} onClick={onToggleCtrl}>
+        disabled={disabled} aria-pressed={ctrlArmed} onClick={onToggleCtrl}>
         {t("terminal.keybar.ctrl")}
       </button>
+      {children}
       {keys.map((key) => (
         <button key={key.label} type="button" className="terminal-keybar__key"
-          onClick={() => onInput(key.sequence)}>{key.label}</button>
+          disabled={disabled} onClick={() => onInput(key.sequence)}>{key.label}</button>
       ))}
     </div>
   );

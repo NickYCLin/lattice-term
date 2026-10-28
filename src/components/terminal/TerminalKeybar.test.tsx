@@ -31,6 +31,16 @@ afterEach(async () => {
 });
 
 describe("touch terminal keys", () => {
+  it("disables every helper key while retaining attachment actions", async () => {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><TerminalKeybar
+      ctrlArmed={false} onToggleCtrl={vi.fn()} onToggleKeyboard={keyboard} onInput={input} disabled
+    ><span>Attachment action</span></TerminalKeybar></I18nProvider>));
+    const buttons = allNodes(container).filter(node => node.tagName === "BUTTON");
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every(node => props(node).disabled)).toBe(true);
+    expect(container.textContent).toContain("Attachment action");
+  });
+
   it.each([
     ["Enter", "\r"], ["Esc", "\x1b"], ["Tab", "\t"],
     ["\u2191", "\x1b[A"], ["\u2193", "\x1b[B"],

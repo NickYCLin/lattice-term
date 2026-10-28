@@ -5,11 +5,12 @@ import { I18nProvider } from "../../i18n";
 import { RemoteCliPane } from "./RemoteCliPane";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { RemoteCliOperation } from "../../app/remoteCli";
-const { invoke, readImage, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), readImage: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null } }));
-vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote }: { session: RemoteSessionSummary; remote: RemoteApi }) => {
+const { invoke, readImage, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), readImage: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null, inputDisabled: false } }));
+vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote, toolbarActions, inputDisabled }: { session: RemoteSessionSummary; remote: RemoteApi; toolbarActions?: import("react").ReactNode; inputDisabled?: boolean }) => {
   rendered.remote = remote;
+  rendered.inputDisabled = !!inputDisabled;
   useEffect(() => remote.onTerminalData(session.sessionId, bytes => { rendered.text += new TextDecoder().decode(bytes); }), [session.sessionId]);
-  return <div>Test terminal</div>;
+  return <div data-input-disabled={inputDisabled}>Test terminal{toolbarActions}</div>;
 } }));
 const IMAGE = "A".repeat(16 * 1024) + "QUJD";
 vi.mock("./remoteImage", () => ({ readRemoteImage: readImage }));
@@ -66,7 +67,7 @@ function installHostDom() {
 }
 
 function reactProps(node: HostNode) {
-  return (node as unknown as Record<string, { onClick: () => void; onChange: (event: unknown) => void }>)[Object.keys(node).find(key => key.startsWith("__reactProps$"))!];
+  return (node as unknown as Record<string, { onClick: () => void; onChange: (event: unknown) => void; disabled?: boolean }>)[Object.keys(node).find(key => key.startsWith("__reactProps$"))!];
 }
 
 it("finds working sessions first in a large list and combines status with project search", async () => {
@@ -116,7 +117,7 @@ it("finds working sessions first in a large list and combines status with projec
   } finally { await act(async () => root.unmount()); }
 });
 
-async function uploadHarness() {
+async function uploadHarness(replayPending = false) {
   vi.useFakeTimers();
   await import("@tauri-apps/api/core");
   const container = installHostDom();
@@ -124,11 +125,12 @@ async function uploadHarness() {
   const operations: RemoteCliOperation[] = [];
   let attach: (operation: RemoteCliOperation) => Promise<unknown> = async () => null;
   let input: () => Promise<unknown> = async () => null;
+  let caughtUp = !replayPending;
   invoke.mockImplementation(async (_command, { request }) => {
     const op: RemoteCliOperation = request.operation;
     operations.push(op);
     const value = op.kind === "cliList" ? [{ id:"image-session", label:"Codex", groupLabel:"Image fixture", agent:"codex", state:"idle", detached:false }]
-      : op.kind === "cliRead" ? { sessionId:op.sessionId, cursor:op.cursor, nextCursor:0, endOffset:0, base64:"", truncated:false }
+      : op.kind === "cliRead" ? { sessionId:op.sessionId, cursor:op.cursor, nextCursor:0, endOffset:caughtUp ? 0 : 1, base64:"", truncated:false }
       : op.kind === "cliAttach" ? await attach(op) : op.kind === "cliInput" ? await input() : null;
     return { id:request.id, value, error:null };
   });
@@ -138,16 +140,37 @@ async function uploadHarness() {
   const click = async (text:string) => { await act(async () => reactProps(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.includes(text))!).onClick()); };
   await render();
   await click("Image fixture");
-  expect(container.textContent).toContain("已接上原本的助理");
+  if (!replayPending) expect(container.textContent).toContain("已接上原本的助理");
   const pick = async () => {
     await act(async () => {
       reactProps(allNodes(container).find(node => node.tagName === "INPUT")!).onChange({target:{files:[{}],value:"fixture.png"}});
       await vi.advanceTimersByTimeAsync(1);
     });
   };
-  return { container, root, operations, render, click, pick,
+  return { container, root, operations, render, click, pick, finishReplay:() => { caughtUp = true; },
     setAttach:(callback:typeof attach) => { attach = callback; }, setInput:(callback:typeof input) => { input = callback; } };
 }
+
+it("keeps helper input disabled until replay finishes and disables it after an input failure", async () => {
+  const test = await uploadHarness(true);
+  try {
+    expect(rendered.inputDisabled).toBe(true);
+    await act(async () => rendered.remote!.terminalInput("image-session", "too early"));
+    expect(test.operations.filter(operation => operation.kind === "cliInput")).toHaveLength(0);
+    test.finishReplay();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(rendered.inputDisabled).toBe(false);
+    const imageButton = allNodes(test.container).find(node => node.attributes["aria-label"] === "傳圖片給 CLI")!;
+    expect(imageButton).toBeDefined();
+    test.setInput(async () => { throw new Error("disconnected"); });
+    await act(async () => {
+      await rendered.remote!.terminalInput("image-session", "ready");
+      await vi.advanceTimersByTimeAsync(35);
+    });
+    expect(rendered.inputDisabled).toBe(true);
+    expect(reactProps(imageButton).disabled).toBe(true);
+  } finally { await act(async () => test.root.unmount()); }
+});
 
 it.each(["hidden-success", "hidden-failure", "back-success", "switch-failure"])("stops image chunks and retries after leaving the terminal: %s", async scenario => {
   const test = await uploadHarness();

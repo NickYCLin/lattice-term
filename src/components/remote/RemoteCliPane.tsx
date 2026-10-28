@@ -5,7 +5,7 @@ import type { ThemeId } from "../../app/themes";
 import { RemoteCliChannel, remoteCliCard, remoteCliList, remoteCliFolder, REMOTE_CLI_STATES, requestRemoteCli, type RemoteCliFilter, type RemoteCliOperation, type RemoteCliOutput, type RemoteCliSession } from "../../app/remoteCli";
 import { REMOTE_ATTACHMENT_CHUNK } from "../../app/remoteChat";
 import { displayPath } from "../../app/displayPath";
-import { FolderIcon, ImageFileIcon, KeyboardIcon, RefreshIcon } from "../icons";
+import { FolderIcon, ImageFileIcon, RefreshIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { RemoteTerminalView } from "./RemoteTerminalView";
 import { readRemoteImage, type PickedImage } from "./remoteImage";
@@ -198,20 +198,15 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
         : image.state === "sent" ? t("remote.cli.imageSent")
         : image.state === "unreadable" ? t("remote.chat.imageUnreadable") : t("remote.cli.imageFailed")
     }</p>}
-    <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} terminalRef={terminal} />
-    {/* Keep the software keyboard up while tapping helper keys. */}
-    <div className="remote-cli-keys" role="toolbar" aria-label={t("remote.cli.keys")} onPointerDown={event => event.preventDefault()}>
-      <button type="button" className="button button--primary button--sm remote-cli-keys__keyboard" disabled={!ready || problem} title={t("terminal.keybar.keyboard")} aria-label={t("terminal.keybar.keyboard")} onClick={() => {
-        const current = terminal.current;
-        if (current?.textarea && current.textarea === document.activeElement) current.blur(); else current?.focus();
-      }}><KeyboardIcon size={18} /></button>
-      <button type="button" className="button button--secondary button--sm" disabled={!ready || problem || uploading} title={t("remote.cli.image")} aria-label={t("remote.cli.image")} onClick={() => picker.current?.click()}><ImageFileIcon size={18} /></button>
+    <RemoteTerminalView session={{ ...connection, sessionId: selected.id, viewOnly: false, terminal: true }} remote={gated} theme={theme} terminalRef={terminal}
+      inputDisabled={!ready || problem} toolbarActions={<>
+        <button type="button" className="terminal-keybar__key" disabled={!ready || problem || uploading} title={t("remote.cli.image")} aria-label={t("remote.cli.image")} onClick={() => picker.current?.click()}><ImageFileIcon size={18} /></button>
+        <button type="button" className="terminal-keybar__key" disabled={!ready || problem} onClick={() => { channel.input("\x03"); terminal.current?.focus(); }}>Ctrl+C</button>
+      </>} />
       <input ref={picker} type="file" accept="image/*" hidden onChange={event => {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (file) void sendImage(file);
       }} />
-      {[["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl+C", "\x03"], ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["Enter", "\r"]].map(([label, value]) => <button type="button" className="button button--secondary button--sm" key={label} disabled={!ready || problem} onClick={() => channel.input(value)}>{label}</button>)}
-    </div>
   </>;
 }
