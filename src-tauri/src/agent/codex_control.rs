@@ -14,7 +14,6 @@ const MAX_HELP_BYTES: usize = 16 * 1024;
 
 struct RpcClient {
     socket: tungstenite::WebSocket<uds_windows::UnixStream>,
-    frames: usize,
 }
 
 impl RpcClient {
@@ -41,10 +40,11 @@ impl RpcClient {
     }
 
     fn reply(&mut self, id: u64, deadline: Instant) -> Result<Value, UnavailableReason> {
+        let mut frames = 0;
         loop {
             self.set_timeout(deadline)?;
-            self.frames += 1;
-            if self.frames > 128 {
+            frames += 1;
+            if frames > 128 {
                 return Err(UnavailableReason::OutputLimit);
             }
             match self.socket.read().map_err(socket_error)? {
@@ -62,6 +62,18 @@ impl RpcClient {
                 _ => return Err(UnavailableReason::ProbeFailed),
             }
         }
+    }
+}
+
+impl Drop for RpcClient {
+    fn drop(&mut self) {
+        // Send the close frame without waiting for the peer, and keep failure
+        // cleanup short even if the peer has stopped reading.
+        let _ = self
+            .socket
+            .get_mut()
+            .set_write_timeout(Some(Duration::from_millis(100)));
+        let _ = self.socket.close(None);
     }
 }
 
@@ -84,6 +96,7 @@ pub(super) struct CodexControl {
     context: ProbeContext,
     socket: PathBuf,
     server: Mutex<OwnedServer>,
+    snapshot_client: Mutex<Option<RpcClient>>,
     _socket_directory: std::fs::File,
     _directory: tempfile::TempDir,
 }
@@ -179,6 +192,7 @@ impl CodexControl {
                 child,
                 job: Some(job),
             }),
+            snapshot_client: Mutex::new(None),
             _socket_directory: socket_directory,
             _directory: directory,
         };
@@ -243,7 +257,7 @@ impl CodexControl {
                     tungstenite::HandshakeError::Failure(error) => socket_error(error),
                     tungstenite::HandshakeError::Interrupted(_) => UnavailableReason::TimedOut,
                 })?;
-        let mut client = RpcClient { socket, frames: 0 };
+        let mut client = RpcClient { socket };
         rpc(
             &mut client,
             1,
@@ -265,8 +279,20 @@ impl CodexControl {
         expected: Option<&str>,
     ) -> Result<Option<Snapshot>, UnavailableReason> {
         let deadline = Instant::now() + RPC_TIMEOUT;
-        let mut client = self.client(deadline)?;
-        self.snapshot_with(&mut client, expected, deadline)
+        let mut cached = self
+            .snapshot_client
+            .lock()
+            .map_err(|_| UnavailableReason::ProbeFailed)?;
+        if cached.is_none() {
+            *cached = Some(self.client(deadline)?);
+        }
+        let result = self.snapshot_with(cached.as_mut().unwrap(), expected, deadline);
+        if result.is_err() {
+            // Discard a failed transport, but never replay a request or restart
+            // the server. The next read-only poll may reconnect to this server.
+            cached.take();
+        }
+        result
     }
 
     fn snapshot_with(
@@ -555,6 +581,62 @@ mod tests {
     const OTHER: &str = "00000000-0000-4000-8000-000000000002";
 
     #[test]
+    fn codex_control_persistent_rpc_limits_each_reply_and_closes_cleanly() {
+        use tungstenite::protocol::Role;
+        let (client, server) = uds_windows::UnixStream::pair().unwrap();
+        client.set_read_timeout(Some(RPC_TIMEOUT)).unwrap();
+        server.set_read_timeout(Some(RPC_TIMEOUT)).unwrap();
+        let peer = std::thread::spawn(move || {
+            let mut socket = tungstenite::WebSocket::from_raw_socket(server, Role::Server, None);
+            for id in 0..150 {
+                let request = socket.read().unwrap().into_text().unwrap();
+                let request: Value = serde_json::from_str(&request).unwrap();
+                assert_eq!(request["id"], id);
+                socket
+                    .send(tungstenite::Message::Text(
+                        json!({"id":id,"result":{}}).to_string().into(),
+                    ))
+                    .unwrap();
+            }
+            for _ in 0..128 {
+                socket
+                    .send(tungstenite::Message::Text(
+                        json!({"method":"unrelated/notification"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .unwrap();
+            }
+            assert!(matches!(
+                socket.read().unwrap(),
+                tungstenite::Message::Close(_)
+            ));
+        });
+        let mut client = RpcClient {
+            socket: tungstenite::WebSocket::from_raw_socket(client, Role::Client, None),
+        };
+        for id in 0..150 {
+            assert_eq!(
+                rpc(
+                    &mut client,
+                    id,
+                    "thread/loaded/list",
+                    json!({}),
+                    Instant::now() + RPC_TIMEOUT
+                )
+                .unwrap(),
+                json!({}),
+            );
+        }
+        assert_eq!(
+            client.reply(999, Instant::now() + RPC_TIMEOUT),
+            Err(UnavailableReason::OutputLimit),
+        );
+        drop(client);
+        peer.join().unwrap();
+    }
+
+    #[test]
     fn codex_mcp_submit_control_capability_probe_has_no_version_allowlist() {
         assert!(supports_protocol(
             "--remote <ADDR>",
@@ -736,7 +818,27 @@ mod tests {
             arguments: vec![],
         };
         let (control, profile) = CodexControl::start(&context).unwrap();
+        // A long-running watcher must keep its connection usable beyond the
+        // per-response frame limit, rather than reconnecting every second.
+        for _ in 0..150 {
+            assert_eq!(control.snapshot(None).unwrap(), None);
+        }
+        assert!(control.snapshot_client.lock().unwrap().is_some());
+        let pid = control.server.lock().unwrap().child.id();
+        control
+            .snapshot_client
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .socket
+            .get_mut()
+            .shutdown(std::net::Shutdown::Both)
+            .unwrap();
+        assert!(control.snapshot(None).is_err());
+        assert!(control.snapshot_client.lock().unwrap().is_none());
         assert_eq!(control.snapshot(None).unwrap(), None);
+        assert_eq!(control.server.lock().unwrap().child.id(), pid);
         assert!(control.snapshot(Some(ROOT)).is_err());
         profile.revalidate(&context).unwrap();
         let socket = control.socket.clone();
