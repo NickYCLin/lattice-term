@@ -1063,6 +1063,8 @@ struct AgentSessionEntry {
     prompt_screen: Mutex<prompt_screen::PromptScreen>,
     /// A quiet screen cannot prove that a previously submitted turn finished.
     terminal_turn_started: AtomicBool,
+    /// Native resume can replay work markers before any new turn is submitted.
+    resumed_history: bool,
     startup_gate: StartupGate,
     completion_gate: Mutex<CompletionReadiness>,
     /// When this PTY last produced output, used to release a heuristic
@@ -2448,6 +2450,20 @@ impl AgentRegistry {
         next: AgentLifecycle,
         source: AgentStateSource,
     ) -> bool {
+        self.update_state_with_origin(session_id, next, source, false)
+    }
+
+    fn update_state_from_output(&self, session_id: &str, next: AgentLifecycle) -> bool {
+        self.update_state_with_origin(session_id, next, AgentStateSource::Heuristic, true)
+    }
+
+    fn update_state_with_origin(
+        &self,
+        session_id: &str,
+        next: AgentLifecycle,
+        source: AgentStateSource,
+        from_output: bool,
+    ) -> bool {
         let Ok(entry) = self.get(session_id) else {
             return false;
         };
@@ -2473,7 +2489,10 @@ impl AgentRegistry {
         }
         summary.state = next;
         summary.state_source = source;
-        if next == AgentLifecycle::Working {
+        // During native resume these bytes may describe a historical turn.
+        // Keep its visible lifecycle guess, but only real input/integration
+        // may permanently disqualify the resumed session's first prompt.
+        if next == AgentLifecycle::Working && !(from_output && entry.resumed_history) {
             entry.terminal_turn_started.store(true, Ordering::Release);
         }
         true
@@ -3007,7 +3026,13 @@ impl AgentRegistry {
         entry: &AgentSessionEntry,
         summary: &AgentSessionSummary,
     ) -> Option<&'static str> {
-        if summary.state != AgentLifecycle::Idle {
+        let replay_guess = entry.resumed_history
+            && summary.state_source == AgentStateSource::Heuristic
+            && matches!(
+                summary.state,
+                AgentLifecycle::Working | AgentLifecycle::NeedsAttention
+            );
+        if summary.state != AgentLifecycle::Idle && !replay_guess {
             return Some("lifecycle_not_ready");
         }
         if self.approvals.current(&summary.session_id).is_some() {
@@ -3039,7 +3064,11 @@ impl AgentRegistry {
             } else if summary.state_source != AgentStateSource::Integration
                 && self.foreground_terminal_blocker(&entry, &summary).is_none()
             {
-                "stable_empty_terminal_prompt"
+                if entry.resumed_history {
+                    "stable_empty_resumed_terminal_prompt"
+                } else {
+                    "stable_empty_terminal_prompt"
+                }
             } else {
                 "unconfirmed"
             },
@@ -8279,6 +8308,7 @@ pub fn launch_with_replay(
         )),
         prompt_screen: Mutex::new(prompt_screen::PromptScreen::new(size.rows, size.cols)),
         terminal_turn_started: AtomicBool::new(false),
+        resumed_history: request.restore_existing_session || request.resume_session_id.is_some(),
         startup_gate: StartupGate::default(),
         completion_gate: Mutex::new(CompletionReadiness::default()),
         input: Mutex::new(AgentInputControl {
@@ -8423,13 +8453,10 @@ pub fn launch_with_replay(
                             });
                         }
                     } else if let Some(state) = state {
-                        let changed = reader_registry.update_state(
-                            &reader_id,
-                            state,
-                            AgentStateSource::Heuristic,
-                        ) || (explicit_status
-                            && state == AgentLifecycle::Working
-                            && reader_registry.update_codex_working_from_output(&reader_id));
+                        let changed = reader_registry.update_state_from_output(&reader_id, state)
+                            || (explicit_status
+                                && state == AgentLifecycle::Working
+                                && reader_registry.update_codex_working_from_output(&reader_id));
                         if changed {
                             reader_sink.state(&reader_id, state, AgentStateSource::Heuristic);
                         }
@@ -15039,6 +15066,16 @@ notify = ["notify.exe", "turn-ended"]"#,
         registry: &Arc<AgentRegistry>,
         label: &str,
     ) -> AgentSessionSummary {
+        launch_cat_with_restore(sink, registry, label, false)
+    }
+
+    #[cfg(unix)]
+    fn launch_cat_with_restore(
+        sink: &Arc<dyn AgentSink>,
+        registry: &Arc<AgentRegistry>,
+        label: &str,
+        restore_existing_session: bool,
+    ) -> AgentSessionSummary {
         launch(
             sink.clone(),
             registry.clone(),
@@ -15050,7 +15087,7 @@ notify = ["notify.exe", "turn-ended"]"#,
                 resume_session_id: None,
                 group_id: None,
                 seed_input: None,
-                restore_existing_session: false,
+                restore_existing_session,
                 profile_config_path: None,
                 sandbox: false,
                 detached: false,

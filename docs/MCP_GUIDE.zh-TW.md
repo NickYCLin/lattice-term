@@ -520,15 +520,23 @@ AI 先呼叫 `list_launch_plans`，確認 `projectLaunch.enabled: true` 與 `roo
   授權、Windows 輸入資格與 requestId 去重仍依原規則檢查。
 
 `promptReadiness.basis` 回傳 `official_integration`、
-`stable_empty_terminal_prompt` 或 `unconfirmed`，說明就緒來源；不回傳草稿
+`stable_empty_terminal_prompt`、`stable_empty_resumed_terminal_prompt` 或
+`unconfirmed`，說明就緒來源；不回傳草稿
 或畫面內容。`blockers` 會保留 `integration_not_reported`，並附上例如
 `terminal_output_unsettled`（輸出尚未靜止）、`terminal_input_not_empty`
 （輸入列不是已辨識空白形狀）、`terminal_dialog_or_work`（工作／對話框）、
 `terminal_screen_unknown`（畫面不明）或 `terminal_turn_unconfirmed`
 （先前送出的工作尚無完成回報）。
 
-此規則只補足前景首次派送；觀察到工作或送出過提示後，不能只靠靜止畫面宣告完成，
-必須等待正式 idle／done 回報。背景 Fleet、排隊釋放及原本正式 idle／done
+原生續接／還原時，CLI 重播歷史可能留下 heuristic working／needs-attention。
+若本次程序尚未送出新提示、沒有官方工作回報或待核准事項，仍可在目前畫面
+完整符合上述空白提示與兩秒靜止條件後，接受首次前景派送；basis 使用
+`stable_empty_resumed_terminal_prompt`。重播中、畫面仍有工作或核准字樣、
+草稿及未知畫面均拒絕，不會因為是續接就略過畫面檢查。
+
+此規則只補足前景首次派送；新開工作階段觀察到工作，或任何工作階段
+送出過提示後，不能只靠靜止畫面宣告完成，必須等待正式 idle／done 回報。
+背景 Fleet、排隊釋放及原本正式 idle／done
 路徑維持原規則。`state` 仍是 `snapshotOnly`；送出時會在輸入鎖下重新
 檢查，因此讀到 ready 後畫面或授權改變，仍可能回 `not_ready`／拒絕授權。
 未知外觀維持拒絕，不能用這項本機判定宣稱所有 CLI／平台已實機驗收。

@@ -8,9 +8,12 @@ struct ForegroundFixture {
 }
 impl ForegroundFixture {
     fn new() -> Self {
+        Self::with_resume(false)
+    }
+    fn with_resume(resumed: bool) -> Self {
         let sink: Arc<dyn AgentSink> = Arc::new(TestSink::default());
         let registry = Arc::new(AgentRegistry::new());
-        let session = launch_cat(&sink, &registry, "Existing proxy conversation");
+        let session = launch_cat_with_restore(&sink, &registry, "Existing proxy conversation", resumed);
         let entry = registry.get(&session.session_id).unwrap();
         {
             let mut summary = entry.summary.lock().unwrap();
@@ -46,6 +49,79 @@ impl ForegroundFixture {
         self.registry.record_output(&self.id, "\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h› ".as_bytes()).unwrap();
         entry.prompt_screen.lock().unwrap().settle_for_test();
         *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    }
+}
+
+#[tokio::test]
+async fn resumed_history_work_markers_do_not_poison_the_first_ready_prompt() {
+    let f = ForegroundFixture::with_resume(true);
+    let target = f.share(true, true).await;
+    f.unreported_prompt();
+    let entry = f.registry.get(&f.id).unwrap();
+    assert!(entry.resumed_history);
+    // The PTY replays an earlier turn, then redraws an empty live composer.
+    let history = b"\x1b[2J\x1b[HWorking (12s \xe2\x80\xa2 esc to interrupt)";
+    f.registry.record_output(&f.id, history).unwrap();
+    let state = heuristic_state_from_output(&mut entry.completion_gate.lock().unwrap(), history, false).unwrap();
+    assert_eq!(state, AgentLifecycle::Working);
+    f.registry.update_state_from_output(&f.id, state);
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    assert!(f.call(&target, Action::Prompt { text:"not during replay".into(), request_id:"replay".into() }).await.is_err());
+    f.registry.record_output(&f.id, "\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h› ".as_bytes()).unwrap();
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], false);
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], true);
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["basis"], "stable_empty_resumed_terminal_prompt");
+    let prompt = Action::Prompt { text:"new turn after resume".into(), request_id:"resumed-once".into() };
+    assert_eq!(f.call(&target, prompt.clone()).await.unwrap()["sentImmediately"], true);
+    assert_eq!(f.call(&target, prompt).await.unwrap()["duplicate"], true);
+    f.unreported_prompt();
+    assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"terminal_turn_unconfirmed"));
+}
+
+#[tokio::test]
+async fn resumed_history_idle_watchdog_and_attention_guesses_can_settle_without_a_new_turn() {
+    for state in [AgentLifecycle::Idle, AgentLifecycle::NeedsAttention] {
+        let f = ForegroundFixture::with_resume(true);
+        let target = f.share(true, true).await;
+        f.unreported_prompt();
+        // Reproduce the reader's historical Working marker and a later
+        // watchdog Idle or historical approval question; neither is input.
+        f.registry.update_state_from_output(&f.id, AgentLifecycle::Working);
+        f.registry.update_state_from_output(&f.id, state);
+        assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], true);
+    }
+}
+
+#[tokio::test]
+async fn resumed_first_prompt_still_requires_a_safe_live_screen_and_no_real_turn() {
+    for case in ["working", "approval", "draft", "unknown", "official", "submitted", "startup", "fresh"] {
+        let f = ForegroundFixture::with_resume(case != "fresh");
+        let target = f.share(true, true).await;
+        f.unreported_prompt();
+        let entry = f.registry.get(&f.id).unwrap();
+        f.registry.update_state_from_output(&f.id, AgentLifecycle::Working);
+        match case {
+            "working" => { f.registry.record_output(&f.id, "\x1b[2J\x1b[HWorking (12s • esc to interrupt)\r\n› ".as_bytes()).unwrap(); },
+            "approval" => { f.registry.approvals.open(&f.id, approval::ApprovalAsk { tool_name:"fixture".into(), summary:"approval pending".into() }, "pending".into()).unwrap(); },
+            "draft" => { f.registry.record_output(&f.id, "\x1b[2J\x1b[H› unsent text".as_bytes()).unwrap(); },
+            "unknown" => { f.registry.record_output(&f.id, b"\x1b[2J\x1b[Hunknown").unwrap(); },
+            "official" => { f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration); },
+            "submitted" => {
+                record_sent_input(f.sink.as_ref(), &f.registry, &f.id, &entry, b"real work\r");
+                // Even a clean prompt and heuristic Idle cannot confirm it.
+                f.unreported_prompt();
+            },
+            "startup" => entry.input.lock().unwrap().startup_seed_pending = true,
+            "fresh" => {},
+            _ => unreachable!(),
+        }
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+        assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], false, "{case}");
+        assert!(f.call(&target, Action::Prompt { text:"must not send".into(), request_id:format!("resume-blocked-{case}") }).await.is_err(), "{case}");
     }
 }
 
