@@ -17,6 +17,7 @@ import { formatBytes } from "../../domain/metrics";
 import { createSerialQueue } from "../../app/serialQueue";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
+import { FileNameFilter, filterFileNames } from "../files/FileNameFilter";
 import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
@@ -61,6 +62,8 @@ export function SftpPane({
     return () => { mounted.current = false; };
   }, []);
   const [directory, setDirectory] = useState<SftpDirectory | null>(null);
+  const [fileQuery, setFileQuery] = useState("");
+  const visibleEntries = filterFileNames(directory?.entries ?? [], fileQuery);
   const [pathInput, setPathInput] = useState(session.currentPath);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -84,6 +87,7 @@ export function SftpPane({
     pendingPath.current = `${session.sessionId}:${path}`;
     const ticket = ++latestOpen.current;
     const current = () => mounted.current && ticket === latestOpen.current;
+    if (path !== directory?.path) setFileQuery("");
     setLoading(true);
     setProblem(null);
     setDirectory(null);
@@ -100,6 +104,8 @@ export function SftpPane({
       if (current()) { pendingPath.current = null; setLoading(false); }
     }
   }
+
+  useEffect(() => { setFileQuery(""); }, [session.sessionId]);
 
   useEffect(() => {
     void open(session.currentPath);
@@ -408,6 +414,7 @@ export function SftpPane({
         </div>
       )}
 
+      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory} />
       <div className="sftp-table-wrap">
         {loading ? (
           <div className="sftp-state">{t("sftp.loading")}</div>
@@ -415,6 +422,8 @@ export function SftpPane({
           <div className="sftp-state">{t("sftp.listUnknown")}</div>
         ) : directory.entries.length === 0 ? (
           <div className="sftp-state">{t("sftp.empty")}</div>
+        ) : visibleEntries.length === 0 ? (
+          <div className="sftp-state" role="status">{t("files.filter.noResults")}</div>
         ) : (
           <table className="sftp-table">
             <thead>
@@ -427,7 +436,7 @@ export function SftpPane({
               </tr>
             </thead>
             <tbody>
-              {directory?.entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <tr key={entry.path}>
                   <td>
                     <button

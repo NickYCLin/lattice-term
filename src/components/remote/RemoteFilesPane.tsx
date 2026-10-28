@@ -12,6 +12,7 @@ import { formatBytes } from "../../domain/metrics";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import { FileEntryIcon } from "../files/FileEntryIcon";
+import { FileNameFilter, filterFileNames } from "../files/FileNameFilter";
 import { useRemoteTextEditor } from "../files/RemoteTextEditorProvider";
 import { useAppDialogs } from "../overlays/useAppDialogs";
 import {
@@ -53,6 +54,8 @@ export function RemoteFilesPane({
     return () => { mounted.current = false; listingGeneration.current += 1; };
   }, []);
   const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
+  const [fileQuery, setFileQuery] = useState("");
+  const visibleEntries = filterFileNames(directory?.entries ?? [], fileQuery);
   const [pathInput, setPathInput] = useState("/");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -65,6 +68,7 @@ export function RemoteFilesPane({
   async function open(path: string) {
     if (!current()) return;
     const generation = ++listingGeneration.current;
+    if (path !== directory?.path) setFileQuery("");
     setLoading(true);
     setProblem(null);
     setDirectory(null);
@@ -85,6 +89,7 @@ export function RemoteFilesPane({
 
   useEffect(() => {
     uploading.current = null;
+    setFileQuery("");
     setBusy(false);
     void open("/");
     return () => { listingGeneration.current += 1; };
@@ -253,11 +258,14 @@ export function RemoteFilesPane({
         </div>
       )}
 
+      <FileNameFilter value={fileQuery} onChange={setFileQuery} disabled={loading || !directory} />
       <div className="remote-files-list">
         {loading ? (
           <div className="remote-files-state">{t("remote.files.loading")}</div>
         ) : directory?.entries.length === 0 ? (
           <div className="remote-files-state">{t("remote.files.empty")}</div>
+        ) : directory && visibleEntries.length === 0 ? (
+          <div className="remote-files-state" role="status">{t("files.filter.noResults")}</div>
         ) : (
           <table className="remote-files-table">
             <thead>
@@ -269,7 +277,7 @@ export function RemoteFilesPane({
               </tr>
             </thead>
             <tbody>
-              {directory?.entries.map((entry) => {
+              {visibleEntries.map((entry) => {
                 const downloadable = entry.kind === "file";
                 return (
                   <tr key={entry.path}>
