@@ -364,8 +364,12 @@ try {
       "list_authorized_connections", "list_saved_connections", "database", "get_host_metrics", "sftp_list_directory",
       "connect_saved_connection", "read_saved_connection_credential", "desktop_agent", "desktop_chat",
       "sftp_read_text", "sftp_find_files",
-      "ssh_exec_job", "ssh_run_command", "remote_run_command", "remote_file_transfer", "sftp_transfer", "capture_remote_screen", "send_remote_input", "remote_fleet", "get_remote_operation",
+      "ssh_exec_job", "ssh_run_command", "remote_run_command", "remote_file_transfer", "rdp_stage_file", "sftp_transfer", "capture_remote_screen", "send_remote_input", "remote_fleet", "get_remote_operation",
       "wait_remote_operation", "list_remote_operations", "cancel_remote_operation",
+    ].sort());
+    const rdpStage = tools.tools.find((tool) => tool.name === "rdp_stage_file");
+    assert.deepEqual(rdpStage.inputSchema.required.slice().sort(), [
+      "targetId", "localPath", "name", "requestId",
     ].sort());
     const capabilities = ok(await adapter.call("get_capabilities"));
     const remote = capabilities.backends.find((backend) => backend.id === "desktopSshSftp");
@@ -374,6 +378,9 @@ try {
     assert.equal(remote.authorizedConnections, 0);
     assert.deepEqual(ok(await adapter.call("list_authorized_connections")).connections, []);
     assert.equal((await adapter.call("get_host_metrics", { targetId: "not-granted" })).isError, true);
+    assert.equal((await adapter.call("rdp_stage_file", {
+      targetId: "not-granted", localPath: fixture, name: "fixture.cmd", requestId: "denied-rdp-stage",
+    })).isError, true);
     assert.equal((await adapter.call("read_saved_connection_credential", { profileId: "not-granted" })).isError, true);
     assert.equal((await adapter.call("desktop_chat", { targetId: "not-granted", action: { kind: "read" } })).isError, true);
     const list = ok(await adapter.call("list_agent_sessions"));

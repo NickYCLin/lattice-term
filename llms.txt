@@ -32,6 +32,7 @@
 - Remote text editing: `src/components/files/RemoteTextEditor.tsx`, `src-tauri/src/sftp_text.rs`, `crates/lattice-remote/src/host_text.rs`. UTF-8 up to 1 MiB, revision checks and retained recovery copies; SFTP ACL/hardlink and non-atomic replacement limits apply. Lattice Remote editing requires an updated Linux/macOS host; Windows viewers can connect, but Windows hosts do not advertise editing. See `docs/REMOTE_TEXT_EDITING.zh-TW.md`.
 - Lattice Remote: `src/components/remote/`, `src-tauri/src/remote.rs`, `crates/lattice-remote/`
 - RDP and VNC engines: `crates/lattice-rdp/`, `crates/lattice-vnc/`
+- Windows RDP-only deployment: `rdp_stage_file` requires upload scope and per-file desktop approval. It snapshots one local regular file (at most 8 MiB; 128 MiB per connection) onto a read-only redirected drive, returning a tsclient path and SHA-256. It does not grant shell/download access or prove a remote copy or deployment. Screen input requires its own grant. See `docs/RDP_DEPLOYMENT.zh-TW.md`.
 - Vault, backup and storage: `src-tauri/src/vault.rs`, `backup.rs`, `storage.rs`
 
 ## Important boundaries

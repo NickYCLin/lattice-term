@@ -455,6 +455,7 @@ AI 先呼叫 `list_launch_plans`，確認 `projectLaunch.enabled: true` 與 `roo
 | `ssh_run_command` | `targetId`、`command`、`requestId` | 提出臨時指令，由使用者逐筆核准 |
 | `remote_run_command` | `targetId`、`shell`、`command`、`directory`、`requestId` | Lattice Remote 單次命令，預設免逐筆確認，可在設定關閉 |
 | `remote_file_transfer` | `targetId`、`direction`、`localPath`、`remotePath`、`requestId` | Lattice Remote 單檔傳輸，不覆寫，沿用 Remote 確認設定 |
+| `rdp_stage_file` | `targetId`、`localPath`、`name`、`requestId` | Windows 客戶端的 RDP 唯讀暫存；需 upload scope 及逐檔核准，不授予命令／下載權限，也不代表遠端已複製或部署 |
 | `sftp_list_directory` | `targetId`、`rootId`、`path` | 列出核准根目錄下的內容 |
 | `sftp_find_files` | `targetId`、`rootId`、`nameContains` | 在深度、時間與筆數上限內找檔名 |
 | `sftp_read_text` | `targetId`、`rootId`、`path` | 分頁讀 UTF-8 文字，以雜湊檢查版本 |

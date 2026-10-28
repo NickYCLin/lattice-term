@@ -366,6 +366,7 @@ Git、記憶交接或日誌。舊背景服務會要求更新，不會降級繞�
 | `ssh_run_command` | 提出臨時指令，每次都要使用者在桌面看過原文並同意才執行 |
 | `remote_run_command` | 透過 Lattice Remote 加密通道執行單次命令，預設免逐筆確認，可在設定關閉 |
 | `remote_file_transfer` | Lattice Remote 單檔上傳／下載，沿用 Remote 確認設定，不覆寫同名檔 |
+| `rdp_stage_file` | Windows 客戶端的 RDP 部署暫存，需 upload scope 與逐檔桌面核准；提供唯讀 tsclient 路徑與 SHA-256，不代表已複製或部署到遠端，詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md) |
 | `sftp_transfer` | 核准本機／遠端目錄之間的單檔傳送 |
 | `get_remote_operation` | 查詢此 client 的操作結果，無重跑副作用 |
 | `cancel_remote_operation` | 要求中止此 client 的操作，不關閉使用者 SSH 工作階段 |
