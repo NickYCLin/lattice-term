@@ -4,6 +4,30 @@
 
 ---
 
+## [2026.10.29](https://github.com/NickYCLin/lattice-term/compare/v2026.10.27...v2026.10.29) (2026-10-28)
+
+
+### 🚀 新增功能
+
+* **files:** 補上手機檔案排序 ([0dde6c5](https://github.com/NickYCLin/lattice-term/commit/0dde6c53ece5479a57507bc46911126855872f88))
+* **files:** 補上手機檔案篩選與清除操作 ([36479d5](https://github.com/NickYCLin/lattice-term/commit/36479d57ac5545cc6a4fac8cef8d130b1bacbf95))
+* 新增只用 RDP 的部署檔案通道 ([3608557](https://github.com/NickYCLin/lattice-term/commit/360855725923c2c91781d193544c512b673ea596))
+* 讓 iPhone 安全保存 Agent 配對碼 ([bbb71e1](https://github.com/NickYCLin/lattice-term/commit/bbb71e1bb17968120794fbe82b340dcc1f03a79c))
+* 讓手機快速篩選執行中的工作階段 ([a851d1a](https://github.com/NickYCLin/lattice-term/commit/a851d1a810882c15a11cf32f3e48d747c2bb3576))
+
+
+### 🛠️ 問題修正
+
+* **mobile:** 統一遠端助理鍵列與輸入狀態 ([6c03688](https://github.com/NickYCLin/lattice-term/commit/6c0368849d990f4418e877610a555e844125d2e2))
+* **mobile:** 補齊手機終端輸入與觸控鍵列 ([eec8860](https://github.com/NickYCLin/lattice-term/commit/eec88600d52d594fdc44e16a1b7a9c118c923905))
+* 保留手機工作階段清單的返回位置 ([92a4d42](https://github.com/NickYCLin/lattice-term/commit/92a4d4226f7fa4aa9854c79b27b5436f8c3bfdd6))
+* 修正 RDP 傳檔斷線與分享名稱截斷 ([0fdfb13](https://github.com/NickYCLin/lattice-term/commit/0fdfb1378b7dd1af36d80abe5a567f6490925206))
+* 修正 RDP 畫面編碼失敗造成斷線 ([ea24b75](https://github.com/NickYCLin/lattice-term/commit/ea24b75d02e54fce89875f969cd013f21fef0edf))
+* 修正續接歷史重播造成的 MCP 就緒誤判 ([2e0834a](https://github.com/NickYCLin/lattice-term/commit/2e0834aa02952895a9d2b4963a6a8b4bf41faf9a))
+* 同步 Windows MCP 驗收工具與參考清單 ([a123ccd](https://github.com/NickYCLin/lattice-term/commit/a123ccd819b79a257361b644699eccf658b9bf75))
+* 重用 Codex 狀態監看的控制連線 ([b4a15bb](https://github.com/NickYCLin/lattice-term/commit/b4a15bb5c2c2e1d89a42c7b06294927de9e90a15))
+* 離開手機終端後停止後續圖片上傳 ([eae5f51](https://github.com/NickYCLin/lattice-term/commit/eae5f51b97963dee5b90145493c40d9db6a3c789))
+
 ## [2026.10.27](https://github.com/NickYCLin/lattice-term/compare/v2026.10.26...v2026.10.27) (2026-10-27)
 
 
