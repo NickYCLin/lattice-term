@@ -16,6 +16,7 @@ import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSession
 import { TerminalImeFallback } from "../terminal/terminalImeFallback";
 import { TerminalImePresentation } from "../terminal/terminalImePresentation";
 import { MobileTerminalInput } from "../terminal/mobileTerminalInput";
+import { TerminalKeybar, useTerminalControlKey } from "../terminal/TerminalKeybar";
 import {
   TERMINAL_LETTER_SPACING,
   terminalFontFamily,
@@ -67,6 +68,7 @@ export function RemoteTerminalView({
   remoteRef.current = remote;
   const sessionId = session.sessionId;
   const viewOnly = session.viewOnly;
+  const controlKey = useTerminalControlKey();
 
   useEffect(() => {
     const host = hostRef.current;
@@ -123,7 +125,7 @@ export function RemoteTerminalView({
 
     const sendInput = (data: string) => {
       if (viewOnly) return;
-      void remoteRef.current.terminalInput(sessionId, data).catch(() => {});
+      void remoteRef.current.terminalInput(sessionId, controlKey.consume(data)).catch(() => {});
     };
     const mobileInput = new MobileTerminalInput(textarea, sendInput);
 
@@ -187,5 +189,23 @@ export function RemoteTerminalView({
   }, [theme]);
 
   // Phones only raise the keyboard when focus happens inside the tap itself.
-  return <div className="terminal-pane remote-terminal" ref={hostRef} onClick={() => { if (!viewOnly) termRef.current?.focus(); }} />;
+  return (
+    <div className="terminal-pane-wrap remote-terminal">
+      <div className="terminal-pane" ref={hostRef}
+        onClick={() => { if (!viewOnly) termRef.current?.focus(); }} />
+      {!viewOnly && <TerminalKeybar
+        ctrlArmed={controlKey.armed}
+        onToggleCtrl={() => { controlKey.toggle(); termRef.current?.focus(); }}
+        onToggleKeyboard={() => {
+          const terminal = termRef.current;
+          if (terminal?.textarea === document.activeElement) terminal.blur();
+          else terminal?.focus();
+        }}
+        onInput={(sequence) => {
+          termRef.current?.input(sequence);
+          termRef.current?.focus();
+        }}
+      />}
+    </div>
+  );
 }

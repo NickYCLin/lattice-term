@@ -7,7 +7,7 @@
  * an editor lay themselves out correctly.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { attachTerminalTypography } from "../../app/typography";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -25,7 +25,8 @@ import {
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
 import { attachTerminalScrollback } from "./terminalScrollback";
-import { KeyboardIcon } from "../icons";
+import { MobileTerminalInput } from "./mobileTerminalInput";
+import { TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
 
 export function TerminalPane({
   sessionId,
@@ -52,9 +53,7 @@ export function TerminalPane({
   sshRef.current = ssh;
   // A sticky Ctrl for touch keyboards that have none: arm it, and the next
   // typed character is sent as its control code.
-  const [ctrlArmed, setCtrlArmed] = useState(false);
-  const ctrlArmedRef = useRef(false);
-  ctrlArmedRef.current = ctrlArmed;
+  const controlKey = useTerminalControlKey();
   const closedRef = useRef(onClosed);
   closedRef.current = onClosed;
   const messageRef = useRef("");
@@ -124,30 +123,24 @@ export function TerminalPane({
     const stopTypography = attachTerminalTypography(terminal, scheduleFit);
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit);
 
-    attachTerminalClipboard(terminal, {
-      ...nativeTerminalClipboard,
-      shouldProcessKeyEvent: () =>
-        imePresentation.shouldProcessTerminalKeyEvent(),
-    });
-
     // Silence here is what made a broken session look like a dead keyboard:
     // say so once, in the terminal itself, rather than dropping keystrokes.
     let inputReported = false;
     const sendInput = (rawData: string) => {
-      let data = rawData;
-      if (ctrlArmedRef.current && data.length === 1) {
-        const code = data.toUpperCase().charCodeAt(0);
-        if (code >= 64 && code <= 95) {
-          data = String.fromCharCode(code - 64);
-        }
-        setCtrlArmed(false);
-      }
+      const data = controlKey.consume(rawData);
       void sshRef.current.send(sessionId, data).catch(() => {
         if (inputReported) return;
         inputReported = true;
         terminal.write(`\r\n\x1b[31m${messageRef.current}\x1b[0m\r\n`);
       });
     };
+    const mobileInput = new MobileTerminalInput(textarea, sendInput);
+    attachTerminalClipboard(terminal, {
+      ...nativeTerminalClipboard,
+      shouldProcessKeyEvent: (event) =>
+        imePresentation.shouldProcessTerminalKeyEvent() &&
+        mobileInput.shouldProcessTerminalKeyEvent(event),
+    });
     const imeFallback = new TerminalImeFallback(sendInput);
     const typed = terminal.onData((rawData) => {
       const data = imeFallback.recordTerminalData(rawData);
@@ -187,6 +180,7 @@ export function TerminalPane({
       stopClosed();
       textarea?.removeEventListener("input", handleInput);
       imePresentation.dispose();
+      mobileInput.dispose();
       imeFallback.dispose();
       typed.dispose();
       stopTypography();
@@ -211,59 +205,19 @@ export function TerminalPane({
     termRef.current?.focus();
   }
 
-  const keybarKeys: Array<{ label: string; sequence: string }> = [
-    { label: "Esc", sequence: "" },
-    { label: "Tab", sequence: "	" },
-    { label: "↑", sequence: "[A" },
-    { label: "↓", sequence: "[B" },
-    { label: "←", sequence: "[D" },
-    { label: "→", sequence: "[C" },
-    { label: "|", sequence: "|" },
-    { label: "-", sequence: "-" },
-    { label: "~", sequence: "~" },
-  ];
-
   return (
     <div className="terminal-pane-wrap">
       <div className="terminal-pane" ref={hostRef} />
-      {/* Touch helper row: keys a software keyboard hides or lacks. Hidden on
-          fine-pointer desktops by the stylesheet. */}
-      <div className="terminal-keybar" role="toolbar" aria-label={t("terminal.keybar.label")}
-        onPointerDown={(event) => event.preventDefault()}>
-        <button type="button" className="terminal-keybar__key terminal-keybar__keyboard"
-          aria-label={t("terminal.keybar.keyboard")}
-          onClick={() => {
-            const terminal = termRef.current;
-            if (terminal?.textarea === document.activeElement) terminal.blur();
-            else terminal?.focus();
-          }}>
-          <KeyboardIcon size={18} />
-        </button>
-        <button
-          type="button"
-          className={`terminal-keybar__key${ctrlArmed ? " is-armed" : ""}`}
-          aria-pressed={ctrlArmed}
-          onClick={() => {
-            setCtrlArmed((armed) => !armed);
-            termRef.current?.focus();
-          }}
-        >
-          {t("terminal.keybar.ctrl")}
-        </button>
-        <button type="button" className="terminal-keybar__key" onClick={() => tap("\r")}>
-          Enter
-        </button>
-        {keybarKeys.map((key) => (
-          <button
-            key={key.label}
-            type="button"
-            className="terminal-keybar__key"
-            onClick={() => tap(key.sequence)}
-          >
-            {key.label}
-          </button>
-        ))}
-      </div>
+      <TerminalKeybar
+        ctrlArmed={controlKey.armed}
+        onToggleCtrl={() => { controlKey.toggle(); termRef.current?.focus(); }}
+        onToggleKeyboard={() => {
+          const terminal = termRef.current;
+          if (terminal?.textarea === document.activeElement) terminal.blur();
+          else terminal?.focus();
+        }}
+        onInput={tap}
+      />
     </div>
   );
 }
