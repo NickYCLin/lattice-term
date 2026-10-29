@@ -9,8 +9,9 @@ use ironrdp_svc::SvcMessage;
 use crate::Rdpdr;
 use crate::pdu::RdpdrPdu;
 use crate::pdu::efs::{
-    AnyIoCtlCode, DecodedDeviceControlRequest, DeviceCloseResponse, DeviceControlRequest, DeviceIoResponse, NtStatus,
-    PrinterIoRequest, ServerDeviceAnnounceResponse, ServerDriveIoRequest,
+    AnyIoCtlCode, DecodedDeviceControlRequest, DeviceCloseResponse, DeviceControlRequest,
+    DeviceIoResponse, NtStatus, PrinterIoRequest, ServerDeviceAnnounceResponse,
+    ServerDriveIoRequest,
 };
 use crate::pdu::esc::{ScardCall, ScardIoCtlCode};
 
@@ -65,7 +66,10 @@ pub trait RdpdrBackend: AsAny + fmt::Debug + Send {
     /// Handles the server result for a device announcement.
     ///
     /// A rejected filesystem device is never eligible for server I/O.
-    fn handle_server_device_announce_response(&mut self, pdu: ServerDeviceAnnounceResponse) -> PduResult<()>;
+    fn handle_server_device_announce_response(
+        &mut self,
+        pdu: ServerDeviceAnnounceResponse,
+    ) -> PduResult<()>;
 
     /// Handles a decoded smart-card Device Control IRP.
     ///
@@ -121,7 +125,10 @@ pub trait RdpdrBackend: AsAny + fmt::Debug + Send {
         let device_io_request = req.into_device_io_request();
         Ok(vec![SvcMessage::from(RdpdrPdu::DeviceCloseResponse(
             DeviceCloseResponse {
-                device_io_response: DeviceIoResponse::new(device_io_request, NtStatus::NOT_SUPPORTED),
+                device_io_response: DeviceIoResponse::new(
+                    device_io_request,
+                    NtStatus::NOT_SUPPORTED,
+                ),
             },
         ))])
     }

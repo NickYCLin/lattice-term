@@ -7,10 +7,13 @@ use core::fmt::{Debug, Display};
 
 use bitflags::bitflags;
 use ironrdp_core::{
-    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_fixed_part_size, ensure_size,
-    invalid_field_err, invalid_field_err_with_source, unsupported_value_err,
+    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length,
+    ensure_fixed_part_size, ensure_size, invalid_field_err, invalid_field_err_with_source,
+    unsupported_value_err,
 };
-use ironrdp_pdu::utils::{CharacterSet, decode_string, encoded_str_len, from_utf16_bytes, write_string_to_cursor};
+use ironrdp_pdu::utils::{
+    CharacterSet, decode_string, encoded_str_len, from_utf16_bytes, write_string_to_cursor,
+};
 use ironrdp_pdu::{PduError, read_padding, write_padding};
 use tracing::error;
 
@@ -187,7 +190,8 @@ impl ClientNameRequest {
     }
 
     pub fn size(&self) -> usize {
-        Self::FIXED_PART_SIZE + encoded_str_len(self.computer_name(), self.unicode_flag().into(), true)
+        Self::FIXED_PART_SIZE
+            + encoded_str_len(self.computer_name(), self.unicode_flag().into(), true)
     }
 }
 
@@ -334,7 +338,9 @@ impl Capabilities {
                     || server_capability
                         .capabilities
                         .iter()
-                        .any(|server_capability| server_capability.header.cap_type == capability.header.cap_type)
+                        .any(|server_capability| {
+                            server_capability.header.cap_type == capability.header.cap_type
+                        })
             })
             .collect::<Vec<_>>();
 
@@ -365,7 +371,9 @@ impl Capabilities {
     pub fn add_drive_security(&mut self) {
         for capability in self.0.iter_mut() {
             if let CapabilityData::General(general) = &mut capability.capability_data {
-                general.io_code_1.insert(IoCode1::RDPDR_IRP_MJ_QUERY_SECURITY);
+                general
+                    .io_code_1
+                    .insert(IoCode1::RDPDR_IRP_MJ_QUERY_SECURITY);
                 general.io_code_1.insert(IoCode1::RDPDR_IRP_MJ_SET_SECURITY);
                 break;
             }
@@ -519,7 +527,8 @@ impl CapabilityHeader {
     fn new_general() -> Self {
         Self {
             cap_type: CapabilityType::General,
-            length: u16::try_from(Self::SIZE + GeneralCapabilitySet::SIZE).expect("value fits into u16"),
+            length: u16::try_from(Self::SIZE + GeneralCapabilitySet::SIZE)
+                .expect("value fits into u16"),
             version: GENERAL_CAPABILITY_VERSION_02,
         }
     }
@@ -572,7 +581,10 @@ impl CapabilityHeader {
     fn data_size(&self) -> DecodeResult<usize> {
         match self.cap_type {
             CapabilityType::General => GeneralCapabilitySet::size_for_version(self.version),
-            CapabilityType::Printer | CapabilityType::Port | CapabilityType::Drive | CapabilityType::Smartcard => Ok(0),
+            CapabilityType::Printer
+            | CapabilityType::Port
+            | CapabilityType::Drive
+            | CapabilityType::Smartcard => Ok(0),
         }
     }
 }
@@ -651,7 +663,11 @@ impl TryFrom<u16> for CapabilityType {
             0x0003 => Ok(CapabilityType::Port),
             0x0004 => Ok(CapabilityType::Drive),
             0x0005 => Ok(CapabilityType::Smartcard),
-            _ => Err(invalid_field_err!("try_from", "CapabilityType", "invalid value")),
+            _ => Err(invalid_field_err!(
+                "try_from",
+                "CapabilityType",
+                "invalid value"
+            )),
         }
     }
 }
@@ -1019,11 +1035,20 @@ impl Devices {
     /// Callers needing a different driver should use
     /// [`DeviceAnnounceHeader::new_printer_with_driver`].
     pub fn add_printer(&mut self, device_id: u32, print_name: String) {
-        self.add_printer_with_driver(device_id, print_name, DEFAULT_PRINTER_DRIVER_NAME.to_owned());
+        self.add_printer_with_driver(
+            device_id,
+            print_name,
+            DEFAULT_PRINTER_DRIVER_NAME.to_owned(),
+        );
     }
 
     /// Announce a virtual printer device with an explicit server-side driver.
-    pub fn add_printer_with_driver(&mut self, device_id: u32, print_name: String, driver_name: String) {
+    pub fn add_printer_with_driver(
+        &mut self,
+        device_id: u32,
+        print_name: String,
+        driver_name: String,
+    ) {
         self.push(DeviceAnnounceHeader::new_printer_with_driver(
             device_id,
             print_name,
@@ -1037,7 +1062,12 @@ impl Devices {
 
     /// Returns the [`DeviceType`] for the given device ID.
     pub fn for_device_type(&self, device_id: u32) -> DecodeResult<DeviceType> {
-        if let Some(device_type) = self.0.iter().find(|d| d.device_id == device_id).map(|d| d.device_type) {
+        if let Some(device_type) = self
+            .0
+            .iter()
+            .find(|d| d.device_id == device_id)
+            .map(|d| d.device_type)
+        {
             Ok(device_type)
         } else {
             Err(invalid_field_err!(
@@ -1132,7 +1162,11 @@ impl DeviceAnnounceHeader {
         // [`RdpdrBackend::handle_printer_io_request`] need a PostScript-to-PDF
         // pipeline (e.g. Ghostscript). Print bytes are passed through
         // verbatim; IronRDP itself is format-agnostic.
-        Self::new_printer_with_driver(device_id, print_name, DEFAULT_PRINTER_DRIVER_NAME.to_owned())
+        Self::new_printer_with_driver(
+            device_id,
+            print_name,
+            DEFAULT_PRINTER_DRIVER_NAME.to_owned(),
+        )
     }
 
     /// Construct a printer announce with an explicit driver name.
@@ -1154,7 +1188,11 @@ impl DeviceAnnounceHeader {
     /// Panics if the encoded UTF-16LE of any name field exceeds
     /// `u32::MAX` bytes. Real printer names are well under 200 bytes,
     /// so this is unreachable in practice.
-    pub fn new_printer_with_driver(device_id: u32, print_name: String, driver_name: String) -> Self {
+    pub fn new_printer_with_driver(
+        device_id: u32,
+        print_name: String,
+        driver_name: String,
+    ) -> Self {
         // [MS-RDPEPC 2.2.2.3] RDPDR_PRINTER_ANNOUNCE device_data layout:
         //   Flags            u32 LE
         //   CodePage         u32 LE   (reserved; MUST be ignored)
@@ -1185,7 +1223,8 @@ impl DeviceAnnounceHeader {
         //  - TSPRINTER (0x08): "printer is from a previous terminal server
         //    session" (i.e. nested-hop re-redirection). We're a first-hop
         //    client, so setting it would be a lie.
-        let flags: u32 = RDPDR_PRINTER_ANNOUNCE_FLAG_DEFAULTPRINTER | RDPDR_PRINTER_ANNOUNCE_FLAG_NETWORKPRINTER;
+        let flags: u32 =
+            RDPDR_PRINTER_ANNOUNCE_FLAG_DEFAULTPRINTER | RDPDR_PRINTER_ANNOUNCE_FLAG_NETWORKPRINTER;
         let code_page: u32 = 0;
         let pnp_name_len: u32 = 0;
         let cached_fields_len: u32 = 0;
@@ -1308,9 +1347,9 @@ impl PreferredDosName {
     fn format(&self) -> String {
         let mut name: &str = &self.0;
         if name.len() > 7 {
-            name = name
-                .get(..7)
-                .expect("index is guaranteed to be on a UTF-8 boundary for a string of ASCII characters");
+            name = name.get(..7).expect(
+                "index is guaranteed to be on a UTF-8 boundary for a string of ASCII characters",
+            );
         }
         format!("{name:\x00<8}")
     }
@@ -1351,7 +1390,11 @@ impl TryFrom<u32> for DeviceType {
             0x0000_0004 => Ok(DeviceType::Print),
             0x0000_0008 => Ok(DeviceType::Filesystem),
             0x0000_0020 => Ok(DeviceType::Smartcard),
-            _ => Err(invalid_field_err!("try_from", "DeviceType", "invalid value")),
+            _ => Err(invalid_field_err!(
+                "try_from",
+                "DeviceType",
+                "invalid value"
+            )),
         }
     }
 }
@@ -1385,7 +1428,10 @@ impl ServerDeviceAnnounceResponse {
         let device_id = src.read_u32();
         let result_code = NtStatus::from(src.read_u32());
 
-        Ok(Self { device_id, result_code })
+        Ok(Self {
+            device_id,
+            result_code,
+        })
     }
 
     pub fn size(&self) -> usize {
@@ -1608,7 +1654,11 @@ impl TryFrom<u32> for MajorFunction {
             0x0000_0011 => Ok(MajorFunction::LockControl),
             0x0000_0014 => Ok(MajorFunction::QuerySecurity),
             0x0000_0015 => Ok(MajorFunction::SetSecurity),
-            _ => Err(invalid_field_err!("try_from", "MajorFunction", "unsupported value")),
+            _ => Err(invalid_field_err!(
+                "try_from",
+                "MajorFunction",
+                "unsupported value"
+            )),
         }
     }
 }
@@ -1642,7 +1692,9 @@ impl Debug for MinorFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             MinorFunction::IRP_MN_QUERY_DIRECTORY => write!(f, "IRP_MN_QUERY_DIRECTORY"),
-            MinorFunction::IRP_MN_NOTIFY_CHANGE_DIRECTORY => write!(f, "IRP_MN_NOTIFY_CHANGE_DIRECTORY"),
+            MinorFunction::IRP_MN_NOTIFY_CHANGE_DIRECTORY => {
+                write!(f, "IRP_MN_NOTIFY_CHANGE_DIRECTORY")
+            }
             _ => write!(f, "MinorFunction({:#010X})", self.0),
         }
     }
@@ -1697,7 +1749,12 @@ where
         let input_buffer_length = src.read_u32();
         let io_control_code = T::try_from(src.read_u32()).map_err(|e| {
             error!("Failed to parse IoCtlCode");
-            invalid_field_err_with_source("DeviceControlRequest", "IoCtlCode", "invalid IoCtlCode", e)
+            invalid_field_err_with_source(
+                "DeviceControlRequest",
+                "IoCtlCode",
+                "invalid IoCtlCode",
+                e,
+            )
         })?;
 
         // Padding (20 bytes): An array of 20 bytes. Reserved. This field can be set to any value and MUST be ignored.
@@ -1725,7 +1782,10 @@ where
         ensure_size!(ctx: "DeviceControlRequest", in: src, size: input_buffer_size);
         let input_buffer = src.read_slice(input_buffer_size).to_vec();
 
-        Ok(DecodedDeviceControlRequest { request, input_buffer })
+        Ok(DecodedDeviceControlRequest {
+            request,
+            input_buffer,
+        })
     }
 }
 
@@ -1890,12 +1950,18 @@ impl ServerDriveIoRequest {
             MajorFunction::Read => Ok(DeviceReadRequest::decode(dev_io_req, src)?.into()),
             MajorFunction::Write => Ok(DeviceWriteRequest::decode(dev_io_req, src)?.into()),
             MajorFunction::FlushBuffers => Ok(DeviceFlushBuffersRequest::decode(dev_io_req).into()),
-            MajorFunction::DeviceControl => Ok(DeviceControlRequest::<AnyIoCtlCode>::decode(dev_io_req, src)?.into()),
+            MajorFunction::DeviceControl => {
+                Ok(DeviceControlRequest::<AnyIoCtlCode>::decode(dev_io_req, src)?.into())
+            }
             MajorFunction::QueryVolumeInformation => {
                 Ok(ServerDriveQueryVolumeInformationRequest::decode(dev_io_req, src)?.into())
             }
-            MajorFunction::QueryInformation => Ok(ServerDriveQueryInformationRequest::decode(dev_io_req, src)?.into()),
-            MajorFunction::SetInformation => Ok(ServerDriveSetInformationRequest::decode(dev_io_req, src)?.into()),
+            MajorFunction::QueryInformation => {
+                Ok(ServerDriveQueryInformationRequest::decode(dev_io_req, src)?.into())
+            }
+            MajorFunction::SetInformation => {
+                Ok(ServerDriveSetInformationRequest::decode(dev_io_req, src)?.into())
+            }
             MajorFunction::DirectoryControl => match dev_io_req.minor_function {
                 MinorFunction::IRP_MN_QUERY_DIRECTORY => {
                     Ok(ServerDriveQueryDirectoryRequest::decode(dev_io_req, src)?.into())
@@ -1910,9 +1976,15 @@ impl ServerDriveIoRequest {
                     "invalid value"
                 )),
             },
-            MajorFunction::LockControl => Ok(ServerDriveLockControlRequest::decode(dev_io_req, src)?.into()),
-            MajorFunction::QuerySecurity => Ok(ServerDriveQuerySecurityRequest::decode(dev_io_req, src)?.into()),
-            MajorFunction::SetSecurity => Ok(ServerDriveSetSecurityRequest::decode(dev_io_req, src)?.into()),
+            MajorFunction::LockControl => {
+                Ok(ServerDriveLockControlRequest::decode(dev_io_req, src)?.into())
+            }
+            MajorFunction::QuerySecurity => {
+                Ok(ServerDriveQuerySecurityRequest::decode(dev_io_req, src)?.into())
+            }
+            MajorFunction::SetSecurity => {
+                Ok(ServerDriveSetSecurityRequest::decode(dev_io_req, src)?.into())
+            }
             MajorFunction::SetVolumeInformation => Err(unsupported_value_err!(
                 "ServerDriveIoRequest::decode",
                 "MajorFunction",
@@ -2029,7 +2101,9 @@ pub enum PrinterIoRequest {
 impl PrinterIoRequest {
     pub fn decode(dev_io_req: DeviceIoRequest, src: &mut ReadCursor<'_>) -> DecodeResult<Self> {
         match dev_io_req.major_function {
-            MajorFunction::Create => Ok(Self::Create(DeviceCreateRequest::decode(dev_io_req, src)?)),
+            MajorFunction::Create => {
+                Ok(Self::Create(DeviceCreateRequest::decode(dev_io_req, src)?))
+            }
             MajorFunction::Write => Ok(Self::Write(DeviceWriteRequest::decode(dev_io_req, src)?)),
             MajorFunction::Close => Ok(Self::Close(DeviceCloseRequest::decode(dev_io_req))),
             _ => Err(invalid_field_err!(
@@ -2084,7 +2158,8 @@ impl DeviceCreateRequest {
         let shared_access = SharedAccess::from_bits_retain(src.read_u32());
         let create_disposition = CreateDisposition::from(src.read_u32());
         let create_options = CreateOptions::from_bits_retain(src.read_u32());
-        let path_length: usize = cast_length!("DeviceCreateRequest", "path_length", src.read_u32())?;
+        let path_length: usize =
+            cast_length!("DeviceCreateRequest", "path_length", src.read_u32())?;
 
         ensure_size!(ctx: "DeviceCreateRequest", in: src, size: path_length);
         let path = from_utf16_bytes(src.read_slice(path_length))
@@ -2371,7 +2446,11 @@ impl ServerDriveQueryInformationRequest {
         // data. Consume exactly this request; keep the trailing-data check.
         ensure_size!(ctx: "ServerDriveQueryInformationRequest", in: src, size: 32);
         let file_info_class_lvl = FileInformationClassLevel::from(src.read_u32());
-        let length = cast_length!("ServerDriveQueryInformationRequest", "length", src.read_u32())?;
+        let length = cast_length!(
+            "ServerDriveQueryInformationRequest",
+            "length",
+            src.read_u32()
+        )?;
         read_padding!(src, 24);
         ensure_size!(in: src, size: length);
         src.advance(length);
@@ -2420,17 +2499,37 @@ impl Display for FileInformationClassLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             FileInformationClassLevel::FILE_BASIC_INFORMATION => write!(f, "FileBasicInformation"),
-            FileInformationClassLevel::FILE_STANDARD_INFORMATION => write!(f, "FileStandardInformation"),
-            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => write!(f, "FileAttributeTagInformation"),
-            FileInformationClassLevel::FILE_DIRECTORY_INFORMATION => write!(f, "FileDirectoryInformation"),
-            FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => write!(f, "FileFullDirectoryInformation"),
-            FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => write!(f, "FileBothDirectoryInformation"),
+            FileInformationClassLevel::FILE_STANDARD_INFORMATION => {
+                write!(f, "FileStandardInformation")
+            }
+            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => {
+                write!(f, "FileAttributeTagInformation")
+            }
+            FileInformationClassLevel::FILE_DIRECTORY_INFORMATION => {
+                write!(f, "FileDirectoryInformation")
+            }
+            FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => {
+                write!(f, "FileFullDirectoryInformation")
+            }
+            FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => {
+                write!(f, "FileBothDirectoryInformation")
+            }
             FileInformationClassLevel::FILE_NAMES_INFORMATION => write!(f, "FileNamesInformation"),
-            FileInformationClassLevel::FILE_END_OF_FILE_INFORMATION => write!(f, "FileEndOfFileInformation"),
-            FileInformationClassLevel::FILE_DISPOSITION_INFORMATION => write!(f, "FileDispositionInformation"),
-            FileInformationClassLevel::FILE_RENAME_INFORMATION => write!(f, "FileRenameInformation"),
-            FileInformationClassLevel::FILE_ALLOCATION_INFORMATION => write!(f, "FileAllocationInformation"),
-            FileInformationClassLevel::FILE_STREAM_INFORMATION => write!(f, "FileStreamInformation"),
+            FileInformationClassLevel::FILE_END_OF_FILE_INFORMATION => {
+                write!(f, "FileEndOfFileInformation")
+            }
+            FileInformationClassLevel::FILE_DISPOSITION_INFORMATION => {
+                write!(f, "FileDispositionInformation")
+            }
+            FileInformationClassLevel::FILE_RENAME_INFORMATION => {
+                write!(f, "FileRenameInformation")
+            }
+            FileInformationClassLevel::FILE_ALLOCATION_INFORMATION => {
+                write!(f, "FileAllocationInformation")
+            }
+            FileInformationClassLevel::FILE_STREAM_INFORMATION => {
+                write!(f, "FileStreamInformation")
+            }
             _ => write!(f, "FileInformationClassLevel({})", self.0),
         }
     }
@@ -2440,12 +2539,24 @@ impl Debug for FileInformationClassLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             FileInformationClassLevel::FILE_BASIC_INFORMATION => write!(f, "FileBasicInformation"),
-            FileInformationClassLevel::FILE_STANDARD_INFORMATION => write!(f, "FileStandardInformation"),
-            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => write!(f, "FileAttributeTagInformation"),
-            FileInformationClassLevel::FILE_DIRECTORY_INFORMATION => write!(f, "FileDirectoryInformation"),
-            FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => write!(f, "FileFullDirectoryInformation"),
-            FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => write!(f, "FileBothDirectoryInformation"),
-            FileInformationClassLevel::FILE_STREAM_INFORMATION => write!(f, "FileStreamInformation"),
+            FileInformationClassLevel::FILE_STANDARD_INFORMATION => {
+                write!(f, "FileStandardInformation")
+            }
+            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => {
+                write!(f, "FileAttributeTagInformation")
+            }
+            FileInformationClassLevel::FILE_DIRECTORY_INFORMATION => {
+                write!(f, "FileDirectoryInformation")
+            }
+            FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => {
+                write!(f, "FileFullDirectoryInformation")
+            }
+            FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => {
+                write!(f, "FileBothDirectoryInformation")
+            }
+            FileInformationClassLevel::FILE_STREAM_INFORMATION => {
+                write!(f, "FileStreamInformation")
+            }
             FileInformationClassLevel::FILE_NAMES_INFORMATION => write!(f, "FileNamesInformation"),
             _ => write!(f, "FileInformationClassLevel({})", self.0),
         }
@@ -2758,14 +2869,18 @@ impl FileInformationClass {
         src: &mut ReadCursor<'_>,
     ) -> DecodeResult<Self> {
         match file_info_class_level {
-            FileInformationClassLevel::FILE_BASIC_INFORMATION => Ok(FileBasicInformation::decode(src)?.into()),
+            FileInformationClassLevel::FILE_BASIC_INFORMATION => {
+                Ok(FileBasicInformation::decode(src)?.into())
+            }
             FileInformationClassLevel::FILE_END_OF_FILE_INFORMATION => {
                 Ok(FileEndOfFileInformation::decode(src)?.into())
             }
             FileInformationClassLevel::FILE_DISPOSITION_INFORMATION => {
                 Ok(FileDispositionInformation::decode(src, length)?.into())
             }
-            FileInformationClassLevel::FILE_RENAME_INFORMATION => Ok(FileRenameInformation::decode(src)?.into()),
+            FileInformationClassLevel::FILE_RENAME_INFORMATION => {
+                Ok(FileRenameInformation::decode(src)?.into())
+            }
             FileInformationClassLevel::FILE_ALLOCATION_INFORMATION => {
                 Ok(FileAllocationInformation::decode(src)?.into())
             }
@@ -3476,7 +3591,11 @@ impl ServerDriveQueryDirectoryRequest {
         }
 
         let initial_query = src.read_u8();
-        let path_length = cast_length!("ServerDriveQueryDirectoryRequest", "path_length", src.read_u32())?;
+        let path_length = cast_length!(
+            "ServerDriveQueryDirectoryRequest",
+            "path_length",
+            src.read_u32()
+        )?;
         // Padding (23 bytes): An array of 23 bytes. This field is unused and MUST be ignored.
         read_padding!(src, 23);
 
@@ -3609,7 +3728,11 @@ impl ServerDriveQueryVolumeInformationRequest {
         // We only need to read the buffer up to the FileInformationClass to get the job done, so the rest of the fields in
         // this structure are discarded. See FreeRDP:
         // https://github.com/FreeRDP/FreeRDP/blob/511444a65e7aa2f537c5e531fa68157a50c1bd4d/channels/drive/client/drive_main.c#L464
-        let length = cast_length!("ServerDriveQueryVolumeInformationRequest", "length", src.read_u32())?; // Length
+        let length = cast_length!(
+            "ServerDriveQueryVolumeInformationRequest",
+            "length",
+            src.read_u32()
+        )?; // Length
         read_padding!(src, 24); // Padding
         ensure_size!(in: src, size: length);
         read_padding!(src, length); // QueryVolumeBuffer
@@ -3638,7 +3761,10 @@ pub struct ServerDriveSetVolumeInformationRequest {
 impl ServerDriveSetVolumeInformationRequest {
     const FIXED_PART_SIZE: usize = 4 /* FsInformationClass */ + 4 /* Length */ + 24 /* Padding */;
 
-    pub fn decode(device_io_request: DeviceIoRequest, src: &mut ReadCursor<'_>) -> DecodeResult<Self> {
+    pub fn decode(
+        device_io_request: DeviceIoRequest,
+        src: &mut ReadCursor<'_>,
+    ) -> DecodeResult<Self> {
         ensure_fixed_part_size!(in: src);
         let fs_info_class_lvl = FileSystemInformationClassLevel::from(src.read_u32());
         if fs_info_class_lvl != FileSystemInformationClassLevel::FILE_FS_LABEL_INFORMATION {
@@ -4101,7 +4227,11 @@ impl DeviceReadResponse {
     pub fn encode(&self, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
         ensure_size!(in: dst, size: self.size());
         self.device_io_reply.encode(dst)?;
-        dst.write_u32(cast_length!("DeviceReadResponse", "length", self.read_data.len())?);
+        dst.write_u32(cast_length!(
+            "DeviceReadResponse",
+            "length",
+            self.read_data.len()
+        )?);
         dst.write_slice(&self.read_data);
         Ok(())
     }
@@ -4121,7 +4251,10 @@ impl Debug for DeviceReadResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeviceReadResponse")
             .field("device_io_reply", &self.device_io_reply)
-            .field("read_data", &format!("Vec<u8> of length {}", self.read_data.len()))
+            .field(
+                "read_data",
+                &format!("Vec<u8> of length {}", self.read_data.len()),
+            )
             .finish()
     }
 }
@@ -4162,7 +4295,10 @@ impl Debug for DeviceWriteRequest {
         f.debug_struct("DeviceWriteRequest")
             .field("device_io_request", &self.device_io_request)
             .field("offset", &self.offset)
-            .field("write_data", &format!("Vec<u8> of length {}", self.write_data.len()))
+            .field(
+                "write_data",
+                &format!("Vec<u8> of length {}", self.write_data.len()),
+            )
             .finish()
     }
 }
@@ -4309,10 +4445,15 @@ impl FileRenameInformation {
         ensure_fixed_part_size!(in: src);
         let replace_if_exists = Boolean::from(src.read_u8());
         let _ = src.read_u8(); // RootDirectory
-        let file_name_length = cast_length!("FileRenameInformation", "file_name_length", src.read_u32())?;
+        let file_name_length =
+            cast_length!("FileRenameInformation", "file_name_length", src.read_u32())?;
 
         ensure_size!(in: src, size: file_name_length);
-        let file_name = decode_string(src.read_slice(file_name_length), CharacterSet::Unicode, true)?;
+        let file_name = decode_string(
+            src.read_slice(file_name_length),
+            CharacterSet::Unicode,
+            true,
+        )?;
 
         Ok(Self {
             replace_if_exists,
@@ -4363,7 +4504,11 @@ impl ClientDriveSetInformationResponse {
     pub fn new(req: &ServerDriveSetInformationRequest, io_status: NtStatus) -> EncodeResult<Self> {
         Ok(Self {
             device_io_reply: DeviceIoResponse::new(req.device_io_request.clone(), io_status),
-            length: cast_length!("ClientDriveSetInformationResponse", "length", req.set_buffer.size())?,
+            length: cast_length!(
+                "ClientDriveSetInformationResponse",
+                "length",
+                req.set_buffer.size()
+            )?,
         })
     }
 
@@ -4487,12 +4632,19 @@ impl ServerDriveLockControlRequest {
         ensure_size!(in: src, size: Self::FIXED_PART_SIZE);
         let operation = LockOperation::try_from(src.read_u32())?;
         let wait = src.read_u32() & 1 != 0;
-        let locks_count: usize = cast_length!("ServerDriveLockControlRequest", "num_locks", src.read_u32())?;
+        let locks_count: usize =
+            cast_length!("ServerDriveLockControlRequest", "num_locks", src.read_u32())?;
         // Padding2 (20 bytes): This field is unused and MUST be ignored.
         read_padding!(src, 20);
-        let locks_size = locks_count.checked_mul(Self::LOCK_INFO_SIZE).ok_or_else(|| {
-            invalid_field_err!("ServerDriveLockControlRequest::decode", "num_locks", "too many locks")
-        })?;
+        let locks_size = locks_count
+            .checked_mul(Self::LOCK_INFO_SIZE)
+            .ok_or_else(|| {
+                invalid_field_err!(
+                    "ServerDriveLockControlRequest::decode",
+                    "num_locks",
+                    "too many locks"
+                )
+            })?;
         ensure_size!(in: src, size: locks_size);
 
         let mut locks = Vec::with_capacity(locks_count);
@@ -4561,7 +4713,8 @@ mod tests {
         .expect("valid server announce request");
         assert_eq!(reply.version_minor, VERSION_MINOR_13);
 
-        let CapabilityData::General(general) = CapabilityMessage::new_general(0).capability_data else {
+        let CapabilityData::General(general) = CapabilityMessage::new_general(0).capability_data
+        else {
             panic!("new general capability must contain general data");
         };
         assert_eq!(general.protocol_minor_version, VERSION_MINOR_13);
@@ -4580,8 +4733,9 @@ mod tests {
             kind: VersionAndIdPduKind::ServerAnnounceRequest,
         };
 
-        let reply = VersionAndIdPdu::new_client_announce_reply_with_legacy_client_id(server_announce, 7)
-            .expect("valid server announce");
+        let reply =
+            VersionAndIdPdu::new_client_announce_reply_with_legacy_client_id(server_announce, 7)
+                .expect("valid server announce");
 
         assert_eq!(reply.client_id, 7);
         assert_eq!(reply.version_minor, VERSION_MINOR_13);
@@ -4596,7 +4750,8 @@ mod tests {
         payload.resize(40, 0);
         let mut cursor = ReadCursor::new(&payload);
 
-        let capability = CapabilityMessage::decode(&mut cursor).expect("valid version one general capability");
+        let capability =
+            CapabilityMessage::decode(&mut cursor).expect("valid version one general capability");
 
         assert!(cursor.is_empty());
         let CapabilityData::General(general) = capability.capability_data else {
@@ -4632,14 +4787,17 @@ mod tests {
             minor_function: MinorFunction::from(0),
         };
         let mut payload = Vec::new();
-        payload.extend_from_slice(&u32::from(FileInformationClassLevel::FILE_NAMES_INFORMATION).to_le_bytes());
+        payload.extend_from_slice(
+            &u32::from(FileInformationClassLevel::FILE_NAMES_INFORMATION).to_le_bytes(),
+        );
         payload.push(0); // InitialQuery
         payload.extend_from_slice(&1u32.to_le_bytes()); // ignored PathLength
         payload.extend_from_slice(&[0; 23]); // Padding
         payload.push(0xFF); // invalid UTF-16 and not null-terminated, but ignored
 
-        let decoded = ServerDriveQueryDirectoryRequest::decode(request, &mut ReadCursor::new(&payload))
-            .expect("continuation query with an ignored path");
+        let decoded =
+            ServerDriveQueryDirectoryRequest::decode(request, &mut ReadCursor::new(&payload))
+                .expect("continuation query with an ignored path");
 
         assert_eq!(decoded.initial_query, 0);
         assert!(decoded.path.is_empty());
@@ -4664,7 +4822,11 @@ mod tests {
             .encode(&mut WriteCursor::new(&mut volume_bytes))
             .expect("encode volume information");
         assert_eq!(
-            u32::from_le_bytes(volume_bytes[12..16].try_into().expect("volume label length")),
+            u32::from_le_bytes(
+                volume_bytes[12..16]
+                    .try_into()
+                    .expect("volume label length")
+            ),
             4
         );
         assert_eq!(&volume_bytes[17..], &[b'C', 0, 0, 0]);
@@ -4674,7 +4836,11 @@ mod tests {
             .encode(&mut WriteCursor::new(&mut attribute_bytes))
             .expect("encode attribute information");
         assert_eq!(
-            u32::from_le_bytes(attribute_bytes[8..12].try_into().expect("file-system name length")),
+            u32::from_le_bytes(
+                attribute_bytes[8..12]
+                    .try_into()
+                    .expect("file-system name length")
+            ),
             8
         );
         assert_eq!(attribute_bytes.len(), 20);
@@ -4708,7 +4874,10 @@ mod tests {
             .expect("encode volume information response");
 
         assert_eq!(bytes.len(), 36);
-        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().expect("buffer length")), 20);
+        assert_eq!(
+            u32::from_le_bytes(bytes[12..16].try_into().expect("buffer length")),
+            20
+        );
         assert_eq!(
             u32::from_le_bytes(bytes[16..20].try_into().expect("file-system attributes")),
             FileSystemAttributes::FILE_NAMED_STREAMS.bits()
@@ -4740,8 +4909,14 @@ mod tests {
             .encode(&mut WriteCursor::new(&mut bytes))
             .expect("encode directory notification response");
 
-        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().expect("buffer length")), 14);
-        assert_eq!(&bytes[16..30], &[0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, b'a', 0]);
+        assert_eq!(
+            u32::from_le_bytes(bytes[12..16].try_into().expect("buffer length")),
+            14
+        );
+        assert_eq!(
+            &bytes[16..30],
+            &[0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, b'a', 0]
+        );
         assert_eq!(bytes.len(), 30);
     }
 
@@ -4765,7 +4940,8 @@ mod tests {
             minor_function: MinorFunction::from(0),
         };
 
-        let decoded = ServerDriveLockControlRequest::decode(request, &mut cursor).expect("valid lock request");
+        let decoded = ServerDriveLockControlRequest::decode(request, &mut cursor)
+            .expect("valid lock request");
 
         assert_eq!(decoded.operation, LockOperation::Exclusive);
         assert!(decoded.wait);
@@ -4796,8 +4972,9 @@ mod tests {
         let mut query_payload = Vec::new();
         query_payload.extend_from_slice(&SecurityInformation::OWNER.bits().to_le_bytes());
 
-        let query = ServerDriveIoRequest::decode(request.clone(), &mut ReadCursor::new(&query_payload))
-            .expect("valid query security request");
+        let query =
+            ServerDriveIoRequest::decode(request.clone(), &mut ReadCursor::new(&query_payload))
+                .expect("valid query security request");
         let ServerDriveIoRequest::ServerDriveQuerySecurityRequest(query) = query else {
             panic!("decoded request must be query security");
         };
@@ -4834,8 +5011,8 @@ mod tests {
         );
         assert_eq!(&query_bytes[16..], descriptor.as_slice());
 
-        let set_response =
-            ClientDriveSetSecurityResponse::new(&set, NtStatus::SUCCESS).expect("construct set security response");
+        let set_response = ClientDriveSetSecurityResponse::new(&set, NtStatus::SUCCESS)
+            .expect("construct set security response");
         let mut set_bytes = vec![0; set_response.size()];
         set_response
             .encode(&mut WriteCursor::new(&mut set_bytes))
@@ -4882,8 +5059,9 @@ mod tests {
             minor_function: MinorFunction::from(0),
         };
 
-        let decoded = DeviceControlRequest::<AnyIoCtlCode>::decode_with_input_buffer(request, &mut cursor)
-            .expect("valid control request");
+        let decoded =
+            DeviceControlRequest::<AnyIoCtlCode>::decode_with_input_buffer(request, &mut cursor)
+                .expect("valid control request");
 
         assert_eq!(decoded.request.output_buffer_length, 64);
         assert_eq!(decoded.input_buffer, [1, 2, 3]);
@@ -4906,8 +5084,8 @@ mod tests {
             minor_function: MinorFunction::from(0),
         };
 
-        let decoded =
-            DeviceControlRequest::<AnyIoCtlCode>::decode(request, &mut cursor).expect("valid control request");
+        let decoded = DeviceControlRequest::<AnyIoCtlCode>::decode(request, &mut cursor)
+            .expect("valid control request");
 
         assert_eq!(decoded.input_buffer_length, 3);
         assert_eq!(cursor.read_slice(3), [1, 2, 3]);
@@ -4941,8 +5119,8 @@ mod tests {
             minor_function: MinorFunction::from(0),
         };
 
-        let decoded =
-            ServerDriveIoRequest::decode(request.clone(), &mut ReadCursor::new(&[])).expect("valid flush request");
+        let decoded = ServerDriveIoRequest::decode(request.clone(), &mut ReadCursor::new(&[]))
+            .expect("valid flush request");
 
         assert_eq!(
             decoded,
@@ -4968,14 +5146,20 @@ mod tests {
         payload.extend_from_slice(&4u32.to_le_bytes()); // VolumeLabelLength
         payload.extend_from_slice(&[b'C', 0, b'D', 0]); // VolumeLabel
 
-        let decoded = ServerDriveSetVolumeInformationRequest::decode(request.clone(), &mut ReadCursor::new(&payload))
-            .expect("valid set-volume request");
+        let decoded = ServerDriveSetVolumeInformationRequest::decode(
+            request.clone(),
+            &mut ReadCursor::new(&payload),
+        )
+        .expect("valid set-volume request");
 
         assert_eq!(decoded.device_io_request, request);
         assert_eq!(decoded.volume_label, "CD");
 
         payload[4..8].copy_from_slice(&4u32.to_le_bytes()); // Length
-        assert!(ServerDriveSetVolumeInformationRequest::decode(request, &mut ReadCursor::new(&payload)).is_err());
+        assert!(
+            ServerDriveSetVolumeInformationRequest::decode(request, &mut ReadCursor::new(&payload))
+                .is_err()
+        );
     }
 
     #[test]

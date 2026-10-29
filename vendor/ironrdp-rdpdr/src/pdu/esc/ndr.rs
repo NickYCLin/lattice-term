@@ -21,14 +21,20 @@
 //!
 //! [smartcard_pack.c]: https://github.com/FreeRDP/FreeRDP/blob/ff303a9bda911c54ffc1b9f2471acd79c897b075/libfreerdp/utils/smartcard_pack.c
 
-use ironrdp_core::{DecodeResult, EncodeResult, ReadCursor, WriteCursor, ensure_size, invalid_field_err};
+use ironrdp_core::{
+    DecodeResult, EncodeResult, ReadCursor, WriteCursor, ensure_size, invalid_field_err,
+};
 use ironrdp_pdu::utils::{self, CharacterSet};
 
 pub trait Decode {
     fn decode_ptr(src: &mut ReadCursor<'_>, index: &mut u32) -> DecodeResult<Self>
     where
         Self: Sized;
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()>;
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()>;
 }
 
 pub trait Encode {
@@ -41,7 +47,11 @@ pub trait Encode {
     }
 }
 
-pub fn encode_ptr(length: Option<u32>, index: &mut u32, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
+pub fn encode_ptr(
+    length: Option<u32>,
+    index: &mut u32,
+    dst: &mut WriteCursor<'_>,
+) -> EncodeResult<()> {
     ensure_size!(ctx: "encode_ptr", in: dst, size: ptr_size(length.is_some()));
     if let Some(length) = length {
         dst.write_u32(length);
@@ -96,7 +106,10 @@ pub fn skip_pad(cursor: &mut ReadCursor<'_>) -> DecodeResult<()> {
 /// A special read_string_from_cursor which reads and ignores the additional length and
 /// offset fields prefixing the string, as well as any extra padding for a 4-byte aligned
 /// NULL-terminated string.
-pub fn read_string_from_cursor(cursor: &mut ReadCursor<'_>, charset: CharacterSet) -> DecodeResult<String> {
+pub fn read_string_from_cursor(
+    cursor: &mut ReadCursor<'_>,
+    charset: CharacterSet,
+) -> DecodeResult<String> {
     ensure_size!(ctx: "ndr::read_string_from_cursor", in: cursor, size: size_of::<u32>() * 3);
     let _length = cursor.read_u32();
     let _offset = cursor.read_u32();

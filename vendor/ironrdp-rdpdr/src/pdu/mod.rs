@@ -1,18 +1,20 @@
 use core::fmt::{self, Display};
 
 use ironrdp_core::{
-    Decode, DecodeError, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, ensure_size, invalid_field_err,
-    unsupported_value_err,
+    Decode, DecodeError, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, ensure_size,
+    invalid_field_err, unsupported_value_err,
 };
 use ironrdp_svc::SvcEncode;
 
 use self::efs::{
     ClientDeviceListAnnounce, ClientDeviceListRemove, ClientDriveLockControlResponse,
-    ClientDriveNotifyChangeDirectoryResponse, ClientDriveQueryDirectoryResponse, ClientDriveQueryInformationResponse,
-    ClientDriveQuerySecurityResponse, ClientDriveQueryVolumeInformationResponse, ClientDriveSetInformationResponse,
-    ClientDriveSetSecurityResponse, ClientNameRequest, CoreCapability, CoreCapabilityKind, DeviceCloseResponse,
-    DeviceControlResponse, DeviceCreateResponse, DeviceFlushBuffersResponse, DeviceIoRequest, DeviceReadResponse,
-    DeviceWriteResponse, ServerDeviceAnnounceResponse, VersionAndIdPdu, VersionAndIdPduKind,
+    ClientDriveNotifyChangeDirectoryResponse, ClientDriveQueryDirectoryResponse,
+    ClientDriveQueryInformationResponse, ClientDriveQuerySecurityResponse,
+    ClientDriveQueryVolumeInformationResponse, ClientDriveSetInformationResponse,
+    ClientDriveSetSecurityResponse, ClientNameRequest, CoreCapability, CoreCapabilityKind,
+    DeviceCloseResponse, DeviceControlResponse, DeviceCreateResponse, DeviceFlushBuffersResponse,
+    DeviceIoRequest, DeviceReadResponse, DeviceWriteResponse, ServerDeviceAnnounceResponse,
+    VersionAndIdPdu, VersionAndIdPduKind,
 };
 
 pub mod efs;
@@ -118,15 +120,26 @@ impl RdpdrPdu {
         }
     }
 
-    pub(crate) fn decode_body(header: SharedHeader, src: &mut ReadCursor<'_>) -> DecodeResult<Self> {
+    pub(crate) fn decode_body(
+        header: SharedHeader,
+        src: &mut ReadCursor<'_>,
+    ) -> DecodeResult<Self> {
         match header.packet_id {
-            PacketId::CoreServerAnnounce => Ok(RdpdrPdu::VersionAndIdPdu(VersionAndIdPdu::decode(header, src)?)),
-            PacketId::CoreServerCapability => Ok(RdpdrPdu::CoreCapability(CoreCapability::decode(header, src)?)),
-            PacketId::CoreClientidConfirm => Ok(RdpdrPdu::VersionAndIdPdu(VersionAndIdPdu::decode(header, src)?)),
+            PacketId::CoreServerAnnounce => Ok(RdpdrPdu::VersionAndIdPdu(VersionAndIdPdu::decode(
+                header, src,
+            )?)),
+            PacketId::CoreServerCapability => Ok(RdpdrPdu::CoreCapability(CoreCapability::decode(
+                header, src,
+            )?)),
+            PacketId::CoreClientidConfirm => Ok(RdpdrPdu::VersionAndIdPdu(
+                VersionAndIdPdu::decode(header, src)?,
+            )),
             PacketId::CoreDeviceReply => Ok(RdpdrPdu::ServerDeviceAnnounceResponse(
                 ServerDeviceAnnounceResponse::decode(src)?,
             )),
-            PacketId::CoreDeviceIoRequest => Ok(RdpdrPdu::DeviceIoRequest(DeviceIoRequest::decode(src)?)),
+            PacketId::CoreDeviceIoRequest => {
+                Ok(RdpdrPdu::DeviceIoRequest(DeviceIoRequest::decode(src)?))
+            }
             PacketId::CoreUserLoggedon => Ok(RdpdrPdu::UserLoggedon),
             packet_id => Err(unsupported_value_err!(
                 "RdpdrPdu::decode_body",

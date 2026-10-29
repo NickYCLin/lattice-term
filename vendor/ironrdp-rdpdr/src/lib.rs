@@ -1,5 +1,7 @@
 #![cfg_attr(doc, doc = include_str!("../README.md"))]
-#![doc(html_logo_url = "https://cdnweb.devolutions.net/images/projects/devolutions/logos/devolutions-icon-shadow.svg")]
+#![doc(
+    html_logo_url = "https://cdnweb.devolutions.net/images/projects/devolutions/logos/devolutions-icon-shadow.svg"
+)]
 #![allow(clippy::arithmetic_side_effects)] // FIXME: remove
 
 use ironrdp_core::{ReadCursor, impl_as_any};
@@ -7,11 +9,12 @@ use ironrdp_pdu::gcc::ChannelName;
 use ironrdp_pdu::{PduResult, decode_err, pdu_other_err};
 use ironrdp_svc::{CompressionCondition, SvcClientProcessor, SvcMessage, SvcProcessor};
 use pdu::efs::{
-    AnyIoCtlCode, Capabilities, ClientDeviceListAnnounce, ClientDeviceListRemove, ClientNameRequest,
-    ClientNameRequestUnicodeFlag, CoreCapability, CoreCapabilityKind, DEFAULT_PRINTER_DRIVER_NAME,
-    DeviceAnnounceHeader, DeviceCloseResponse, DeviceControlRequest, DeviceControlResponse, DeviceIoRequest,
-    DeviceIoResponse, DeviceType, Devices, MajorFunction, NtStatus, PrinterIoRequest, ServerDeviceAnnounceResponse,
-    VERSION_MINOR_12, VERSION_MINOR_RDP51, VersionAndIdPdu, VersionAndIdPduKind,
+    AnyIoCtlCode, Capabilities, ClientDeviceListAnnounce, ClientDeviceListRemove,
+    ClientNameRequest, ClientNameRequestUnicodeFlag, CoreCapability, CoreCapabilityKind,
+    DEFAULT_PRINTER_DRIVER_NAME, DeviceAnnounceHeader, DeviceCloseResponse, DeviceControlRequest,
+    DeviceControlResponse, DeviceIoRequest, DeviceIoResponse, DeviceType, Devices, MajorFunction,
+    NtStatus, PrinterIoRequest, ServerDeviceAnnounceResponse, VERSION_MINOR_12,
+    VERSION_MINOR_RDP51, VersionAndIdPdu, VersionAndIdPduKind,
 };
 use pdu::esc::{ScardCall, ScardIoCtlCode};
 use pdu::{PacketId, RdpdrPdu, SharedHeader};
@@ -122,7 +125,11 @@ impl Rdpdr {
     /// [`RdpdrBackend::handle_printer_io_request`].
     #[must_use]
     pub fn with_printer(self, device_id: u32, print_name: String) -> Self {
-        self.with_printer_driver(device_id, print_name, DEFAULT_PRINTER_DRIVER_NAME.to_owned())
+        self.with_printer_driver(
+            device_id,
+            print_name,
+            DEFAULT_PRINTER_DRIVER_NAME.to_owned(),
+        )
     }
 
     /// Adds printer redirection capability with an explicit server-side
@@ -131,7 +138,12 @@ impl Rdpdr {
     /// Use this when the target host needs a driver other than
     /// [`DEFAULT_PRINTER_DRIVER_NAME`] for the redirected printer queue.
     #[must_use]
-    pub fn with_printer_driver(mut self, device_id: u32, print_name: String, driver_name: String) -> Self {
+    pub fn with_printer_driver(
+        mut self,
+        device_id: u32,
+        print_name: String,
+        driver_name: String,
+    ) -> Self {
         self.capabilities.add_printer();
         self.device_list
             .add_printer_with_driver(device_id, print_name, driver_name);
@@ -158,12 +170,20 @@ impl Rdpdr {
 
     /// Activates a filesystem device and, when allowed by the current sequence,
     /// announces it to the server.
-    pub fn add_dynamic_drive(&mut self, device_id: u32, name: String) -> PduResult<Vec<SvcMessage>> {
+    pub fn add_dynamic_drive(
+        &mut self,
+        device_id: u32,
+        name: String,
+    ) -> PduResult<Vec<SvcMessage>> {
         if name.is_empty() || name.contains('\0') {
-            return Err(pdu_other_err!("dynamic drive name must be nonempty and contain no NUL"));
+            return Err(pdu_other_err!(
+                "dynamic drive name must be nonempty and contain no NUL"
+            ));
         }
         if self.device_types.iter().any(|(id, _)| *id == device_id) {
-            return Err(pdu_other_err!("dynamic drive uses an already-live device ID"));
+            return Err(pdu_other_err!(
+                "dynamic drive uses an already-live device ID"
+            ));
         }
         if !self.drive_capability_configured && self.server_capabilities_received {
             return Err(pdu_other_err!(
@@ -198,7 +218,9 @@ impl Rdpdr {
             .iter()
             .any(|(id, device_type)| *id == device_id && *device_type == DeviceType::Filesystem)
         {
-            return Err(pdu_other_err!("device removal requires a filesystem device"));
+            return Err(pdu_other_err!(
+                "device removal requires a filesystem device"
+            ));
         }
         if self.pending_device_announcements.contains(&device_id) {
             return Err(pdu_other_err!(
@@ -222,8 +244,10 @@ impl Rdpdr {
         self.device_types.retain(|(id, _)| *id != device_id);
         self.active_device_ids.retain(|id| *id != device_id);
         self.rejected_device_ids.retain(|id| *id != device_id);
-        self.manually_announced_device_ids.retain(|id| *id != device_id);
-        self.activated_dynamic_drive_ids.retain(|id| *id != device_id);
+        self.manually_announced_device_ids
+            .retain(|id| *id != device_id);
+        self.activated_dynamic_drive_ids
+            .retain(|id| *id != device_id);
 
         if was_active {
             messages.push(SvcMessage::from(RdpdrPdu::ClientDeviceListRemove(
@@ -255,14 +279,21 @@ impl Rdpdr {
         }
 
         let device_id = self.device_list.remove_device(device_id)?;
-        if let Some(index) = self.device_types.iter().position(|(id, _)| *id == device_id) {
+        if let Some(index) = self
+            .device_types
+            .iter()
+            .position(|(id, _)| *id == device_id)
+        {
             self.device_types.remove(index);
         }
-        self.pending_device_announcements.retain(|id| *id != device_id);
-        self.manually_announced_device_ids.retain(|id| *id != device_id);
+        self.pending_device_announcements
+            .retain(|id| *id != device_id);
+        self.manually_announced_device_ids
+            .retain(|id| *id != device_id);
         self.active_device_ids.retain(|id| *id != device_id);
         self.rejected_device_ids.retain(|id| *id != device_id);
-        self.activated_dynamic_drive_ids.retain(|id| *id != device_id);
+        self.activated_dynamic_drive_ids
+            .retain(|id| *id != device_id);
         Some(ClientDeviceListRemove::remove_device(device_id))
     }
 
@@ -332,20 +363,23 @@ impl Rdpdr {
 
     fn handle_server_capability(&mut self, req: CoreCapability) -> PduResult<Vec<SvcMessage>> {
         if self.server_capabilities_received {
-            return Err(pdu_other_err!("received duplicate RDPDR server capability request"));
+            return Err(pdu_other_err!(
+                "received duplicate RDPDR server capability request"
+            ));
         }
 
         self.server_capabilities_received = true;
-        let client_capability_response =
-            RdpdrPdu::CoreCapability(CoreCapability::new_response(self.capabilities.clone_supported_by(&req)));
+        let client_capability_response = RdpdrPdu::CoreCapability(CoreCapability::new_response(
+            self.capabilities.clone_supported_by(&req),
+        ));
         trace!("sending {:?}", client_capability_response);
         Ok(vec![SvcMessage::from(client_capability_response)])
     }
 
     fn handle_client_id_confirm(&mut self, req: VersionAndIdPdu) -> PduResult<Vec<SvcMessage>> {
-        let expected_client_id = self
-            .client_id
-            .ok_or_else(|| pdu_other_err!("received RDPDR client ID confirm before server announce"))?;
+        let expected_client_id = self.client_id.ok_or_else(|| {
+            pdu_other_err!("received RDPDR client ID confirm before server announce")
+        })?;
         if expected_client_id != req.client_id {
             return Err(pdu_other_err!(
                 "received RDPDR client ID confirm for an unexpected client ID"
@@ -392,7 +426,8 @@ impl Rdpdr {
             .into_iter()
             .zip(self.device_types.iter().copied())
             .filter(|(device, (device_id, _))| {
-                !self.manually_announced_device_ids.contains(device_id) && !Self::is_pre_logon_device(device)
+                !self.manually_announced_device_ids.contains(device_id)
+                    && !Self::is_pre_logon_device(device)
             })
             .map(|(device, (device_id, _))| (device, device_id))
             .unzip();
@@ -434,7 +469,9 @@ impl Rdpdr {
         }
         for (index, device_id) in device_ids.iter().enumerate() {
             if self.pending_device_announcements.contains(device_id)
-                || device_ids[..index].iter().any(|previous| previous == device_id)
+                || device_ids[..index]
+                    .iter()
+                    .any(|previous| previous == device_id)
             {
                 return Err(pdu_other_err!(
                     "device was announced more than once before server acknowledgement"
@@ -465,7 +502,8 @@ impl Rdpdr {
             .handle_server_device_announce_response(pdu)?;
 
         if accepted {
-            self.pending_device_announcements.retain(|id| *id != device_id);
+            self.pending_device_announcements
+                .retain(|id| *id != device_id);
             if !self.active_device_ids.contains(&device_id) {
                 self.active_device_ids.push(device_id);
             }
@@ -481,8 +519,10 @@ impl Rdpdr {
         } else {
             Vec::new()
         };
-        self.activated_dynamic_drive_ids.retain(|id| *id != device_id);
-        self.pending_device_announcements.retain(|id| *id != device_id);
+        self.activated_dynamic_drive_ids
+            .retain(|id| *id != device_id);
+        self.pending_device_announcements
+            .retain(|id| *id != device_id);
         if !self.rejected_device_ids.contains(&device_id) {
             self.rejected_device_ids.push(device_id);
         }
@@ -532,9 +572,10 @@ impl Rdpdr {
 
         match device_type {
             DeviceType::Smartcard => {
-                let req =
-                    DeviceControlRequest::<ScardIoCtlCode>::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
-                let call = ScardCall::decode(req.io_control_code, src).map_err(|e| decode_err!(e))?;
+                let req = DeviceControlRequest::<ScardIoCtlCode>::decode(dev_io_req, src)
+                    .map_err(|e| decode_err!(e))?;
+                let call =
+                    ScardCall::decode(req.io_control_code, src).map_err(|e| decode_err!(e))?;
 
                 debug!(?req);
                 debug!(?req.io_control_code, ?call);
@@ -564,8 +605,10 @@ impl Rdpdr {
                     return Ok(Vec::new());
                 }
                 if dev_io_req.major_function == MajorFunction::DeviceControl {
-                    let req = DeviceControlRequest::<AnyIoCtlCode>::decode_with_input_buffer(dev_io_req, src)
-                        .map_err(|e| decode_err!(e))?;
+                    let req = DeviceControlRequest::<AnyIoCtlCode>::decode_with_input_buffer(
+                        dev_io_req, src,
+                    )
+                    .map_err(|e| decode_err!(e))?;
                     if !src.is_empty() {
                         return Err(pdu_other_err!(
                             "received filesystem device-control IRP with trailing RDPDR data"
@@ -587,9 +630,12 @@ impl Rdpdr {
                     }
                     src.advance(CLOSE_REQUEST_PADDING_SIZE);
                 }
-                let req = ServerDriveIoRequest::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
+                let req =
+                    ServerDriveIoRequest::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
                 if !src.is_empty() {
-                    return Err(pdu_other_err!("received filesystem IRP with trailing RDPDR data"));
+                    return Err(pdu_other_err!(
+                        "received filesystem IRP with trailing RDPDR data"
+                    ));
                 }
 
                 debug!(?req);
@@ -602,8 +648,8 @@ impl Rdpdr {
             }
             DeviceType::Print => match dev_io_req.major_function {
                 MajorFunction::DeviceControl => {
-                    let req =
-                        DeviceControlRequest::<AnyIoCtlCode>::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
+                    let req = DeviceControlRequest::<AnyIoCtlCode>::decode(dev_io_req, src)
+                        .map_err(|e| decode_err!(e))?;
                     debug!(?req, "Completing printer device-control IRP");
 
                     Ok(vec![SvcMessage::from(RdpdrPdu::DeviceControlResponse(
@@ -611,7 +657,8 @@ impl Rdpdr {
                     ))])
                 }
                 MajorFunction::Create | MajorFunction::Write | MajorFunction::Close => {
-                    let req = PrinterIoRequest::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
+                    let req =
+                        PrinterIoRequest::decode(dev_io_req, src).map_err(|e| decode_err!(e))?;
                     debug!(?req, "Dispatching printer IRP to backend");
                     self.backend
                         .as_mut()
@@ -657,7 +704,10 @@ impl SvcProcessor for Rdpdr {
     fn process(&mut self, payload: &[u8]) -> PduResult<Vec<SvcMessage>> {
         let mut src = ReadCursor::new(payload);
         let header = SharedHeader::decode(&mut src).map_err(|e| decode_err!(e))?;
-        if matches!(header.packet_id, PacketId::PrnCacheData | PacketId::PrnUsingXps) {
+        if matches!(
+            header.packet_id,
+            PacketId::PrnCacheData | PacketId::PrnUsingXps
+        ) {
             warn!(
                 packet_id = ?header.packet_id,
                 "Ignoring unhandled RDPDR printer-cache PDU"
@@ -669,16 +719,24 @@ impl SvcProcessor for Rdpdr {
         debug!("Received {:?}", pdu);
 
         match pdu {
-            RdpdrPdu::VersionAndIdPdu(pdu) if pdu.kind == VersionAndIdPduKind::ServerAnnounceRequest => {
+            RdpdrPdu::VersionAndIdPdu(pdu)
+                if pdu.kind == VersionAndIdPduKind::ServerAnnounceRequest =>
+            {
                 self.handle_server_announce(pdu)
             }
-            RdpdrPdu::CoreCapability(pdu) if pdu.kind == CoreCapabilityKind::ServerCoreCapabilityRequest => {
+            RdpdrPdu::CoreCapability(pdu)
+                if pdu.kind == CoreCapabilityKind::ServerCoreCapabilityRequest =>
+            {
                 self.handle_server_capability(pdu)
             }
-            RdpdrPdu::VersionAndIdPdu(pdu) if pdu.kind == VersionAndIdPduKind::ServerClientIdConfirm => {
+            RdpdrPdu::VersionAndIdPdu(pdu)
+                if pdu.kind == VersionAndIdPduKind::ServerClientIdConfirm =>
+            {
                 self.handle_client_id_confirm(pdu)
             }
-            RdpdrPdu::ServerDeviceAnnounceResponse(pdu) => self.handle_server_device_announce_response(pdu),
+            RdpdrPdu::ServerDeviceAnnounceResponse(pdu) => {
+                self.handle_server_device_announce_response(pdu)
+            }
             RdpdrPdu::DeviceIoRequest(pdu) => self.handle_device_io_request(pdu, &mut src),
             RdpdrPdu::UserLoggedon => self.handle_user_logged_on(),
             // TODO: This can eventually become a `_ => {}` block, but being explicit for now
@@ -750,8 +808,12 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn handle_server_device_announce_response(&mut self, pdu: ServerDeviceAnnounceResponse) -> PduResult<()> {
-            self.announcement_results.push((pdu.device_id, pdu.result_code));
+        fn handle_server_device_announce_response(
+            &mut self,
+            pdu: ServerDeviceAnnounceResponse,
+        ) -> PduResult<()> {
+            self.announcement_results
+                .push((pdu.device_id, pdu.result_code));
             Ok(())
         }
 
@@ -763,16 +825,26 @@ mod tests {
             Ok(Vec::new())
         }
 
-        fn handle_drive_io_request(&mut self, req: ServerDriveIoRequest) -> PduResult<Vec<SvcMessage>> {
+        fn handle_drive_io_request(
+            &mut self,
+            req: ServerDriveIoRequest,
+        ) -> PduResult<Vec<SvcMessage>> {
             let ServerDriveIoRequest::DeviceCloseRequest(req) = req else {
-                return Err(pdu_other_err!("test backend received an unexpected filesystem IRP"));
+                return Err(pdu_other_err!(
+                    "test backend received an unexpected filesystem IRP"
+                ));
             };
-            self.drive_requests
-                .push((req.device_io_request.device_id, req.device_io_request.completion_id));
+            self.drive_requests.push((
+                req.device_io_request.device_id,
+                req.device_io_request.completion_id,
+            ));
 
             Ok(vec![SvcMessage::from(RdpdrPdu::DeviceCloseResponse(
                 DeviceCloseResponse {
-                    device_io_response: DeviceIoResponse::new(req.device_io_request, NtStatus::SUCCESS),
+                    device_io_response: DeviceIoResponse::new(
+                        req.device_io_request,
+                        NtStatus::SUCCESS,
+                    ),
                 },
             ))])
         }
@@ -793,7 +865,11 @@ mod tests {
     }
 
     fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-        u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("four-byte integer"))
+        u32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .expect("four-byte integer"),
+        )
     }
 
     fn encoded_server_announce(client_id: u32) -> Vec<u8> {
@@ -817,14 +893,20 @@ mod tests {
     }
 
     fn encoded_server_device_announce_response(device_id: u32, result_code: NtStatus) -> Vec<u8> {
-        encode_vec(&RdpdrPdu::ServerDeviceAnnounceResponse(ServerDeviceAnnounceResponse {
-            device_id,
-            result_code,
-        }))
+        encode_vec(&RdpdrPdu::ServerDeviceAnnounceResponse(
+            ServerDeviceAnnounceResponse {
+                device_id,
+                result_code,
+            },
+        ))
         .expect("encode server device announce response")
     }
 
-    fn encoded_drive_io_request(device_id: u32, completion_id: u32, major_function: MajorFunction) -> Vec<u8> {
+    fn encoded_drive_io_request(
+        device_id: u32,
+        completion_id: u32,
+        major_function: MajorFunction,
+    ) -> Vec<u8> {
         let mut request = encode_vec(&RdpdrPdu::DeviceIoRequest(DeviceIoRequest {
             device_id,
             file_id: 1,
@@ -865,7 +947,10 @@ mod tests {
         );
         assert!(
             rdpdr
-                .process(&encoded_server_device_announce_response(device_id, NtStatus::SUCCESS))
+                .process(&encoded_server_device_announce_response(
+                    device_id,
+                    NtStatus::SUCCESS
+                ))
                 .expect("process accepted device announcement")
                 .is_empty()
         );
@@ -922,12 +1007,16 @@ mod tests {
             .process(&encoded_drive_io_request(42, 0x100, MajorFunction::Close))
             .expect("process drive close");
         assert_eq!(responses.len(), 1);
-        let encoded = responses[0].encode_unframed_pdu().expect("encode drive completion");
+        let encoded = responses[0]
+            .encode_unframed_pdu()
+            .expect("encode drive completion");
         assert_eq!(read_u32(&encoded, 4), 42);
         assert_eq!(read_u32(&encoded, 8), 0x100);
         assert_eq!(NtStatus::from(read_u32(&encoded, 12)), NtStatus::SUCCESS);
 
-        let backend = rdpdr.downcast_backend::<TrackingBackend>().expect("tracking backend");
+        let backend = rdpdr
+            .downcast_backend::<TrackingBackend>()
+            .expect("tracking backend");
         assert_eq!(backend.resets, 1);
         assert_eq!(backend.restored_drives, vec![42]);
         assert_eq!(backend.announcement_results, vec![(42, NtStatus::SUCCESS)]);
@@ -940,7 +1029,9 @@ mod tests {
                 .len(),
             2
         );
-        let backend = rdpdr.downcast_backend::<TrackingBackend>().expect("tracking backend");
+        let backend = rdpdr
+            .downcast_backend::<TrackingBackend>()
+            .expect("tracking backend");
         assert_eq!(backend.resets, 2);
         assert_eq!(backend.restored_drives, vec![42, 42]);
     }
@@ -958,7 +1049,9 @@ mod tests {
         request.extend_from_slice(&[0; 20]); // Padding
         request.extend_from_slice(&[1, 2, 3]); // InputBuffer
 
-        let responses = rdpdr.process(&request).expect("process drive device control");
+        let responses = rdpdr
+            .process(&request)
+            .expect("process drive device control");
         assert_eq!(responses.len(), 1);
         let encoded = responses[0]
             .encode_unframed_pdu()
@@ -1033,10 +1126,15 @@ mod tests {
                 .is_empty()
         );
         let responses = rdpdr
-            .process(&encoded_server_device_announce_response(42, NtStatus::ACCESS_DENIED))
+            .process(&encoded_server_device_announce_response(
+                42,
+                NtStatus::ACCESS_DENIED,
+            ))
             .expect("process rejected device announcement");
         assert_eq!(responses.len(), 1);
-        let encoded = responses[0].encode_unframed_pdu().expect("encode device removal");
+        let encoded = responses[0]
+            .encode_unframed_pdu()
+            .expect("encode device removal");
         assert_eq!(&encoded[..4], &[0x72, 0x44, 0x4d, 0x44]);
         assert!(
             rdpdr
@@ -1046,7 +1144,10 @@ mod tests {
         );
         assert!(
             rdpdr
-                .process(&encoded_server_device_announce_response(42, NtStatus::ACCESS_DENIED))
+                .process(&encoded_server_device_announce_response(
+                    42,
+                    NtStatus::ACCESS_DENIED
+                ))
                 .is_err()
         );
         assert!(
@@ -1119,7 +1220,10 @@ mod tests {
         );
         assert!(rdpdr.remove_drive(42).is_err());
         rdpdr
-            .process(&encoded_server_device_announce_response(42, NtStatus::SUCCESS))
+            .process(&encoded_server_device_announce_response(
+                42,
+                NtStatus::SUCCESS,
+            ))
             .expect("process accepted device announcement");
 
         let responses = rdpdr.remove_drive(42).expect("remove active dynamic drive");
@@ -1143,7 +1247,9 @@ mod tests {
     #[test]
     fn rejected_dynamic_drive_releases_backend_resources() {
         let mut rdpdr = Rdpdr::new(Box::new(TrackingBackend::default()), "test".to_owned());
-        rdpdr.add_dynamic_drive(42, "C:".to_owned()).expect("add dynamic drive");
+        rdpdr
+            .add_dynamic_drive(42, "C:".to_owned())
+            .expect("add dynamic drive");
 
         let responses = rdpdr
             .process(&encoded_server_announce(0x1234))
@@ -1163,7 +1269,10 @@ mod tests {
 
         assert_eq!(
             rdpdr
-                .process(&encoded_server_device_announce_response(42, NtStatus::ACCESS_DENIED))
+                .process(&encoded_server_device_announce_response(
+                    42,
+                    NtStatus::ACCESS_DENIED
+                ))
                 .expect("process rejected dynamic drive")
                 .len(),
             1
@@ -1193,10 +1302,17 @@ mod tests {
     #[test]
     fn raw_device_removal_cannot_bypass_dynamic_drive_cleanup() {
         let mut rdpdr = Rdpdr::new(Box::new(TrackingBackend::default()), "test".to_owned());
-        rdpdr.add_dynamic_drive(42, "C:".to_owned()).expect("add dynamic drive");
+        rdpdr
+            .add_dynamic_drive(42, "C:".to_owned())
+            .expect("add dynamic drive");
 
         assert!(rdpdr.remove_device(42).is_none());
-        assert!(rdpdr.remove_drive(42).expect("remove dynamic drive").is_empty());
+        assert!(
+            rdpdr
+                .remove_drive(42)
+                .expect("remove dynamic drive")
+                .is_empty()
+        );
         assert_eq!(
             rdpdr
                 .downcast_backend::<TrackingBackend>()
@@ -1239,7 +1355,10 @@ mod tests {
         assert_eq!(announcement.device_list.len(), 1);
         assert!(
             rdpdr
-                .process(&encoded_server_device_announce_response(42, NtStatus::SUCCESS))
+                .process(&encoded_server_device_announce_response(
+                    42,
+                    NtStatus::SUCCESS
+                ))
                 .expect("process raw drive announcement response")
                 .is_empty()
         );

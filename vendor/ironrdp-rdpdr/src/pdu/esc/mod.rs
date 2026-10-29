@@ -7,11 +7,12 @@ pub mod rpce;
 
 use bitflags::bitflags;
 use ironrdp_core::{
-    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_size, invalid_field_err,
-    other_err,
+    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_size,
+    invalid_field_err, other_err,
 };
 use ironrdp_pdu::utils::{
-    CharacterSet, encoded_multistring_len, read_multistring_from_cursor, write_multistring_to_cursor,
+    CharacterSet, encoded_multistring_len, read_multistring_from_cursor,
+    write_multistring_to_cursor,
 };
 use tracing::{error, warn};
 
@@ -56,42 +57,36 @@ impl ScardCall {
             ScardIoCtlCode::AccessStartedEvent => Ok(ScardCall::AccessStartedEventCall(
                 ScardAccessStartedEventCall::decode(src)?,
             )),
-            ScardIoCtlCode::EstablishContext => Ok(ScardCall::EstablishContextCall(EstablishContextCall::decode(src)?)),
-            ScardIoCtlCode::ListReaderGroupsW | ScardIoCtlCode::ListReaderGroupsA => {
-                Ok(ScardCall::ListReaderGroupsCall(ListReaderGroupsCall::decode(src)?))
-            }
-            ScardIoCtlCode::ListReadersW => Ok(ScardCall::ListReadersCall(ListReadersCall::decode(
-                src,
-                Some(CharacterSet::Unicode),
-            )?)),
-            ScardIoCtlCode::ListReadersA => Ok(ScardCall::ListReadersCall(ListReadersCall::decode(
-                src,
-                Some(CharacterSet::Ansi),
-            )?)),
-            ScardIoCtlCode::GetStatusChangeW => Ok(ScardCall::GetStatusChangeCall(GetStatusChangeCall::decode(
-                src,
-                Some(CharacterSet::Unicode),
-            )?)),
-            ScardIoCtlCode::GetStatusChangeA => Ok(ScardCall::GetStatusChangeCall(GetStatusChangeCall::decode(
-                src,
-                Some(CharacterSet::Ansi),
-            )?)),
-            ScardIoCtlCode::LocateCardsW => Ok(ScardCall::LocateCardsCall(LocateCardsCall::decode(
-                src,
-                Some(CharacterSet::Unicode),
-            )?)),
-            ScardIoCtlCode::LocateCardsA => Ok(ScardCall::LocateCardsCall(LocateCardsCall::decode(
-                src,
-                Some(CharacterSet::Ansi),
-            )?)),
-            ScardIoCtlCode::LocateCardsByAtrW => Ok(ScardCall::LocateCardsByAtrCall(LocateCardsByAtrCall::decode(
-                src,
-                Some(CharacterSet::Unicode),
-            )?)),
-            ScardIoCtlCode::LocateCardsByAtrA => Ok(ScardCall::LocateCardsByAtrCall(LocateCardsByAtrCall::decode(
-                src,
-                Some(CharacterSet::Ansi),
-            )?)),
+            ScardIoCtlCode::EstablishContext => Ok(ScardCall::EstablishContextCall(
+                EstablishContextCall::decode(src)?,
+            )),
+            ScardIoCtlCode::ListReaderGroupsW | ScardIoCtlCode::ListReaderGroupsA => Ok(
+                ScardCall::ListReaderGroupsCall(ListReaderGroupsCall::decode(src)?),
+            ),
+            ScardIoCtlCode::ListReadersW => Ok(ScardCall::ListReadersCall(
+                ListReadersCall::decode(src, Some(CharacterSet::Unicode))?,
+            )),
+            ScardIoCtlCode::ListReadersA => Ok(ScardCall::ListReadersCall(
+                ListReadersCall::decode(src, Some(CharacterSet::Ansi))?,
+            )),
+            ScardIoCtlCode::GetStatusChangeW => Ok(ScardCall::GetStatusChangeCall(
+                GetStatusChangeCall::decode(src, Some(CharacterSet::Unicode))?,
+            )),
+            ScardIoCtlCode::GetStatusChangeA => Ok(ScardCall::GetStatusChangeCall(
+                GetStatusChangeCall::decode(src, Some(CharacterSet::Ansi))?,
+            )),
+            ScardIoCtlCode::LocateCardsW => Ok(ScardCall::LocateCardsCall(
+                LocateCardsCall::decode(src, Some(CharacterSet::Unicode))?,
+            )),
+            ScardIoCtlCode::LocateCardsA => Ok(ScardCall::LocateCardsCall(
+                LocateCardsCall::decode(src, Some(CharacterSet::Ansi))?,
+            )),
+            ScardIoCtlCode::LocateCardsByAtrW => Ok(ScardCall::LocateCardsByAtrCall(
+                LocateCardsByAtrCall::decode(src, Some(CharacterSet::Unicode))?,
+            )),
+            ScardIoCtlCode::LocateCardsByAtrA => Ok(ScardCall::LocateCardsByAtrCall(
+                LocateCardsByAtrCall::decode(src, Some(CharacterSet::Ansi))?,
+            )),
             ScardIoCtlCode::ConnectW => Ok(ScardCall::ConnectCall(ConnectCall::decode(
                 src,
                 Some(CharacterSet::Unicode),
@@ -105,22 +100,28 @@ impl ScardCall {
                 HCardAndDispositionCall::decode(src)?,
             )),
             ScardIoCtlCode::Transmit => Ok(ScardCall::TransmitCall(TransmitCall::decode(src)?)),
-            ScardIoCtlCode::StatusW | ScardIoCtlCode::StatusA => Ok(ScardCall::StatusCall(StatusCall::decode(src)?)),
+            ScardIoCtlCode::StatusW | ScardIoCtlCode::StatusA => {
+                Ok(ScardCall::StatusCall(StatusCall::decode(src)?))
+            }
             ScardIoCtlCode::State => Ok(ScardCall::StateCall(StateCall::decode(src)?)),
             ScardIoCtlCode::Control => Ok(ScardCall::ControlCall(ControlCall::decode(src)?)),
             ScardIoCtlCode::GetAttrib => Ok(ScardCall::GetAttribCall(GetAttribCall::decode(src)?)),
             ScardIoCtlCode::SetAttrib => Ok(ScardCall::SetAttribCall(SetAttribCall::decode(src)?)),
-            ScardIoCtlCode::GetTransmitCount => Ok(ScardCall::GetTransmitCountCall(GetTransmitCountCall::decode(src)?)),
+            ScardIoCtlCode::GetTransmitCount => Ok(ScardCall::GetTransmitCountCall(
+                GetTransmitCountCall::decode(src)?,
+            )),
             ScardIoCtlCode::ReleaseContext => Ok(ScardCall::ContextCall(ContextCall::decode(src)?)),
-            ScardIoCtlCode::EndTransaction => Ok(ScardCall::HCardAndDispositionCall(HCardAndDispositionCall::decode(
-                src,
-            )?)),
-            ScardIoCtlCode::Disconnect => Ok(ScardCall::HCardAndDispositionCall(HCardAndDispositionCall::decode(
-                src,
-            )?)),
+            ScardIoCtlCode::EndTransaction => Ok(ScardCall::HCardAndDispositionCall(
+                HCardAndDispositionCall::decode(src)?,
+            )),
+            ScardIoCtlCode::Disconnect => Ok(ScardCall::HCardAndDispositionCall(
+                HCardAndDispositionCall::decode(src)?,
+            )),
             ScardIoCtlCode::Cancel => Ok(ScardCall::ContextCall(ContextCall::decode(src)?)),
             ScardIoCtlCode::IsValidContext => Ok(ScardCall::ContextCall(ContextCall::decode(src)?)),
-            ScardIoCtlCode::GetDeviceTypeId => Ok(ScardCall::GetDeviceTypeIdCall(GetDeviceTypeIdCall::decode(src)?)),
+            ScardIoCtlCode::GetDeviceTypeId => Ok(ScardCall::GetDeviceTypeIdCall(
+                GetDeviceTypeIdCall::decode(src)?,
+            )),
             ScardIoCtlCode::ReadCacheW => Ok(ScardCall::ReadCacheCall(ReadCacheCall::decode(
                 src,
                 Some(CharacterSet::Unicode),
@@ -137,19 +138,19 @@ impl ScardCall {
                 src,
                 Some(CharacterSet::Ansi),
             )?)),
-            ScardIoCtlCode::GetReaderIcon => Ok(ScardCall::GetReaderIconCall(GetReaderIconCall::decode(src)?)),
+            ScardIoCtlCode::GetReaderIcon => Ok(ScardCall::GetReaderIconCall(
+                GetReaderIconCall::decode(src)?,
+            )),
             ScardIoCtlCode::IntroduceReaderGroupW
             | ScardIoCtlCode::ForgetReaderGroupW
-            | ScardIoCtlCode::ForgetReaderW => Ok(ScardCall::ContextAndStringCall(ContextAndStringCall::decode(
-                src,
-                Some(CharacterSet::Unicode),
-            )?)),
+            | ScardIoCtlCode::ForgetReaderW => Ok(ScardCall::ContextAndStringCall(
+                ContextAndStringCall::decode(src, Some(CharacterSet::Unicode))?,
+            )),
             ScardIoCtlCode::IntroduceReaderGroupA
             | ScardIoCtlCode::ForgetReaderGroupA
-            | ScardIoCtlCode::ForgetReaderA => Ok(ScardCall::ContextAndStringCall(ContextAndStringCall::decode(
-                src,
-                Some(CharacterSet::Ansi),
-            )?)),
+            | ScardIoCtlCode::ForgetReaderA => Ok(ScardCall::ContextAndStringCall(
+                ContextAndStringCall::decode(src, Some(CharacterSet::Ansi))?,
+            )),
             ScardIoCtlCode::IntroduceReaderW
             | ScardIoCtlCode::AddReaderToGroupW
             | ScardIoCtlCode::RemoveReaderFromGroupW => Ok(ScardCall::ContextAndTwoStringCall(
@@ -320,10 +321,17 @@ impl ndr::Decode for ScardContext {
                 "ScardContext cbContext/pbContext inconsistency"
             ));
         }
-        Ok(Self { len, bytes: [0; 16] })
+        Ok(Self {
+            len,
+            bytes: [0; 16],
+        })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         if self.len == 0 {
             return Ok(());
@@ -332,7 +340,10 @@ impl ndr::Decode for ScardContext {
         let length = src.read_u32();
         if length != u32::from(self.len) {
             error!(?length, expected = self.len, "ScardContext length mismatch");
-            return Err(invalid_field_err!("decode_value", "ScardContext length mismatch"));
+            return Err(invalid_field_err!(
+                "decode_value",
+                "ScardContext length mismatch"
+            ));
         }
         let n = usize::from(self.len);
         ensure_size!(in: src, size: n);
@@ -360,7 +371,11 @@ impl ndr::Decode for ReaderState {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         let charset = expect_charset(charset)?;
         self.reader = ndr::read_string_from_cursor(src, charset)?;
         Ok(())
@@ -526,7 +541,11 @@ impl TryFrom<u32> for ScardIoCtlCode {
             0x0009_0108 => Ok(ScardIoCtlCode::GetDeviceTypeId),
             _ => {
                 error!("Unsupported ScardIoCtlCode: 0x{:08x}", value);
-                Err(invalid_field_err!("try_from", "ScardIoCtlCode", "unsupported value"))
+                Err(invalid_field_err!(
+                    "try_from",
+                    "ScardIoCtlCode",
+                    "unsupported value"
+                ))
             }
         }
     }
@@ -757,7 +776,10 @@ impl EstablishContextCall {
 }
 
 impl rpce::HeaderlessDecode for EstablishContextCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         ensure_size!(in: src, size: Self::size());
         let scope = Scope::try_from(src.read_u32())?;
@@ -808,7 +830,10 @@ impl EstablishContextReturn {
     const NAME: &'static str = "EstablishContext_Return";
 
     pub fn new(return_code: ReturnCode, context: ScardContext) -> rpce::Pdu<Self> {
-        rpce::Pdu(Self { return_code, context })
+        rpce::Pdu(Self {
+            return_code,
+            context,
+        })
     }
 }
 
@@ -852,7 +877,10 @@ impl ListReadersCall {
 }
 
 impl rpce::HeaderlessDecode for ListReadersCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -919,8 +947,13 @@ pub struct ListReadersReturn {
 impl ListReadersReturn {
     const NAME: &'static str = "ListReaders_Return";
 
-    pub fn new(return_code: ReturnCode, readers: Vec<String>, encoding: CharacterSet) -> rpce::Pdu<Self> {
-        let c_bytes = u32::try_from(encoded_multistring_len(&readers, encoding)).unwrap_or(u32::MAX);
+    pub fn new(
+        return_code: ReturnCode,
+        readers: Vec<String>,
+        encoding: CharacterSet,
+    ) -> rpce::Pdu<Self> {
+        let c_bytes =
+            u32::try_from(encoded_multistring_len(&readers, encoding)).unwrap_or(u32::MAX);
         rpce::Pdu(Self {
             return_code,
             encoding,
@@ -970,7 +1003,9 @@ impl rpce::HeaderlessEncode for ListReadersReturn {
     fn size(&self) -> usize {
         self.return_code.size()
             + match &self.readers {
-                Some(readers) => ndr::ptr_size(true) + 4 + encoded_multistring_len(readers, self.encoding),
+                Some(readers) => {
+                    ndr::ptr_size(true) + 4 + encoded_multistring_len(readers, self.encoding)
+                }
                 None => 8,
             }
     }
@@ -996,7 +1031,10 @@ impl GetStatusChangeCall {
 }
 
 impl rpce::HeaderlessDecode for GetStatusChangeCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
 
@@ -1111,11 +1149,18 @@ impl LocateCardsAtrMask {
         let atr_length = src.read_u32();
         // MS-RDPESC: cbAtr range(0,36)
         if atr_length > 36 {
-            return Err(invalid_field_err!("decode", "LocateCards_ATRMask cbAtr out of range"));
+            return Err(invalid_field_err!(
+                "decode",
+                "LocateCards_ATRMask cbAtr out of range"
+            ));
         }
         let atr = src.read_array::<36>();
         let mask = src.read_array::<36>();
-        Ok(Self { atr_length, atr, mask })
+        Ok(Self {
+            atr_length,
+            atr,
+            mask,
+        })
     }
 }
 
@@ -1143,7 +1188,10 @@ impl LocateCardsCall {
 }
 
 impl rpce::HeaderlessDecode for LocateCardsCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -1171,7 +1219,10 @@ impl rpce::HeaderlessDecode for LocateCardsCall {
             }
             // MS-RDPESC: cBytes range(0, 65536)
             if cards_length > 65_536 {
-                return Err(invalid_field_err!("decode", "LocateCards cBytes out of range"));
+                return Err(invalid_field_err!(
+                    "decode",
+                    "LocateCards cBytes out of range"
+                ));
             }
             let cards_len: usize = cast_length!("LocateCardsCall", "cards_length", cards_length)?;
             ensure_size!(in: src, size: cards_len);
@@ -1193,7 +1244,10 @@ impl rpce::HeaderlessDecode for LocateCardsCall {
             let states_length = src.read_u32();
             // MS-RDPESC: cReaders range(0,10)
             if states_length > 10 {
-                return Err(invalid_field_err!("decode", "LocateCards cReaders out of range"));
+                return Err(invalid_field_err!(
+                    "decode",
+                    "LocateCards cReaders out of range"
+                ));
             }
             if states_length != states_ptr_length {
                 return Err(invalid_field_err!(
@@ -1249,7 +1303,10 @@ impl LocateCardsByAtrCall {
 }
 
 impl rpce::HeaderlessDecode for LocateCardsByAtrCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
 
@@ -1276,7 +1333,10 @@ impl rpce::HeaderlessDecode for LocateCardsByAtrCall {
             }
             // MS-RDPESC: cAtrs range(0,1000)
             if atr_masks_length > 1000 {
-                return Err(invalid_field_err!("decode", "LocateCardsByATR cAtrs out of range"));
+                return Err(invalid_field_err!(
+                    "decode",
+                    "LocateCardsByATR cAtrs out of range"
+                ));
             }
             let mut atr_masks = Vec::new();
             for _ in 0..atr_masks_length {
@@ -1292,7 +1352,10 @@ impl rpce::HeaderlessDecode for LocateCardsByAtrCall {
             let states_length = src.read_u32();
             // MS-RDPESC: cReaders range(0,10)
             if states_length > 10 {
-                return Err(invalid_field_err!("decode", "LocateCardsByATR cReaders out of range"));
+                return Err(invalid_field_err!(
+                    "decode",
+                    "LocateCardsByATR cReaders out of range"
+                ));
             }
             if states_length != states_ptr_length {
                 return Err(invalid_field_err!(
@@ -1336,7 +1399,10 @@ pub struct GetStatusChangeReturn {
 impl GetStatusChangeReturn {
     const NAME: &'static str = "GetStatusChange_Return";
 
-    pub fn new(return_code: ReturnCode, reader_states: Vec<ReaderStateCommonCall>) -> rpce::Pdu<Self> {
+    pub fn new(
+        return_code: ReturnCode,
+        reader_states: Vec<ReaderStateCommonCall>,
+    ) -> rpce::Pdu<Self> {
         rpce::Pdu(Self {
             return_code,
             reader_states,
@@ -1348,7 +1414,11 @@ impl rpce::HeaderlessEncode for GetStatusChangeReturn {
     fn encode(&self, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
         ensure_size!(in: dst, size: self.size());
         dst.write_u32(self.return_code.into());
-        let reader_states_len = cast_length!("GetStatusChangeReturn", "reader_states", self.reader_states.len())?;
+        let reader_states_len = cast_length!(
+            "GetStatusChangeReturn",
+            "reader_states",
+            self.reader_states.len()
+        )?;
         let mut index = 0;
         ndr::encode_ptr(Some(reader_states_len), &mut index, dst)?;
         dst.write_u32(reader_states_len);
@@ -1386,7 +1456,10 @@ impl ConnectCall {
 }
 
 impl rpce::HeaderlessDecode for ConnectCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let _reader_ptr = ndr::decode_ptr(src, &mut index)?;
@@ -1423,7 +1496,11 @@ impl ndr::Decode for ConnectCommon {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         self.context.decode_value(src, None)
     }
@@ -1467,7 +1544,11 @@ impl ScardHandle {
     pub fn new(context: ScardContext, value: u32) -> Self {
         let mut bytes = [0u8; 16];
         bytes[..4].copy_from_slice(&value.to_le_bytes());
-        Self { context, len: 4, bytes }
+        Self {
+            context,
+            len: 4,
+            bytes,
+        }
     }
 
     /// Creates a handle from opaque wire bytes (`0..=16`).
@@ -1475,7 +1556,11 @@ impl ScardHandle {
         let len = scard_wire_len(u32::try_from(opaque.len()).unwrap_or(u32::MAX))?;
         let mut bytes = [0u8; 16];
         bytes[..opaque.len()].copy_from_slice(opaque);
-        Ok(Self { context, len, bytes })
+        Ok(Self {
+            context,
+            len,
+            bytes,
+        })
     }
 
     /// Context that owns this handle.
@@ -1563,7 +1648,11 @@ impl ndr::Decode for ScardHandle {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         self.context.decode_value(src, None)?;
         if self.len == 0 {
@@ -1573,7 +1662,10 @@ impl ndr::Decode for ScardHandle {
         let length = src.read_u32();
         if length != u32::from(self.len) {
             error!(?length, expected = self.len, "ScardHandle length mismatch");
-            return Err(invalid_field_err!("decode_value", "ScardHandle length mismatch"));
+            return Err(invalid_field_err!(
+                "decode_value",
+                "ScardHandle length mismatch"
+            ));
         }
         let n = usize::from(self.len);
         ensure_size!(in: src, size: n);
@@ -1633,7 +1725,11 @@ pub struct ConnectReturn {
 impl ConnectReturn {
     const NAME: &'static str = "Connect_Return";
 
-    pub fn new(return_code: ReturnCode, handle: ScardHandle, active_protocol: CardProtocol) -> rpce::Pdu<Self> {
+    pub fn new(
+        return_code: ReturnCode,
+        handle: ScardHandle,
+        active_protocol: CardProtocol,
+    ) -> rpce::Pdu<Self> {
         rpce::Pdu(Self {
             return_code,
             handle,
@@ -1678,14 +1774,20 @@ impl HCardAndDispositionCall {
 }
 
 impl rpce::HeaderlessDecode for HCardAndDispositionCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
         ensure_size!(in: src, size: size_of::<u32>());
         let disposition = src.read_u32();
         handle.decode_value(src, None)?;
-        Ok(Self { handle, disposition })
+        Ok(Self {
+            handle,
+            disposition,
+        })
     }
 }
 
@@ -1710,7 +1812,10 @@ impl TransmitCall {
 }
 
 impl rpce::HeaderlessDecode for TransmitCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -1769,7 +1874,8 @@ impl ndr::Decode for SCardIORequest {
     {
         ensure_size!(in: src, size: size_of::<u32>() * 2);
         let protocol = CardProtocol::from_bits_retain(src.read_u32());
-        let extra_bytes_length = cast_length!("SCardIORequest", "extra_bytes_length", src.read_u32())?;
+        let extra_bytes_length =
+            cast_length!("SCardIORequest", "extra_bytes_length", src.read_u32())?;
         let _extra_bytes_ptr = ndr::decode_ptr(src, index)?;
         let extra_bytes = Vec::new();
         Ok(Self {
@@ -1779,7 +1885,11 @@ impl ndr::Decode for SCardIORequest {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         ensure_size!(in: src, size: self.extra_bytes_length);
         self.extra_bytes = src.read_slice(self.extra_bytes_length).to_vec();
@@ -1791,7 +1901,11 @@ impl ndr::Encode for SCardIORequest {
     fn encode_ptr(&self, index: &mut u32, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
         ensure_size!(in: dst, size: self.size_ptr());
 
-        let extra_bytes_length = cast_length!("SCardIORequest", "extra_bytes_length", self.extra_bytes_length)?;
+        let extra_bytes_length = cast_length!(
+            "SCardIORequest",
+            "extra_bytes_length",
+            self.extra_bytes_length
+        )?;
 
         dst.write_u32(self.protocol.bits());
         ndr::encode_ptr(Some(extra_bytes_length), index, dst)
@@ -1827,7 +1941,11 @@ pub struct TransmitReturn {
 impl TransmitReturn {
     const NAME: &'static str = "Transmit_Return";
 
-    pub fn new(return_code: ReturnCode, recv_pci: Option<SCardIORequest>, recv_buffer: Vec<u8>) -> rpce::Pdu<Self> {
+    pub fn new(
+        return_code: ReturnCode,
+        recv_pci: Option<SCardIORequest>,
+        recv_buffer: Vec<u8>,
+    ) -> rpce::Pdu<Self> {
         let recv_len = u32::try_from(recv_buffer.len()).unwrap_or(u32::MAX);
         rpce::Pdu(Self {
             return_code,
@@ -1837,7 +1955,11 @@ impl TransmitReturn {
         })
     }
 
-    pub fn recv_probe(return_code: ReturnCode, recv_pci: Option<SCardIORequest>, recv_len: u32) -> rpce::Pdu<Self> {
+    pub fn recv_probe(
+        return_code: ReturnCode,
+        recv_pci: Option<SCardIORequest>,
+        recv_len: u32,
+    ) -> rpce::Pdu<Self> {
         rpce::Pdu(Self {
             return_code,
             recv_pci,
@@ -1905,7 +2027,10 @@ impl StatusCall {
 }
 
 impl rpce::HeaderlessDecode for StatusCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -1951,7 +2076,8 @@ impl StatusReturn {
         atr_length: u32,
         encoding: CharacterSet,
     ) -> rpce::Pdu<Self> {
-        let reader_c_bytes = u32::try_from(encoded_multistring_len(&reader_names, encoding)).unwrap_or(u32::MAX);
+        let reader_c_bytes =
+            u32::try_from(encoded_multistring_len(&reader_names, encoding)).unwrap_or(u32::MAX);
         rpce::Pdu(Self {
             return_code,
             reader_names: Some(reader_names),
@@ -2082,7 +2208,10 @@ impl ContextCall {
 }
 
 impl rpce::HeaderlessDecode for ContextCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2108,7 +2237,10 @@ impl GetDeviceTypeIdCall {
 }
 
 impl rpce::HeaderlessDecode for GetDeviceTypeIdCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2177,14 +2309,20 @@ impl ReadCacheCall {
 }
 
 impl rpce::HeaderlessDecode for ReadCacheCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let _lookup_name_ptr = ndr::decode_ptr(src, &mut index)?;
         let mut common = ReadCacheCommon::decode_ptr(src, &mut index)?;
         let lookup_name = ndr::read_string_from_cursor(src, charset)?;
         common.decode_value(src, None)?;
-        Ok(Self { lookup_name, common })
+        Ok(Self {
+            lookup_name,
+            common,
+        })
     }
 }
 
@@ -2221,7 +2359,11 @@ impl ndr::Decode for ReadCacheCommon {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         self.context.decode_value(src, None)?;
         ensure_size!(in: src, size: 16);
@@ -2270,7 +2412,10 @@ impl rpce::HeaderlessEncode for ReadCacheReturn {
         match &self.data {
             Some(data) => {
                 if data.len() > 65_536 {
-                    return Err(invalid_field_err!("encode", "ReadCacheReturn cbDataLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "ReadCacheReturn cbDataLen out of range"
+                    ));
                 }
                 let data_len: u32 = cast_length!("ReadCacheReturn", "data_len", data.len())?;
                 let mut index = 0;
@@ -2280,7 +2425,10 @@ impl rpce::HeaderlessEncode for ReadCacheReturn {
             }
             None => {
                 if self.data_len > 65_536 {
-                    return Err(invalid_field_err!("encode", "ReadCacheReturn cbDataLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "ReadCacheReturn cbDataLen out of range"
+                    ));
                 }
                 dst.write_u32(self.data_len);
                 dst.write_u32(0);
@@ -2318,14 +2466,20 @@ impl WriteCacheCall {
 }
 
 impl rpce::HeaderlessDecode for WriteCacheCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let _lookup_name_ptr = ndr::decode_ptr(src, &mut index)?;
         let mut common = WriteCacheCommon::decode_ptr(src, &mut index)?;
         let lookup_name = ndr::read_string_from_cursor(src, charset)?;
         common.decode_value(src, None)?;
-        Ok(Self { lookup_name, common })
+        Ok(Self {
+            lookup_name,
+            common,
+        })
     }
 }
 
@@ -2360,7 +2514,11 @@ impl ndr::Decode for WriteCacheCommon {
         })
     }
 
-    fn decode_value(&mut self, src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<()> {
+    fn decode_value(
+        &mut self,
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<()> {
         expect_no_charset(charset)?;
         self.context.decode_value(src, None)?;
         ensure_size!(in: src, size: 16);
@@ -2392,7 +2550,10 @@ impl ContextAndStringCall {
 }
 
 impl rpce::HeaderlessDecode for ContextAndStringCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2428,7 +2589,10 @@ impl ContextAndTwoStringCall {
 }
 
 impl rpce::HeaderlessDecode for ContextAndTwoStringCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         let charset = expect_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2466,7 +2630,10 @@ impl GetReaderIconCall {
 }
 
 impl rpce::HeaderlessDecode for GetReaderIconCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2475,7 +2642,10 @@ impl rpce::HeaderlessDecode for GetReaderIconCall {
 
         context.decode_value(src, None)?;
         let reader_name = ndr::read_string_from_cursor(src, CharacterSet::Unicode)?;
-        Ok(Self { context, reader_name })
+        Ok(Self {
+            context,
+            reader_name,
+        })
     }
 }
 
@@ -2546,7 +2716,10 @@ impl ListReaderGroupsCall {
 }
 
 impl rpce::HeaderlessDecode for ListReaderGroupsCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut context = ScardContext::decode_ptr(src, &mut index)?;
@@ -2580,7 +2753,10 @@ impl ReconnectCall {
 }
 
 impl rpce::HeaderlessDecode for ReconnectCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -2652,7 +2828,10 @@ impl StateCall {
 }
 
 impl rpce::HeaderlessDecode for StateCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -2684,7 +2863,12 @@ pub struct StateReturn {
 impl StateReturn {
     const NAME: &'static str = "State_Return";
 
-    pub fn new(return_code: ReturnCode, state: CardState, protocol: CardProtocol, atr: Vec<u8>) -> rpce::Pdu<Self> {
+    pub fn new(
+        return_code: ReturnCode,
+        state: CardState,
+        protocol: CardProtocol,
+        atr: Vec<u8>,
+    ) -> rpce::Pdu<Self> {
         let atr_len = u32::try_from(atr.len()).unwrap_or(u32::MAX);
         rpce::Pdu(Self {
             return_code,
@@ -2720,7 +2904,10 @@ impl rpce::HeaderlessEncode for StateReturn {
         match &self.atr {
             Some(atr) => {
                 if atr.len() > 36 {
-                    return Err(invalid_field_err!("encode", "StateReturn cbAtrLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "StateReturn cbAtrLen out of range"
+                    ));
                 }
                 let atr_len: u32 = cast_length!("StateReturn", "atr_len", atr.len())?;
                 let mut index = 0;
@@ -2730,7 +2917,10 @@ impl rpce::HeaderlessEncode for StateReturn {
             }
             None => {
                 if self.atr_len > 36 {
-                    return Err(invalid_field_err!("encode", "StateReturn cbAtrLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "StateReturn cbAtrLen out of range"
+                    ));
                 }
                 dst.write_u32(self.atr_len);
                 dst.write_u32(0);
@@ -2770,7 +2960,10 @@ impl ControlCall {
 }
 
 impl rpce::HeaderlessDecode for ControlCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -2779,7 +2972,10 @@ impl rpce::HeaderlessDecode for ControlCall {
         // MS-RDPESC: cbInBufferSize range(0,66560)
         let in_buffer_len = src.read_u32();
         if in_buffer_len > 66_560 {
-            return Err(invalid_field_err!("decode", "Control cbInBufferSize out of range"));
+            return Err(invalid_field_err!(
+                "decode",
+                "Control cbInBufferSize out of range"
+            ));
         }
         let in_buffer_ptr = ndr::decode_ptr(src, &mut index)?;
         ensure_size!(in: src, size: size_of::<u32>() * 2);
@@ -2914,7 +3110,10 @@ impl GetAttribCall {
 }
 
 impl rpce::HeaderlessDecode for GetAttribCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -2972,7 +3171,10 @@ impl rpce::HeaderlessEncode for GetAttribReturn {
         match &self.attr {
             Some(attr) => {
                 if attr.len() > 65_536 {
-                    return Err(invalid_field_err!("encode", "GetAttribReturn cbAttrLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "GetAttribReturn cbAttrLen out of range"
+                    ));
                 }
                 let data_len: u32 = cast_length!("GetAttribReturn", "attr_len", attr.len())?;
                 let mut index = 0;
@@ -2982,7 +3184,10 @@ impl rpce::HeaderlessEncode for GetAttribReturn {
             }
             None => {
                 if self.attr_len > 65_536 {
-                    return Err(invalid_field_err!("encode", "GetAttribReturn cbAttrLen out of range"));
+                    return Err(invalid_field_err!(
+                        "encode",
+                        "GetAttribReturn cbAttrLen out of range"
+                    ));
                 }
                 dst.write_u32(self.attr_len);
                 dst.write_u32(0);
@@ -3021,7 +3226,10 @@ impl SetAttribCall {
 }
 
 impl rpce::HeaderlessDecode for SetAttribCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -3030,7 +3238,10 @@ impl rpce::HeaderlessDecode for SetAttribCall {
         // MS-RDPESC: cbAttrLen range(0,65536)
         let attr_len = src.read_u32();
         if attr_len > 65_536 {
-            return Err(invalid_field_err!("decode", "SetAttrib cbAttrLen out of range"));
+            return Err(invalid_field_err!(
+                "decode",
+                "SetAttrib cbAttrLen out of range"
+            ));
         }
         let attr_ptr = ndr::decode_ptr(src, &mut index)?;
         handle.decode_value(src, None)?;
@@ -3048,12 +3259,19 @@ impl rpce::HeaderlessDecode for SetAttribCall {
             ensure_size!(in: src, size: attr_len);
             src.read_slice(attr_len).to_vec()
         } else if attr_len != 0 {
-            return Err(invalid_field_err!("decode", "SetAttrib cbAttrLen/pbAttr inconsistency"));
+            return Err(invalid_field_err!(
+                "decode",
+                "SetAttrib cbAttrLen/pbAttr inconsistency"
+            ));
         } else {
             Vec::new()
         };
 
-        Ok(Self { handle, attr_id, attr })
+        Ok(Self {
+            handle,
+            attr_id,
+            attr,
+        })
     }
 }
 
@@ -3072,7 +3290,10 @@ impl GetTransmitCountCall {
 }
 
 impl rpce::HeaderlessDecode for GetTransmitCountCall {
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self> {
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self> {
         expect_no_charset(charset)?;
         let mut index = 0;
         let mut handle = ScardHandle::decode_ptr(src, &mut index)?;
@@ -3172,14 +3393,18 @@ mod tests {
         assert_eq!(roundtrip_context(c4), c4);
         assert_eq!(c4.value(), 0xA1B2_C3D4);
         let opaque = [
-            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
         ];
         assert_eq!(
             roundtrip_context(ScardContext::from_opaque(&opaque).unwrap()).as_bytes(),
             &opaque
         );
         assert!(ScardContext::from_opaque(&[0; 17]).is_err());
-        assert_eq!(roundtrip_context(ScardContext::from_opaque(&[]).unwrap()).len(), 0);
+        assert_eq!(
+            roundtrip_context(ScardContext::from_opaque(&[]).unwrap()).len(),
+            0
+        );
         let ctx = ScardContext::new(0x1111_2222);
         assert_eq!(
             roundtrip_handle(ScardHandle::new(ctx, 0x3333_4444)),
@@ -3195,9 +3420,13 @@ mod tests {
     #[test]
     fn context_and_string_null_unique_ptr() {
         // empty context + NULL sz unique pointer
-        let mut pdu = vec![0x01, 0x10, 0x08, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 12, 0, 0, 0, 0, 0, 0, 0];
+        let mut pdu = vec![
+            0x01, 0x10, 0x08, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 12, 0, 0, 0, 0, 0, 0, 0,
+        ];
         pdu.extend_from_slice(&[0u8; 12]);
-        let d = ContextAndStringCall::decode(&mut ReadCursor::new(&pdu), Some(CharacterSet::Unicode)).unwrap();
+        let d =
+            ContextAndStringCall::decode(&mut ReadCursor::new(&pdu), Some(CharacterSet::Unicode))
+                .unwrap();
         assert!(d.sz.is_empty());
     }
 
@@ -3209,18 +3438,22 @@ mod tests {
             HeaderlessEncode::encode(body, &mut WriteCursor::new(&mut buf)).unwrap();
             buf
         }
-        let est = EstablishContextReturn::new(ReturnCode::Success, ScardContext::new(0xA1B2_C3D4)).into_inner();
+        let est = EstablishContextReturn::new(ReturnCode::Success, ScardContext::new(0xA1B2_C3D4))
+            .into_inner();
         assert_eq!(
             enc(&est),
-            [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 2, 0, 4, 0, 0, 0, 0xD4, 0xC3, 0xB2, 0xA1]
+            [
+                0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 2, 0, 4, 0, 0, 0, 0xD4, 0xC3, 0xB2, 0xA1
+            ]
         );
         let h = ScardHandle::new(ScardContext::new(0x1111_2222), 0x3333_4444);
-        let conn = ConnectReturn::new(ReturnCode::Success, h, CardProtocol::SCARD_PROTOCOL_T0).into_inner();
+        let conn = ConnectReturn::new(ReturnCode::Success, h, CardProtocol::SCARD_PROTOCOL_T0)
+            .into_inner();
         assert_eq!(
             enc(&conn),
             [
-                0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 2, 0, 4, 0, 0, 0, 4, 0, 2, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0x22, 0x22, 0x11,
-                0x11, 4, 0, 0, 0, 0x44, 0x44, 0x33, 0x33,
+                0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 2, 0, 4, 0, 0, 0, 4, 0, 2, 0, 1, 0, 0, 0, 4, 0, 0, 0,
+                0x22, 0x22, 0x11, 0x11, 4, 0, 0, 0, 0x44, 0x44, 0x33, 0x33,
             ]
         );
     }
@@ -3237,10 +3470,20 @@ mod tests {
         let names = vec!["RDR".into()];
         let atr = [0x3Bu8; 32];
 
-        let list_full = ListReadersReturn::new(ReturnCode::Success, names.clone(), CharacterSet::Unicode).into_inner();
-        let list_probe = ListReadersReturn::probe(ReturnCode::InsufficientBuffer, 12, CharacterSet::Ansi).into_inner();
-        assert_eq!(enc_headerless(&list_full).len(), HeaderlessEncode::size(&list_full));
-        assert_eq!(enc_headerless(&list_probe).len(), HeaderlessEncode::size(&list_probe));
+        let list_full =
+            ListReadersReturn::new(ReturnCode::Success, names.clone(), CharacterSet::Unicode)
+                .into_inner();
+        let list_probe =
+            ListReadersReturn::probe(ReturnCode::InsufficientBuffer, 12, CharacterSet::Ansi)
+                .into_inner();
+        assert_eq!(
+            enc_headerless(&list_full).len(),
+            HeaderlessEncode::size(&list_full)
+        );
+        assert_eq!(
+            enc_headerless(&list_probe).len(),
+            HeaderlessEncode::size(&list_probe)
+        );
         let list_with_stale_length = ListReadersReturn {
             return_code: ReturnCode::Success,
             encoding: CharacterSet::Unicode,
@@ -3253,10 +3496,17 @@ mod tests {
             "full replies derive cBytes from their live multistring"
         );
 
-        let xmit_full = TransmitReturn::new(ReturnCode::Success, None, vec![0x90, 0x00]).into_inner();
+        let xmit_full =
+            TransmitReturn::new(ReturnCode::Success, None, vec![0x90, 0x00]).into_inner();
         let xmit_probe = TransmitReturn::recv_probe(ReturnCode::Success, None, 256).into_inner();
-        assert_eq!(enc_headerless(&xmit_full).len(), HeaderlessEncode::size(&xmit_full));
-        assert_eq!(enc_headerless(&xmit_probe).len(), HeaderlessEncode::size(&xmit_probe));
+        assert_eq!(
+            enc_headerless(&xmit_full).len(),
+            HeaderlessEncode::size(&xmit_full)
+        );
+        assert_eq!(
+            enc_headerless(&xmit_probe).len(),
+            HeaderlessEncode::size(&xmit_probe)
+        );
 
         let status_full = StatusReturn::new(
             ReturnCode::Success,
@@ -3280,9 +3530,18 @@ mod tests {
         .into_inner();
         assert_eq!(
             HeaderlessEncode::size(&status_full),
-            4 * 5 + 8 + 32 + encoded_multistring_len(status_full.reader_names.as_ref().unwrap(), CharacterSet::Unicode)
+            4 * 5
+                + 8
+                + 32
+                + encoded_multistring_len(
+                    status_full.reader_names.as_ref().unwrap(),
+                    CharacterSet::Unicode
+                )
         );
-        assert_eq!(enc_headerless(&status_full).len(), HeaderlessEncode::size(&status_full));
+        assert_eq!(
+            enc_headerless(&status_full).len(),
+            HeaderlessEncode::size(&status_full)
+        );
         assert_eq!(
             enc_headerless(&status_probe).len(),
             HeaderlessEncode::size(&status_probe)
@@ -3317,11 +3576,18 @@ mod tests {
             3,
         )
         .into_inner();
-        assert_eq!(enc_headerless(&state_full).len(), HeaderlessEncode::size(&state_full));
-        assert_eq!(enc_headerless(&state_probe).len(), HeaderlessEncode::size(&state_probe));
+        assert_eq!(
+            enc_headerless(&state_full).len(),
+            HeaderlessEncode::size(&state_full)
+        );
+        assert_eq!(
+            enc_headerless(&state_probe).len(),
+            HeaderlessEncode::size(&state_probe)
+        );
 
         let control_full = ControlReturn::new(ReturnCode::Success, vec![1, 2, 3]).into_inner();
-        let control_probe = ControlReturn::out_probe(ReturnCode::InsufficientBuffer, 64).into_inner();
+        let control_probe =
+            ControlReturn::out_probe(ReturnCode::InsufficientBuffer, 64).into_inner();
         assert_eq!(
             enc_headerless(&control_full).len(),
             HeaderlessEncode::size(&control_full)
@@ -3333,7 +3599,10 @@ mod tests {
 
         let attrib_full = GetAttribReturn::new(ReturnCode::Success, vec![9, 8]).into_inner();
         let attrib_probe = GetAttribReturn::attr_probe(ReturnCode::Success, 16).into_inner();
-        assert_eq!(enc_headerless(&attrib_full).len(), HeaderlessEncode::size(&attrib_full));
+        assert_eq!(
+            enc_headerless(&attrib_full).len(),
+            HeaderlessEncode::size(&attrib_full)
+        );
         assert_eq!(
             enc_headerless(&attrib_probe).len(),
             HeaderlessEncode::size(&attrib_probe)
@@ -3341,8 +3610,14 @@ mod tests {
 
         let cache_full = ReadCacheReturn::new(ReturnCode::Success, vec![4, 5, 6, 7]).into_inner();
         let cache_probe = ReadCacheReturn::data_probe(ReturnCode::Success, 32).into_inner();
-        assert_eq!(enc_headerless(&cache_full).len(), HeaderlessEncode::size(&cache_full));
-        assert_eq!(enc_headerless(&cache_probe).len(), HeaderlessEncode::size(&cache_probe));
+        assert_eq!(
+            enc_headerless(&cache_full).len(),
+            HeaderlessEncode::size(&cache_full)
+        );
+        assert_eq!(
+            enc_headerless(&cache_probe).len(),
+            HeaderlessEncode::size(&cache_probe)
+        );
     }
 
     /// 6-byte Unicode mszCards needs 2-byte NDR pad before reader states.
@@ -3371,7 +3646,9 @@ mod tests {
         pdu.extend_from_slice(&0u32.to_le_bytes());
         pdu.extend_from_slice(&body);
 
-        let decoded = LocateCardsCall::decode(&mut ReadCursor::new(&pdu), Some(CharacterSet::Unicode)).unwrap();
+        let decoded =
+            LocateCardsCall::decode(&mut ReadCursor::new(&pdu), Some(CharacterSet::Unicode))
+                .unwrap();
         assert_eq!(decoded.cards, vec!["A".to_owned()]);
         assert_eq!(decoded.states[0].reader, "R");
     }

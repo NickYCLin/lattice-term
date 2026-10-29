@@ -3,7 +3,8 @@
 //! [\[MS-RPCE\]: Remote Procedure Call Protocol Extensions]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rpce/290c38b1-92fe-4229-91e6-4fc376610c15
 
 use ironrdp_core::{
-    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_size, invalid_field_err,
+    DecodeError, DecodeResult, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_size,
+    invalid_field_err,
 };
 use ironrdp_pdu::utils::CharacterSet;
 
@@ -128,7 +129,10 @@ impl<T: HeaderlessEncode> ironrdp_core::Encode for Pdu<T> {
     }
 
     fn size(&self) -> usize {
-        StreamHeader::size() + TypeHeader::size() + HeaderlessEncode::size(&self.0) + padding_size(&self.0)
+        StreamHeader::size()
+            + TypeHeader::size()
+            + HeaderlessEncode::size(&self.0)
+            + padding_size(&self.0)
     }
 }
 
@@ -163,7 +167,10 @@ pub trait HeaderlessDecode: Sized {
     /// `charset` is an optional parameter that can be used to specify the character set
     /// when relevant. This is useful for accounting for the "A" vs "W" variants of certain
     /// opcodes e.g. [`ListReadersA`][`super::ScardIoCtlCode::ListReadersA`] vs [`ListReadersW`][`super::ScardIoCtlCode::ListReadersW`].
-    fn headerless_decode(src: &mut ReadCursor<'_>, charset: Option<CharacterSet>) -> DecodeResult<Self>;
+    fn headerless_decode(
+        src: &mut ReadCursor<'_>,
+        charset: Option<CharacterSet>,
+    ) -> DecodeResult<Self>;
 }
 
 /// [2.2.6.1] Common Type Header for the Serialization Stream
@@ -238,7 +245,11 @@ impl TryFrom<u8> for Endianness {
         match value {
             0x00 => Ok(Endianness::BigEndian),
             0x10 => Ok(Endianness::LittleEndian),
-            _ => Err(invalid_field_err!("try_from", "RpceEndianness", "unsupported value")),
+            _ => Err(invalid_field_err!(
+                "try_from",
+                "RpceEndianness",
+                "unsupported value"
+            )),
         }
     }
 }
