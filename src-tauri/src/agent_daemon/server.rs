@@ -2800,6 +2800,9 @@ mod observer_transport_tests {
     async fn mismatched_role_protocols_are_rejected_before_subscribing() {
         for (role, protocol) in [
             (ClientRole::Observer, super::super::PROTOCOL_VERSION),
+            // v2 observers predate project-launch grants. Reject them before
+            // returning metadata or subscribing to any output.
+            (ClientRole::Observer, 2),
             (ClientRole::Desktop, OBSERVER_PROTOCOL_VERSION),
         ] {
             let dir = tempfile::tempdir().unwrap();

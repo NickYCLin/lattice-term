@@ -19,6 +19,10 @@ import { arch, release, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+// Keep these in sync with agent_daemon/mod.rs; Linux Vitest checks both.
+const DESKTOP_PROTOCOL_VERSION = 1;
+const OBSERVER_PROTOCOL_VERSION = 3;
+
 if (process.platform !== "win32" || !process.argv[2])
   throw Error("Pass a Windows LatticeTerm executable.");
 const executable = resolve(process.argv[2]);
@@ -211,7 +215,7 @@ async function daemonPeer(role = "desktop") {
   clients.add(peer);
   peer.hello = await peer.request({
     type: "hello",
-    protocol: role === "observer" ? 2 : 1,
+    protocol: role === "observer" ? OBSERVER_PROTOCOL_VERSION : DESKTOP_PROTOCOL_VERSION,
     token: readFileSync(join(dataDir, "agent-daemon.token"), "utf8").trim(),
     role,
     client: "windows-acceptance 1.0",
@@ -301,7 +305,7 @@ try {
         if (end < 0) return;
         const { id, body } = JSON.parse(pending.slice(0, end));
         // Keep only protocol metadata. The legacy server ignores role, but
-        // rejects version 2 before returning any sessions or output snapshots.
+        // rejects the observer version before returning any private data.
         greetings.push({ type: body.type, protocol: body.protocol, role: body.role });
         socket.end(JSON.stringify({ kind: "response", id, ok: false,
           result: null, error: "The background service refused the greeting." }) + "\n");
@@ -317,9 +321,9 @@ try {
       assert.equal(value.daemonRunning, false);
       assert.ok(greetings.length > 0, "adapter must reach the existing legacy pipe");
       assert.ok(greetings.every((entry) => entry.type === "hello" &&
-        entry.protocol === 2 && entry.role === "observer"));
+        entry.protocol === OBSERVER_PROTOCOL_VERSION && entry.role === "observer"));
       probe.close();
-      return { reachedLegacyPipe: true, observerProtocol: 2, privateDataReturned: false };
+      return { reachedLegacyPipe: true, observerProtocol: OBSERVER_PROTOCOL_VERSION, privateDataReturned: false };
     } finally {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => legacy.close(resolve));
