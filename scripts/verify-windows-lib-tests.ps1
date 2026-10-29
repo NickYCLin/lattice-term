@@ -247,7 +247,7 @@ try {
     $report.manifest.toolSignature = "Valid Microsoft Corporation"
     $report.manifest.testCopySha256 = (Get-FileHash -LiteralPath $testCopy -Algorithm SHA256).Hash
     foreach ($filter in @("codex_input_profile", "codex_mcp_submit", "desktop_interrupt", "startup_seed",
-            "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
+            "windows_elevation::", "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
             "remote_host::", "remote::", "remote_commands::", "remote_chat_host::", "notification_sound::",
             "durable_file::", "backup::", "credentials::", "vault::",
             "npm_shim", "cliproxy::catalog::", "git_changes::", "chat_images::", "mcp_inventory::")) {

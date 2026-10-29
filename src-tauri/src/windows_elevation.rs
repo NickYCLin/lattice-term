@@ -17,7 +17,33 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, MB_ICONERROR, MB_OK, SW_SHOWNORMAL,
 };
 
-const ATTEMPTED: &str = "--latticeterm-elevation-attempted";
+// Older installers may replay the legacy flag from a successful elevation.
+// Use a distinct pending guard so the first update into this fix can elevate.
+const LEGACY_ATTEMPTED: &str = "--latticeterm-elevation-attempted";
+const ATTEMPTED: &str = "--latticeterm-elevation-pending";
+
+fn is_elevation_argument(argument: &OsStr) -> bool {
+    argument == ATTEMPTED || argument == LEGACY_ATTEMPTED
+}
+
+fn has_pending_elevation(arguments: &[OsString]) -> bool {
+    arguments.iter().any(|argument| argument == ATTEMPTED)
+}
+
+fn restart_arguments(arguments: &[OsString]) -> Vec<OsString> {
+    arguments
+        .iter()
+        .enumerate()
+        .filter(|(index, argument)| *index == 0 || !is_elevation_argument(argument))
+        .map(|(_, argument)| argument.clone())
+        .collect()
+}
+
+pub(crate) fn restart_environment() -> tauri::Env {
+    let mut environment = tauri::Env::default();
+    environment.args_os = restart_arguments(&environment.args_os);
+    environment
+}
 
 fn wide(value: &OsStr) -> Result<Vec<u16>, String> {
     let mut result: Vec<_> = value.encode_wide().collect();
@@ -58,6 +84,7 @@ fn parameters(arguments: &[OsString]) -> Result<Vec<u16>, String> {
     for argument in arguments
         .iter()
         .map(OsString::as_os_str)
+        .filter(|argument| !is_elevation_argument(argument))
         .chain([OsStr::new(ATTEMPTED)])
     {
         if !result.is_empty() {
@@ -117,10 +144,7 @@ impl Drop for ComApartment {
 }
 
 pub fn ensure_elevated(arguments: &[OsString]) -> Result<bool, String> {
-    if !elevation_required(
-        elevated()?,
-        arguments.iter().any(|argument| argument == ATTEMPTED),
-    )? {
+    if !elevation_required(elevated()?, has_pending_elevation(arguments))? {
         return Ok(false);
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -187,10 +211,53 @@ mod tests {
     }
 
     #[test]
+    fn legacy_updater_arguments_get_a_fresh_elevation_attempt() {
+        let arguments = vec![LEGACY_ATTEMPTED.into(), "--desktop-autostart".into()];
+        assert_eq!(
+            elevation_required(false, has_pending_elevation(&arguments)),
+            Ok(true),
+        );
+        let pending = vec![ATTEMPTED.into()];
+        assert!(elevation_required(false, has_pending_elevation(&pending)).is_err());
+    }
+
+    #[test]
+    fn updater_and_restart_drop_consumed_guards_but_keep_launch_arguments() {
+        let arguments: Vec<OsString> = [
+            "lattice-term.exe",
+            LEGACY_ATTEMPTED,
+            "--desktop-autostart",
+            ATTEMPTED,
+            "專案資料夾",
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .chain([OsString::from_wide(&[0xd800])])
+        .collect();
+        let restarted = restart_arguments(&arguments);
+        assert_eq!(
+            restarted,
+            vec![
+                OsString::from("lattice-term.exe"),
+                OsString::from("--desktop-autostart"),
+                OsString::from("專案資料夾"),
+                OsString::from_wide(&[0xd800]),
+            ],
+        );
+        assert_eq!(restart_arguments(&restarted), restarted);
+        assert_eq!(
+            elevation_required(false, has_pending_elevation(&restarted[1..])),
+            Ok(true),
+        );
+    }
+
+    #[test]
     fn preserves_windows_arguments_and_adds_a_loop_guard() {
         let arguments: Vec<OsString> = [
             "",
             "--desktop-autostart",
+            LEGACY_ATTEMPTED,
+            ATTEMPTED,
             "繁體中文與空白 資料夾",
             r"C:\folder with spaces\",
             r#"a\"b"#,
@@ -219,7 +286,10 @@ mod tests {
             }));
         }
         unsafe { LocalFree(parsed.cast()) };
-        let mut expected = arguments;
+        let mut expected: Vec<_> = arguments
+            .into_iter()
+            .filter(|argument| !is_elevation_argument(argument))
+            .collect();
         expected.push(ATTEMPTED.into());
         assert_eq!(actual, expected);
     }

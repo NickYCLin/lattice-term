@@ -66,6 +66,8 @@ pub mod vnc;
 mod voice_typing;
 #[cfg(any(windows, test))]
 mod window_fit;
+#[cfg(windows)]
+pub mod windows_elevation;
 
 use crate::agent::{
     AgentBroadcastOutcome, AgentDefinition, AgentLaunchPlan, AgentLaunchPlanDraft,
@@ -5486,6 +5488,10 @@ pub fn run() {
     ));
     #[cfg(mobile)]
     let builder = tauri::Builder::default();
+    // The elevation retry guard belongs only to the initial runas handoff.
+    // Both Tauri restart and the Windows updater reuse this managed Env.
+    #[cfg(windows)]
+    let builder = builder.manage(windows_elevation::restart_environment());
     let builder = builder.plugin(tauri_plugin_dialog::init());
     // Opens web links the user clicks (search sources) in the default
     // browser; the capability limits it to http(s) URLs.

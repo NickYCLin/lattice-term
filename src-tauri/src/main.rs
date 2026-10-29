@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(windows)]
-mod windows_elevation;
+use latticeterm_lib::windows_elevation;
 
 fn main() {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
