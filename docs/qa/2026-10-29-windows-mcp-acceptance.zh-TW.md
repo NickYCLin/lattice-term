@@ -29,6 +29,12 @@ Linux Vitest 比對 Rust 與驗收常數，並確認實際問候及隔離斷言�
 - GLib structured log 測試假設上游 workspace 的 `glib/tests/...`
   路徑，獨立 crate 實際為 `tests/...`。改以同一來源的 `file!()`
   精確比對，保留所有日誌欄位與行號檢查。
+- 首輪 main CI `40798773894` 的完整 GLib 測試另重現
+  `test_spawn_from_within` 銷毀競態：迴圈退出後，工作執行緒釋放
+  最後的 task/context，跨執行緒銷毀 local future 而中止。新增協調
+  執行順序的 fixture 在 Linux 重現 SIGABRT，保留迴圈執行緒的
+  context 所有權，等待工作執行緒結束後排空清理事件；沒有降低
+  平行度或改動產品實作。修正後完整測試及連續 50 輪單元測試通過。
 - CI 加入兩個 vendored crates 的格式及完整測試，保留 GLib release
   安全回歸，避免只跑 focused tests 而漏掉上述測試缺陷。
 

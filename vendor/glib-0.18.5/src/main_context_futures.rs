@@ -746,18 +746,32 @@ mod tests {
     #[test]
     fn test_spawn_from_within() {
         let c = MainContext::new();
+        // Keep ownership and the last context reference on the loop thread.
+        let _owner = c.acquire().unwrap();
         let l = crate::MainLoop::new(Some(&c), false);
+        let (release, wait) = mpsc::channel();
 
-        std::thread::spawn({
+        let worker = std::thread::spawn({
             let l_clone = l.clone();
+            let c = c.clone();
             move || {
-                c.spawn_from_within(move || async move {
+                let task = c.spawn_from_within(move || async move {
                     l_clone.quit();
                 });
+                // Reproduce teardown after the loop has exited.
+                wait.recv().unwrap();
+                drop(task);
             }
         });
 
         l.run();
+        drop(l);
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        // Dropping the detached task on the worker queues local-future cleanup.
+        while c.pending() {
+            c.iteration(false);
+        }
     }
 
     #[test]
