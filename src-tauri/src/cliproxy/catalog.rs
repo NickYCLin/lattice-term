@@ -389,8 +389,11 @@ Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefin
         let script = fixture.path().join("probe.ps1");
         std::fs::write(
             &script,
-            r#"Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
+            r#"[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "started`n")
+Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
+[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "assembly loaded`n")
 if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
+[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "no console`n")
 Write-Output '[{"role":"developer","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]'
 "#,
         )
@@ -407,10 +410,11 @@ Write-Output '[{"role":"developer","content":[{"type":"input_text","text":"latti
         .map(Into::into)
         .chain(std::iter::once(script.into_os_string()))
         .collect();
-        assert!(supports_layered_profiles(
-            std::ffi::OsStr::new("powershell.exe"),
-            &prefix
-        ));
+        assert!(
+            supports_layered_profiles(std::ffi::OsStr::new("powershell.exe"), &prefix),
+            "direct PowerShell fixture stages: {:?}",
+            std::fs::read_to_string(fixture.path().join("probe.log"))
+        );
 
         let shim = fixture.path().join("probe.cmd");
         std::fs::write(
