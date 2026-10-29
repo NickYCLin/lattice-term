@@ -159,6 +159,7 @@ jobs:
       - name: Lint Rust
         run: |
           cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path vendor/glib-0.18.5/Cargo.toml --all-targets -- -D warnings
           cargo clippy --manifest-path crates/lattice-remote/Cargo.toml --features "agent client-cli relay-server" --all-targets -- -D warnings
           cargo clippy --manifest-path crates/lattice-rdp/Cargo.toml --all-targets -- -D warnings
           cargo clippy --manifest-path crates/lattice-vnc/Cargo.toml --all-targets -- -D warnings

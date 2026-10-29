@@ -1086,7 +1086,7 @@ impl<T: TransparentPtrType> IntoPtrSlice<T> for PtrSlice<T> {
     }
 }
 
-impl<'a, T: TransparentPtrType> IntoPtrSlice<T> for &'a PtrSlice<T> {
+impl<T: TransparentPtrType> IntoPtrSlice<T> for &PtrSlice<T> {
     #[inline]
     fn run_with_ptr_slice<R, F: FnOnce(&[<T as GlibPtrDefault>::GlibType]) -> R>(self, f: F) -> R {
         f(unsafe { std::slice::from_raw_parts(self.as_ptr() as *mut _, self.len() + 1) })
@@ -1149,7 +1149,7 @@ impl<T: TransparentPtrType, const N: usize> IntoPtrSlice<T> for [T; N] {
     }
 }
 
-impl<'a, T: TransparentPtrType> IntoPtrSlice<T> for &'a [T] {
+impl<T: TransparentPtrType> IntoPtrSlice<T> for &[T] {
     #[inline]
     fn run_with_ptr_slice<R, F: FnOnce(&[<T as GlibPtrDefault>::GlibType]) -> R>(self, f: F) -> R {
         if self.len() < MAX_STACK_ALLOCATION {
@@ -1285,7 +1285,7 @@ mod test {
 
         let slice2 = crate::Slice::from(slice.clone());
 
-        for (a, b) in Iterator::zip(items.iter(), slice.into_iter()) {
+        for (a, b) in Iterator::zip(items.iter(), slice) {
             assert_eq!(a.message(), b.message());
             assert_eq!(
                 a.kind::<crate::FileError>().unwrap(),
@@ -1295,7 +1295,7 @@ mod test {
 
         let slice3 = crate::PtrSlice::from(slice2.clone());
 
-        for (a, b) in Iterator::zip(items.iter(), slice2.into_iter()) {
+        for (a, b) in Iterator::zip(items.iter(), slice2) {
             assert_eq!(a.message(), b.message());
             assert_eq!(
                 a.kind::<crate::FileError>().unwrap(),
@@ -1303,7 +1303,7 @@ mod test {
             );
         }
 
-        for (a, b) in Iterator::zip(items.iter(), slice3.into_iter()) {
+        for (a, b) in Iterator::zip(items.iter(), slice3) {
             assert_eq!(a.message(), b.message());
             assert_eq!(
                 a.kind::<crate::FileError>().unwrap(),

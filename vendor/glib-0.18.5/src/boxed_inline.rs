@@ -550,6 +550,9 @@ macro_rules! glib_boxed_inline_wrapper {
             #[inline]
             fn static_type() -> $crate::types::Type {
                 #[allow(unused_unsafe)]
+                // wrapper! 的公開契約允許此型別註冊運算式呼叫 unsafe FFI。
+                // 移到安全區塊會破壞既有呼叫端，故只豁免這個展開點。
+                #[allow(clippy::macro_metavars_in_unsafe)]
                 unsafe { $crate::translate::from_glib($get_type_expr) }
             }
         }

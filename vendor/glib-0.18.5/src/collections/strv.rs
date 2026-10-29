@@ -75,7 +75,7 @@ impl<'a> PartialEq<[&'a str]> for StrV {
     }
 }
 
-impl<'a> PartialEq<StrV> for [&'a str] {
+impl PartialEq<StrV> for [&str] {
     #[inline]
     fn eq(&self, other: &StrV) -> bool {
         other.eq(self)
@@ -1003,7 +1003,7 @@ impl crate::StaticType for StrV {
     }
 }
 
-impl<'a> crate::StaticType for &'a [GStringPtr] {
+impl crate::StaticType for &[GStringPtr] {
     #[inline]
     fn static_type() -> crate::Type {
         <Vec<String>>::static_type()
@@ -1078,7 +1078,7 @@ impl IntoStrV for StrV {
     }
 }
 
-impl<'a> IntoStrV for &'a StrV {
+impl IntoStrV for &StrV {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         f(unsafe { std::slice::from_raw_parts(self.as_ptr(), self.len()) })
@@ -1098,21 +1098,21 @@ impl IntoStrV for Vec<GString> {
     }
 }
 
-impl<'a> IntoStrV for Vec<&'a GString> {
+impl IntoStrV for Vec<&GString> {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
     }
 }
 
-impl<'a> IntoStrV for Vec<&'a GStr> {
+impl IntoStrV for Vec<&GStr> {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
     }
 }
 
-impl<'a> IntoStrV for Vec<&'a str> {
+impl IntoStrV for Vec<&str> {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
@@ -1126,7 +1126,7 @@ impl IntoStrV for Vec<String> {
     }
 }
 
-impl<'a> IntoStrV for Vec<&'a String> {
+impl IntoStrV for Vec<&String> {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
@@ -1158,7 +1158,7 @@ impl IntoStrV for &[GString] {
     }
 }
 
-impl<'a> IntoStrV for &[&'a GString] {
+impl IntoStrV for &[&GString] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         let required_len = (self.len() + 1) * mem::size_of::<*mut c_char>();
@@ -1183,7 +1183,7 @@ impl<'a> IntoStrV for &[&'a GString] {
     }
 }
 
-impl<'a> IntoStrV for &[&'a GStr] {
+impl IntoStrV for &[&GStr] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         let required_len = (self.len() + 1) * mem::size_of::<*mut c_char>();
@@ -1208,7 +1208,7 @@ impl<'a> IntoStrV for &[&'a GStr] {
     }
 }
 
-impl<'a> IntoStrV for &[&'a str] {
+impl IntoStrV for &[&str] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         let required_len = (self.len() + 1) * mem::size_of::<*mut c_char>()
@@ -1268,7 +1268,7 @@ impl IntoStrV for &[String] {
     }
 }
 
-impl<'a> IntoStrV for &[&'a String] {
+impl IntoStrV for &[&String] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         let required_len = (self.len() + 1) * mem::size_of::<*mut c_char>()
@@ -1305,21 +1305,21 @@ impl<const N: usize> IntoStrV for [GString; N] {
     }
 }
 
-impl<'a, const N: usize> IntoStrV for [&'a GString; N] {
+impl<const N: usize> IntoStrV for [&GString; N] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
     }
 }
 
-impl<'a, const N: usize> IntoStrV for [&'a GStr; N] {
+impl<const N: usize> IntoStrV for [&GStr; N] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
     }
 }
 
-impl<'a, const N: usize> IntoStrV for [&'a str; N] {
+impl<const N: usize> IntoStrV for [&str; N] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
@@ -1333,7 +1333,7 @@ impl<const N: usize> IntoStrV for [String; N] {
     }
 }
 
-impl<'a, const N: usize> IntoStrV for [&'a String; N] {
+impl<const N: usize> IntoStrV for [&String; N] {
     #[inline]
     fn run_with_strv<R, F: FnOnce(&[*mut c_char]) -> R>(self, f: F) -> R {
         self.as_slice().run_with_strv(f)
@@ -1469,7 +1469,7 @@ mod test {
         slice.push(e);
         assert_eq!(slice.len(), 4);
 
-        for (a, b) in Iterator::zip(items.iter(), slice.into_iter()) {
+        for (a, b) in Iterator::zip(items.iter(), slice) {
             assert_eq!(*a, b);
         }
     }

@@ -290,7 +290,7 @@ impl Ord for EnumValue {
     }
 }
 
-unsafe impl<'a, 'b> FromValue<'a> for &'b EnumValue {
+unsafe impl<'a> FromValue<'a> for &EnumValue {
     type Checker = EnumTypeChecker;
 
     unsafe fn from_value(value: &'a Value) -> Self {
@@ -904,7 +904,7 @@ impl<'a> FlagsBuilder<'a> {
     }
 }
 
-unsafe impl<'a, 'b> FromValue<'a> for Vec<&'b FlagsValue> {
+unsafe impl<'a> FromValue<'a> for Vec<&FlagsValue> {
     type Checker = FlagsTypeChecker;
 
     unsafe fn from_value(value: &'a Value) -> Self {

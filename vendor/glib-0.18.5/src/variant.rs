@@ -997,20 +997,20 @@ impl StaticVariantType for Variant {
     }
 }
 
-impl<'a, T: ?Sized + ToVariant> ToVariant for &'a T {
+impl<T: ?Sized + ToVariant> ToVariant for &T {
     fn to_variant(&self) -> Variant {
         <T as ToVariant>::to_variant(self)
     }
 }
 
-impl<'a, T: ?Sized + Into<Variant> + Clone> From<&'a T> for Variant {
+impl<'a, T: Into<Variant> + Clone> From<&'a T> for Variant {
     #[inline]
     fn from(v: &'a T) -> Self {
         v.clone().into()
     }
 }
 
-impl<'a, T: ?Sized + StaticVariantType> StaticVariantType for &'a T {
+impl<T: ?Sized + StaticVariantType> StaticVariantType for &T {
     fn static_variant_type() -> Cow<'static, VariantTy> {
         <T as StaticVariantType>::static_variant_type()
     }
@@ -1380,10 +1380,7 @@ impl<T: FromVariant> FromVariant for Vec<T> {
         let mut vec = Vec::with_capacity(variant.n_children());
 
         for i in 0..variant.n_children() {
-            match variant.child_value(i).get() {
-                Some(child) => vec.push(child),
-                None => return None,
-            }
+            vec.push(variant.child_value(i).get()?);
         }
 
         Some(vec)
@@ -1440,14 +1437,8 @@ where
 
         for i in 0..variant.n_children() {
             let entry = variant.child_value(i);
-            let key = match entry.child_value(0).get() {
-                Some(key) => key,
-                None => return None,
-            };
-            let val = match entry.child_value(1).get() {
-                Some(val) => val,
-                None => return None,
-            };
+            let key = entry.child_value(0).get()?;
+            let val = entry.child_value(1).get()?;
 
             map.insert(key, val);
         }
@@ -1470,14 +1461,8 @@ where
 
         for i in 0..variant.n_children() {
             let entry = variant.child_value(i);
-            let key = match entry.child_value(0).get() {
-                Some(key) => key,
-                None => return None,
-            };
-            let val = match entry.child_value(1).get() {
-                Some(val) => val,
-                None => return None,
-            };
+            let key = entry.child_value(0).get()?;
+            let val = entry.child_value(1).get()?;
 
             map.insert(key, val);
         }
@@ -1646,14 +1631,8 @@ where
             return None;
         }
 
-        let key = match variant.child_value(0).get() {
-            Some(key) => key,
-            None => return None,
-        };
-        let value = match variant.child_value(1).get() {
-            Some(value) => value,
-            None => return None,
-        };
+        let key = variant.child_value(0).get()?;
+        let value = variant.child_value(1).get()?;
 
         Some(Self { key, value })
     }

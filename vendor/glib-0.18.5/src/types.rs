@@ -313,14 +313,14 @@ impl From<Type> for crate::Value {
     }
 }
 
-impl<'a, T: ?Sized + StaticType> StaticType for &'a T {
+impl<T: ?Sized + StaticType> StaticType for &T {
     #[inline]
     fn static_type() -> Type {
         T::static_type()
     }
 }
 
-impl<'a, T: ?Sized + StaticType> StaticType for &'a mut T {
+impl<T: ?Sized + StaticType> StaticType for &mut T {
     #[inline]
     fn static_type() -> Type {
         T::static_type()
@@ -513,7 +513,7 @@ builtin!(PathBuf, STRING);
 builtin!(Path, STRING);
 builtin!(Pointer, POINTER);
 
-impl<'a> StaticType for [&'a str] {
+impl StaticType for [&str] {
     #[inline]
     fn static_type() -> Type {
         unsafe { from_glib(ffi::g_strv_get_type()) }

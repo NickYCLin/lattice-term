@@ -145,7 +145,7 @@ impl MainContext {
     ///
     /// This will fail if the main context is owned already by another thread.
     #[doc(alias = "g_main_context_push_thread_default")]
-    pub fn with_thread_default<R, F: Sized>(&self, func: F) -> Result<R, crate::BoolError>
+    pub fn with_thread_default<R, F>(&self, func: F) -> Result<R, crate::BoolError>
     where
         F: FnOnce() -> R,
     {

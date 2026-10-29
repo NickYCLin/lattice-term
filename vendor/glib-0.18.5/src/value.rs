@@ -688,7 +688,7 @@ impl ToValue for Value {
     }
 }
 
-impl<'a> ToValue for &'a Value {
+impl ToValue for &Value {
     #[inline]
     fn to_value(&self) -> Value {
         (*self).clone()
@@ -741,7 +741,7 @@ impl ToValue for SendValue {
     }
 }
 
-impl<'a> ToValue for &'a SendValue {
+impl ToValue for &SendValue {
     #[inline]
     fn to_value(&self) -> Value {
         unsafe { from_glib_none(self.to_glib_none().0) }
@@ -791,7 +791,7 @@ impl SendValue {
         }
     }
     #[inline]
-    pub fn from_owned<T: Send + Into<Value> + ?Sized>(t: T) -> Self {
+    pub fn from_owned<T: Send + Into<Value>>(t: T) -> Self {
         unsafe { Self::unsafe_from(t.into().into_raw()) }
     }
 }
@@ -995,7 +995,7 @@ impl From<Vec<String>> for Value {
     }
 }
 
-impl<'a> ToValue for [&'a str] {
+impl ToValue for [&str] {
     fn to_value(&self) -> Value {
         unsafe {
             let mut value = Value::for_value_type::<Vec<String>>();

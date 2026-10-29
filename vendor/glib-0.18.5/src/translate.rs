@@ -421,7 +421,7 @@ pub trait GlibPtrDefault {
     type GlibType: Ptr;
 }
 
-impl<'a, T: ?Sized + GlibPtrDefault> GlibPtrDefault for &'a T {
+impl<T: ?Sized + GlibPtrDefault> GlibPtrDefault for &T {
     type GlibType = <T as GlibPtrDefault>::GlibType;
 }
 

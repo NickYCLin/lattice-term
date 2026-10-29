@@ -1030,6 +1030,9 @@ macro_rules! glib_object_wrapper {
             #[inline]
             fn static_type() -> $crate::types::Type {
                 #[allow(unused_unsafe)]
+                // wrapper! 的公開契約允許此型別註冊運算式呼叫 unsafe FFI。
+                // 移到安全區塊會破壞既有呼叫端，故只豁免這個展開點。
+                #[allow(clippy::macro_metavars_in_unsafe)]
                 unsafe { $crate::translate::from_glib($get_type_expr) }
             }
         }
@@ -2997,7 +3000,7 @@ impl<T: ObjectType> ObjectExt for T {
         crate::signal::connect_raw(
             self.as_object_ref().to_glib_none().0,
             signal_name.as_ptr() as *const _,
-            Some(mem::transmute::<_, unsafe extern "C" fn()>(
+            Some(mem::transmute::<*const (), unsafe extern "C" fn()>(
                 notify_trampoline::<Self, F> as *const (),
             )),
             Box::into_raw(f),
@@ -3897,9 +3900,9 @@ impl<T: IsClass> Class<T> {
     /// Casts this class to a reference to a child type's class or
     /// fails if this class is not implementing the child class.
     #[inline]
-    pub fn downcast_ref<U: IsClass>(&self) -> Option<&Class<U>>
+    pub fn downcast_ref<U>(&self) -> Option<&Class<U>>
     where
-        U: IsA<T>,
+        U: IsClass + IsA<T>,
     {
         if !self.type_().is_a(U::static_type()) {
             return None;
@@ -3915,9 +3918,9 @@ impl<T: IsClass> Class<T> {
     /// Casts this class to a mutable reference to a child type's class or
     /// fails if this class is not implementing the child class.
     #[inline]
-    pub fn downcast_ref_mut<U: IsClass>(&mut self) -> Option<&mut Class<U>>
+    pub fn downcast_ref_mut<U>(&mut self) -> Option<&mut Class<U>>
     where
-        U: IsA<T>,
+        U: IsClass + IsA<T>,
     {
         if !self.type_().is_a(U::static_type()) {
             return None;
