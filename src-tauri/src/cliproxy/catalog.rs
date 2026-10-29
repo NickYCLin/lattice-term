@@ -345,28 +345,31 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    #[cfg(windows)]
     #[test]
     fn capability_probe_has_no_console_even_through_a_cmd_shim() {
-        let fixture = tempfile::tempdir().unwrap();
-        let compiler = fixture.path().join("compile.ps1");
-        std::fs::write(
-            &compiler,
-            r#"$ErrorActionPreference = 'Stop'
-Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
-"#,
-        )
-        .unwrap();
-        let mut compile = Command::new("powershell.exe")
+        // Build a native fixture before entering the product's probe deadline.
+        // PowerShell's cold startup/module loading is not the Codex contract.
+        // Spaces in the path also exercise argument quoting through cmd.exe.
+        let fixture = tempfile::Builder::new()
+            .prefix("profile probe ")
+            .tempdir()
+            .unwrap();
+        let executable = fixture
+            .path()
+            .join(format!("profile-probe{}", std::env::consts::EXE_SUFFIX));
+        let mut compile = Command::new("rustc")
             .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
+                "--edition=2021",
+                "--deny=warnings",
+                "--crate-name",
+                "profile_probe",
             ])
-            .arg(&compiler)
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/profile_probe.rs"
+            ))
+            .arg("-o")
+            .arg(&executable)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -386,44 +389,25 @@ Add-Type -OutputAssembly (Join-Path $PSScriptRoot 'ConsoleProbe.dll') -TypeDefin
             "console fixture compilation failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let script = fixture.path().join("probe.ps1");
-        std::fs::write(
-            &script,
-            r#"[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "started`n")
-Add-Type -Path (Join-Path $PSScriptRoot 'ConsoleProbe.dll')
-[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "assembly loaded`n")
-if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 41 }
-[IO.File]::AppendAllText("$PSScriptRoot/probe.log", "no console`n")
-Write-Output '[{"role":"developer","content":[{"type":"input_text","text":"latticeterm-profile-capability-probe"}]}]'
-"#,
-        )
-        .unwrap();
-        let prefix: Vec<std::ffi::OsString> = [
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-        ]
-        .into_iter()
-        .map(Into::into)
-        .chain(std::iter::once(script.into_os_string()))
-        .collect();
-        assert!(
-            supports_layered_profiles(std::ffi::OsStr::new("powershell.exe"), &prefix),
-            "direct PowerShell fixture stages: {:?}",
-            std::fs::read_to_string(fixture.path().join("probe.log"))
-        );
+        assert!(supports_layered_profiles(executable.as_os_str(), &[]));
 
-        let shim = fixture.path().join("probe.cmd");
-        std::fs::write(
-            &shim,
-            "@echo off\r\n\"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0probe.ps1\" %*\r\n",
-        )
-        .unwrap();
-        let (program, prefix) = crate::agent::launch_parts(&shim);
-        assert!(supports_layered_profiles(&program, &prefix));
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+
+            // A positive control: the fixture must reject an attached console,
+            // rather than always emitting the expected JSON.
+            let status = Command::new(&executable)
+                .creation_flags(0x00000010) // CREATE_NEW_CONSOLE
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(41));
+
+            let shim = fixture.path().join("probe.cmd");
+            std::fs::write(&shim, "@echo off\r\n\"%~dp0profile-probe.exe\" %*\r\n").unwrap();
+            let (program, prefix) = crate::agent::launch_parts(&shim);
+            assert!(supports_layered_profiles(&program, &prefix));
+        }
     }
 
     fn model(id: &str, owner: Option<&str>) -> ProxyModel {
