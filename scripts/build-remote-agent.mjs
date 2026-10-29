@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sidecarBuildEnvironment } from "./sidecar-build-env.mjs";
+import { sidecarBinaryPath } from "./sidecar-build-path.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const release = process.argv.includes("--release");
@@ -27,10 +28,11 @@ if (process.platform === "linux" && !environment.BINDGEN_EXTRA_CLANG_ARGS) {
   environment.BINDGEN_EXTRA_CLANG_ARGS = `-I${gccInclude}`;
 }
 
+const manifestPath = join(root, "crates/lattice-remote/Cargo.toml");
 const args = [
   "build",
   "--manifest-path",
-  join(root, "crates/lattice-remote/Cargo.toml"),
+  manifestPath,
   "--features",
   "agent,client-cli",
   "--bin",
@@ -50,12 +52,10 @@ const profile = release ? "release" : "debug";
 const binaryDir = join(root, "src-tauri/binaries");
 mkdirSync(binaryDir, { recursive: true });
 for (const binary of ["lattice-agent", "lattice-remote"]) {
-  const source = join(
-    root,
-    "crates/lattice-remote/target",
-    profile,
-    `${binary}${extension}`,
-  );
+  const source = sidecarBinaryPath({
+    cwd: root, manifestPath, environment, profile,
+    binary: `${binary}${extension}`,
+  });
   const destination = join(binaryDir, `${binary}-${triple}${extension}`);
   copyFileSync(source, destination);
   console.log(`Prepared ${destination}`);

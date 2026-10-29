@@ -116,6 +116,13 @@ Herdr 類型的背景服務、完整工具語意 Adapter、跨程序原 PTY 重�
 
 ## 專案驗證
 
+`npm run build:sidecars`（及各 sidecar 的 debug／release 指令）會使用
+`cargo metadata` 回報的 `target_directory` 尋找產物，支援
+`CARGO_TARGET_DIR`、`CARGO_BUILD_TARGET_DIR` 與 Cargo config 的 `build.target-dir`。
+環境變數的相對路徑以儲存庫根目錄（建置時的工作目錄）解析；未指定時仍使用
+各 crate 的 `target` 目錄。sidecar 會複製至 `src-tauri/binaries/`，供 Tauri
+建置與測試使用；若產物不存在，錯誤會列出嘗試的來源路徑。
+
 ```sh
 npm run check
 npm run build:sidecars

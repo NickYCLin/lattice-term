@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sidecarBuildEnvironment } from "./sidecar-build-env.mjs";
+import { sidecarBinaryPath } from "./sidecar-build-path.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const release = process.argv.includes("--release");
@@ -19,26 +20,26 @@ if (!triple) {
   throw new Error(`Unsupported VNC engine target: ${process.platform}-${process.arch}`);
 }
 
+const manifestPath = join(root, "crates/lattice-vnc/Cargo.toml");
 const args = [
   "build",
   "--manifest-path",
-  join(root, "crates/lattice-vnc/Cargo.toml"),
+  manifestPath,
 ];
 if (release) args.push("--release");
+const environment = sidecarBuildEnvironment();
 execFileSync("cargo", args, {
   cwd: root,
-  env: sidecarBuildEnvironment(),
+  env: environment,
   stdio: "inherit",
 });
 
 const extension = process.platform === "win32" ? ".exe" : "";
 const profile = release ? "release" : "debug";
-const source = join(
-  root,
-  "crates/lattice-vnc/target",
-  profile,
-  `lattice-vnc-engine${extension}`,
-);
+const source = sidecarBinaryPath({
+  cwd: root, manifestPath, environment, profile,
+  binary: `lattice-vnc-engine${extension}`,
+});
 const binaryDir = join(root, "src-tauri/binaries");
 const destination = join(
   binaryDir,
