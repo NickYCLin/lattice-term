@@ -84,11 +84,8 @@ fn structured_log() {
         })
         .collect::<Vec<_>>();
 
-    let path = if cfg!(windows) {
-        "glib\\tests\\structured_log.rs"
-    } else {
-        "glib/tests/structured_log.rs"
-    };
+    // Match the compiler's path for this standalone vendored crate too.
+    let path = file!();
 
     assert_eq!(
         log[0],
