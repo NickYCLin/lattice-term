@@ -4,6 +4,21 @@
 
 ---
 
+## [2026.10.30](https://github.com/NickYCLin/lattice-term/compare/v2026.10.29...v2026.10.30) (2026-10-29)
+
+
+### 🛠️ 問題修正
+
+* 修正更新後誤判管理員權限而無法啟動 ([e0953f8](https://github.com/NickYCLin/lattice-term/commit/e0953f8edc7e81349e48ca02d0212263c75a4669))
+* 同步 Windows MCP 驗收問候版本 ([f7fbd11](https://github.com/NickYCLin/lattice-term/commit/f7fbd11c9bfb309a0bcbb658a571774298533ad6))
+* 清除 GLib 嚴格 Clippy 診斷 ([a669757](https://github.com/NickYCLin/lattice-term/commit/a669757038733be9834b8dca4865b0af8257777d))
+* 讓 sidecar 建置尊重 Cargo 產物目錄 ([3ecc7b0](https://github.com/NickYCLin/lattice-term/commit/3ecc7b071af048b5da2a34e25fab6dbae09ecc47))
+
+
+### 🎨 介面與視覺調整
+
+* 統一 RDPDR 原始碼格式 ([6144a04](https://github.com/NickYCLin/lattice-term/commit/6144a04a481969b7be4d17ea4264e0466f11be66))
+
 ## [2026.10.29](https://github.com/NickYCLin/lattice-term/compare/v2026.10.27...v2026.10.29) (2026-10-28)
 
 
