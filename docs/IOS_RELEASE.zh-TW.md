@@ -206,6 +206,12 @@ npm run ios:build -- --build-number 1
 
 執行工作時填入未使用的建置號。工作會解開匯出的 IPA，檢查 SDK、隱私宣告、簽章、Team、App ID、憑證與描述檔配對、到期日及禁止除錯，再保留 `ios-signed-release-<commit>-<build>` artifact 七天。產物包含 IPA、bundle 報告及 SHA-256／來源 commit；不含 P12 或私密金鑰。這個工作只完成封裝，不上傳 Apple、不寄送 TestFlight 邀請，也不提交 App Review。
 
+### 上傳既有簽章 IPA
+
+`.github/workflows/ios-upload.yml` 提供手動觸發的 `iOS App Store Connect upload` 工作，只接受 `main`。填入 `iOS signed release` 的執行編號與 artifact 名稱後，它會下載該輪產物，核對 provenance 的 commit、建置號、執行編號與 IPA SHA-256，再以 `xcrun altool --upload-app` 上傳；不重新編譯、不送審。
+
+上傳時才在 `ios-app-store` environment 暫時設定 Secret `ASC_API_KEY_P8`（App Store Connect API 私密金鑰內容）及 Variable 或 Secret `ASC_KEY_ID`、`ASC_ISSUER_ID`。工作只在執行期間把金鑰寫入 runner 的 `~/.appstoreconnect/private_keys/`，結束時刪除；上傳完成後應立即移除這些暫存設定。同一行銷版本的建置號不能重複使用。
+
 ## 隱私與加密
 
 - `src-tauri/Info.ios.plist` 是區域網路用途說明的來源，Tauri 建置時會合併進 App。直接手改生成的 plist 不足以保證下次建置保留。

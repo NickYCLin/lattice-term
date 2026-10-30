@@ -1,0 +1,84 @@
+name: iOS App Store Connect upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "產生簽章 IPA 的 iOS signed release 執行編號"
+        required: true
+        type: string
+      artifact_name:
+        description: "簽章 IPA artifact 名稱（ios-signed-release-<commit>-<build>）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ios-app-store-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: ios-app-store
+    env:
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      ARTIFACT_NAME: ${{ inputs.artifact_name }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "run_id 必須是數字"; exit 1; }
+          [[ "$ARTIFACT_NAME" =~ ^ios-signed-release-[0-9a-f]{40}-[0-9]+$ ]] || { echo "artifact 名稱格式不符"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ios-release-artifacts
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify artifact provenance
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          root = Path('ios-release-artifacts')
+          provenance = json.loads((root / 'provenance.json').read_text())
+          name = os.environ['ARTIFACT_NAME']
+          commit, build = re.fullmatch(r'ios-signed-release-([0-9a-f]{40})-([0-9]+)', name).groups()
+          assert provenance['commit'] == commit, 'Artifact commit mismatch'
+          assert provenance['buildNumber'] == build, 'Artifact build number mismatch'
+          assert str(provenance['runId']) == os.environ['SOURCE_RUN_ID'], 'Artifact run mismatch'
+          digest = hashlib.sha256((root / 'LatticeTerm.ipa').read_bytes()).hexdigest()
+          assert digest == provenance['sha256'], 'IPA SHA-256 mismatch'
+          print(f'Verified IPA for {commit} build {build}: {digest}')
+          PY
+      - name: Upload to App Store Connect
+        shell: bash
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ vars.ASC_KEY_ID || secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID || secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ASC_API_KEY_P8" && "$ASC_KEY_ID" =~ ^[A-Z0-9]{10}$ && "$ASC_ISSUER_ID" =~ ^[0-9a-f-]{36}$ ]] || { echo "缺少或格式不符的 App Store Connect API 設定"; exit 1; }
+          key_dir="$HOME/.appstoreconnect/private_keys"
+          key_file="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          mkdir -p "$key_dir"
+          printf '%s\n' "$ASC_API_KEY_P8" > "$key_file"
+          xcrun altool --upload-app --type ios \
+            --file ios-release-artifacts/LatticeTerm.ipa \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" \
+            --output-format normal
+      - name: Remove API key
+        if: always()
+        shell: bash
+        run: rm -rf "$HOME/.appstoreconnect/private_keys"
+      # Uploads an already verified IPA only. App Review submission is separate.
