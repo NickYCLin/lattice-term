@@ -38,7 +38,7 @@ describe("mobile connection layout", () => {
   it("allows routes and metadata to wrap without squeezing the host heading", () => {
     expect(connectionStyles).toMatch(/\.connection-card__actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*max-width:\s*100%;/s);
     expect(connectionStyles).toMatch(/\.connection-card__meta\s*\{[^}]*flex-wrap:\s*wrap;/s);
-    expect(connectionStyles).toMatch(/\.connection-card__routes\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+    expect(connectionStyles).toMatch(/\.connection-route-picker__list\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
     expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
     expect(connectionStyles).not.toMatch(/\.connection-card__primary\s*\{[^}]*max-width:/s);
   });

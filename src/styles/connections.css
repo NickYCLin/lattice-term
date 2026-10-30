@@ -203,6 +203,8 @@
 
 .connection-card__primary {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   grid-area: primary;
   justify-content: stretch;
   min-width: 0;
@@ -221,6 +223,7 @@
 
 /* Buttons sit above the card-wide open target. */
 .connection-card__foot .icon-button,
+.connection-card__foot .button,
 .connection-card__head .icon-button,
 .connection-card__connect {
   pointer-events: auto;
@@ -3012,18 +3015,41 @@
   height: auto;
   pointer-events: auto;
   flex: 1;
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-/* One button per route when several connections reach the same computer. */
-.connection-card__routes {
+.connection-route-picker__list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   min-width: 0;
   width: 100%;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.connection-route-picker {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.connection-route-picker .dialog__title,
+.connection-merge__routes {
+  overflow-wrap: anywhere;
+}
+
+.connection-merge__routes {
+  max-height: 30vh;
+  overflow-y: auto;
+  padding-inline-start: var(--space-5);
+}
+
+.connection-card__route-count {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 .connection-card__route {
@@ -3060,15 +3086,8 @@
   overflow-wrap: anywhere;
 }
 
-.connection-card__route-action {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-xs);
-  color: var(--accent);
-}
-
-.connection-card__add-route {
+.connection-card__add-route,
+.connection-card__merge {
   position: relative;
   z-index: 1;
   max-width: 100%;

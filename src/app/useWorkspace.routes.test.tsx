@@ -42,6 +42,34 @@ it("preserves peer routes after deleting the representative and keeps failed del
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 
+it("merges complete cards across addresses without changing route identities or sign-in settings", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const source = createConnectionProfile({ ...emptyDraft("rdp"), name: "主機", hostname: "public.invalid", username: "operator", machineId: "first-machine" }, "rdp");
+  const ssh = { ...source, id: "ssh", protocol: "ssh" as const, port: 22, name: "公網入口" };
+  const internal = { ...ssh, id: "internal", hostname: "private.invalid", port: 2222, username: "admin" };
+  const workstation = { ...ssh, id: "workstation", name: "工作站入口", hostname: "127.0.0.1", port: 14422, username: "other", machineId: "second-machine" };
+  const unrelated = { ...ssh, id: "unrelated", machineId: undefined };
+  const original = [source, ssh, internal, workstation, unrelated];
+  let database = original;
+  let api!: ReturnType<typeof useWorkspace>;
+  function Fixture() { api = useWorkspace(); return null; }
+  native.invoke.mockImplementation(async (command: string, args: Record<string, any>) => {
+    if (command === "list_connection_profiles") return database;
+    if (command === "replace_connection_profiles") database = args.profiles;
+  });
+  try {
+    await act(async () => root.render(<Fixture />));
+    await act(async () => { expect(await api.linkProfiles([source.id, workstation.id])).toBeNull(); });
+    expect(api.profiles).toEqual(original.map((profile) => profile.id === unrelated.id ? profile : { ...profile, machineId: "first-machine" }));
+    expect(database).toEqual(api.profiles);
+    await act(async () => api.refreshProfiles());
+    expect(api.profiles).toEqual(database);
+    await act(async () => { expect(await api.unlinkProfile(workstation.id)).toBeNull(); });
+    expect(api.profiles.find((profile) => profile.id === workstation.id)).toEqual({ ...workstation, machineId: undefined });
+    expect(original).toEqual([source, ssh, internal, workstation, unrelated]);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("publishes two addresses only after the single native write succeeds", async () => {
   const container = installFakeDom();
   const root = createRoot(container as unknown as Element);

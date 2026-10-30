@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   createConnectionProfile,
   emptyDraft,
-  findProtocol,
 } from "../../domain/connection";
 import { I18nProvider } from "../../i18n";
 import { ConnectionCard } from "./ConnectionCard";
@@ -57,14 +56,16 @@ describe("connection card runtime capability", () => {
     expect(renderCard({ profile: { ...profile, tags: [] } })).not.toContain('class="connection-card__tags"');
   });
 
-  it("distinguishes same-protocol address buttons without needing hover", () => {
+  it("keeps same-protocol routes behind a single connect button", () => {
     const markup = renderCard({ onConnect: vi.fn(), linked: [{
       profile: { ...profile, id: "wan", hostname: "wan.example.com", port: 3390 }, onConnect: vi.fn(),
     }] });
-    expect(markup).toContain(">desktop.example.com:3389</span>");
-    expect(markup).toContain(">wan.example.com:3390</span>");
+    expect(markup).not.toContain("wan.example.com:3390");
+    expect(markup.match(/>連線<\/button>/g)).toHaveLength(1);
+    expect(markup).toContain('aria-haspopup="dialog"');
+    expect(markup).toContain("2 個連線方式");
     expect(markup.match(/class="badge tone-neutral"/g)).toHaveLength(1);
-    expect(markup.match(/connection-card__route-info/g)).toHaveLength(2);
+    expect(markup).not.toContain("connection-card__route-info");
     expect(markup).not.toContain("同一台電腦：Office PC");
   });
   it("separates the primary action from compact management controls", () => {
@@ -94,7 +95,6 @@ describe("connection card runtime capability", () => {
     expect(markup).not.toContain("連線功能開發中");
   });
 });
-
 describe("same-computer card", () => {
   it("offers a separate add-route action even when the current protocol is unavailable", () => {
     const markup = renderCard({ onAddRoute: vi.fn(), unavailableReason: "desktop-only" });
@@ -107,7 +107,7 @@ describe("same-computer card", () => {
     expect(renderCard({})).not.toContain("connection-card__add-route");
   });
 
-  it("offers one connect button per route and names the folded entry", () => {
+  it("summarizes routes without repeating their names on the card", () => {
     const remote = createConnectionProfile(
       { ...emptyDraft("lattice"), name: "蘋果筆電", deviceId: "008806370" },
       "remote-card",
@@ -117,16 +117,11 @@ describe("same-computer card", () => {
       linked: [{ profile: remote, onConnect: vi.fn() }],
     });
 
-    expect(markup).toContain("同一台電腦：蘋果筆電");
+    expect(markup).not.toContain("同一台電腦：蘋果筆電");
     expect(markup).not.toContain("connection-card__name truncate");
     expect(markup).not.toContain("connection-card__target mono truncate");
     expect(markup).not.toContain("connection-card__target truncate");
-    expect(markup).toContain("用 RDP 連到「Office PC」");
-    expect(markup).toContain(`用 ${remoteAcronym()} 連到「蘋果筆電」`);
-    expect(markup).not.toContain(">連線</button>");
+    expect(markup).toContain("2 個連線方式");
+    expect(markup.match(/>連線<\/button>/g)).toHaveLength(1);
   });
 });
-
-function remoteAcronym(): string {
-  return findProtocol("lattice").acronym;
-}

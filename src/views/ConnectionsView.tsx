@@ -12,6 +12,7 @@ import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { Workspace } from "../app/useWorkspace";
 import { canConnectProtocol } from "../app/platformCapabilities";
+import { cardRouteProfiles } from "../app/connectionRoutes";
 import { exportTextFile } from "../app/fileExport";
 import {
   UNGROUPED,
@@ -24,6 +25,8 @@ import type { ImportIssue } from "../domain/export";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/context";
 import { ConnectionCard } from "../components/connections/ConnectionCard";
+import { ConnectionRoutePicker } from "../components/connections/ConnectionRoutePicker";
+import { ConnectionMergeDialog } from "../components/connections/ConnectionMergeDialog";
 import { DatabaseManager } from "../components/connections/DatabaseManager";
 import { Callout, EmptyState } from "../components/common/Callout";
 import {
@@ -76,6 +79,8 @@ export function ConnectionsView({
 }) {
   const { t } = useI18n();
   const [databaseScope, setDatabaseScope] = useState<{ hostKeys?: string[] } | null>(null);
+  const [routePickerId, setRoutePickerId] = useState<string | null>(null);
+  const [mergeId, setMergeId] = useState<string | null>(null);
   const {
     profiles,
     visibleGroups,
@@ -99,11 +104,27 @@ export function ConnectionsView({
       new Map(
         mergeMachineCards(visibleProfiles).map((card) => [
           card.profile.id,
-          card.linked,
+          cardRouteProfiles(profiles, card.profile.id).slice(1),
         ]),
       ),
-    [visibleProfiles],
+    [visibleProfiles, profiles],
   );
+
+  const machineCards = useMemo(() => mergeMachineCards(profiles), [profiles]);
+  const mergeSource = profiles.find((profile) => profile.id === mergeId);
+  const mergeCandidates = mergeSource ? machineCards.filter((card) =>
+    card.profile.id !== mergeSource.id &&
+    (!mergeSource.machineId || card.profile.machineId !== mergeSource.machineId)) : [];
+  const routeSource = profiles.find((profile) => profile.id === routePickerId);
+  const routePicker = routeSource ? <ConnectionRoutePicker name={routeSource.name}
+    routes={cardRouteProfiles(profiles, routeSource.id).map((profile) => ({
+      profile,
+      onConnect: canConnectProtocol(profile.protocol, supportedProtocols) ? () => onConnect(profile) : undefined,
+    }))} onClose={() => setRoutePickerId(null)} /> : null;
+  const mergeDialog = mergeSource ? <ConnectionMergeDialog key={mergeSource.id}
+    name={mergeSource.name} candidates={mergeCandidates}
+    onMerge={(id) => workspace.linkProfiles([mergeSource.id, id])}
+    onClose={() => setMergeId(null)} /> : null;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -289,6 +310,8 @@ export function ConnectionsView({
 
   return (
     <div className="connections">
+      {routePicker}
+      {mergeDialog}
       {databaseManager}
       {filePicker}
 
@@ -419,6 +442,10 @@ export function ConnectionsView({
                             )
                           }
                           onEdit={() => onEdit(profile.id)}
+                          onChooseRoute={() => setRoutePickerId(profile.id)}
+                          onMerge={machineCards.some((card) => card.profile.id !== profile.id &&
+                            (!profile.machineId || card.profile.machineId !== profile.machineId))
+                            ? () => setMergeId(profile.id) : undefined}
                           onAddRoute={onAddRoute ? () => onAddRoute(profile.id) : undefined}
                           onDuplicate={() => duplicateProfile(profile.id)}
                           onDelete={() => onDelete(profile.id)}

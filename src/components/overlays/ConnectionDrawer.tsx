@@ -441,7 +441,7 @@ export function ConnectionDrawer({
             <div className={relayEntry ? "field-grid field-grid--even" : "field"}>
               <div className="field">
                 <label className="field__label" htmlFor={`${formId}-name`}>
-                  {t("form.name")}
+                  {t(draft.machineId ? "form.route.name" : "form.name")}
                 </label>
                 <input
                   id={`${formId}-name`}
