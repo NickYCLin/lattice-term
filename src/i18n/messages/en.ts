@@ -2596,6 +2596,7 @@ export const en: Messages = {
   "remote.chat.uploading": "Uploading image {current}/{count} ({percent}%)",
   "remote.chat.imageUnreadable": "This image cannot be read. Try another one.",
   "remote.chat.imageFailed": "The image was not sent. The host needs LatticeTerm 2026.9.30 or later to receive phone images; if it is up to date, send again.",
+  "remote.chat.imageInterrupted": "You left the conversation before the image message was sent. Return to send it again.",
   "remote.chat.tab": "Chats",
   "remote.cli.keys": "Terminal keys",
   "remote.cli.folder": "Folder: {path}",

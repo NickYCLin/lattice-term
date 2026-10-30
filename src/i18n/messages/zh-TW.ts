@@ -2508,6 +2508,7 @@ export const zhTW = {
   "remote.chat.uploading": "正在上傳第 {current}/{count} 張圖片（{percent}%）",
   "remote.chat.imageUnreadable": "讀不到這張圖片，請換一張試試。",
   "remote.chat.imageFailed": "圖片沒傳成功。主機要更新到 2026.9.30 以後才收得到手機傳的圖片；已經更新的話，再按一次送出。",
+  "remote.chat.imageInterrupted": "已離開對話，圖片訊息尚未送出。返回後可重新傳送。",
   "remote.chat.tab": "對話",
   "remote.cli.keys": "終端快捷鍵",
   "remote.cli.folder": "資料夾：{path}",

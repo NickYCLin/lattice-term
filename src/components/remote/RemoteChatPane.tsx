@@ -27,7 +27,10 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   const [refresh, setRefresh] = useState(0);
   const alive = useRef(true);
   const serial = useRef(0);
+  const context = useRef(0);
+  const busyRef = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { context.current += 1; return () => { context.current += 1; }; }, [sessionId, selected, hidden]);
   async function request(operation: RemoteChatOperation) {
     const { invoke } = await import("@tauri-apps/api/core");
     const response = await invoke<RemoteChatResponse>("remote_chat_request", { sessionId, request: { id: crypto.randomUUID(), operation } });
@@ -55,39 +58,56 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   useEffect(() => { setImages([]); }, [selected]);
   async function pick(files: FileList | null) {
     const chosen = Array.from(files ?? []).slice(0, MAX_IMAGES - images.length);
-    if (!chosen.length) return;
+    if (!chosen.length || hidden || busyRef.current) return;
+    const version = context.current;
     setProblem(null);
     try {
       const read = await Promise.all(chosen.map(readImage));
-      if (alive.current) setImages(value => [...value, ...read].slice(0, MAX_IMAGES));
-    } catch { if (alive.current) setProblem(t("remote.chat.imageUnreadable")); }
+      if (alive.current && context.current === version && !busyRef.current) setImages(value => [...value, ...read].slice(0, MAX_IMAGES));
+    } catch { if (alive.current && context.current === version) setProblem(t("remote.chat.imageUnreadable")); }
   }
   /** Uploads every picked image in pieces, then sends them with the message. */
   async function sendWithImages(threadId: string, text: string) {
-    if (busy || hidden) return;
+    if (busyRef.current || hidden) return;
+    busyRef.current = true;
     setBusy(true); setProblem(null);
+    const version = context.current;
+    const active = () => alive.current && context.current === version;
     const ids: string[] = [];
+    let sending = false;
     try {
       for (const [index, image] of images.entries()) {
         const uploadId = crypto.randomUUID();
         for (let start = 0; start < image.data.length; start += REMOTE_ATTACHMENT_CHUNK) {
           const operation: RemoteChatOperation = { kind: "attach", threadId, uploadId, offset: start / 4 * 3, total: image.bytes, data: image.data.slice(start, start + REMOTE_ATTACHMENT_CHUNK) };
           // One retry: the host ignores a piece it already stored.
-          await request(operation).catch(() => request(operation));
-          if (!alive.current) return;
+          await request(operation).catch(error => { if (!active()) throw error; return request(operation); });
+          if (!active()) return;
           setUploading({ index, percent: Math.min(100, Math.round((start + REMOTE_ATTACHMENT_CHUNK) / image.data.length * 100)) });
         }
         ids.push(uploadId);
       }
-    } catch {
-      if (alive.current) { setProblem(t("remote.chat.imageFailed")); setUploading(null); setBusy(false); }
-      return;
+      if (!active()) return;
+      sending = true;
+      await request({ kind: "send", threadId, text, attachments: ids });
+      if (alive.current) {
+        setDrafts(value => value[threadId] === text ? { ...value, [threadId]: "" } : value);
+        setImages([]);
+        setBefore(null); setRefresh(value => value + 1);
+      }
+    } catch (error) {
+      if (alive.current && (sending || active())) setProblem(sending ? String(error) : t("remote.chat.imageFailed"));
+    } finally {
+      busyRef.current = false;
+      if (alive.current) {
+        if (!active() && !sending) setProblem(t("remote.chat.imageInterrupted"));
+        setUploading(null); setBusy(false);
+      }
     }
-    setUploading(null); setBusy(false);
-    if (await act({ kind: "send", threadId, text, attachments: ids }) && alive.current) setImages([]);
   }
   async function act(operation: RemoteChatOperation): Promise<boolean> {
-    if (busy || hidden) return false;
+    if (busyRef.current || hidden) return false;
+    busyRef.current = true;
     setBusy(true); setProblem(null);
     try {
       const result = await request(operation);
@@ -97,7 +117,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
       setBefore(null); setRefresh(value => value + 1);
       return true;
     } catch (error) { if (alive.current) setProblem(String(error)); return false; }
-    finally { if (alive.current) setBusy(false); }
+    finally { busyRef.current = false; if (alive.current) setBusy(false); }
   }
   const draft = selected ? drafts[selected] ?? "" : "";
   const current = page?.thread.id === selected ? page : null;
@@ -105,7 +125,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   const visibleThreads = filterRemoteThreads(threads, query, activity);
   return <section className="remote-chat-pane" hidden={hidden} aria-label={t("remote.chat.title")}>
     <header className="remote-pane-header">
-      {selected ? <button className="button button--secondary button--sm" onClick={() => { setSelected(null); setPage(null); setBefore(null); setProblem(null); }}>{t("remote.chat.sessions")}</button> : <strong>{t("remote.chat.title")}</strong>}
+      {selected ? <button className="button button--secondary button--sm" disabled={busy} onClick={() => { setSelected(null); setPage(null); setBefore(null); setProblem(null); }}>{t("remote.chat.sessions")}</button> : <strong>{t("remote.chat.title")}</strong>}
       {selected && current && <button className="button button--secondary button--sm remote-pane-header__new" disabled={busy} title={t("remote.chat.new")} aria-label={t("remote.chat.new")} onClick={() => { void act({ kind: "create", templateId: selected }); }}><PlusIcon size={14} />{t("remote.chat.newShort")}</button>}
       <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(null); setBefore(null); setRefresh(value => value + 1); }}><RefreshIcon size={15} /></button>
     </header>

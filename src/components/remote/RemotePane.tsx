@@ -345,7 +345,7 @@ export function RemotePane({
 
       <div className={`remote-workspace${cliOpen ? " remote-workspace--cli" : ""}${chatOpen ? " remote-workspace--chat" : ""}${filesOpen || commandsOpen ? " remote-workspace--files" : ""}`}>
         {cliOpen && <RemoteCliPane session={session} theme={theme} active={active} />}
-        {session.chat && <RemoteChatPane key={`chat-${session.sessionId}`} sessionId={session.sessionId} hidden={!chatOpen} />}
+        {session.chat && <RemoteChatPane key={`chat-${session.sessionId}`} sessionId={session.sessionId} hidden={!chatOpen || !active || !pageVisible} />}
         {!!session.commandShells && <RemoteCommandPane key={session.sessionId} session={session} hidden={!commandsOpen} />}
         {filesOpen && session.fileTransfer && (
           <aside
