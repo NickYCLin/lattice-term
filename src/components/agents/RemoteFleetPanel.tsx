@@ -37,6 +37,8 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
   const [sessions, setSessions] = useState<FleetSession[]>([]);
   const [plans, setPlans] = useState<FleetPlan[]>([]);
   const [error, setError] = useState("");
+  const [launchError, setLaunchError] = useState("");
+  const [planError, setPlanError] = useState("");
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [launching, setLaunching] = useState(new Set<string>());
   const pendingLaunches = useRef(new Set<string>());
@@ -44,6 +46,7 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
   const target = targets.find((entry) => entry.id === targetId) ?? null;
   const targetRequest = useRef(0);
   const sessionRequest = useRef(0);
+  const planRequest = useRef(0);
   const activeTarget = useRef(targetId);
   activeTarget.current = targetId;
   const mounted = useRef(false);
@@ -75,6 +78,20 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
     }
   }, [targetId]);
 
+  const loadPlans = useCallback(async () => {
+    if (!mounted.current || !targetId || !target?.scopes.fleetLaunch) return;
+    const request = ++planRequest.current;
+    try {
+      const next = await listFleetPlans(targetId);
+      if (mounted.current && activeTarget.current === targetId && request === planRequest.current) {
+        setPlans(next);
+        setPlanError("");
+      }
+    } catch (reason) {
+      if (mounted.current && activeTarget.current === targetId && request === planRequest.current) setPlanError(String(reason));
+    }
+  }, [targetId, target?.scopes.fleetLaunch]);
+
   useEffect(() => {
     mounted.current = true;
     void loadTargets();
@@ -82,30 +99,31 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
       mounted.current = false;
       targetRequest.current += 1;
       sessionRequest.current += 1;
+      planRequest.current += 1;
     };
   }, [loadTargets]);
 
   useEffect(() => {
-    let cancelled = false;
     viewGeneration.current += 1;
     sessionRequest.current += 1;
+    planRequest.current += 1;
     setSessions([]);
     setPlans([]);
     setOpenIds([]);
     setError("");
+    setLaunchError("");
+    setPlanError("");
     if (!targetId) return;
     void loadSessions();
-    if (target?.scopes.fleetLaunch) void listFleetPlans(targetId).then(next => {
-      if (!cancelled && activeTarget.current === targetId) setPlans(next);
-    }).catch(() => {});
+    void loadPlans();
     const timer = window.setInterval(() => void loadSessions(), 5000);
     return () => {
-      cancelled = true;
       viewGeneration.current += 1;
       sessionRequest.current += 1;
+      planRequest.current += 1;
       window.clearInterval(timer);
     };
-  }, [targetId, target?.scopes.fleetLaunch, target?.scopes.fleetRead, loadSessions]);
+  }, [targetId, target?.scopes.fleetLaunch, target?.scopes.fleetRead, loadSessions, loadPlans]);
 
   async function launch(planId: string) {
     if (!mounted.current || !target?.scopes.fleetLaunch) return;
@@ -115,12 +133,12 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
     setLaunching(new Set(pendingLaunches.current));
     const generation = viewGeneration.current;
     const current = () => mounted.current && activeTarget.current === targetId && generation === viewGeneration.current;
-    setError("");
+    setLaunchError("");
     try {
       await launchFleetPlan(targetId, planId);
       if (current()) await loadSessions();
     } catch (reason) {
-      if (current()) setError(String(reason));
+      if (current()) setLaunchError(String(reason));
     } finally {
       pendingLaunches.current.delete(key);
       if (mounted.current) setLaunching(new Set(pendingLaunches.current));
@@ -137,12 +155,18 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
           <h3>{t("agents.remoteFleet.title")}</h3>
           <p>{t(mobile ? "agents.remoteFleet.mobileBody" : "agents.remoteFleet.body")}</p>
         </div>
-        <button type="button" className="button button--ghost button--sm" onClick={() => void loadTargets()}>
+        <button type="button" className="button button--ghost button--sm" onClick={() => {
+          void loadTargets();
+          void loadSessions();
+          void loadPlans();
+        }}>
           <RefreshIcon />
           {t("agents.remoteFleet.refresh")}
         </button>
       </div>
       {error && <p className="field__error">{error}</p>}
+      {launchError && <p className="field__error">{launchError}</p>}
+      {planError && <p className="field__error">{planError}</p>}
       {targets.length === 0 ? (
         <p className="agents-running__empty">{t(mobile ? "agents.remoteFleet.mobileNone" : "agents.remoteFleet.none")}</p>
       ) : (

@@ -220,6 +220,33 @@ it("deduplicates cancellation before React disables the button", async () => {
   } finally { await unmount(); }
 });
 
+it("refreshes saved plans and keeps launch errors visible during session polling", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "remote" }]);
+  vi.mocked(fleet.listFleetPlans).mockResolvedValueOnce([]).mockResolvedValue([{ planId: "plan", label: "Test plan" }]);
+  vi.mocked(fleet.launchFleetPlan).mockRejectedValueOnce(new Error("Launch interrupted"));
+  const { host, unmount } = await mount(true);
+  try {
+    expect(host.textContent).not.toContain("Test plan");
+    await act(async () => props(button(host, "重新整理")).onClick());
+    expect(host.textContent).toContain("Test plan");
+    await act(async () => props(button(host, "Test plan")).onClick());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(host.textContent).toContain("Launch interrupted");
+  } finally { await unmount(); }
+});
+
+it("shows plan loading failures until a refresh succeeds", async () => {
+  vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "remote" }]);
+  vi.mocked(fleet.listFleetPlans).mockRejectedValueOnce(new Error("Plans unavailable")).mockResolvedValue([]);
+  const { host, unmount } = await mount(true);
+  try {
+    expect(host.textContent).toContain("Plans unavailable");
+    await act(async () => props(button(host, "重新整理")).onClick());
+    expect(host.textContent).not.toContain("Plans unavailable");
+  } finally { await unmount(); }
+});
+
 it("keeps a failed prompt visible across successful output polls", async () => {
   vi.useFakeTimers();
   vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "remote" }]);
