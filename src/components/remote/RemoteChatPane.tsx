@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
 import { displayPath } from "../../app/displayPath";
 import { REMOTE_ATTACHMENT_CHUNK, filterRemoteThreads, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
@@ -29,6 +29,8 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   const serial = useRef(0);
   const context = useRef(0);
   const busyRef = useRef(false);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const followLatest = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => { context.current += 1; return () => { context.current += 1; }; }, [sessionId, selected, hidden]);
   async function request(operation: RemoteChatOperation) {
@@ -121,6 +123,11 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   }
   const draft = selected ? drafts[selected] ?? "" : "";
   const current = page?.thread.id === selected ? page : null;
+  useLayoutEffect(() => { followLatest.current = before === null; }, [selected, before]);
+  useLayoutEffect(() => {
+    const messages = messagesRef.current;
+    if (!hidden && current && before === null && followLatest.current && messages) messages.scrollTop = messages.scrollHeight;
+  }, [current, before, hidden]);
   const heading = current ? remoteThreadCard(current.thread, t("remote.chat.untitled"), t("terminal.model.pending")) : null;
   const visibleThreads = filterRemoteThreads(threads, query, activity);
   return <section className="remote-chat-pane" hidden={hidden} aria-label={t("remote.chat.title")}>
@@ -152,7 +159,10 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
       })}
     </div> : current ? <>
       <div className="remote-chat-heading"><strong>{heading!.title}</strong><small>{heading!.detail}</small>{current.thread.directory && <small className="remote-chat-heading__path">{t("remote.cli.folder", { path: displayPath(current.thread.directory) })}</small>}</div>
-      <div className="remote-chat-messages" aria-label={t("remote.chat.messages")}>
+      <div ref={messagesRef} className="remote-chat-messages" aria-label={t("remote.chat.messages")} onScroll={event => {
+        const messages = event.currentTarget;
+        followLatest.current = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 32;
+      }}>
         {current.before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(current.before)}>{t("remote.chat.older")}</button>}
         {before && <button className="button button--secondary button--sm remote-chat-page" onClick={() => setBefore(null)}>{t("remote.chat.latest")}</button>}
         {current.items.map(item => <article className={`remote-chat-message remote-chat-message--${item.type}`} key={item.id}>

@@ -10,6 +10,30 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("./remoteImage", () => ({ readRemoteImage: readImage }));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
+it("follows new messages only while the reader is near the bottom", async () => {
+  vi.useFakeTimers();
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  const thread = { id: "thread", title: "Example", agent: "codex", directory: "/work", runningTurnId: null, updatedAt: 1 };
+  invoke.mockImplementation(async (_command, { request }) => ({ id: request.id, error: null, value: request.operation.kind === "list" ? [thread] : { thread, items: [], before: null } }));
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteChatPane sessionId="host" hidden={false} /></I18nProvider>));
+    await act(async () => props(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent.includes("Example"))!).onClick());
+    const messagesNode = allNodes(host).find(node => node.attributes.class === "remote-chat-messages")!;
+    const messages = messagesNode as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number };
+    messages.scrollHeight = 1000; messages.clientHeight = 200; messages.scrollTop = 800;
+    await act(async () => props(messagesNode).onScroll({ currentTarget: messages }));
+    messages.scrollHeight = 1200;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(messages.scrollTop).toBe(1200);
+    messages.scrollTop = 300;
+    await act(async () => props(messagesNode).onScroll({ currentTarget: messages }));
+    messages.scrollHeight = 1400;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(messages.scrollTop).toBe(300);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it.each(["resolve", "reject"])("stops an image upload when the conversation is hidden (%s) and retains the draft", async outcome => {
   vi.useFakeTimers();
   const host = installHostDom();
