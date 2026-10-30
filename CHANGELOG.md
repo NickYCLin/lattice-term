@@ -4,6 +4,26 @@
 
 ---
 
+## [2026.10.31](https://github.com/NickYCLin/lattice-term/compare/v2026.10.30...v2026.10.31) (2026-10-30)
+
+
+### 🚀 新增功能
+
+* **connections:** 整合卡片合併與連線選單 ([dac0212](https://github.com/NickYCLin/lattice-term/commit/dac0212239d4b4c078e31b0bb0759126e5caec67))
+* 在手機提供遠端 Agent Fleet 入口 ([63a06bb](https://github.com/NickYCLin/lattice-term/commit/63a06bb145fa0264e50179e59912cb39111ef41a))
+* 補上遠端對話搜尋與狀態篩選 ([c60e017](https://github.com/NickYCLin/lattice-term/commit/c60e017032d7c03f740f7e904c67c1ed84865e5e))
+* 遠端對話自動追蹤最新訊息 ([885d6fd](https://github.com/NickYCLin/lattice-term/commit/885d6fdd3130c4bcb6dbc1b9882e045ea71c54ba))
+
+
+### 🛠️ 問題修正
+
+* **mobile:** 補齊資料庫入口與字級縮放 ([0f34a69](https://github.com/NickYCLin/lattice-term/commit/0f34a691c162e5623460e1b0bfc00015639752c9))
+* 保留遠端 Agent 操作失敗提示 ([3d17733](https://github.com/NickYCLin/lattice-term/commit/3d177339331e39575d0a76e789bbbaf17b2bd9bd))
+* 改善遠端 Agent 啟動項目重新整理 ([791a63e](https://github.com/NickYCLin/lattice-term/commit/791a63e108d0347ab48d9b0d73049b4badada810))
+* 避免手機終端失焦後卡住組字狀態 ([7638230](https://github.com/NickYCLin/lattice-term/commit/7638230adfa5c8aff9bb6722a0a540bdde20701e))
+* 避免手機終端重複傳送按鍵文字 ([73fc8a4](https://github.com/NickYCLin/lattice-term/commit/73fc8a42547f9838e228d0af1ff1f3d32d9a03b3))
+* 避免離開遠端對話後誤送圖片 ([914e2e9](https://github.com/NickYCLin/lattice-term/commit/914e2e9b6048551feeee76937a1a4e7731b7af04))
+
 ## [2026.10.30](https://github.com/NickYCLin/lattice-term/compare/v2026.10.29...v2026.10.30) (2026-10-29)
 
 
