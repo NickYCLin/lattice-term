@@ -234,7 +234,8 @@ function RemoteFleetPane({
   const { t } = useI18n();
   const [output, setOutput] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState("");
+  const [readError, setReadError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const acting = useRef(false);
   const mounted = useRef(false);
@@ -255,9 +256,9 @@ function RemoteFleetPane({
           if (next.text) setOutput((current) => appendBounded(current, next.text));
           if (!next.hasMore) break;
         }
-        if (!cancelled) setError("");
+        if (!cancelled) setReadError("");
       } catch (reason) {
-        if (!cancelled) setError(String(reason));
+        if (!cancelled) setReadError(String(reason));
       }
       if (!cancelled) timer = window.setTimeout(() => void poll(), 2000);
     };
@@ -278,11 +279,11 @@ function RemoteFleetPane({
     if (acting.current || !mounted.current || !canControl) return;
     acting.current = true;
     setBusy(true);
-    setError("");
+    setActionError("");
     try {
       await action();
     } catch (reason) {
-      if (mounted.current) setError(String(reason));
+      if (mounted.current) setActionError(String(reason));
     } finally {
       acting.current = false;
       if (mounted.current) setBusy(false);
@@ -308,7 +309,8 @@ function RemoteFleetPane({
       <pre ref={logRef} className="agents-remote-fleet__log">
         {output || t("agents.remoteFleet.waiting")}
       </pre>
-      {error && <p className="field__error">{error}</p>}
+      {readError && <p className="field__error">{readError}</p>}
+      {actionError && <p className="field__error">{actionError}</p>}
       {canControl && (
         <form
           onSubmit={(event) => {

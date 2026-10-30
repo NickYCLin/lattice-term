@@ -219,3 +219,23 @@ it("deduplicates cancellation before React disables the button", async () => {
     await act(async () => pending.resolve({}));
   } finally { await unmount(); }
 });
+
+it("keeps a failed prompt visible across successful output polls", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "remote" }]);
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  vi.mocked(fleet.sendFleetPrompt).mockRejectedValueOnce(new Error("Send interrupted")).mockResolvedValue({});
+  const { host, unmount } = await mount(true);
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const input = allNodes(host).find(node => node.tagName === "INPUT")!;
+    const form = allNodes(host).find(node => node.tagName === "FORM")!;
+    await act(async () => props(input).onChange({ target: { value: "Test prompt" } }));
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(host.textContent).toContain("Send interrupted");
+    expect(props(input).value).toBe("Test prompt");
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(host.textContent).not.toContain("Send interrupted");
+  } finally { await unmount(); }
+});
