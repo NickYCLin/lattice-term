@@ -56,6 +56,11 @@ export class MobileTerminalInput {
   private readonly onCompositionEnd = () => {
     this.composing = false;
   };
+  private readonly onBlur = () => {
+    this.composing = false;
+    this.keyUnidentified = false;
+    this.keypressData = null;
+  };
   private readonly onBeforeInput = (event: Event) => {
     const input = event as InputEvent;
     if (input.isComposing || this.composing) return;
@@ -97,6 +102,7 @@ export class MobileTerminalInput {
     textarea.addEventListener("keypress", this.onKeyPress, true);
     textarea.addEventListener("compositionstart", this.onCompositionStart);
     textarea.addEventListener("compositionend", this.onCompositionEnd);
+    textarea.addEventListener("blur", this.onBlur);
     textarea.addEventListener("beforeinput", this.onBeforeInput);
   }
 
@@ -127,6 +133,7 @@ export class MobileTerminalInput {
       this.onCompositionStart,
     );
     this.textarea.removeEventListener("compositionend", this.onCompositionEnd);
+    this.textarea.removeEventListener("blur", this.onBlur);
     this.textarea.removeEventListener("beforeinput", this.onBeforeInput);
   }
 

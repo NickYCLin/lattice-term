@@ -111,6 +111,20 @@ describe("MobileTerminalInput", () => {
     expect(sent).toEqual([" "]);
   });
 
+  it("recovers soft-keyboard input after focus leaves during composition", () => {
+    const { textarea, input, sent, flush } = harness();
+
+    textarea.dispatchEvent(new Event("compositionstart"));
+    textarea.dispatchEvent(new Event("blur"));
+    const letter = type(textarea, input, "a");
+    const number = type(textarea, input, "1");
+    const space = type(textarea, input, " ");
+    flush();
+
+    expect([letter.processed, number.processed, space.processed]).toEqual([false, false, false]);
+    expect(sent).toEqual(["a1 "]);
+  });
+
   it("does not resend a character xterm already sent from keypress", () => {
     const { textarea, input, sent, flush } = harness();
 
