@@ -52,8 +52,23 @@
 }
 
 .app--mobile .button { min-height: 2.75rem; }
-.app--mobile .rail__item { height: 3.25rem; gap: 2px; padding-block: 4px; }
-.app--mobile .rail__label { display: block; font-size: 10px; line-height: 1.2; white-space: nowrap; }
+.app--mobile .rail { min-width: 0; }
+.app--mobile .rail__items {
+  min-width: 0;
+  overflow-x: auto;
+  justify-content: flex-start;
+  gap: var(--space-1);
+  overscroll-behavior-x: contain;
+}
+.app--mobile .rail__items > li { flex: 1 0 auto; }
+.app--mobile .rail__item {
+  width: 100%;
+  height: auto;
+  min-height: 3.25rem;
+  gap: 2px;
+  padding: 4px var(--space-1);
+}
+.app--mobile .rail__label { display: block; font-size: calc(10px * var(--interface-text-scale)); line-height: 1.2; white-space: nowrap; }
 .app--mobile input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .app--mobile select,
 .app--mobile textarea { font-size: calc(16px * var(--interface-text-scale)); }

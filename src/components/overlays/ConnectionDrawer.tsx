@@ -825,7 +825,7 @@ export function ConnectionDrawer({
             </div>
           </details>
         </form>
-        {databaseAvailable && !mobile && <section className="form-section connection-drawer__database">
+        {databaseAvailable && <section className="form-section connection-drawer__database">
           <h3 className="form-section__title">資料庫連線</h3>
           {databaseHost ? <>
             <p>資料庫設定為選填，可新增多種資料庫與版本。資料庫與上方遠端連線分開儲存，不影響原有遠端連線。</p>

@@ -61,15 +61,17 @@ function render(profiles: ConnectionProfile[], options: { backendAvailable?: boo
 }
 
 describe("ConnectionsView", () => {
-  it.each([{ profiles: [] }, { profiles: [profile] }])("shows an explicit database creation entry for %j", ({ profiles }) => {
-    const markup = render(profiles);
+  it.each([
+    { profiles: [], mobile: false }, { profiles: [profile], mobile: false },
+    { profiles: [], mobile: true }, { profiles: [profile], mobile: true },
+  ])("shows an explicit database creation entry for %j", ({ profiles, mobile }) => {
+    const markup = render(profiles, { mobile });
     expect(markup).toContain("新增／管理資料庫</button>");
     if (profiles.length) expect(markup).toContain("資料庫設定</button>");
   });
 
   it.each([
     { backendAvailable: false, mobile: false },
-    { backendAvailable: true, mobile: true },
     { backendAvailable: false, mobile: true },
   ])("does not offer unsupported database actions: %j", options => {
     for (const profiles of [[], [profile]]) {

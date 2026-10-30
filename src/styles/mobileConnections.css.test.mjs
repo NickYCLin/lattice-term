@@ -7,12 +7,25 @@ const connectionStyles = readFileSync(
 );
 const shellStyles = readFileSync(new URL("./shell.css", import.meta.url), "utf8");
 const mobileStyles = readFileSync(new URL("./mobile.css", import.meta.url), "utf8");
+const databaseStyles = readFileSync(new URL("./database.css", import.meta.url), "utf8");
 const overlayStyles = readFileSync(
   new URL("./overlays.css", import.meta.url),
   "utf8",
 );
 
 describe("mobile connection layout", () => {
+  it("lets database forms shrink and keeps wide query results in their own scroll area", () => {
+    expect(databaseStyles).toMatch(/\.database-manager__layout > \*,[\s\S]*?\.database-manager__fields,[\s\S]*?\.database-manager label,[\s\S]*?\.database-manager__result \{ min-width: 0; \}/);
+    expect(databaseStyles).toMatch(/\.database-manager__result \{ overflow: auto;/);
+    expect(databaseStyles).toMatch(/\.database-manager__result th \{[^}]*min-width: 8rem;/);
+    expect(databaseStyles).toMatch(/@media \(max-width: 700px\)[\s\S]*?\.database-manager__actions > label \{ width: 100%; \}/);
+  });
+  it("scales navigation labels and keeps every tab reachable by scrolling", () => {
+    expect(mobileStyles).toMatch(/\.app--mobile \.rail__label\s*\{[^}]*font-size: calc\(10px \* var\(--interface-text-scale\)\)/s);
+    expect(mobileStyles).toMatch(/\.app--mobile \.rail__items\s*\{[^}]*min-width: 0;[^}]*overflow-x: auto;[^}]*justify-content: flex-start;/s);
+    expect(mobileStyles).toContain(".app--mobile .rail__items > li { flex: 1 0 auto; }");
+    expect(mobileStyles).toMatch(/\.app--mobile \.rail__item\s*\{[^}]*width: 100%;[^}]*height: auto;[^}]*min-height: 3\.25rem;/s);
+  });
   it("lets the empty connections page scroll to actions in landscape", () => {
     expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty\s*\{[^}]*overflow-y:\s*auto;/s);
     expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty > \.empty-state\s*\{[^}]*flex:\s*1 0 auto;/s);

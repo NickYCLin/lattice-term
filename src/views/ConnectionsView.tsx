@@ -254,7 +254,7 @@ export function ConnectionsView({
   );
 
   const databaseManager = databaseScope && <DatabaseManager profiles={profiles} hostKeys={databaseScope.hostKeys} onClose={() => setDatabaseScope(null)} />;
-  const databaseButton = backendAvailable && !mobile && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => setDatabaseScope({})}>新增／管理資料庫</button>;
+  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => setDatabaseScope({})}>新增／管理資料庫</button>;
 
   if (profiles.length === 0) {
     return (
@@ -420,7 +420,7 @@ export function ConnectionsView({
                       const linked = cardFor.get(profile.id) ?? [];
                       return (
                         <ConnectionCard
-                          onDatabases={backendAvailable && !mobile ? () => setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
+                          onDatabases={backendAvailable ? () => setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
                           key={profile.id}
                           profile={profile}
                           linked={linked.map((peer) => ({

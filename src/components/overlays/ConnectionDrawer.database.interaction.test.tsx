@@ -63,8 +63,8 @@ async function submitDatabase() {
   await act(async () => props(form).onSubmit({ preventDefault() {} }));
 }
 
-it("embeds the host databases below remote fields without a second dialog or nested form", async () => {
-  await render();
+it.each([false, true])("embeds the host databases below remote fields without a second dialog or nested form (mobile=%s)", async (mobile) => {
+  await render({ mobile });
   expect(allNodes(container).filter((node) => props(node)?.role === "dialog")).toHaveLength(1);
   const forms = allNodes(container).filter((node) => node.tagName === "FORM");
   expect(forms).toHaveLength(2);
@@ -85,15 +85,15 @@ it("includes legacy route databases when the primary host has no machine identit
   expect(container.textContent).not.toContain("其他主機資料庫");
 });
 
-it.each([{ mobile: true }, { available: false }, { newHost: true }])("does not load databases before a saved desktop host exists: %j", async (options) => {
+it.each([{ available: false }, { newHost: true }, { mobile: true, available: false }, { mobile: true, newHost: true }])("does not load databases before a saved native host exists: %j", async (options) => {
   await render(options);
   expect(invoke).not.toHaveBeenCalled();
   if (options.newHost) expect(container.textContent).toContain("請先儲存遠端連線");
   else expect(container.textContent).not.toContain("資料庫連線");
 });
 
-it("asks before discarding database edits and prevents remote save from dropping them", async () => {
-  await render(); await editDatabase();
+it.each([false, true])("asks before discarding database edits and prevents remote save from dropping them (mobile=%s)", async (mobile) => {
+  await render({ mobile }); await editDatabase();
   expect(props(button("儲存")).disabled).toBe(true);
   await act(async () => props(button("儲存並連線")).onClick());
   expect(onSave).not.toHaveBeenCalled();
@@ -106,8 +106,8 @@ it("asks before discarding database edits and prevents remote save from dropping
   expect(onClose).toHaveBeenCalledOnce();
 });
 
-it("keeps the drawer open during database save and unlocks remote saving afterwards", async () => {
-  await render(); await editDatabase();
+it.each([false, true])("keeps the drawer open during database save and unlocks remote saving afterwards (mobile=%s)", async (mobile) => {
+  await render({ mobile }); await editDatabase();
   let finish!: (value: typeof snapshot) => void;
   invoke.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   await submitDatabase();
