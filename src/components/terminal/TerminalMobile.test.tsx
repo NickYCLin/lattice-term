@@ -18,6 +18,7 @@ vi.mock("@xterm/xterm", () => ({ Terminal: class {
   open() {}
   loadAddon() {}
   onData(handler: (data: string) => void) { this.dataHandler = handler; return { dispose() {} }; }
+  onKey() { return { dispose() {} }; }
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) { this.keyHandler = handler; }
   input(data: string) { this.dataHandler(data); }
   write() {}

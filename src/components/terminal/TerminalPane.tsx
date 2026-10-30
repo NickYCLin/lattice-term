@@ -135,6 +135,7 @@ export function TerminalPane({
       });
     };
     const mobileInput = new MobileTerminalInput(textarea, sendInput);
+    const mobileKey = terminal.onKey(({ key, domEvent }) => mobileInput.recordTerminalKey(key, domEvent));
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,
       shouldProcessKeyEvent: (event) =>
@@ -181,6 +182,7 @@ export function TerminalPane({
       textarea?.removeEventListener("input", handleInput);
       imePresentation.dispose();
       mobileInput.dispose();
+      mobileKey.dispose();
       imeFallback.dispose();
       typed.dispose();
       stopTypography();

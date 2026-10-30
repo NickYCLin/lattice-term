@@ -45,11 +45,9 @@ export class MobileTerminalInput {
     this.keyUnidentified = unidentifiedKey(event as KeyboardEvent);
     this.keypressData = null;
   };
-  private readonly onKeyPress = (event: Event) => {
-    const keypress = event as KeyboardEvent;
-    // Registered after xterm, so a cancelled keypress is one xterm sent.
-    this.keypressData = keypress.defaultPrevented ? keypress.key : null;
-  };
+  recordTerminalKey(data: string, event: KeyboardEvent) {
+    if (event.type === "keypress") this.keypressData = data;
+  }
   private readonly onCompositionStart = () => {
     this.composing = true;
   };
@@ -71,7 +69,10 @@ export class MobileTerminalInput {
 
     let data: string;
     if (input.inputType === "insertText" && input.data) {
-      if (keypressData === input.data) return;
+      if (keypressData === input.data) {
+        input.preventDefault();
+        return;
+      }
       data = input.data;
     } else if (input.inputType === "deleteContentBackward" && keyUnidentified) {
       data = DELETE;
@@ -99,7 +100,6 @@ export class MobileTerminalInput {
   ) {
     if (!enabled || !textarea) return;
     textarea.addEventListener("keydown", this.onKeyDown, true);
-    textarea.addEventListener("keypress", this.onKeyPress, true);
     textarea.addEventListener("compositionstart", this.onCompositionStart);
     textarea.addEventListener("compositionend", this.onCompositionEnd);
     textarea.addEventListener("blur", this.onBlur);
@@ -127,7 +127,6 @@ export class MobileTerminalInput {
     this.queue.length = 0;
     if (!this.enabled || !this.textarea) return;
     this.textarea.removeEventListener("keydown", this.onKeyDown, true);
-    this.textarea.removeEventListener("keypress", this.onKeyPress, true);
     this.textarea.removeEventListener(
       "compositionstart",
       this.onCompositionStart,

@@ -134,14 +134,24 @@ describe("MobileTerminalInput", () => {
     const press = Object.assign(new Event("keypress", { cancelable: true }), {
       key: " ",
     });
-    press.preventDefault();
-    textarea.dispatchEvent(press);
+    input.recordTerminalKey(" ", press as KeyboardEvent);
     const event = beforeinput("insertText", " ");
     textarea.dispatchEvent(event);
     flush();
 
     expect(sent).toEqual([]);
-    expect(event.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("forwards text when a keypress was not sent by xterm", () => {
+    const { textarea, sent, flush } = harness();
+    textarea.dispatchEvent(keydown("a", 65));
+    textarea.dispatchEvent(Object.assign(new Event("keypress"), { key: "a" }));
+    const event = beforeinput("insertText", "a");
+    textarea.dispatchEvent(event);
+    flush();
+    expect(sent).toEqual(["a"]);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("leaves a real Backspace key to xterm", () => {

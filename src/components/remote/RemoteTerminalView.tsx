@@ -140,6 +140,7 @@ export function RemoteTerminalView({
     };
     textarea?.addEventListener("beforeinput", blockUnavailableInput, true);
     const mobileInput = new MobileTerminalInput(textarea, sendInput);
+    const mobileKey = terminal.onKey(({ key, domEvent }) => mobileInput.recordTerminalKey(key, domEvent));
 
     attachTerminalClipboard(
       terminal,
@@ -184,6 +185,7 @@ export function RemoteTerminalView({
       textarea?.removeEventListener("beforeinput", blockUnavailableInput, true);
       imePresentation.dispose();
       mobileInput.dispose();
+      mobileKey.dispose();
       imeFallback.dispose();
       typed.dispose();
       stopTypography();
