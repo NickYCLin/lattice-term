@@ -1587,6 +1587,8 @@ export const zhTW = {
   "agents.running.title": "執行中的 Agent",
   "agents.remoteFleet.eyebrow": "遠端工作區",
   "agents.remoteFleet.title": "遠端 Agent Fleet",
+  "agents.remoteFleet.mobileBody": "透過已連線的 Lattice Remote 主機查看分享的 Agent。讀取、傳送提示、取消及啟動項目依主機授權而定；手機不執行本機 Agent。",
+  "agents.remoteFleet.mobileNone": "尚無分享 Fleet 的連線。請先在遠端主機啟用 Fleet 分享與所需權限，然後連線並重新整理。",
   "agents.remoteFleet.body": "在這裡直接看另一台機器分享出來的 Agent 工作階段：並排顯示輸出、排入提示、取消這一輪或啟動儲存的項目。用的是你在設定「遠端 MCP」授權給這條連線的範圍，對方的輸出是不可信資料。",
   "agents.remoteFleet.refresh": "重新整理",
   "agents.remoteFleet.none": "還沒有授權 Fleet 的遠端連線。先在「設定 → 遠端 MCP」選一條 SSH 或 Lattice Remote 連線並勾選 Fleet 範圍。",

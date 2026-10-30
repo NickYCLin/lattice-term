@@ -41,12 +41,35 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
-async function mount() {
+async function mount(mobile = false) {
   const host = installHostDom();
   const root = createRoot(host as unknown as Element);
-  await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteFleetPanel /></I18nProvider>));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteFleetPanel mobile={mobile} /></I18nProvider>));
   return { host, unmount: async () => { await act(async () => root.unmount()); } };
 }
+
+it("shows only connected Lattice Remote Fleet targets on mobile", async () => {
+  vi.mocked(fleet.listFleetTargets).mockResolvedValue([
+    { ...targets[0], backend: "ssh" },
+    { ...targets[1], backend: "remote" },
+    { ...targets[0], id: "offline", label: "offline", backend: "remote", connected: false },
+  ]);
+  const { host, unmount } = await mount(true);
+  try {
+    expect(allNodes(host).filter(node => node.tagName === "OPTION").map(node => node.textContent)).toEqual(["beta"]);
+    expect(fleet.listFleetSessions).toHaveBeenCalledWith("beta");
+    expect(host.textContent).toContain("手機不執行本機 Agent");
+  } finally { await unmount(); }
+});
+
+it("explains how to connect when no mobile Fleet host is available", async () => {
+  vi.mocked(fleet.listFleetTargets).mockResolvedValue([{ ...targets[0], backend: "ssh" }]);
+  const { host, unmount } = await mount(true);
+  try {
+    expect(host.textContent).toContain("請先在遠端主機啟用 Fleet 分享");
+    expect(fleet.listFleetSessions).not.toHaveBeenCalled();
+  } finally { await unmount(); }
+});
 
 it("ignores old host sessions and launch plans after switching hosts", async () => {
   const oldSessions = deferred<FleetSession[]>();

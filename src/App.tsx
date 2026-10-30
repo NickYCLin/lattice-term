@@ -122,6 +122,11 @@ const AgentsView = lazy(() =>
     default: module.AgentsView,
   })),
 );
+const RemoteFleetPanel = lazy(() =>
+  import("./components/agents/RemoteFleetPanel").then((module) => ({
+    default: module.RemoteFleetPanel,
+  })),
+);
 const ChatRuntime = lazy(() =>
   import("./app/ChatRuntime").then((module) => ({
     default: module.ChatRuntime,
@@ -1042,7 +1047,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [focusSearch, openCreate, toggleResourceSidebar, textEditor.active]);
 
-  const item = findNavigationItem(view);
+  const item = visibleNavigation.find((entry) => entry.id === view) ?? findNavigationItem(view);
   const workspaceMotionRef = useViewMotion(view, preferences.motion);
   const showSidebar = view === "connections" && sidebarExpanded;
   const showInspector =
@@ -1206,7 +1211,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               </Suspense>
             )}
             <Suspense fallback={<LazyViewFallback />}>
-            {view === "agents" && (
+            {view === "agents" && (onMobile ? (
+              <div className="agents-view agents-view--mobile"><RemoteFleetPanel mobile /></div>
+            ) : (
               <AgentsView
                 agents={agents}
                 mcp={agentMcp}
@@ -1217,7 +1224,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   setView("terminal");
                 }}
               />
-            )}
+            ))}
             <Suspense fallback={null}>
               <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} completionNotification={preferences.chatCompletionNotification} onChange={setChatRuntime} sessions={agents.sessions} />
             </Suspense>

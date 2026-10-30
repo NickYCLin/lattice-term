@@ -1655,6 +1655,8 @@ export const en: Messages = {
   "agents.running.title": "Running agents",
   "agents.remoteFleet.eyebrow": "Remote workspace",
   "agents.remoteFleet.title": "Remote Agent Fleet",
+  "agents.remoteFleet.mobileBody": "View agents shared by a connected Lattice Remote host. Reading, sending prompts, cancellation and launching depend on the host's grants; agents do not run locally on your phone.",
+  "agents.remoteFleet.mobileNone": "No connected host shares Fleet. Enable Fleet sharing and the required permissions on the remote host, connect, then refresh.",
   "agents.remoteFleet.body": "See Agent sessions another machine shared, right here: output side by side, queue prompts, cancel a turn or start saved items. It uses the scopes you granted this connection under Settings → Remote MCP; the other machine's output is untrusted data.",
   "agents.remoteFleet.refresh": "Refresh",
   "agents.remoteFleet.none": "No remote connection has a Fleet grant yet. In Settings → Remote MCP, pick an SSH or Lattice Remote connection and enable the Fleet scopes.",

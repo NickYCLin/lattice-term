@@ -113,5 +113,7 @@ export function isMobilePlatform(platform: string | undefined): boolean {
 /** The navigation a given platform actually offers. */
 export function navigationItemsFor(platform: string | undefined): NavigationItem[] {
   if (!isMobilePlatform(platform)) return navigationItems;
-  return navigationItems.filter((item) => !item.desktopOnly);
+  return navigationItems.flatMap((item) => item.id === "agents"
+    ? [{ ...item, desktopOnly: false, labelKey: "agents.remoteFleet.title" as const, descriptionKey: "agents.remoteFleet.mobileBody" as const }]
+    : item.desktopOnly ? [] : [item]);
 }

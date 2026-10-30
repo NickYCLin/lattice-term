@@ -30,7 +30,7 @@ const stateKey: Record<string, MessageKey> = {
  * granted in Settings. Output is plain text with terminal controls
  * removed, and is untrusted data from the other machine.
  */
-export function RemoteFleetPanel() {
+export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
   const { t } = useI18n();
   const [targets, setTargets] = useState<FleetTarget[]>([]);
   const [targetId, setTargetId] = useState("");
@@ -52,14 +52,15 @@ export function RemoteFleetPanel() {
     if (!hasDesktopBackend()) return;
     const request = ++targetRequest.current;
     try {
-      const next = await listFleetTargets();
+      const discovered = await listFleetTargets();
+      const next = mobile ? discovered.filter((entry) => entry.backend === "remote" && entry.connected) : discovered;
       if (!mounted.current || request !== targetRequest.current) return;
       setTargets(next);
       setTargetId((current) => (next.some((entry) => entry.id === current) ? current : next[0]?.id ?? ""));
     } catch (reason) {
       if (mounted.current && request === targetRequest.current) setError(String(reason));
     }
-  }, []);
+  }, [mobile]);
 
   const loadSessions = useCallback(async () => {
     if (!mounted.current || !targetId || activeTarget.current !== targetId) return;
@@ -134,7 +135,7 @@ export function RemoteFleetPanel() {
         <div>
           <span className="eyebrow">{t("agents.remoteFleet.eyebrow")}</span>
           <h3>{t("agents.remoteFleet.title")}</h3>
-          <p>{t("agents.remoteFleet.body")}</p>
+          <p>{t(mobile ? "agents.remoteFleet.mobileBody" : "agents.remoteFleet.body")}</p>
         </div>
         <button type="button" className="button button--ghost button--sm" onClick={() => void loadTargets()}>
           <RefreshIcon />
@@ -143,7 +144,7 @@ export function RemoteFleetPanel() {
       </div>
       {error && <p className="field__error">{error}</p>}
       {targets.length === 0 ? (
-        <p className="agents-running__empty">{t("agents.remoteFleet.none")}</p>
+        <p className="agents-running__empty">{t(mobile ? "agents.remoteFleet.mobileNone" : "agents.remoteFleet.none")}</p>
       ) : (
         <>
           <label className="field">

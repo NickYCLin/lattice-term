@@ -1303,3 +1303,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
 }
+
+.agents-view--mobile .agents-remote-fleet button,
+.agents-view--mobile .agents-remote-fleet input,
+.agents-view--mobile .agents-remote-fleet select {
+  min-height: 44px;
+}
