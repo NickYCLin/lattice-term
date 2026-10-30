@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
 import { displayPath } from "../../app/displayPath";
-import { REMOTE_ATTACHMENT_CHUNK, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
+import { REMOTE_ATTACHMENT_CHUNK, filterRemoteThreads, remoteThreadActivity, remoteThreadCard, type RemoteActivity, type RemoteChatOperation, type RemoteChatResponse, type RemoteChatThread, type RemoteChatPage } from "../../app/remoteChat";
 import { CloseIcon, ImageFileIcon, PlusIcon, RefreshIcon, SendIcon, StopIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import { readRemoteImage as readImage, type PickedImage } from "./remoteImage";
@@ -12,6 +12,9 @@ const MAX_IMAGES = 4;
 export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidden: boolean }) {
   const { t } = useI18n();
   const [threads, setThreads] = useState<RemoteChatThread[]>([]);
+  const [query, setQuery] = useState("");
+  const [activity, setActivity] = useState<RemoteActivity | "all">("all");
+  const [loaded, setLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState<RemoteChatPage | null>(null);
   const [before, setBefore] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
       try {
         const result = await request(selected ? { kind: "read", threadId: selected, before } : { kind: "list" });
         if (stopped || serial.current !== version) return;
-        if (selected) setPage(result as RemoteChatPage); else setThreads(result as RemoteChatThread[]);
+        if (selected) setPage(result as RemoteChatPage); else { setThreads(result as RemoteChatThread[]); setLoaded(true); }
       } catch (error) { if (!stopped) setProblem(String(error)); }
       if (!stopped) timer = setTimeout(() => { void poll(); }, 1200);
     }
@@ -99,6 +102,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   const draft = selected ? drafts[selected] ?? "" : "";
   const current = page?.thread.id === selected ? page : null;
   const heading = current ? remoteThreadCard(current.thread, t("remote.chat.untitled"), t("terminal.model.pending")) : null;
+  const visibleThreads = filterRemoteThreads(threads, query, activity);
   return <section className="remote-chat-pane" hidden={hidden} aria-label={t("remote.chat.title")}>
     <header className="remote-pane-header">
       {selected ? <button className="button button--secondary button--sm" onClick={() => { setSelected(null); setPage(null); setBefore(null); setProblem(null); }}>{t("remote.chat.sessions")}</button> : <strong>{t("remote.chat.title")}</strong>}
@@ -108,8 +112,17 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
     {problem && <p role="alert">{problem}</p>}
     {!selected ? <div className="remote-chat-list">
       <p className="muted">{t("remote.chat.hint")}</p>
-      {threads.length === 0 && <p>{t("remote.chat.empty")}</p>}
-      {threads.map(thread => {
+      <input type="search" className="input remote-chat-search" aria-label={t("remote.chat.search")} placeholder={t("remote.chat.search")} value={query} onChange={event => setQuery(event.currentTarget.value)} />
+      <div className="remote-cli-filters" role="group" aria-label={t("remote.chat.filter")}>
+        {(["all", "working", "needsAttention", "idle"] as const).map(state => <button type="button" key={state} className={`remote-cli-filter${activity === state ? " is-active" : ""}`} aria-pressed={activity === state} onClick={() => setActivity(state)}>
+          {state === "all" ? t("remote.cli.all") : t(state === "working" ? "remote.chat.running" : state === "idle" ? "remote.chat.idle" : "remote.chat.awaitingApproval")}
+        </button>)}
+      </div>
+      {(query !== "" || activity !== "all") && <button type="button" className="button button--ghost button--sm" onClick={() => { setQuery(""); setActivity("all"); }}>{t("remote.cli.clearFilters")}</button>}
+      {!loaded && !problem && <p role="status">{t("remote.chat.loading")}</p>}
+      {loaded && threads.length === 0 && <p>{t("remote.chat.empty")}</p>}
+      {loaded && threads.length > 0 && visibleThreads.length === 0 && <p role="status">{t("remote.chat.noMatches")}</p>}
+      {visibleThreads.map(thread => {
         const card = remoteThreadCard(thread, t("remote.chat.untitled"), t("terminal.model.pending"));
         return <button className="remote-chat-thread" key={thread.id} onClick={() => { setSelected(thread.id); setPage(null); setBefore(null); setProblem(null); }}>
           <strong className="remote-chat-thread__title">{card.title}</strong>{card.detail && <span>{card.detail}</span>}

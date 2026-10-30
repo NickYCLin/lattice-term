@@ -35,6 +35,11 @@ export function remoteThreadCard(thread: RemoteChatThread, untitled: string, def
     place: [remoteProjectName(thread.directory), thread.proxy ? name : ""].filter(Boolean).join(" · "),
   };
 }
+export function filterRemoteThreads(threads: readonly RemoteChatThread[], query: string, activity: RemoteActivity | "all" = "all"): RemoteChatThread[] {
+  const search = query.trim().toLocaleLowerCase();
+  return threads.filter(thread => (activity === "all" || remoteThreadActivity(thread) === activity) && (!search || [thread.title, thread.agent, agentDisplayName(thread.agent), thread.directory,
+    thread.model, thread.proxy ? CLI_PROXY_NAME : ""].some(value => value?.toLocaleLowerCase().includes(search))));
+}
 export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();

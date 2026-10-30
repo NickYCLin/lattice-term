@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { createThread, type ChatThread } from "./agentChat";
 import { fakeChatApi } from "./testFixtures/agentApis";
-import { performRemoteChat, RemoteUploads, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
+import { filterRemoteThreads, performRemoteChat, RemoteUploads, remotePage, remoteProjectName, remoteThread, remoteThreadActivity, remoteThreadCard } from "./remoteChat";
 function thread() { return createThread({ definitionId: "codex", workingDirectory: "/work", permission: "ask", model: "" }, "thread", 1); }
 describe("Remote conversation projection", () => {
+  it("filters remote conversations without changing their order or original list", () => {
+    const first = { ...remoteThread(thread()), id: "first", title: "中文專案", directory: "/Work/Alpha", model: "Model-X" };
+    const second = { ...first, id: "second", title: "Another", directory: "/work/beta", proxy: true };
+    const threads = [first, second];
+    expect(filterRemoteThreads(threads, " 中文 ")).toEqual([first]);
+    expect(filterRemoteThreads(threads, "MODEL-x")).toEqual(threads);
+    expect(filterRemoteThreads(threads, "BETA")).toEqual([second]);
+    expect(filterRemoteThreads(threads, "CLIProxyAPI")).toEqual([second]);
+    expect(filterRemoteThreads(threads, "missing")).toEqual([]);
+    expect(filterRemoteThreads([{ ...first, runningTurnId: "turn" }, { ...second, awaitingApproval: true }], "", "needsAttention").map(item => item.id)).toEqual(["second"]);
+    expect(filterRemoteThreads(threads, "beta", "working")).toEqual([]);
+    expect(threads).toEqual([first, second]);
+  });
   it.each([
     ["\\\\?\\D:\\project\\sample", "D:\\project\\sample"],
     ["\\\\?\\UNC\\server\\share\\project", "\\\\server\\share\\project"],
