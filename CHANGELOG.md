@@ -4,6 +4,13 @@
 
 ---
 
+## [2026.11.1](https://github.com/NickYCLin/lattice-term/compare/v2026.10.31...v2026.11.1) (2026-10-31)
+
+
+### 🛠️ 問題修正
+
+* 修正 SFTP 下載測試的完成時序 ([31e4130](https://github.com/NickYCLin/lattice-term/commit/31e41304d50d1d6616482dba4819ed264bbdeb88))
+
 ## [2026.10.31](https://github.com/NickYCLin/lattice-term/compare/v2026.10.30...v2026.10.31) (2026-10-30)
 
 
