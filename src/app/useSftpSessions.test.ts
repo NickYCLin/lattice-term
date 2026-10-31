@@ -126,7 +126,7 @@ describe("SFTP IPC payloads", () => {
 
 describe("SFTP transfer state reconciliation", () => {
   it("does not let a late initial response revive a completed transfer", () => {
-    const completed = transfer("fast", "done", 100);
+    const completed = { ...transfer("fast", "done", 100), localPath: "/downloads/fast (2).bin" };
     const initial = transfer("fast", "running", 0);
 
     expect(reconcileSftpTransferUpdate(completed, initial)).toEqual(completed);

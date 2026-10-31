@@ -285,6 +285,8 @@ async fn a_file_past_the_old_cap_survives_the_round_trip() {
 
     // Download it back into a scratch directory and compare byte for byte.
     let target = temp_dir("download");
+    let existing = target.join("latticeterm-big.bin");
+    std::fs::write(&existing, b"existing file").unwrap();
     let download = start_download(
         Arc::clone(&transfers),
         &sessions,
@@ -296,7 +298,9 @@ async fn a_file_past_the_old_cap_survives_the_round_trip() {
     .await
     .unwrap();
 
-    let local_path = download.local_path.expect("downloads have a local path");
+    assert_eq!(download.state, "running");
+    assert!(download.local_path.is_none());
+    let mut completed_path = None;
     for _ in 0..600 {
         let state = transfers
             .list()
@@ -304,12 +308,21 @@ async fn a_file_past_the_old_cap_survives_the_round_trip() {
             .find(|state| state.transfer_id == download.transfer_id)
             .unwrap();
         match state.state {
-            "done" => break,
+            "done" => {
+                completed_path = state.local_path;
+                break;
+            }
             "error" | "cancelled" => panic!("download ended early: {:?}", state.detail),
             _ => tokio::time::sleep(Duration::from_millis(100)).await,
         }
     }
 
+    let local_path = completed_path.expect("completed downloads have a local path");
+    assert_eq!(
+        std::path::Path::new(&local_path),
+        target.join("latticeterm-big (2).bin")
+    );
+    assert_eq!(std::fs::read(existing).unwrap(), b"existing file");
     let returned = std::fs::read(&local_path).unwrap();
     assert_eq!(returned.len(), original.len(), "sizes match");
     assert!(returned == original, "every byte survived the round trip");
