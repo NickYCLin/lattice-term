@@ -9,6 +9,23 @@ const { buildStrategy } = require("release-please/build/src/factory");
 const { TagName } = require("release-please/build/src/util/tag-name");
 const { Version } = require("release-please/build/src/version");
 const { parseConventionalCommits } = require("release-please/build/src/commit");
+const { BranchFileCache } = require("@google-automations/git-file-utils");
+
+describe("Release Please file matching", () => {
+  it("matches repository files with the overridden minimatch", async () => {
+    const cache = Object.create(BranchFileCache.prototype);
+    cache.branch = "main";
+    cache.treeEntryIterator = async function* () {
+      yield { path: "packages/app/package.json" };
+      yield { path: "packages/app/README.md" };
+      yield { path: "package.json" };
+    };
+    await expect(cache.findFilesByGlob("**/package.json")).resolves.toEqual([
+      "packages/app/package.json",
+      "package.json",
+    ]);
+  });
+});
 
 describe("Taipei date versions", () => {
   it.each([
