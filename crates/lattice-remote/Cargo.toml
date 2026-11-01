@@ -27,7 +27,7 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 # tokio-tungstenite pulls rustls without choosing a crypto provider. Pick ring
 # explicitly so wss:// works consistently in desktop and sidecar processes.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2"
 image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
 serde = { version = "1", features = ["derive"] }
