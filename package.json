@@ -53,6 +53,11 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
+  "overrides": {
+    "@google-automations/git-file-utils": {
+      "minimatch": "^11.0.1"
+    }
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4",
     "@types/react": "^19.1.8",
