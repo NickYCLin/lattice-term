@@ -2119,6 +2119,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_mcp_file_grants_follow_host_capabilities_without_screen_access() {
+        use crate::mcp_desktop::*;
+
+        for command_shells in [0, 1] {
+            for file_transfer in [false, true] {
+                let registry = Arc::new(RemoteRegistry::new());
+                let mut summary = remote_summary("terminal-files", true);
+                summary.command_shells = command_shells;
+                summary.file_transfer = file_transfer;
+                register_test_record(&registry, idle_test_record(summary, 7));
+                let service = DesktopService::new(
+                    Arc::new(crate::ssh::SshRegistry::new()),
+                    Arc::new(crate::sftp::SftpRegistry::new()),
+                )
+                .with_screens(
+                    Arc::new(crate::rdp::RdpRegistry::new()),
+                    Arc::new(crate::vnc::VncRegistry::new()),
+                    registry.clone(),
+                    Arc::new(crate::mcp_screen::ScreenFrames::default()),
+                );
+
+                service.grant_live_connections().await;
+                let targets = service.targets();
+                if command_shells == 0 {
+                    assert!(targets.is_empty());
+                } else {
+                    assert_eq!(
+                        targets.len(),
+                        1,
+                        "one grant for terminal commands and files"
+                    );
+                    let target = &targets[0];
+                    assert_eq!(target.backend, Backend::Remote);
+                    assert_eq!(target.scopes.command, command_shells != 0);
+                    assert_eq!(target.scopes.upload, file_transfer);
+                    assert_eq!(target.scopes.download, file_transfer);
+                    assert!(!target.scopes.screen);
+                    assert!(!target.scopes.input);
+                    assert!(!target.scopes.fleet_observe);
+                    if !file_transfer {
+                        assert!(service
+                            .grant(GrantRequest {
+                                session_id: "terminal-files".into(),
+                                backend: Backend::Remote,
+                                label: "unshared files".into(),
+                                scopes: Scopes {
+                                    command: true,
+                                    upload: true,
+                                    download: true,
+                                    ..Scopes::default()
+                                },
+                                exec_plans: Vec::new(),
+                                roots: Vec::new(),
+                                fleet: None,
+                            })
+                            .await
+                            .is_err());
+                    }
+                }
+
+                let record = registry.remove("terminal-files").unwrap().unwrap();
+                stop_remote_session(record, "test completed", Duration::from_millis(10)).await;
+                assert!(
+                    service.targets().iter().all(|target| !target.connected),
+                    "disconnect revokes file grants"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn mcp_remote_commands_require_approval_and_replay_without_rerunning() {
         check_mcp_remote_command(false, false).await;
     }

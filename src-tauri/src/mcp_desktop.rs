@@ -1540,6 +1540,8 @@ impl DesktopService {
                     session.host.clone(),
                     Scopes {
                         command: true,
+                        upload: session.file_transfer,
+                        download: session.file_transfer,
                         ..Scopes::default()
                     },
                     None,
@@ -2708,9 +2710,7 @@ fn validate_grant(request: &GrantRequest) -> Result<(), ServiceError> {
         && ((!request.scopes.screen
             && !(request.backend == Backend::Remote
                 && request.scopes.command
-                && !request.scopes.input
-                && !request.scopes.upload
-                && !request.scopes.download))
+                && !request.scopes.input))
             || request.scopes.metrics
             || request.scopes.list
             || request.scopes.exec
