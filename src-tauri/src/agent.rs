@@ -1541,9 +1541,8 @@ impl CompletionReadiness {
             return Some(AgentLifecycle::NeedsAttention);
         }
 
-        // Codex renders an explicit working footer while a foreground turn or
-        // a background terminal is still active. A stale conversational
-        // question must not leave the sidebar on "needs attention" after
+        // Codex renders an explicit working footer while a foreground turn is
+        // active. A stale conversational question must not leave the sidebar on "needs attention" after
         // this authoritative-looking activity signal arrives.
         // Read the accumulated, ANSI-free tail: both styles and PTY read
         // boundaries can split the words the user sees on one line.
@@ -2499,8 +2498,8 @@ impl AgentRegistry {
     }
 
     /// Codex's turn-complete notification can arrive while its background
-    /// terminals are still running. Only an explicit working footer observed
-    /// after that notification may revise its completed status; ordinary PTY
+    /// terminals are still running. Only an explicit foreground working footer
+    /// observed after that notification may revise its completed status; ordinary PTY
     /// guesses and other integrations still defer to the reporter.
     fn update_codex_working_from_output(&self, session_id: &str) -> bool {
         let Ok(entry) = self.get(session_id) else {
@@ -7566,9 +7565,7 @@ fn has_attention_marker(text: &str) -> bool {
 }
 
 fn has_explicit_working_status(text: &str) -> bool {
-    text.contains("working (")
-        || text.contains("esc to interrupt")
-        || text.contains("background terminal running")
+    text.contains("working (") || text.contains("esc to interrupt")
 }
 
 fn has_actionable_attention_prompt(text: &str) -> bool {
@@ -11080,6 +11077,16 @@ session id: 0199aa11-"
             Some(AgentLifecycle::NeedsAttention)
         );
         assert_eq!(readiness.observe_output(b"\x1b[?2004h", false), None);
+    }
+
+    #[test]
+    fn codex_background_terminal_notice_does_not_restart_completed_turn() {
+        let notice = b"1 background terminal running \xc2\xb7 /ps to view \xc2\xb7 /stop to close";
+        for split in 0..=notice.len() {
+            let mut readiness = CompletionReadiness::default();
+            assert_eq!(readiness.observe_output(&notice[..split], true), None);
+            assert_eq!(readiness.observe_output(&notice[split..], true), None);
+        }
     }
 
     #[test]
