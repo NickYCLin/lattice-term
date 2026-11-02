@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ConnectionProfile } from "../../domain/connection";
@@ -263,4 +263,43 @@ it("opens secure saving from quick connect with the typed device and code", asyn
     await act(async () => props(button).onClick!());
     expect(prepare).toHaveBeenCalledWith("123456789", "wss://relay.example.test", "test-code");
   } finally { await act(async () => root.unmount()); }
+});
+
+it("clears the parent's transferred code and does not restore it after a failed connection", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const vault = fakeVault(); vault.backend = "osKeyring";
+  credential.state = { mode: "saved", provider: "iOS Keychain", detail: null };
+  const connect = vi.fn(async () => ({ outcome: "failed", stage: "pairing", detail: "rejected" }));
+  function Parent() {
+    const [code, setCode] = useState("test-new-code");
+    return <I18nProvider locale="zh-TW"><span id="parent-code-state">{code ? "held" : "cleared"}</span>
+      <RemoteConnectFlow profile={profile} vault={vault} platform="ios"
+        remote={{ connect } as unknown as RemoteApi} initialPairingCode={code}
+        onInitialPairingCodeConsumed={() => setCode("")} onConnected={vi.fn()} onCancel={vi.fn()} />
+    </I18nProvider>;
+  }
+  try {
+    await act(async () => root.render(<Parent />));
+    expect(allNodes(container).find(node => node.attributes.id === "parent-code-state")!.textContent).toBe("cleared");
+    expect(connect).not.toHaveBeenCalled();
+    expect(props(allNodes(container).find(node => node.attributes.id === "remote-pairing-code")!).value).toBe("test-new-code");
+    await act(async () => props(allNodes(container).find(node => node.tagName === "FORM")!).onSubmit!({ preventDefault: vi.fn() }));
+    expect(connect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pairingCode: "test-new-code", useSavedPairingCode: false }));
+    expect(props(allNodes(container).find(node => node.attributes.id === "remote-pairing-code")!).value).toBe("");
+    expect(allNodes(container).find(node => node.attributes.id === "parent-code-state")!.textContent).toBe("cleared");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("clears an entered pairing code when the native connection call throws", async () => {
+  const vault = fakeVault("unlocked");
+  credential.state = { mode: "missing", provider: "Encrypted vault", detail: null };
+  const test = harness(vault, "ios", "test-new-code");
+  vi.mocked(test.connect).mockRejectedValueOnce(new Error("connection failed"));
+  try {
+    await act(async () => test.render());
+    await act(async () => props(allNodes(test.container).find(node => node.tagName === "FORM")!).onSubmit!({ preventDefault: vi.fn() }));
+    expect(props(test.input("remote-pairing-code")).value).toBe("");
+    expect(test.connected).not.toHaveBeenCalled();
+  } finally { await act(async () => test.root.unmount()); }
 });

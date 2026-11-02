@@ -26,6 +26,7 @@ import { useModalFocus } from "../overlays/modalFocus";
 export function RemoteConnectFlow({
   profile,
   initialPairingCode = "",
+  onInitialPairingCodeConsumed,
   initialRelayAddress,
   remote,
   vault,
@@ -36,6 +37,7 @@ export function RemoteConnectFlow({
 }: {
   profile: ConnectionProfile;
   initialPairingCode?: string;
+  onInitialPairingCodeConsumed?: () => void;
   initialRelayAddress?: string;
   remote: RemoteApi;
   vault?: VaultApi;
@@ -51,6 +53,7 @@ export function RemoteConnectFlow({
   const vaultUnavailable = vault?.backend === "vault" && vault.status !== null && vault.status.state !== "unlocked";
   const storageReady = !vaultUnavailable && (savedCredential.state.mode === "missing" || savedCredential.state.mode === "saved");
   const [pairingCode, setPairingCode] = useState(initialPairingCode);
+  const hasInitialPairingCode = useRef(initialPairingCode.length > 0);
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
@@ -81,16 +84,20 @@ export function RemoteConnectFlow({
   }, [busy]);
 
   useEffect(() => {
+    onInitialPairingCodeConsumed?.();
+  }, [onInitialPairingCodeConsumed]);
+
+  useEffect(() => {
     if (vault?.backend === "vault") void savedCredential.refresh();
   }, [vault?.backend, vault?.status?.state, savedCredential.refresh]);
 
   useEffect(() => {
-    if (relay && !initialPairingCode && !vaultUnavailable && savedCredential.state.mode === "saved") {
+    if (relay && !hasInitialPairingCode.current && !vaultUnavailable && savedCredential.state.mode === "saved") {
       setUseSavedPairingCode(true);
     } else if (savedCredential.state.mode !== "loading") {
       setUseSavedPairingCode(false);
     }
-  }, [relay, initialPairingCode, vaultUnavailable, savedCredential.state.mode]);
+  }, [relay, vaultUnavailable, savedCredential.state.mode]);
 
   useEffect(() => {
     if (!useSavedPairingCode) codeRef.current?.focus();
@@ -160,9 +167,6 @@ export function RemoteConnectFlow({
         // identity, exactly as the connect-by-ID dialog does.
         ...(relay ? { deviceId: profile.deviceId, relayAddress: attempted } : {}),
       });
-      // Clear the entered pairing code from the form after the IPC call resolves.
-      setPairingCode("");
-
       const followUp = relayConnectFollowUp({
         relayEntry: relay,
         savedAddress: profile.relayAddress ?? "",
@@ -196,6 +200,7 @@ export function RemoteConnectFlow({
         detail: reason instanceof Error ? reason.message : String(reason),
       }));
     } finally {
+      setPairingCode("");
       operationInFlight.current = false;
       setBusy(false);
     }

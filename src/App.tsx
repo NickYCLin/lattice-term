@@ -399,7 +399,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
   const [quickConnectOpen, setQuickConnectOpen] = useState(false);
-  const quickPairingCode = useRef("");
+  const [quickPairingCode, setQuickPairingCode] = useState("");
   const quickRelayAddress = useRef("");
   const [connectTarget, setConnectTarget] = useState<ConnectionProfile | null>(
     null,
@@ -1393,7 +1393,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               ? await saveProfileRecord(createConnectionProfile(memory.draft))
               : undefined);
             if (!profile) throw new Error("Could not save the connection.");
-            quickPairingCode.current = code;
+            setQuickPairingCode(code);
             quickRelayAddress.current = relayAddress;
             setQuickConnectOpen(false);
             setConnectTarget(profile);
@@ -1429,7 +1429,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {runtime.host === "tauri" && connectTarget?.protocol === "lattice" && (
         <RemoteConnectFlow
           profile={connectTarget}
-          initialPairingCode={quickPairingCode.current}
+          initialPairingCode={quickPairingCode}
+          onInitialPairingCodeConsumed={() => setQuickPairingCode("")}
           initialRelayAddress={quickRelayAddress.current || undefined}
           remote={remote}
           vault={vault}
@@ -1446,13 +1447,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             saveRelayAddress(window.localStorage, relayAddress);
           }}
           onConnected={(sessionId) => {
-            quickPairingCode.current = "";
+            setQuickPairingCode("");
             quickRelayAddress.current = "";
             setConnectTarget(null);
             setActiveSessionId(sessionId);
             setView("terminal");
           }}
-          onCancel={() => { quickPairingCode.current = ""; quickRelayAddress.current = ""; setConnectTarget(null); }}
+          onCancel={() => { setQuickPairingCode(""); quickRelayAddress.current = ""; setConnectTarget(null); }}
         />
       )}
 
