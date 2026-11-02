@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.11.3](https://github.com/NickYCLin/lattice-term/compare/v2026.11.1...v2026.11.3) (2026-11-02)
+
+
+### 🛠️ 問題修正
+
+* **agent:** 修正背景終端造成的執行狀態誤判 ([c59dd55](https://github.com/NickYCLin/lattice-term/commit/c59dd5542c6273cb43aee9254f40a4b748ab5785))
+* 修正純終端 Remote 的檔案傳輸授權 ([262f42a](https://github.com/NickYCLin/lattice-term/commit/262f42a30a0c0d8ebcaa12e614bd387f85a8e9ff))
+
 ## [2026.11.1](https://github.com/NickYCLin/lattice-term/compare/v2026.10.31...v2026.11.1) (2026-10-31)
 
 
