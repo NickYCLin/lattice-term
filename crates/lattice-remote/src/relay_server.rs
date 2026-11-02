@@ -1694,6 +1694,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn device_can_register_again_after_its_control_connection_closes() {
+        let (address, state) = start_relay().await;
+        let identity = DeviceIdentity::generate().unwrap();
+        let control = register_agent(address, &identity).await;
+        drop(control);
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if !state
+                    .agents
+                    .lock()
+                    .unwrap()
+                    .contains_key(&identity.device_id)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("relay must remove the disconnected control");
+        let error = match dial(&address.to_string(), &identity.device_id).await {
+            Err(error) => error,
+            Ok(_) => panic!("disconnected device unexpectedly available"),
+        };
+        assert!(
+            matches!(error, crate::relay::RelayError::Rejected { code, .. } if code == "offline")
+        );
+        let mut replacement = register_agent(address, &identity).await;
+        write_client_message(&mut replacement, &RelayClientMessage::Ping)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_server_message(&mut replacement).await.unwrap(),
+            RelayServerMessage::Pong
+        );
+        assert!(state
+            .agents
+            .lock()
+            .unwrap()
+            .contains_key(&identity.device_id));
+        let device_id = identity.device_id.clone();
+        let viewer = tokio::spawn(async move { dial(&address.to_string(), &device_id).await });
+        assert!(matches!(
+            timeout(
+                Duration::from_secs(2),
+                read_server_message(&mut replacement)
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+            RelayServerMessage::Invite { .. }
+        ));
+        viewer.abort();
+    }
+
+    #[tokio::test]
     async fn a_device_id_cannot_be_claimed_with_another_token() {
         let (address, _state) = start_relay().await;
         let identity = DeviceIdentity::generate().unwrap();
