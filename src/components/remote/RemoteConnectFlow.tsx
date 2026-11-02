@@ -60,6 +60,7 @@ export function RemoteConnectFlow({
   // goes stale on its own. Offering the field only after the relay actually
   // failed keeps the usual connection down to one input.
   const [relayUnreachable, setRelayUnreachable] = useState(false);
+  const [relayOffline, setRelayOffline] = useState(false);
   const [connecting, setBusy] = useState(false);
   const busy = connecting || removingCredential || switchingStorage;
   const [problem, setProblem] = useState<string | null>(null);
@@ -180,7 +181,7 @@ export function RemoteConnectFlow({
       ) {
         setUseSavedPairingCode(false);
       }
-      if (followUp.offerAddressRepair) setRelayUnreachable(true);
+      if (followUp.offerAddressRepair) { setRelayUnreachable(true); setRelayOffline(outcome.stage === "relayOffline"); }
       setProblem(
         outcome.stage === "legacyTrust" ? t("remote.connect.legacyUntrusted") :
         outcome.stage === "identityChanged" ? t("remote.connect.identityChanged") :
@@ -347,8 +348,8 @@ export function RemoteConnectFlow({
 
           {relayUnreachable && (
             <div className="field">
-              <Callout tone="info" title={t("remote.connect.relayMovedTitle")}>
-                {t("remote.connect.relayMovedBody")}
+              <Callout tone="info" title={t(relayOffline ? "remote.connect.relayOfflineTitle" : "remote.connect.relayMovedTitle")}>
+                {t(relayOffline ? "remote.connect.relayOfflineBody" : "remote.connect.relayMovedBody")}
               </Callout>
               <label className="field__label" htmlFor="remote-relay-address">
                 {t("remote.host.relayAddress")}

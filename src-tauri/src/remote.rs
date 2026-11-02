@@ -699,13 +699,12 @@ fn session_id() -> String {
 
 /// Which failure stage a relay dial error belongs to.
 ///
-/// `relay` means the relay itself could not be reached or understood, which
-/// points at the address the user saved; the viewer offers to correct it on
-/// this stage alone. A relay that answered and rejected the dial reports
-/// `connect`: there the address was right and the device was not there, so
-/// inviting an address edit would send the user to fix the wrong thing.
+/// A reachable relay can still be a different relay than the host uses.
+/// Preserve the offline rejection separately so the viewer can compare both
+/// the device ID and relay address without treating the host as powered off.
 fn relay_dial_stage(error: &RelayError) -> &'static str {
     match error {
+        RelayError::Rejected { code, .. } if code == "offline" => "relayOffline",
         RelayError::Rejected { .. } => "connect",
         _ => "relay",
     }
@@ -2002,9 +2001,8 @@ mod tests {
     }
 
     #[test]
-    fn only_an_unreachable_relay_blames_the_address() {
-        // The viewer offers to correct a saved relay address on this stage
-        // alone, so the split has to survive edits to the dial path.
+    fn distinguishes_offline_registration_from_other_relay_errors() {
+        // Transport failures are distinct from a relay rejecting a dial.
         assert_eq!(
             relay_dial_stage(&RelayError::Io(std::io::Error::from(
                 std::io::ErrorKind::ConnectionRefused
@@ -2015,14 +2013,13 @@ mod tests {
         assert_eq!(relay_dial_stage(&RelayError::Protocol), "relay");
         assert_eq!(relay_dial_stage(&RelayError::InvalidRelayAddress), "relay");
 
-        // The relay answered, so the address was right and the device simply
-        // was not registered there.
+        // The device is not registered on this particular relay.
         assert_eq!(
             relay_dial_stage(&RelayError::Rejected {
                 code: "offline".to_string(),
                 detail: "That device is not connected.".to_string(),
             }),
-            "connect"
+            "relayOffline"
         );
     }
 

@@ -15,10 +15,12 @@ describe("relayConnectFollowUp", () => {
     ).toEqual({ offerAddressRepair: true, addressToSave: null });
   });
 
-  it("leaves the address alone when the relay answered and refused", () => {
-    // The relay resolved the name and replied, so the address was right and
-    // the device was simply not registered. Inviting an edit here would send
-    // the user to fix the wrong thing.
+  it("offers to compare the relay when the device is not registered there", () => {
+    expect(relayConnectFollowUp({ relayEntry: true, savedAddress: saved, attemptedAddress: saved,
+      outcome: { outcome: "failed", stage: "relayOffline" } })).toEqual({ offerAddressRepair: true, addressToSave: null });
+  });
+
+  it("leaves the address alone for unrelated failures", () => {
     for (const stage of ["connect", "pairing", "pinning", "session"]) {
       expect(
         relayConnectFollowUp({

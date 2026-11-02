@@ -49,11 +49,9 @@ export function relayConnectFollowUp({
   }
 
   return {
-    // "relay" is reported only when the relay never answered or the address
-    // could not be read. A relay that answered and refused the dial reports
-    // "connect": there the address was right and the device was not there,
-    // and inviting an edit would send the user to fix the wrong thing.
-    offerAddressRepair: outcome.stage === "relay",
+    // An answering relay may still be a different relay from the host's,
+    // or the host registration may be temporarily disconnected.
+    offerAddressRepair: outcome.stage === "relay" || outcome.stage === "relayOffline",
     addressToSave: null,
   };
 }

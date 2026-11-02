@@ -2186,6 +2186,8 @@ export const en: Messages = {
   "remote.connect.relayCodeInvalid": "Use 6-64 ASCII letters, digits or symbols without spaces. Legacy mode accepts a 32-character hexadecimal token or eight digits for a trusted device.",
   "remote.connect.legacyUntrusted": "This computer has no trusted key for this legacy device, so an eight-digit code cannot establish its identity. Connect from a computer that previously paired with it. If no trusted record is available, update the host once and pair with a new token.",
   "remote.connect.identityChanged": "This device ID presented a different key from the one previously trusted. The connection was stopped. Check whether the host was rebuilt or its identity changed; do not delete the trust record to bypass this check.",
+  "remote.connect.relayOfflineTitle": "Device not registered on this relay",
+  "remote.connect.relayOfflineBody": "The host may be reconnecting, or it may be using another relay. Compare the relay address and device ID with the sharing device. A corrected address is saved only after a successful connection.",
   "remote.connect.relayMovedTitle": "The relay did not answer",
   "remote.connect.relayMovedBody": "Its address may have changed — a free Cloudflare Quick Tunnel hands out a new one every restart. Enter the current address and connect again; this entry keeps the new one once it works.",
   "remote.connect.codeInvalid": "Use 6-64 ASCII letters, digits or symbols without spaces, or a generated 32-character hexadecimal token.",

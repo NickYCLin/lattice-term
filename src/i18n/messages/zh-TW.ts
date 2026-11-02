@@ -2116,6 +2116,8 @@ export const zhTW = {
   "remote.connect.relayCodeInvalid": "請輸入 6～64 個半形英文、數字或特殊符號，不含空白；舊版模式只接受 32 位十六進位長碼或已信任裝置的八位數碼。",
   "remote.connect.legacyUntrusted": "這台電腦沒有此舊版裝置的信任紀錄，無法使用八位數碼確認身分。請用曾成功配對的電腦連線；若沒有信任紀錄，須先更新遠端主機一次，再用新配對碼建立信任。",
   "remote.connect.identityChanged": "這個裝置 ID 的金鑰與先前信任的紀錄不同，已停止連線。請先確認遠端主機是否重建或更換身分；不要刪除信任紀錄來略過檢查。",
+  "remote.connect.relayOfflineTitle": "此中繼站找不到裝置",
+  "remote.connect.relayOfflineBody": "主機可能正在重新連線，或使用了另一個中繼站。請與分享端核對中繼位址和裝置 ID；只有成功連線後才會保存修改的位址。",
   "remote.connect.relayMovedTitle": "中繼伺服器連不上",
   "remote.connect.relayMovedBody": "中繼沒有回應，位址可能已經變了——免費的 Cloudflare Quick Tunnel 每次重啟都會換網址。填入目前的位址再連一次；連上之後這筆連線就會記住新的位址。",
   "remote.connect.codeInvalid": "請輸入 6～64 個半形英文、數字或特殊符號，不含空白；也可貼上自動產生的 32 位長碼。",
