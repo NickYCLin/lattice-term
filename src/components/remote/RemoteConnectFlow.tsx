@@ -25,6 +25,8 @@ import { useModalFocus } from "../overlays/modalFocus";
 
 export function RemoteConnectFlow({
   profile,
+  initialPairingCode = "",
+  initialRelayAddress,
   remote,
   vault,
   platform,
@@ -33,6 +35,8 @@ export function RemoteConnectFlow({
   onCancel,
 }: {
   profile: ConnectionProfile;
+  initialPairingCode?: string;
+  initialRelayAddress?: string;
   remote: RemoteApi;
   vault?: VaultApi;
   platform?: string;
@@ -46,12 +50,12 @@ export function RemoteConnectFlow({
   const savedCredential = useSavedCredential(profile.id, "latticePairingCode");
   const vaultUnavailable = vault?.backend === "vault" && vault.status !== null && vault.status.state !== "unlocked";
   const storageReady = !vaultUnavailable && (savedCredential.state.mode === "missing" || savedCredential.state.mode === "saved");
-  const [pairingCode, setPairingCode] = useState("");
+  const [pairingCode, setPairingCode] = useState(initialPairingCode);
   const [useSavedPairingCode, setUseSavedPairingCode] = useState(false);
   const [rememberPairingCode, setRememberPairingCode] = useState(false);
   const [removingCredential, setRemovingCredential] = useState(false);
   const [switchingStorage, setSwitchingStorage] = useState(false);
-  const [relayAddress, setRelayAddress] = useState(profile.relayAddress ?? "");
+  const [relayAddress, setRelayAddress] = useState(initialRelayAddress ?? profile.relayAddress ?? "");
   // A quick tunnel hands out a new hostname every restart, so a saved address
   // goes stale on its own. Offering the field only after the relay actually
   // failed keeps the usual connection down to one input.
@@ -80,12 +84,12 @@ export function RemoteConnectFlow({
   }, [vault?.backend, vault?.status?.state, savedCredential.refresh]);
 
   useEffect(() => {
-    if (relay && !vaultUnavailable && savedCredential.state.mode === "saved") {
+    if (relay && !initialPairingCode && !vaultUnavailable && savedCredential.state.mode === "saved") {
       setUseSavedPairingCode(true);
     } else if (savedCredential.state.mode !== "loading") {
       setUseSavedPairingCode(false);
     }
-  }, [relay, vaultUnavailable, savedCredential.state.mode]);
+  }, [relay, initialPairingCode, vaultUnavailable, savedCredential.state.mode]);
 
   useEffect(() => {
     if (!useSavedPairingCode) codeRef.current?.focus();
@@ -155,7 +159,7 @@ export function RemoteConnectFlow({
         // identity, exactly as the connect-by-ID dialog does.
         ...(relay ? { deviceId: profile.deviceId, relayAddress: attempted } : {}),
       });
-      // Drop the one-time secret immediately after the IPC call resolves.
+      // Clear the entered pairing code from the form after the IPC call resolves.
       setPairingCode("");
 
       const followUp = relayConnectFollowUp({

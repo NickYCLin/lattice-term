@@ -399,6 +399,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
   const [quickConnectOpen, setQuickConnectOpen] = useState(false);
+  const quickPairingCode = useRef("");
+  const quickRelayAddress = useRef("");
   const [connectTarget, setConnectTarget] = useState<ConnectionProfile | null>(
     null,
   );
@@ -1384,6 +1386,18 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {quickConnectOpen && runtime.host === "tauri" && (
         <RemoteQuickConnect
           remote={remote}
+          onPrepareSave={platform === "ios" ? async (deviceId, relayAddress, code) => {
+            const memory = rememberRelayDevice(workspace.profiles, { deviceId, relayAddress });
+            const existing = workspace.profiles.find((profile) => profile.protocol === "lattice" && profile.deviceId === deviceId);
+            const profile = existing ?? (memory?.action === "add"
+              ? await saveProfileRecord(createConnectionProfile(memory.draft))
+              : undefined);
+            if (!profile) throw new Error("Could not save the connection.");
+            quickPairingCode.current = code;
+            quickRelayAddress.current = relayAddress;
+            setQuickConnectOpen(false);
+            setConnectTarget(profile);
+          } : undefined}
           onConnected={(result) => {
             setQuickConnectOpen(false);
             // Keep the device in My connections so the next session can use
@@ -1415,6 +1429,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {runtime.host === "tauri" && connectTarget?.protocol === "lattice" && (
         <RemoteConnectFlow
           profile={connectTarget}
+          initialPairingCode={quickPairingCode.current}
+          initialRelayAddress={quickRelayAddress.current || undefined}
           remote={remote}
           vault={vault}
           platform={platform}
@@ -1430,11 +1446,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             saveRelayAddress(window.localStorage, relayAddress);
           }}
           onConnected={(sessionId) => {
+            quickPairingCode.current = "";
+            quickRelayAddress.current = "";
             setConnectTarget(null);
             setActiveSessionId(sessionId);
             setView("terminal");
           }}
-          onCancel={() => setConnectTarget(null)}
+          onCancel={() => { quickPairingCode.current = ""; quickRelayAddress.current = ""; setConnectTarget(null); }}
         />
       )}
 

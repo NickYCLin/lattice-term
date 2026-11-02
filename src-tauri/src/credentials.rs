@@ -11,7 +11,10 @@
 //! uses one authoritative marker so rotation can fail closed.
 
 use crate::domain::{ConnectionProfile, Environment, Protocol};
+#[cfg(not(target_os = "ios"))]
 use keyring::{Entry, Error};
+#[cfg(target_os = "ios")]
+use keyring_core::{Entry, Error};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -653,7 +656,29 @@ fn account(profile_id: &str, kind: CredentialKind) -> Result<String, String> {
     Ok(format!("profile:{profile_id}:{}", kind.suffix()))
 }
 
+#[cfg(target_os = "ios")]
+fn keyring_status() -> Result<(), String> {
+    static INITIALIZED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    INITIALIZED
+        .get_or_init(|| {
+            let store = apple_native_keyring_store::protected::Store::new()
+                .map_err(|error| error.to_string())?;
+            keyring_core::set_default_store(store);
+            Ok(())
+        })
+        .clone()
+}
+
+#[cfg(not(target_os = "ios"))]
+fn keyring_status() -> Result<(), String> {
+    Entry::store_status()
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 fn entry(profile_id: &str, kind: CredentialKind) -> Result<Entry, String> {
+    keyring_status()?;
     let account = account(profile_id, kind)?;
     Entry::new(SERVICE, &account).map_err(|error| error.to_string())
 }
@@ -663,7 +688,7 @@ const NOT_FOUND: &str = "No saved credential exists for this connection.";
 /// The status of whichever backend new secrets would go to right now.
 pub fn status() -> CredentialStoreStatus {
     match preferred_backend() {
-        CredentialBackend::OsKeyring => match Entry::store_status() {
+        CredentialBackend::OsKeyring => match keyring_status() {
             Ok(()) => CredentialStoreStatus {
                 ready: true,
                 provider: provider().to_string(),

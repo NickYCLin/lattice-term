@@ -3298,6 +3298,7 @@ dependencies = [
  "gtk",
  "if-addrs",
  "keyring",
+ "keyring-core",
  "lattice-remote",
  "libc",
  "objc2-ui-kit",

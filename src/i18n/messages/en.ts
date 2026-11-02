@@ -2325,6 +2325,7 @@ export const en: Messages = {
   "remote.quick.idInvalid": "A device ID has exactly nine digits.",
   "remote.quick.relayMissing": "Enter the relay server address first.",
   "remote.quick.relayHint": "Use the same wss:// URL or private relay address as the sharing side.",
+  "remote.quick.saveCode": "Save pairing code securely",
   "remote.quick.submit": "Connect",
   "remote.relay.saved": "Using the saved relay server",
   "remote.relay.change": "Change",

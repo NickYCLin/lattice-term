@@ -7,6 +7,7 @@ import type { VaultApi } from "../../app/useVault";
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import { I18nProvider } from "../../i18n";
 import { RemoteConnectFlow } from "./RemoteConnectFlow";
+import { RemoteQuickConnect } from "./RemoteQuickConnect";
 
 vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
 const credential = vi.hoisted(() => ({
@@ -77,13 +78,13 @@ function fakeVault(state: "locked" | "notCreated" | "unlocked" = "locked"): Vaul
     refresh: vi.fn(async () => {}), create: vi.fn(async () => true), unlock: vi.fn(async () => true), lock: vi.fn(async () => {}),
     changePassword: vi.fn(async () => true), setBackend: vi.fn(async () => true) };
 }
-function harness(vault = fakeVault(), platform?: string) {
+function harness(vault = fakeVault(), platform?: string, initialPairingCode?: string) {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);
   const connect = vi.fn(async () => ({ outcome: "connected", sessionId: "test-session" }));
   const connected = vi.fn();
   const render = () => root.render(<I18nProvider locale="zh-TW"><RemoteConnectFlow profile={profile}
-    remote={{ connect } as unknown as RemoteApi} vault={vault} platform={platform} onConnected={connected} onCancel={vi.fn()} /></I18nProvider>);
+    remote={{ connect } as unknown as RemoteApi} vault={vault} platform={platform} initialPairingCode={initialPairingCode} onConnected={connected} onCancel={vi.fn()} /></I18nProvider>);
   const input = (id: string) => allNodes(container).find(node => node.attributes.id === id)!;
   const change = async (id: string, value: string) => {
     await act(async () => { const node = input(id); node.value = value; props(node).onChange?.({ currentTarget: { value, checked: false } }); });
@@ -232,4 +233,34 @@ it("does not request storage after the vault locks while a remember choice is se
     await act(async () => props(allNodes(test.container).find(node => node.tagName === "FORM")!).onSubmit!({ preventDefault: vi.fn() }));
     expect(test.connect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ rememberPairingCode: false, useSavedPairingCode: false }));
   } finally { await act(async () => test.root.unmount()); }
+});
+
+ it("keeps the quick-connect code for an explicit new credential instead of auto-connecting with an older one", async () => {
+  const vault = fakeVault(); vault.backend = "osKeyring";
+  credential.state = { mode: "saved", provider: "iOS Keychain", detail: null };
+  const test = harness(vault, "ios", "test-new-code");
+  try {
+    await act(async () => test.render());
+    expect(test.connect).not.toHaveBeenCalled();
+    expect(props(test.input("remote-pairing-code")).value).toBe("test-new-code");
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("opens secure saving from quick connect with the typed device and code", async () => {
+  const container = installHostDom();
+  Object.assign(window, { localStorage: { getItem: () => null, setItem: () => {} } });
+  const root = createRoot(container as unknown as Element);
+  const prepare = vi.fn(async () => {});
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteQuickConnect
+      remote={{ sessions: [] } as unknown as RemoteApi} onPrepareSave={prepare}
+      onConnected={vi.fn()} onCancel={vi.fn()} /></I18nProvider>));
+    for (const [id, value] of [["remote-quick-id", "123456789"], ["remote-quick-code", "test-code"], ["remote-quick-relay", "wss://relay.example.test"]]) {
+      const node = allNodes(container).find(node => node.attributes.id === id)!;
+      await act(async () => props(node).onChange!({ currentTarget: { value, checked: false } }));
+    }
+    const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "安全保存配對碼")!;
+    await act(async () => props(button).onClick!());
+    expect(prepare).toHaveBeenCalledWith("123456789", "wss://relay.example.test", "test-code");
+  } finally { await act(async () => root.unmount()); }
 });

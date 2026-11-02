@@ -4600,6 +4600,13 @@ async fn remote_connect(
         request.port,
         (!request.device_id.trim().is_empty()).then_some(request.device_id.as_str()),
     ) {
+        if request.remember_pairing_code {
+            return Ok(RemoteConnectOutcome::Failed {
+                stage: "credential",
+                detail: "Close the existing connection before saving a new pairing code."
+                    .to_string(),
+            });
+        }
         return Ok(RemoteConnectOutcome::Connected { session });
     }
 

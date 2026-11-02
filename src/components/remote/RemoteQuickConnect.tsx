@@ -31,10 +31,12 @@ export function RemoteQuickConnect({
   remote,
   onConnected,
   onCancel,
+  onPrepareSave,
 }: {
   remote: RemoteApi;
   onConnected: (result: RemoteQuickConnectResult) => void;
   onCancel: () => void;
+  onPrepareSave?: (deviceId: string, relayAddress: string, pairingCode: string) => Promise<void>;
 }) {
   const { t } = useI18n();
   const [savedRelay] = useState(() => loadRelayAddress(window.localStorage));
@@ -99,7 +101,7 @@ export function RemoteQuickConnect({
       deviceId: normalizedId,
       relayAddress: relayAddress.trim(),
     });
-    // Drop the one-time secret immediately after the IPC call resolves.
+    // Clear the entered pairing code from the form after the IPC call resolves.
     setPairingCode("");
     setBusy(false);
     if (outcome.outcome === "connected") {
@@ -120,6 +122,21 @@ export function RemoteQuickConnect({
         }),
       );
     }
+  }
+
+  async function prepareSave() {
+    const id = normalizeDeviceId(deviceId);
+    if (!id) { setProblem(t("remote.quick.idInvalid")); return; }
+    if (!relayAddress.trim()) { setProblem(t("remote.quick.relayMissing")); return; }
+    if (!onPrepareSave || busy) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await onPrepareSave(id, relayAddress.trim(), pairingCode);
+      setPairingCode("");
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : String(reason));
+    } finally { setBusy(false); }
   }
 
   return (
@@ -220,6 +237,10 @@ export function RemoteQuickConnect({
             onChange={setRelayAddress}
           />
 
+          {onPrepareSave && (
+            <button type="button" className="button button--secondary" disabled={busy}
+              onClick={() => void prepareSave()}>{t("remote.quick.saveCode")}</button>
+          )}
           <div className="dialog__actions">
             <button
               type="button"

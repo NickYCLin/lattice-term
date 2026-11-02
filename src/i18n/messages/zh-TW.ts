@@ -2248,6 +2248,7 @@ export const zhTW = {
   "remote.quick.idInvalid": "裝置 ID 必須是九位數字。",
   "remote.quick.relayMissing": "請先填寫中繼伺服器位址。",
   "remote.quick.relayHint": "與分享端使用同一個 wss:// 網址或私有中繼位址。",
+  "remote.quick.saveCode": "安全保存配對碼",
   "remote.quick.submit": "連線",
   "remote.relay.saved": "使用已儲存的中繼伺服器",
   "remote.relay.change": "修改",
