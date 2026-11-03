@@ -18,7 +18,9 @@ let container: ReturnType<typeof installFakeDom>;
 let root: ReturnType<typeof createRoot>;
 let panel: SqlWorkbenchState;
 beforeEach(() => {
-  vi.useFakeTimers(); container = installFakeDom(); root = createRoot(container as unknown as Element);
+  vi.useFakeTimers(); container = installFakeDom();
+  document.createElementNS = ((_namespace: string | null, name: string) => document.createElement(name)) as typeof document.createElementNS;
+  root = createRoot(container as unknown as Element);
   panel = {id:"a".repeat(32),profileId:"fixture",name:"測試庫",sql:"SELECT 1",revision:0,busy:false,shareRead:false,shareEdit:false,detached:false,updatedBy:"user",lastSql:"",result:null,error:null};
   invoke.mockImplementation(async (command: string, {action}: {action?: Record<string, unknown>} = {}) => {
     if (command === "database_popout") { panel = {...panel,detached:true}; return; }
@@ -47,7 +49,7 @@ it("syncs the exact dirty SQL before confirmation and executes a write only afte
   await render(); await type("DELETE FROM sample WHERE id=1"); await click("執行增刪修…");
   expect(invoke.mock.calls.some(([,p])=>p?.action?.kind === "execute")).toBe(false);
   expect(props(container).find((p)=>p.children === "確認執行這份 SQL")?.disabled).toBe(true);
-  await act(async()=>{const checkboxes = props(container).filter((p)=>p.type === "checkbox"); checkboxes[checkboxes.length-1]!.onChange!({target:{checked:true}});});
+  await act(async()=>{props(container).find((p)=>p["aria-label"] === "確認執行資料變更")!.onChange!({target:{checked:true}});});
   await click("確認執行這份 SQL");
   expect(invoke).toHaveBeenCalledWith("database_workbench",{action:{kind:"execute",id:panel.id,revision:1,confirmedWrite:true}});
   expect(panel.lastSql).toBe("DELETE FROM sample WHERE id=1");

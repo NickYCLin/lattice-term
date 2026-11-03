@@ -16,12 +16,15 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   onStateChange?: (state: { busy: boolean; dirty: boolean }) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
   const operationBusy = useRef(false);
   const titleId = useId();
   const hostKey = hostKeys?.[0] ?? "local";
   const hosts = new Map(profiles.map((profile) => [profile.machineId ?? profile.id, profile]));
   const initialHost = profiles.find((profile) => hostKeys?.includes(profile.id) || hostKeys?.includes(profile.machineId ?? ""));
+  const [view, setView] = useState<"sql" | "tables" | "settings">("sql");
+  const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
   const [draft, setDraft] = useState(() => emptyDatabase(hostKey, initialHost?.hostname));
   const [password, setPassword] = useState("");
@@ -40,7 +43,12 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const [previousOffsets, setPreviousOffsets] = useState<number[]>([]);
   const saved = snapshot?.profiles.find((profile) => profile.id === draft.id);
   const dirty = !saved || JSON.stringify(saved) !== JSON.stringify(draft) || password.length > 0;
-  useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: busy, active: !embedded });
+  const navigationBlocked = busy || (touched && dirty);
+  const activeView = saved ? view : "settings";
+  useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeView, draft.id]);
+  const available = snapshot?.profiles.filter((profile) => !hostKeys || hostKeys.includes(profile.hostKey)) ?? [];
+  const visible = available.filter((profile) => `${profile.name} ${profile.hostname} ${profile.database}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: navigationBlocked, active: !embedded });
   useEffect(() => { onStateChange?.({ busy, dirty: (touched && dirty) || sqlState.dirty }); }, [busy, dirty, touched, sqlState.dirty, onStateChange]);
 
   useEffect(() => {
@@ -48,7 +56,11 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
     operationBusy.current = true;
     setBusy(true);
     void invoke<DatabaseSnapshot>("database_profiles").then((value) => {
-      if (generation.current === request) setSnapshot(value);
+      if (generation.current === request) {
+        setSnapshot(value);
+        const first = value.profiles.find((profile) => !hostKeys || hostKeys.includes(profile.hostKey));
+        if (first) setDraft(first);
+      }
     }).catch((reason: unknown) => {
       if (generation.current === request) setError(String(reason));
     }).finally(() => {
@@ -58,7 +70,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   }, []);
 
   function reset(profile = emptyDatabase(hostKey, initialHost?.hostname)) {
-    setTouched(false);
+    setTouched(false); setView(snapshot?.profiles.some((entry) => entry.id === profile.id) ? "sql" : "settings");
     setDraft(profile); setPassword(""); setResult(null); setResultKind(null); setTables([]);
     setTableIndex(""); setOffset(0); setDeleting(null); setError(""); setNotice("");
   }
@@ -87,7 +99,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
       const value = await invoke<DatabaseSnapshot>("database_save", { profile: draft, revision: snapshot.revision, password: password || null });
       setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setTables([]); setTableIndex(""); setResult(null);
       setTouched(false);
-      setNotice("連線已儲存；尚未代表已連線成功，請按測試連線確認。");
+      setNotice("連線已儲存。可測試連線，或切換 SQL 工作台開始查詢。");
     });
   }
 
@@ -104,6 +116,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
       const value = await invoke<DatabaseResult>("database_read", { action });
       setResult(value);
       setResultKind(kind);
+      if (kind === "version") setNotice("連線測試成功。");
       if (kind === "tables") { setTables(value.rows); setTableIndex(""); }
       setOffset(nextOffset);
       setPreviousOffsets(history);
@@ -113,37 +126,36 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   return (
     <div className={embedded ? undefined : "scrim scrim--center"} role={embedded ? undefined : "presentation"}>
       <div className={embedded ? "database-manager database-manager--embedded" : "dialog database-manager"} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby={titleId} aria-busy={busy} ref={dialogRef} tabIndex={-1}>
-        <header className="database-manager__header">
-          {embedded ? <h4 id={titleId}>資料庫設定與資料瀏覽</h4> : <h2 className="dialog__title" id={titleId}>資料庫連線</h2>}
-          {!embedded && <button type="button" className="button button--secondary" onClick={onClose} disabled={busy}>關閉</button>}
+        <header className="database-manager__header"><div><span className="database-manager__eyebrow">DATABASE WORKSPACE</span>
+          {embedded ? <h4 id={titleId}>資料庫工作區</h4> : <h2 id={titleId}>資料庫工作區</h2>}
+          </div>{!embedded && <button type="button" className="button button--secondary" onClick={onClose} disabled={navigationBlocked}>關閉</button>}
         </header>
-        <p>同一台主機可新增多個種類、版本或執行個體；以名稱及連接埠區分。下方 SQL 工作台可查詢與增刪修資料。</p>
-        <p>伺服器連線強制驗證 TLS 憑證；資料瀏覽可使用唯讀帳號，增刪修需有對應寫入權限。不自動探索 instance 連接埠，也不會傳回密碼。</p>
-        {error && <p role="alert" className="database-manager__error">{error}</p>}
-        {notice && <p role="status">{notice}</p>}
-        {!!snapshot?.credentialCleanupPending && <div role="alert">
-          <p>連線設定已更新，仍有 {snapshot.credentialCleanupPending} 筆舊密碼等待清除。請解鎖憑證庫後重試；尚未完成密碼清除。</p>
-          <button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
-            const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
-          })}>重試清除舊密碼</button>
-        </div>}
-        {(connectionBusy || sqlState.busy) && <p role="status">處理中…最長等候 20 秒</p>}
         <div className="database-manager__layout">
-          <aside aria-label="已儲存的資料庫">
-            <button type="button" className="button button--primary" disabled={busy} onClick={() => reset()}>新增資料庫</button>
-            <ul className="database-manager__list">
-              {snapshot?.profiles.filter((profile) => !hostKeys || hostKeys.includes(profile.hostKey)).map((profile) => (
-                <li key={profile.id}>
-                  <button type="button" className="button button--secondary" aria-pressed={draft.id === profile.id} disabled={busy} onClick={() => reset(profile)}>
-                    {profile.name} · {databaseEngines.find((engine) => engine.value === profile.engine)?.label} {profile.port || ""}
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <aside className="database-manager__sidebar" aria-label="已儲存的資料庫">
+            <div className="database-manager__sidebar-head"><h3>連線 <span>{available.length}</span></h3><button type="button" className="button button--secondary" disabled={navigationBlocked} onClick={() => reset()}>新增資料庫</button></div>
+            <input className="database-manager__search" aria-label="搜尋資料庫連線" placeholder="搜尋連線…" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <ul className="database-manager__list">{visible.map((profile) => <li key={profile.id}>
+              <button type="button" title={profile.name} aria-pressed={draft.id === profile.id} disabled={navigationBlocked} onClick={() => reset(profile)}>{profile.name}<small><span className="database-manager__engine-dot" />{profile.engine === "sqlite" ? "SQLite" : databaseEngines.find((engine) => engine.value === profile.engine)?.label} · {profile.engine === "sqlite" ? "本機檔案" : `${profile.hostname}:${profile.port}`}</small></button>
+            </li>)}</ul>
+            {snapshot && !visible.length && <p className="database-manager__hint">{available.length ? "沒有符合的連線" : "新增第一個資料庫連線，開始查詢資料。"}</p>}
+            <div className="database-manager__sidebar-foot"><span>連線保存在此裝置</span><button type="button" disabled={navigationBlocked} onClick={() => void perform(async () => {
+              const value = await invoke<DatabaseSnapshot>("database_profiles"); setSnapshot(value); reset(value.profiles.find((entry) => !hostKeys || hostKeys.includes(entry.hostKey)));
+            })}>重新載入連線（捨棄未儲存設定）</button></div>
           </aside>
-          <form onSubmit={save}>
+          <section className="database-manager__workspace" aria-label="資料庫內容">
+            <div className="database-manager__connection-head"><div><h3>{saved?.name || "建立新連線"}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? "本機檔案" : `${saved.hostname}:${saved.port} / ${saved.database}`}` : "連接資料庫，將查詢與結果留在同一個工作區。"}</p></div><span className="database-manager__badge">{saved ? "已儲存" : "尚未儲存"}</span></div>
+            <nav className="database-manager__tabs" aria-label="資料庫工作區頁面">{([ ["sql", "SQL 工作台"], ["tables", "資料表瀏覽"], ["settings", "連線設定"] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => setView(key)}>{label}</button>)}</nav>
+            <div className="database-manager__content" ref={contentRef}>
+              {error && <p role="alert" className="database-manager__notice database-manager__error">{error}</p>}
+              {notice && <p role="status" className="database-manager__notice">{notice}</p>}
+              {(connectionBusy || sqlState.busy) && <p role="status" className="database-manager__notice">處理中…最長等候 20 秒</p>}
+              {!!snapshot?.credentialCleanupPending && <div role="alert" className="database-manager__notice"><p>仍有 {snapshot.credentialCleanupPending} 筆舊密碼等待清除，請解鎖憑證庫後重試。</p><button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
+                const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
+              })}>重試清除舊密碼</button></div>}
+          <form onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings"}>
+            <div className="database-manager__section-heading"><h3>{saved ? "連線設定" : "新增資料庫連線"}</h3><p>設定端點與帳號，儲存後即可開啟 SQL 工作台。</p></div>
             <fieldset disabled={busy || !snapshot} className="database-manager__fields">
-              <label>連線名稱（例如 PostgreSQL 16 測試庫）<input required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
+              <label>連線名稱<input placeholder="例如：開發環境 PostgreSQL" required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
               <label>所屬主機<select value={draft.hostKey} onChange={(event) => update("hostKey", event.target.value)}>
                 <option value="local">未分類／本機</option>
                 {!hosts.has(draft.hostKey) && draft.hostKey !== "local" && <option value={draft.hostKey}>原主機（卡片已移除或合併）</option>}
@@ -155,23 +167,25 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
                 setPassword(""); setResult(null); setTables([]); setTableIndex("");
               }}>{databaseEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}</select></label>
               {draft.engine === "sqlite" ? (
-                <label>既有 SQLite 本機檔案（絕對路徑）<input required maxLength={2048} value={draft.sqlitePath} onChange={(event) => update("sqlitePath", event.target.value)} /></label>
+                <label className="database-manager__span">SQLite 檔案路徑<input required maxLength={2048} value={draft.sqlitePath} onChange={(event) => update("sqlitePath", event.target.value)} /></label>
               ) : <>
                 <label>主機名稱／IP<input required maxLength={253} value={draft.hostname} onChange={(event) => update("hostname", event.target.value)} /></label>
                 <label>連接埠<input required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
                 <label>資料庫名稱<input required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
                 <label>帳號<input required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
                 <label>密碼（留白保留；變更端點須重填）<input type="password" autoComplete="new-password" value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label>
-                <label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
-                <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p>
+                <details className="database-manager__advanced database-manager__span"><summary>進階 TLS 設定</summary><label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
+                <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p></details>
               </>}
-              <label className="database-manager__permission"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
-              <p>密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>
-              <div className="database-manager__actions">
+              <label className="database-manager__permission database-manager__span"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
+              <p className="database-manager__hint database-manager__span">密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>
+              <div className="database-manager__actions database-manager__span">
                 <button type="submit" className="button button--primary" disabled={!dirty}>{embedded ? "儲存資料庫連線" : "儲存連線"}</button>
-                {saved && <button type="button" className="button button--danger" onClick={() => setDeleting(saved.id)}>刪除此資料庫連線</button>}
+                {saved && <button type="button" className="button button--secondary" disabled={dirty} onClick={() => read("version")}>測試連線</button>}
+                <button type="button" className="button button--secondary" onClick={() => reset(saved ?? available[0])}>取消編輯</button>
+                {saved && <button type="button" className="database-manager__delete" onClick={() => setDeleting(saved.id)}>刪除此資料庫連線</button>}
               </div>
-              {deleting && <div role="group" aria-label="確認刪除資料庫連線">
+              {deleting && <div className="database-manager__span sql-workbench__confirm" role="group" aria-label="確認刪除資料庫連線">
                 <p>只刪除此連線與保存的密碼，不刪除資料庫、檔案或其他連線。</p>
                 <button type="button" className="button button--danger" onClick={() => void perform(async () => {
                   const value = await invoke<DatabaseSnapshot>("database_delete", { profileId: deleting, revision: snapshot!.revision });
@@ -181,8 +195,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
               </div>}
             </fieldset>
           </form>
-        </div>
-        <section aria-label="唯讀資料瀏覽">
+        <section className="database-manager__browse" aria-label="唯讀資料瀏覽" hidden={activeView !== "tables"}><div className="database-manager__section-heading"><h3>資料表瀏覽</h3><p>查看資料表結構與分頁資料。</p></div>
           <div className="database-manager__actions">
             <button type="button" className="button button--secondary" disabled={busy || dirty} onClick={() => read("version")}>測試連線／讀取版本</button>
             <button type="button" className="button button--secondary" disabled={busy || dirty} onClick={() => read("tables")}>列出資料表</button>
@@ -207,10 +220,12 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
             </div>}
           </>}
         </section>
-        {saved && !dirty && <SqlWorkbench key={saved.id} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} />}
-        <button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
-          const value = await invoke<DatabaseSnapshot>("database_profiles"); setSnapshot(value); reset();
-        })}>重新載入連線（捨棄未儲存設定）</button>
+
+              {saved && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={saved.id} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">請先儲存或取消連線設定的變更。</p>}</div>}
+            </div>
+            <footer className="database-manager__footer"><span>{sqlState.dirty ? "SQL 尚未同步，請先同步草稿再切換連線。" : touched && dirty ? "連線設定尚未儲存" : "SQL 查詢與資料增刪修"}</span><span>{draft.engine === "sqlite" ? "本機 SQLite 檔案" : "伺服器連線驗證 TLS 憑證"}</span></footer>
+          </section>
+        </div>
       </div>
     </div>
   );

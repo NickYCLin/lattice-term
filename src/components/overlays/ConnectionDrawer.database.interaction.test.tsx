@@ -10,6 +10,7 @@ import { ConnectionDrawer } from "./ConnectionDrawer";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("./modalFocus", () => ({ useModalFocus: () => {} }));
+vi.mock("../connections/SqlWorkbench", () => ({ SqlWorkbench: () => null }));
 vi.mock("../../app/useConnectionCredentialDraft", () => ({ useConnectionCredentialDraft: () => ({
   native: false, dirty: false, loading: false, secret: "", saved: false, allowMcpRead: false,
   setSecret() {}, setAllowMcpRead() {}, reveal() {}, invalidateReveal() {},
@@ -54,7 +55,9 @@ async function click(text: string) {
   await act(async () => props(target).onClick());
 }
 async function editDatabase() {
-  await click("主機資料庫 · PostgreSQL 5432");
+  const selected = allNodes(container).find((node) => node.tagName === "BUTTON" && node.textContent.startsWith("主機資料庫"))!;
+  await act(async () => props(selected).onClick());
+  await click("連線設定");
   const input = allNodes(container).find((node) => props(node)?.value === "主機資料庫")!;
   await act(async () => props(input).onChange({ target: { value: "已修改資料庫" } }));
 }

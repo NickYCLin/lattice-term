@@ -29,6 +29,7 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
   const current = useRef(panel); current.current = panel;
   const editing = useRef(dirty); editing.current = dirty;
   const operation = useRef(false);
+  const lineNumbers = useRef<HTMLPreElement>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => { onStateChange?.({ busy: pending || panel?.busy === true, dirty }); }, [pending, panel?.busy, dirty, onStateChange]);
   useEffect(() => () => onStateChange?.({ busy: false, dirty: false }), [onStateChange]);
@@ -132,7 +133,7 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
       const start = drag.current; drag.current = null;
       if (start && Math.hypot(start.x - event.screenX, start.y - event.screenY) > 40 && draggedOutside(event.clientX, event.clientY, window.innerWidth, window.innerHeight)) popout(event.screenX - 30, event.screenY - 20);
     }}>
-      <h3>SQL 工作台{panel ? ` · ${panel.name}` : ""}</h3>
+      <h3>{separate ? `SQL 工作台${panel ? ` · ${panel.name}` : ""}` : "SQL 編輯器"}{!separate && canDetach && <small>可拖出視窗</small>}</h3>
       {separate ? <button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
         await sync();
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -140,37 +141,21 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
         await getCurrentWindow().close();
       })}>放回主視窗</button> : canDetach && <button type="button" className="button button--secondary" disabled={!panel || busy} onClick={() => popout()}>移至獨立視窗</button>}
     </header>
-    {!separate && canDetach && <p>拖曳上方標題列到視窗外可分離；關閉獨立視窗會回到這個面板。</p>}
-    {error && <p role="alert">{error}</p>}
-    {panel?.error && <p role="alert">{panel.error}</p>}
-    {panel && <p>目前連線：{panel.target ?? panel.name}</p>}
-    <label className="sql-workbench__editor">SQL 語法<textarea aria-label="SQL 語法" rows={9} spellCheck={false} maxLength={65536} disabled={!panel || busy} value={sql} onChange={(event) => { setSql(event.target.value); setDirty(true); editing.current = true; }} /></label>
-    <div className="database-manager__actions">
-      {!separate && <button type="button" className="button button--secondary" disabled={!panel || busy || dirty} onClick={() => void perform(async () => {
-        await invoke("database_workbench_close", {id:panel!.id,revision:panel!.revision}); setClosed(true); setPanel(null);
-      })}>關閉工作台並清除草稿與結果</button>}
-      <button type="button" className="button button--secondary" disabled={!panel || busy || !dirty} onClick={() => void perform(async () => { await sync(); })}>同步草稿</button>
-      <button type="button" className="button button--secondary" disabled={!panel || busy} onClick={() => void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "read", id: panel!.id } })); })}>重新載入共享草稿</button>
+    {error && <p className="database-manager__notice database-manager__error" role="alert">{error}</p>}
+    {panel?.error && <p className="database-manager__notice database-manager__error" role="alert">{panel.error}</p>}
+    {panel && separate && <p className="sql-workbench__target">目前連線：{panel.target ?? panel.name}</p>}
+    <div className="sql-workbench__editor"><div className="sql-workbench__code"><pre ref={lineNumbers} aria-hidden="true">{sql.split("\n").map((_, i) => i + 1).join("\n")}</pre><textarea aria-label="SQL 語法" rows={7} wrap="off" spellCheck={false} maxLength={65536} disabled={!panel || busy} value={sql} onScroll={(event) => { if (lineNumbers.current) lineNumbers.current.scrollTop = event.currentTarget.scrollTop; }} onChange={(event) => { setSql(event.target.value); setDirty(true); editing.current = true; }} /></div></div>
+    <div className="sql-workbench__toolbar">
+
       <button type="button" className="button button--primary" disabled={!panel || busy || !sql.trim()} onClick={() => execute(false)}>執行查詢</button>
       <button type="button" className="button button--danger" disabled={!panel || busy || !sql.trim()} onClick={() => execute(true)}>執行增刪修…</button>
+      <button type="button" className="button button--secondary" disabled={!panel || busy || !dirty} onClick={() => void perform(async () => { await sync(); })}>同步草稿</button>
     </div>
-    <p>{dirty ? "目前有未同步的 SQL；同步後 MCP 才能看到最新語法。" : panel?.updatedBy === "mcp" ? "MCP 已更新這份 SQL 草稿，尚未執行。" : "SQL 草稿已同步。"} 每次執行一個 SELECT、INSERT、UPDATE 或 DELETE；寫入帳號需具備對應資料庫權限。</p>
-    {panel && <div className="sql-workbench__sharing">
-      {!mcpAllowed && !separate && <p>要透過 MCP 存取工作台，請先在上方連線設定開啟「允許 MCP 讀取」並儲存。</p>}
-      <label><input type="checkbox" checked={panel.shareRead} disabled={busy || dirty} onChange={(event) => {
-        const read = event.target.checked;
-        void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "share", id: panel.id, revision: panel.revision, read, edit: read && panel.shareEdit } })); });
-      }} />允許 MCP 讀取此工作台的 SQL 與結果</label>
-      <label><input type="checkbox" checked={panel.shareEdit} disabled={busy || dirty || !panel.shareRead} onChange={(event) => {
-        const edit = event.target.checked;
-        void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "share", id: panel.id, revision: panel.revision, read: panel.shareRead, edit } })); });
-      }} />允許 MCP 修改 SQL 草稿（不會自動執行）</label>
-      <small>工作台 ID：{panel.id}。關閉程式會清除這些草稿與結果。</small>
-    </div>}
+    <p className="sql-workbench__status">{dirty ? "尚未同步的變更" : panel?.updatedBy === "mcp" ? "MCP 已更新草稿，尚未執行" : "草稿已同步"} · 每次執行一個 SQL 敘述</p>
     {confirmation && <div role="group" aria-label="確認 SQL 資料變更" className="sql-workbench__confirm">
       <p>將對「{panel?.name} · {panel?.target ?? ""}」執行以下 SQL。請確認連線、WHERE 條件與資料範圍。</p>
       <pre>{confirmation.sql}</pre>
-      <label><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />我已確認這份 SQL，要執行資料變更</label>
+      <label><input type="checkbox" aria-label="確認執行資料變更" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />我已確認這份 SQL，要執行資料變更</label>
       <button type="button" className="button button--danger" disabled={busy || !accepted} onClick={() => void perform(async () => {
         const value = await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "execute", id: panel!.id, revision: confirmation.revision, confirmedWrite: true } });
         setConfirmation(null); setAccepted(false); apply(value);
@@ -178,6 +163,7 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
       <button type="button" className="button button--secondary" onClick={() => setConfirmation(null)}>取消執行</button>
     </div>}
     {panel?.busy && <p role="status">SQL 執行中，最長等候 20 秒；請勿重複送出。</p>}
+    {panel && !panel.result && !panel.busy && !panel.error && <div className="sql-workbench__empty"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M9 9v11M15 9v11" /></svg><h4>查詢結果會顯示在這裡</h4><p>輸入 SQL，執行查詢後即可查看資料。</p></div>}
     {panel?.result && <div className="sql-workbench__results">
       <details><summary>這份結果執行的 SQL</summary><pre>{panel.lastSql}</pre></details>
       {panel.result.affectedRows !== null ? <p role="status">執行完成，伺服器回報影響 {panel.result.affectedRows} 筆資料。</p> : <>
@@ -188,5 +174,22 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
         </table></div>
       </>}
     </div>}
+    <details className="sql-workbench__options"><summary>草稿與 MCP 設定</summary>
+      <div className="database-manager__actions">      <button type="button" className="button button--secondary" disabled={!panel || busy} onClick={() => void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "read", id: panel!.id } })); })}>重新載入共享草稿</button>      {!separate && <button type="button" className="button button--secondary" disabled={!panel || busy || dirty} onClick={() => void perform(async () => {
+        await invoke("database_workbench_close", {id:panel!.id,revision:panel!.revision}); setClosed(true); setPanel(null);
+      })}>關閉工作台並清除草稿與結果</button>}</div>
+    {panel && <div className="sql-workbench__sharing">
+      {!mcpAllowed && !separate && <p>要透過 MCP 存取工作台，請先在「連線設定」頁面開啟「允許 MCP 讀取」並儲存。</p>}
+      <label><input type="checkbox" checked={panel.shareRead} disabled={busy || dirty} onChange={(event) => {
+        const read = event.target.checked;
+        void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "share", id: panel.id, revision: panel.revision, read, edit: read && panel.shareEdit } })); });
+      }} />允許 MCP 讀取此工作台的 SQL 與結果</label>
+      <label><input type="checkbox" checked={panel.shareEdit} disabled={busy || dirty || !panel.shareRead} onChange={(event) => {
+        const edit = event.target.checked;
+        void perform(async () => { apply(await invoke<SqlWorkbenchState>("database_workbench", { action: { kind: "share", id: panel.id, revision: panel.revision, read: panel.shareRead, edit } })); });
+      }} />允許 MCP 修改 SQL 草稿（不會自動執行）</label>
+      <small>工作台 ID：{panel.id}。關閉程式會清除這些草稿與結果。</small>
+    </div>}
+    </details>
   </section>;
 }

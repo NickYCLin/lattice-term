@@ -11,6 +11,7 @@ import { ConnectionsView } from "./ConnectionsView";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../components/overlays/modalFocus", () => ({ useModalFocus: () => {} }));
+vi.mock("../components/connections/SqlWorkbench", () => ({ SqlWorkbench: () => null }));
 vi.mock("../components/files/FileDropZone", () => ({ FileDropZone: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
 
 const host = { ...createConnectionProfile({ ...emptyDraft(), name: "測試主機", hostname: "db.invalid" }, "ssh-route"), machineId: "machine" };
@@ -58,7 +59,7 @@ async function click(label: string) {
 it.each([
   { profiles: [], mobile: false }, { profiles: [host], mobile: false },
   { profiles: [], mobile: true }, { profiles: [host], mobile: true },
-])("opens the database input form without requiring a host: %j", async ({ profiles, mobile }) => {
+])("opens the database workspace without requiring a host: %j", async ({ profiles, mobile }) => {
   await render(profiles, mobile);
   expect(invoke).not.toHaveBeenCalled();
   await click("新增／管理資料庫");
@@ -74,6 +75,7 @@ it.each([false, true])("opens a merged card with its host prefilled and both rou
   expect(container.textContent).toContain("舊連線資料庫");
   expect(container.textContent).toContain("主機資料庫");
   expect(container.textContent).not.toContain("其他主機資料庫");
+  await click("新增資料庫");
   expect(allNodes(container).some(node => node.tagName === "INPUT" && props(node).value === "db.invalid")).toBe(true);
   expect(invoke).toHaveBeenCalledExactlyOnceWith("database_profiles");
 });
@@ -88,9 +90,10 @@ it.each([false, true])("does not offer databases without a native backend (mobil
 it("reads a saved database version from the mobile card", async () => {
   await render([host], true);
   await click("資料庫設定");
-  const saved = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.startsWith("主機資料庫 ·"));
+  const saved = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.startsWith("主機資料庫"));
   expect(saved).toBeDefined();
   await act(async () => props(saved!).onClick());
+  await click("資料表瀏覽");
   invoke.mockResolvedValueOnce({ columns: ["version"], rows: [["synthetic PostgreSQL 16"]], truncated: false, cellCharacterLimit: 512, stableOrder: false });
   await click("測試連線／讀取版本");
   expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: expect.any(String) } });

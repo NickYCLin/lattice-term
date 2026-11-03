@@ -9,9 +9,11 @@ import { DatabaseManager } from "./DatabaseManager";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
+vi.mock("./SqlWorkbench", () => ({ SqlWorkbench: () => <section aria-label="測試 SQL 工作台" /> }));
 
 type Host = Record<string, unknown> & { childNodes?: Host[] };
 type Props = {
+  hidden?: boolean;
   rows?: number;
   autoComplete?: string;
   maxLength?: number;
@@ -199,4 +201,24 @@ it("shows load failures rather than silently pretending there are no saved conne
   await render();
   expect(hostProps(container).some((props) => props.children === "資料庫設定檔無法解析；原檔已保留，請先修復。")).toBe(true);
   expect(hostProps(container).some((props) => props.disabled === true)).toBe(true);
+});
+
+it("opens the first saved connection in the SQL workspace and keeps settings in their own view", async () => {
+  await render();
+  expect(hostProps(container).find((props) => props.onSubmit)!.hidden).toBe(true);
+  expect(hostProps(container).some((props) => props.value === database.name)).toBe(true);
+  await click("連線設定");
+  expect(hostProps(container).find((props) => props.onSubmit)!.hidden).toBe(false);
+  await click("另一個版本");
+  expect(hostProps(container).find((props) => props.onSubmit)!.hidden).toBe(true);
+});
+
+it("requires saving or cancelling edited settings before switching connections or closing", async () => {
+  await render(); await click("連線設定");
+  await change((props) => props.maxLength === 100, { value: "尚未儲存" });
+  expect(hostProps(container).find((props) => Array.isArray(props.children) && props.children.includes("另一個版本"))!.disabled).toBe(true);
+  expect(hostProps(container).find((props) => props.children === "關閉")!.disabled).toBe(true);
+  await click("取消編輯");
+  expect(hostProps(container).find((props) => props.children === "關閉")!.disabled).toBe(false);
+  expect(hostProps(container).some((props) => props.value === database.name)).toBe(true);
 });
