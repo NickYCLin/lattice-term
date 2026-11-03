@@ -4,6 +4,27 @@
 
 ---
 
+## [2026.11.4](https://github.com/NickYCLin/lattice-term/compare/v2026.11.3...v2026.11.4) (2026-11-03)
+
+
+### 🚀 新增功能
+
+* **connections:** 統一遠端與資料庫設定入口 ([b1ccfce](https://github.com/NickYCLin/lattice-term/commit/b1ccfcedb38f16f9fe61d580eb21d422c5b639bc))
+* **database:** 整合 SQL 工作區與 AI 執行權限 ([68bd7ea](https://github.com/NickYCLin/lattice-term/commit/68bd7ea1f3b64b43496bc0f456328db65635f4dc))
+* **fleet:** 支援遠端輸出的閱讀與追尾 ([773f09c](https://github.com/NickYCLin/lattice-term/commit/773f09c9bb3acf8855fe22ba1321580bd5d23c74))
+* **fleet:** 補齊多行提示與啟動後顯示 ([df0de44](https://github.com/NickYCLin/lattice-term/commit/df0de44fb843af525d3dfb18821e444a9980e1cf))
+* 新增可分離的 SQL 工作台與資料增刪修 ([4e0934c](https://github.com/NickYCLin/lattice-term/commit/4e0934c7fd64ac03b8c72561ead5f8480355e0dd))
+* 重新設計資料庫與 SQL 工作區介面 ([2a8f7f4](https://github.com/NickYCLin/lattice-term/commit/2a8f7f44f4987cac7c596d3d2b61d920248326c4))
+
+
+### 🛠️ 問題修正
+
+* **capture:** 補齊遠端錄影的資源清理 ([5b70623](https://github.com/NickYCLin/lattice-term/commit/5b706231e2cfce792e9cb4584c20f85680aa9ab7))
+* **ios:** 修正注音空白補送的計時器錯誤 ([23acd9a](https://github.com/NickYCLin/lattice-term/commit/23acd9a7823684037ee5030fee764529e77005be))
+* **ios:** 修正鍵盤首次開啟並提供空白鍵 ([d1e79b5](https://github.com/NickYCLin/lattice-term/commit/d1e79b58849d4f61c14155aeba3eba8ca29a105e))
+* **ios:** 恢復注音選字後的空白輸入 ([4400355](https://github.com/NickYCLin/lattice-term/commit/440035545d8d212bc5de5fad80b48cb6afb3d603))
+* 修正 SQL Server 工作台提交交易時的錯誤 ([0c113e1](https://github.com/NickYCLin/lattice-term/commit/0c113e199129badae948092e4fb7e2dbd4f90a1f))
+
 ## [2026.11.3](https://github.com/NickYCLin/lattice-term/compare/v2026.11.1...v2026.11.3) (2026-11-02)
 
 
