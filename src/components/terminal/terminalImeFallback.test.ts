@@ -262,3 +262,33 @@ describe("TerminalImeFallback", () => {
     expect(fallback.recordTerminalData("中文")).toBeNull();
   });
 });
+
+
+it("keeps the Window receiver for fallback scheduling and cancellation", () => {
+  vi.useFakeTimers();
+  const schedule = globalThis.setTimeout;
+  const cancel = globalThis.clearTimeout;
+  const sent: string[] = [];
+  const fallback = new TerminalImeFallback(data => sent.push(data), undefined, undefined, undefined, true);
+  vi.stubGlobal("setTimeout", function (this: unknown, ...args: Parameters<typeof setTimeout>) {
+    expect(this).toBe(globalThis);
+    return schedule(...args);
+  });
+  vi.stubGlobal("clearTimeout", function (this: unknown, timer: ReturnType<typeof setTimeout>) {
+    expect(this).toBe(globalThis);
+    cancel(timer);
+  });
+  try {
+    fallback.recordInput("中文", "insertText");
+    fallback.flushPending();
+    expect(sent).toEqual(["中文"]);
+    fallback.recordInput("測試", "insertText");
+    fallback.dispose();
+    vi.runAllTimers();
+    expect(sent).toEqual(["中文"]);
+  } finally {
+    fallback.dispose();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});

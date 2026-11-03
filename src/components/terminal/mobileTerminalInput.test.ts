@@ -260,3 +260,35 @@ it("keeps a recovered Chinese commit before its spaces and suppresses late xterm
     vi.useRealTimers();
   }
 });
+
+
+it("calls browser timers with the Window receiver when forwarding mobile spaces", () => {
+  vi.useFakeTimers();
+  const schedule = globalThis.setTimeout;
+  const cancel = globalThis.clearTimeout;
+  const textarea = new EventTarget() as HTMLTextAreaElement;
+  const sent: string[] = [];
+  const input = new MobileTerminalInput(textarea, data => sent.push(data), true);
+  vi.stubGlobal("setTimeout", function (this: unknown, ...args: Parameters<typeof setTimeout>) {
+    expect(this).toBe(globalThis);
+    return schedule(...args);
+  });
+  vi.stubGlobal("clearTimeout", function (this: unknown, timer: ReturnType<typeof setTimeout>) {
+    expect(this).toBe(globalThis);
+    cancel(timer);
+  });
+  try {
+    type(textarea, input, " ");
+    type(textarea, input, " ");
+    vi.runAllTimers();
+    expect(sent).toEqual(["  "]);
+    type(textarea, input, " ");
+    input.dispose();
+    vi.runAllTimers();
+    expect(sent).toEqual(["  "]);
+  } finally {
+    input.dispose();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});

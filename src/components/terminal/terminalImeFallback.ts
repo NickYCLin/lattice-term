@@ -45,11 +45,13 @@ export class TerminalImeFallback {
 
   constructor(
     private readonly deliver: (data: string) => void,
+    // WebKit requires Window as the receiver of its timer functions.
     private readonly schedule: (
       task: () => void,
       delayMs: number,
-    ) => TimerHandle = globalThis.setTimeout,
-    private readonly cancel: (timer: TimerHandle) => void = globalThis.clearTimeout,
+    ) => TimerHandle = (task, delayMs) => globalThis.setTimeout(task, delayMs),
+    private readonly cancel: (timer: TimerHandle) => void = (timer) =>
+      globalThis.clearTimeout(timer),
     private readonly now: () => number = Date.now,
     private readonly enabled: boolean = webkitImeFallbackNeeded(),
   ) {}

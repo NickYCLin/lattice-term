@@ -102,11 +102,13 @@ export class MobileTerminalInput {
     private readonly textarea: HTMLTextAreaElement | undefined,
     private readonly deliver: (data: string) => void,
     private readonly enabled: boolean = mobileKeyboardInputNeeded(),
+    // WebKit requires Window as the receiver of its timer functions.
     private readonly schedule: (
       task: () => void,
       delayMs: number,
-    ) => TimerHandle = globalThis.setTimeout,
-    private readonly cancel: (timer: TimerHandle) => void = globalThis.clearTimeout,
+    ) => TimerHandle = (task, delayMs) => globalThis.setTimeout(task, delayMs),
+    private readonly cancel: (timer: TimerHandle) => void = (timer) =>
+      globalThis.clearTimeout(timer),
   ) {
     if (!enabled || !textarea) return;
     textarea.addEventListener("keydown", this.onKeyDown, true);
