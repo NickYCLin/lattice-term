@@ -276,6 +276,8 @@ function RemoteFleetPane({
   const mounted = useRef(false);
   const cursor = useRef(0);
   const logRef = useRef<HTMLPreElement>(null);
+  const followOutput = useRef(true);
+  const [following, setFollowing] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,7 +309,7 @@ function RemoteFleetPane({
 
   useEffect(() => {
     const log = logRef.current;
-    if (log) log.scrollTop = log.scrollHeight;
+    if (log && followOutput.current) log.scrollTop = log.scrollHeight;
   }, [output]);
 
   async function act(action: () => Promise<unknown>) {
@@ -341,7 +343,32 @@ function RemoteFleetPane({
           </button>
         )}
       </header>
-      <pre ref={logRef} className="agents-remote-fleet__log">
+      {!following && (
+        <button
+          type="button"
+          className="button button--ghost button--sm"
+          onClick={() => {
+            followOutput.current = true;
+            setFollowing(true);
+            const log = logRef.current;
+            if (log) log.scrollTop = log.scrollHeight;
+          }}
+        >
+          {t("agents.remoteFleet.followOutput")}
+        </button>
+      )}
+      <pre
+        ref={logRef}
+        className="agents-remote-fleet__log"
+        tabIndex={0}
+        aria-label={t("agents.remoteFleet.outputLabel", { label: session.label })}
+        onScroll={(event) => {
+          const log = event.currentTarget;
+          const atBottom = log.scrollHeight - log.clientHeight - log.scrollTop <= 24;
+          followOutput.current = atBottom;
+          setFollowing(atBottom);
+        }}
+      >
         {output || t("agents.remoteFleet.waiting")}
       </pre>
       {readError && <p className="field__error">{readError}</p>}

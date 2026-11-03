@@ -325,3 +325,48 @@ it("submits with Ctrl/Command Enter but leaves Enter and IME composition alone",
     expect(preventDefault).toHaveBeenCalledTimes(2);
   } finally { await unmount(); }
 });
+
+it("preserves reading position during output polling and resumes following on request", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  vi.mocked(fleet.readFleetOutput).mockResolvedValueOnce({ text: "First output", nextCursor: 12, hasMore: false });
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const log = allNodes(host).find(n => n.tagName === "PRE")!;
+    const geometry = log as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number };
+    Object.assign(geometry, { scrollTop: 200, scrollHeight: 1000, clientHeight: 200 });
+    await act(async () => props(log).onScroll({ currentTarget: log }));
+    expect(button(host, "回到最新輸出")).toBeDefined();
+    vi.mocked(fleet.readFleetOutput).mockResolvedValue({ text: "Second output", nextCursor: 25, hasMore: false });
+    geometry.scrollHeight = 2000;
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(log.textContent).toContain("Second output");
+    expect(geometry.scrollTop).toBe(200);
+    await act(async () => props(button(host, "回到最新輸出")).onClick());
+    expect(geometry.scrollTop).toBe(2000);
+    expect(button(host, "回到最新輸出")).toBeUndefined();
+    expect(props(log).tabIndex).toBe(0);
+    expect(props(log)["aria-label"]).toContain("Alpha session");
+  } finally { await unmount(); }
+});
+
+it("resumes following when the reader scrolls back to the bottom", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const log = allNodes(host).find(n => n.tagName === "PRE")!;
+    const geometry = log as unknown as { scrollTop: number; scrollHeight: number; clientHeight: number };
+    Object.assign(geometry, { scrollTop: 0, scrollHeight: 1000, clientHeight: 200 });
+    await act(async () => props(log).onScroll({ currentTarget: log }));
+    geometry.scrollTop = 800;
+    await act(async () => props(log).onScroll({ currentTarget: log }));
+    expect(button(host, "回到最新輸出")).toBeUndefined();
+    geometry.scrollHeight = 2000;
+    vi.mocked(fleet.readFleetOutput).mockResolvedValue({ text: "New output", nextCursor: 10, hasMore: false });
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(geometry.scrollTop).toBe(2000);
+  } finally { await unmount(); }
+});
