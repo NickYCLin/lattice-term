@@ -1668,7 +1668,7 @@ export const en: Messages = {
   "agents.remoteFleet.hide": "Hide",
   "agents.remoteFleet.cancel": "Cancel this turn",
   "agents.remoteFleet.waiting": "Waiting for output…",
-  "agents.remoteFleet.promptPlaceholder": "Queue a prompt (sent when this turn ends)",
+  "agents.remoteFleet.promptPlaceholder": "Queue a multiline prompt (Ctrl/⌘+Enter to send)",
   "agents.remoteFleet.send": "Send",
   "agents.pacing.limit": "Working at once",
   "agents.pacing.unlimited": "No limit",

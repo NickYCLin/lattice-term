@@ -66,7 +66,7 @@ Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
 - **RDP 部署暫存**：Windows 客戶端提供 `rdp_stage_file`，單檔上限 8 MiB、每條連線合計 128 MiB，檔案出現在專用唯讀 `LatticeDeploy` 分享中，斷線清除。遠端主機須允許磁碟重新導向；經獨立授權的鍵鼠操作複製與部署，暫存成功不代表部署成功。詳見 [RDP 部署](RDP_DEPLOYMENT.zh-TW.md)。
 - **Lattice Remote 命令介面**：Windows 分享端可獨立授權 cmd／PowerShell 指令；觀看端在畫面旁查看 stdout、stderr 與結束代碼，並可停止執行。指令受時間、輸出與併發限制，停止或斷線會清理所屬子程序。詳見 [命令操作與權限](REMOTE_COMMANDS.zh-TW.md)。
 
-- **使用者控制的截圖與錄影**：Lattice Remote、Web RDP 與 VNC 都可手動擷取 PNG，或開始、停止並下載遠端 Canvas 錄影；不會自動錄製或上傳。
+- **使用者控制的截圖與錄影**：Lattice Remote、Web RDP 與 VNC 都可手動擷取 PNG，或開始、停止並下載遠端 Canvas 錄影；不會自動錄製或上傳。 遠端畫面失效時會自動結束錄影並走既有下載流程；錄影編碼器建立失敗時會釋放已取得的擷取串流，可再次嘗試。
 - **跨平台支援**：桌面版支援 Windows、Linux 與 macOS；Android 與 iOS 版已可建置共用的純 Rust 核心功能，iOS 已有 Simulator 驗證與 In-House 企業 IPA；需本機程序的 RDP／VNC／CLI Fleet 維持桌面限定。
 
 ## 誠實呈現的介面原則
@@ -87,7 +87,7 @@ Gemini CLI、OpenCode、GitHub Copilot CLI 與 Qwen Code。程式以 `--version`
 Windows 客戶端的 RDP 部署暫存已完成；其他客戶端平台與直接寫入遠端目的地尚未提供。
 
 1. **Lattice Remote 連線範圍**：鍵盤／滑鼠遠端控制已可用（由分享端明確授權）；免帳戶數字裝置 ID、自架 Relay（`docs/RELAY_SERVER.zh-TW.md`）、裝置金鑰釘選（TOFU）與固定配對碼無人值守已可用；接著加入 NAT 直連穿透。連線清單先保存在本機，帳戶只作為日後跨裝置同步與團隊權限的選配層。
-2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH 與 [Relay Fleet](RELAY_FLEET.zh-TW.md) 已提供 MCP 工作區與遠端多 PTY 操作；Relay 尚待外部主機與安裝版驗收，桌面遠端 panes 尚未提供。
+2. **Agent 常駐與遠端能力**：背景服務已能持有勾選「留在背景」的工作階段並跨視窗關閉接回；保存的啟動項目也會記住這個選擇，還原時直接回到背景；對話排程在 LatticeTerm 關著時也由背景服務準時執行。SSH 與 [Relay Fleet](RELAY_FLEET.zh-TW.md) 已提供 MCP 工作區與遠端多 PTY 操作；Relay 尚待外部主機與安裝版驗收；Fleet 桌面已有最多四個並排輸出面板，啟動保存項目後自動開啟可讀取的新工作階段，並支援多行提示與 Ctrl／⌘＋Enter 排入佇列。
 3. **Agent 編排與隔離**：補齊其他工具的 hook 與 token／cost 可觀測事件；排程、佇列、接續執行與同時執行上限已完成，Linux 與 macOS 的檔案範圍沙箱已完成，接著是 Windows 的對應隔離與網路／資源限制。
 4. **平台完整度**：Windows npm shim 已改為直接啟動 node（pnpm／yarn shim 仍走 cmd）、持續強化 Android 發行流程，並持續驗證 iOS 商店更新與實機操作。
 5. **正式發行信任**：自動更新包已有 Tauri 簽章；Windows Authenticode 與 Apple Developer ID／notarization 仍需發行者憑證。

@@ -1600,7 +1600,7 @@ export const zhTW = {
   "agents.remoteFleet.hide": "收起",
   "agents.remoteFleet.cancel": "取消這一輪",
   "agents.remoteFleet.waiting": "等待輸出…",
-  "agents.remoteFleet.promptPlaceholder": "排入提示（這一輪結束後送出）",
+  "agents.remoteFleet.promptPlaceholder": "排入多行提示（Ctrl／⌘＋Enter 送出）",
   "agents.remoteFleet.send": "送出",
   "agents.pacing.limit": "同時工作上限",
   "agents.pacing.unlimited": "不限",

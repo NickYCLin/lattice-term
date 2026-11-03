@@ -135,8 +135,19 @@ export function RemoteFleetPanel({ mobile = false }: { mobile?: boolean }) {
     const current = () => mounted.current && activeTarget.current === targetId && generation === viewGeneration.current;
     setLaunchError("");
     try {
-      await launchFleetPlan(targetId, planId);
-      if (current()) await loadSessions();
+      const result = await launchFleetPlan(targetId, planId);
+      if (current()) {
+        await loadSessions();
+        if (current() && result.session) {
+          const created = result.session;
+          setSessions((entries) => entries.some((entry) => entry.sessionId === created.sessionId)
+            ? entries : [...entries, created]);
+          if (created.readOutput && target.scopes.fleetRead) {
+            setOpenIds((ids) => ids.includes(created.sessionId)
+              ? ids : [...ids, created.sessionId].slice(-4));
+          }
+        }
+      }
     } catch (reason) {
       if (current()) setLaunchError(String(reason));
     } finally {
@@ -347,8 +358,16 @@ function RemoteFleetPane({
             });
           }}
         >
-          <input
+          <textarea
             className="input"
+            rows={3}
+            aria-label={t("agents.remoteFleet.promptPlaceholder")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
             value={prompt}
             maxLength={16000}
             placeholder={t("agents.remoteFleet.promptPlaceholder")}

@@ -1304,8 +1304,13 @@
   gap: var(--space-2);
 }
 
+.agents-remote-fleet__pane textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
 .agents-view--mobile .agents-remote-fleet button,
-.agents-view--mobile .agents-remote-fleet input,
+.agents-view--mobile .agents-remote-fleet textarea,
 .agents-view--mobile .agents-remote-fleet select {
   min-height: 44px;
 }

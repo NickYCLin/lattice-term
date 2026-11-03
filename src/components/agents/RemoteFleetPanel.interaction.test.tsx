@@ -186,7 +186,7 @@ it("sends a prompt once, blocks concurrent cancellation and preserves the draft 
   const { host, unmount } = await mount();
   try {
     await act(async () => props(button(host, "並排顯示")).onClick());
-    const input = allNodes(host).find(node => node.tagName === "INPUT")!;
+    const input = allNodes(host).find(node => node.tagName === "TEXTAREA")!;
     await act(async () => props(input).onChange({ target: { value: "Test prompt" } }));
     const form = allNodes(host).find(node => node.tagName === "FORM")!;
     await act(async () => {
@@ -255,7 +255,7 @@ it("keeps a failed prompt visible across successful output polls", async () => {
   const { host, unmount } = await mount(true);
   try {
     await act(async () => props(button(host, "並排顯示")).onClick());
-    const input = allNodes(host).find(node => node.tagName === "INPUT")!;
+    const input = allNodes(host).find(node => node.tagName === "TEXTAREA")!;
     const form = allNodes(host).find(node => node.tagName === "FORM")!;
     await act(async () => props(input).onChange({ target: { value: "Test prompt" } }));
     await act(async () => props(form).onSubmit({ preventDefault() {} }));
@@ -264,5 +264,64 @@ it("keeps a failed prompt visible across successful output polls", async () => {
     expect(props(input).value).toBe("Test prompt");
     await act(async () => props(form).onSubmit({ preventDefault() {} }));
     expect(host.textContent).not.toContain("Send interrupted");
+  } finally { await unmount(); }
+});
+
+
+it("opens the newly launched session even before it appears in the session poll", async () => {
+  const created = session("New remote task");
+  vi.mocked(fleet.listFleetPlans).mockResolvedValue([{ planId: "plan", label: "New plan" }]);
+  vi.mocked(fleet.launchFleetPlan).mockResolvedValue({ session: created, duplicate: false });
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "New plan")).onClick());
+    expect(host.textContent).toContain("New remote task");
+    expect(fleet.readFleetOutput).toHaveBeenCalledWith("alpha", created.sessionId, 0);
+    expect(allNodes(host).filter(n => n.tagName === "PRE")).toHaveLength(1);
+  } finally { await unmount(); }
+});
+
+it("queues multiline prompts without collapsing line breaks", async () => {
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  vi.mocked(fleet.sendFleetPrompt).mockResolvedValue({});
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const input = allNodes(host).find(n => n.tagName === "TEXTAREA")!;
+    await act(async () => props(input).onChange({ target: { value: "First task\nSecond task" } }));
+    const form = allNodes(host).find(n => n.tagName === "FORM")!;
+    await act(async () => props(form).onSubmit({ preventDefault() {} }));
+    expect(fleet.sendFleetPrompt).toHaveBeenCalledWith("alpha", "shared-session-id", "First task\nSecond task");
+  } finally { await unmount(); }
+});
+
+
+it("keeps metadata-only launched sessions out of output panes", async () => {
+  vi.mocked(fleet.listFleetPlans).mockResolvedValue([{ planId: "plan", label: "New plan" }]);
+  vi.mocked(fleet.launchFleetPlan).mockResolvedValue({ session: session("Metadata only", false), duplicate: false });
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "New plan")).onClick());
+    expect(host.textContent).toContain("Metadata only");
+    expect(fleet.readFleetOutput).not.toHaveBeenCalled();
+  } finally { await unmount(); }
+});
+
+it("submits with Ctrl/Command Enter but leaves Enter and IME composition alone", async () => {
+  vi.mocked(fleet.listFleetSessions).mockResolvedValue([session("Alpha session")]);
+  const { host, unmount } = await mount();
+  try {
+    await act(async () => props(button(host, "並排顯示")).onClick());
+    const input = allNodes(host).find(n => n.tagName === "TEXTAREA")!;
+    const requestSubmit = vi.fn();
+    const preventDefault = vi.fn();
+    const event = { key: "Enter", ctrlKey: false, metaKey: false, nativeEvent: { isComposing: false }, preventDefault, currentTarget: { form: { requestSubmit } } };
+    props(input).onKeyDown(event);
+    props(input).onKeyDown({ ...event, ctrlKey: true, nativeEvent: { isComposing: true } });
+    expect(requestSubmit).not.toHaveBeenCalled();
+    props(input).onKeyDown({ ...event, ctrlKey: true });
+    props(input).onKeyDown({ ...event, metaKey: true });
+    expect(requestSubmit).toHaveBeenCalledTimes(2);
+    expect(preventDefault).toHaveBeenCalledTimes(2);
   } finally { await unmount(); }
 });
