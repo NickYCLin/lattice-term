@@ -70,6 +70,7 @@ import { NavRail } from "./components/shell/NavRail";
 import { ResourceSidebar } from "./components/shell/ResourceSidebar";
 import { StatusBar } from "./components/shell/StatusBar";
 import { ViewHeader } from "./components/shell/ViewHeader";
+import { DatabaseDock } from "./components/connections/DatabaseDock";
 import { ConnectionInspector } from "./components/connections/ConnectionInspector";
 import { useHostMetrics } from "./app/useHostMetrics";
 import type { Command } from "./components/overlays/CommandPalette";
@@ -390,6 +391,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     ? mobileResourceSidebarOpen
     : !preferences.sidebarCollapsed;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sqlDockOpen, setSqlDockOpen] = useState(false);
   const [drawer, setDrawer] = useState<{
     open: boolean;
     profileId: string | null;
@@ -1103,6 +1105,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           onToggleSidebar={toggleResourceSidebar}
           actions={
             <>
+              {runtime.host === "tauri" && (view === "terminal" || view === "chat") && <button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>SQL 資料庫</button>}
               {headerCapabilities.remoteQuickConnect && (
                 <button
                   type="button"
@@ -1147,6 +1150,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
 
         <div className="workspace__body">
           <div ref={workspaceMotionRef} className="workspace__content glass glass--sheen">
+            {onMobile && runtime.host === "tauri" && view === "terminal" && <div className="database-dock__mobile-entry"><button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>SQL 資料庫</button></div>}
             <Suspense fallback={<LazyViewFallback />}>
               {view === "connections" && (
                 <ConnectionsView
@@ -1284,6 +1288,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             </Suspense>
           </div>
 
+          {runtime.host === "tauri" && <DatabaseDock profiles={profiles} open={sqlDockOpen} visible={view === "terminal" || view === "chat"} onClose={() => setSqlDockOpen(false)} />}
           {showInspector && selected && (
             <ConnectionInspector
               profile={selected}

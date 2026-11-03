@@ -24,6 +24,8 @@ const STORE_LIMIT: u64 = 1024 * 1024;
 pub(super) const MAX_COLUMNS: usize = 64;
 pub(super) const CELL_CHARS: usize = 512;
 
+type McpGuard = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Engine {
@@ -440,6 +442,15 @@ impl DatabaseRegistry {
     }
 
     pub async fn execute(&self, action: DatabaseAction, mcp: bool) -> Result<Value, String> {
+        self.execute_guarded(action, mcp, None).await
+    }
+
+    async fn execute_guarded(
+        &self,
+        action: DatabaseAction,
+        mcp: bool,
+        guard: Option<McpGuard>,
+    ) -> Result<Value, String> {
         let _permit = self
             .calls
             .clone()
@@ -448,10 +459,12 @@ impl DatabaseRegistry {
         let registry = self.clone();
         let snapshot = crate::credential_call(move || registry.snapshot()).await?;
         if matches!(action, DatabaseAction::List {}) {
+            let panels = self.workbenches.lock().map_err(|_| "SQL 工作台忙碌中。")?;
             let profiles: Vec<_> = snapshot.profiles.into_iter().filter(|profile| !mcp || profile.allow_mcp_read).map(|profile| json!({
                 "id":profile.id, "hostKey":profile.host_key, "name":profile.name, "engine":profile.engine,
                 "hostname":profile.hostname, "port":profile.port, "database":profile.database,
-                "readOnly":true
+                "readOnly": !panels.values().any(|panel| panel.bound_to(&profile) && panel.share_read && panel.share_execute && panel.share_write),
+                "tableBrowsingReadOnly":true
             })).collect();
             return Ok(json!({"profiles":profiles}));
         }
@@ -462,7 +475,17 @@ impl DatabaseRegistry {
             .iter()
             .find(|entry| entry.id == id && (!mcp || entry.allow_mcp_read))
             .cloned()
-            .ok_or("資料庫不存在，或未開啟 MCP 唯讀存取。")?;
+            .ok_or("資料庫不存在，或未開啟 MCP 存取。")?;
+        if let DatabaseAction::WorkbenchExecute {
+            workbench_id,
+            revision,
+            ..
+        } = &action
+        {
+            return self
+                .workbench_mcp(&profile, workbench_id, *revision, guard, _permit)
+                .await;
+        }
         if let Some(result) = self.workbench_action(&action, &profile) {
             return result;
         }
@@ -520,6 +543,11 @@ pub enum DatabaseAction {
         revision: u64,
         sql: String,
     },
+    WorkbenchExecute {
+        profile_id: String,
+        workbench_id: String,
+        revision: u64,
+    },
     Version {
         profile_id: String,
     },
@@ -548,6 +576,7 @@ impl DatabaseAction {
             | Self::Workbenches { profile_id }
             | Self::Workbench { profile_id, .. }
             | Self::WorkbenchSql { profile_id, .. }
+            | Self::WorkbenchExecute { profile_id, .. }
             | Self::Tables { profile_id }
             | Self::Columns { profile_id, .. }
             | Self::Rows { profile_id, .. } => Some(profile_id),
@@ -558,9 +587,9 @@ impl DatabaseAction {
             identifier(id, 80)?;
         }
         match self {
-            Self::Workbench { workbench_id, .. } | Self::WorkbenchSql { workbench_id, .. } => {
-                identifier(workbench_id, 80)?
-            }
+            Self::Workbench { workbench_id, .. }
+            | Self::WorkbenchSql { workbench_id, .. }
+            | Self::WorkbenchExecute { workbench_id, .. } => identifier(workbench_id, 80)?,
             _ => {}
         }
         if let Self::Columns { schema, table, .. } | Self::Rows { schema, table, .. } = self {
@@ -630,8 +659,22 @@ pub fn from_desktop(
     action: DatabaseAction,
 ) -> crate::mcp_desktop::CredentialReadFuture {
     Box::pin(async move {
+        let service = app
+            .state::<Arc<crate::mcp_desktop::DesktopService>>()
+            .inner()
+            .clone();
+        let guard: McpGuard = Arc::new(move || {
+            if service.connection_book_shared() {
+                Ok(())
+            } else {
+                Err(
+                    "MCP 連線簿授權已撤回；已送出的 SQL 可能已完成，請先確認資料，不要直接重送。"
+                        .into(),
+                )
+            }
+        });
         app.state::<DatabaseRegistry>()
-            .execute(action, true)
+            .execute_guarded(action, true, Some(guard))
             .await
             .map_err(|message| crate::mcp_desktop::ServiceError {
                 code: "database_unavailable".into(),
@@ -643,12 +686,16 @@ pub fn from_desktop(
 pub fn action_schema() -> Value {
     let id = json!({"type":"string","minLength":1,"maxLength":80});
     let name = json!({"type":"string","minLength":1,"maxLength":256});
-    let variants: Vec<_> = ["list", "version", "tables", "columns", "rows", "workbenches", "workbench", "workbenchSql"].into_iter().map(|kind| {
+    let variants: Vec<_> = ["list", "version", "tables", "columns", "rows", "workbenches", "workbench", "workbenchSql", "workbenchExecute"].into_iter().map(|kind| {
         let mut properties = json!({"kind":{"const":kind}});
         let mut required = vec!["kind"];
         if kind != "list" { properties["profileId"] = id.clone(); required.push("profileId"); }
-        if kind == "workbench" || kind == "workbenchSql" {
+        if kind == "workbench" || kind == "workbenchSql" || kind == "workbenchExecute" {
             properties["workbenchId"] = id.clone(); required.push("workbenchId");
+        }
+        if kind == "workbenchExecute" {
+            properties["revision"] = json!({"type":"integer","minimum":0});
+            required.push("revision");
         }
         if kind == "workbenchSql" {
             properties["revision"] = json!({"type":"integer","minimum":0});

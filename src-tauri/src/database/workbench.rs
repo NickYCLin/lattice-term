@@ -1,5 +1,5 @@
 //! Shared SQL drafts and bounded results. MCP may inspect/edit an explicitly
-//! shared draft, but has no execute action or way to confirm a database write.
+//! shared draft. Execution additionally requires an explicit per-workbench grant.
 use super::*;
 
 #[derive(Clone, Serialize)]
@@ -16,6 +16,8 @@ pub struct Workbench {
     pub busy: bool,
     pub share_read: bool,
     pub share_edit: bool,
+    pub share_execute: bool,
+    pub share_write: bool,
     pub detached: bool,
     pub updated_by: String,
     pub last_sql: String,
@@ -47,12 +49,22 @@ pub enum WorkbenchAction {
         revision: u64,
         read: bool,
         edit: bool,
+        #[serde(default)]
+        execute: bool,
+        #[serde(default)]
+        write: bool,
     },
     Execute {
         id: String,
         revision: u64,
         confirmed_write: bool,
     },
+}
+
+impl Workbench {
+    pub(super) fn bound_to(&self, profile: &DatabaseProfile) -> bool {
+        self.bound_profile == *profile
+    }
 }
 
 fn edit(workbench: &mut Workbench, revision: u64, sql: &str, source: &str) -> Result<(), String> {
@@ -89,7 +101,7 @@ impl DatabaseRegistry {
             DatabaseAction::Workbenches { .. } => Some((|| {
                 let panels = self.workbenches.lock().map_err(|_| "SQL 工作台忙碌中。")?;
                 Ok(
-                    json!({"workbenches":panels.values().filter(|w| w.bound_profile == *profile && w.share_read).map(|w| json!({"id":w.id,"name":w.name,"revision":w.revision,"busy":w.busy,"canEditSql":w.share_edit})).collect::<Vec<_>>()}),
+                    json!({"workbenches":panels.values().filter(|w| w.bound_profile == *profile && w.share_read).map(|w| json!({"id":w.id,"name":w.name,"revision":w.revision,"busy":w.busy,"canEditSql":w.share_edit,"canExecuteSql":w.share_execute,"canWriteSql":w.share_write})).collect::<Vec<_>>()}),
                 )
             })()),
             DatabaseAction::Workbench { workbench_id, .. }
@@ -139,6 +151,8 @@ impl DatabaseRegistry {
                     existing.name = profile.name.clone();
                     existing.share_read = false;
                     existing.share_edit = false;
+                    existing.share_execute = false;
+                    existing.share_write = false;
                     existing.result = None;
                     existing.last_sql.clear();
                     existing.error = None;
@@ -163,6 +177,8 @@ impl DatabaseRegistry {
                 busy: false,
                 share_read: false,
                 share_edit: false,
+                share_execute: false,
+                share_write: false,
                 detached: false,
                 updated_by: "user".into(),
                 last_sql: String::new(),
@@ -201,7 +217,7 @@ impl DatabaseRegistry {
             let registry = self.clone();
             return tokio::spawn(async move {
                 let _permit = _permit;
-                let result = registry.run_sql(&panel, confirmed_write).await;
+                let result = registry.run_sql(&panel, confirmed_write, false, None).await;
                 let mut panels = registry
                     .workbenches
                     .lock()
@@ -233,6 +249,8 @@ impl DatabaseRegistry {
                 revision,
                 read,
                 edit: can_edit,
+                execute,
+                write,
             } => {
                 let panel = panels.get_mut(&id).ok_or("SQL 工作台已關閉。")?;
                 if panel.revision != revision {
@@ -240,6 +258,8 @@ impl DatabaseRegistry {
                 }
                 panel.share_read = read;
                 panel.share_edit = read && can_edit;
+                panel.share_execute = read && execute;
+                panel.share_write = read && execute && write;
                 panel.revision += 1;
                 Ok(panel.clone())
             }
@@ -247,7 +267,87 @@ impl DatabaseRegistry {
         }
     }
 
-    async fn run_sql(&self, panel: &Workbench, confirmed: bool) -> Result<Value, String> {
+    fn check_mcp_sql(&self, panel: &Workbench, write: bool) -> Result<(), String> {
+        let panels = self.workbenches.lock().map_err(|_| "SQL 工作台忙碌中。")?;
+        let current = panels.get(&panel.id).ok_or("SQL 工作台已關閉。")?;
+        if current.bound_profile != panel.bound_profile
+            || !current.bound_profile.allow_mcp_read
+            || !current.share_read
+            || !current.share_execute
+            || (write && !current.share_write)
+        {
+            return Err("未允許 MCP 執行這份 SQL，或執行權限已撤回。".into());
+        }
+        Ok(())
+    }
+
+    pub(super) async fn workbench_mcp(
+        &self,
+        profile: &DatabaseProfile,
+        id: &str,
+        revision: u64,
+        guard: Option<McpGuard>,
+        permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<Value, String> {
+        if let Some(check) = &guard {
+            check()?;
+        }
+        let panel = {
+            let mut panels = self.workbenches.lock().map_err(|_| "SQL 工作台忙碌中。")?;
+            let panel = panels.get_mut(id).ok_or("SQL 工作台已關閉。")?;
+            if panel.bound_profile != *profile
+                || !profile.allow_mcp_read
+                || !panel.share_read
+                || !panel.share_execute
+            {
+                return Err("使用者未允許 MCP 執行此工作台的 SQL。".into());
+            }
+            if panel.busy || panel.revision != revision {
+                return Err("SQL 已變更或正在執行，請重新讀取工作台；不可重送舊版本。".into());
+            }
+            panel.busy = true;
+            panel.revision += 1;
+            panel.result = None;
+            panel.error = None;
+            panel.last_sql = panel.sql.clone();
+            panel.updated_by = "mcp".into();
+            panel.clone()
+        };
+        let registry = self.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            let result = registry
+                .run_sql(&panel, panel.share_write, true, guard)
+                .await;
+            let mut panels = registry
+                .workbenches
+                .lock()
+                .map_err(|_| "SQL 工作台忙碌中。")?;
+            let current = panels.get_mut(&panel.id).ok_or("SQL 工作台已關閉。")?;
+            current.busy = false;
+            current.revision += 1;
+            match result {
+                Ok(result) => {
+                    current.result = Some(result);
+                    serde_json::to_value(current).map_err(|_| "無法讀取結果。".into())
+                }
+                Err(error) => {
+                    current.error = Some(error.clone());
+                    Err(error)
+                }
+            }
+        })
+        .await
+        .map_err(|_| "SQL 執行結果無法確認；請先查詢，不要直接重送。".to_string())?
+    }
+
+    async fn run_sql(
+        &self,
+        panel: &Workbench,
+        confirmed: bool,
+        mcp: bool,
+        guard: Option<McpGuard>,
+    ) -> Result<Value, String> {
         let registry = self.clone();
         let snapshot = crate::credential_call(move || registry.snapshot()).await?;
         let profile = snapshot
@@ -258,6 +358,12 @@ impl DatabaseRegistry {
             .ok_or("資料庫連線已移除。")?;
         if profile != panel.bound_profile {
             return Err("連線設定已變更，請重新開啟工作台並確認 SQL。".into());
+        }
+        if mcp {
+            self.check_mcp_sql(panel, confirmed)?;
+        }
+        if let Some(check) = &guard {
+            check()?;
         }
         let credential_profile = profile.clone();
         let password = crate::credential_call(move || {
@@ -275,12 +381,19 @@ impl DatabaseRegistry {
         })
         .await?;
         let revalidate = || {
+            if let Some(check) = &guard {
+                check()?;
+            }
+            if mcp {
+                self.check_mcp_sql(panel, confirmed)?;
+            }
             let current = self.snapshot()?;
             if current.profiles.iter().find(|p| p.id == profile.id) != Some(&profile) {
                 return Err("連線設定已變更；請先查詢資料確認執行結果，不要直接重送。".into());
             }
             Ok(())
         };
+        revalidate()?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
             drivers::execute_sql(&profile, &password, &panel.sql, confirmed, revalidate),
@@ -386,6 +499,181 @@ pub async fn database_popout(
 mod tests {
     use super::*;
 
+    async fn mcp_fixture(
+        execute: bool,
+        write: bool,
+        sql: &str,
+    ) -> (tempfile::TempDir, DatabaseRegistry, Workbench) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mcp.sqlite");
+        rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TABLE sample(id INTEGER PRIMARY KEY, value TEXT); INSERT INTO sample VALUES(1, 'original');").unwrap();
+        let registry = DatabaseRegistry::new(directory.path().into());
+        let profile = DatabaseProfile {
+            id: "mcp".into(),
+            host_key: "local".into(),
+            name: "MCP test".into(),
+            engine: Engine::Sqlite,
+            hostname: String::new(),
+            port: 0,
+            username: String::new(),
+            database: String::new(),
+            sqlite_path: path.to_string_lossy().into_owned(),
+            tls_ca_pem: String::new(),
+            allow_mcp_read: true,
+        };
+        let snapshot = registry.snapshot().unwrap();
+        registry
+            .edit(&snapshot.revision, Some(profile), None, None)
+            .unwrap();
+        let panel = registry
+            .workbench_local(WorkbenchAction::Open {
+                profile_id: "mcp".into(),
+            })
+            .await
+            .unwrap();
+        let panel = registry
+            .workbench_local(WorkbenchAction::Edit {
+                id: panel.id.clone(),
+                revision: panel.revision,
+                sql: sql.into(),
+            })
+            .await
+            .unwrap();
+        let panel = registry
+            .workbench_local(WorkbenchAction::Share {
+                id: panel.id.clone(),
+                revision: panel.revision,
+                read: true,
+                edit: true,
+                execute,
+                write,
+            })
+            .await
+            .unwrap();
+        (directory, registry, panel)
+    }
+
+    fn execute_mcp(panel: &Workbench) -> DatabaseAction {
+        DatabaseAction::WorkbenchExecute {
+            profile_id: panel.profile_id.clone(),
+            workbench_id: panel.id.clone(),
+            revision: panel.revision,
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_execution_is_opt_in_and_readonly_rejects_writes() {
+        let (_dir, registry, panel) = mcp_fixture(false, false, "SELECT value FROM sample").await;
+        assert!(registry.execute(execute_mcp(&panel), true).await.is_err());
+        let (_dir, registry, panel) = mcp_fixture(true, false, "SELECT value FROM sample").await;
+        let result = registry.execute(execute_mcp(&panel), true).await.unwrap();
+        assert_eq!(result["result"]["rows"][0][0], "original");
+        assert!(
+            registry.execute(execute_mcp(&panel), true).await.is_err(),
+            "stale execution must not replay"
+        );
+        let (dir, registry, panel) = mcp_fixture(true, false, "DELETE FROM sample").await;
+        assert!(registry.execute(execute_mcp(&panel), true).await.is_err());
+        let db = rusqlite::Connection::open(dir.path().join("mcp.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM sample", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_write_grant_executes_once_and_revocation_blocks_execution() {
+        let (dir, registry, panel) =
+            mcp_fixture(true, true, "UPDATE sample SET value='changed' WHERE id=1").await;
+        let result = registry.execute(execute_mcp(&panel), true).await.unwrap();
+        assert_eq!(result["result"]["affectedRows"], 1);
+        assert!(registry.execute(execute_mcp(&panel), true).await.is_err());
+        let db = rusqlite::Connection::open(dir.path().join("mcp.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT value FROM sample", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "changed"
+        );
+        let mut panel = registry
+            .workbench_local(WorkbenchAction::Read { id: panel.id })
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO sample VALUES(2, 'added')",
+            "DELETE FROM sample WHERE id=2",
+        ] {
+            registry
+                .execute(
+                    DatabaseAction::WorkbenchSql {
+                        profile_id: panel.profile_id.clone(),
+                        workbench_id: panel.id.clone(),
+                        revision: panel.revision,
+                        sql: sql.into(),
+                    },
+                    true,
+                )
+                .await
+                .unwrap();
+            panel = registry
+                .workbench_local(WorkbenchAction::Read { id: panel.id })
+                .await
+                .unwrap();
+            let result = registry.execute(execute_mcp(&panel), true).await.unwrap();
+            assert_eq!(result["result"]["affectedRows"], 1);
+            panel = registry
+                .workbench_local(WorkbenchAction::Read { id: panel.id })
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM sample", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let panel = registry
+            .workbench_local(WorkbenchAction::Share {
+                id: panel.id,
+                revision: panel.revision,
+                read: true,
+                edit: true,
+                execute: false,
+                write: false,
+            })
+            .await
+            .unwrap();
+        assert!(registry.execute(execute_mcp(&panel), true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn mcp_global_revocation_before_commit_rolls_back_sqlite_write() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (dir, registry, panel) = mcp_fixture(true, true, "DELETE FROM sample").await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let checked = calls.clone();
+        let guard: McpGuard = Arc::new(move || {
+            // Initial admission, credential lookup and pre-execution checks pass;
+            // revoke when the driver asks permission to commit its transaction.
+            if checked.fetch_add(1, Ordering::SeqCst) < 3 {
+                Ok(())
+            } else {
+                Err("revoked".into())
+            }
+        });
+        let error = registry
+            .execute_guarded(execute_mcp(&panel), true, Some(guard))
+            .await
+            .unwrap_err();
+        assert_eq!(error, "revoked");
+        assert!(calls.load(Ordering::SeqCst) >= 4);
+        let db = rusqlite::Connection::open(dir.path().join("mcp.sqlite")).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM sample", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
     #[tokio::test]
     async fn shared_drafts_use_cas_never_execute_and_revoke_on_connection_change() {
         let directory = tempfile::tempdir().unwrap();
@@ -429,6 +717,8 @@ mod tests {
                 revision: panel.revision,
                 read: true,
                 edit: false,
+                execute: false,
+                write: false,
             })
             .await
             .unwrap();
@@ -445,6 +735,8 @@ mod tests {
                 revision: panel.revision,
                 read: true,
                 edit: true,
+                execute: false,
+                write: false,
             })
             .await
             .unwrap();

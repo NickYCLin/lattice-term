@@ -10,6 +10,8 @@ export interface SqlWorkbenchState {
   busy: boolean;
   shareRead: boolean;
   shareEdit: boolean;
+  shareExecute?: boolean;
+  shareWrite?: boolean;
   detached: boolean;
   updatedBy: "user" | "mcp";
   lastSql: string;

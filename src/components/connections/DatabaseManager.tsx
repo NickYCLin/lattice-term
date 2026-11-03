@@ -28,6 +28,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
   const [draft, setDraft] = useState(() => emptyDatabase(hostKey, initialHost?.hostname));
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched] = useState(false);
   const [connectionBusy, setBusy] = useState(false);
   const [sqlState, setSqlState] = useState({ busy: false, dirty: false });
@@ -71,7 +72,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
 
   function reset(profile = emptyDatabase(hostKey, initialHost?.hostname)) {
     setTouched(false); setView(snapshot?.profiles.some((entry) => entry.id === profile.id) ? "sql" : "settings");
-    setDraft(profile); setPassword(""); setResult(null); setResultKind(null); setTables([]);
+    setDraft(profile); setPassword(""); setShowPassword(false); setResult(null); setResultKind(null); setTables([]);
     setTableIndex(""); setOffset(0); setDeleting(null); setError(""); setNotice("");
   }
 
@@ -97,7 +98,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
     if (!snapshot) return;
     void perform(async () => {
       const value = await invoke<DatabaseSnapshot>("database_save", { profile: draft, revision: snapshot.revision, password: password || null });
-      setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setTables([]); setTableIndex(""); setResult(null);
+      setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setShowPassword(false); setTables([]); setTableIndex(""); setResult(null);
       setTouched(false);
       setNotice("連線已儲存。可測試連線，或切換 SQL 工作台開始查詢。");
     });
@@ -153,33 +154,44 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
                 const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
               })}>重試清除舊密碼</button></div>}
           <form onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings"}>
-            <div className="database-manager__section-heading"><h3>{saved ? "連線設定" : "新增資料庫連線"}</h3><p>設定端點與帳號，儲存後即可開啟 SQL 工作台。</p></div>
+            <div className="database-manager__section-heading"><h3 className="visually-hidden">{saved ? "連線設定" : "新增資料庫連線"}</h3><p>設定端點與帳號，儲存後即可開啟 SQL 工作台。</p></div>
             <fieldset disabled={busy || !snapshot} className="database-manager__fields">
-              <label>連線名稱<input placeholder="例如：開發環境 PostgreSQL" required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
-              <label>所屬主機<select value={draft.hostKey} onChange={(event) => update("hostKey", event.target.value)}>
-                <option value="local">未分類／本機</option>
-                {!hosts.has(draft.hostKey) && draft.hostKey !== "local" && <option value={draft.hostKey}>原主機（卡片已移除或合併）</option>}
-                {[...hosts].map(([key, profile]) => <option key={key} value={key}>{profile.name}</option>)}
-              </select></label>
-              <label>資料庫種類<select value={draft.engine} onChange={(event) => {
-                setTouched(true);
-                setDraft(changeDatabaseEngine(draft, event.target.value as DatabaseProfile["engine"]));
-                setPassword(""); setResult(null); setTables([]); setTableIndex("");
-              }}>{databaseEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}</select></label>
-              {draft.engine === "sqlite" ? (
-                <label className="database-manager__span">SQLite 檔案路徑<input required maxLength={2048} value={draft.sqlitePath} onChange={(event) => update("sqlitePath", event.target.value)} /></label>
-              ) : <>
-                <label>主機名稱／IP<input required maxLength={253} value={draft.hostname} onChange={(event) => update("hostname", event.target.value)} /></label>
-                <label>連接埠<input required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
-                <label>資料庫名稱<input required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
-                <label>帳號<input required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
-                <label>密碼（留白保留；變更端點須重填）<input type="password" autoComplete="new-password" value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label>
-                <details className="database-manager__advanced database-manager__span"><summary>進階 TLS 設定</summary><label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
-                <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p></details>
-              </>}
-              <label className="database-manager__permission database-manager__span"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
-              <p className="database-manager__hint database-manager__span">密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>
-              <div className="database-manager__actions database-manager__span">
+              <legend className="visually-hidden">資料庫連線與登入設定</legend>
+              <section className="database-manager__form-card" aria-label="連線位置">
+                <h4 className="database-manager__form-section"><span>01</span><span>連線位置<small>設定要連接的資料庫。</small></span></h4>
+                <div className="database-manager__field-grid">
+                  <label className="database-manager__span">連線名稱<input placeholder="例如：開發環境 PostgreSQL" required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
+                  <label className="database-manager__span">資料庫種類<select value={draft.engine} onChange={(event) => {
+                    setTouched(true); setDraft(changeDatabaseEngine(draft, event.target.value as DatabaseProfile["engine"]));
+                    setPassword(""); setShowPassword(false); setResult(null); setTables([]); setTableIndex("");
+                  }}>{databaseEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}</select></label>
+                  {draft.engine === "sqlite" ? <label className="database-manager__span">SQLite 檔案路徑<input required maxLength={2048} value={draft.sqlitePath} onChange={(event) => update("sqlitePath", event.target.value)} /></label> : <>
+                    <label>主機名稱／IP<input placeholder="db.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={253} value={draft.hostname} onChange={(event) => update("hostname", event.target.value)} /></label>
+                    <label>連接埠<input inputMode="numeric" required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
+                    <label className="database-manager__span">資料庫名稱<input placeholder="要連線的資料庫名稱" autoCapitalize="none" spellCheck={false} required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
+                  </>}
+                  <details className="database-manager__advanced database-manager__span"><summary>連線分類（選填）</summary><label>所屬主機<select value={draft.hostKey} onChange={(event) => update("hostKey", event.target.value)}>
+                    <option value="local">未分類／本機</option>
+                    {!hosts.has(draft.hostKey) && draft.hostKey !== "local" && <option value={draft.hostKey}>原主機（卡片已移除或合併）</option>}
+                    {[...hosts].map(([key, profile]) => <option key={key} value={key}>{profile.name}</option>)}
+                  </select></label></details>
+                </div>
+              </section>
+              <section className="database-manager__form-card" aria-label="登入資料與 AI 權限">
+                <h4 className="database-manager__form-section"><span>02</span><span>登入資料<small>密碼加密儲存於此裝置，不會傳給 AI。</small></span></h4>
+                <div className="database-manager__field-grid">
+                  {draft.engine === "sqlite" ? <p className="database-manager__hint database-manager__span">本機 SQLite 檔案不需要帳號密碼。</p> : <>
+                    <label className="database-manager__span">帳號<input placeholder="資料庫使用者名稱" autoCapitalize="none" autoCorrect="off" spellCheck={false} required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
+                    <div className="database-manager__password database-manager__span"><label>密碼（留白保留；變更端點須重填）<input type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? "留白保留已儲存的密碼" : "輸入資料庫密碼"} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "隱藏密碼" : "顯示密碼"}</button><small>切換端點、帳號或憑證後，請重新輸入密碼。</small></div>
+                    <details className="database-manager__advanced database-manager__span"><summary>進階 TLS 設定</summary><label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
+                      <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p></details>
+                  </>}
+                  <div className="database-manager__form-section database-manager__span"><span>03</span><span>AI 與 MCP 存取<small>SQL 唯讀或增刪修權限可在工作台個別設定。</small></span></div>
+                  <label className="database-manager__permission database-manager__span"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
+                  <p className="database-manager__hint database-manager__span">密碼儲存於目前選用的系統憑證庫或加密保管庫，不寫入連線設定。</p>
+                </div>
+              </section>
+              <div className="database-manager__actions database-manager__save-bar database-manager__span">
                 <button type="submit" className="button button--primary" disabled={!dirty}>{embedded ? "儲存資料庫連線" : "儲存連線"}</button>
                 {saved && <button type="button" className="button button--secondary" disabled={dirty} onClick={() => read("version")}>測試連線</button>}
                 <button type="button" className="button button--secondary" onClick={() => reset(saved ?? available[0])}>取消編輯</button>

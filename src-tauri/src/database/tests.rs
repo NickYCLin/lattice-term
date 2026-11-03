@@ -330,3 +330,21 @@ async fn sqlite_reads_real_tables_with_explicit_mcp_grants_and_no_write_access()
         .unwrap();
     assert_eq!(count, 2);
 }
+
+#[test]
+fn mcp_sql_execution_requires_a_revision_and_cannot_supply_its_own_write_grant() {
+    assert!(serde_json::from_value::<DatabaseAction>(
+        json!({"kind":"workbenchExecute","profileId":"p","workbenchId":"w","revision":3})
+    )
+    .is_ok());
+    assert!(serde_json::from_value::<DatabaseAction>(
+        json!({"kind":"workbenchExecute","profileId":"p","workbenchId":"w"})
+    )
+    .is_err());
+    assert!(serde_json::from_value::<DatabaseAction>(json!({"kind":"workbenchExecute","profileId":"p","workbenchId":"w","revision":3,"confirmedWrite":true})).is_err());
+    assert!(action_schema()["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["properties"]["kind"]["const"] == "workbenchExecute"));
+}

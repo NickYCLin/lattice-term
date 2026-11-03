@@ -222,3 +222,17 @@ it("requires saving or cancelling edited settings before switching connections o
   expect(hostProps(container).find((props) => props.children === "關閉")!.disabled).toBe(false);
   expect(hostProps(container).some((props) => props.value === database.name)).toBe(true);
 });
+
+
+it("lets the user reveal only a newly typed password without retrieving saved credentials", async () => {
+  await render(); await click("連線設定");
+  const password = () => hostProps(container).find(p => p.autoComplete === "new-password")!;
+  expect(password().value).toBe(""); expect(password().type).toBe("password");
+  await change(p => p.autoComplete === "new-password", {value:"test-only-password"});
+  await click("顯示密碼");
+  expect(password().type).toBe("text"); expect(password().value).toBe("test-only-password");
+  await click("隱藏密碼"); expect(password().type).toBe("password");
+  expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
+  await click("顯示密碼"); await submit();
+  expect(password().type).toBe("password"); expect(password().value).toBe("");
+});

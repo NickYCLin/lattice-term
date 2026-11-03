@@ -19,6 +19,8 @@ let root: ReturnType<typeof createRoot>;
 let panel: SqlWorkbenchState;
 beforeEach(() => {
   vi.useFakeTimers(); container = installFakeDom();
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
   document.createElementNS = ((_namespace: string | null, name: string) => document.createElement(name)) as typeof document.createElementNS;
   root = createRoot(container as unknown as Element);
   panel = {id:"a".repeat(32),profileId:"fixture",name:"測試庫",sql:"SELECT 1",revision:0,busy:false,shareRead:false,shareEdit:false,detached:false,updatedBy:"user",lastSql:"",result:null,error:null};
@@ -29,6 +31,9 @@ beforeEach(() => {
       if (action.revision !== panel.revision) throw Error("草稿已變更");
       panel = {...panel,sql:String(action.sql),revision:panel.revision+1};
     }
+    if (action?.kind === "share") {
+      panel = {...panel, shareRead: Boolean(action.read), shareEdit: Boolean(action.edit), shareExecute: Boolean(action.execute), shareWrite: Boolean(action.write), revision: panel.revision+1};
+    }
     if (action?.kind === "execute") {
       if (action.revision !== panel.revision) throw Error("草稿已變更");
       panel = {...panel,revision:panel.revision+2,lastSql:panel.sql,result:{columns:[],rows:[],truncated:false,cellCharacterLimit:512,stableOrder:false,affectedRows:1}};
@@ -36,7 +41,7 @@ beforeEach(() => {
     return structuredClone(panel);
   });
 });
-afterEach(async () => { await act(async()=>root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(async () => { await act(async()=>root.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 async function render() { await act(async()=>root.render(<SqlWorkbench profileId="fixture" mcpAllowed />)); }
 async function click(label: string) {
   const button = props(container).find((p)=>p.children === label && p.onClick);
@@ -87,4 +92,50 @@ it("connects the title drag gesture to the same popout operation when released o
   header.onPointerDown!({screenX:100,screenY:100,pointerId:1,target:{closest:()=>null},currentTarget:{setPointerCapture:()=>{}}});
   await act(async()=>header.onPointerUp!({screenX:1200,screenY:300,clientX:-10,clientY:300}));
   expect(invoke).toHaveBeenCalledWith("database_popout",{id:panel.id,x:1170,y:280});
+});
+
+
+it("saves explicit AI read/write grants without executing SQL and can revoke them", async () => {
+  panel = {...panel, shareRead:true, shareEdit:true};
+  await render();
+  for (const [value, execute, write] of [["read",true,false],["write",true,true],["none",false,false]] as const) {
+    const permission = props(container).find(p => p["aria-label"] === "AI 執行 SQL 權限")!;
+    expect(permission.disabled).toBe(false);
+    await act(async () => permission.onChange!({target:{value}}));
+    expect(invoke).toHaveBeenLastCalledWith("database_workbench", {action:{kind:"share",id:panel.id,revision:panel.revision-1,read:true,edit:true,execute,write}});
+  }
+  expect(invoke.mock.calls.some(([,args]) => args?.action?.kind === "execute")).toBe(false);
+});
+
+
+it("can revoke AI execution while an MCP query is busy", async () => {
+  panel = {...panel, shareRead:true, shareEdit:true, shareExecute:true, shareWrite:true, busy:true};
+  await render(); await click("撤回 AI 執行授權");
+  expect(panel.shareExecute).toBe(false); expect(panel.shareWrite).toBe(false);
+  expect(invoke).toHaveBeenCalledWith("database_workbench", {action:{kind:"share",id:panel.id,revision:0,read:true,edit:true,execute:false,write:false}});
+  expect(invoke.mock.calls.some(([,args]) => args?.action?.kind === "execute")).toBe(false);
+});
+
+it("revokes against the latest revision without replacing a conflicting local draft", async () => {
+  panel = {...panel, shareRead:true, shareEdit:true, shareExecute:true, shareWrite:true};
+  await render(); await type("SELECT 'local draft'");
+  panel = {...panel, sql:"SELECT 'MCP draft'", revision:1};
+  await click("撤回 AI 執行授權");
+  expect(panel.shareExecute).toBe(false); expect(panel.shareWrite).toBe(false);
+  expect(props(container).find(p => p["aria-label"] === "SQL 語法")!.value).toBe("SELECT 'local draft'");
+  await click("同步草稿");
+  expect(panel.sql).toBe("SELECT 'MCP draft'");
+});
+
+
+it("unblocks a preserved local draft when a revoked in-flight query finishes", async () => {
+  panel = {...panel, shareRead:true, shareEdit:true, shareExecute:true, shareWrite:true};
+  await render(); await type("SELECT 'local draft'");
+  panel = {...panel, busy:true, revision:1};
+  await click("撤回 AI 執行授權");
+  panel = {...panel, busy:false, revision:panel.revision+1};
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(props(container).find(p => p.children === "同步草稿")!.disabled).toBe(false);
+  expect(props(container).find(p => p["aria-label"] === "SQL 語法")!.value).toBe("SELECT 'local draft'");
+  expect(panel.shareExecute).toBe(false);
 });

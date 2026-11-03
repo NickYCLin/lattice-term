@@ -302,7 +302,10 @@ pub(super) async fn read(
     match action {
         DatabaseAction::Workbenches { .. }
         | DatabaseAction::Workbench { .. }
-        | DatabaseAction::WorkbenchSql { .. } => Err("SQL 工作台操作不會直接開啟資料庫。".into()),
+        | DatabaseAction::WorkbenchSql { .. }
+        | DatabaseAction::WorkbenchExecute { .. } => {
+            Err("SQL 工作台操作不會直接開啟資料庫。".into())
+        }
         DatabaseAction::List {} => Err("列出連線不需要開啟資料庫。".into()),
         DatabaseAction::Version { .. } => {
             let statement = match engine {
