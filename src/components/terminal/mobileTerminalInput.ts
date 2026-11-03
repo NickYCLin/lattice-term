@@ -54,6 +54,16 @@ export class MobileTerminalInput {
   private readonly onCompositionEnd = () => {
     this.composing = false;
   };
+  private readonly onInput = (event: Event) => {
+    const input = event as InputEvent;
+    // Some mobile IMEs commit through input without compositionend. Only
+    // committed text ends the fence; candidate/preedit updates remain owned
+    // by the IME and must never turn their selection space into terminal data.
+    if (!input.isComposing &&
+      (input.inputType === "insertText" || input.inputType === "insertFromComposition")) {
+      this.composing = false;
+    }
+  };
   private readonly onBlur = () => {
     this.composing = false;
     this.keyUnidentified = false;
@@ -104,6 +114,7 @@ export class MobileTerminalInput {
     textarea.addEventListener("compositionend", this.onCompositionEnd);
     textarea.addEventListener("blur", this.onBlur);
     textarea.addEventListener("beforeinput", this.onBeforeInput);
+    textarea.addEventListener("input", this.onInput);
   }
 
   /**
@@ -134,6 +145,7 @@ export class MobileTerminalInput {
     this.textarea.removeEventListener("compositionend", this.onCompositionEnd);
     this.textarea.removeEventListener("blur", this.onBlur);
     this.textarea.removeEventListener("beforeinput", this.onBeforeInput);
+    this.textarea.removeEventListener("input", this.onInput);
   }
 
   private flush() {

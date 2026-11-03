@@ -134,7 +134,11 @@ export function TerminalPane({
         terminal.write(`\r\n\x1b[31m${messageRef.current}\x1b[0m\r\n`);
       });
     };
-    const mobileInput = new MobileTerminalInput(textarea, sendInput);
+    const imeFallback = new TerminalImeFallback(sendInput);
+    const mobileInput = new MobileTerminalInput(textarea, (data) => {
+      imeFallback.flushPending();
+      sendInput(data);
+    });
     const mobileKey = terminal.onKey(({ key, domEvent }) => mobileInput.recordTerminalKey(key, domEvent));
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,
@@ -142,7 +146,6 @@ export function TerminalPane({
         imePresentation.shouldProcessTerminalKeyEvent() &&
         mobileInput.shouldProcessTerminalKeyEvent(event),
     });
-    const imeFallback = new TerminalImeFallback(sendInput);
     const typed = terminal.onData((rawData) => {
       const data = imeFallback.recordTerminalData(rawData);
       if (data) sendInput(data);

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { TerminalImeFallback } from "./terminalImeFallback";
 import { MobileTerminalInput } from "./mobileTerminalInput";
 
 function harness(enabled = true) {
@@ -188,4 +189,74 @@ describe("MobileTerminalInput", () => {
 
     expect(sent).toEqual([]);
   });
+});
+
+
+describe("mobile IME commits without compositionend", () => {
+  for (const inputType of ["insertText", "insertFromComposition"]) {
+    it(`recovers literal spaces after a committed ${inputType} event`, () => {
+      const { textarea, input, sent, flush } = harness();
+      textarea.dispatchEvent(new Event("compositionstart"));
+      const selection = beforeinput("insertText", " ");
+      textarea.dispatchEvent(selection);
+      expect(selection.defaultPrevented).toBe(false);
+      textarea.dispatchEvent(Object.assign(new Event("input"), {
+        inputType, data: "中文", isComposing: false,
+      }));
+      const first = type(textarea, input, " ");
+      const second = type(textarea, input, " ");
+      flush();
+      expect(first.processed).toBe(false);
+      expect(first.event.defaultPrevented).toBe(true);
+      expect(second.event.defaultPrevented).toBe(true);
+      expect(sent).toEqual(["  "]);
+    });
+  }
+
+  it("does not treat a composing input update as a completed selection", () => {
+    const { textarea, input, sent, flush } = harness();
+    textarea.dispatchEvent(new Event("compositionstart"));
+    textarea.dispatchEvent(Object.assign(new Event("input"), {
+      inputType: "insertCompositionText", data: "ㄓ", isComposing: true,
+    }));
+    const selection = type(textarea, input, " ");
+    flush();
+    expect(selection.processed).toBe(true);
+    expect(selection.event.defaultPrevented).toBe(false);
+    expect(sent).toEqual([]);
+  });
+});
+
+
+it("keeps a recovered Chinese commit before its spaces and suppresses late xterm echoes", () => {
+  vi.useFakeTimers();
+  const textarea = new EventTarget() as HTMLTextAreaElement;
+  const sent: string[] = [];
+  const fallback = new TerminalImeFallback(data => sent.push(data), undefined, undefined, undefined, true);
+  const mobile = new MobileTerminalInput(textarea, data => {
+    fallback.flushPending();
+    sent.push(data);
+  }, true);
+  const listener = (event: Event) => {
+    const input = event as InputEvent;
+    fallback.recordInput(input.data, input.inputType, input.isComposing);
+  };
+  textarea.addEventListener("input", listener);
+  try {
+    textarea.dispatchEvent(new Event("compositionstart"));
+    textarea.dispatchEvent(Object.assign(new Event("input"), {
+      inputType: "insertFromComposition", data: "中文", isComposing: false,
+    }));
+    type(textarea, mobile, " ");
+    type(textarea, mobile, " ");
+    vi.advanceTimersByTime(1);
+    expect(sent.join("")).toBe("中文  ");
+    vi.advanceTimersByTime(40);
+    expect(sent.join("")).toBe("中文  ");
+    expect(fallback.recordTerminalData("中文")).toBeNull();
+  } finally {
+    mobile.dispose(); fallback.dispose();
+    textarea.removeEventListener("input", listener);
+    vi.useRealTimers();
+  }
 });

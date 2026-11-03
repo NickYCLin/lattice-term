@@ -139,7 +139,11 @@ export function RemoteTerminalView({
       event.stopImmediatePropagation();
     };
     textarea?.addEventListener("beforeinput", blockUnavailableInput, true);
-    const mobileInput = new MobileTerminalInput(textarea, sendInput);
+    const imeFallback = new TerminalImeFallback(sendInput);
+    const mobileInput = new MobileTerminalInput(textarea, (data) => {
+      imeFallback.flushPending();
+      sendInput(data);
+    });
     const mobileKey = terminal.onKey(({ key, domEvent }) => mobileInput.recordTerminalKey(key, domEvent));
 
     attachTerminalClipboard(
@@ -151,7 +155,6 @@ export function RemoteTerminalView({
       ),
     );
 
-    const imeFallback = new TerminalImeFallback(sendInput);
     const typed = terminal.onData((rawData) => {
       const data = imeFallback.recordTerminalData(rawData);
       if (data) sendInput(data);

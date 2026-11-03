@@ -127,27 +127,39 @@ export class TerminalImeFallback {
       timer: undefined as unknown as TimerHandle,
     };
     pending.timer = this.schedule(() => {
-      if (!this.pending.includes(pending)) return;
-      const missing = pending.data.slice(pending.matchedLength);
-      if (!missing) {
-        this.removePending(pending);
-        return;
-      }
-      pending.fallbackDelivered = true;
-      // xterm may later replay either the complete composition or only the
-      // suffix it had not emitted before the repair fired. Both are echoes of
-      // bytes already delivered to the PTY by this point.
-      pending.lateEchoes = [...new Set([pending.data, missing])];
-      this.deliver(missing);
-      // Keep the record briefly so a delayed xterm event can be identified.
-      // It must eventually expire because an actual missing onData has nothing
-      // left to match against.
-      pending.cleanupTimer = this.schedule(() => {
-        const index = this.pending.indexOf(pending);
-        if (index >= 0) this.pending.splice(index, 1);
-      }, LATE_DATA_WINDOW_MS);
+      this.deliverPending(pending);
     }, FALLBACK_DELAY_MS);
     this.pending.push(pending);
+  }
+
+  /** Preserve committed-text order before a mobile editing key is forwarded. */
+  flushPending() {
+    for (const pending of [...this.pending]) {
+      if (!pending.fallbackDelivered) this.deliverPending(pending);
+    }
+  }
+
+  private deliverPending(pending: PendingInput) {
+    if (pending.fallbackDelivered || !this.pending.includes(pending)) return;
+    this.cancel(pending.timer);
+    const missing = pending.data.slice(pending.matchedLength);
+    if (!missing) {
+      this.removePending(pending);
+      return;
+    }
+    pending.fallbackDelivered = true;
+    // xterm may later replay either the complete composition or only the
+    // suffix it had not emitted before the repair fired. Both are echoes of
+    // bytes already delivered to the PTY by this point.
+    pending.lateEchoes = [...new Set([pending.data, missing])];
+    this.deliver(missing);
+    // Keep the record briefly so a delayed xterm event can be identified.
+    // It must eventually expire because an actual missing onData has nothing
+    // left to match against.
+    pending.cleanupTimer = this.schedule(() => {
+      const index = this.pending.indexOf(pending);
+      if (index >= 0) this.pending.splice(index, 1);
+    }, LATE_DATA_WINDOW_MS);
   }
 
   dispose() {
