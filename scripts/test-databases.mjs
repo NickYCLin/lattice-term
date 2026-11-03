@@ -39,6 +39,7 @@ try {
     const name = `latticeterm-db-qa-${randomBytes(6).toString("hex")}`;
     const adminPassword = `Qa1!${randomBytes(24).toString("hex")}`;
     const password = `Read1!${randomBytes(24).toString("hex")}`;
+    const writerPassword = `Write1!${randomBytes(24).toString("hex")}`;
     const postgres = engine === "postgres";
     const sqlServer = engine === "sqlServer";
     const copy = "cp /qa/server.crt /qa/server.key /qa/ca.crt /tmp/; chmod 600 /tmp/server.key; ";
@@ -73,10 +74,16 @@ try {
     }
     if (!ready) throw new Error(`${engine} did not become ready`);
     checked("docker", exec, { input: seed });
+    const workbenchSeed = postgres
+      ? `CREATE TABLE sql_workbench_qa(id integer PRIMARY KEY, value text); INSERT INTO sql_workbench_qa VALUES(1,'原始'); CREATE USER writer WITH PASSWORD '${writerPassword}'; GRANT CONNECT ON DATABASE sample TO writer; GRANT USAGE ON SCHEMA public TO writer; GRANT SELECT ON sql_workbench_qa TO reader; GRANT SELECT,INSERT,UPDATE,DELETE ON sql_workbench_qa TO writer;`
+      : sqlServer
+        ? `USE sample; CREATE TABLE sql_workbench_qa(id int PRIMARY KEY, value nvarchar(1000)); INSERT INTO sql_workbench_qa VALUES(1,N'原始'); CREATE LOGIN writer WITH PASSWORD='${writerPassword}'; CREATE USER writer FOR LOGIN writer; GRANT SELECT,INSERT,UPDATE,DELETE ON sql_workbench_qa TO writer;\nGO\n`
+        : `USE sample; CREATE TABLE sql_workbench_qa(id int PRIMARY KEY, value text CHARACTER SET utf8mb4); INSERT INTO sql_workbench_qa VALUES(1,'原始'); CREATE USER 'writer'@'%' IDENTIFIED BY '${writerPassword}'; GRANT SELECT,INSERT,UPDATE,DELETE ON sample.sql_workbench_qa TO 'writer'@'%';`;
+    checked("docker", exec, { input: workbenchSeed });
     const { readFileSync } = await import("node:fs");
     const fixture = join(directory, "fixture.json");
-    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password }), { mode: 0o600 });
-    console.log(`Testing ${engine} (${image}) with verified TLS and a read-only account`);
+    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password, writerPassword }), { mode: 0o600 });
+    console.log(`Testing ${engine} (${image}) with verified TLS, read-only access and isolated SQL CRUD`);
     const result = run(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--", "--ignored", "--nocapture"], { env: { ...process.env, LATTICETERM_TEST_DATABASES_JSON: fixture }, stdio: "inherit", timeout: 600000 });
     if (result.status !== 0) throw new Error(`${engine} acceptance failed`);
     checked("docker", ["rm", "-f", "-v", containerId]);

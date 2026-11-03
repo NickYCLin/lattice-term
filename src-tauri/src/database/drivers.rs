@@ -20,7 +20,7 @@ enum Client {
 }
 
 pub(super) fn failed() -> String {
-    "資料庫操作失敗。請檢查服務、連接埠、帳密、資料庫名稱、唯讀權限與 TLS 憑證；伺服器原始錯誤不會回傳，以免洩漏敏感資料。".into()
+    "資料庫操作失敗。請檢查服務、連接埠、帳密、資料庫名稱、帳號權限與 TLS 憑證；伺服器原始錯誤不會回傳，以免洩漏敏感資料。".into()
 }
 
 fn mysql_text(value: Option<Vec<u8>>) -> Result<Option<String>, String> {
@@ -157,12 +157,13 @@ impl Client {
                     .map_err(|_| failed())?;
                 if writable {
                     connection
-                        .simple_query("SET XACT_ABORT ON; BEGIN TRANSACTION")
+                        .simple_query("SET XACT_ABORT ON")
                         .await
                         .map_err(|_| failed())?
                         .into_results()
                         .await
                         .map_err(|_| failed())?;
+                    connection.begin_transaction().await.map_err(|_| failed())?;
                 }
                 Ok(Self::SqlServer(Box::new(connection)))
             }

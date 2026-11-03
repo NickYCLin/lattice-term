@@ -2,9 +2,109 @@ use super::*;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Fixture {
     profile: DatabaseProfile,
     password: String,
+    writer_password: Option<String>,
+}
+
+#[tokio::test]
+#[ignore = "Run node scripts/test-databases.mjs for isolated TLS database containers"]
+async fn isolated_network_databases_verify_sql_workbench_crud() {
+    let path = std::env::var_os("LATTICETERM_TEST_DATABASES_JSON").expect("isolated fixture path");
+    let fixture: Fixture = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let mut profile = fixture.profile;
+    assert_eq!(profile.hostname, "localhost");
+    assert!(!profile.tls_ca_pem.is_empty());
+    profile.validate().unwrap();
+    assert!(
+        drivers::execute_sql(
+            &profile,
+            &fixture.password,
+            "DELETE FROM sql_workbench_qa",
+            true,
+            || Ok(())
+        )
+        .await
+        .is_err(),
+        "read-only server account must reject writes even after confirmation"
+    );
+    profile.username = "writer".into();
+    let password = fixture.writer_password.expect("isolated writer credential");
+    let literal = if profile.engine == Engine::SqlServer {
+        "N"
+    } else {
+        ""
+    };
+    assert!(drivers::execute_sql(
+        &profile,
+        &password,
+        "DELETE FROM sql_workbench_qa",
+        false,
+        || Ok(())
+    )
+    .await
+    .is_err());
+    for statement in [
+        format!("INSERT INTO sql_workbench_qa VALUES(2,{literal}'新增中文🙂')"),
+        format!("UPDATE sql_workbench_qa SET value={literal}'修改中文🙂' WHERE id=2"),
+    ] {
+        let result = drivers::execute_sql(&profile, &password, &statement, true, || Ok(()))
+            .await
+            .unwrap();
+        assert_eq!(result["affectedRows"], 1);
+    }
+    let rows = drivers::execute_sql(
+        &profile,
+        &password,
+        "SELECT id,value,NULL AS optional_value FROM sql_workbench_qa WHERE id=2",
+        false,
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(rows["rows"], json!([["2", "修改中文🙂", null]]));
+    let empty = drivers::execute_sql(
+        &profile,
+        &password,
+        "SELECT id,value FROM sql_workbench_qa WHERE id=-1",
+        false,
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(empty["columns"], json!(["id", "value"]));
+    assert_eq!(empty["rows"], json!([]));
+    assert!(drivers::execute_sql(
+        &profile,
+        &password,
+        "UPDATE sql_workbench_qa SET value='rollback' WHERE id=1",
+        true,
+        || Err("連線設定已變更".into())
+    )
+    .await
+    .is_err());
+    let original = drivers::execute_sql(
+        &profile,
+        &password,
+        "SELECT value FROM sql_workbench_qa WHERE id=1",
+        false,
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(original["rows"], json!([["原始"]]));
+    let deleted = drivers::execute_sql(
+        &profile,
+        &password,
+        "DELETE FROM sql_workbench_qa WHERE id=2",
+        true,
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(deleted["affectedRows"], 1);
 }
 
 #[tokio::test]

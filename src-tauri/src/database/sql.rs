@@ -82,6 +82,23 @@ fn push_result(rows: &mut TextRows, row: Vec<Option<String>>, bytes: &mut usize)
 }
 
 impl Client {
+    async fn finish_transaction(&mut self, commit: bool) -> Result<(), String> {
+        if let Self::SqlServer(client) = self {
+            // Use TDS transaction-manager requests. Sending COMMIT through
+            // execute/sp_executesql changes the RPC's transaction count and
+            // can report an error after the server already committed.
+            return if commit {
+                client.commit_transaction().await
+            } else {
+                client.rollback_transaction().await
+            }
+            .map_err(|_| failed());
+        }
+        self.execute_statement(if commit { "COMMIT" } else { "ROLLBACK" })
+            .await
+            .map(|_| ())
+    }
+
     async fn execute_statement(&mut self, statement: &str) -> Result<u64, String> {
         match self {
             Self::Postgres(c) => sqlx::Executor::execute(c, statement)
@@ -228,11 +245,11 @@ pub(in crate::database) async fn execute_sql(
     }
     let count = client.execute_statement(&statement).await?;
     if let Err(error) = before_commit() {
-        let _ = client.execute_statement("ROLLBACK").await;
+        let _ = client.finish_transaction(false).await;
         return Err(error);
     }
     client
-        .execute_statement("COMMIT")
+        .finish_transaction(true)
         .await
         .map_err(|_| "提交結果無法確認，請先查詢資料，不要直接重送 SQL。")?;
     Ok(
