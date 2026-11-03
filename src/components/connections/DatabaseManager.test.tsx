@@ -236,3 +236,44 @@ it("lets the user reveal only a newly typed password without retrieving saved cr
   await click("顯示密碼"); await submit();
   expect(password().type).toBe("password"); expect(password().value).toBe("");
 });
+
+
+it("keeps connection editing in the shared setup without mounting a query workspace", async () => {
+  const selected = vi.fn();
+  await act(async () => root.render(<DatabaseManager profiles={[host]} settingsOnly initialProfileId="second" onProfileSelected={selected} onClose={() => {}} />));
+  expect(selected).toHaveBeenCalledWith(snapshot.profiles[1]);
+  expect(hostProps(container).find(p => p.onSubmit)!.hidden).toBe(false);
+  expect(hostProps(container).some(p => p.children === "SQL 工作台")).toBe(false);
+});
+
+it("routes query settings to the shared connection editor", async () => {
+  const configure = vi.fn();
+  await act(async () => root.render(<DatabaseManager profiles={[host]} onConfigure={configure} onClose={() => {}} />));
+  await click("連線設定");
+  expect(configure).toHaveBeenCalledWith(database.id, database.hostKey);
+  expect(hostProps(container).find(p => p.onSubmit)!.hidden).toBe(true);
+});
+
+it("defers catalog updates until local connection edits have been cancelled", async () => {
+  const view = (revision: number) => <DatabaseManager profiles={[host]} settingsOnly catalogRevision={revision} onClose={() => {}} />;
+  await act(async () => root.render(view(0)));
+  await change(p => p.maxLength === 100, {value: "本機未儲存"});
+  snapshot = {...snapshot, revision: "external", profiles: [{...database, name:"外部更新"}]};
+  await act(async () => root.render(view(1)));
+  expect(invoke.mock.calls.filter(([c]) => c === "database_profiles")).toHaveLength(1);
+  expect(hostProps(container).some(p => p.value === "本機未儲存")).toBe(true);
+  await click("取消編輯");
+  expect(invoke.mock.calls.filter(([c]) => c === "database_profiles")).toHaveLength(2);
+  expect(hostProps(container).some(p => p.value === "外部更新")).toBe(true);
+});
+
+it("links an existing standalone database explicitly and copies only the remote hostname", async () => {
+  snapshot.profiles = [{...database, hostKey:"local", hostname:"database.invalid"}];
+  await act(async () => root.render(<DatabaseManager profiles={[host]} hostKeys={[host.id]} initialProfileId={database.id} settingsOnly onClose={() => {}} />));
+  await click("與這個遠端連線放在一起");
+  await click("帶入遠端主機位址");
+  expect(hostProps(container).some(p => p.value === "reader")).toBe(true);
+  expect(hostProps(container).find(p => p.type === "password")!.value).toBe("");
+  await submit();
+  expect(snapshot.profiles[0]).toMatchObject({id:database.id, hostKey:host.id, hostname:host.hostname, username:"reader"});
+});

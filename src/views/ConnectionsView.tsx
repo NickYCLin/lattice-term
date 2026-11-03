@@ -8,6 +8,9 @@ import { readSelectedText, localFileError, type UploadFile } from "../app/localF
  * a way back.
  */
 
+import { useDatabaseCatalog } from "../app/useDatabaseCatalog";
+import { databaseListEntries, databaseRemoteHost, databasesForHost, type DatabaseWorkspaceTarget } from "../domain/connectionSetup";
+import { DatabaseConnectionCard } from "../components/connections/DatabaseConnectionCard";
 import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { Workspace } from "../app/useWorkspace";
@@ -65,10 +68,13 @@ export function ConnectionsView({
   backendAvailable,
   mobile,
   platform,
+  onEditDatabase,
+  onOpenDatabase,
+  databaseRevision = 0,
 }: {
   workspace: Workspace;
   onCreate: () => void;
-  onEdit: (id: string) => void;
+  onEdit: (id: string, section?: "remote" | "database") => void;
   onAddRoute?: (id: string) => void;
   onDelete: (id: string) => void;
   onConnect: (profile: ConnectionProfile) => void;
@@ -76,9 +82,14 @@ export function ConnectionsView({
   backendAvailable: boolean;
   mobile: boolean;
   platform?: string;
+  onEditDatabase?: (profileId?: string, hostKey?: string) => void;
+  onOpenDatabase?: (target: DatabaseWorkspaceTarget) => void;
+  databaseRevision?: number;
 }) {
   const { t } = useI18n();
-  const [databaseScope, setDatabaseScope] = useState<{ hostKeys?: string[] } | null>(null);
+  const [databaseScope, setDatabaseScope] = useState<DatabaseWorkspaceTarget | null>(null);
+  const [kind, setKind] = useState<"all" | "remote" | "database">("all");
+  const databases = useDatabaseCatalog(backendAvailable, databaseRevision);
   const [routePickerId, setRoutePickerId] = useState<string | null>(null);
   const [mergeId, setMergeId] = useState<string | null>(null);
   const {
@@ -125,6 +136,11 @@ export function ConnectionsView({
     name={mergeSource.name} candidates={mergeCandidates}
     onMerge={(id) => workspace.linkProfiles([mergeSource.id, id])}
     onClose={() => setMergeId(null)} /> : null;
+
+  const databaseEntries = databaseListEntries(databases.profiles, profiles, visibleProfiles, kind, workspace.filter);
+  const openSql = (target: DatabaseWorkspaceTarget) => onOpenDatabase ? onOpenDatabase(target) : setDatabaseScope(target);
+  const configureDatabase = (id?: string, hostKey?: string) => onEditDatabase ? onEditDatabase(id, hostKey) : setDatabaseScope({ profileId: id });
+  const databaseCards = databaseEntries.length > 0 && <section className="connection-group database-connection-group" aria-label="資料庫連線"><h2 className="connection-group__title">資料庫 <span>{databaseEntries.length}</span></h2><ul className="connection-grid">{databaseEntries.map(database => <DatabaseConnectionCard key={database.id} profile={database} remoteName={databaseRemoteHost(database, profiles)?.name} onOpen={() => openSql({ profileId: database.id })} onEdit={() => configureDatabase(database.id, database.hostKey)} />)}</ul></section>;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -253,14 +269,15 @@ export function ConnectionsView({
     />
   );
 
-  const databaseManager = databaseScope && <DatabaseManager profiles={profiles} hostKeys={databaseScope.hostKeys} onClose={() => setDatabaseScope(null)} />;
-  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => setDatabaseScope({})}>新增／管理資料庫</button>;
+  const databaseManager = databaseScope && <DatabaseManager profiles={profiles} initialProfileId={databaseScope.profileId} hostKeys={databaseScope.hostKeys} onClose={() => { setDatabaseScope(null); void databases.refresh(); }} />;
+  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => onEditDatabase ? onEditDatabase() : setDatabaseScope({})}>新增／管理資料庫</button>;
 
-  if (profiles.length === 0) {
+  if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
     return (
       <div className="connections connections--empty">
         {databaseManager}
         {filePicker}
+        {databases.error && <Callout tone="warn" title="資料庫清單讀取失敗" actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>重新載入</button>}>{databases.error}</Callout>}
         <div style={{ padding: "var(--space-5) var(--space-6) 0" }}>
           {notice && (
             <Callout tone={notice.tone} title={notice.title}>
@@ -317,7 +334,7 @@ export function ConnectionsView({
 
       <div className="connections__toolbar">
         <p className="connections__count" aria-live="polite">
-          {filterActive
+          {backendAvailable ? `遠端 ${profiles.length} · 資料庫 ${databases.profiles.length}` : filterActive
             ? t("connections.countFiltered", {
                 visible: visibleProfiles.length,
                 total: profiles.length,
@@ -327,6 +344,7 @@ export function ConnectionsView({
 
         <div className="connections__tools">
           {databaseButton}
+          {backendAvailable && <div className="connection-kind-filter" role="group" aria-label="連線種類">{([["all","全部"],["remote","遠端"],["database","資料庫"]] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>)}</div>}
           <label className="select">
             <span className="select__label">{t("connections.sortBy")}</span>
             <select
@@ -375,7 +393,10 @@ export function ConnectionsView({
           </div>
         )}
 
-        {visibleProfiles.length === 0 ? (
+        {databases.error && <Callout tone="warn" title="資料庫清單讀取失敗" actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>重新載入</button>}>{databases.error}</Callout>}
+        {databases.loading && <p role="status">正在讀取資料庫連線…</p>}
+        {databaseCards}
+        {(kind === "database" || visibleProfiles.length === 0) && databaseEntries.length === 0 && !databases.loading ? (
           <EmptyState
             icon={<SearchIcon size={26} />}
             title={t("connections.noResults.title")}
@@ -384,13 +405,13 @@ export function ConnectionsView({
               <button
                 type="button"
                 className="button button--secondary"
-                onClick={resetFilter}
+                onClick={() => { setKind("all"); resetFilter(); }}
               >
                 {t("connections.resetFilters")}
               </button>
             }
           />
-        ) : (
+        ) : kind === "database" ? null : (
           visibleGroups
             .filter((group) =>
               group.profiles.some((profile) => cardFor.has(profile.id)),
@@ -420,7 +441,9 @@ export function ConnectionsView({
                       const linked = cardFor.get(profile.id) ?? [];
                       return (
                         <ConnectionCard
-                          onDatabases={backendAvailable ? () => setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
+                          onDatabases={backendAvailable ? () => onEditDatabase ? onEdit(profile.id, "database") : setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
+                          databaseCount={databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).length}
+                          onOpenSql={backendAvailable && databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).length ? () => openSql({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)])] }) : undefined}
                           key={profile.id}
                           profile={profile}
                           linked={linked.map((peer) => ({

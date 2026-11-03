@@ -70,6 +70,8 @@ import { NavRail } from "./components/shell/NavRail";
 import { ResourceSidebar } from "./components/shell/ResourceSidebar";
 import { StatusBar } from "./components/shell/StatusBar";
 import { ViewHeader } from "./components/shell/ViewHeader";
+import type { ConnectionSetupMode, ConnectionSetupSection, DatabaseWorkspaceTarget } from "./domain/connectionSetup";
+import { DatabaseManager } from "./components/connections/DatabaseManager";
 import { DatabaseDock } from "./components/connections/DatabaseDock";
 import { ConnectionInspector } from "./components/connections/ConnectionInspector";
 import { useHostMetrics } from "./app/useHostMetrics";
@@ -392,11 +394,17 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     : !preferences.sidebarCollapsed;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sqlDockOpen, setSqlDockOpen] = useState(false);
+  const [databaseRevision, setDatabaseRevision] = useState(0);
+  const [databaseWorkspace, setDatabaseWorkspace] = useState<DatabaseWorkspaceTarget | null>(null);
   const [drawer, setDrawer] = useState<{
     open: boolean;
     profileId: string | null;
     routeSourceId?: string;
     routeProtocol?: Protocol;
+    mode?: ConnectionSetupMode;
+    section?: ConnectionSetupSection;
+    databaseProfileId?: string;
+    saveCycle?: number;
   }>({ open: false, profileId: null });
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
@@ -794,11 +802,27 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setDrawer({ open: true, profileId: null });
   }, []);
 
-  const openEdit = useCallback((id: string) => {
+  const openEdit = useCallback((id: string, section: ConnectionSetupSection = "remote") => {
     setView("connections");
     setMobileResourceSidebarOpen(false);
-    setDrawer({ open: true, profileId: id });
+    setDrawer({ open: true, profileId: id, mode: "both", section });
   }, []);
+
+  const closeConnectionSetup = useCallback(() => {
+    setDrawer({ open: false, profileId: null });
+    setDatabaseRevision(revision => revision + 1);
+  }, []);
+
+  const openDatabaseConfig = useCallback((profileId?: string, hostKey?: string) => {
+    const host = profiles.find(profile => profile.id === hostKey || profile.machineId === hostKey);
+    setDatabaseWorkspace(null);
+    setDrawer({ open: true, profileId: host?.id ?? null, mode: host ? "both" : "database", section: "database", databaseProfileId: profileId });
+  }, [profiles]);
+
+  const openDatabaseWorkspace = useCallback((target: DatabaseWorkspaceTarget) => {
+    closeConnectionSetup();
+    setDatabaseWorkspace(target);
+  }, [closeConnectionSetup]);
 
   const openRoute = useCallback((id: string, protocol?: Protocol) => {
     setView("connections");
@@ -856,9 +880,12 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       id: string,
       credential?: ConnectionCredentialDraft,
       additionalRoute?: ConnectionProfile,
+      configureDatabase = false,
+      databaseProfileId?: string,
     ) => {
       const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential, drawer.routeSourceId, additionalRoute);
-      setDrawer({ open: false, profileId: null });
+      if (configureDatabase) setDrawer(previous => ({ open: true, profileId: saved.id, mode: "both", section: "database", databaseProfileId, saveCycle: (previous.saveCycle ?? 0) + 1 }));
+      else setDrawer({ open: false, profileId: null });
       if (
         connectAfterSave &&
         canConnectProtocol(saved.protocol, supportedProtocols)
@@ -1157,6 +1184,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                   workspace={workspace}
                   onCreate={openCreate}
                   onEdit={openEdit}
+                  onEditDatabase={openDatabaseConfig}
+                  onOpenDatabase={openDatabaseWorkspace}
+                  databaseRevision={databaseRevision}
                   onAddRoute={openRoute}
                   onDelete={requestDelete}
                   onConnect={openConnection}
@@ -1288,7 +1318,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             </Suspense>
           </div>
 
-          {runtime.host === "tauri" && <DatabaseDock profiles={profiles} open={sqlDockOpen} visible={view === "terminal" || view === "chat"} onClose={() => setSqlDockOpen(false)} />}
+          {runtime.host === "tauri" && <DatabaseDock profiles={profiles} open={sqlDockOpen} visible={view === "terminal" || view === "chat"} onClose={() => setSqlDockOpen(false)} onConfigure={openDatabaseConfig} catalogRevision={databaseRevision} />}
           {showInspector && selected && (
             <ConnectionInspector
               profile={selected}
@@ -1340,9 +1370,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       </main>
 
       <Suspense fallback={<LazyOverlayFallback />}>
+      {databaseWorkspace && <DatabaseManager profiles={profiles} initialProfileId={databaseWorkspace.profileId} hostKeys={databaseWorkspace.hostKeys} onConfigure={openDatabaseConfig} onClose={() => { setDatabaseWorkspace(null); setDatabaseRevision(revision => revision + 1); }} />}
       {drawer.open && (
         <ConnectionDrawer
-          key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : "new"}
+          key={`${drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : `new:${drawer.mode ?? "remote"}:${drawer.databaseProfileId ?? ""}`}:${drawer.saveCycle ?? 0}`}
           profile={editing}
           routeSource={profiles.find(entry => entry.id === drawer.routeSourceId) ?? null}
           routeProtocol={drawer.routeProtocol}
@@ -1352,8 +1383,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           supportedProtocols={supportedProtocols}
           mobile={onMobile}
           databaseAvailable={runtime.host === "tauri"}
+          initialMode={drawer.mode}
+          initialSection={drawer.section}
+          databaseProfileId={drawer.databaseProfileId}
           onSave={saveDraft}
-          onClose={() => setDrawer({ open: false, profileId: null })}
+          onSaveForDatabase={(draft, connect, id, credential, route, databaseId) => saveDraft(draft, connect, id, credential, route, true, databaseId)}
+          onOpenDatabase={profileId => openDatabaseWorkspace({ profileId })}
+          onClose={closeConnectionSetup}
         />
       )}
 

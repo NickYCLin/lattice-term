@@ -82,11 +82,11 @@ describe("ConnectionsView", () => {
   });
 
   it("offers a way to start when the workspace is empty", () => {
-    const markup = render([]);
+    const markup = render([], {backendAvailable:false});
     expect(markup).toContain("還沒有任何連線");
     expect(markup).toContain("新增連線");
     expect(markup).toContain("載入範例");
-    expect(markup.indexOf("新增／管理資料庫</button>")).toBeGreaterThan(markup.indexOf("empty-state__actions"));
+    expect(markup).not.toContain("新增／管理資料庫</button>");
   });
 
   it("lists a saved profile by name and host", () => {
@@ -132,4 +132,12 @@ describe("ConnectionsView", () => {
     expect(markup).toContain("第一組");
     expect(markup).not.toContain("第二組");
   });
+});
+
+
+it("waits for native database metadata before declaring the entire workspace empty", () => {
+  const markup=render([]);
+  expect(markup).toContain("正在讀取資料庫連線");
+  expect(markup).toContain("新增／管理資料庫</button>");
+  expect(markup).not.toContain("還沒有任何連線");
 });

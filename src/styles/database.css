@@ -228,3 +228,40 @@
 .sql-workbench { container-type: inline-size; }
 .database-manager__fields select, .sql-workbench__execution-permission select { appearance: none; height: 2.875rem; padding-right: 2.5rem; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) calc(50% - 1px), calc(100% - 13px) calc(50% - 1px); background-size: 5px 5px; background-repeat: no-repeat; }
 @container (max-width: 38rem) { .database-manager__field-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.connection-drawer__remote-form[hidden], .drawer__foot button[hidden] { display: none; }
+.drawer.drawer--connection-database { width: min(78rem, calc(100vw - var(--space-6))); }
+.connection-setup { display: grid; gap: .75rem; }
+.connection-setup > p { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; }
+.connection-setup__modes { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.connection-setup__modes legend { margin-bottom: .75rem; font-size: var(--text-sm); font-weight: 600; }
+.connection-setup__modes label { display: flex; gap: .75rem; align-items: start; min-width: 0; padding: .75rem; border: 1px solid var(--line-strong); border-radius: var(--radius-md); cursor: pointer; }
+.connection-setup__modes label.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.connection-setup__modes input { flex: none; margin-top: .2rem; }
+.connection-setup__modes span { min-width: 0; }
+.connection-setup__modes strong { display: block; font-size: var(--text-sm); }
+.connection-setup__modes small { display: block; font-size: var(--text-xs); color: var(--text-muted); margin-top: .3rem; }
+.connection-setup__tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--line); }
+.connection-setup__tabs button { padding: .75rem 1rem; color: var(--text-muted); border-bottom: 2px solid transparent; }
+.connection-setup__tabs button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.connection-drawer__database .database-manager__header { display: none; }
+.connection-drawer__database .database-manager__layout { min-height: 0; }
+.database-manager__copy-host { justify-self: start; color: var(--accent); font-size: var(--text-xs); text-decoration: underline; text-underline-offset: .2rem; }
+.connection-kind-filter { display: flex; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .2rem; gap: .2rem; }
+.connection-kind-filter button { min-height: 2rem; padding: .25rem .6rem; border-radius: var(--radius-sm); font-size: var(--text-xs); color: var(--text-muted); }
+.connection-kind-filter button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.database-connection-card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.database-connection-card__heading { display: flex; gap: .75rem; align-items: center; }
+.database-connection-card__heading > div { min-width: 0; }
+.database-connection-card__heading h3 { font-size: var(--text-lg); overflow-wrap: anywhere; }
+.database-connection-card__heading p, .database-connection-card__relation { color: var(--text-muted); font-size: var(--text-xs); }
+.database-connection-card__icon { padding: .6rem; background: var(--accent-soft); color: var(--accent); font-family: var(--font-mono); border-radius: var(--radius-sm); flex: none; }
+.database-connection-card__target { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.database-connection-card__actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: auto; }
+.database-connection-group { margin-bottom: 1.5rem; }
+@media (max-width: 40rem) {
+  .connection-setup__modes label { flex-direction: column; align-items: center; padding: .5rem; gap: .4rem; text-align: center; }
+  .connection-setup__modes small { display: none; }
+  .connection-setup__modes { gap: .4rem; }
+  .drawer.drawer--connection-database { width: calc(100vw - 1rem); }
+}

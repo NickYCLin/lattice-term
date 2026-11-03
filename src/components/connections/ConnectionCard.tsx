@@ -44,6 +44,8 @@ export function ConnectionCard({
   onChooseRoute,
   onMerge,
   onDatabases,
+  onOpenSql,
+  databaseCount = 0,
   onDuplicate,
   onDelete,
   onToggleFavorite,
@@ -59,6 +61,8 @@ export function ConnectionCard({
   onChooseRoute?: () => void;
   onMerge?: () => void;
   onDatabases?: () => void;
+  onOpenSql?: () => void;
+  databaseCount?: number;
   onDuplicate: () => void;
   onDelete: () => void;
   onToggleFavorite: () => void;
@@ -142,7 +146,8 @@ export function ConnectionCard({
 
       <div className="connection-card__foot">
         {onMerge && <button type="button" className="button button--ghost button--sm connection-card__merge" onClick={onMerge}>{t("connections.merge.action")}</button>}
-        {onDatabases && <button type="button" className="button button--secondary button--sm" title="設定此主機的資料庫，可新增多個種類與版本" onClick={onDatabases}>資料庫設定</button>}
+        {onOpenSql && <button type="button" className="button button--secondary button--sm" onClick={onOpenSql}>開啟 SQL{databaseCount > 1 ? `（${databaseCount}）` : ""}</button>}
+          {onDatabases && <button type="button" className="button button--secondary button--sm" title="設定此主機的資料庫，可新增多個種類與版本" onClick={onDatabases}>資料庫設定</button>}
         {onAddRoute && (
           <button
             type="button"

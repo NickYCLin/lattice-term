@@ -36,12 +36,12 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function render(options: { newHost?: boolean; mobile?: boolean; available?: boolean; legacyHost?: boolean } = {}) {
+async function render(options: { newHost?: boolean; mobile?: boolean; available?: boolean; legacyHost?: boolean; mode?: "remote" | "database" | "both"; databaseId?: string; saveBoth?: typeof onSave } = {}) {
   const selectedHost = options.legacyHost ? { ...host, machineId: undefined } : host;
   const linkedPeer = options.legacyHost ? { ...peer, machineId: host.id } : peer;
   await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer
     profile={options.newHost ? null : selectedHost} profiles={[selectedHost, linkedPeer]} supportedProtocols={["ssh", "rdp"]}
-    mobile={options.mobile ?? false} databaseAvailable={options.available ?? true} onSave={onSave} onClose={onClose}
+    mobile={options.mobile ?? false} databaseAvailable={options.available ?? true} initialMode={options.mode} initialSection="database" databaseProfileId={options.databaseId} onSaveForDatabase={options.saveBoth} onSave={onSave} onClose={onClose}
   /></I18nProvider>));
 }
 function button(text: string) {
@@ -57,7 +57,6 @@ async function click(text: string) {
 async function editDatabase() {
   const selected = allNodes(container).find((node) => node.tagName === "BUTTON" && node.textContent.startsWith("主機資料庫"))!;
   await act(async () => props(selected).onClick());
-  await click("連線設定");
   const input = allNodes(container).find((node) => props(node)?.value === "主機資料庫")!;
   await act(async () => props(input).onChange({ target: { value: "已修改資料庫" } }));
 }
@@ -66,7 +65,7 @@ async function submitDatabase() {
   await act(async () => props(form).onSubmit({ preventDefault() {} }));
 }
 
-it.each([false, true])("embeds the host databases below remote fields without a second dialog or nested form (mobile=%s)", async (mobile) => {
+it.each([false, true])("embeds host database settings in the unified database tab without a second dialog or nested form (mobile=%s)", async (mobile) => {
   await render({ mobile });
   expect(allNodes(container).filter((node) => props(node)?.role === "dialog")).toHaveLength(1);
   const forms = allNodes(container).filter((node) => node.tagName === "FORM");
@@ -91,14 +90,20 @@ it("includes legacy route databases when the primary host has no machine identit
 it.each([{ available: false }, { newHost: true }, { mobile: true, available: false }, { mobile: true, newHost: true }])("does not load databases before a saved native host exists: %j", async (options) => {
   await render(options);
   expect(invoke).not.toHaveBeenCalled();
-  if (options.newHost) expect(container.textContent).toContain("請先儲存遠端連線");
+  if (options.newHost) {
+    const both = allNodes(container).find(node => props(node)?.["aria-label"] === "兩者都用")!;
+    await act(async () => props(both).onChange());
+    await click("資料庫設定");
+    expect(container.textContent).toContain("不需要遠端主機");
+  }
   else expect(container.textContent).not.toContain("資料庫連線");
 });
 
 it.each([false, true])("asks before discarding database edits and prevents remote save from dropping them (mobile=%s)", async (mobile) => {
   await render({ mobile }); await editDatabase();
   expect(props(button("儲存")).disabled).toBe(true);
-  await act(async () => props(button("儲存並連線")).onClick());
+  const remoteForm = allNodes(container).find(node => node.tagName === "FORM" && props(node).id)!;
+  await act(async () => props(remoteForm).onSubmit({preventDefault(){}}));
   expect(onSave).not.toHaveBeenCalled();
   await click("取消");
   expect(onClose).not.toHaveBeenCalled();
@@ -120,6 +125,7 @@ it.each([false, true])("keeps the drawer open during database save and unlocks r
   await act(async () => finish({ ...snapshot, profiles: [{ ...database, name: "已修改資料庫" }], revision: "updated" }));
   expect(props(button("儲存")).disabled).toBe(false);
   expect(onSave).not.toHaveBeenCalled();
+  await click("遠端設定");
   const remoteForm = allNodes(container).find((node) => node.tagName === "FORM" && props(node).id)!;
   await act(async () => props(remoteForm).onSubmit({ preventDefault() {} }));
   expect(onSave).toHaveBeenCalledOnce();
@@ -134,4 +140,42 @@ it("retains database edits and the discard guard after a save failure", async ()
   await click("取消");
   expect(onClose).not.toHaveBeenCalled();
   expect(container.textContent).toContain("要放棄這次的修改嗎？");
+});
+
+it("saves a database-only connection without remote validation or a remote record", async () => {
+  await render({newHost:true,mode:"database"});
+  expect(container.textContent).not.toContain("請先在「遠端設定」儲存");
+  const form = allNodes(container).find(node => node.tagName === "FORM" && !props(node).id)!;
+  const change = async (predicate: (node: HostNode) => boolean, value: string) => {
+    const input = allNodes(form).find(predicate)!;
+    await act(async () => props(input).onChange({target:{value},currentTarget:{value}}));
+  };
+  await change(node => props(node)?.maxLength === 100, "資料庫專用");
+  await change(node => props(node)?.maxLength === 253, "database.invalid");
+  await change(node => props(node)?.maxLength === 128 && props(node)?.autoComplete !== "off", "orders");
+  await change(node => props(node)?.autoComplete === "off", "db-reader");
+  await change(node => props(node)?.type === "password", "database-fixture-only");
+  invoke.mockImplementation(async (command, args) => {
+    if(command === "database_save") return {...snapshot,profiles:[...snapshot.profiles,args.profile],revision:"updated"};
+    throw Error(command);
+  });
+  await submitDatabase();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({profile:expect.objectContaining({name:"資料庫專用",hostKey:"local",hostname:"database.invalid",username:"db-reader"}),password:"database-fixture-only"}));
+  expect(onSave).not.toHaveBeenCalled();
+  await click("完成"); expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("uses the keep-open save path when a new combined connection proceeds to database setup", async () => {
+  const saveBoth = vi.fn();
+  await render({newHost:true,mode:"both",saveBoth});
+  await click("遠端設定");
+  const set = async (suffix: string, value: string) => {
+    const input = allNodes(container).find(node => node.tagName === "INPUT" && String(props(node)?.id).endsWith(suffix))!;
+    await act(async () => props(input).onChange({target:{value},currentTarget:{value}}));
+  };
+  await set("-name", "同時使用"); await set("-host", "remote.invalid"); await set("-user", "operator");
+  const form=allNodes(container).find(node=>node.tagName === "FORM" && props(node).id)!;
+  await act(async () => props(form).onSubmit({preventDefault(){}}));
+  expect(saveBoth).toHaveBeenCalledOnce(); expect(onSave).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
 });

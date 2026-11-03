@@ -9,6 +9,8 @@
 
 import { useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import type { ConnectionSetupMode, ConnectionSetupSection } from "../../domain/connectionSetup";
+import type { DatabaseProfile } from "../../domain/database";
 import { canConnectProtocol } from "../../app/platformCapabilities";
 import {
   connectionTarget,
@@ -92,6 +94,11 @@ export function ConnectionDrawer({
   supportedProtocols,
   mobile,
   databaseAvailable = false,
+  initialMode,
+  initialSection = "remote",
+  databaseProfileId,
+  onSaveForDatabase,
+  onOpenDatabase,
   onSave,
   onClose,
 }: {
@@ -107,6 +114,12 @@ export function ConnectionDrawer({
   /** Mobile packages show only usable protocols when creating a profile. */
   mobile: boolean;
   databaseAvailable?: boolean;
+  initialMode?: ConnectionSetupMode;
+  initialSection?: ConnectionSetupSection;
+  databaseProfileId?: string;
+  onSaveForDatabase?: (draft: ConnectionDraft, connectAfterSave: boolean, id: string,
+    credential?: ConnectionCredentialDraft, additionalRoute?: ConnectionProfile, databaseId?: string) => void | Promise<void>;
+  onOpenDatabase?: (profileId: string) => void;
   onSave: (
     draft: ConnectionDraft,
     connectAfterSave: boolean,
@@ -123,6 +136,12 @@ export function ConnectionDrawer({
     [profile, routeSource, profiles, routeProtocol],
   );
 
+  const [mode, setMode] = useState<ConnectionSetupMode>(databaseAvailable ? initialMode ?? (profile ? "both" : "remote") : "remote");
+  const [section, setSection] = useState<ConnectionSetupSection>(initialMode === "database" ? "database" : initialSection);
+  const [selectedDatabase, setSelectedDatabase] = useState<DatabaseProfile | null | undefined>(undefined);
+  const selectedDatabaseId = selectedDatabase === undefined ? databaseProfileId : selectedDatabase?.id;
+  const remoteVisible = mode !== "database" && (mode !== "both" || section === "remote");
+  const databaseVisible = mode === "database" || (mode === "both" && section === "database");
   const [draft, setDraft] = useState<ConnectionDraft>(initial);
   const [additionalHostname, setAdditionalHostname] = useState("");
   const [additionalPort, setAdditionalPort] = useState("");
@@ -291,20 +310,20 @@ export function ConnectionDrawer({
   }
 
   async function save(connectAfterSave: boolean) {
-    if (savingRef.current || credential.loading || pendingProtocol || databaseState.busy || databaseState.dirty) return;
+    if (!remoteVisible || savingRef.current || credential.loading || pendingProtocol || databaseState.busy || databaseState.dirty) return;
     if (Object.keys(validateNow()).length > 0) return;
     savingRef.current = true;
     setSaving(true);
     setSaveError(null);
     try {
       const addresses = connectionAddressDrafts(protocolDraft({ ...draft, tags: parseTags(tagInput) }), additionalHostname, additionalPort);
-      await onSave(
-        addresses.primary,
-        connectAfterSave,
-        recordId,
+      const databaseSave = mode === "both" && onSaveForDatabase;
+      const args = [addresses.primary, connectAfterSave, recordId,
         supportsCredentialRecord(candidate) ? credential.credential : undefined,
-        addresses.additional ? createConnectionProfile(addresses.additional, additionalId) : undefined,
-      );
+        addresses.additional ? createConnectionProfile(addresses.additional, additionalId) : undefined] as const;
+      if (databaseSave) await databaseSave(...args, selectedDatabaseId);
+      else await onSave(...args);
+
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -326,7 +345,7 @@ export function ConnectionDrawer({
     setShowSecret(current => !current);
   }
 
-  const title = profile ? t("form.editTitle") : t("form.addTitle");
+  const title = profile || selectedDatabaseId ? t("form.editTitle") : t("form.addTitle");
   const error = (field: keyof ValidationErrors) => {
     const issue = errors[field];
     return issue ? t(issue.key, issue.values) : undefined;
@@ -335,7 +354,7 @@ export function ConnectionDrawer({
   return (
     <div className="scrim" role="presentation" onMouseDown={requestClose}>
       <div
-        className="drawer"
+        className={`drawer${databaseVisible ? " drawer--connection-database" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -360,7 +379,15 @@ export function ConnectionDrawer({
         </header>
 
         <div className="drawer__body" inert={saving}>
-        <form className="connection-drawer__remote-form" id={formId} onSubmit={submit} noValidate inert={databaseState.busy}>
+        {databaseAvailable && <section className="connection-setup">
+          <fieldset className="connection-setup__modes" disabled={saving || databaseState.busy || databaseState.dirty}><legend>這次要設定</legend>
+            {([ ["remote", "遠端連線", "SSH、遠端桌面"], ["database", "資料庫", "直接查詢，不需要遠端"], ["both", "兩者都用", "同一處管理，各自儲存"] ] as const).map(([value,label,hint]) => <label key={value} className={mode === value ? "is-selected" : ""}><input type="radio" name={`${formId}-purpose`} aria-label={label} checked={mode === value} onChange={() => { setMode(value); setSection(value === "database" ? "database" : "remote"); setSaveError(null); }} /><span><strong>{label}</strong><small>{hint}</small></span></label>)}
+          </fieldset>
+          {mode === "both" && <nav className="connection-setup__tabs" aria-label="連線設定項目"><button type="button" aria-pressed={section === "remote"} disabled={saving || databaseState.busy || databaseState.dirty} onClick={() => setSection("remote")}>遠端設定</button><button type="button" aria-pressed={section === "database"} disabled={saving || databaseState.busy || databaseState.dirty} onClick={() => setSection("database")}>資料庫設定</button></nav>}
+          {mode === "database" && <p>只儲存資料庫設定，不會建立或啟動 SSH、RDP 等遠端連線。</p>}
+          {mode === "both" && <p>遠端與資料庫的帳號、密碼及 AI 權限各自設定。{!databaseHost && "先儲存遠端設定，這個視窗會繼續開啟資料庫設定。"}</p>}
+        </section>}
+        <form hidden={!remoteVisible} className="connection-drawer__remote-form" id={formId} onSubmit={submit} noValidate inert={databaseState.busy}>
           {(profile || routeSource) && <section className="form-section">
             <h3 className="form-section__title">{t("form.route.title")}</h3>
             <p>{t("form.route.hint")}</p>
@@ -825,14 +852,17 @@ export function ConnectionDrawer({
             </div>
           </details>
         </form>
-        {databaseAvailable && <section className="form-section connection-drawer__database">
-          <h3 className="form-section__title">資料庫連線</h3>
-          {databaseHost ? <>
-            <p>資料庫設定為選填，可新增多種資料庫與版本。資料庫與上方遠端連線分開儲存，不影響原有遠端連線。</p>
-            {databaseState.dirty && <p role="status">資料庫設定尚未儲存，請先按「儲存資料庫連線」，再使用底部按鈕儲存遠端連線。</p>}
-            <DatabaseManager embedded profiles={profiles} hostKeys={databaseHostKeys} onClose={requestClose} onStateChange={setDatabaseState} />
-          </> : <p>請先儲存遠端連線，再從這張主機卡片開啟編輯，即可在這裡新增資料庫。</p>}
+        {databaseAvailable && databaseVisible && <section className="form-section connection-drawer__database">
+          <h3 className="form-section__title">資料庫設定</h3>
+          {(mode === "database" || databaseHost) ? <>
+            {databaseState.dirty && <p role="status">資料庫設定尚未儲存，請先按「儲存資料庫連線」。</p>}
+            <DatabaseManager embedded settingsOnly initialView="settings" initialProfileId={selectedDatabaseId}
+              createNew={mode === "database" && !selectedDatabaseId && !databaseHost}
+              profiles={profiles} hostKeys={databaseHostKeys} onClose={requestClose}
+              onProfileSelected={setSelectedDatabase} onStateChange={setDatabaseState} />
+          </> : <p>請先在「遠端設定」儲存連線，接著即可在這裡新增資料庫；也可改選「資料庫」直接新增，不需要遠端主機。</p>}
         </section>}
+
         </div>
 
         {confirmDiscard ? (
@@ -879,7 +909,7 @@ export function ConnectionDrawer({
               )}
             </div>
           </div>
-        ) : (
+        ) : mode === "database" ? <div className="drawer__foot"><span className="drawer__foot-note">資料庫帳密獨立保存</span><div className="drawer__foot-actions"><button type="button" className="button button--secondary" disabled={databaseState.busy} onClick={requestClose}>取消</button>{selectedDatabaseId && onOpenDatabase && <button type="button" className="button button--primary" disabled={databaseState.busy || databaseState.dirty} onClick={() => navigate(() => onOpenDatabase(selectedDatabaseId))}>開啟 SQL</button>}<button type="button" className="button button--primary" disabled={databaseState.busy || databaseState.dirty} onClick={requestClose}>完成</button></div></div> : (
           <div className="drawer__foot">
             <span className="drawer__foot-note">
               {dirty ? t("form.unsaved") : t("form.noChanges")}
@@ -893,6 +923,7 @@ export function ConnectionDrawer({
                 {t("common.cancel")}
               </button>
               <button
+                hidden={!remoteVisible}
                 type="submit"
                 form={formId}
                 className={`button ${
@@ -902,7 +933,9 @@ export function ConnectionDrawer({
               >
                 {t("form.submit.saveOnly")}
               </button>
-              {connectSupported && (
+              {databaseVisible && <button type="button" className="button button--primary" disabled={databaseState.busy || databaseState.dirty} onClick={requestClose}>完成</button>}
+              {databaseVisible && selectedDatabaseId && onOpenDatabase && <button type="button" className="button button--secondary" disabled={databaseState.busy || databaseState.dirty} onClick={() => navigate(() => onOpenDatabase(selectedDatabaseId))}>開啟 SQL</button>}
+              {connectSupported && remoteVisible && (
                 <button
                   type="button"
                   className="button button--primary"

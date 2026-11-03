@@ -8,11 +8,18 @@ import {
 import { useModalFocus } from "../overlays/modalFocus";
 import { SqlWorkbench } from "./SqlWorkbench";
 
-export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange }: {
+export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0 }: {
   profiles: ConnectionProfile[];
   hostKeys?: string[];
   onClose: () => void;
   embedded?: boolean;
+  initialProfileId?: string;
+  initialView?: "sql" | "tables" | "settings";
+  settingsOnly?: boolean;
+  createNew?: boolean;
+  onProfileSelected?: (profile: DatabaseProfile | null) => void;
+  onConfigure?: (profileId?: string, hostKey?: string) => void;
+  catalogRevision?: number;
   onStateChange?: (state: { busy: boolean; dirty: boolean }) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -23,7 +30,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const hostKey = hostKeys?.[0] ?? "local";
   const hosts = new Map(profiles.map((profile) => [profile.machineId ?? profile.id, profile]));
   const initialHost = profiles.find((profile) => hostKeys?.includes(profile.id) || hostKeys?.includes(profile.machineId ?? ""));
-  const [view, setView] = useState<"sql" | "tables" | "settings">("sql");
+  const [view, setView] = useState<"sql" | "tables" | "settings">(settingsOnly ? "settings" : initialView);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
   const [draft, setDraft] = useState(() => emptyDatabase(hostKey, initialHost?.hostname));
@@ -45,9 +52,9 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const saved = snapshot?.profiles.find((profile) => profile.id === draft.id);
   const dirty = !saved || JSON.stringify(saved) !== JSON.stringify(draft) || password.length > 0;
   const navigationBlocked = busy || (touched && dirty);
-  const activeView = saved ? view : "settings";
+  const activeView = settingsOnly ? "settings" : saved ? view : "settings";
   useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeView, draft.id]);
-  const available = snapshot?.profiles.filter((profile) => !hostKeys || hostKeys.includes(profile.hostKey)) ?? [];
+  const available = snapshot?.profiles.filter((profile) => !hostKeys || hostKeys.includes(profile.hostKey) || profile.id === initialProfileId) ?? [];
   const visible = available.filter((profile) => `${profile.name} ${profile.hostname} ${profile.database}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: navigationBlocked, active: !embedded });
   useEffect(() => { onStateChange?.({ busy, dirty: (touched && dirty) || sqlState.dirty }); }, [busy, dirty, touched, sqlState.dirty, onStateChange]);
@@ -59,8 +66,9 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
     void invoke<DatabaseSnapshot>("database_profiles").then((value) => {
       if (generation.current === request) {
         setSnapshot(value);
-        const first = value.profiles.find((profile) => !hostKeys || hostKeys.includes(profile.hostKey));
+        const first = createNew ? undefined : value.profiles.find(profile => profile.id === initialProfileId) ?? value.profiles.find((profile) => !hostKeys || hostKeys.includes(profile.hostKey));
         if (first) setDraft(first);
+        onProfileSelected?.(first ?? null);
       }
     }).catch((reason: unknown) => {
       if (generation.current === request) setError(String(reason));
@@ -70,9 +78,25 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
     return () => { generation.current++; };
   }, []);
 
+  const lastCatalogRevision = useRef(catalogRevision);
+  const blockedRef = useRef(navigationBlocked); blockedRef.current = navigationBlocked;
+  useEffect(() => {
+    if (!snapshot || navigationBlocked || lastCatalogRevision.current === catalogRevision) return;
+    const request = ++generation.current;
+    lastCatalogRevision.current = catalogRevision;
+    void invoke<DatabaseSnapshot>("database_profiles").then(value => {
+      if (request !== generation.current) return;
+      if (blockedRef.current) { lastCatalogRevision.current = -1; return; }
+      setSnapshot(value);
+      const selected = value.profiles.find(profile => profile.id === draft.id);
+      if (selected) setDraft(selected);
+      else setDraft(emptyDatabase(hostKey, initialHost?.hostname));
+    }).catch(reason => { if (request === generation.current) setError(String(reason)); });
+  }, [catalogRevision, navigationBlocked, snapshot]);
+
   function reset(profile = emptyDatabase(hostKey, initialHost?.hostname)) {
     setTouched(false); setView(snapshot?.profiles.some((entry) => entry.id === profile.id) ? "sql" : "settings");
-    setDraft(profile); setPassword(""); setShowPassword(false); setResult(null); setResultKind(null); setTables([]);
+    setDraft(profile); onProfileSelected?.(snapshot?.profiles.some(entry => entry.id === profile.id) ? profile : null); setPassword(""); setShowPassword(false); setResult(null); setResultKind(null); setTables([]);
     setTableIndex(""); setOffset(0); setDeleting(null); setError(""); setNotice("");
   }
 
@@ -100,6 +124,8 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
       const value = await invoke<DatabaseSnapshot>("database_save", { profile: draft, revision: snapshot.revision, password: password || null });
       setSnapshot(value); setDraft(value.profiles.find((profile) => profile.id === draft.id) ?? draft); setPassword(""); setShowPassword(false); setTables([]); setTableIndex(""); setResult(null);
       setTouched(false);
+      const selected = value.profiles.find(profile => profile.id === draft.id);
+      if (selected) onProfileSelected?.(selected);
       setNotice("連線已儲存。可測試連線，或切換 SQL 工作台開始查詢。");
     });
   }
@@ -133,7 +159,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
         </header>
         <div className="database-manager__layout">
           <aside className="database-manager__sidebar" aria-label="已儲存的資料庫">
-            <div className="database-manager__sidebar-head"><h3>連線 <span>{available.length}</span></h3><button type="button" className="button button--secondary" disabled={navigationBlocked} onClick={() => reset()}>新增資料庫</button></div>
+            <div className="database-manager__sidebar-head"><h3>連線 <span>{available.length}</span></h3><button type="button" className="button button--secondary" disabled={navigationBlocked} onClick={() => onConfigure ? onConfigure(undefined, initialHost?.id) : reset()}>新增資料庫</button></div>
             <input className="database-manager__search" aria-label="搜尋資料庫連線" placeholder="搜尋連線…" value={search} onChange={(event) => setSearch(event.target.value)} />
             <ul className="database-manager__list">{visible.map((profile) => <li key={profile.id}>
               <button type="button" title={profile.name} aria-pressed={draft.id === profile.id} disabled={navigationBlocked} onClick={() => reset(profile)}>{profile.name}<small><span className="database-manager__engine-dot" />{profile.engine === "sqlite" ? "SQLite" : databaseEngines.find((engine) => engine.value === profile.engine)?.label} · {profile.engine === "sqlite" ? "本機檔案" : `${profile.hostname}:${profile.port}`}</small></button>
@@ -145,7 +171,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
           </aside>
           <section className="database-manager__workspace" aria-label="資料庫內容">
             <div className="database-manager__connection-head"><div><h3>{saved?.name || "建立新連線"}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? "本機檔案" : `${saved.hostname}:${saved.port} / ${saved.database}`}` : "連接資料庫，將查詢與結果留在同一個工作區。"}</p></div><span className="database-manager__badge">{saved ? "已儲存" : "尚未儲存"}</span></div>
-            <nav className="database-manager__tabs" aria-label="資料庫工作區頁面">{([ ["sql", "SQL 工作台"], ["tables", "資料表瀏覽"], ["settings", "連線設定"] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => setView(key)}>{label}</button>)}</nav>
+            {!settingsOnly && <nav className="database-manager__tabs" aria-label="資料庫工作區頁面">{([ ["sql", "SQL 工作台"], ["tables", "資料表瀏覽"], ["settings", "連線設定"] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey) : setView(key)}>{label}</button>)}</nav>}
             <div className="database-manager__content" ref={contentRef}>
               {error && <p role="alert" className="database-manager__notice database-manager__error">{error}</p>}
               {notice && <p role="status" className="database-manager__notice">{notice}</p>}
@@ -153,7 +179,8 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
               {!!snapshot?.credentialCleanupPending && <div role="alert" className="database-manager__notice"><p>仍有 {snapshot.credentialCleanupPending} 筆舊密碼等待清除，請解鎖憑證庫後重試。</p><button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
                 const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
               })}>重試清除舊密碼</button></div>}
-          <form onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings"}>
+          {onConfigure && activeView === "settings" && <div className="database-manager__section-heading"><h3>新增資料庫連線</h3><p>可以只設定資料庫，不需要建立 SSH 或遠端主機。</p><button type="button" className="button button--primary" onClick={() => onConfigure(saved?.id, saved?.hostKey)}>新增／編輯連線</button></div>}
+          <form onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings" || Boolean(onConfigure)}>
             <div className="database-manager__section-heading"><h3 className="visually-hidden">{saved ? "連線設定" : "新增資料庫連線"}</h3><p>設定端點與帳號，儲存後即可開啟 SQL 工作台。</p></div>
             <fieldset disabled={busy || !snapshot} className="database-manager__fields">
               <legend className="visually-hidden">資料庫連線與登入設定</legend>
@@ -166,10 +193,11 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
                     setPassword(""); setShowPassword(false); setResult(null); setTables([]); setTableIndex("");
                   }}>{databaseEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}</select></label>
                   {draft.engine === "sqlite" ? <label className="database-manager__span">SQLite 檔案路徑<input required maxLength={2048} value={draft.sqlitePath} onChange={(event) => update("sqlitePath", event.target.value)} /></label> : <>
-                    <label>主機名稱／IP<input placeholder="db.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={253} value={draft.hostname} onChange={(event) => update("hostname", event.target.value)} /></label>
+                    <label>主機名稱／IP<input placeholder="db.example.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={253} value={draft.hostname} onChange={(event) => update("hostname", event.target.value)} />{initialHost?.hostname && <button type="button" className="database-manager__copy-host" onClick={() => update("hostname", initialHost.hostname)}>帶入遠端主機位址</button>}</label>
                     <label>連接埠<input inputMode="numeric" required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
                     <label className="database-manager__span">資料庫名稱<input placeholder="要連線的資料庫名稱" autoCapitalize="none" spellCheck={false} required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
                   </>}
+                  {initialHost && draft.hostKey !== hostKey && <button type="button" className="button button--secondary database-manager__span" onClick={() => update("hostKey", hostKey)}>與這個遠端連線放在一起</button>}
                   <details className="database-manager__advanced database-manager__span"><summary>連線分類（選填）</summary><label>所屬主機<select value={draft.hostKey} onChange={(event) => update("hostKey", event.target.value)}>
                     <option value="local">未分類／本機</option>
                     {!hosts.has(draft.hostKey) && draft.hostKey !== "local" && <option value={draft.hostKey}>原主機（卡片已移除或合併）</option>}
@@ -233,9 +261,9 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
           </>}
         </section>
 
-              {saved && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={saved.id} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">請先儲存或取消連線設定的變更。</p>}</div>}
+              {saved && !settingsOnly && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={JSON.stringify(saved)} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">請先儲存或取消連線設定的變更。</p>}</div>}
             </div>
-            <footer className="database-manager__footer"><span>{sqlState.dirty ? "SQL 尚未同步，請先同步草稿再切換連線。" : touched && dirty ? "連線設定尚未儲存" : "SQL 查詢與資料增刪修"}</span><span>{draft.engine === "sqlite" ? "本機 SQLite 檔案" : "伺服器連線驗證 TLS 憑證"}</span></footer>
+            <footer className="database-manager__footer"><span>{sqlState.dirty ? "SQL 尚未同步，請先同步草稿再切換連線。" : touched && dirty ? "連線設定尚未儲存" : settingsOnly ? "連線設定儲存於此裝置" : "SQL 查詢與資料增刪修"}</span><span>{draft.engine === "sqlite" ? "本機 SQLite 檔案" : "伺服器連線驗證 TLS 憑證"}</span></footer>
           </section>
         </div>
       </div>
