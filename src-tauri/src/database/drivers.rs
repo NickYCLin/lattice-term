@@ -5,6 +5,10 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 type TextRows = Vec<Vec<Option<String>>>;
 
+#[path = "sql.rs"]
+mod sql;
+pub(super) use sql::execute_sql;
+
 enum Client {
     Postgres(sqlx::PgConnection),
     Mysql(sqlx::MySqlConnection),
@@ -28,6 +32,14 @@ fn mysql_text(value: Option<Vec<u8>>) -> Result<Option<String>, String> {
 
 impl Client {
     async fn connect(profile: &DatabaseProfile, password: &str) -> Result<Self, String> {
+        Self::connect_mode(profile, password, false).await
+    }
+
+    async fn connect_mode(
+        profile: &DatabaseProfile,
+        password: &str,
+        writable: bool,
+    ) -> Result<Self, String> {
         match profile.engine {
             Engine::Postgres => {
                 let mut options = sqlx::postgres::PgConnectOptions::new()
@@ -45,7 +57,7 @@ impl Client {
                 let mut connection = sqlx::PgConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
-                sqlx::query("BEGIN READ ONLY")
+                sqlx::query(if writable { "BEGIN" } else { "BEGIN READ ONLY" })
                     .execute(&mut connection)
                     .await
                     .map_err(|_| failed())?;
@@ -70,29 +82,45 @@ impl Client {
                 let mut connection = sqlx::MySqlConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
-                sqlx::Executor::execute(&mut connection, "START TRANSACTION READ ONLY")
-                    .await
-                    .map_err(|_| failed())?;
+                sqlx::Executor::execute(
+                    &mut connection,
+                    if writable {
+                        "START TRANSACTION"
+                    } else {
+                        "START TRANSACTION READ ONLY"
+                    },
+                )
+                .await
+                .map_err(|_| failed())?;
                 Ok(Self::Mysql(connection))
             }
             #[cfg(target_os = "ios")]
-            Engine::Sqlite => Ok(Self::Sqlite(
-                super::sqlite::ReadOnlyConnection::open(profile.sqlite_path.clone()).await?,
-            )),
+            Engine::Sqlite => {
+                if writable {
+                    return Err("iOS 的 SQLite 目前只提供唯讀存取。".into());
+                }
+                Ok(Self::Sqlite(
+                    super::sqlite::ReadOnlyConnection::open(profile.sqlite_path.clone()).await?,
+                ))
+            }
             #[cfg(not(target_os = "ios"))]
             Engine::Sqlite => {
                 let options = sqlx::sqlite::SqliteConnectOptions::new()
                     .filename(&profile.sqlite_path)
-                    .read_only(true)
+                    .read_only(!writable)
                     .create_if_missing(false);
                 let options = options.disable_statement_logging();
                 let mut connection = sqlx::SqliteConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
-                sqlx::query("PRAGMA query_only = ON")
-                    .execute(&mut connection)
-                    .await
-                    .map_err(|_| failed())?;
+                sqlx::query(if writable {
+                    "BEGIN IMMEDIATE"
+                } else {
+                    "PRAGMA query_only = ON"
+                })
+                .execute(&mut connection)
+                .await
+                .map_err(|_| failed())?;
                 sqlx::query("PRAGMA trusted_schema = OFF")
                     .execute(&mut connection)
                     .await
@@ -127,6 +155,15 @@ impl Client {
                     .into_results()
                     .await
                     .map_err(|_| failed())?;
+                if writable {
+                    connection
+                        .simple_query("SET XACT_ABORT ON; BEGIN TRANSACTION")
+                        .await
+                        .map_err(|_| failed())?
+                        .into_results()
+                        .await
+                        .map_err(|_| failed())?;
+                }
                 Ok(Self::SqlServer(Box::new(connection)))
             }
         }
@@ -262,6 +299,9 @@ pub(super) async fn read(
     let mut client = Client::connect(profile, password).await?;
     let engine = profile.engine;
     match action {
+        DatabaseAction::Workbenches { .. }
+        | DatabaseAction::Workbench { .. }
+        | DatabaseAction::WorkbenchSql { .. } => Err("SQL 工作台操作不會直接開啟資料庫。".into()),
         DatabaseAction::List {} => Err("列出連線不需要開啟資料庫。".into()),
         DatabaseAction::Version { .. } => {
             let statement = match engine {

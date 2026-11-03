@@ -5,6 +5,7 @@ mod network_tests;
 mod sqlite;
 #[cfg(test)]
 mod tests;
+pub mod workbench;
 
 use crate::credentials::{self, CredentialKind};
 use crate::domain::{ConnectionProfile, Environment, Protocol};
@@ -220,6 +221,7 @@ pub struct DatabaseRegistry {
     directory: PathBuf,
     lock: Arc<Mutex<()>>,
     calls: Arc<Semaphore>,
+    workbenches: Arc<Mutex<std::collections::HashMap<String, workbench::Workbench>>>,
 }
 
 impl DatabaseRegistry {
@@ -228,6 +230,7 @@ impl DatabaseRegistry {
             directory,
             lock: Arc::new(Mutex::new(())),
             calls: Arc::new(Semaphore::new(4)),
+            workbenches: Arc::default(),
         }
     }
 
@@ -460,6 +463,9 @@ impl DatabaseRegistry {
             .find(|entry| entry.id == id && (!mcp || entry.allow_mcp_read))
             .cloned()
             .ok_or("資料庫不存在，或未開啟 MCP 唯讀存取。")?;
+        if let Some(result) = self.workbench_action(&action, &profile) {
+            return result;
+        }
         let credential_profile = profile.clone();
         let password = crate::credential_call(move || {
             credential_profile.validate()?;
@@ -501,6 +507,19 @@ impl DatabaseRegistry {
 )]
 pub enum DatabaseAction {
     List {},
+    Workbenches {
+        profile_id: String,
+    },
+    Workbench {
+        profile_id: String,
+        workbench_id: String,
+    },
+    WorkbenchSql {
+        profile_id: String,
+        workbench_id: String,
+        revision: u64,
+        sql: String,
+    },
     Version {
         profile_id: String,
     },
@@ -526,6 +545,9 @@ impl DatabaseAction {
         match self {
             Self::List {} => None,
             Self::Version { profile_id }
+            | Self::Workbenches { profile_id }
+            | Self::Workbench { profile_id, .. }
+            | Self::WorkbenchSql { profile_id, .. }
             | Self::Tables { profile_id }
             | Self::Columns { profile_id, .. }
             | Self::Rows { profile_id, .. } => Some(profile_id),
@@ -534,6 +556,12 @@ impl DatabaseAction {
     fn validate(&self) -> Result<(), String> {
         if let Some(id) = self.profile_id() {
             identifier(id, 80)?;
+        }
+        match self {
+            Self::Workbench { workbench_id, .. } | Self::WorkbenchSql { workbench_id, .. } => {
+                identifier(workbench_id, 80)?
+            }
+            _ => {}
         }
         if let Self::Columns { schema, table, .. } | Self::Rows { schema, table, .. } = self {
             identifier(schema, 256)?;
@@ -615,10 +643,18 @@ pub fn from_desktop(
 pub fn action_schema() -> Value {
     let id = json!({"type":"string","minLength":1,"maxLength":80});
     let name = json!({"type":"string","minLength":1,"maxLength":256});
-    let variants: Vec<_> = ["list", "version", "tables", "columns", "rows"].into_iter().map(|kind| {
+    let variants: Vec<_> = ["list", "version", "tables", "columns", "rows", "workbenches", "workbench", "workbenchSql"].into_iter().map(|kind| {
         let mut properties = json!({"kind":{"const":kind}});
         let mut required = vec!["kind"];
         if kind != "list" { properties["profileId"] = id.clone(); required.push("profileId"); }
+        if kind == "workbench" || kind == "workbenchSql" {
+            properties["workbenchId"] = id.clone(); required.push("workbenchId");
+        }
+        if kind == "workbenchSql" {
+            properties["revision"] = json!({"type":"integer","minimum":0});
+            properties["sql"] = json!({"type":"string","maxLength":65536});
+            required.extend(["revision", "sql"]);
+        }
         if kind == "columns" || kind == "rows" {
             properties["schema"] = name.clone(); properties["table"] = name.clone();
             required.extend(["schema", "table"]);

@@ -51,6 +51,15 @@
 .database-manager__result td,
 .database-manager__result th { padding: var(--space-2); text-align: start; border: 1px solid currentColor; min-width: 8rem; max-width: 24rem; overflow-wrap: anywhere; white-space: pre-wrap; }
 .database-manager__error { font-weight: 600; }
+.sql-workbench { border: 1px solid var(--line); border-radius: 0.75rem; padding: var(--space-4); margin-block: var(--space-4); min-width: 0; }
+.sql-workbench__header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); cursor: grab; touch-action: none; }
+.sql-workbench__editor { display: grid; gap: var(--space-2); }
+.sql-workbench__editor textarea { width: 100%; box-sizing: border-box; resize: vertical; font-family: var(--font-mono, monospace); }
+.sql-workbench__sharing { display: grid; gap: var(--space-2); margin-block: var(--space-3); }
+.sql-workbench__confirm { border: 1px solid currentColor; padding: var(--space-3); }
+.sql-workbench pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14rem; overflow: auto; }
+.sql-workbench small { overflow-wrap: anywhere; }
+.sql-workbench-window { padding: var(--space-4); min-width: 0; height: 100dvh; overflow: auto; box-sizing: border-box; }
 .connection-drawer__remote-form {
   display: flex;
   flex-direction: column;

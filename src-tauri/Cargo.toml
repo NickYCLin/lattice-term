@@ -59,16 +59,18 @@ if-addrs = "0.15"
 tauri-plugin-opener = "2"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "mysql"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+sqlparser = { version = "0.63.0", default-features = false, features = ["std", "visitor"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies.tiberius]
 version = "0.13.0"
 default-features = false
-features = ["native-tls", "tds73"]
+features = ["native-tls", "tds73", "chrono"]
 
 [target.'cfg(not(windows))'.dependencies.tiberius]
 version = "0.13.0"
 default-features = false
-features = ["rustls", "tds73"]
+features = ["rustls", "tds73", "chrono"]
 
 [dev-dependencies]
 rusqlite = { version = "0.32.1", default-features = false, features = ["modern_sqlite"] }

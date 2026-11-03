@@ -6,6 +6,7 @@ import {
   type DatabaseAction, type DatabaseProfile, type DatabaseResult, type DatabaseSnapshot,
 } from "../../domain/database";
 import { useModalFocus } from "../overlays/modalFocus";
+import { SqlWorkbench } from "./SqlWorkbench";
 
 export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange }: {
   profiles: ConnectionProfile[];
@@ -25,7 +26,9 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const [draft, setDraft] = useState(() => emptyDatabase(hostKey, initialHost?.hostname));
   const [password, setPassword] = useState("");
   const [touched, setTouched] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [connectionBusy, setBusy] = useState(false);
+  const [sqlState, setSqlState] = useState({ busy: false, dirty: false });
+  const busy = connectionBusy || sqlState.busy || sqlState.dirty;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -38,7 +41,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const saved = snapshot?.profiles.find((profile) => profile.id === draft.id);
   const dirty = !saved || JSON.stringify(saved) !== JSON.stringify(draft) || password.length > 0;
   useModalFocus({ dialogRef, onEscape: onClose, escapeDisabled: busy, active: !embedded });
-  useEffect(() => { onStateChange?.({ busy, dirty: touched && dirty }); }, [busy, dirty, touched, onStateChange]);
+  useEffect(() => { onStateChange?.({ busy, dirty: (touched && dirty) || sqlState.dirty }); }, [busy, dirty, touched, sqlState.dirty, onStateChange]);
 
   useEffect(() => {
     const request = ++generation.current;
@@ -111,11 +114,11 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
     <div className={embedded ? undefined : "scrim scrim--center"} role={embedded ? undefined : "presentation"}>
       <div className={embedded ? "database-manager database-manager--embedded" : "dialog database-manager"} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby={titleId} aria-busy={busy} ref={dialogRef} tabIndex={-1}>
         <header className="database-manager__header">
-          {embedded ? <h4 id={titleId}>資料庫設定與唯讀瀏覽</h4> : <h2 className="dialog__title" id={titleId}>資料庫連線</h2>}
+          {embedded ? <h4 id={titleId}>資料庫設定與資料瀏覽</h4> : <h2 className="dialog__title" id={titleId}>資料庫連線</h2>}
           {!embedded && <button type="button" className="button button--secondary" onClick={onClose} disabled={busy}>關閉</button>}
         </header>
-        <p>同一台主機可新增多個種類、版本或執行個體；以名稱及連接埠區分。此處只讀資料，部署仍走原有的 SSH／SFTP。</p>
-        <p>伺服器連線強制驗證 TLS 憑證，請使用唯讀帳號。不自動探索 instance 連接埠，也不會傳回密碼。</p>
+        <p>同一台主機可新增多個種類、版本或執行個體；以名稱及連接埠區分。下方 SQL 工作台可查詢與增刪修資料。</p>
+        <p>伺服器連線強制驗證 TLS 憑證；資料瀏覽可使用唯讀帳號，增刪修需有對應寫入權限。不自動探索 instance 連接埠，也不會傳回密碼。</p>
         {error && <p role="alert" className="database-manager__error">{error}</p>}
         {notice && <p role="status">{notice}</p>}
         {!!snapshot?.credentialCleanupPending && <div role="alert">
@@ -124,7 +127,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
             const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
           })}>重試清除舊密碼</button>
         </div>}
-        {busy && <p role="status">處理中…最長等候 20 秒</p>}
+        {(connectionBusy || sqlState.busy) && <p role="status">處理中…最長等候 20 秒</p>}
         <div className="database-manager__layout">
           <aside aria-label="已儲存的資料庫">
             <button type="button" className="button button--primary" disabled={busy} onClick={() => reset()}>新增資料庫</button>
@@ -204,6 +207,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
             </div>}
           </>}
         </section>
+        {saved && !dirty && <SqlWorkbench key={saved.id} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} />}
         <button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
           const value = await invoke<DatabaseSnapshot>("database_profiles"); setSnapshot(value); reset();
         })}>重新載入連線（捨棄未儲存設定）</button>
