@@ -66,6 +66,12 @@ export function CanvasCaptureControls({
     return () => window.clearInterval(timer);
   }, [recording]);
 
+  useEffect(() => {
+    if (ready) return;
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }, [ready]);
+
   function screenshot() {
     const canvas = canvasRef.current;
     if (!canvas || !ready) return;
@@ -94,11 +100,12 @@ export function CanvasCaptureControls({
     try {
       const mimeType = preferredRecordingMimeType(MediaRecorder.isTypeSupported);
       const stream = canvas.captureStream(30);
+      // Own the stream before constructing the recorder, which may throw.
+      streamRef.current = stream;
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 })
         : new MediaRecorder(stream, { videoBitsPerSecond: 4_000_000 });
 
-      streamRef.current = stream;
       recorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (event) => {
