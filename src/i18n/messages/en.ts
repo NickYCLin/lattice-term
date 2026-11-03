@@ -2679,6 +2679,7 @@ export const en: Messages = {
   "remote.commands.state.timedOut": "Time limit reached",
   "remote.commands.state.outputLimit": "Stopped at the 512 KiB output limit",
   "remote.commands.state.failed": "Failed",
+  "remote.commands.state.unconfirmed": "Result unconfirmed. Disconnect and reconnect; verify the previous outcome before retrying.",
   "agents.mcp.project.title": "Launch sessions by project directory",
   "agents.mcp.project.risk": "All authorized MCP clients connected to this service can create sessions with output access and control. Full permissions bypass CLI approvals and disable the LatticeTerm sandbox. Project roots restrict startup location, not file access or commands. Disabling blocks future launches; revoke access or stop existing sessions separately.",
   "agents.mcp.project.roots": "Allowed project roots (absolute paths, one per line)",

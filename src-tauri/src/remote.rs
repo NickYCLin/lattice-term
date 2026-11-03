@@ -919,11 +919,14 @@ impl RemoteRegistry {
         &self,
         session_id: &str,
     ) -> Result<Option<crate::remote_commands::CommandView>, String> {
-        let state = self.state.lock().map_err(|e| e.to_string())?;
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
         let record = state
             .sessions
-            .get(session_id)
+            .get_mut(session_id)
             .ok_or("The remote session is not connected.")?;
+        if let Some(command) = record.command.as_mut() {
+            command.reconcile_deadline();
+        }
         Ok(record.command.as_ref().map(|c| c.view.clone()))
     }
     fn command_event(
@@ -1006,6 +1009,12 @@ pub(crate) async fn command_start_checked(
         }
         if record.summary.command_shells & input.shell.flag() == 0 {
             return Err(CommandStartError::ShellNotAllowed);
+        }
+        if let Some(command) = record.command.as_mut() {
+            command.reconcile_deadline();
+            if command.view.reconnect_required {
+                return Err(CommandStartError::ReconnectRequired);
+            }
         }
         if record.command.as_ref().is_some_and(|c| c.view.active()) {
             return Err(CommandStartError::Busy);
@@ -2612,6 +2621,91 @@ mod tests {
             directory: String::new(),
             timeout_seconds: 5,
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_command_result_expires_without_replaying_or_claiming_termination() {
+        use lattice_remote::command_protocol::{CommandEnd, CommandEvent};
+        let registry = Arc::new(RemoteRegistry::new());
+        let mut summary = remote_summary("lost-result", false);
+        summary.command_shells = 1;
+        let mut record = idle_test_record(summary, 7);
+        let (outbound, mut sent) = mpsc::channel(4);
+        record.outbound = outbound;
+        register_test_record(&registry, record);
+        command_start_checked(&registry, "lost-result", command_fixture(), Some(7))
+            .await
+            .unwrap();
+        registry
+            .command_event(
+                "lost-result",
+                7,
+                CommandEvent::Started {
+                    id: 1,
+                    directory: String::new(),
+                },
+            )
+            .unwrap();
+        registry
+            .command_event(
+                "lost-result",
+                7,
+                CommandEvent::Output {
+                    id: 1,
+                    stderr: false,
+                    bytes: b"partial".to_vec(),
+                },
+            )
+            .unwrap();
+        tokio::time::advance(Duration::from_secs(19)).await;
+        assert_eq!(
+            command_start_checked(&registry, "lost-result", command_fixture(), Some(7))
+                .await
+                .unwrap_err(),
+            CommandStartError::Busy
+        );
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(
+            command_start_checked(&registry, "lost-result", command_fixture(), Some(7))
+                .await
+                .unwrap_err(),
+            CommandStartError::ReconnectRequired
+        );
+        let view = registry.command_state("lost-result").unwrap().unwrap();
+        assert_eq!(view.state, "failed");
+        assert_eq!(view.stdout, "partial");
+        assert_eq!(view.exit_code, None);
+        assert!(view.detail.contains("not confirmed"));
+        assert_eq!(
+            registry.state.lock().unwrap().sessions["lost-result"].command_next,
+            1
+        );
+        assert!(matches!(
+            sent.try_recv(),
+            Ok(RemoteMessage::CommandRequest(_))
+        ));
+        assert!(
+            sent.try_recv().is_err(),
+            "expiry must not replay or cancel an unknown write"
+        );
+        // Only the actual host completion can release this quarantine.
+        registry
+            .command_event(
+                "lost-result",
+                7,
+                CommandEvent::Finished {
+                    id: 1,
+                    reason: CommandEnd::Exited,
+                    exit_code: Some(0),
+                    detail: String::new(),
+                },
+            )
+            .unwrap();
+        command_start_checked(&registry, "lost-result", command_fixture(), Some(7))
+            .await
+            .unwrap();
+        let record = registry.remove("lost-result").unwrap().unwrap();
+        stop_remote_session(record, "test completed", Duration::ZERO).await;
     }
 
     #[tokio::test]

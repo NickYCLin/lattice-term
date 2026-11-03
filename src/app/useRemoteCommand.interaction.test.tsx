@@ -15,7 +15,25 @@ vi.mock("@tauri-apps/api/event", () => ({
     return () => listeners.delete(name);
   },
 }));
-afterEach(() => { vi.resetAllMocks(); listeners.clear(); });
+afterEach(() => { vi.resetAllMocks(); vi.useRealTimers(); listeners.clear(); });
+
+it("refreshes a running command when no completion event arrives and stops polling after failure", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useRemoteCommand>;
+  function Probe() { api = useRemoteCommand("lost"); return null; }
+  invoke.mockResolvedValue({ ...result("lost"), state: "running", exitCode: null });
+  try {
+    await act(async () => root.render(<Probe />));
+    invoke.mockResolvedValue({ ...result("lost"), revision: 2, state: "failed", exitCode: null,
+      reconnectRequired: true, detail: "Command result not confirmed" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(api.view?.state).toBe("failed");
+    const calls = invoke.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(invoke.mock.calls.length).toBe(calls);
+  } finally { await act(async () => root.unmount()); }
+});
 
 function result(sessionId: string): RemoteCommandView {
   return { sessionId, id: 1, revision: 1, shell: "posix", command: "fixture", directory: "",

@@ -33,7 +33,7 @@ fn start_error(error: CommandStartError) -> ServiceError {
         ),
         CommandStartError::ReconnectRequired | CommandStartError::StateUnavailable(_) => ServiceError::new(
             "not_ready",
-            "The Remote connection cannot accept another command. This command was not sent. Reconnect and verify the connection in LatticeTerm.",
+            "The Remote connection cannot accept another command. This command was not sent. Disconnect this Remote connection in LatticeTerm before reconnecting. Verify the previous command outcome before retrying; reconnecting does not prove that a remote process stopped.",
         ),
         CommandStartError::InvalidRequest(_) => ServiceError::new(
             "invalid_request",
@@ -92,6 +92,9 @@ pub(super) async fn execute(
                 )
             })?;
         if !view.active() {
+            if view.reconnect_required {
+                return Err(ServiceError::new("unknown_outcome", &view.detail));
+            }
             return Ok(json!({
                 "operationId": operation_id,
                 "state": view.state,

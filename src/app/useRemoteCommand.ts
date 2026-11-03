@@ -12,6 +12,7 @@ export interface RemoteCommandView {
   stderr: string;
   exitCode: number | null;
   detail: string;
+  reconnectRequired?: boolean;
 }
 export interface RemoteCommandInput {
   shell: RemoteCommandView["shell"];
@@ -66,6 +67,21 @@ export function useRemoteCommand(sessionId: string) {
     })();
     return () => { stopped = true; generation.current += 1; dispose?.(); };
   }, [merge, refresh]);
+  // Events are normally sufficient, but a missing Finished must not leave
+  // the panel frozen forever. Reads also reconcile the native deadline.
+  useEffect(() => {
+    if (!commandActive(view)) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { await refresh(); } catch (error) {
+        if (!stopped) setProblem(String(error));
+      }
+      if (!stopped) timer = setTimeout(() => { void poll(); }, 1000);
+    };
+    timer = setTimeout(() => { void poll(); }, 1000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [view?.state, refresh]);
   const start = useCallback(async (request: RemoteCommandInput) => {
     const revision = generation.current;
     setProblem(null);

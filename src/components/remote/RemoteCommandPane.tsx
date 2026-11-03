@@ -13,13 +13,14 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
   const [seconds, setSeconds] = useState(30);
   const [busy, setBusy] = useState(false);
   const active = commandActive(command.view);
+  const blocked = active || !!command.view?.reconnectRequired;
   const tooLarge = new TextEncoder().encode(text).length > 16 * 1024;
   return <aside className="remote-workspace__files remote-command-pane" hidden={hidden} aria-label={t("remote.commands.title")}>
     <strong>{t("remote.commands.title")}</strong>
     <p className="muted">{t("remote.commands.hint")}</p>
     <form onSubmit={event => {
       event.preventDefault();
-      if (!command.ready || busy || active || !text.trim() || tooLarge) return;
+      if (!command.ready || busy || blocked || !text.trim() || tooLarge) return;
       setBusy(true);
       void command.start({ shell, command: text, directory, timeoutSeconds: seconds }).finally(() => setBusy(false));
     }}>
@@ -42,7 +43,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
         </select>
       </label>
       <div className="remote-command-actions">
-        <button className="button button--primary" type="submit" disabled={!command.ready || busy || active || !text.trim() || tooLarge}>{t("remote.commands.run")}</button>
+        <button className="button button--primary" type="submit" disabled={!command.ready || busy || blocked || !text.trim() || tooLarge}>{t("remote.commands.run")}</button>
         {active && <button className="button button--ghost" type="button" disabled={busy} onClick={() => {
           if (!command.view) return;
           setBusy(true);
@@ -53,7 +54,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
     {tooLarge && <p role="alert">{t("remote.commands.tooLarge")}</p>}
     {command.problem && <p role="alert">{command.problem}</p>}
     {command.view && <section className="remote-command-result" aria-label={t("remote.commands.result")}>
-      <div role="status">{t(`remote.commands.state.${command.view.state}`)}{command.view.exitCode !== null && ` · ${t("remote.commands.exitCode")}: ${command.view.exitCode}`}</div>
+      <div role="status">{t(`remote.commands.state.${command.view.reconnectRequired ? "unconfirmed" : command.view.state}`)}{command.view.exitCode !== null && ` · ${t("remote.commands.exitCode")}: ${command.view.exitCode}`}</div>
       <small className="mono">{command.view.directory}</small>
       <pre className="remote-command-submitted">{command.view.command}</pre>
       {command.view.detail && <p role="alert">{command.view.detail}</p>}
