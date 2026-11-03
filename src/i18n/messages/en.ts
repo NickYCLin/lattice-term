@@ -362,6 +362,8 @@ export const en: Messages = {
   "mobile.desktopOnly.body": "RDP and VNC run in separate native engine processes, which mobile operating systems do not allow. Use this connection on the desktop app.",
   "terminal.keybar.ctrl": "Ctrl",
   "terminal.keybar.label": "Terminal helper keys",
+  "terminal.keybar.openKeyboard": "Open keyboard",
+  "terminal.keybar.space": "Space",
   "terminal.keybar.keyboard": "Show or hide keyboard",
   "terminal.paneSwitch": "Switch between terminal and files",
   "terminal.pane.terminal": "Terminal",

@@ -26,7 +26,7 @@ import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
 import { attachTerminalScrollback } from "./terminalScrollback";
 import { MobileTerminalInput } from "./mobileTerminalInput";
-import { TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
+import { openTerminalKeyboard, TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
 
 export function TerminalPane({
   sessionId,
@@ -217,9 +217,7 @@ export function TerminalPane({
         ctrlArmed={controlKey.armed}
         onToggleCtrl={() => { controlKey.toggle(); termRef.current?.focus(); }}
         onToggleKeyboard={() => {
-          const terminal = termRef.current;
-          if (terminal?.textarea === document.activeElement) terminal.blur();
-          else terminal?.focus();
+          openTerminalKeyboard(termRef.current);
         }}
         onInput={tap}
       />

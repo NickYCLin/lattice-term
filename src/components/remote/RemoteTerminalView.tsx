@@ -16,7 +16,7 @@ import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSession
 import { TerminalImeFallback } from "../terminal/terminalImeFallback";
 import { TerminalImePresentation } from "../terminal/terminalImePresentation";
 import { MobileTerminalInput } from "../terminal/mobileTerminalInput";
-import { TerminalKeybar, useTerminalControlKey } from "../terminal/TerminalKeybar";
+import { openTerminalKeyboard, TerminalKeybar, useTerminalControlKey } from "../terminal/TerminalKeybar";
 import {
   TERMINAL_LETTER_SPACING,
   terminalFontFamily,
@@ -220,9 +220,7 @@ export function RemoteTerminalView({
         ctrlArmed={controlKey.armed}
         onToggleCtrl={() => { controlKey.toggle(); termRef.current?.focus(); }}
         onToggleKeyboard={() => {
-          const terminal = termRef.current;
-          if (terminal?.textarea === document.activeElement) terminal.blur();
-          else terminal?.focus();
+          openTerminalKeyboard(termRef.current);
         }}
         onInput={(sequence) => {
           termRef.current?.input(sequence);

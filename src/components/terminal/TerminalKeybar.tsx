@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/context";
+import type { Terminal } from "@xterm/xterm";
 import { KeyboardIcon } from "../icons";
 
 export function useTerminalControlKey() {
@@ -19,7 +20,14 @@ export function useTerminalControlKey() {
   return { armed, toggle, consume };
 }
 
+/** Focus from the tap itself, even if an earlier programmatic focus did not show iOS's keyboard. */
+export function openTerminalKeyboard(terminal: Pick<Terminal, "blur" | "focus"> | null) {
+  terminal?.blur();
+  terminal?.focus();
+}
+
 const keys = [
+  { label: "Space", sequence: " " },
   { label: "Enter", sequence: "\r" },
   { label: "Esc", sequence: "\x1b" },
   { label: "Tab", sequence: "\t" },
@@ -52,7 +60,7 @@ export function TerminalKeybar({
     <div className="terminal-keybar" role="toolbar" aria-label={t("terminal.keybar.label")}
       onPointerDown={(event) => event.preventDefault()}>
       <button type="button" className="terminal-keybar__key terminal-keybar__keyboard"
-        disabled={disabled} aria-label={t("terminal.keybar.keyboard")} onClick={onToggleKeyboard}>
+        disabled={disabled} aria-label={t("terminal.keybar.openKeyboard")} onClick={onToggleKeyboard}>
         <KeyboardIcon size={18} />
       </button>
       <button type="button" className={"terminal-keybar__key" + (ctrlArmed ? " is-armed" : "")}
@@ -62,7 +70,7 @@ export function TerminalKeybar({
       {children}
       {keys.map((key) => (
         <button key={key.label} type="button" className="terminal-keybar__key"
-          disabled={disabled} onClick={() => onInput(key.sequence)}>{key.label}</button>
+          disabled={disabled} onClick={() => onInput(key.sequence)}>{key.label === "Space" ? t("terminal.keybar.space") : key.label}</button>
       ))}
     </div>
   );

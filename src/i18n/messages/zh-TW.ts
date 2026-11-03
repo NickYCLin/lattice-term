@@ -354,6 +354,8 @@ export const zhTW = {
   "mobile.desktopOnly.body": "RDP 與 VNC 需要獨立的原生引擎程序，行動裝置的系統不允許執行。請在桌面版使用這個連線。",
   "terminal.keybar.ctrl": "Ctrl",
   "terminal.keybar.label": "終端機輔助按鍵",
+  "terminal.keybar.openKeyboard": "開啟鍵盤",
+  "terminal.keybar.space": "空白",
   "terminal.keybar.keyboard": "開啟或收起鍵盤",
   "terminal.paneSwitch": "切換終端機與檔案",
   "terminal.pane.terminal": "終端機",

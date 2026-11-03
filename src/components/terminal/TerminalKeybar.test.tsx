@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { allNodes, installHostDom, props, type HostNode } from "../agents/testFixtures/interactionDom";
-import { TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
+import { openTerminalKeyboard, TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
 
 let container: HostNode;
 let root: ReturnType<typeof createRoot>;
@@ -42,7 +42,7 @@ describe("touch terminal keys", () => {
   });
 
   it.each([
-    ["Enter", "\r"], ["Esc", "\x1b"], ["Tab", "\t"],
+    ["空白", " "], ["Enter", "\r"], ["Esc", "\x1b"], ["Tab", "\t"],
     ["\u2191", "\x1b[A"], ["\u2193", "\x1b[B"],
     ["\u2190", "\x1b[D"], ["\u2192", "\x1b[C"],
     ["Home", "\x1b[H"], ["End", "\x1b[F"],
@@ -85,4 +85,12 @@ describe("touch terminal keys", () => {
     expect(controls.armed).toBe(false);
     expect(controls.consume("d")).toBe("d");
   });
+});
+
+
+it("reopens a keyboard synchronously when its textarea was already focused", () => {
+  const calls: string[] = [];
+  openTerminalKeyboard({ blur: () => calls.push("blur"), focus: () => calls.push("focus") });
+  expect(calls).toEqual(["blur", "focus"]);
+  expect(() => openTerminalKeyboard(null)).not.toThrow();
 });
