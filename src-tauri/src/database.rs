@@ -612,6 +612,88 @@ pub async fn database_profiles(registry: State<'_, DatabaseRegistry>) -> Result<
 }
 
 #[tauri::command]
+pub async fn database_test(
+    registry: State<'_, DatabaseRegistry>,
+    profile: DatabaseProfile,
+    revision: String,
+    password: Option<String>,
+) -> Result<Value, String> {
+    registry
+        .test_draft(profile, &revision, password.map(Zeroizing::new))
+        .await
+}
+
+impl DatabaseRegistry {
+    // Desktop-only draft probe. It never saves a profile, secret, or MCP grant.
+    async fn test_draft(
+        &self,
+        profile: DatabaseProfile,
+        revision: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<Value, String> {
+        profile.validate()?;
+        if password.as_ref().is_some_and(|value| value.len() > 4096) {
+            return Err("密碼超過長度限制。".into());
+        }
+        let _permit = self
+            .calls
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "資料庫查詢忙碌中，請稍後重試。")?;
+        let registry = self.clone();
+        let snapshot = crate::credential_call(move || registry.snapshot()).await?;
+        if snapshot.revision != revision {
+            return Err("連線設定已被其他視窗更新，請重新載入後再測試。".into());
+        }
+        let password = if profile.engine == Engine::Sqlite {
+            Zeroizing::new(String::new())
+        } else if let Some(password) = password {
+            password
+        } else {
+            if !snapshot
+                .profiles
+                .iter()
+                .any(|saved| saved.id == profile.id && saved.same_endpoint(&profile))
+            {
+                return Err("新連線或端點已變更，請輸入資料庫密碼後再測試。".into());
+            }
+            let credential_profile = profile.clone();
+            crate::credential_call(move || {
+                credentials::load_bound_with_context(
+                    &credential_profile.credential_profile(),
+                    CredentialKind::DatabasePassword,
+                    &credential_profile.credential_context(),
+                )
+                .map(Zeroizing::new)
+                .map_err(|_| "無法讀取資料庫密碼，請確認憑證庫已解鎖。".into())
+            })
+            .await?
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            drivers::read(
+                &profile,
+                &password,
+                &DatabaseAction::Version {
+                    profile_id: profile.id.clone(),
+                },
+            ),
+        )
+        .await
+        .map_err(|_| "資料庫連線測試超過 20 秒，已中止。")??;
+        let registry = self.clone();
+        if crate::credential_call(move || registry.snapshot())
+            .await?
+            .revision
+            != revision
+        {
+            return Err("測試期間連線設定已變更，請重新載入後再測試。".into());
+        }
+        Ok(result)
+    }
+}
+
+#[tauri::command]
 pub async fn database_save(
     registry: State<'_, DatabaseRegistry>,
     profile: DatabaseProfile,

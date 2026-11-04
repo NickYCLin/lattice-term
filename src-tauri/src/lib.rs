@@ -5672,6 +5672,7 @@ pub fn run() {
             database::database_delete,
             database::database_cleanup,
             database::database_read,
+            database::database_test,
             database::workbench::database_workbench,
             database::workbench::database_workbench_close,
             #[cfg(desktop)]

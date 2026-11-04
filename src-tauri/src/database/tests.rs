@@ -20,6 +20,54 @@ fn profile(directory: &Path, id: &str) -> DatabaseProfile {
     }
 }
 
+#[tokio::test]
+async fn draft_probe_does_not_save_settings_or_grant_mcp_access() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    let draft = profile(directory.path(), "draft");
+    let before = registry.snapshot().unwrap();
+    let result = registry
+        .test_draft(draft.clone(), &before.revision, None)
+        .await
+        .unwrap();
+    assert!(!result["rows"].as_array().unwrap().is_empty());
+    assert!(!registry.path().exists());
+    assert_eq!(registry.snapshot().unwrap().revision, before.revision);
+    assert!(registry.snapshot().unwrap().profiles.is_empty());
+    assert!(registry.workbenches.lock().unwrap().is_empty());
+
+    assert!(registry
+        .test_draft(draft.clone(), "stale", None)
+        .await
+        .is_err());
+    let _permit = registry.calls.clone().acquire_many_owned(4).await.unwrap();
+    assert!(registry
+        .test_draft(draft, &before.revision, None)
+        .await
+        .unwrap_err()
+        .contains("忙碌"));
+}
+
+#[tokio::test]
+async fn draft_probe_requires_a_password_for_a_new_network_endpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    let mut draft = profile(directory.path(), "draft");
+    draft.engine = Engine::Postgres;
+    draft.hostname = "db.invalid".into();
+    draft.port = 5432;
+    draft.username = "reader".into();
+    draft.database = "orders".into();
+    draft.sqlite_path.clear();
+    let before = registry.snapshot().unwrap();
+    let error = registry
+        .test_draft(draft, &before.revision, None)
+        .await
+        .unwrap_err();
+    assert!(error.contains("請輸入資料庫密碼"));
+    assert!(!registry.path().exists());
+}
+
 #[test]
 fn persists_multiple_databases_without_overwriting_and_deletes_only_one() {
     let directory = tempfile::tempdir().unwrap();
