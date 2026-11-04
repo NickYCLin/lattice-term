@@ -92,30 +92,29 @@ describe("session chat output disclosure", () => {
     }
   });
 
-  it("renders linked tool input and output as collapsed plain-text cards", () => {
+  it.each(["codex", "claude"])("hides tool records while preserving user and assistant messages (%s)", definitionId => {
     conversation.messages = [
+      { role: "user", text: "請幫我檢查檔案" },
       { role: "assistant", text: '{"command":"npm test"}', tool: { callId: "call-1", name: "exec_command", kind: "call" } },
       { role: "assistant", text: '<script>alert("test")</script>\nExit code: 1', tool: { callId: "call-1", name: null, kind: "result" } },
+      { role: "assistant", text: "檢查已完成" },
     ];
-    const html = render("working");
-    expect(html.match(/<details class="chat-card chat-card--tool">/g)).toHaveLength(2);
-    expect(html.match(/exec_command/g)).toHaveLength(2);
-    expect(html).toContain("呼叫內容");
-    expect(html).toContain("回傳內容");
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).not.toContain("<script>");
-    expect(html).not.toContain("chat-card--tool is-running");
+    const html = render("working", definitionId);
+    expect(html).toContain("請幫我檢查檔案");
+    expect(html).toContain("檢查已完成");
+    expect(html).not.toMatch(/chat-card--tool|exec_command|呼叫內容|回傳內容|npm test|call-1|alert\(|Exit code/);
+    expect(html).toContain("session-chat__activity");
   });
 
-  it("does not borrow a name from another call or a later tool invocation", () => {
+  it("hides unnamed results and non-exec tool records without expanding terminal output", () => {
     conversation.messages = [
       { role: "assistant", text: "early output", tool: { callId: "call-2", name: null, kind: "result" } },
       { role: "assistant", text: "input", tool: { callId: "call-2", name: "apply_patch", kind: "call" } },
       { role: "assistant", text: "other output", tool: { callId: "call-3", name: null, kind: "result" } },
     ];
     const html = render("done");
-    expect(html.match(/apply_patch/g)).toHaveLength(1);
-    expect(html.match(/chat-card__label">工具/g)).toHaveLength(2);
+    expect(html).not.toMatch(/apply_patch|early output|other output|call-2|call-3|chat-card--tool/);
+    expect(html).not.toContain('class="session-chat__output" open=""');
   });
 
   it("hides historical image paths and unavailable-pixel tool placeholders", () => {

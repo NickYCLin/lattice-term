@@ -241,21 +241,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           && conversation.availability === "waitingForIdentity" && <p>{t("sessionChat.codexIdentityHint")}</p>}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
         {conversation.messages.map((message, index) => {
-          if (message.tool) {
-            const tool = message.tool;
-            const name = tool.name ?? conversation.messages.slice(0, index).reverse()
-              .find(candidate => candidate.tool?.kind === "call" && candidate.tool.callId === tool.callId)
-              ?.tool?.name;
-            if (name && /(?:^|\.)view_image$/.test(name)) return null;
-            return <details key={index} className="chat-card chat-card--tool">
-              <summary>
-                <span className="chat-card__label">{name ?? t("sessionChat.tool")}</span>
-                <span className="chat-card__summary">{t(tool.kind === "call" ? "sessionChat.toolInput" : "sessionChat.toolOutput")}</span>
-              </summary>
-              <div className="chat-card__text"><code>{tool.callId}</code></div>
-              <pre className="chat-card__output">{message.text}</pre>
-            </details>;
-          }
+          if (message.tool) return null;
           const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
           return <ConversationMessage key={index} role={message.role} assistant={assistant}>
