@@ -4,6 +4,24 @@
 
 ---
 
+## [2026.11.5](https://github.com/NickYCLin/lattice-term/compare/v2026.11.4...v2026.11.5) (2026-11-04)
+
+
+### 🚀 新增功能
+
+* 將對話接手說明收進標題列圖示 ([9d5b433](https://github.com/NickYCLin/lattice-term/commit/9d5b4339c6b0488a0dc5e5a323e3d145919f0561))
+* 支援儲存前測試資料庫連線 ([a6350a6](https://github.com/NickYCLin/lattice-term/commit/a6350a64ac29f754387c387d23c025d1300f8368))
+* 支援遠端與資料庫共用一張連線卡片 ([5db80dc](https://github.com/NickYCLin/lattice-term/commit/5db80dc0958e7c029ae49938b5cb9778c96ba57f))
+* 簡化獨立資料庫連線與設定介面 ([4826418](https://github.com/NickYCLin/lattice-term/commit/4826418b63d8533fe3338ed4f6c99d0ce788766a))
+
+
+### 🛠️ 問題修正
+
+* 修正資料庫密碼識別碼導致無法儲存連線 ([927335f](https://github.com/NickYCLin/lattice-term/commit/927335ff8292c5d919653cef9c83b7a9646664a0))
+* 修正遠端命令結果遺失後永久忙碌的狀態 ([028f1b5](https://github.com/NickYCLin/lattice-term/commit/028f1b5c8c3f8bf1edb6bf7edd13c6384122ef27))
+* 讓對話輸入框直接調整權限模式 ([30c5755](https://github.com/NickYCLin/lattice-term/commit/30c57558586d2cb3129ad8b698d3bf836eff2ef4))
+* 隱藏工作階段對話中的工具呼叫與回傳卡片 ([1ae942a](https://github.com/NickYCLin/lattice-term/commit/1ae942a7c131aed3ef886e6be0f2fcb837e48662))
+
 ## [2026.11.4](https://github.com/NickYCLin/lattice-term/compare/v2026.11.3...v2026.11.4) (2026-11-03)
 
 
