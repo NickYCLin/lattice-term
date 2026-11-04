@@ -278,3 +278,14 @@ it("preserves legacy associations when editing without exposing an owner require
   await submit();
   expect(snapshot.profiles[0]).toMatchObject({id:database.id, hostKey:database.hostKey, hostname:"database.invalid", username:"reader"});
 });
+
+it("groups or separates cards without changing the database endpoint, password, or MCP grant", async () => {
+  snapshot.profiles = [{...database, hostKey:"local", allowMcpRead:true}];
+  await act(async () => root.render(<DatabaseManager profiles={[host]} initialProfileId={database.id} settingsOnly onClose={() => {}} />));
+  await change(p => p.value === "local" && Array.isArray(p.children), {value:host.id});
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", {profile:{...database, hostKey:host.id, allowMcpRead:true},revision:"original",password:null});
+  await change(p => p.value === host.id && Array.isArray(p.children), {value:"local"});
+  await submit();
+  expect(snapshot.profiles[0]).toEqual({...database,hostKey:"local",allowMcpRead:true});
+});

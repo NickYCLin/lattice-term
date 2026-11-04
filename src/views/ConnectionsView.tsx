@@ -443,6 +443,7 @@ export function ConnectionsView({
                         <ConnectionCard
                           onDatabases={backendAvailable ? () => onEditDatabase ? onEdit(profile.id, "database") : setDatabaseScope({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map((peer) => peer.id)])] }) : undefined}
                           databaseCount={databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).length}
+                          databaseNames={databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).map(database => database.name)}
                           onOpenSql={backendAvailable && databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).length ? () => openSql({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)])] }) : undefined}
                           key={profile.id}
                           profile={profile}

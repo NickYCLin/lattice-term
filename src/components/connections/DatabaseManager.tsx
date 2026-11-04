@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import type { ConnectionProfile } from "../../domain/connection";
+import { mergeMachineCards, type ConnectionProfile } from "../../domain/connection";
 import {
   databaseEngines, emptyDatabase, changeDatabaseEngine,
   type DatabaseAction, type DatabaseProfile, type DatabaseResult, type DatabaseSnapshot,
@@ -8,7 +8,7 @@ import {
 import { useModalFocus } from "../overlays/modalFocus";
 import { SqlWorkbench } from "./SqlWorkbench";
 
-export function DatabaseManager({ hostKeys, onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
+export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
   profiles: ConnectionProfile[];
   hostKeys?: string[];
   onClose: () => void;
@@ -29,6 +29,7 @@ export function DatabaseManager({ hostKeys, onClose, embedded = false, onStateCh
   const generation = useRef(0);
   const operationBusy = useRef(false);
   const titleId = useId();
+  const cardTargets = new Map(mergeMachineCards(profiles).map(({ profile }) => [profile.machineId ?? profile.id, profile]));
   const [view, setView] = useState<"sql" | "tables" | "settings">(settingsOnly ? "settings" : initialView);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
@@ -209,6 +210,14 @@ export function DatabaseManager({ hostKeys, onClose, embedded = false, onStateCh
                     <label>連接埠<input inputMode="numeric" required type="number" min={1} max={65535} value={draft.port} onChange={(event) => update("port", Number(event.target.value))} /></label>
                     <label className="database-manager__span">資料庫名稱<input placeholder="要連線的資料庫名稱" autoCapitalize="none" spellCheck={false} required maxLength={128} value={draft.database} onChange={(event) => update("database", event.target.value)} /></label>
                   </>}
+                  <details className="database-manager__advanced database-manager__span"><summary>卡片顯示（選填）</summary>
+                    <label>與遠端顯示在同一張卡片<select value={draft.hostKey} onChange={event => update("hostKey", event.target.value)}>
+                      <option value="local">獨立卡片（不需要遠端）</option>
+                      {draft.hostKey !== "local" && !cardTargets.has(draft.hostKey) && <option value={draft.hostKey}>{profiles.find(profile => profile.id === draft.hostKey)?.name ?? "原卡片已移除，暫時獨立顯示"}</option>}
+                      {[...cardTargets].map(([key, profile]) => <option key={key} value={key}>{profile.name}</option>)}
+                    </select></label>
+                    <p className="database-manager__hint">選擇遠端後，連線清單只顯示一張卡片，可分別開啟遠端與 SQL。只調整顯示方式，不共用帳密，也不建立 SSH 通道。</p>
+                  </details>
                 </div>
               </section>
               <section className="database-manager__form-card" aria-label="登入資料與 AI 權限">

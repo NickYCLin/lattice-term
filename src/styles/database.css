@@ -285,6 +285,10 @@
 .database-connection-card__target { font-size: var(--text-sm); overflow-wrap: anywhere; }
 .database-connection-card__actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: auto; }
 .database-connection-group { margin-bottom: 1.5rem; }
+.connection-card--database .connection-card__primary { flex-direction: row; flex-wrap: wrap; gap: .5rem; }
+.connection-card--database .connection-card__primary > .button { pointer-events: auto; flex: 1 1 7rem; min-height: 2.75rem; }
+.connection-card--database .connection-card__route-count { flex-basis: 100%; }
+.connection-card__database-names { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: var(--text-xs); padding-top: .25rem; }
 @media (max-width: 40rem) {
   .connection-setup__modes label { flex-direction: column; align-items: center; padding: .5rem; gap: .4rem; text-align: center; }
   .connection-setup__modes small { display: block; font-size: var(--text-2xs); }

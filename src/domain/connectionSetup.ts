@@ -21,7 +21,10 @@ export function databaseListEntries(databases: DatabaseProfile[], profiles: Conn
   const remoteFilter = filter.protocols.length || filter.environments.length || filter.tags.length || filter.favoritesOnly || filter.group !== null;
   return databases.filter(database => {
     const host = databaseRemoteHost(database, profiles);
-    if (remoteFilter && (!host || !visibleProfiles.some(profile => profile.id === database.hostKey || profile.machineId === database.hostKey))) return false;
+    const hostVisible = host && visibleProfiles.some(profile => profile.id === host.id ||
+      Boolean(host.machineId && profile.machineId === host.machineId));
+    if (kind === "all" && hostVisible) return false;
+    if (remoteFilter && !hostVisible) return false;
     return !query || [database.name, database.engine, database.hostname, database.database, database.sqlitePath, host?.name ?? ""].join(" ").toLocaleLowerCase().includes(query);
   });
 }

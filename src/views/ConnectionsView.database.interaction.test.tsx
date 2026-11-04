@@ -117,6 +117,17 @@ it("shows standalone database cards and opens SQL without launching a remote ses
 it("routes attached SQL and settings through the shared workspace and unified editor", async()=>{
   const open=vi.fn(),configure=vi.fn(),connect=vi.fn(),edit=vi.fn();
   await render([host,peer],false,true,{open,configure,connect,edit});
+  expect(allNodes(container).filter(node => node.tagName === "LI" && String(props(node)?.className).includes("database-connection-card"))).toHaveLength(1);
+  const combined = allNodes(container).find(node => node.tagName === "LI" && String(props(node)?.className).includes("connection-card--database"))!;
+  expect(combined.textContent).toContain("主機資料庫");
+  expect(combined.textContent).toContain("舊連線資料庫");
+  const remoteAction = allNodes(combined).find(node => node.tagName === "BUTTON" && String(props(node)?.className).includes("connection-card__go"))!;
+  expect(remoteAction).toBeDefined();
+  await act(async () => props(remoteAction).onClick());
+  expect(connect).not.toHaveBeenCalled();
+  // Multiple remote routes open their picker without starting SQL.
+  expect(open).not.toHaveBeenCalled();
+  await click("取消");
   await click("開啟 SQL（2）");
   expect(open).toHaveBeenCalledWith({hostKeys:expect.arrayContaining(["machine","ssh-route","rdp-route"])});
   expect(connect).not.toHaveBeenCalled();
