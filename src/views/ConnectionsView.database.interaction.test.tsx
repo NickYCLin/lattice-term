@@ -62,35 +62,35 @@ it.each([
 ])("opens the database workspace without requiring a host: %j", async ({ profiles, mobile }) => {
   await render(profiles, mobile);
   expect(invoke).toHaveBeenCalledExactlyOnceWith("database_profiles");
-  await click("新增／管理資料庫");
-  expect(container.textContent).toContain("新增資料庫");
-  expect(container.textContent).toContain("主機名稱／IP");
+  await click("SQL 工作台");
+  expect(container.textContent).toContain("新增資料庫連線");
+  expect(container.textContent).toContain("資料庫位址／IP");
   expect(container.textContent).toContain("其他主機資料庫");
   expect(invoke.mock.calls.filter(([command]) => command === "database_profiles")).toHaveLength(2);
 });
 
-it.each([false, true])("opens a merged card with its host prefilled and both route identities in scope (mobile=%s)", async (mobile) => {
+it.each([false, true])("preserves both legacy route identities but creates new database settings without a remote endpoint (mobile=%s)", async (mobile) => {
   await render([host, peer], mobile);
-  await click("資料庫設定");
+  await click("相關資料庫");
   expect(container.textContent).toContain("舊連線資料庫");
   expect(container.textContent).toContain("主機資料庫");
   const dialog = allNodes(container).find(node => props(node)?.role === "dialog")!;
   expect(dialog.textContent).not.toContain("其他主機資料庫");
-  await click("新增資料庫");
-  expect(allNodes(container).some(node => node.tagName === "INPUT" && props(node).value === "db.invalid")).toBe(true);
+  await click("新增資料庫連線");
+  expect(allNodes(container).find(node => node.tagName === "INPUT" && props(node)?.maxLength === 253 && props(node)?.value === "")).toBeDefined();
   expect(invoke.mock.calls.filter(([command]) => command === "database_profiles")).toHaveLength(2);
 });
 
 it.each([false, true])("does not offer databases without a native backend (mobile=%s)", async (mobile) => {
   await render([host], mobile, false);
-  expect(container.textContent).not.toContain("新增／管理資料庫");
-  expect(container.textContent).not.toContain("資料庫設定");
+  expect(container.textContent).not.toContain("SQL 工作台");
+  expect(container.textContent).not.toContain("相關資料庫");
   expect(invoke).not.toHaveBeenCalled();
 });
 
 it("reads a saved database version from the mobile card", async () => {
   await render([host], true);
-  await click("資料庫設定");
+  await click("相關資料庫");
   const saved = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent.startsWith("主機資料庫"));
   expect(saved).toBeDefined();
   await act(async () => props(saved!).onClick());
@@ -106,7 +106,7 @@ it("shows standalone database cards and opens SQL without launching a remote ses
   const open=vi.fn(),configure=vi.fn(),connect=vi.fn();
   await render([],false,true,{open,configure,connect});
   const card=allNodes(container).find(node=>node.tagName==="LI" && node.textContent.includes("主機資料庫"))!;
-  expect(card).toBeDefined();expect(card.textContent).toContain("不需要遠端連線");
+  expect(card).toBeDefined();expect(card.textContent).toContain("不需要遠端主機");
   await act(async()=>props(allNodes(card).find(node=>node.tagName==="BUTTON" && node.textContent==="開啟 SQL")!).onClick());
   expect(open).toHaveBeenCalledWith({profileId:expect.any(String)});expect(connect).not.toHaveBeenCalled();
   await act(async()=>props(allNodes(card).find(node=>node.tagName==="BUTTON" && node.textContent==="連線設定")!).onClick());
@@ -120,6 +120,6 @@ it("routes attached SQL and settings through the shared workspace and unified ed
   await click("開啟 SQL（2）");
   expect(open).toHaveBeenCalledWith({hostKeys:expect.arrayContaining(["machine","ssh-route","rdp-route"])});
   expect(connect).not.toHaveBeenCalled();
-  await click("資料庫設定");expect(edit).toHaveBeenCalledWith(host.id,"database");
-  await click("新增／管理資料庫");expect(configure).toHaveBeenCalledWith();
+  await click("相關資料庫");expect(edit).toHaveBeenCalledWith(host.id,"database");
+  await click("SQL 工作台");expect(open).toHaveBeenCalledWith({});
 });

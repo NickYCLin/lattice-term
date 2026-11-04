@@ -41,7 +41,7 @@ export type DatabaseAction =
   | { kind: "columns"; profileId: string; schema: string; table: string }
   | { kind: "rows"; profileId: string; schema: string; table: string; limit: number; offset: number };
 
-export function emptyDatabase(hostKey: string, hostname = ""): DatabaseProfile {
+export function emptyDatabase(hostKey = "local", hostname = ""): DatabaseProfile {
   return {
     id: crypto.randomUUID(), hostKey, name: "", engine: "postgres", hostname,
     port: 5432, username: "", database: "", sqlitePath: "", allowMcpRead: false,

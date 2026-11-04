@@ -10,9 +10,9 @@ it("lists database-only and orphaned records without inventing remote hosts", ()
   expect(databaseListEntries([db,orphan],[],[],"all")).toEqual([db,orphan]);
   expect(databaseRemoteHost(db,[])).toBeUndefined();
 });
-it("groups attached databases with their remote card but exposes them in database search", () => {
+it("lists associated databases independently as well as through their remote card", () => {
   const attached = {...db,hostKey:"machine"};
-  expect(databaseListEntries([attached],[host],[host],"all")).toEqual([]);
+  expect(databaseListEntries([attached],[host],[host],"all")).toEqual([attached]);
   expect(databaseListEntries([attached],[host],[host],"database")).toEqual([attached]);
   expect(databaseListEntries([attached],[host],[],"all",{...emptyFilter,search:"orders"})).toEqual([attached]);
   expect(databaseRemoteHost(attached,[host])).toBe(host);

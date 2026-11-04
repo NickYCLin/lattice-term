@@ -404,7 +404,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     mode?: ConnectionSetupMode;
     section?: ConnectionSetupSection;
     databaseProfileId?: string;
-    saveCycle?: number;
   }>({ open: false, profileId: null });
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
@@ -805,19 +804,20 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const openEdit = useCallback((id: string, section: ConnectionSetupSection = "remote") => {
     setView("connections");
     setMobileResourceSidebarOpen(false);
-    setDrawer({ open: true, profileId: id, mode: "both", section });
-  }, []);
+    if (section === "database") {
+      setDatabaseWorkspace({ hostKeys: cardRouteProfiles(profiles, id).flatMap(profile => [profile.id, profile.machineId ?? profile.id]) });
+    } else setDrawer({ open: true, profileId: id, mode: "remote" });
+  }, [profiles]);
 
   const closeConnectionSetup = useCallback(() => {
     setDrawer({ open: false, profileId: null });
     setDatabaseRevision(revision => revision + 1);
   }, []);
 
-  const openDatabaseConfig = useCallback((profileId?: string, hostKey?: string) => {
-    const host = profiles.find(profile => profile.id === hostKey || profile.machineId === hostKey);
+  const openDatabaseConfig = useCallback((profileId?: string) => {
     setDatabaseWorkspace(null);
-    setDrawer({ open: true, profileId: host?.id ?? null, mode: host ? "both" : "database", section: "database", databaseProfileId: profileId });
-  }, [profiles]);
+    setDrawer({ open: true, profileId: null, mode: "database", section: "database", databaseProfileId: profileId });
+  }, []);
 
   const openDatabaseWorkspace = useCallback((target: DatabaseWorkspaceTarget) => {
     closeConnectionSetup();
@@ -880,12 +880,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       id: string,
       credential?: ConnectionCredentialDraft,
       additionalRoute?: ConnectionProfile,
-      configureDatabase = false,
-      databaseProfileId?: string,
     ) => {
       const saved = await saveProfileRecord(createConnectionProfile(draft, id), credential, drawer.routeSourceId, additionalRoute);
-      if (configureDatabase) setDrawer(previous => ({ open: true, profileId: saved.id, mode: "both", section: "database", databaseProfileId, saveCycle: (previous.saveCycle ?? 0) + 1 }));
-      else setDrawer({ open: false, profileId: null });
+      setDrawer({ open: false, profileId: null });
       if (
         connectAfterSave &&
         canConnectProtocol(saved.protocol, supportedProtocols)
@@ -1373,7 +1370,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {databaseWorkspace && <DatabaseManager profiles={profiles} initialProfileId={databaseWorkspace.profileId} hostKeys={databaseWorkspace.hostKeys} onConfigure={openDatabaseConfig} onClose={() => { setDatabaseWorkspace(null); setDatabaseRevision(revision => revision + 1); }} />}
       {drawer.open && (
         <ConnectionDrawer
-          key={`${drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : `new:${drawer.mode ?? "remote"}:${drawer.databaseProfileId ?? ""}`}:${drawer.saveCycle ?? 0}`}
+          key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : `new:${drawer.mode ?? "remote"}:${drawer.databaseProfileId ?? ""}`}
           profile={editing}
           routeSource={profiles.find(entry => entry.id === drawer.routeSourceId) ?? null}
           routeProtocol={drawer.routeProtocol}
@@ -1387,7 +1384,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           initialSection={drawer.section}
           databaseProfileId={drawer.databaseProfileId}
           onSave={saveDraft}
-          onSaveForDatabase={(draft, connect, id, credential, route, databaseId) => saveDraft(draft, connect, id, credential, route, true, databaseId)}
+          onEditDatabase={openDatabaseConfig}
           onOpenDatabase={profileId => openDatabaseWorkspace({ profileId })}
           onClose={closeConnectionSetup}
         />

@@ -78,19 +78,20 @@ async function submit() {
 it.each(databaseEngines)("creates and reopens a $value connection without replacing another version", async (engine) => {
   await render();
   await click("測試資料庫");
-  await click("新增資料庫");
+  await click("新增資料庫連線");
   await change((props) => props.value === "postgres" && Array.isArray(props.children), { value: engine.value });
   await change((props) => props.maxLength === 100, { value: "新資料庫" });
   if (engine.value === "sqlite") {
     await change((props) => props.maxLength === 2048, { value: "C:/test/sample.sqlite" });
   } else {
+    await change((props) => props.maxLength === 253, { value: "db.invalid" });
     await change((props) => props.maxLength === 128 && props.autoComplete !== "off", { value: "sample" });
     await change((props) => props.autoComplete === "off", { value: "reader" });
     await change((props) => props.type === "password", { value: "test-only-password" });
   }
   await submit();
   const savedProfile = snapshot.profiles.find((profile) => profile.name === "新資料庫")!;
-  expect(savedProfile).toMatchObject({ hostKey: "host", engine: engine.value, port: engine.port, allowMcpRead: false });
+  expect(savedProfile).toMatchObject({ hostKey: "local", engine: engine.value, port: engine.port, allowMcpRead: false });
   expect(savedProfile.id).not.toBe(database.id);
   expect(savedProfile).not.toHaveProperty("password");
   expect(snapshot.profiles).toHaveLength(3);
@@ -267,13 +268,13 @@ it("defers catalog updates until local connection edits have been cancelled", as
   expect(hostProps(container).some(p => p.value === "外部更新")).toBe(true);
 });
 
-it("links an existing standalone database explicitly and copies only the remote hostname", async () => {
-  snapshot.profiles = [{...database, hostKey:"local", hostname:"database.invalid"}];
+it("preserves legacy associations when editing without exposing an owner requirement", async () => {
+  snapshot.profiles = [{...database, hostname:"database.invalid"}];
   await act(async () => root.render(<DatabaseManager profiles={[host]} hostKeys={[host.id]} initialProfileId={database.id} settingsOnly onClose={() => {}} />));
-  await click("與這個遠端連線放在一起");
-  await click("帶入遠端主機位址");
+  expect(hostProps(container).some(p => p.children === "所屬主機")).toBe(false);
+  await change(p => p.maxLength === 100, {value:"調整顯示名稱"});
   expect(hostProps(container).some(p => p.value === "reader")).toBe(true);
   expect(hostProps(container).find(p => p.type === "password")!.value).toBe("");
   await submit();
-  expect(snapshot.profiles[0]).toMatchObject({id:database.id, hostKey:host.id, hostname:host.hostname, username:"reader"});
+  expect(snapshot.profiles[0]).toMatchObject({id:database.id, hostKey:database.hostKey, hostname:"database.invalid", username:"reader"});
 });

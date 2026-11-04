@@ -64,10 +64,10 @@ describe("ConnectionsView", () => {
   it.each([
     { profiles: [], mobile: false }, { profiles: [profile], mobile: false },
     { profiles: [], mobile: true }, { profiles: [profile], mobile: true },
-  ])("shows an explicit database creation entry for %j", ({ profiles, mobile }) => {
+  ])("shows an explicit SQL workspace entry for %j", ({ profiles, mobile }) => {
     const markup = render(profiles, { mobile });
-    expect(markup).toContain("新增／管理資料庫</button>");
-    if (profiles.length) expect(markup).toContain("資料庫設定</button>");
+    expect(markup).toContain("SQL 工作台</button>");
+    if (profiles.length) expect(markup).toContain("相關資料庫</button>");
   });
 
   it.each([
@@ -76,8 +76,8 @@ describe("ConnectionsView", () => {
   ])("does not offer unsupported database actions: %j", options => {
     for (const profiles of [[], [profile]]) {
       const markup = render(profiles, options);
-      expect(markup).not.toContain("新增／管理資料庫</button>");
-      expect(markup).not.toContain("資料庫設定</button>");
+      expect(markup).not.toContain("SQL 工作台</button>");
+      expect(markup).not.toContain("相關資料庫</button>");
     }
   });
 
@@ -86,7 +86,7 @@ describe("ConnectionsView", () => {
     expect(markup).toContain("還沒有任何連線");
     expect(markup).toContain("新增連線");
     expect(markup).toContain("載入範例");
-    expect(markup).not.toContain("新增／管理資料庫</button>");
+    expect(markup).not.toContain("SQL 工作台</button>");
   });
 
   it("lists a saved profile by name and host", () => {
@@ -138,6 +138,6 @@ describe("ConnectionsView", () => {
 it("waits for native database metadata before declaring the entire workspace empty", () => {
   const markup=render([]);
   expect(markup).toContain("正在讀取資料庫連線");
-  expect(markup).toContain("新增／管理資料庫</button>");
+  expect(markup).toContain("SQL 工作台</button>");
   expect(markup).not.toContain("還沒有任何連線");
 });

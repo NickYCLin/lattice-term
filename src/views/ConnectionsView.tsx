@@ -270,7 +270,7 @@ export function ConnectionsView({
   );
 
   const databaseManager = databaseScope && <DatabaseManager profiles={profiles} initialProfileId={databaseScope.profileId} hostKeys={databaseScope.hostKeys} onClose={() => { setDatabaseScope(null); void databases.refresh(); }} />;
-  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="新增資料庫連線，或管理已儲存的資料庫" onClick={() => onEditDatabase ? onEditDatabase() : setDatabaseScope({})}>新增／管理資料庫</button>;
+  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="開啟已儲存的資料庫與查詢結果" onClick={() => onOpenDatabase ? onOpenDatabase({}) : setDatabaseScope({})}>SQL 工作台</button>;
 
   if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
     return (
