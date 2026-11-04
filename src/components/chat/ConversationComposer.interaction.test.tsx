@@ -495,13 +495,60 @@ it("opens native source and model choices from the composer without closing on a
     await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
     const modelButton = allNodes(container).find(node => node.attributes.class === "session-composer__model")!;
     await act(async () => onClick(modelButton)());
-    const source = allNodes(container).find(node => node.tagName === "SELECT")!;
+    const modelMenu = allNodes(container).find(node => node.attributes.role === "dialog" && node.attributes["aria-label"] === "test-model")!;
+    const source = allNodes(modelMenu).find(node => node.tagName === "SELECT")!;
     const sourceKey = Object.keys(source).find(name => name.startsWith("__reactProps$"))!;
     const sourceChange = (source as unknown as Record<string, { onChange: (event: { currentTarget: { value: string } }) => void }>)[sourceKey].onChange;
     const option = allNodes(source).find(node => node.tagName === "OPTION" && node.textContent.includes("Claude Code"))!;
     await act(async () => sourceChange({ currentTarget: { value: option.attributes.value } }));
     expect(chat.updateThread).toHaveBeenCalledWith(thread.id, expect.objectContaining({ definitionId: "claude", model: "", accountProfileId: null }));
     expect(allNodes(container).some(node => node.attributes.role === "dialog" && node.attributes["aria-label"] === "test-model")).toBe(true);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each(["codex", "claude", "gemini"] as const)("changes composer permissions only to supported values (%s)", async definitionId => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ definitionId, permission: "readOnly" });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  const agents = fakeAgentApi({ catalog: [fakeDefinition({ id: definitionId })] });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
+    const select = allNodes(container).find(node => node.tagName === "SELECT" && node.parentNode?.attributes.class?.includes("session-composer__access--editable"))!;
+    expect(select).toBeDefined();
+    const key = Object.keys(select).find(name => name.startsWith("__reactProps$"))!;
+    const control = (select as unknown as Record<string, { disabled: boolean; onChange: (event: { target: { value: string } }) => void }>)[key];
+    expect(control.disabled).toBe(false);
+    await act(async () => control.onChange({ target: { value: "workspaceWrite" } }));
+    expect(chat.updateThread).toHaveBeenCalledExactlyOnceWith(thread.id, { permission: "workspaceWrite" });
+    vi.mocked(chat.updateThread).mockClear();
+    await act(async () => control.onChange({ target: { value: "unsupported" } }));
+    if (definitionId === "gemini") {
+      expect(allNodes(select).some(node => node.attributes.value === "ask")).toBe(false);
+      await act(async () => control.onChange({ target: { value: "ask" } }));
+    }
+    expect(chat.updateThread).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each(["running", "queued", "proxy"] as const)("keeps composer permission changes unavailable for %s conversations", async mode => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ runningTurnId: mode === "running" ? "turn" : null,
+    pendingInputs: mode === "queued" ? [{ id: "queued", prompt: "Later", attachments: [], profileConfigPath: null, createdAt: 1 }] : [],
+    ...(mode === "proxy" ? { provider: "cliproxyapi" as const, model: "proxy-model", nativeSessionId: null } : {}) });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={fakeAgentApi()} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
+    const select = allNodes(container).find(node => node.tagName === "SELECT" && node.parentNode?.attributes.class?.includes("session-composer__access--editable"));
+    if (mode === "proxy") expect(select).toBeUndefined();
+    else {
+      const key = Object.keys(select!).find(name => name.startsWith("__reactProps$"))!;
+      const control = (select as unknown as Record<string, { disabled: boolean; onChange: (event: { target: { value: string } }) => void }>)[key];
+      expect(control.disabled).toBe(true);
+      await act(async () => control.onChange({ target: { value: "full" } }));
+    }
+    expect(chat.updateThread).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); }
 });
 

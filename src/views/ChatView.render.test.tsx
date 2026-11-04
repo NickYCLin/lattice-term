@@ -118,7 +118,7 @@ describe("ChatView", () => {
     expect(markup).not.toContain("從剪貼簿貼上");
     const composer = markup.slice(markup.lastIndexOf('<form'));
     expect(composer).toContain("唯讀");
-    expect(composer).not.toContain("完整檔案存取");
+    expect(composer).toContain('value="readOnly" selected=""');
   });
 
   it("locks the composer model while a turn is running", () => {

@@ -1234,6 +1234,11 @@ button.chat-chip:hover {
   font-weight: 500;
 }
 
+.session-composer__access--editable { min-width: 0; max-width: 13rem; cursor: pointer; }
+.session-composer__access--editable select { appearance: auto; min-width: 0; max-width: 100%; min-height: 2.5rem; padding: .25rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.session-composer__access--editable:focus-within { border-radius: var(--radius-sm); outline: 2px solid var(--accent); outline-offset: 2px; }
+.session-composer__access--editable select:disabled { opacity: .55; cursor: default; }
+
 .session-composer__model-picker {
   position: relative;
   flex: 1;

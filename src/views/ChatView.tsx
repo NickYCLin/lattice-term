@@ -1096,6 +1096,11 @@ function ThreadPane({
     }
   }
 
+  function changePermission(permission: ChatPermission) {
+    if (settingsLocked || directProxy || !permissionsFor(thread.definitionId).includes(permission)) return;
+    chat.updateThread(thread.id, { permission });
+  }
+
   function changeModel({ definitionId, accountProfileId, model, provider, proxyId }: AccountModelSelection) {
     if (settingsLocked) return;
     const agent = provider ? cliProxyAgentFor(model, installed) : definitionId;
@@ -1290,11 +1295,7 @@ function ThreadPane({
                 className="select"
                 value={thread.permission}
                 disabled={settingsLocked || directProxy}
-                onChange={(event) =>
-                  chat.updateThread(thread.id, {
-                    permission: event.target.value as ChatPermission,
-                  })
-                }
+                onChange={(event) => changePermission(event.target.value as ChatPermission)}
               >
                 {permissionsFor(thread.definitionId).map((permission) => (
                   <option key={permission} value={permission}>
@@ -1513,10 +1514,13 @@ function ThreadPane({
                   }}
                 />
               </ComposerAttachments>
-              {!directProxy && <span className={`session-composer__access${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
+              {!directProxy && <label className={`session-composer__access session-composer__access--editable${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
                 {thread.permission === "full" ? <AlertIcon size={14} /> : <ShieldIcon size={14} />}
-                {t(permissionLabelKey[thread.permission])}
-              </span>}
+                <select aria-label={t("chat.permission")} value={thread.permission} disabled={settingsLocked}
+                  onChange={event => changePermission(event.target.value as ChatPermission)}>
+                  {permissionsFor(thread.definitionId).map(permission => <option key={permission} value={permission}>{t(permissionLabelKey[permission])}</option>)}
+                </select>
+              </label>}
               <ComposerPopover model label={composerModelLabel} disabled={settingsLocked}
                 open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
                 <AccountModelField options={modelOptions} value={pickerValue} disabled={settingsLocked}
