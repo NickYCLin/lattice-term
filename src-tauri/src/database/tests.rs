@@ -206,6 +206,96 @@ fn credentials_are_bound_to_engine_endpoint_account_and_database() {
 }
 
 #[test]
+fn database_credential_ids_satisfy_the_real_credential_store_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut entry = profile(directory.path(), "fixture");
+    for id in [
+        "fixture".to_string(),
+        "資".repeat(26),
+        "x".repeat(80),
+        "fixture:custom/id".to_string(),
+    ] {
+        entry.id = id;
+        let key = entry.credential_profile().id;
+        assert!(crate::credentials::account(&key, CredentialKind::DatabasePassword).is_ok());
+        assert_eq!(key.len(), 73);
+        assert!(!key.contains("fixture"));
+    }
+    let first = entry.credential_profile().id;
+    entry.id = "another-profile".into();
+    assert_ne!(first, entry.credential_profile().id);
+    assert!(crate::credentials::account(
+        "database:fixture:0123456789abcdef",
+        CredentialKind::DatabasePassword
+    )
+    .is_err());
+}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "Writes and removes one disposable Windows credential; run explicitly"]
+fn windows_database_password_save_roundtrip_uses_a_disposable_credential() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    let mut random_id = [0u8; 32];
+    getrandom::fill(&mut random_id).unwrap();
+    let random_id: String = random_id.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut entry = profile(directory.path(), &random_id);
+    entry.engine = Engine::SqlServer;
+    entry.hostname = "db.invalid".into();
+    entry.port = 1433;
+    entry.username = "fixture-user".into();
+    entry.database = "fixture-database".into();
+    entry.sqlite_path.clear();
+    let credential_profile = entry.credential_profile();
+    let account =
+        crate::credentials::account(&credential_profile.id, CredentialKind::DatabasePassword)
+            .unwrap();
+    let key = keyring::Entry::new("io.github.NickYCLin.LatticeTerm", &account).unwrap();
+    struct Cleanup(keyring::Entry);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = self.0.delete_credential();
+        }
+    }
+    let cleanup = Cleanup(key);
+    let mut random_secret = Zeroizing::new([0u8; 32]);
+    getrandom::fill(random_secret.as_mut()).unwrap();
+    let secret = Zeroizing::new(
+        random_secret
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    );
+    let before = registry.snapshot().unwrap();
+    let saved = registry
+        .edit(
+            &before.revision,
+            Some(entry.clone()),
+            None,
+            Some(secret.clone()),
+        )
+        .unwrap();
+    assert_eq!(saved.profiles, vec![entry.clone()]);
+    let loaded = Zeroizing::new(
+        credentials::load_bound_with_context(
+            &credential_profile,
+            CredentialKind::DatabasePassword,
+            &entry.credential_context(),
+        )
+        .unwrap(),
+    );
+    assert!(loaded.as_str() == secret.as_str());
+    let raw = std::fs::read_to_string(registry.path()).unwrap();
+    assert!(!raw.contains(secret.as_str()));
+    cleanup.0.delete_credential().unwrap();
+    assert!(matches!(
+        cleanup.0.get_password(),
+        Err(keyring::Error::NoEntry)
+    ));
+}
+
+#[test]
 fn ca_input_rejects_private_keys_invalid_data_and_oversized_input() {
     assert!(validate_ca("").is_ok());
     for pem in [

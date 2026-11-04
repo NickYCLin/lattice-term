@@ -642,7 +642,7 @@ fn provider() -> &'static str {
     }
 }
 
-fn account(profile_id: &str, kind: CredentialKind) -> Result<String, String> {
+pub(crate) fn account(profile_id: &str, kind: CredentialKind) -> Result<String, String> {
     let profile_id = profile_id.trim();
     if profile_id.is_empty() || profile_id.len() > MAX_PROFILE_ID_LENGTH {
         return Err("The credential profile id is missing or too long.".to_string());

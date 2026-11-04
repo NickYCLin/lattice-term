@@ -89,6 +89,7 @@ impl DatabaseProfile {
 
     fn credential_profile(&self) -> ConnectionProfile {
         let mut binding = serde_json::to_vec(&(
+            &self.id,
             self.engine,
             &self.hostname,
             self.port,
@@ -102,11 +103,10 @@ impl DatabaseProfile {
         }
         let digest: String = Sha256::digest(binding)
             .iter()
-            .take(12)
             .map(|byte| format!("{byte:02x}"))
             .collect();
         ConnectionProfile {
-            id: format!("database:{}:{digest}", self.id),
+            id: format!("database-{digest}"),
             name: self.name.clone(),
             protocol: Protocol::Ssh,
             hostname: self.hostname.clone(),
@@ -406,7 +406,9 @@ impl DatabaseRegistry {
                         &context,
                         password,
                     )
-                    .map_err(|_| "無法儲存密碼，請確認憑證庫已解鎖。")?;
+                    .map_err(|_| {
+                        "無法將資料庫密碼寫入憑證庫，請檢查目前的憑證儲存設定與服務狀態。"
+                    })?;
                 } else if endpoint_changed || existing.is_none() {
                     return Err("新增或變更端點後，請重新填入資料庫密碼。".into());
                 }

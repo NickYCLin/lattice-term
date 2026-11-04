@@ -249,7 +249,7 @@ try {
     foreach ($filter in @("codex_input_profile", "codex_mcp_submit", "desktop_interrupt", "startup_seed",
             "windows_elevation::", "windows_pty_environment", "conpty_startup", "desktop_ownership", "agent_daemon::", "mcp_desktop::", "metrics::",
             "remote_host::", "remote::", "remote_commands::", "remote_chat_host::", "notification_sound::",
-            "durable_file::", "backup::", "credentials::", "vault::",
+            "durable_file::", "backup::", "credentials::", "vault::", "database::",
             "npm_shim", "cliproxy::catalog::", "git_changes::", "chat_images::", "mcp_inventory::")) {
         $check = [ordered]@{ filter = $filter; passed = $false }
         $report.tests += $check
