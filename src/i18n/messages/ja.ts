@@ -1318,6 +1318,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "決済アカウントは、新しいネイティブな会話を開始し、安全に最新のコンテキストを実行します。",
   "chat.accountProfile.hint": "その他のアカウントは、AI Agent Fleet ページに追加されます。まだサインインされていないアカウントは、最初に起動して署名する必要があります。",
   "chat.accountProfile.notSignedIn": "このアカウントは、まだ登録されていません。AI Agent Fleetページで一度起動し、最初にサインインします。",
+  "chat.handoff.info": "会話の引き継ぎについて",
   "chat.handoff.pending": "次のメッセージは、新しい {assistant} の会話を開始します。 最近のユーザーメッセージとテキストのみが転送されます。 ツールの出力、推論、ネイティブな会話 ID は使用しません。",
   "chat.attachment.images": "画像の追加",
   "chat.attachment.files": "ファイルを追加",

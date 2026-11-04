@@ -1847,6 +1847,7 @@ export const en: Messages = {
   "chat.accountProfile.handoff": "Switching accounts starts a new native conversation and safely carries recent context.",
   "chat.accountProfile.hint": "Other accounts are added on the AI Agent Fleet page; an account that is not signed in yet must be launched and signed in there first.",
   "chat.accountProfile.notSignedIn": "This account is not signed in yet. Launch it once on the AI Agent Fleet page and sign in first.",
+  "chat.handoff.info": "Conversation handoff information",
   "chat.handoff.pending":
     "Your next message starts a new {assistant} conversation. Only recent user messages and text replies transfer; tool output, reasoning, and native conversation IDs do not.",
   "chat.attachment.images": "Add images",

@@ -1314,6 +1314,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "Switching 계정은 새로운 네이티브 대화를 시작하고 안전하게 최근의 컨텍스트를 수행합니다.",
   "chat.accountProfile.hint": "다른 계정은 AI Agent Fleet 페이지에 추가됩니다. 아직 로그인하지 않은 계정은 처음에 가입하고 서명해야합니다.",
   "chat.accountProfile.notSignedIn": "이 계정은 아직 로그인되지 않습니다. AI Agent Fleet 페이지에 한 번 실행하고 처음 로그인하십시오.",
+  "chat.handoff.info": "대화 인계 안내",
   "chat.handoff.pending": "다음 메시지는 새로운 {assistant} 대화를 시작합니다. 최근 사용자 메시지와 텍스트가 전송을 replies; 도구 출력, 이유, 그리고 네이티브 대화 ID는하지 않습니다.",
   "chat.attachment.images": "이미지 추가",
   "chat.attachment.files": "파일 추가",

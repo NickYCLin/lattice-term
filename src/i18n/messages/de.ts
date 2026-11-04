@@ -1314,6 +1314,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "Schaltkonten starten ein neues natives Gespräch und trägt sicher den aktuellen Kontext.",
   "chat.accountProfile.hint": "Andere Konten werden auf der AI Agent Fleet Seite hinzugefügt; ein Konto, das noch nicht angemeldet ist, muss dort zuerst gestartet und unterzeichnet werden.",
   "chat.accountProfile.notSignedIn": "Dieses Konto ist noch nicht angemeldet. Starten Sie es einmal auf der AI Agent Fleet Seite und melden Sie sich zuerst an.",
+  "chat.handoff.info": "Informationen zur Gesprächsübergabe",
   "chat.handoff.pending": "Ihre nächste Nachricht startet ein neues {assistant}-Gespräch. Nur aktuelle Benutzernachrichten und Textnachrichten übertragen; Werkzeugausgabe, Argumentation und native Gesprächs-IDs nicht.",
   "chat.attachment.images": "Bilder hinzufügen",
   "chat.attachment.files": "Dateien hinzufügen",

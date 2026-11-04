@@ -1778,6 +1778,7 @@ export const zhTW = {
   "chat.accountProfile.handoff": "切換帳號會建立新的原生對話，並安全轉交近期脈絡。",
   "chat.accountProfile.hint": "其他帳號在 AI Agent Fleet 頁新增；還沒登入的帳號要先在那裡啟動一次並登入。",
   "chat.accountProfile.notSignedIn": "這個帳號還沒登入，請先到 AI Agent Fleet 用它啟動一次並登入。",
+  "chat.handoff.info": "對話接手說明",
   "chat.handoff.pending":
     "下一則訊息會交由 {assistant} 以新的原生對話接手；只會帶入近期的使用者訊息與文字回覆，工具輸出、推理內容和原生對話 ID 不會轉交。",
   "chat.attachment.images": "加入圖片",

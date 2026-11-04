@@ -1338,6 +1338,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "切换帐号会创建新的原生对话，并安全转交近期脉络。",
   "chat.accountProfile.hint": "其他帐号在 AI Agent Fleet 页添加；还没登录的帐号要先在那里启动一次并登录。",
   "chat.accountProfile.notSignedIn": "这个帐号还没登录，请先到 AI Agent Fleet 用它启动一次并登录。",
+  "chat.handoff.info": "对话接手说明",
   "chat.handoff.pending": "下一则消息会交由 {assistant} 以新的原生对话接手；只会带入近期的用户消息与文本回复，工具输出、推理内容和原生对话 ID 不会转交。",
   "chat.attachment.images": "加入图片",
   "chat.attachment.files": "加入文件",

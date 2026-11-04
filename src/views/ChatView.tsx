@@ -15,6 +15,7 @@ import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
 import { ConversationIdentity, ConversationListIdentity, ConversationMessage, ConversationMetadata } from "../components/chat/ConversationPresentation";
+import { ConversationInfo } from "../components/chat/ConversationInfo";
 import { isChatAtBottom } from "../app/chatScroll";
 import { conversationLabels } from "../app/conversationLabels";
 import { cliProxyLabel } from "../app/cliProxyApi";
@@ -1138,6 +1139,9 @@ function ThreadPane({
                 {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : !directProxy && <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
           </ConversationIdentity>
           <div className="chat-composer__actions">
+            {thread.handoff && <ConversationInfo key={thread.id} label={t("chat.handoff.info")}>
+              {t("chat.handoff.pending", { assistant })}
+            </ConversationInfo>}
             {!thread.archived && <button
               type="button"
               className="button button--ghost button--sm"
@@ -1333,11 +1337,6 @@ function ThreadPane({
         {directProxy && <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>}
         {!directProxy && thread.permission === "full" && !thread.archived && (
           <Callout tone="warn">{t("chat.permission.full.hint")}</Callout>
-        )}
-        {thread.handoff && (
-          <Callout tone="info">
-            {t("chat.handoff.pending", { assistant })}
-          </Callout>
         )}
         {!cliInstalled && !thread.archived && (
           <Callout tone="warn">

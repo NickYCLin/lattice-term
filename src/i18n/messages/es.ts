@@ -1314,6 +1314,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "Las cuentas de conmutación comienzan una nueva conversación nativa y conducen con seguridad el contexto reciente.",
   "chat.accountProfile.hint": "Otras cuentas se agregan en la página de la Flota Agente AI; una cuenta que aún no está firmada debe ser lanzada y firmada allí primero.",
   "chat.accountProfile.notSignedIn": "Esta cuenta no está firmada todavía. Lance una vez en la página de la Flota Agente AI y firme en el primero.",
+  "chat.handoff.info": "Información sobre el relevo de conversación",
   "chat.handoff.pending": "Su siguiente mensaje comienza una nueva conversación {assistant}. Sólo mensajes de usuario recientes y respuestas de texto transferencia; salida de herramientas, razonamiento, e identificación de conversación nativa no.",
   "chat.attachment.images": "Agregar imágenes",
   "chat.attachment.files": "Agregar archivos",

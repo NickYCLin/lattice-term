@@ -1314,6 +1314,7 @@ export const messages: Messages = {
   "chat.accountProfile.handoff": "Le changement de comptes commence une nouvelle conversation native et porte en toute sécurité un contexte récent.",
   "chat.accountProfile.hint": "D'autres comptes sont ajoutés à la page de la flotte d'agents d'IA; un compte qui n'est pas encore signé doit d'abord être lancé et signé.",
   "chat.accountProfile.notSignedIn": "Ce compte n'est pas encore signé. Lancez-le une fois sur la page Agent d'IA Fleet et connectez-vous en premier.",
+  "chat.handoff.info": "Informations sur le relais de conversation",
   "chat.handoff.pending": "Votre message suivant commence une nouvelle conversation {assistant}. Seuls les messages utilisateurs récents et les réponses texte transfert; sortie de l'outil, le raisonnement et les ID de conversation native ne le font pas.",
   "chat.attachment.images": "Ajouter des images",
   "chat.attachment.files": "Ajouter des fichiers",

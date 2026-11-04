@@ -45,6 +45,15 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("keeps the handoff explanation behind a header info button", () => {
+    const thread = fakeThread({ handoff: { sourceDefinitionId: "claude", transcript: "Recent text only" } });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(html).toContain('aria-label="對話接手說明"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("下一則訊息會交由");
+    const ordinary = fakeThread();
+    expect(render(fakeChatApi({ threads: [ordinary], activeThreadId: ordinary.id }))).not.toContain('aria-label="對話接手說明"');
+  });
   it("shows terminal sessions, imported threads and native history under one project", () => {
     const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "shared-native",
       title: "終端正在處理", workingDirectory: "/work/app", resumable: true, updatedAt: 1 };
