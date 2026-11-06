@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.11.6](https://github.com/NickYCLin/lattice-term/compare/v2026.11.5...v2026.11.6) (2026-11-06)
+
+
+### 🛠️ 問題修正
+
+* **database:** 修正憑證清理造成連線設定卡住 ([33437d4](https://github.com/NickYCLin/lattice-term/commit/33437d45326a4e552577fd4a955f90d306d2d628))
+* **database:** 補齊連線測試失敗後重試 ([46679e2](https://github.com/NickYCLin/lattice-term/commit/46679e232400936443fab6ff58ae0b9fe9308ad4))
+
 ## [2026.11.5](https://github.com/NickYCLin/lattice-term/compare/v2026.11.4...v2026.11.5) (2026-11-04)
 
 
