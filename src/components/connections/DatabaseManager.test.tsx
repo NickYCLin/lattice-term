@@ -75,6 +75,40 @@ async function submit() {
   await act(async () => hostProps(container).find((props) => props.onSubmit)!.onSubmit!({ preventDefault() {} }));
 }
 
+it("explains an unavailable catalog when testing and preserves the draft for retry", async () => {
+  invoke.mockRejectedValueOnce(Error("catalog unavailable"));
+  await render();
+  await change((props) => props.maxLength === 100, { value: "保留的連線" });
+  await click("測試連線");
+  expect(hostProps(container).some(props => String(props.children).includes("請先重新載入連線"))).toBe(true);
+  expect(invoke.mock.calls.some(([command]) => command === "database_test")).toBe(false);
+  await click("重新載入連線（保留輸入）");
+  invoke.mockResolvedValueOnce({ columns: ["version"], rows: [["fixture"]] });
+  await click("測試連線");
+  expect(invoke).toHaveBeenLastCalledWith("database_test", expect.objectContaining({
+    profile: expect.objectContaining({ name: "保留的連線" }), revision: "original", password: null,
+  }));
+  expect(hostProps(container).some(props => String(props.children).includes("連線測試成功"))).toBe(true);
+  expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
+});
+
+it.each(databaseEngines)("allows retrying a failed $value draft probe without saving", async engine => {
+  await render();
+  await click("新增資料庫連線");
+  await change((props) => props.value === "postgres" && Array.isArray(props.children), { value: engine.value });
+  invoke.mockRejectedValueOnce(Error("fixture connection failure"));
+  await click("測試連線");
+  expect(hostProps(container).some(props => String(props.children).includes("fixture connection failure"))).toBe(true);
+  invoke.mockResolvedValueOnce({ columns: ["version"], rows: [["fixture"]] });
+  await click("測試連線");
+  expect(invoke).toHaveBeenLastCalledWith("database_test", expect.objectContaining({
+    profile: expect.objectContaining({ engine: engine.value }), revision: "original",
+  }));
+  expect(hostProps(container).some(props => String(props.children).includes("連線測試成功"))).toBe(true);
+  expect(hostProps(container).some(props => String(props.children).includes("fixture connection failure"))).toBe(false);
+  expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
+});
+
 it.each(databaseEngines)("creates and reopens a $value connection without replacing another version", async (engine) => {
   await render();
   await click("測試資料庫");

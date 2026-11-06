@@ -136,7 +136,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   }
 
   function testConnection() {
-    if (!snapshot) return;
+    if (!snapshot) { setError("尚未載入資料庫設定，請先重新載入連線後再儲存或測試。"); return; }
     void perform(async () => {
       await invoke<DatabaseResult>("database_test", { profile: draft, revision: snapshot.revision, password: password || null });
       setNotice("連線測試成功。測試不會儲存設定，也不會開啟 AI 存取權限。");
