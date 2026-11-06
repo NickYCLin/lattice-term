@@ -147,6 +147,29 @@ async fn isolated_network_databases_verify_tls_and_readonly_queries() {
         .await
         .unwrap();
     assert!(!result["rows"][0][0].as_str().unwrap().is_empty());
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    let snapshot = registry.snapshot().unwrap();
+    assert!(registry
+        .test_draft(
+            profile.clone(),
+            &snapshot.revision,
+            Some(Zeroizing::new("incorrect-password".into())),
+        )
+        .await
+        .is_err());
+    let probe = registry
+        .test_draft(
+            profile.clone(),
+            &snapshot.revision,
+            Some(Zeroizing::new(fixture.password.clone())),
+        )
+        .await
+        .unwrap();
+    assert!(!probe["rows"][0][0].as_str().unwrap().is_empty());
+    assert!(!registry.path().exists());
+    assert_eq!(registry.snapshot().unwrap().revision, snapshot.revision);
+    assert!(registry.snapshot().unwrap().profiles.is_empty());
     let tables = drivers::read(
         &profile,
         &fixture.password,

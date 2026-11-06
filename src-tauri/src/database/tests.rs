@@ -137,6 +137,72 @@ fn rejects_concurrent_process_writes() {
 }
 
 #[test]
+fn reloads_generated_cleanup_keys_and_preserves_active_passwords() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    let mut network = profile(directory.path(), "network");
+    network.engine = Engine::Postgres;
+    network.hostname = "database.invalid".into();
+    network.port = 5432;
+    network.username = "reader".into();
+    network.database = "sample".into();
+    network.sqlite_path.clear();
+    let key = network.credential_profile().id;
+    let raw = serde_json::to_vec(&Store {
+        version: 1,
+        profiles: vec![network.clone()],
+        pending_credentials: vec![key.clone()],
+    })
+    .unwrap();
+    std::fs::write(registry.path(), &raw).unwrap();
+    let snapshot = registry.snapshot().unwrap();
+    assert_eq!(snapshot.pending_credentials, vec![key]);
+    assert_eq!(snapshot.credential_cleanup_pending, 1);
+    assert_eq!(std::fs::read(registry.path()).unwrap(), raw);
+    let snapshot = registry
+        .edit(
+            &snapshot.revision,
+            Some(profile(directory.path(), "local")),
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(snapshot.profiles.len(), 2);
+    assert!(snapshot.profiles.contains(&network));
+    assert_eq!(snapshot.credential_cleanup_pending, 0);
+    assert!(registry.snapshot().unwrap().pending_credentials.is_empty());
+}
+
+#[test]
+fn rejects_unscoped_cleanup_keys_without_modifying_the_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry = DatabaseRegistry::new(directory.path().into());
+    for key in [
+        "database:fixture:0123456789abcdef".into(),
+        "ssh-route".into(),
+        "database-".into(),
+        format!("database-{}", "a".repeat(63)),
+        format!("database-{}", "a".repeat(65)),
+        format!("database-{}", "g".repeat(64)),
+        format!("database-{}", "A".repeat(64)),
+    ] {
+        let raw = serde_json::to_vec(&Store {
+            version: 1,
+            profiles: vec![],
+            pending_credentials: vec![key],
+        })
+        .unwrap();
+        std::fs::write(registry.path(), &raw).unwrap();
+        assert!(registry
+            .snapshot()
+            .err()
+            .unwrap()
+            .contains("無效的資料庫憑證清理紀錄"));
+        assert_eq!(std::fs::read(registry.path()).unwrap(), raw);
+    }
+}
+
+#[test]
 fn validates_paths_limits_and_rejects_unknown_fields() {
     let directory = tempfile::tempdir().unwrap();
     let mut entry = profile(directory.path(), "first");
@@ -236,6 +302,7 @@ fn database_credential_ids_satisfy_the_real_credential_store_contract() {
 #[ignore = "Writes and removes one disposable Windows credential; run explicitly"]
 fn windows_database_password_save_roundtrip_uses_a_disposable_credential() {
     let directory = tempfile::tempdir().unwrap();
+    crate::vault::initialize(directory.path().into());
     let registry = DatabaseRegistry::new(directory.path().into());
     let mut random_id = [0u8; 32];
     getrandom::fill(&mut random_id).unwrap();
@@ -288,7 +355,14 @@ fn windows_database_password_save_roundtrip_uses_a_disposable_credential() {
     assert!(loaded.as_str() == secret.as_str());
     let raw = std::fs::read_to_string(registry.path()).unwrap();
     assert!(!raw.contains(secret.as_str()));
-    cleanup.0.delete_credential().unwrap();
+    let reloaded = DatabaseRegistry::new(directory.path().into());
+    let saved = reloaded.snapshot().unwrap();
+    let deleted = reloaded
+        .edit(&saved.revision, None, Some(&entry.id), None)
+        .unwrap();
+    assert!(deleted.profiles.is_empty());
+    assert_eq!(deleted.credential_cleanup_pending, 0);
+    assert!(reloaded.snapshot().unwrap().pending_credentials.is_empty());
     assert!(matches!(
         cleanup.0.get_password(),
         Err(keyring::Error::NoEntry)
