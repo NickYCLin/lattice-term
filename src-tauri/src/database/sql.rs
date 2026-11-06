@@ -5,7 +5,7 @@ use sqlparser::{
     dialect::*,
     parser::Parser,
 };
-use sqlx::{Column, ValueRef};
+use sqlx::{AssertSqlSafe, Column, SqlSafeStr, ValueRef};
 use std::ops::ControlFlow;
 
 /// Parse and re-serialize a single statement. Never pass executable comments,
@@ -101,16 +101,16 @@ impl Client {
 
     async fn execute_statement(&mut self, statement: &str) -> Result<u64, String> {
         match self {
-            Self::Postgres(c) => sqlx::Executor::execute(c, statement)
+            Self::Postgres(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
                 .map_err(|_| failed()),
-            Self::Mysql(c) => sqlx::Executor::execute(c, statement)
+            Self::Mysql(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
                 .map_err(|_| failed()),
             #[cfg(not(target_os = "ios"))]
-            Self::Sqlite(c) => sqlx::Executor::execute(c, statement)
+            Self::Sqlite(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
                 .map_err(|_| failed()),
@@ -133,10 +133,10 @@ impl Client {
             ($connection:expr) => {{
                 // Simple-query/text protocol preserves arbitrary scalar types
                 // as server-formatted text, rather than decoding them as i64.
-                let description = sqlx::Executor::describe(&mut *$connection, statement).await.map_err(|_| failed())?;
-                names = description.columns().iter().map(|c| c.name().to_owned()).collect();
+                let description = sqlx::Executor::prepare(&mut *$connection, AssertSqlSafe(statement).into_sql_str()).await.map_err(|_| failed())?;
+                names = sqlx::Statement::columns(&description).iter().map(|c| c.name().to_owned()).collect();
                 if names.len() > MAX_COLUMNS { return Err("查詢結果最多支援 64 個欄位。".into()); }
-                let mut stream = sqlx::Executor::fetch($connection, statement);
+                let mut stream = sqlx::Executor::fetch($connection, AssertSqlSafe(statement));
                 while let Some(row) = stream.try_next().await.map_err(|_| failed())? {
                     if row.len() > MAX_COLUMNS { return Err("查詢結果最多支援 64 個欄位。".into()); }
                     names = row.columns().iter().map(|c| c.name().to_owned()).collect();

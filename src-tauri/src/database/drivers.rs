@@ -173,7 +173,7 @@ impl Client {
     async fn query(&mut self, statement: &str, parameters: &[&str]) -> Result<TextRows, String> {
         macro_rules! fetch {
             ($connection:expr) => {{
-                let mut query = sqlx::query(statement);
+                let mut query = sqlx::query(sqlx::AssertSqlSafe(statement));
                 for parameter in parameters {
                     query = query.bind(*parameter);
                 }
@@ -196,7 +196,7 @@ impl Client {
         match self {
             Self::Postgres(connection) => fetch!(connection),
             Self::Mysql(connection) => {
-                let mut query = sqlx::query(statement);
+                let mut query = sqlx::query(sqlx::AssertSqlSafe(statement));
                 for parameter in parameters {
                     query = query.bind(*parameter);
                 }
