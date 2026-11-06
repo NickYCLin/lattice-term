@@ -120,7 +120,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
 
   function save(event: FormEvent) {
     event.preventDefault();
-    if (!snapshot) return;
+    if (!snapshot) { setError("尚未載入資料庫設定，請先重新載入連線後再儲存或測試。"); return; }
     const intent = (event.nativeEvent as SubmitEvent | undefined)?.submitter?.getAttribute("value");
     if (intent === "test") { testConnection(); return; }
     void perform(async () => {
@@ -187,6 +187,15 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
             {!settingsOnly && <nav className="database-manager__tabs" aria-label="資料庫工作區頁面">{([ ["sql", "SQL 工作台"], ["tables", "資料表瀏覽"], ["settings", "連線設定"] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey) : setView(key)}>{label}</button>)}</nav>}
             <div className="database-manager__content" ref={contentRef}>
               {error && <p role="alert" className="database-manager__notice database-manager__error">{error}</p>}
+              {!snapshot && !connectionBusy && <button type="button" className="button button--secondary" onClick={() => void perform(async () => {
+                const value = await invoke<DatabaseSnapshot>("database_profiles");
+                setSnapshot(value);
+                if (!touched) {
+                  const first = createNew ? undefined : value.profiles.find(profile => profile.id === initialProfileId) ?? value.profiles.find(profile => !hostKeys || hostKeys.includes(profile.hostKey));
+                  if (first) setDraft(first);
+                  onProfileSelected?.(first ?? null);
+                }
+              })}>重新載入連線（保留輸入）</button>}
               {notice && <p role="status" className="database-manager__notice">{notice}</p>}
               {(connectionBusy || sqlState.busy) && <p role="status" className="database-manager__notice">處理中…最長等候 20 秒</p>}
               {!!snapshot?.credentialCleanupPending && <div role="alert" className="database-manager__notice"><p>仍有 {snapshot.credentialCleanupPending} 筆舊密碼等待清除，請解鎖憑證庫後重試。</p><button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {

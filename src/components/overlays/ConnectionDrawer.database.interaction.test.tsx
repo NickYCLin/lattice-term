@@ -7,9 +7,9 @@ import { emptyDatabase } from "../../domain/database";
 import { I18nProvider } from "../../i18n";
 import { ConnectionDrawer } from "./ConnectionDrawer";
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+const { invoke, useModalFocus } = vi.hoisted(() => ({ invoke: vi.fn(), useModalFocus: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("./modalFocus", () => ({ useModalFocus: () => {} }));
+vi.mock("./modalFocus", () => ({ useModalFocus }));
 vi.mock("../connections/SqlWorkbench", () => ({ SqlWorkbench: () => null }));
 vi.mock("../../app/useConnectionCredentialDraft", () => ({ useConnectionCredentialDraft: () => ({
   native: false, dirty: false, loading: false, secret: "", saved: false, allowMcpRead: false,
@@ -57,6 +57,52 @@ async function fill() {
   await change(node => props(node)?.autoComplete === "off", "reader");
   await change(node => props(node)?.autoComplete === "new-password", "fixture-only-password");
 }
+
+it.each(["cancel", "close", "scrim", "escape"])("can discard edits after a catalog failure using %s", async exit => {
+  invoke.mockRejectedValueOnce("無效的資料庫憑證清理紀錄。");
+  await render({ database: true });
+  expect(container.textContent).toContain("無效的資料庫憑證清理紀錄");
+  await fill();
+  await submit();
+  expect(container.textContent).toContain("請先重新載入連線");
+  expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
+  if (exit === "cancel") await click("取消");
+  else await act(async () => {
+    if (exit === "escape") useModalFocus.mock.calls.slice().reverse().find(([options]) => options.active !== false)![0].onEscape();
+    else {
+      const node = allNodes(container).find(node => exit === "close" ? props(node)?.["aria-label"] === "關閉" : props(node)?.className === "scrim")!;
+      if (exit === "close") props(node).onClick();
+      else props(node).onMouseDown();
+    }
+  });
+  expect(onClose).not.toHaveBeenCalled();
+  await click("放棄修改");
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("retries a failed catalog without losing the draft or password", async () => {
+  invoke.mockRejectedValueOnce("無效的資料庫憑證清理紀錄。");
+  await render({ database: true });
+  await fill();
+  await click("重新載入連線（保留輸入）");
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({
+    revision: "original", profile: expect.objectContaining({ name: "獨立資料庫" }), password: "fixture-only-password",
+  }));
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("keeps failed saves editable and allows cancelling without saving", async () => {
+  await render({ database: true });
+  await fill();
+  invoke.mockRejectedValueOnce("無效的資料庫憑證清理紀錄。");
+  await submit();
+  expect(container.textContent).toContain("無效的資料庫憑證清理紀錄");
+  expect(onClose).not.toHaveBeenCalled();
+  await click("取消");
+  await click("放棄修改");
+  expect(onClose).toHaveBeenCalledOnce();
+});
 
 it.each([false, true])("creates an independent database without a remote record or owner field (mobile=%s)", async mobile => {
   await render({ database: true, mobile }); await fill();

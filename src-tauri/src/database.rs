@@ -290,7 +290,12 @@ impl DatabaseRegistry {
             }
             for id in &store.pending_credentials {
                 identifier(id, 128)?;
-                if !id.starts_with("database:") {
+                if !id.strip_prefix("database-").is_some_and(|digest| {
+                    digest.len() == 64
+                        && digest
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                }) {
                     return Err("無效的資料庫憑證清理紀錄。".into());
                 }
             }
