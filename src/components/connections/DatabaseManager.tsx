@@ -115,7 +115,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
 
   function update<Key extends keyof DatabaseProfile>(key: Key, value: DatabaseProfile[Key]) {
     setTouched(true);
-    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
+    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem", "route"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
   }
 
   function save(event: FormEvent) {
@@ -210,6 +210,17 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
                 <h4 className="database-manager__form-section"><span>01</span><span>連線位置<small>設定要連接的資料庫。</small></span></h4>
                 <div className="database-manager__field-grid">
                   <label className="database-manager__span">連線名稱<input placeholder="例如：開發環境 PostgreSQL" required maxLength={100} value={draft.name} onChange={(event) => update("name", event.target.value)} /></label>
+                  {draft.engine !== "sqlite" && <>
+                    <label className="database-manager__span">連線路徑<select value={draft.route ? `${draft.route.kind}:${draft.route.profileId}` : "direct"} onChange={event => {
+                      const value = event.target.value;
+                      const index = value.indexOf(":");
+                      update("route", value === "direct" ? null : { kind: value.slice(0, index) as "ssh" | "remote", profileId: value.slice(index + 1) });
+                    }}>
+                      <option value="direct">本機直接連線</option>
+                      {profiles.filter(profile => profile.protocol === "ssh" || profile.protocol === "lattice").map(profile => <option key={profile.id} value={`${profile.protocol === "ssh" ? "ssh" : "remote"}:${profile.id}`}>{profile.protocol === "ssh" ? "SSH 通道" : "Lattice Remote 通道"}：{profile.name}</option>)}
+                    </select></label>
+                    <p className="database-manager__hint database-manager__span">使用通道時，資料庫位址是從遠端主機看到的位址。SSH 先確認主機指紋；Lattice Remote 請先連線，並在主機開啟「允許資料庫通道」。只有 RDP 的主機請搭配 Remote 代理。變更路徑後須重填資料庫密碼。</p>
+                  </>}
                   <label className="database-manager__span">資料庫種類<select value={draft.engine} onChange={(event) => {
                     setTouched(true); setDraft(changeDatabaseEngine(draft, event.target.value as DatabaseProfile["engine"]));
                     setPassword(""); setShowPassword(false); setResult(null); setTables([]); setTableIndex("");

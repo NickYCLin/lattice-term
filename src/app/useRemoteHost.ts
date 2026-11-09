@@ -44,6 +44,7 @@ export interface RemoteHostStartRequest {
   /** Let the paired viewer control this machine. Defaults to view-only. */
   allowInput: boolean;
   allowCommands?: boolean;
+  allowDatabaseForwarding?: boolean;
   allowChat?: boolean;
   allowCli?: boolean;
   /** Granted afresh when sharing starts; not inherited from pairing or CLI access. */

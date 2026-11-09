@@ -1,10 +1,13 @@
 mod drivers;
 #[cfg(test)]
 mod network_tests;
+#[cfg(test)]
+mod route_tests;
 #[cfg(any(target_os = "ios", test))]
 mod sqlite;
 #[cfg(test)]
 mod tests;
+mod transport;
 pub mod workbench;
 
 use crate::credentials::{self, CredentialKind};
@@ -37,6 +40,18 @@ pub enum Engine {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum DatabaseRoute {
+    Ssh { profile_id: String },
+    Remote { profile_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DatabaseProfile {
     pub id: String,
@@ -51,6 +66,8 @@ pub struct DatabaseProfile {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tls_ca_pem: String,
     pub allow_mcp_read: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<DatabaseRoute>,
 }
 
 impl DatabaseProfile {
@@ -59,6 +76,14 @@ impl DatabaseProfile {
         identifier(&self.host_key, 128)?;
         identifier(&self.name, 100)?;
         validate_ca(&self.tls_ca_pem)?;
+        if let Some(DatabaseRoute::Ssh { profile_id } | DatabaseRoute::Remote { profile_id }) =
+            &self.route
+        {
+            identifier(profile_id, 128)?;
+            if self.engine == Engine::Sqlite {
+                return Err("本機 SQLite 不使用遠端通道。".into());
+            }
+        }
         if self.engine == Engine::Sqlite {
             validate_sqlite_path(&self.sqlite_path)?;
             if !self.hostname.is_empty()
@@ -101,6 +126,9 @@ impl DatabaseProfile {
         if !self.tls_ca_pem.is_empty() {
             binding.extend_from_slice(self.tls_ca_pem.as_bytes());
         }
+        if let Some(route) = &self.route {
+            binding.extend_from_slice(&serde_json::to_vec(route).unwrap_or_default());
+        }
         let digest: String = Sha256::digest(binding)
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -134,6 +162,7 @@ impl DatabaseProfile {
             && self.database == other.database
             && self.sqlite_path == other.sqlite_path
             && self.tls_ca_pem == other.tls_ca_pem
+            && self.route == other.route
     }
 }
 
@@ -220,6 +249,7 @@ pub struct Snapshot {
 
 #[derive(Clone)]
 pub struct DatabaseRegistry {
+    app: Option<tauri::AppHandle>,
     directory: PathBuf,
     lock: Arc<Mutex<()>>,
     calls: Arc<Semaphore>,
@@ -229,11 +259,17 @@ pub struct DatabaseRegistry {
 impl DatabaseRegistry {
     pub fn new(directory: PathBuf) -> Self {
         Self {
+            app: None,
             directory,
             lock: Arc::new(Mutex::new(())),
             calls: Arc::new(Semaphore::new(4)),
             workbenches: Arc::default(),
         }
+    }
+
+    pub fn with_app(mut self, app: tauri::AppHandle) -> Self {
+        self.app = Some(app);
+        self
     }
 
     fn path(&self) -> PathBuf {
@@ -513,9 +549,10 @@ impl DatabaseRegistry {
             })
         })
         .await?;
+        let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            drivers::read(&profile, &password, &action),
+            drivers::read(&route.profile, &password, &action),
         )
         .await
         .map_err(|_| "資料庫連線或查詢超過 20 秒，已中止。")??;
@@ -676,10 +713,11 @@ impl DatabaseRegistry {
             })
             .await?
         };
+        let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
             drivers::read(
-                &profile,
+                &route.profile,
                 &password,
                 &DatabaseAction::Version {
                     profile_id: profile.id.clone(),

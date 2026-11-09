@@ -213,6 +213,17 @@ it("preserves saved credentials without offering CA settings", async () => {
   expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: "first" } });
 });
 
+it("saves an SSH route separately from card grouping and revokes MCP", async () => {
+  snapshot.profiles[0] = { ...database, allowMcpRead: true };
+  await render(); await click("測試資料庫");
+  await change(props => props.value === "direct", { value: "ssh:host" });
+  expect(hostProps(container).find(props => props.type === "checkbox")!.checked).toBe(false);
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({ profile: expect.objectContaining({
+    route: { kind: "ssh", profileId: "host" }, hostKey: "host", allowMcpRead: false,
+  }) }));
+});
+
 it("uses structured read requests with saved identities and bounded pagination", async () => {
   await render(); await click("測試資料庫"); await click("測試連線／讀取版本");
   expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: "first" } });

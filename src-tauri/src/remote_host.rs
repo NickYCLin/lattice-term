@@ -36,6 +36,8 @@ pub struct RemoteHostStartRequest {
     #[serde(default)]
     pub allow_commands: bool,
     #[serde(default)]
+    pub allow_database_forwarding: bool,
+    #[serde(default)]
     pub allow_chat: bool,
     #[serde(default)]
     pub allow_cli: bool,
@@ -423,6 +425,7 @@ async fn spawn_agent(
     fps: u32,
     allow_input: bool,
     allow_commands: bool,
+    allow_database_forwarding: bool,
     file_root: Option<&Path>,
     chat: Option<&crate::remote_chat_host::Bridge>,
     direct_pairing_code: Option<&str>,
@@ -483,6 +486,9 @@ async fn spawn_agent(
     command.arg("--fps").arg(fps.to_string());
     if allow_input {
         command.arg("--allow-input");
+    }
+    if allow_database_forwarding {
+        command.arg("--allow-database-forwarding");
     }
     if allow_commands {
         command.arg("--allow-commands");
@@ -727,6 +733,7 @@ async fn start_inner(
         request.fps,
         request.allow_input,
         request.allow_commands,
+        request.allow_database_forwarding,
         file_root.as_deref(),
         chat.as_ref(),
         fixed_code.as_ref().map(|code| code.as_str()),
@@ -1295,6 +1302,7 @@ mod tests {
             fps: 5,
             allow_input: false,
             allow_commands: false,
+            allow_database_forwarding: false,
             allow_chat: false,
             allow_cli: false,
             fleet: None,
@@ -1315,6 +1323,7 @@ mod tests {
             fps: 10,
             allow_input: true,
             allow_commands: false,
+            allow_database_forwarding: false,
             allow_chat: false,
             allow_cli: false,
             fleet: None,
@@ -1339,6 +1348,7 @@ mod tests {
                 fps: 5,
                 allow_input: false,
                 allow_commands: false,
+                allow_database_forwarding: false,
                 allow_chat: false,
                 allow_cli: false,
                 fleet: None,
@@ -1380,6 +1390,7 @@ mod tests {
             fps: 5,
             allow_input: false,
             allow_commands: false,
+            allow_database_forwarding: false,
             allow_chat: false,
             allow_cli: false,
             fleet: None,

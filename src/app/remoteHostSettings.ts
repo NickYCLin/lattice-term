@@ -7,7 +7,7 @@ export function loadRemoteHostSettings(storage: Storage): RemoteHostStartRequest
   // way the product is meant to be used; the pairing code is what keeps it
   // private. Picking "only look" or single items is remembered from then on,
   // and a configuration saved earlier is read as it was written.
-  const defaults: RemoteHostStartRequest = { bindAddress: "", port: 44900, fps: 5, allowInput: true, allowFiles: true, allowCommands: true, allowChat: true, allowCli: true, fleet: { directory: "", read: true, control: true, launch: true }, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "", useSavedPairingCode: false, rememberPairingCode: false };
+  const defaults: RemoteHostStartRequest = { bindAddress: "", port: 44900, fps: 5, allowInput: true, allowFiles: true, allowCommands: true, allowDatabaseForwarding: false, allowChat: true, allowCli: true, fleet: { directory: "", read: true, control: true, launch: true }, fileRoot: "", mode: relay ? "relay" : "direct", relayAddress: relay, pairingCode: "", useSavedPairingCode: false, rememberPairingCode: false };
   try {
     const value = JSON.parse(storage.getItem(KEY) ?? "null") as Partial<RemoteHostStartRequest> | null;
     if (!value || typeof value !== "object") return defaults;
@@ -15,6 +15,7 @@ export function loadRemoteHostSettings(storage: Storage): RemoteHostStartRequest
       bindAddress: typeof value.bindAddress === "string" && value.bindAddress.length < 128 ? value.bindAddress : defaults.bindAddress,
       port: Number.isInteger(value.port) && value.port! > 0 && value.port! <= 65535 ? value.port! : defaults.port,
       fps: Number.isInteger(value.fps) && value.fps! >= 1 && value.fps! <= 10 ? value.fps! : defaults.fps,
+      allowDatabaseForwarding: value.allowDatabaseForwarding === true,
       allowInput: value.allowInput === true, allowFiles: value.allowFiles === true, allowCommands: value.allowCommands === true, allowChat: value.allowChat === true, allowCli: value.allowCli === true,
       // Fleet authority is never written down; a configured share starts it
       // off again, and only a share nobody has set up offers it by default.

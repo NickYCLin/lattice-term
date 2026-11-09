@@ -99,6 +99,7 @@ pub struct RemoteSessionSummary {
     /// The host can pause its desktop stream while the viewer reads
     /// sessions or conversations.
     pub stream_pause: bool,
+    pub database_forwarding: bool,
     pub file_root_label: String,
     /// True when the agent shares a shell (headless host) instead of a display.
     pub terminal: bool,
@@ -293,6 +294,7 @@ struct RemoteSessionAccess {
 struct RemoteRegistryState {
     sessions: HashMap<String, RemoteSessionRecord>,
     pending_profiles: HashMap<String, u64>,
+    database_channels: HashMap<String, Arc<lattice_remote::client_tcp::TcpConnector>>,
 }
 
 pub struct RemoteRegistry {
@@ -333,6 +335,39 @@ impl Drop for RemoteConnectReservation {
 }
 
 impl RemoteRegistry {
+    pub(crate) fn database_connector(
+        &self,
+        profile: &crate::domain::ConnectionProfile,
+    ) -> Result<Arc<lattice_remote::client_tcp::TcpConnector>, String> {
+        let state = self.state.lock().map_err(|_| "Remote 工作階段忙碌中。")?;
+        let session = state
+            .sessions
+            .values()
+            .find(|record| record.summary.profile_id == profile.id)
+            .ok_or("請先連線指定的 Lattice Remote 主機。")?;
+        let same_target = match profile.device_id.as_deref() {
+            Some(device) => {
+                session.summary.via_relay
+                    && normalize_device_id(device).ok().is_some_and(|expected| {
+                        Some(expected) == normalize_device_id(&session.summary.host).ok()
+                    })
+            }
+            None => {
+                !session.summary.via_relay
+                    && session.summary.port == profile.port
+                    && session.summary.host.eq_ignore_ascii_case(&profile.hostname)
+            }
+        };
+        if !same_target {
+            return Err("Remote 連線位置已變更，請重新連線主機後再開啟資料庫通道。".into());
+        }
+        state
+            .database_channels
+            .get(&session.summary.session_id)
+            .cloned()
+            .ok_or_else(|| "遠端代理未允許資料庫通道；請更新代理並開啟資料庫通道分享。".into())
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -419,6 +454,12 @@ impl RemoteRegistry {
             return Err("The remote session has already been registered.".to_string());
         };
         state.pending_profiles.remove(&reservation.profile_id);
+        if pending_record.summary.database_forwarding {
+            state.database_channels.insert(
+                pending_record.summary.session_id.clone(),
+                lattice_remote::client_tcp::TcpConnector::new(pending_record.outbound.clone()),
+            );
+        }
         let terminal_output = pending_record
             .summary
             .terminal
@@ -477,12 +518,11 @@ impl RemoteRegistry {
     }
 
     fn remove(&self, session_id: &str) -> Result<Option<RemoteSessionRecord>, String> {
-        Ok(self
-            .state
-            .lock()
-            .map_err(|error| error.to_string())?
-            .sessions
-            .remove(session_id))
+        let mut state = self.state.lock().map_err(|error| error.to_string())?;
+        if let Some(channel) = state.database_channels.remove(session_id) {
+            channel.close();
+        }
+        Ok(state.sessions.remove(session_id))
     }
 
     fn remove_if_generation(
@@ -496,6 +536,9 @@ impl RemoteRegistry {
             .get(session_id)
             .is_some_and(|record| record.generation == generation)
         {
+            if let Some(channel) = state.database_channels.remove(session_id) {
+                channel.close();
+            }
             Ok(state.sessions.remove(session_id))
         } else {
             Ok(None)
@@ -1284,6 +1327,7 @@ pub async fn connect(
         cli: hello.cli,
         fleet: hello.fleet,
         stream_pause: hello.stream_pause,
+        database_forwarding: hello.database_forwarding,
         file_root_label: hello.file_root_label,
         terminal: hello.terminal,
     };
@@ -1327,18 +1371,57 @@ pub async fn connect(
             return "The remote reader was cancelled before registration.".to_string();
         }
         let mut assembler = FrameAssembler::new();
+        let mut database_cancelled = task_registry.state.lock().ok().and_then(|state| {
+            state
+                .database_channels
+                .get(&task_session_id)
+                .map(|channel| channel.cancellation())
+        });
         // The deadline is armed only once the host has sent a heartbeat, so a
         // host too old to send them is never cut off for being quiet.
         let mut host_heartbeats = false;
         loop {
-            let received = match remote_idle_limit(host_heartbeats) {
-                Some(limit) => match timeout(limit, reader.receive()).await {
-                    Ok(result) => result,
-                    Err(_) => break "The host stopped answering.".to_string(),
-                },
-                None => reader.receive().await,
+            let receive = async {
+                match remote_idle_limit(host_heartbeats) {
+                    Some(limit) => match timeout(limit, reader.receive()).await {
+                        Ok(result) => Some(result),
+                        Err(_) => None,
+                    },
+                    None => Some(reader.receive().await),
+                }
+            };
+            let received = tokio::select! {
+                result = receive => result,
+                _ = async {
+                    match database_cancelled.as_mut() {
+                        Some(cancelled) => { if !*cancelled.borrow() { let _ = cancelled.changed().await; } }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => break "The database channel was closed.".into(),
+            };
+            let Some(received) = received else {
+                break "The host stopped answering.".into();
             };
             match received {
+                Ok(RemoteMessage::Tcp(message)) => {
+                    let state = task_registry
+                        .state
+                        .lock()
+                        .map_err(|_| "Remote registry unavailable.");
+                    let accepted = state.is_ok_and(|state| {
+                        state
+                            .sessions
+                            .get(&task_session_id)
+                            .is_some_and(|record| record.generation == generation)
+                            && state
+                                .database_channels
+                                .get(&task_session_id)
+                                .is_some_and(|channel| channel.receive(message))
+                    });
+                    if !accepted {
+                        break "Invalid database channel data.".into();
+                    }
+                }
                 Ok(RemoteMessage::Close(reason)) => break reason,
                 Ok(RemoteMessage::KeepAlive) => host_heartbeats = true,
                 Ok(message @ RemoteMessage::FrameStart(_))
@@ -2046,6 +2129,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             file_root_label: String::new(),
             terminal: true,
         }
@@ -2077,6 +2161,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             file_root_label: String::new(),
             terminal,
         }

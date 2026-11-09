@@ -5350,10 +5350,20 @@ fn vnc_sessions(registry: State<'_, Arc<VncRegistry>>) -> Vec<VncSessionSummary>
 
 #[tauri::command]
 async fn tunnel_start(
+    request: StartTunnelRequest,
+    storage: State<'_, AppStorage>,
+    trust: State<'_, TrustState>,
+    registry: State<'_, Arc<TunnelRegistry>>,
+) -> Result<TunnelStatusSummary, String> {
+    tunnel_start_internal(request, storage, trust, registry, None).await
+}
+
+async fn tunnel_start_internal(
     mut request: StartTunnelRequest,
     storage: State<'_, AppStorage>,
     trust: State<'_, TrustState>,
     registry: State<'_, Arc<TunnelRegistry>>,
+    listener: Option<tokio::net::TcpListener>,
 ) -> Result<TunnelStatusSummary, String> {
     // Hold the reader side from before the profile/trust snapshot until a
     // Starting row exists. Backup restore takes the writer side, so it can
@@ -5431,7 +5441,14 @@ async fn tunnel_start(
     reservation.restore_admission_after_credential(admission)?;
     let password = password.map_err(|detail| format!("credential:{detail}"))?;
 
-    crate::tunnel::start_reserved_tunnel(reservation, request, password.as_str(), known).await
+    crate::tunnel::start_reserved_tunnel_prebound(
+        reservation,
+        request,
+        password.as_str(),
+        known,
+        listener,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -5539,7 +5556,7 @@ pub fn run() {
             crate::credentials::initialize(dir.clone());
             let storage = FileStorage::open(&dir)?;
             app.manage(Mutex::new(storage));
-            app.manage(database::DatabaseRegistry::new(dir.clone()));
+            app.manage(database::DatabaseRegistry::new(dir.clone()).with_app(app.handle().clone()));
             let agent_plans = FileAgentPlanStore::open(&dir).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(agent_plans));
             app.manage(McpPlanSync::default());

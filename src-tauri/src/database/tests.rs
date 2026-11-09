@@ -16,8 +16,33 @@ fn profile(directory: &Path, id: &str) -> DatabaseProfile {
         database: String::new(),
         sqlite_path: path.to_string_lossy().into_owned(),
         tls_ca_pem: String::new(),
+        route: None,
         allow_mcp_read: false,
     }
+}
+
+#[test]
+fn database_routes_are_bound_to_credentials_and_sqlite_cannot_use_a_gateway() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut first = profile(directory.path(), "routed");
+    let original = first.credential_profile().id;
+    assert!(serde_json::to_value(&first).unwrap().get("route").is_none());
+    first.route = Some(DatabaseRoute::Ssh {
+        profile_id: "gateway-one".into(),
+    });
+    assert!(first.validate().is_err());
+    assert_ne!(original, first.credential_profile().id);
+    let ssh = first.credential_profile().id;
+    first.route = Some(DatabaseRoute::Remote {
+        profile_id: "gateway-one".into(),
+    });
+    assert_ne!(ssh, first.credential_profile().id);
+    first.route = Some(DatabaseRoute::Ssh {
+        profile_id: "gateway-two".into(),
+    });
+    assert_ne!(ssh, first.credential_profile().id);
+    first.route = None;
+    assert_eq!(original, first.credential_profile().id);
 }
 
 #[tokio::test]

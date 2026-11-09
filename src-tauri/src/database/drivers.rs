@@ -434,6 +434,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            route: None,
             allow_mcp_read: false,
         };
         let Client::Sqlite(mut connection) = Client::connect(&profile, "").await.unwrap() else {

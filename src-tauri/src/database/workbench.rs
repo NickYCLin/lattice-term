@@ -394,9 +394,10 @@ impl DatabaseRegistry {
             Ok(())
         };
         revalidate()?;
+        let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            drivers::execute_sql(&profile, &password, &panel.sql, confirmed, revalidate),
+            drivers::execute_sql(&route.profile, &password, &panel.sql, confirmed, revalidate),
         )
         .await
         .map_err(|_| "SQL 超過 20 秒；寫入結果可能無法確認，請先查詢資料，不要直接重送。")??;
@@ -519,6 +520,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            route: None,
             allow_mcp_read: true,
         };
         let snapshot = registry.snapshot().unwrap();
@@ -694,6 +696,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            route: None,
             allow_mcp_read: true,
         };
         let original = registry.snapshot().unwrap();

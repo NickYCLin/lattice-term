@@ -159,6 +159,7 @@ pub struct RemoteHello {
     /// The host honours `StreamControl`. Viewers must not send it otherwise:
     /// older hosts close the session on an unknown message type.
     pub stream_pause: bool,
+    pub database_forwarding: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,6 +390,7 @@ pub enum RemoteMessage {
     ChatResponse(crate::chat_protocol::ChatResponse),
     CommandRequest(crate::command_protocol::CommandRequest),
     CommandEvent(crate::command_protocol::CommandEvent),
+    Tcp(crate::tcp_protocol::TcpMessage),
     /// Raw PTY output from a terminal-mode agent.
     TerminalData {
         bytes: Vec<u8>,
@@ -557,6 +559,7 @@ impl RemoteMessage {
                     || hello.cli
                     || hello.fleet
                     || hello.stream_pause
+                    || hello.database_forwarding
                 {
                     output.push(u8::from(hello.terminal));
                 }
@@ -566,6 +569,7 @@ impl RemoteMessage {
                     || hello.cli
                     || hello.fleet
                     || hello.stream_pause
+                    || hello.database_forwarding
                 {
                     output.push(u8::from(hello.file_edit));
                 }
@@ -574,19 +578,28 @@ impl RemoteMessage {
                     || hello.cli
                     || hello.fleet
                     || hello.stream_pause
+                    || hello.database_forwarding
                 {
                     output.push(hello.command_shells);
                 }
-                if hello.chat || hello.cli || hello.fleet || hello.stream_pause {
+                if hello.chat
+                    || hello.cli
+                    || hello.fleet
+                    || hello.stream_pause
+                    || hello.database_forwarding
+                {
                     output.push(u8::from(hello.chat));
                 }
-                if hello.cli || hello.fleet || hello.stream_pause {
+                if hello.cli || hello.fleet || hello.stream_pause || hello.database_forwarding {
                     output.push(u8::from(hello.cli));
                 }
-                if hello.fleet || hello.stream_pause {
+                if hello.fleet || hello.stream_pause || hello.database_forwarding {
                     output.push(u8::from(hello.fleet));
                 }
-                if hello.stream_pause {
+                if hello.stream_pause || hello.database_forwarding {
+                    output.push(u8::from(hello.stream_pause));
+                }
+                if hello.database_forwarding {
                     output.push(1);
                 }
                 Ok(output)
@@ -648,6 +661,7 @@ impl RemoteMessage {
                 }
                 Ok(output)
             }
+            Self::Tcp(message) => encode_command(17, message, message.valid()),
             Self::FileRequest(request) => encode_file_request(request),
             Self::FileResponse(response) => encode_file_response(response),
             Self::ChatRequest(request) => encode_command(14, request, request.valid()),
@@ -760,6 +774,7 @@ impl RemoteMessage {
                     cli: body.get(base_len + 4).copied().unwrap_or(0) == 1,
                     fleet: body.get(base_len + 5).copied().unwrap_or(0) == 1,
                     stream_pause: body.get(base_len + 6).copied().unwrap_or(0) == 1,
+                    database_forwarding: body.get(base_len + 7).copied().unwrap_or(0) == 1,
                 };
                 validate_hello(&hello)?;
                 Ok(Self::Hello(hello))
@@ -855,6 +870,14 @@ impl RemoteMessage {
                     return Err(ProtocolError::InvalidMessage("invalid command event"));
                 }
                 Ok(Self::CommandEvent(event))
+            }
+            17 if body.len() <= 60 * 1024 => {
+                let message: crate::tcp_protocol::TcpMessage = serde_json::from_slice(body)
+                    .map_err(|_| ProtocolError::InvalidMessage("invalid TCP message"))?;
+                if !message.valid() {
+                    return Err(ProtocolError::InvalidMessage("invalid TCP message"));
+                }
+                Ok(Self::Tcp(message))
             }
             MESSAGE_TERMINAL_DATA => {
                 validate_terminal_bytes(body)?;
@@ -1530,6 +1553,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: false,
         });
         assert_eq!(
@@ -1555,6 +1579,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
         };
         let old = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.command_shells = 7;
@@ -1587,6 +1612,7 @@ mod tests {
             cli: true,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
         };
         let without = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         hello.stream_pause = true;
@@ -1630,6 +1656,7 @@ mod tests {
                 cli: false,
                 fleet: false,
                 stream_pause: false,
+                database_forwarding: false,
                 terminal: true,
             }),
             RemoteMessage::TerminalData {
@@ -1707,6 +1734,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: true,
         })
         .encode()
@@ -1740,6 +1768,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: false,
         })
         .encode()
@@ -1760,6 +1789,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: true,
         })
         .encode()
@@ -1784,6 +1814,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
         };
         let legacy = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(
@@ -1874,6 +1905,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: true,
         })
         .encode()
@@ -1987,6 +2019,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: false,
         });
         assert_eq!(oversized_name.encode(), Err(ProtocolError::InvalidHello));
@@ -2005,6 +2038,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: false,
         });
         assert_eq!(control_name.encode(), Err(ProtocolError::InvalidHello));
@@ -2023,6 +2057,7 @@ mod tests {
             cli: false,
             fleet: false,
             stream_pause: false,
+            database_forwarding: false,
             terminal: false,
         })
         .encode()

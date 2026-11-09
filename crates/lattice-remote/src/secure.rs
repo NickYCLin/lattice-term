@@ -491,6 +491,7 @@ mod tests {
                     cli: false,
                     fleet: false,
                     stream_pause: false,
+                    database_forwarding: false,
                     terminal: true,
                 }))
                 .await
@@ -800,6 +801,7 @@ mod tests {
                     cli: false,
                     fleet: false,
                     stream_pause: false,
+                    database_forwarding: false,
                     terminal: false,
                 }))
                 .await

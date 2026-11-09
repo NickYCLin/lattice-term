@@ -10,9 +10,11 @@ it("enables the available operations for a new share but keeps saved restriction
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => { values.set(key, value); },
   };
-  expect(loadRemoteHostSettings(storage)).toMatchObject({ allowInput: true, allowFiles: true, allowCommands: true, allowChat: true, allowCli: true });
+  expect(loadRemoteHostSettings(storage)).toMatchObject({ allowInput: true, allowFiles: true, allowCommands: true, allowDatabaseForwarding: false, allowChat: true, allowCli: true });
   saveRemoteHostSettings(storage, { ...loadRemoteHostSettings(storage), allowCommands: false, allowFiles: false });
   expect(loadRemoteHostSettings(storage)).toMatchObject({ allowCommands: false, allowFiles: false });
+  saveRemoteHostSettings(storage, { ...loadRemoteHostSettings(storage), allowDatabaseForwarding: true });
+  expect(loadRemoteHostSettings(storage).allowDatabaseForwarding).toBe(true);
 });
 
 it("does not persist or restore Fleet authority with a saved pairing password", () => {

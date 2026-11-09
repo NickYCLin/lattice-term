@@ -257,6 +257,18 @@ impl Drop for TunnelStartReservation {
 }
 
 impl TunnelRegistry {
+    pub(crate) fn forget_database_tunnel(&self, id: &str) {
+        if !id.starts_with("database-") {
+            return;
+        }
+        if let Ok(mut tunnels) = self.tunnels.lock() {
+            if tunnels.get(id).is_some_and(|entry| {
+                matches!(entry.status, TunnelStatus::Stopped | TunnelStatus::Error)
+            }) {
+                tunnels.remove(id);
+            }
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -1418,10 +1430,20 @@ pub(crate) fn reserve_tunnel_start(
 
 /// Starts a tunnel from a previously admitted reservation.
 pub(crate) async fn start_reserved_tunnel(
+    reservation: TunnelStartReservation,
+    request: StartTunnelRequest,
+    password: &str,
+    known: Option<HostKeyRecord>,
+) -> Result<TunnelStatusSummary, String> {
+    start_reserved_tunnel_prebound(reservation, request, password, known, None).await
+}
+
+pub(crate) async fn start_reserved_tunnel_prebound(
     mut reservation: TunnelStartReservation,
     request: StartTunnelRequest,
     password: &str,
     known: Option<HostKeyRecord>,
+    prebound: Option<TcpListener>,
 ) -> Result<TunnelStatusSummary, String> {
     validate_request(&request)?;
     if reservation.tunnel_id != request.tunnel_id {
@@ -1432,31 +1454,45 @@ pub(crate) async fn start_reserved_tunnel(
 
     // Bind first: a port squatted by another process should fail fast, before
     // any network round trip to the SSH host.
-    let listener = match request.tunnel_type {
-        TunnelType::Local | TunnelType::Dynamic => Some(
-            run_start_stage(
-                reservation.stop_receiver(),
-                LOCAL_BIND_TIMEOUT,
-                format!(
-                    "bind:cannot listen on {}:{} within {} seconds",
-                    request.local_host,
-                    request.local_port,
-                    LOCAL_BIND_TIMEOUT.as_secs()
-                ),
-                async {
-                    TcpListener::bind((request.local_host.as_str(), request.local_port))
-                        .await
-                        .map_err(|err| {
-                            format!(
-                                "bind:cannot listen on {}:{}: {err}",
-                                request.local_host, request.local_port
-                            )
-                        })
-                },
-            )
-            .await?,
-        ),
-        TunnelType::Remote => None,
+    let listener = if let Some(listener) = prebound {
+        let address = listener
+            .local_addr()
+            .map_err(|_| "bind:listener unavailable")?;
+        if request.tunnel_type != TunnelType::Local
+            || !address.ip().is_loopback()
+            || address.port() != request.local_port
+            || request.local_host != address.ip().to_string()
+        {
+            return Err("bind:database listener does not match its reservation".into());
+        }
+        Some(listener)
+    } else {
+        match request.tunnel_type {
+            TunnelType::Local | TunnelType::Dynamic => Some(
+                run_start_stage(
+                    reservation.stop_receiver(),
+                    LOCAL_BIND_TIMEOUT,
+                    format!(
+                        "bind:cannot listen on {}:{} within {} seconds",
+                        request.local_host,
+                        request.local_port,
+                        LOCAL_BIND_TIMEOUT.as_secs()
+                    ),
+                    async {
+                        TcpListener::bind((request.local_host.as_str(), request.local_port))
+                            .await
+                            .map_err(|err| {
+                                format!(
+                                    "bind:cannot listen on {}:{}: {err}",
+                                    request.local_host, request.local_port
+                                )
+                            })
+                    },
+                )
+                .await?,
+            ),
+            TunnelType::Remote => None,
+        }
     };
 
     let tunnel_admission = reservation.take_admission_for_session()?;

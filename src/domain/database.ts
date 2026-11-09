@@ -19,6 +19,7 @@ export interface DatabaseProfile {
   database: string;
   sqlitePath: string;
   tlsCaPem?: string;
+  route?: { kind: "ssh" | "remote"; profileId: string } | null;
   allowMcpRead: boolean;
 }
 
@@ -54,6 +55,6 @@ export function changeDatabaseEngine(profile: DatabaseProfile, engine: DatabaseE
     hostname: engine === "sqlite" ? "" : profile.hostname,
     username: engine === "sqlite" ? "" : profile.username,
     database: engine === "sqlite" ? "" : profile.database,
-    sqlitePath: "", tlsCaPem: "", allowMcpRead: false,
+    sqlitePath: "", tlsCaPem: "", route: engine === "sqlite" ? null : profile.route, allowMcpRead: false,
   };
 }

@@ -7,6 +7,7 @@
 //! and forwards ciphertext; it never sees pairing codes or frame contents.
 
 pub mod chat_protocol;
+pub mod client_tcp;
 pub mod command_protocol;
 pub mod credentials;
 pub mod device_pins;
@@ -18,6 +19,8 @@ pub mod host_files;
 #[cfg(feature = "agent")]
 pub mod host_input;
 #[cfg(feature = "agent")]
+pub mod host_tcp;
+#[cfg(feature = "agent")]
 pub mod host_text;
 pub mod pairing_limit;
 mod password_pairing;
@@ -26,6 +29,7 @@ pub mod relay;
 #[cfg(feature = "relay-server")]
 pub mod relay_server;
 mod secure;
+pub mod tcp_protocol;
 pub mod transport;
 mod wire;
 

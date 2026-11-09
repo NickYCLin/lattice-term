@@ -109,6 +109,7 @@ struct Options {
     json: bool,
     allow_input: bool,
     allow_commands: bool,
+    allow_database: bool,
     file_root: Option<PathBuf>,
     relay: Option<String>,
     identity_file: Option<PathBuf>,
@@ -190,7 +191,7 @@ fn help() -> &'static str {
 Usage: lattice-agent [--bind ADDRESS:PORT] [--relay HOST[:PORT]|WSS_URL] [--identity FILE]\n\
                      [--pair-code CODE|--pair-code-file FILE|--pair-code-stdin]\n\
                      [--fps 1-10] [--allow-input]\n\
-                     [--file-root PATH] [--allow-commands] [--terminal]\n\
+                     [--file-root PATH] [--allow-commands] [--allow-database-forwarding] [--terminal]\n\
                      [--multi] [--json]\n\n\
 Direct mode (default): the safe default listens on 127.0.0.1 only. To receive\n\
 a LAN connection, pass the machine's LAN address explicitly, for example\n\
@@ -275,6 +276,7 @@ fn parse_options() -> Result<Options, String> {
     let mut json = false;
     let mut allow_input = false;
     let mut allow_commands = false;
+    let mut allow_database = false;
     let mut file_root = None;
     let mut relay = None;
     let mut identity_file = None;
@@ -337,6 +339,9 @@ fn parse_options() -> Result<Options, String> {
             }
             "--json" => json = true,
             "--allow-input" => allow_input = true,
+            "--allow-database-forwarding" => {
+                allow_database = true;
+            }
             "--allow-commands" => {
                 if !cfg!(any(windows, unix)) {
                     return Err("Command execution is unavailable on this host.".into());
@@ -373,6 +378,7 @@ fn parse_options() -> Result<Options, String> {
         json,
         allow_input,
         allow_commands,
+        allow_database,
         file_root,
         relay,
         identity_file,
@@ -2338,6 +2344,7 @@ struct ScreenSessionOptions {
     report_json: bool,
     allow_input: bool,
     allow_commands: bool,
+    allow_database: bool,
     file_root: Option<PathBuf>,
     file_job_permits: Arc<Semaphore>,
     command_permits: Arc<Semaphore>,
@@ -2368,6 +2375,7 @@ where
         report_json,
         allow_input,
         allow_commands,
+        allow_database,
         file_root,
         file_job_permits,
         command_permits,
@@ -2396,6 +2404,7 @@ where
             cli: lattice_remote::chat_protocol::cli_available(),
             fleet: lattice_remote::chat_protocol::fleet_available(),
             stream_pause: true,
+            database_forwarding: allow_database,
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2443,6 +2452,8 @@ where
         FileRequestHandler::new(shared_files.clone(), outgoing.clone(), file_job_permits);
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
     let mut command_failed_rx = command_handler.subscribe_failures();
+    let mut tcp_handler =
+        lattice_remote::host_tcp::TcpForwards::remote(allow_database, outgoing.clone());
     let (receiver_stop_tx, mut receiver_stop_rx) = watch::channel(false);
     // A viewer reading sessions or conversations does not need the desktop.
     // Heartbeats keep the paused session alive without capturing frames.
@@ -2499,6 +2510,11 @@ where
                         .await
                         .is_err()
                     {
+                        break;
+                    }
+                }
+                Ok(RemoteMessage::Tcp(message)) => {
+                    if !tcp_handler.handle(message).await {
                         break;
                     }
                 }
@@ -2755,6 +2771,7 @@ async fn serve_terminal<S>(
     connection: SecureConnection<S>,
     allow_input: bool,
     allow_commands: bool,
+    allow_database: bool,
     file_root: Option<PathBuf>,
     file_job_permits: Arc<Semaphore>,
     command_permits: Arc<Semaphore>,
@@ -2813,6 +2830,7 @@ where
             cli: lattice_remote::chat_protocol::cli_available(),
             fleet: lattice_remote::chat_protocol::fleet_available(),
             stream_pause: false,
+            database_forwarding: allow_database,
             file_root_label: shared_files
                 .as_ref()
                 .map(|files| files.label().to_string())
@@ -2931,6 +2949,8 @@ where
         FileRequestHandler::new(shared_files, outgoing.clone(), file_job_permits);
     let mut file_failed_rx = file_handler.registry.subscribe_failures();
     let mut command_failed_rx = command_handler.subscribe_failures();
+    let mut tcp_handler =
+        lattice_remote::host_tcp::TcpForwards::remote(allow_database, outgoing.clone());
     let heartbeat = spawn_session_heartbeat(outgoing.clone());
     let mut peer_heartbeats = false;
     loop {
@@ -2982,6 +3002,11 @@ where
                     .await
                     .is_err()
                 {
+                    break;
+                }
+            }
+            Ok(RemoteMessage::Tcp(message)) => {
+                if !tcp_handler.handle(message).await {
                     break;
                 }
             }
@@ -3134,6 +3159,7 @@ async fn run_relay_session(
             secure,
             options.allow_input,
             options.allow_commands,
+            options.allow_database,
             options.file_root,
             Arc::clone(&options.file_job_permits),
             Arc::clone(&options.command_permits),
@@ -3147,6 +3173,7 @@ async fn run_relay_session(
                 report_json: options.json,
                 allow_input: options.allow_input,
                 allow_commands: options.allow_commands,
+                allow_database: options.allow_database,
                 file_root: options.file_root,
                 file_job_permits: Arc::clone(&options.file_job_permits),
                 command_permits: Arc::clone(&options.command_permits),
@@ -3636,6 +3663,7 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
                     secure,
                     session_options.allow_input,
                     session_options.allow_commands,
+                    session_options.allow_database,
                     session_options.file_root.clone(),
                     Arc::clone(&session_options.file_job_permits),
                     Arc::clone(&session_options.command_permits),
@@ -3649,6 +3677,7 @@ async fn run_direct(options: &Options, listener: TcpListener) -> String {
                         report_json: session_options.json,
                         allow_input: session_options.allow_input,
                         allow_commands: session_options.allow_commands,
+                        allow_database: session_options.allow_database,
                         file_root: session_options.file_root.clone(),
                         file_job_permits: Arc::clone(&session_options.file_job_permits),
                         command_permits: Arc::clone(&session_options.command_permits),
@@ -3766,6 +3795,7 @@ mod tests {
                     report_json: false,
                     allow_input: false,
                     allow_commands: false,
+                    allow_database: false,
                     file_root: None,
                     file_job_permits: Arc::new(Semaphore::new(1)),
                     command_permits: Arc::new(Semaphore::new(1)),
@@ -3839,6 +3869,7 @@ mod tests {
                     report_json: false,
                     allow_input: false,
                     allow_commands: false,
+                    allow_database: false,
                     file_root: None,
                     file_job_permits: Arc::new(Semaphore::new(1)),
                     command_permits: Arc::new(Semaphore::new(1)),

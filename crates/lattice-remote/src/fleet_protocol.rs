@@ -79,6 +79,7 @@ mod tests {
             cli: false,
             fleet: true,
             stream_pause: false,
+            database_forwarding: false,
         };
         let encoded = RemoteMessage::Hello(hello.clone()).encode().unwrap();
         assert_eq!(

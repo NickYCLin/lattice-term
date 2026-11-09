@@ -72,6 +72,7 @@ export function RemoteHostDialog({
   const [fleetControl, setFleetControl] = useState(settings.fleet?.control === true);
   const [fleetLaunch, setFleetLaunch] = useState(settings.fleet?.launch === true);
   const [allowChat, setAllowChat] = useState(settings.allowChat === true);
+  const [allowDatabaseForwarding, setAllowDatabaseForwarding] = useState(settings.allowDatabaseForwarding === true);
   const [allowCommands, setAllowCommands] = useState(settings.allowCommands === true);
   const [allowFiles, setAllowFiles] = useState(settings.allowFiles === true);
   const [fileRoot, setFileRoot] = useState(settings.fileRoot);
@@ -81,7 +82,7 @@ export function RemoteHostDialog({
   const shared = [allowInput, allowCli, allowFleet, allowChat, allowFiles];
   const level = shared.every(Boolean)
     ? "full"
-    : shared.every((on) => !on) && !allowCommands
+    : shared.every((on) => !on) && !allowCommands && !allowDatabaseForwarding
       ? "view"
       : "custom";
   // One choice sets every switch below; the details stay for anything finer.
@@ -95,7 +96,7 @@ export function RemoteHostDialog({
     setFleetRead(on);
     setFleetControl(on);
     setFleetLaunch(on);
-    if (!on) setAllowCommands(false);
+    if (!on) { setAllowCommands(false); setAllowDatabaseForwarding(false); }
   };
   const [submitting, setBusy] = useState(false);
   const busy = submitting || host.configuring === true || removingCredential;
@@ -186,6 +187,7 @@ export function RemoteHostDialog({
         allowChat,
         allowCli,
         fleet: allowFleet ? { directory: fleetDirectory, read: fleetRead, control: fleetControl, launch: fleetLaunch } : null,
+        allowDatabaseForwarding,
         allowCommands: ["windows", "linux", "macos"].includes(platform ?? "") && allowCommands,
         allowFiles,
         fileRoot: fileRoot.trim(),
@@ -837,6 +839,10 @@ export function RemoteHostDialog({
                 <input type="checkbox" checked={allowCommands} disabled={busy} onChange={e => setAllowCommands(e.currentTarget.checked)} />
                 <span><strong>{t("remote.commands.allow")}</strong><small>{t("remote.commands.allowHint")}</small></span>
               </label>}
+              <label className="remote-host-toggle">
+                <input type="checkbox" checked={allowDatabaseForwarding} disabled={busy} onChange={e => setAllowDatabaseForwarding(e.currentTarget.checked)} />
+                <span><strong>允許資料庫通道</strong><small>允許已配對的裝置透過這台主機連線內網資料庫。</small></span>
+              </label>
               <label className="remote-host-toggle">
                 <input
                   type="checkbox"
