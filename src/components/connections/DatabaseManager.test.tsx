@@ -205,15 +205,12 @@ it("requires a specific delete confirmation and leaves the other version alone",
   expect(hostProps(container).some((props) => Array.isArray(props.children) && props.children.includes("另一個版本"))).toBe(true);
 });
 
-it("revokes MCP when CA changes and accepts canonical saved profiles after clearing it", async () => {
+it("preserves saved credentials without offering CA settings", async () => {
   snapshot.profiles[0] = { ...database, tlsCaPem: "old CA", allowMcpRead: true };
   await render(); await click("測試資料庫");
-  await change((props) => props.rows === 5, { value: "" });
-  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
-  invoke.mockResolvedValueOnce({ ...snapshot, profiles: [database], revision: "saved" });
-  await submit();
-  expect(hostProps(container).find((props) => props.children === "測試連線／讀取版本")!.disabled).toBe(false);
+  expect(hostProps(container).some((props) => props.rows === 5)).toBe(false);
   await click("測試連線／讀取版本");
+  expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: "first" } });
 });
 
 it("uses structured read requests with saved identities and bounded pagination", async () => {

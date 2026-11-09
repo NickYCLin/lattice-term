@@ -1,6 +1,25 @@
 use super::*;
 use serde::Deserialize;
 
+/// Opt-in read-only acceptance against an explicitly supplied direct endpoint.
+/// Supply the fixture in the process environment; never persist real accounts
+/// in the repository or print connection strings in test output.
+#[tokio::test]
+#[ignore = "Requires LATTICETERM_TEST_DIRECT_DATABASE_JSON with an authorized read-only fixture"]
+async fn direct_database_without_ca_reads_one() {
+    let raw = std::env::var("LATTICETERM_TEST_DIRECT_DATABASE_JSON")
+        .expect("explicit direct database fixture required");
+    let fixture: Fixture = serde_json::from_str(&raw).expect("valid fixture required");
+    let mut profile = fixture.profile;
+    profile.tls_ca_pem.clear();
+    profile.validate().expect("valid profile required");
+    let result = drivers::execute_sql(&profile, &fixture.password, "SELECT 1", false, || Ok(()))
+        .await
+        .expect("direct read-only query must succeed");
+    assert_eq!(result["rows"].as_array().map(Vec::len), Some(1));
+    assert_eq!(result["rows"][0][0], "1");
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Fixture {
@@ -109,7 +128,7 @@ async fn isolated_network_databases_verify_sql_workbench_crud() {
 
 #[tokio::test]
 #[ignore = "Run node scripts/test-databases.mjs for isolated TLS database containers"]
-async fn isolated_network_databases_verify_tls_and_readonly_queries() {
+async fn isolated_network_databases_accept_self_signed_servers_and_readonly_queries() {
     let path = std::env::var_os("LATTICETERM_TEST_DATABASES_JSON").expect("isolated fixture path");
     let fixture: Fixture = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let profile = fixture.profile;
@@ -119,30 +138,16 @@ async fn isolated_network_databases_verify_tls_and_readonly_queries() {
     let version = DatabaseAction::Version {
         profile_id: profile.id.clone(),
     };
-    let mut untrusted = profile.clone();
-    untrusted.tls_ca_pem.clear();
-    assert!(
-        drivers::read(&untrusted, &fixture.password, &version)
-            .await
-            .is_err(),
-        "untrusted CA must fail"
-    );
-    let mut mismatched = profile.clone();
-    let mut malformed = profile.clone();
-    malformed.tls_ca_pem = "-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----".into();
-    assert!(
-        drivers::read(&malformed, &fixture.password, &version)
-            .await
-            .is_err(),
-        "invalid CA must not fall back to unverified TLS"
-    );
-    mismatched.hostname = "127.0.0.1".into();
-    assert!(
-        drivers::read(&mismatched, &fixture.password, &version)
-            .await
-            .is_err(),
-        "hostname mismatch must fail"
-    );
+    let mut without_ca = profile.clone();
+    without_ca.tls_ca_pem.clear();
+    drivers::read(&without_ca, &fixture.password, &version)
+        .await
+        .expect("self-signed servers do not require a client CA setting");
+    let mut by_address = without_ca.clone();
+    by_address.hostname = "127.0.0.1".into();
+    drivers::read(&by_address, &fixture.password, &version)
+        .await
+        .expect("direct connections do not require a matching certificate hostname");
     let result = drivers::read(&profile, &fixture.password, &version)
         .await
         .unwrap();

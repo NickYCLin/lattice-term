@@ -234,9 +234,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
                 <div className="database-manager__field-grid">
                   {draft.engine === "sqlite" ? <p className="database-manager__hint database-manager__span">本機 SQLite 檔案不需要帳號密碼。</p> : <>
                     <label className="database-manager__span">帳號<input placeholder="資料庫使用者名稱" autoCapitalize="none" autoCorrect="off" spellCheck={false} required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
-                    <div className="database-manager__password database-manager__span"><label>密碼（留白保留；變更端點須重填）<input type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? "留白保留已儲存的密碼" : "輸入資料庫密碼"} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "隱藏密碼" : "顯示密碼"}</button><small>切換端點、帳號或憑證後，請重新輸入密碼。</small></div>
-                    <details className="database-manager__advanced database-manager__span"><summary>進階 TLS 設定</summary><label>自訂 CA 憑證（選填，PEM 格式）<textarea value={draft.tlsCaPem ?? ""} maxLength={16384} rows={5} spellCheck={false} onChange={(event) => update("tlsCaPem", event.target.value)} /></label>
-                      <p>內網自簽憑證請貼上管理員提供的 CA 公開憑證，不要貼私鑰。仍會驗證主機名稱；變更 CA 後須重填密碼並重新允許 MCP 讀取。</p></details>
+                    <div className="database-manager__password database-manager__span"><label>密碼（留白保留；變更端點須重填）<input type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? "留白保留已儲存的密碼" : "輸入資料庫密碼"} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "隱藏密碼" : "顯示密碼"}</button><small>切換端點或帳號後，請重新輸入密碼。</small></div>
                   </>}
                   <div className="database-manager__form-section database-manager__span"><span>03</span><span>AI 與 MCP 存取<small>SQL 唯讀或增刪修權限可在工作台個別設定。</small></span></div>
                   <label className="database-manager__permission database-manager__span"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />允許 MCP 讀取這個資料庫的結構與資料（不包含密碼）</label>
@@ -289,7 +287,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
 
               {saved && !settingsOnly && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={JSON.stringify(saved)} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">請先儲存或取消連線設定的變更。</p>}</div>}
             </div>
-            <footer className="database-manager__footer"><span>{sqlState.dirty ? "SQL 尚未同步，請先同步草稿再切換連線。" : touched && dirty ? "連線設定尚未儲存" : settingsOnly ? "連線設定儲存於此裝置" : "SQL 查詢與資料增刪修"}</span><span>{draft.engine === "sqlite" ? "本機 SQLite 檔案" : "伺服器連線驗證 TLS 憑證"}</span></footer>
+            <footer className="database-manager__footer"><span>{sqlState.dirty ? "SQL 尚未同步，請先同步草稿再切換連線。" : touched && dirty ? "連線設定尚未儲存" : settingsOnly ? "連線設定儲存於此裝置" : "SQL 查詢與資料增刪修"}</span><span>{draft.engine === "sqlite" ? "本機 SQLite 檔案" : "帳密直接連線，不要求 CA 憑證"}</span></footer>
           </section>
         </div>
       </div>

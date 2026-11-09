@@ -42,18 +42,14 @@ impl Client {
     ) -> Result<Self, String> {
         match profile.engine {
             Engine::Postgres => {
-                let mut options = sqlx::postgres::PgConnectOptions::new()
+                let options = sqlx::postgres::PgConnectOptions::new()
                     .host(&profile.hostname)
                     .port(profile.port)
                     .username(&profile.username)
                     .password(password)
                     .database(&profile.database)
-                    .ssl_mode(sqlx::postgres::PgSslMode::VerifyFull)
+                    .ssl_mode(sqlx::postgres::PgSslMode::Prefer)
                     .disable_statement_logging();
-                if !profile.tls_ca_pem.is_empty() {
-                    options =
-                        options.ssl_root_cert_from_pem(profile.tls_ca_pem.as_bytes().to_vec());
-                }
                 let mut connection = sqlx::PgConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
@@ -68,17 +64,14 @@ impl Client {
                 Ok(Self::Postgres(connection))
             }
             Engine::Mysql | Engine::Mariadb => {
-                let mut options = sqlx::mysql::MySqlConnectOptions::new()
+                let options = sqlx::mysql::MySqlConnectOptions::new()
                     .host(&profile.hostname)
                     .port(profile.port)
                     .username(&profile.username)
                     .password(password)
                     .database(&profile.database)
-                    .ssl_mode(sqlx::mysql::MySqlSslMode::VerifyIdentity)
+                    .ssl_mode(sqlx::mysql::MySqlSslMode::Preferred)
                     .disable_statement_logging();
-                if !profile.tls_ca_pem.is_empty() {
-                    options = options.ssl_ca_from_pem(profile.tls_ca_pem.as_bytes().to_vec());
-                }
                 let mut connection = sqlx::MySqlConnection::connect_with(&options)
                     .await
                     .map_err(|_| failed())?;
@@ -136,10 +129,10 @@ impl Client {
                     &profile.username,
                     password,
                 ));
-                config.encryption(tiberius::EncryptionLevel::Required);
-                if !profile.tls_ca_pem.is_empty() {
-                    config.trust_cert_ca_bundle(profile.tls_ca_pem.as_bytes());
-                }
+                // Let the server negotiate encryption without requiring a CA
+                // or hostname validation for these explicitly direct profiles.
+                config.encryption(tiberius::EncryptionLevel::Off);
+                config.trust_cert();
                 let socket =
                     tokio::net::TcpStream::connect((profile.hostname.as_str(), profile.port))
                         .await
