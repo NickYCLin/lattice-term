@@ -21,7 +21,7 @@ vi.mock("../components/icons", async importOriginal => {
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it("adds an assistant with full permissions without showing a permission selector", async () => {
+it.each([false, true])("adds an assistant with full permissions and no extra prompt: carry=%s", async carryMemory => {
   vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", () => {});
   const container = installFakeDom();
@@ -32,6 +32,7 @@ it("adds an assistant with full permissions without showing a permission selecto
   const restore = installFakeStorage();
   const root = createRoot(container as unknown as Element);
   const agents = fakeAgentApi({ sessions: [fakeSession()] });
+  vi.mocked(agents.exportTranscript).mockResolvedValue("user: 修好登入 / assistant: 已完成");
   const emptyRemote = { sessions: [], lastClosed: null };
   const viewProps = { agents, ssh: emptyRemote, sftp: emptyRemote, remote: emptyRemote, rdp: emptyRemote,
     vnc: emptyRemote, activeSessionId: "s1", onSelect: vi.fn(), theme: "dark", sessionRestoreComplete: true,
@@ -44,14 +45,23 @@ it("adds an assistant with full permissions without showing a permission selecto
     expect(elements(container).some(node => props(node)["aria-describedby"]?.endsWith("-hint"))).toBe(false);
     const carry = elements(container).find(node => props(node).type === "checkbox" && props(node).checked === true);
     expect(carry).toBeDefined();
-    await act(async () => props(carry!).onChange({ currentTarget: { checked: false } }));
+    if (!carryMemory) await act(async () => props(carry!).onChange({ currentTarget: { checked: false } }));
     const launch = elements(container).find(node => props(node).children === "啟動工作階段");
     expect(launch).toBeDefined();
     await act(async () => props(launch!).onClick());
+    // 帶入記憶也不再跳出交接摘要卡片，直接開新的工作階段。
+    expect(elements(container).some(node => props(node).className === "handoff-summary")).toBe(false);
     expect(agents.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      groupId: "g1", seedInput: null,
+      groupId: "g1",
+      seedInput: carryMemory ? expect.stringContaining("/tmp/handoff.md") : null,
       arguments: expect.arrayContaining(sessionPermissionArguments("codex", "full")),
     }));
+    if (carryMemory) {
+      expect(agents.exportTranscript).toHaveBeenCalledWith("s1", { forFile: true });
+      expect(agents.writeHandoffFile).toHaveBeenCalledExactlyOnceWith(expect.any(String), expect.stringContaining("修好登入"));
+    } else {
+      expect(agents.writeHandoffFile).not.toHaveBeenCalled();
+    }
   } finally {
     await act(async () => root.unmount());
     restore();

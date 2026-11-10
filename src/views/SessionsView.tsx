@@ -115,7 +115,8 @@ import {
 } from "../components/icons";
 import { AgentTerminalPane } from "../components/agents/AgentTerminalPane";
 import { AgentStartupNotice } from "../components/agents/AgentStartupNotice";
-import { ConversationHandoffDialog } from "../components/agents/ConversationHandoffDialog";
+import { handoffSummary } from "../app/handoffSummary";
+import { handoffExportFailureKey } from "../app/conversationHandoff";
 import { HostMetricsPanel } from "../components/connections/HostMetricsPanel";
 import { useSessionHostMetrics } from "../app/useHostMetrics";
 import { RemotePane } from "../components/remote/RemotePane";
@@ -379,7 +380,6 @@ export function SessionsView({
     Record<string, string>
   >({});
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
-  const [summaryHandoff, setSummaryHandoff] = useState<{ group: { groupId: string; members: AgentSessionSummary[] }; selection: AccountModelSelection; sourceId: string; permission: SessionPermission } | null>(null);
   const [projectPermission, setProjectPermission] = useState<SessionPermission>("default");
   const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
@@ -880,6 +880,47 @@ export function SessionsView({
     onSelect(sessionId);
   }
 
+  // 帶入記憶時直接匯出原對話、寫成交接檔再開新助理，不再跳出摘要確認卡片。
+  async function addCliWithHandoff(
+    group: { groupId: string; members: AgentSessionSummary[] },
+    selection: AccountModelSelection,
+  ) {
+    const sourceId = activeMemberId(group);
+    const source = group.members.find(member => member.sessionId === sourceId);
+    const sourceLabel = source?.label ?? sourceId;
+    let summary: string;
+    try {
+      summary = handoffSummary((await agents.exportTranscript(sourceId, { forFile: true })) ?? "").trim();
+    } catch (reason) {
+      setAddCliError({ title: t("terminal.handoff.exportFailedTitle"), body: t(handoffExportFailureKey(reason)) });
+      return;
+    }
+    if (!summary) {
+      setAddCliError({ title: t("terminal.handoff.exportFailedTitle"), body: t("terminal.handoff.noReadableMessages") });
+      return;
+    }
+    try {
+      const brief = `Source: ${sourceLabel}\nSummary handoff, not native thread continuity.\n\n${summary}`;
+      const path = await agents.writeHandoffFile(source?.label ?? "", brief);
+      const session = await agents.launch({
+        label: "",
+        executable: "",
+        ...sessionLaunchSettings(selection, "full"),
+        resumeSessionId: null,
+        groupId: group.groupId,
+        sandbox: source?.sandboxed !== false,
+        seedInput: t("terminal.handoff.filePointer", { path, source: sourceLabel }),
+        workingDirectory: source?.workingDirectory ?? group.members[0]?.workingDirectory ?? "",
+        cols: 80,
+        rows: 24,
+      });
+      setPendingRevealSessionId(session.sessionId);
+      selectMember(group.groupId, session.sessionId);
+    } catch {
+      setAddCliError({ title: t("terminal.addCli.failed"), body: t("terminal.addCli.failedBody") });
+    }
+  }
+
   async function addCli(
     group: { groupId: string; members: AgentSessionSummary[] },
     selection: AccountModelSelection,
@@ -888,7 +929,7 @@ export function SessionsView({
     setAddCliFor(null);
     setAddCliError(null);
     if (carryContext) {
-      setSummaryHandoff({ group, selection, sourceId: activeMemberId(group), permission: "full" });
+      await addCliWithHandoff(group, selection);
       return;
     }
     const workingDirectory = group.members[0]?.workingDirectory ?? "";
@@ -2158,26 +2199,6 @@ export function SessionsView({
 
   return (
     <div className="terminal-workspace">
-      {summaryHandoff && <ConversationHandoffDialog
-        source={summaryHandoff.group.members.find(member => member.sessionId === summaryHandoff.sourceId)?.label ?? summaryHandoff.sourceId}
-        definitions={installedAgents} profiles={accountProfiles} initialTarget={summaryHandoff.selection}
-        apiTargets={cliProxySettings.proxies.map(proxy => ({ definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: proxy.id, label: `${proxy.label} · API` }))}
-        loadSummary={() => agents.exportTranscript(summaryHandoff.sourceId, { forFile: true })}
-        onCancel={() => setSummaryHandoff(null)}
-        onConfirm={async (summary, target) => {
-          const source = summaryHandoff.group.members.find(member => member.sessionId === summaryHandoff.sourceId);
-          const brief = `Source: ${source?.label ?? summaryHandoff.sourceId}\nSummary handoff, not native thread continuity.\n\n${summary}`;
-          const path = await agents.writeHandoffFile(source?.label ?? "", brief);
-          const session = await agents.launch({ label: "", executable: "",
-            ...sessionLaunchSettings(target, summaryHandoff.permission),
-            resumeSessionId: null, groupId: summaryHandoff.group.groupId,
-            sandbox: source?.sandboxed !== false,
-            seedInput: t("terminal.handoff.filePointer", { path, source: source?.label ?? summaryHandoff.sourceId }),
-            workingDirectory: source?.workingDirectory ?? "", cols: 80, rows: 24 });
-          setPendingRevealSessionId(session.sessionId);
-          selectMember(summaryHandoff.group.groupId, session.sessionId);
-          setSummaryHandoff(null);
-        }} />}
       {workspaceFilePicker}
       {storageCallout}
       {closedCallout}
