@@ -420,12 +420,17 @@ enum AgentTarget<'a> {
     },
 }
 
+/// Capabilities the host explicitly granted for this sharing session.
+struct AgentGrants {
+    input: bool,
+    commands: bool,
+    database_forwarding: bool,
+}
+
 async fn spawn_agent(
     target: AgentTarget<'_>,
     fps: u32,
-    allow_input: bool,
-    allow_commands: bool,
-    allow_database_forwarding: bool,
+    grants: AgentGrants,
     file_root: Option<&Path>,
     chat: Option<&crate::remote_chat_host::Bridge>,
     direct_pairing_code: Option<&str>,
@@ -484,13 +489,13 @@ async fn spawn_agent(
         }
     }
     command.arg("--fps").arg(fps.to_string());
-    if allow_input {
+    if grants.input {
         command.arg("--allow-input");
     }
-    if allow_database_forwarding {
+    if grants.database_forwarding {
         command.arg("--allow-database-forwarding");
     }
-    if allow_commands {
+    if grants.commands {
         command.arg("--allow-commands");
     }
     if let Some(file_root) = file_root {
@@ -731,9 +736,11 @@ async fn start_inner(
     let (mut child, stdout, lifetime) = spawn_agent(
         target,
         request.fps,
-        request.allow_input,
-        request.allow_commands,
-        request.allow_database_forwarding,
+        AgentGrants {
+            input: request.allow_input,
+            commands: request.allow_commands,
+            database_forwarding: request.allow_database_forwarding,
+        },
         file_root.as_deref(),
         chat.as_ref(),
         fixed_code.as_ref().map(|code| code.as_str()),

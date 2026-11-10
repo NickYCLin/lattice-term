@@ -1383,10 +1383,7 @@ pub async fn connect(
         loop {
             let receive = async {
                 match remote_idle_limit(host_heartbeats) {
-                    Some(limit) => match timeout(limit, reader.receive()).await {
-                        Ok(result) => Some(result),
-                        Err(_) => None,
-                    },
+                    Some(limit) => timeout(limit, reader.receive()).await.ok(),
                     None => Some(reader.receive().await),
                 }
             };
