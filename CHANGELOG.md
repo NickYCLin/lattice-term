@@ -4,6 +4,28 @@
 
 ---
 
+## [2026.11.10](https://github.com/NickYCLin/lattice-term/compare/v2026.11.6...v2026.11.10) (2026-11-10)
+
+
+### 🚀 新增功能
+
+* CLIProxyAPI 可用模型改成按鈕開啟分組卡片 ([26b0781](https://github.com/NickYCLin/lattice-term/commit/26b0781716018d03c48a1ad268112cef28be8379))
+* **database:** 支援 SSH 與 Remote 資料庫通道 ([6668436](https://github.com/NickYCLin/lattice-term/commit/66684360e68e401bd6f6daad3626e9555ed92ddb))
+
+
+### 🛠️ 問題修正
+
+* **agent:** Windows 可直接安裝並偵測 Grok CLI ([78998e6](https://github.com/NickYCLin/lattice-term/commit/78998e6dfff2fe14b39c89b8366c9ec64c959ccb))
+* CLIProxyAPI 設定頁列出全部可用模型 ([ba8ca8e](https://github.com/NickYCLin/lattice-term/commit/ba8ca8e7c134e4fc3a0391459af4a86d72e86a72))
+* **database:** 修正資料庫介面未隨語系切換 ([e253df3](https://github.com/NickYCLin/lattice-term/commit/e253df302965f682be3edae03403f68bee43e612))
+* **database:** 改用帳密直接連線資料庫 ([770830f](https://github.com/NickYCLin/lattice-term/commit/770830fa1e779438d6728b04e091a6fdcc0eb3af))
+* **remote:** 修正資料庫通道加入後的 clippy 錯誤 ([1bcb0ff](https://github.com/NickYCLin/lattice-term/commit/1bcb0ff1cf5263883e803afc7372014cd51ab729))
+* **remote:** 將 TCP 通道測試模組移到檔案結尾 ([98c1a3d](https://github.com/NickYCLin/lattice-term/commit/98c1a3d9c829976c059fba2cea3ac293659fd5cb))
+* 加開助理預設使用全部允許權限 ([6b263ff](https://github.com/NickYCLin/lattice-term/commit/6b263ff3858a281779ba91532ab897104ed2f8d6))
+* 帶入記憶加開助理時直接開啟工作階段 ([cefa48e](https://github.com/NickYCLin/lattice-term/commit/cefa48edda4891d0c062e905d60ab338593ea741))
+* 啟動指示未確認的黃色提醒可以關閉 ([dcbd432](https://github.com/NickYCLin/lattice-term/commit/dcbd432860b6dcb084ef53aad0d3018c529e713b))
+* 遠端分享的資料庫通道選項改用翻譯字串 ([3c4fb8a](https://github.com/NickYCLin/lattice-term/commit/3c4fb8a36cff76feade4300c14c422659b8d89f5))
+
 ## [2026.11.6](https://github.com/NickYCLin/lattice-term/compare/v2026.11.5...v2026.11.6) (2026-11-06)
 
 
