@@ -942,24 +942,91 @@
   border-radius: var(--radius-sm);
 }
 
-/* 列出全部可用模型；數量多時在卡片內捲動，不撐開整個設定頁。 */
-.cli-proxy-models {
+/* 可用模型卡片：依廠牌分組，用途標籤用顏色區分，清單在卡片內捲動。 */
+.cli-proxy-models-dialog {
+  width: min(44rem, 100%);
+  max-height: min(48rem, calc(100vh - 2 * var(--space-6)));
+  display: flex;
+  flex-direction: column;
+}
+
+.cli-proxy-models-dialog__filters {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  max-height: 14rem;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.cli-proxy-models-dialog__filters [aria-pressed="true"] {
+  background: var(--surface-active);
+  color: var(--text);
+}
+
+.cli-proxy-models-dialog__list {
+  display: grid;
+  gap: var(--space-4);
+  min-height: 0;
+  margin-top: var(--space-4);
+  overflow-y: auto;
+}
+
+.cli-proxy-models-dialog__vendor h3 {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.cli-proxy-models-dialog__vendor h3 span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.cli-proxy-models-dialog__vendor ul {
+  display: grid;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
+}
+
+.cli-proxy-models-dialog__vendor li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.cli-proxy-models-dialog__vendor code {
+  overflow-wrap: anywhere;
   font-size: var(--text-sm);
 }
 
-.cli-proxy-models li {
-  padding: 2px var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow-wrap: anywhere;
+.cli-proxy-models-dialog__vendor small {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.cli-proxy-models-dialog__tag {
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  background: var(--surface-active);
+  color: var(--text-muted);
+}
+
+.cli-proxy-models-dialog__tag--image,
+.cli-proxy-models-dialog__tag--video {
+  background: var(--accent-soft, var(--surface-active));
+  color: var(--accent, var(--text));
+}
+
+.cli-proxy-models-dialog__tag--audio,
+.cli-proxy-models-dialog__tag--embedding {
+  background: var(--warn-soft, var(--surface-active));
+  color: var(--warn, var(--text));
 }
 
 .cli-proxy-entry__head {

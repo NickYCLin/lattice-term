@@ -73,13 +73,13 @@ describe("CLIProxyAPI settings", () => {
     expect(html).not.toContain("<input");
   });
 
-  it("shows every model the proxy reports, not just the first few", () => {
+  it("puts the model list behind a button that names the count", () => {
     withSavedProxies([{ id: "default", label: "", baseUrl: "http://127.0.0.1:8317" }]);
-    const models = Array.from({ length: 29 }, (_, index) => ({ id: `model-${index}`, ownedBy: "antigravity" }));
+    const models = Array.from({ length: 68 }, (_, index) => ({ id: `model-${index}`, ownedBy: "antigravity" }));
     proxyModels.current = { state: "ready", models, reload: () => {} };
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><CliProxyApiPanel available /></I18nProvider>);
-    expect(html).toContain("可用模型 29 個");
-    expect(html.match(/<li>/g)).toHaveLength(29);
-    expect(html).toContain("model-28 · antigravity");
+    expect(html).toContain("可用模型 68 個");
+    // The list itself only opens on demand, so the settings page stays short.
+    expect(html).not.toContain("model-0");
   });
 });

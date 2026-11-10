@@ -5,7 +5,6 @@ import {
   CLI_PROXY_SETTINGS_CHANGED,
   cliProxyLabel,
   cliProxyMessageKey,
-  cliProxyModelLabel,
   cliProxyStatusCode,
   loadCliProxySettings,
   newCliProxyId,
@@ -14,6 +13,7 @@ import {
 } from "../../app/cliProxyApi";
 import { useCliProxyModels } from "../../app/useCliProxyApi";
 import { useI18n } from "../../i18n/context";
+import { CliProxyModelsDialog } from "./CliProxyModelsDialog";
 
 interface Probe { healthy: boolean; status: number }
 
@@ -49,6 +49,7 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   const [probe, setProbe] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [showModels, setShowModels] = useState(false);
   const models = useCliProxyModels(savedBaseUrl ? { ...endpoint, baseUrl: savedBaseUrl } : null, available);
 
   const refreshKey = useCallback(async () => {
@@ -139,10 +140,10 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
       {models.state === "loading" && <p>{t("settings.cliProxy.modelsLoading")}</p>}
       {models.state === "unavailable" && <p role="alert">{explain(models.reason)}</p>}
       {models.state === "ready" && <>
-        <p>{t("settings.cliProxy.modelsReady", { count: models.models.length })}</p>
-        <ul className="cli-proxy-models mono">
-          {models.models.map((model, index) => <li key={`${model.id}:${index}`}>{cliProxyModelLabel(model)}</li>)}
-        </ul>
+        <div><button type="button" className="button button--secondary" disabled={models.models.length === 0}
+          onClick={() => setShowModels(true)}>{t("settings.cliProxy.modelsButton", { count: models.models.length })}</button></div>
+        {showModels && <CliProxyModelsDialog proxyName={cliProxyLabel({ ...endpoint, label, baseUrl: savedBaseUrl })}
+          models={models.models} onClose={() => setShowModels(false)} />}
       </>}
       <div><button type="button" className="button button--ghost" disabled={busy} onClick={models.reload}>
         {t("settings.cliProxy.modelsReload")}</button></div>
