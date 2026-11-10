@@ -5856,22 +5856,47 @@ fn find_agent_executable(agent: &AgentSpec) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn well_known_agent_path(agent_id: &str, local_app_data: &Path) -> Option<PathBuf> {
+fn well_known_agent_path(
+    agent_id: &str,
+    local_app_data: Option<&Path>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
     match agent_id {
         // The official Windows installer adds this new directory to the user
         // PATH. The running desktop process keeps its old environment block,
         // so catalog refresh also checks the documented install location.
-        "antigravity" => Some(local_app_data.join("agy").join("bin").join("agy.exe")),
+        "antigravity" => Some(local_app_data?.join("agy").join("bin").join("agy.exe")),
+        // The official script only edits bash startup files, never the
+        // Windows PATH, so the binary is found at its fixed location.
+        "grok" => Some(home?.join(".grok").join("bin").join("grok.exe")),
         _ => None,
     }
 }
 
 #[cfg(windows)]
 fn find_well_known_agent_executable(agent: &AgentSpec) -> Option<PathBuf> {
-    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
-    let candidate = well_known_agent_path(agent.id, &local_app_data)?;
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    let candidate = well_known_agent_path(agent.id, local_app_data.as_deref(), home.as_deref())?;
     is_executable(&candidate)
         .then(|| plain_win32_path(candidate.canonicalize().unwrap_or(candidate)))
+}
+
+/// Git for Windows' bash, used for official installers published only as
+/// bash scripts. WSL's `System32\bash.exe` is deliberately not used: it would
+/// install a Linux binary into the WSL distribution instead of Windows.
+#[cfg(windows)]
+fn git_bash() -> Option<PathBuf> {
+    let roots = [
+        std::env::var_os("ProgramFiles").map(PathBuf::from),
+        std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(|root| PathBuf::from(root).join("Programs")),
+    ];
+    roots
+        .into_iter()
+        .flatten()
+        .map(|root| root.join("Git").join("bin").join("bash.exe"))
+        .find(|candidate| is_executable(candidate))
 }
 
 #[cfg(not(windows))]
@@ -6226,10 +6251,16 @@ pub(crate) fn install_definition(definition_id: &str) -> AgentInstallDefinition 
         "grok" => {
             #[cfg(windows)]
             {
-                manual_install(
-                    "curl -fsSL https://raw.githubusercontent.com/superagent-ai/grok-cli/main/install.sh | bash",
-                    "https://github.com/superagent-ai/grok-cli#install",
-                )
+                const COMMAND: &str = "curl -fsSL https://raw.githubusercontent.com/superagent-ai/grok-cli/main/install.sh | bash";
+                const SOURCE: &str = "https://github.com/superagent-ai/grok-cli#install";
+                // The script supports Windows (MINGW) and installs
+                // %USERPROFILE%\.grok\bin\grok.exe; it needs Git Bash.
+                match git_bash() {
+                    Some(bash) => {
+                        direct_install(&bash.to_string_lossy(), &["-lc", COMMAND], COMMAND, SOURCE)
+                    }
+                    None => manual_install(COMMAND, SOURCE),
+                }
             }
             #[cfg(not(windows))]
             {
@@ -12206,10 +12237,19 @@ model = "gpt-5.3-codex"
         );
 
         assert_eq!(
-            well_known_agent_path("antigravity", Path::new(r"C:\Users\dev\AppData\Local")),
+            well_known_agent_path(
+                "antigravity",
+                Some(Path::new(r"C:\Users\dev\AppData\Local")),
+                None
+            ),
             Some(PathBuf::from(r"C:\Users\dev\AppData\Local\agy\bin\agy.exe"))
         );
-        assert!(well_known_agent_path("custom", Path::new(r"C:\Temp")).is_none());
+        assert_eq!(
+            well_known_agent_path("grok", None, Some(Path::new(r"C:\Users\dev"))),
+            Some(PathBuf::from(r"C:\Users\dev\.grok\bin\grok.exe"))
+        );
+        assert!(well_known_agent_path("grok", Some(Path::new(r"C:\Temp")), None).is_none());
+        assert!(well_known_agent_path("custom", Some(Path::new(r"C:\Temp")), None).is_none());
 
         let node_directory = dir.path().join("nodejs");
         std::fs::create_dir_all(&node_directory).unwrap();
