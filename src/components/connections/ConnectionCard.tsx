@@ -110,7 +110,7 @@ export function ConnectionCard({
           </span>
         ))}
         {databaseCount > 0 && <span className="badge tone-neutral">SQL{databaseCount > 1 ? ` · ${databaseCount}` : ""}</span>}
-        {databaseNames.length > 0 && <span className="connection-card__database-names" title={databaseNames.join("、")}>資料庫 · {databaseNames.join("、")}</span>}
+        {databaseNames.length > 0 && <span className="connection-card__database-names" title={databaseNames.join(t("database.nameSeparator"))}>{t("database.cardNames", { names: databaseNames.join(t("database.nameSeparator")) })}</span>}
       </div>
 
       <div className="connection-card__primary">
@@ -122,7 +122,7 @@ export function ConnectionCard({
             aria-haspopup={routes.length > 1 ? "dialog" : undefined}
           >
             <TerminalIcon size={13} />
-            {databaseCount > 0 ? "連線遠端" : t("row.connect")}
+            {databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
           </button>
         ) : (
           <span
@@ -145,13 +145,13 @@ export function ConnectionCard({
             )}
           </span>
         )}
-        {onOpenSql && <button type="button" className="button button--secondary button--sm" onClick={onOpenSql}>開啟 SQL{databaseCount > 1 ? `（${databaseCount}）` : ""}</button>}
+        {onOpenSql && <button type="button" className="button button--secondary button--sm" onClick={onOpenSql}>{databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")}</button>}
         {linked.length > 0 && <span className="connection-card__route-count">{t("row.routeCount", { count: routes.length })}</span>}
       </div>
 
       <div className="connection-card__foot">
         {onMerge && <button type="button" className="button button--ghost button--sm connection-card__merge" onClick={onMerge}>{t("connections.merge.action")}</button>}
-        {onDatabases && <button type="button" className="button button--secondary button--sm" title="查看既有的相關資料庫連線" onClick={onDatabases}>相關資料庫</button>}
+        {onDatabases && <button type="button" className="button button--secondary button--sm" title={t("database.relatedHint")} onClick={onDatabases}>{t("database.related")}</button>}
         {onAddRoute && (
           <button
             type="button"

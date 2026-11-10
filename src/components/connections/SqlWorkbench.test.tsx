@@ -1,3 +1,4 @@
+import { I18nProvider } from "../../i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
@@ -42,13 +43,23 @@ beforeEach(() => {
   });
 });
 afterEach(async () => { await act(async()=>root.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
-async function render() { await act(async()=>root.render(<SqlWorkbench profileId="fixture" mcpAllowed />)); }
+async function render(locale: "zh-TW" | "en" = "zh-TW") { await act(async()=>root.render(<I18nProvider locale={locale}><SqlWorkbench profileId="fixture" mcpAllowed /></I18nProvider>)); }
 async function click(label: string) {
   const button = props(container).find((p)=>p.children === label && p.onClick);
   expect(button,label).toBeDefined(); expect(button!.disabled,label).not.toBe(true);
   await act(async()=>button!.onClick!());
 }
 async function type(sql: string) { await act(async()=>props(container).find((p)=>p["aria-label"] === "SQL 語法")!.onChange!({target:{value:sql}})); }
+
+it("localizes AI execution warnings and keeps write confirmation required in English", async () => {
+  panel = { ...panel, shareRead: true, shareExecute: true, shareWrite: true };
+  await render("en");
+  expect(props(container).some(value => value["aria-label"] === "AI SQL execution permission")).toBe(true);
+  expect(props(container).some(value => Array.isArray(value.children) && value.children.includes("AI can modify data without confirmation for each operation; database account permissions still apply."))).toBe(true);
+  await click("Modify data…");
+  expect(props(container).find(value => value.children === "Confirm running this SQL")?.disabled).toBe(true);
+  expect(invoke.mock.calls.some(([, args]) => args?.action?.kind === "execute")).toBe(false);
+});
 
 it("syncs the exact dirty SQL before confirmation and executes a write only after explicit acceptance", async()=>{
   await render(); await type("DELETE FROM sample WHERE id=1"); await click("執行增刪修…");

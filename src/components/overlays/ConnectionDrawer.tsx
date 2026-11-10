@@ -392,10 +392,10 @@ export function ConnectionDrawer({
 
         <div className="drawer__body" inert={saving}>
         {databaseAvailable && !profile && !databaseProfileId && !routeSource && <section className="connection-setup">
-          <fieldset className="connection-setup__modes" disabled={saving || databaseState.busy || databaseState.dirty}><legend>這次要設定</legend>
-            {([ ["remote", "遠端連線", "終端機、檔案與遠端桌面"], ["database", "資料庫連線", "直接查詢與編輯資料"] ] as const).map(([value,label,hint]) => <label key={value} className={mode === value ? "is-selected" : ""}><input type="radio" name={`${formId}-purpose`} aria-label={label} checked={mode === value} onChange={() => selectPurpose(value)} /><span className="connection-setup__kind-icon" aria-hidden="true">{value === "remote" ? ">_" : "SQL"}</span><span><strong>{label}</strong><small>{hint}</small></span></label>)}
+          <fieldset className="connection-setup__modes" disabled={saving || databaseState.busy || databaseState.dirty}><legend>{t("database.setupPurpose")}</legend>
+            {([ ["remote", t("database.remoteConnection"), t("database.remoteConnectionHint")], ["database", t("database.connection"), t("database.connectionHint")] ] as const).map(([value,label,hint]) => <label key={value} className={mode === value ? "is-selected" : ""}><input type="radio" name={`${formId}-purpose`} aria-label={label} checked={mode === value} onChange={() => selectPurpose(value)} /><span className="connection-setup__kind-icon" aria-hidden="true">{value === "remote" ? ">_" : "SQL"}</span><span><strong>{label}</strong><small>{hint}</small></span></label>)}
           </fieldset>
-          {mode === "database" && <p>只儲存資料庫設定，不會建立或啟動 SSH、RDP 等遠端連線。</p>}
+          {mode === "database" && <p>{t("database.saveOnlyHint")}</p>}
         </section>}
         <form hidden={!remoteVisible} className="connection-drawer__remote-form" id={formId} onSubmit={submit} noValidate inert={databaseState.busy}>
           {(profile || routeSource) && <section className="form-section">
@@ -863,7 +863,7 @@ export function ConnectionDrawer({
           </details>
         </form>
         {databaseAvailable && databaseVisible && <section className="form-section connection-drawer__database">
-          <h3 className="form-section__title">資料庫設定</h3>
+          <h3 className="form-section__title">{t("database.databaseSettings")}</h3>
             <DatabaseManager embedded settingsOnly initialView="settings" initialProfileId={selectedDatabaseId}
               createNew={!selectedDatabaseId}
               profiles={profiles} onClose={requestClose} settingsFormId={`${formId}-database`}
@@ -871,10 +871,10 @@ export function ConnectionDrawer({
               onProfileSelected={setSelectedDatabase} onStateChange={setDatabaseState} />
         </section>}
 
-        {databaseAvailable && remoteVisible && databaseHost && <section className="connection-related" aria-label="相關資料庫連線">
-          <header><div><h3>相關資料庫</h3><p>獨立連線與帳密，開啟 SQL 不會啟動遠端桌面。</p></div>{onEditDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onEditDatabase())}>新增資料庫連線</button>}</header>
-          {databases.error && <p role="alert">{databases.error}<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>重新載入</button></p>}
-          {databases.loading ? <p role="status">正在讀取資料庫連線…</p> : !relatedDatabases.length && !databases.error ? <p>尚無相關資料庫。也可以直接建立獨立的資料庫連線。</p> : <ul>{relatedDatabases.map(database => <li key={database.id}><div><strong>{database.name}</strong><small>{database.engine === "sqlite" ? "SQLite · 本機檔案" : `${database.hostname}:${database.port} / ${database.database}`}</small></div><div>{onOpenDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onOpenDatabase(database.id))}>開啟 SQL</button>}{onEditDatabase && <button type="button" className="button button--ghost" onClick={() => navigate(() => onEditDatabase(database.id))}>連線設定</button>}</div></li>)}</ul>}
+        {databaseAvailable && remoteVisible && databaseHost && <section className="connection-related" aria-label={t("database.relatedConnections")}>
+          <header><div><h3>{t("database.related")}</h3><p>{t("database.relatedIndependent")}</p></div>{onEditDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onEditDatabase())}>{t("database.add")}</button>}</header>
+          {databases.error && <p role="alert">{databases.error}<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>{t("database.reload")}</button></p>}
+          {databases.loading ? <p role="status">{t("database.loading")}</p> : !relatedDatabases.length && !databases.error ? <p>{t("database.noRelated")}</p> : <ul>{relatedDatabases.map(database => <li key={database.id}><div><strong>{database.name}</strong><small>{database.engine === "sqlite" ? t("database.sqliteTarget") : `${database.hostname}:${database.port} / ${database.database}`}</small></div><div>{onOpenDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onOpenDatabase(database.id))}>{t("database.openSql")}</button>}{onEditDatabase && <button type="button" className="button button--ghost" onClick={() => navigate(() => onEditDatabase(database.id))}>{t("database.settings")}</button>}</div></li>)}</ul>}
         </section>}
 
         </div>
@@ -923,7 +923,7 @@ export function ConnectionDrawer({
               )}
             </div>
           </div>
-        ) : mode === "database" ? <div className="drawer__foot"><span className="drawer__foot-note">直接連接資料庫，不需要遠端主機</span><div className="drawer__foot-actions"><button type="button" className="button button--ghost" disabled={databaseState.busy} onClick={requestClose}>取消</button><button type="submit" form={`${formId}-database`} value="test" className="button button--secondary" disabled={databaseState.busy}>測試連線</button><button type="submit" form={`${formId}-database`} value="save" className={`button ${onOpenDatabase ? "button--secondary" : "button--primary"}`} disabled={databaseState.busy}>儲存連線</button>{onOpenDatabase && <button type="submit" form={`${formId}-database`} value="open" className="button button--primary" disabled={databaseState.busy}>儲存並開啟 SQL</button>}</div></div> : (
+        ) : mode === "database" ? <div className="drawer__foot"><span className="drawer__foot-note">{t("database.noRemoteNeeded")}</span><div className="drawer__foot-actions"><button type="button" className="button button--ghost" disabled={databaseState.busy} onClick={requestClose}>{t("database.cancel")}</button><button type="submit" form={`${formId}-database`} value="test" className="button button--secondary" disabled={databaseState.busy}>{t("database.test")}</button><button type="submit" form={`${formId}-database`} value="save" className={`button ${onOpenDatabase ? "button--secondary" : "button--primary"}`} disabled={databaseState.busy}>{t("database.save")}</button>{onOpenDatabase && <button type="submit" form={`${formId}-database`} value="open" className="button button--primary" disabled={databaseState.busy}>{t("database.saveAndOpen")}</button>}</div></div> : (
           <div className="drawer__foot">
             <span className="drawer__foot-note">
               {dirty ? t("form.unsaved") : t("form.noChanges")}
@@ -947,8 +947,8 @@ export function ConnectionDrawer({
               >
                 {t("form.submit.saveOnly")}
               </button>
-              {databaseVisible && <button type="button" className="button button--primary" disabled={databaseState.busy || databaseState.dirty} onClick={requestClose}>完成</button>}
-              {databaseVisible && selectedDatabaseId && onOpenDatabase && <button type="button" className="button button--secondary" disabled={databaseState.busy || databaseState.dirty} onClick={() => navigate(() => onOpenDatabase(selectedDatabaseId))}>開啟 SQL</button>}
+              {databaseVisible && <button type="button" className="button button--primary" disabled={databaseState.busy || databaseState.dirty} onClick={requestClose}>{t("database.done")}</button>}
+              {databaseVisible && selectedDatabaseId && onOpenDatabase && <button type="button" className="button button--secondary" disabled={databaseState.busy || databaseState.dirty} onClick={() => navigate(() => onOpenDatabase(selectedDatabaseId))}>{t("database.openSql")}</button>}
               {connectSupported && remoteVisible && (
                 <button
                   type="button"

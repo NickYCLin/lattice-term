@@ -1,3 +1,4 @@
+import { I18nProvider } from "../../i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -58,7 +59,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 async function render() {
-  await act(async () => root.render(<DatabaseManager profiles={[host]} hostKeys={["host"]} onClose={() => {}} />));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} hostKeys={["host"]} onClose={() => {}} /></I18nProvider>));
 }
 async function click(label: string) {
   const props = hostProps(container).find((props) => props.onClick && (props.children === label || (Array.isArray(props.children) && props.children.includes(label))));
@@ -283,7 +284,7 @@ it("lets the user reveal only a newly typed password without retrieving saved cr
 
 it("keeps connection editing in the shared setup without mounting a query workspace", async () => {
   const selected = vi.fn();
-  await act(async () => root.render(<DatabaseManager profiles={[host]} settingsOnly initialProfileId="second" onProfileSelected={selected} onClose={() => {}} />));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} settingsOnly initialProfileId="second" onProfileSelected={selected} onClose={() => {}} /></I18nProvider>));
   expect(selected).toHaveBeenCalledWith(snapshot.profiles[1]);
   expect(hostProps(container).find(p => p.onSubmit)!.hidden).toBe(false);
   expect(hostProps(container).some(p => p.children === "SQL 工作台")).toBe(false);
@@ -291,7 +292,7 @@ it("keeps connection editing in the shared setup without mounting a query worksp
 
 it("routes query settings to the shared connection editor", async () => {
   const configure = vi.fn();
-  await act(async () => root.render(<DatabaseManager profiles={[host]} onConfigure={configure} onClose={() => {}} />));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} onConfigure={configure} onClose={() => {}} /></I18nProvider>));
   await click("連線設定");
   expect(configure).toHaveBeenCalledWith(database.id, database.hostKey);
   expect(hostProps(container).find(p => p.onSubmit)!.hidden).toBe(true);
@@ -299,10 +300,10 @@ it("routes query settings to the shared connection editor", async () => {
 
 it("defers catalog updates until local connection edits have been cancelled", async () => {
   const view = (revision: number) => <DatabaseManager profiles={[host]} settingsOnly catalogRevision={revision} onClose={() => {}} />;
-  await act(async () => root.render(view(0)));
+  await act(async () => root.render(<I18nProvider locale="zh-TW">{view(0)}</I18nProvider>));
   await change(p => p.maxLength === 100, {value: "本機未儲存"});
   snapshot = {...snapshot, revision: "external", profiles: [{...database, name:"外部更新"}]};
-  await act(async () => root.render(view(1)));
+  await act(async () => root.render(<I18nProvider locale="zh-TW">{view(1)}</I18nProvider>));
   expect(invoke.mock.calls.filter(([c]) => c === "database_profiles")).toHaveLength(1);
   expect(hostProps(container).some(p => p.value === "本機未儲存")).toBe(true);
   await click("取消編輯");
@@ -312,7 +313,7 @@ it("defers catalog updates until local connection edits have been cancelled", as
 
 it("preserves legacy associations when editing without exposing an owner requirement", async () => {
   snapshot.profiles = [{...database, hostname:"database.invalid"}];
-  await act(async () => root.render(<DatabaseManager profiles={[host]} hostKeys={[host.id]} initialProfileId={database.id} settingsOnly onClose={() => {}} />));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} hostKeys={[host.id]} initialProfileId={database.id} settingsOnly onClose={() => {}} /></I18nProvider>));
   expect(hostProps(container).some(p => p.children === "所屬主機")).toBe(false);
   await change(p => p.maxLength === 100, {value:"調整顯示名稱"});
   expect(hostProps(container).some(p => p.value === "reader")).toBe(true);
@@ -323,7 +324,7 @@ it("preserves legacy associations when editing without exposing an owner require
 
 it("groups or separates cards without changing the database endpoint, password, or MCP grant", async () => {
   snapshot.profiles = [{...database, hostKey:"local", allowMcpRead:true}];
-  await act(async () => root.render(<DatabaseManager profiles={[host]} initialProfileId={database.id} settingsOnly onClose={() => {}} />));
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} initialProfileId={database.id} settingsOnly onClose={() => {}} /></I18nProvider>));
   await change(p => p.value === "local" && Array.isArray(p.children), {value:host.id});
   await submit();
   expect(invoke).toHaveBeenCalledWith("database_save", {profile:{...database, hostKey:host.id, allowMcpRead:true},revision:"original",password:null});

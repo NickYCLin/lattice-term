@@ -140,7 +140,7 @@ export function ConnectionsView({
   const databaseEntries = databaseListEntries(databases.profiles, profiles, visibleProfiles, kind, workspace.filter);
   const openSql = (target: DatabaseWorkspaceTarget) => onOpenDatabase ? onOpenDatabase(target) : setDatabaseScope(target);
   const configureDatabase = (id?: string, hostKey?: string) => onEditDatabase ? onEditDatabase(id, hostKey) : setDatabaseScope({ profileId: id });
-  const databaseCards = databaseEntries.length > 0 && <section className="connection-group database-connection-group" aria-label="資料庫連線"><h2 className="connection-group__title">資料庫 <span>{databaseEntries.length}</span></h2><ul className="connection-grid">{databaseEntries.map(database => <DatabaseConnectionCard key={database.id} profile={database} remoteName={databaseRemoteHost(database, profiles)?.name} onOpen={() => openSql({ profileId: database.id })} onEdit={() => configureDatabase(database.id, database.hostKey)} />)}</ul></section>;
+  const databaseCards = databaseEntries.length > 0 && <section className="connection-group database-connection-group" aria-label={t("database.connection")}><h2 className="connection-group__title">{t("database.databases")} <span>{databaseEntries.length}</span></h2><ul className="connection-grid">{databaseEntries.map(database => <DatabaseConnectionCard key={database.id} profile={database} remoteName={databaseRemoteHost(database, profiles)?.name} onOpen={() => openSql({ profileId: database.id })} onEdit={() => configureDatabase(database.id, database.hostKey)} />)}</ul></section>;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -270,14 +270,14 @@ export function ConnectionsView({
   );
 
   const databaseManager = databaseScope && <DatabaseManager profiles={profiles} initialProfileId={databaseScope.profileId} hostKeys={databaseScope.hostKeys} onClose={() => { setDatabaseScope(null); void databases.refresh(); }} />;
-  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title="開啟已儲存的資料庫與查詢結果" onClick={() => onOpenDatabase ? onOpenDatabase({}) : setDatabaseScope({})}>SQL 工作台</button>;
+  const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title={t("database.openSavedHint")} onClick={() => onOpenDatabase ? onOpenDatabase({}) : setDatabaseScope({})}>{t("database.workbench")}</button>;
 
   if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
     return (
       <div className="connections connections--empty">
         {databaseManager}
         {filePicker}
-        {databases.error && <Callout tone="warn" title="資料庫清單讀取失敗" actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>重新載入</button>}>{databases.error}</Callout>}
+        {databases.error && <Callout tone="warn" title={t("database.loadFailed")} actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>{t("database.reload")}</button>}>{databases.error}</Callout>}
         <div style={{ padding: "var(--space-5) var(--space-6) 0" }}>
           {notice && (
             <Callout tone={notice.tone} title={notice.title}>
@@ -334,7 +334,7 @@ export function ConnectionsView({
 
       <div className="connections__toolbar">
         <p className="connections__count" aria-live="polite">
-          {backendAvailable ? `遠端 ${profiles.length} · 資料庫 ${databases.profiles.length}` : filterActive
+          {backendAvailable ? t("database.connectionCounts", { remote: profiles.length, database: databases.profiles.length }) : filterActive
             ? t("connections.countFiltered", {
                 visible: visibleProfiles.length,
                 total: profiles.length,
@@ -344,7 +344,7 @@ export function ConnectionsView({
 
         <div className="connections__tools">
           {databaseButton}
-          {backendAvailable && <div className="connection-kind-filter" role="group" aria-label="連線種類">{([["all","全部"],["remote","遠端"],["database","資料庫"]] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>)}</div>}
+          {backendAvailable && <div className="connection-kind-filter" role="group" aria-label={t("database.connectionKind")}>{([["all",t("database.all")],["remote",t("database.remote")],["database",t("database.databases")]] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>)}</div>}
           <label className="select">
             <span className="select__label">{t("connections.sortBy")}</span>
             <select
@@ -393,8 +393,8 @@ export function ConnectionsView({
           </div>
         )}
 
-        {databases.error && <Callout tone="warn" title="資料庫清單讀取失敗" actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>重新載入</button>}>{databases.error}</Callout>}
-        {databases.loading && <p role="status">正在讀取資料庫連線…</p>}
+        {databases.error && <Callout tone="warn" title={t("database.loadFailed")} actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>{t("database.reload")}</button>}>{databases.error}</Callout>}
+        {databases.loading && <p role="status">{t("database.loading")}</p>}
         {databaseCards}
         {(kind === "database" || visibleProfiles.length === 0) && databaseEntries.length === 0 && !databases.loading ? (
           <EmptyState

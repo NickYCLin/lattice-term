@@ -1129,7 +1129,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           onToggleSidebar={toggleResourceSidebar}
           actions={
             <>
-              {runtime.host === "tauri" && (view === "terminal" || view === "chat") && <button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>SQL 資料庫</button>}
+              {runtime.host === "tauri" && (view === "terminal" || view === "chat") && <button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>{t("database.dockTitle")}</button>}
               {headerCapabilities.remoteQuickConnect && (
                 <button
                   type="button"
@@ -1174,7 +1174,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
 
         <div className="workspace__body">
           <div ref={workspaceMotionRef} className="workspace__content glass glass--sheen">
-            {onMobile && runtime.host === "tauri" && view === "terminal" && <div className="database-dock__mobile-entry"><button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>SQL 資料庫</button></div>}
+            {onMobile && runtime.host === "tauri" && view === "terminal" && <div className="database-dock__mobile-entry"><button type="button" className="button button--secondary" aria-pressed={sqlDockOpen} onClick={() => setSqlDockOpen(open => !open)}>{t("database.dockTitle")}</button></div>}
             <Suspense fallback={<LazyViewFallback />}>
               {view === "connections" && (
                 <ConnectionsView

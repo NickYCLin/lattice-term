@@ -1,3 +1,4 @@
+import { I18nProvider } from "../../i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
@@ -13,7 +14,7 @@ it("filters the current preview locally and opens a selectable read-only cell", 
   const container = installFakeDom(); const root = createRoot(container as unknown as Element);
   const result = { columns:["名稱","備註"], rows:[["中文資料",null],["other", ""]], truncated:false, cellCharacterLimit:512, stableOrder:false };
   try {
-    await act(async () => root.render(<SqlResultTable result={result} />));
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SqlResultTable result={result} /></I18nProvider>));
     await act(async () => props(container).find(p => p["aria-label"] === "篩選查詢結果")!.onChange!({target:{value:"中文"}}));
     expect(props(container).filter(p => p["aria-label"]?.includes("檢視內容"))).toHaveLength(2);
     await act(async () => props(container).find(p => p["aria-label"] === "第 1 筆，備註，檢視內容")!.onClick!());

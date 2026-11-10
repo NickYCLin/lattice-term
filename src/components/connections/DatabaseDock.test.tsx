@@ -1,3 +1,4 @@
+import { I18nProvider } from "../../i18n";
 import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
@@ -17,7 +18,7 @@ function props(node: Host): Props[] {
 }
 it("preserves one mounted SQL workspace and its unsaved draft across views and collapse", async () => {
   const container = installFakeDom(); const root = createRoot(container as unknown as Element);
-  const render = async (open: boolean, visible: boolean) => { await act(async () => root.render(<DatabaseDock profiles={[]} open={open} visible={visible} onClose={() => {}} />)); };
+  const render = async (open: boolean, visible: boolean) => { await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseDock profiles={[]} open={open} visible={visible} onClose={() => {}} /></I18nProvider>)); };
   try {
     await render(false, true); expect(mounted).not.toHaveBeenCalled();
     await render(true, true); expect(mounted).toHaveBeenCalledTimes(1);
