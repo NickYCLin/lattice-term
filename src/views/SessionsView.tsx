@@ -381,7 +381,6 @@ export function SessionsView({
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
   const [summaryHandoff, setSummaryHandoff] = useState<{ group: { groupId: string; members: AgentSessionSummary[] }; selection: AccountModelSelection; sourceId: string; permission: SessionPermission } | null>(null);
   const [projectPermission, setProjectPermission] = useState<SessionPermission>("default");
-  const [addPermission, setAddPermission] = useState<SessionPermission>("default");
   const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
   const addCliButtonRef = useRef<HTMLButtonElement>(null);
@@ -422,9 +421,6 @@ export function SessionsView({
   useEffect(() => {
     if (newProjectDirectory === null) setProjectPermission("default");
   }, [newProjectDirectory]);
-  useEffect(() => {
-    if (addCliFor === null) setAddPermission("default");
-  }, [addCliFor]);
   const [selectedProjectModel, setSelectedProjectModel] = useState<AccountModelSelection | null>(
     null,
   );
@@ -892,7 +888,7 @@ export function SessionsView({
     setAddCliFor(null);
     setAddCliError(null);
     if (carryContext) {
-      setSummaryHandoff({ group, selection, sourceId: activeMemberId(group), permission: addPermission });
+      setSummaryHandoff({ group, selection, sourceId: activeMemberId(group), permission: "full" });
       return;
     }
     const workingDirectory = group.members[0]?.workingDirectory ?? "";
@@ -902,7 +898,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...sessionLaunchSettings(selection, addPermission),
+        ...sessionLaunchSettings(selection, "full"),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -2606,10 +2602,8 @@ export function SessionsView({
                             allowCliProxyApi
                             proxyModels={cliProxyModels}
                             onReloadProxyModels={reloadCliProxyModels}
-                            onChange={selection => { setSelectedAddModel(selection); setAddPermission("default"); }}
+                            onChange={setSelectedAddModel}
                           />
-                          <SessionPermissionField definitionId={sessionDefinitionId(selectedAddModel)}
-                            value={addPermission} onChange={setAddPermission} />
                           {installed.length === 0 && (
                             <span className="cli-switch__menu-empty">
                               {t("terminal.addCli.none")}

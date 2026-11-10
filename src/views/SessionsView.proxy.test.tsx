@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
-import { fakeAgentApi, fakeChatApi, fakeAutomationsApi, fakeDefinition, fakeThread, installFakeStorage } from "../app/testFixtures/agentApis";
+import { fakeAgentApi, fakeChatApi, fakeAutomationsApi, fakeDefinition, fakeSession, fakeThread, installFakeStorage } from "../app/testFixtures/agentApis";
 import { installFakeDom } from "../app/testFixtures/hookDom";
 import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 import { SessionsView } from "./SessionsView";
@@ -13,12 +13,50 @@ vi.mock("@tauri-apps/api/path", () => ({ homeDir: async () => "C:/Users/test", d
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => [] }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: async () => "D:/project/test" }));
 vi.mock("../components/overlays/modalFocus", () => ({ useModalFocus: () => {} }));
+vi.mock("../components/agents/AgentTerminalPane", () => ({ AgentTerminalPane: () => null }));
 vi.mock("../components/icons", async importOriginal => {
   const icons = await importOriginal<Record<string, unknown>>();
   return Object.fromEntries(Object.keys(icons).map(name => [name, () => null]));
 });
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("adds an assistant with full permissions without showing a permission selector", async () => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const container = installFakeDom();
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [], style: { setProperty() {} } }));
+  vi.stubGlobal("addEventListener", () => {});
+  vi.stubGlobal("removeEventListener", () => {});
+  const restore = installFakeStorage();
+  const root = createRoot(container as unknown as Element);
+  const agents = fakeAgentApi({ sessions: [fakeSession()] });
+  const emptyRemote = { sessions: [], lastClosed: null };
+  const viewProps = { agents, ssh: emptyRemote, sftp: emptyRemote, remote: emptyRemote, rdp: emptyRemote,
+    vnc: emptyRemote, activeSessionId: "s1", onSelect: vi.fn(), theme: "dark", sessionRestoreComplete: true,
+    restoredWorkspaceSessions: [], unrestoredWorkspaceSessions: [] } as unknown as Parameters<typeof SessionsView>[0];
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SessionsView {...viewProps} /></I18nProvider>));
+    const add = elements(container).find(node => props(node).className === "cli-switch__add");
+    expect(add).toBeDefined();
+    await act(async () => props(add!).onClick({ currentTarget: add }));
+    expect(elements(container).some(node => props(node)["aria-describedby"]?.endsWith("-hint"))).toBe(false);
+    const carry = elements(container).find(node => props(node).type === "checkbox" && props(node).checked === true);
+    expect(carry).toBeDefined();
+    await act(async () => props(carry!).onChange({ currentTarget: { checked: false } }));
+    const launch = elements(container).find(node => props(node).children === "啟動工作階段");
+    expect(launch).toBeDefined();
+    await act(async () => props(launch!).onClick());
+    expect(agents.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      groupId: "g1", seedInput: null,
+      arguments: expect.arrayContaining(sessionPermissionArguments("codex", "full")),
+    }));
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
 
 type TestNode = { childNodes?: TestNode[]; [key: string]: unknown };
 function elements(node: TestNode): TestNode[] {
