@@ -380,6 +380,8 @@ export function SessionsView({
     Record<string, string>
   >({});
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
+  // 啟動指示未確認的提醒只需讓使用者知道一次，關閉後同一個工作階段不再顯示。
+  const [dismissedStartupNotices, setDismissedStartupNotices] = useState<ReadonlySet<string>>(() => new Set());
   const [projectPermission, setProjectPermission] = useState<SessionPermission>("default");
   const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
@@ -2654,8 +2656,9 @@ export function SessionsView({
                   </span>
                 )}
               </div>
-              <AgentStartupNotice unconfirmed={group.members.some(member =>
-                member.sessionId === memberId && member.startupInputUnconfirmed)} />
+              <AgentStartupNotice unconfirmed={!dismissedStartupNotices.has(memberId) && group.members.some(member =>
+                member.sessionId === memberId && member.startupInputUnconfirmed)}
+                onDismiss={() => setDismissedStartupNotices(prev => new Set(prev).add(memberId))} />
               <div className="cli-panes">
                 {group.members.map((member, memberIndex) => (
                   <div

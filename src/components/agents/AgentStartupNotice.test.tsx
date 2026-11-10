@@ -15,3 +15,9 @@ it("keeps an unsent startup warning outside terminal output", () => {
 it("does not reserve space for sessions without a warning", () => {
   expect(renderToStaticMarkup(<I18nProvider locale="zh-TW"><AgentStartupNotice /></I18nProvider>)).toBe("");
 });
+
+it("offers a close button when the warning can be dismissed", () => {
+  const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AgentStartupNotice unconfirmed onDismiss={() => {}} /></I18nProvider>);
+  expect(html).toContain("<button");
+  expect(html).toContain("關閉");
+});
