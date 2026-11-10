@@ -120,25 +120,6 @@ impl TcpForwards {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn long_lived_sessions_keep_replay_history_bounded_without_a_query_limit() {
-        let (outgoing, _) = mpsc::channel(1);
-        let mut forwards = TcpForwards::new(true, outgoing);
-        assert!(forwards.record_id(2));
-        assert!(forwards.record_id(1));
-        assert!(!forwards.record_id(2));
-        for id in 3..10_000 {
-            assert!(forwards.record_id(id));
-        }
-        assert!(forwards.seen.len() <= 1024);
-        assert!(!forwards.record_id(1));
-        assert!(!forwards.record_id(9_999));
-    }
-}
-
 impl Drop for TcpForwards {
     fn drop(&mut self) {
         self.streams.clear();
@@ -182,4 +163,23 @@ async fn pump(
         TcpMessage::Failed { id }
     };
     let _ = outgoing.send(event).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn long_lived_sessions_keep_replay_history_bounded_without_a_query_limit() {
+        let (outgoing, _) = mpsc::channel(1);
+        let mut forwards = TcpForwards::new(true, outgoing);
+        assert!(forwards.record_id(2));
+        assert!(forwards.record_id(1));
+        assert!(!forwards.record_id(2));
+        for id in 3..10_000 {
+            assert!(forwards.record_id(id));
+        }
+        assert!(forwards.seen.len() <= 1024);
+        assert!(!forwards.record_id(1));
+        assert!(!forwards.record_id(9_999));
+    }
 }
