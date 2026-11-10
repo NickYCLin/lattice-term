@@ -126,8 +126,10 @@ describe("remote host dialog", () => {
     const checkboxes = windows.match(/<input[^>]+type="checkbox"[^>]*>/g) ?? [];
     expect(windows).toContain("分享 Agent Fleet 工作區");
     expect(windows).toContain("分享助理並允許操作");
+    // 資料庫通道會把內網連線交給對方，維持需主機明確勾選；其餘權限預設開啟。
     const unchecked = checkboxes.filter(input => !input.includes("checked"));
-    expect(unchecked).toHaveLength(0);
+    expect(unchecked).toHaveLength(1);
+    expect(windows).toMatch(/<input type="checkbox"\/><span><strong>允許資料庫通道<\/strong>/);
     expect(windows).toContain("允許獨立命令執行（Windows 或 POSIX）");
     expect(windows).toMatch(/<input type="radio" name="remote-host-level" checked=""\/>完全開放/);
     expect(render(null, null, "linux").markup).toContain("允許獨立命令執行（Windows 或 POSIX）");

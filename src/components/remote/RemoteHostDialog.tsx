@@ -841,7 +841,7 @@ export function RemoteHostDialog({
               </label>}
               <label className="remote-host-toggle">
                 <input type="checkbox" checked={allowDatabaseForwarding} disabled={busy} onChange={e => setAllowDatabaseForwarding(e.currentTarget.checked)} />
-                <span><strong>允許資料庫通道</strong><small>允許已配對的裝置透過這台主機連線內網資料庫。</small></span>
+                <span><strong>{t("remote.database.allow")}</strong><small>{t("remote.database.allowHint")}</small></span>
               </label>
               <label className="remote-host-toggle">
                 <input

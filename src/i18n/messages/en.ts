@@ -2659,6 +2659,8 @@ export const en: Messages = {
   "remote.commands.hint": "Run one command at a time. Directory and environment changes do not persist between runs. Use a terminal for interactive input.",
   "remote.commands.allow": "Allow independent commands (Windows or POSIX)",
   "remote.commands.allowHint": "The viewer can run programs and access files as your sharing-host account, beyond the shared folder. Revoking command access or quitting the app ends running commands.",
+  "remote.database.allow": "Allow database tunnel",
+  "remote.database.allowHint": "Lets paired devices reach internal databases through this host.",
   "remote.commands.shell": "Shell",
   "remote.commands.directory": "Working directory",
   "remote.commands.home": "Host user home folder when empty",

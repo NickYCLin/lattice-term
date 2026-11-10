@@ -1995,6 +1995,8 @@ export const messages: Messages = {
   "remote.commands.hint": "每次运行一段指令；工作目录与环境不会延续到下一次。需要交互输入的指令请使用终端。",
   "remote.commands.allow": "允许 cmd／PowerShell 指令",
   "remote.commands.allowHint": "对方可用目前 Windows 帐号的权限运行程序与访问文件；不受分享文件夹范围限制。撤销命令权限或结束主程序会结束运行中的指令。",
+  "remote.database.allow": "允许数据库通道",
+  "remote.database.allowHint": "允许已配对的设备通过这台主机连接内网数据库。",
   "remote.commands.shell": "运行环境",
   "remote.commands.directory": "工作目录",
   "remote.commands.home": "留空使用主机用户文件夹",
