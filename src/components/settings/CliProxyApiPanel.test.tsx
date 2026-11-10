@@ -4,6 +4,12 @@ import { I18nProvider } from "../../i18n";
 import { CLI_PROXY_SETTINGS_KEY } from "../../app/cliProxyApi";
 import { CliProxyApiPanel } from "./CliProxyApiPanel";
 
+const proxyModels = vi.hoisted(() => ({ current: { state: "loading", reload: () => {} } as Record<string, unknown> }));
+vi.mock("../../app/useCliProxyApi", async importOriginal => ({
+  ...await importOriginal<Record<string, unknown>>(),
+  useCliProxyModels: () => proxyModels.current,
+}));
+
 function withSavedProxies(proxies: readonly { id: string; label: string; baseUrl: string }[]) {
   const values = new Map([[CLI_PROXY_SETTINGS_KEY, JSON.stringify({ proxies })]]);
   vi.stubGlobal("localStorage", {
@@ -13,7 +19,10 @@ function withSavedProxies(proxies: readonly { id: string; label: string; baseUrl
   });
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  proxyModels.current = { state: "loading", reload: () => {} };
+});
 
 describe("CLIProxyAPI settings", () => {
   it.each(["zh-TW", "en"] as const)("states what stays with the user in %s", (locale) => {
@@ -62,5 +71,15 @@ describe("CLIProxyAPI settings", () => {
     expect(html).toContain("Requires the desktop application.");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
+  });
+
+  it("shows every model the proxy reports, not just the first few", () => {
+    withSavedProxies([{ id: "default", label: "", baseUrl: "http://127.0.0.1:8317" }]);
+    const models = Array.from({ length: 29 }, (_, index) => ({ id: `model-${index}`, ownedBy: "antigravity" }));
+    proxyModels.current = { state: "ready", models, reload: () => {} };
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><CliProxyApiPanel available /></I18nProvider>);
+    expect(html).toContain("可用模型 29 個");
+    expect(html.match(/<li>/g)).toHaveLength(29);
+    expect(html).toContain("model-28 · antigravity");
   });
 });

@@ -140,7 +140,9 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
       {models.state === "unavailable" && <p role="alert">{explain(models.reason)}</p>}
       {models.state === "ready" && <>
         <p>{t("settings.cliProxy.modelsReady", { count: models.models.length })}</p>
-        <p className="mono">{models.models.slice(0, 6).map(cliProxyModelLabel).join("、")}</p>
+        <ul className="cli-proxy-models mono">
+          {models.models.map((model, index) => <li key={`${model.id}:${index}`}>{cliProxyModelLabel(model)}</li>)}
+        </ul>
       </>}
       <div><button type="button" className="button button--ghost" disabled={busy} onClick={models.reload}>
         {t("settings.cliProxy.modelsReload")}</button></div>

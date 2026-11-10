@@ -942,6 +942,26 @@
   border-radius: var(--radius-sm);
 }
 
+/* 列出全部可用模型；數量多時在卡片內捲動，不撐開整個設定頁。 */
+.cli-proxy-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  max-height: 14rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.cli-proxy-models li {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
 .cli-proxy-entry__head {
   display: flex;
   align-items: center;
