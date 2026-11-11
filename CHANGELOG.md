@@ -4,6 +4,13 @@
 
 ---
 
+## [2026.11.12](https://github.com/NickYCLin/lattice-term/compare/v2026.11.10...v2026.11.12) (2026-11-11)
+
+
+### 🛠️ 問題修正
+
+* 只有助理有新版本時才顯示更新視窗 ([ce33a09](https://github.com/NickYCLin/lattice-term/commit/ce33a09974f2bd67a3e71b136d58058312471b74))
+
 ## [2026.11.10](https://github.com/NickYCLin/lattice-term/compare/v2026.11.6...v2026.11.10) (2026-11-10)
 
 
