@@ -81,7 +81,7 @@ it("shows single-item activity then verification and clears progress on failure"
   }
 });
 
-it("honors startup settings, deduplicates checks and lets users dismiss failures", async () => {
+it("honors startup settings and only opens the prompt for available updates", async () => {
   const root = createRoot(installFakeDom() as unknown as Element);
   let api!: ReturnType<typeof useCliUpdates>;
   function Probe({ enabled }: { enabled: boolean }) {
@@ -101,8 +101,38 @@ it("honors startup settings, deduplicates checks and lets users dismiss failures
     invoke.mockRejectedValueOnce(new Error("offline"));
     await act(async () => { await api.check(); });
     expect(api.error).toBe(true);
+    expect(api.visible).toBe(false);
+    invoke.mockResolvedValueOnce([
+      { id: "claude", label: "Claude", currentVersion: "1.0.0", latestVersion: "1.1.0", status: "available", sourceUrl: "" },
+      { id: "copilot", label: "Copilot", currentVersion: null, latestVersion: null, status: "error", sourceUrl: "" },
+    ]);
+    await act(async () => { await api.check(); });
     expect(api.visible).toBe(true);
     await act(async () => { api.dismiss(); });
+    expect(api.visible).toBe(false);
+  } finally {
+    await act(async () => { root.unmount(); });
+    vi.clearAllMocks();
+  }
+});
+
+it("does not reopen the prompt for errors or previous updates after verification", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let api!: ReturnType<typeof useCliUpdates>;
+  function Probe() { api = useCliUpdates(false); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    invoke.mockResolvedValueOnce([
+      { id: "codex", label: "Codex", currentVersion: "1.0.0", latestVersion: "1.1.0", status: "available", sourceUrl: "" },
+    ]);
+    await act(async () => { await api.check(); });
+    expect(api.visible).toBe(true);
+    invoke.mockResolvedValueOnce("ok").mockResolvedValueOnce([
+      { id: "codex", label: "Codex", currentVersion: "1.1.0", latestVersion: "1.1.0", status: "current", sourceUrl: "" },
+      { id: "copilot", label: "Copilot", currentVersion: null, latestVersion: null, status: "error", sourceUrl: "" },
+    ]);
+    await act(async () => { await api.updateCli("codex"); });
+    expect(api.updated).toEqual(["Codex"]);
     expect(api.visible).toBe(false);
   } finally {
     await act(async () => { root.unmount(); });

@@ -19,10 +19,8 @@ export interface CliUpdateProgress {
   phase: "updating" | "checking";
 }
 
-function needsAttention(items: CliUpdate[]) {
-  return items.some(
-    (item) => item.status === "available" || item.status === "error",
-  );
+function hasAvailableUpdates(items: CliUpdate[]) {
+  return items.some((item) => item.status === "available");
 }
 
 export function useCliUpdates(enabled: boolean) {
@@ -76,7 +74,7 @@ export function useCliUpdates(enabled: boolean) {
         setProgress({ activeId: null, label, completed: 1, total: 1, phase: "checking" });
         while (checking.current) await checkFinished.current;
         const refreshed = await check();
-        if (refreshed && !needsAttention(refreshed)) setDismissed(true);
+        if (refreshed && !hasAvailableUpdates(refreshed)) setDismissed(true);
         return true;
       } catch (err) {
         setUpdateError(err instanceof Error ? err.message : String(err));
@@ -131,7 +129,7 @@ export function useCliUpdates(enabled: boolean) {
       });
       while (checking.current) await checkFinished.current;
       const refreshed = await check();
-      if (failures.length === 0 && refreshed && !needsAttention(refreshed)) {
+      if (failures.length === 0 && refreshed && !hasAvailableUpdates(refreshed)) {
         setDismissed(true);
       }
     } finally {
@@ -158,11 +156,7 @@ export function useCliUpdates(enabled: boolean) {
     check,
     updateCli,
     updateAll,
-    visible:
-      !dismissed &&
-      (error ||
-        updated.length > 0 ||
-        needsAttention(items)),
+    visible: !dismissed && hasAvailableUpdates(items),
     dismiss: () => setDismissed(true),
   };
 }
