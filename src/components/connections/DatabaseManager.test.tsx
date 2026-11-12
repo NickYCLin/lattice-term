@@ -126,7 +126,7 @@ it.each(databaseEngines)("creates and reopens a $value connection without replac
   }
   await submit();
   const savedProfile = snapshot.profiles.find((profile) => profile.name === "新資料庫")!;
-  expect(savedProfile).toMatchObject({ hostKey: "local", engine: engine.value, port: engine.port, allowMcpRead: false });
+  expect(savedProfile).toMatchObject({ hostKey: host.id, engine: engine.value, port: engine.port, allowMcpRead: false });
   expect(savedProfile.id).not.toBe(database.id);
   expect(savedProfile).not.toHaveProperty("password");
   expect(snapshot.profiles).toHaveLength(3);
@@ -296,6 +296,13 @@ it("routes query settings to the shared connection editor", async () => {
   await click("連線設定");
   expect(configure).toHaveBeenCalledWith(database.id, database.hostKey);
   expect(hostProps(container).find(p => p.onSubmit)!.hidden).toBe(true);
+});
+
+it("passes the card association when adding from a scoped workspace", async () => {
+  const configure = vi.fn();
+  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} hostKeys={[host.id]} onConfigure={configure} onClose={() => {}} /></I18nProvider>));
+  await click("新增資料庫連線");
+  expect(configure).toHaveBeenCalledExactlyOnceWith(undefined, host.id);
 });
 
 it("defers catalog updates until local connection edits have been cancelled", async () => {

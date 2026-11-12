@@ -98,6 +98,7 @@ export function ConnectionDrawer({
   initialMode,
   initialSection = "remote",
   databaseProfileId,
+  defaultDatabaseHostKey,
   onEditDatabase,
   onOpenDatabase,
   onSave,
@@ -118,7 +119,8 @@ export function ConnectionDrawer({
   initialMode?: ConnectionSetupMode;
   initialSection?: ConnectionSetupSection;
   databaseProfileId?: string;
-  onEditDatabase?: (profileId?: string) => void;
+  defaultDatabaseHostKey?: string;
+  onEditDatabase?: (profileId?: string, hostKey?: string) => void;
   onOpenDatabase?: (profileId: string) => void;
   onSave: (
     draft: ConnectionDraft,
@@ -866,13 +868,14 @@ export function ConnectionDrawer({
           <h3 className="form-section__title">{t("database.databaseSettings")}</h3>
             <DatabaseManager embedded settingsOnly initialView="settings" initialProfileId={selectedDatabaseId}
               createNew={!selectedDatabaseId}
+              defaultHostKey={defaultDatabaseHostKey}
               profiles={profiles} onClose={requestClose} settingsFormId={`${formId}-database`}
               onSaved={(saved, open) => { if (open && onOpenDatabase) onOpenDatabase(saved.id); else onClose(); }}
               onProfileSelected={setSelectedDatabase} onStateChange={setDatabaseState} />
         </section>}
 
         {databaseAvailable && remoteVisible && databaseHost && <section className="connection-related" aria-label={t("database.relatedConnections")}>
-          <header><div><h3>{t("database.related")}</h3><p>{t("database.relatedIndependent")}</p></div>{onEditDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onEditDatabase())}>{t("database.add")}</button>}</header>
+          <header><div><h3>{t("database.related")}</h3><p>{t("database.relatedIndependent")}</p></div>{onEditDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onEditDatabase(undefined, databaseHost.machineId ?? databaseHost.id))}>{t("database.add")}</button>}</header>
           {databases.error && <p role="alert">{databases.error}<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>{t("database.reload")}</button></p>}
           {databases.loading ? <p role="status">{t("database.loading")}</p> : !relatedDatabases.length && !databases.error ? <p>{t("database.noRelated")}</p> : <ul>{relatedDatabases.map(database => <li key={database.id}><div><strong>{database.name}</strong><small>{database.engine === "sqlite" ? t("database.sqliteTarget") : `${database.hostname}:${database.port} / ${database.database}`}</small></div><div>{onOpenDatabase && <button type="button" className="button button--secondary" onClick={() => navigate(() => onOpenDatabase(database.id))}>{t("database.openSql")}</button>}{onEditDatabase && <button type="button" className="button button--ghost" onClick={() => navigate(() => onEditDatabase(database.id))}>{t("database.settings")}</button>}</div></li>)}</ul>}
         </section>}

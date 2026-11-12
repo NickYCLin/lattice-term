@@ -34,11 +34,12 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
-async function render(options: { database?: boolean; editing?: boolean; mobile?: boolean; available?: boolean } = {}) {
+async function render(options: { database?: boolean; editing?: boolean; mobile?: boolean; available?: boolean; defaultHostKey?: string } = {}) {
   await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer
     profile={options.editing && !options.database ? host : null} profiles={[host]} supportedProtocols={["ssh", "rdp"]}
     mobile={options.mobile ?? false} databaseAvailable={options.available ?? true}
     initialMode={options.database ? "database" : "remote"} databaseProfileId={options.editing && options.database ? database.id : undefined}
+    defaultDatabaseHostKey={options.defaultHostKey}
     onEditDatabase={onEditDatabase} onOpenDatabase={onOpenDatabase} onSave={onSave} onClose={onClose}
   /></I18nProvider>));
 }
@@ -127,6 +128,16 @@ it("saves the exact selected database before opening SQL", async () => {
   expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({ profile: database, password: null }));
   expect(onOpenDatabase).toHaveBeenCalledExactlyOnceWith(database.id);
   expect(onSave).not.toHaveBeenCalled();
+});
+
+it("saves a new database with the originating card association", async () => {
+  await render({ database: true, defaultHostKey: host.machineId });
+  expect(allNodes(databaseForm()).some(node => node.tagName === "SELECT" && props(node)?.value === "direct")).toBe(true);
+  await fill();
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({
+    profile: expect.objectContaining({ hostKey: host.machineId, hostname: "database.invalid" }),
+  }));
 });
 
 it.each(["save", "test"])("keeps edits after a %s failure and guards against discarding them", async intent => {

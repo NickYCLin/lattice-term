@@ -404,6 +404,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     mode?: ConnectionSetupMode;
     section?: ConnectionSetupSection;
     databaseProfileId?: string;
+    defaultDatabaseHostKey?: string;
   }>({ open: false, profileId: null });
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile[] | null>(null);
   const [remoteHostOpen, setRemoteHostOpen] = useState(false);
@@ -805,7 +806,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setView("connections");
     setMobileResourceSidebarOpen(false);
     if (section === "database") {
-      setDatabaseWorkspace({ hostKeys: cardRouteProfiles(profiles, id).flatMap(profile => [profile.id, profile.machineId ?? profile.id]) });
+      setDatabaseWorkspace({ hostKeys: [...new Set(cardRouteProfiles(profiles, id).flatMap(profile => [profile.machineId ?? profile.id, profile.id]))] });
     } else setDrawer({ open: true, profileId: id, mode: "remote" });
   }, [profiles]);
 
@@ -814,9 +815,9 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     setDatabaseRevision(revision => revision + 1);
   }, []);
 
-  const openDatabaseConfig = useCallback((profileId?: string) => {
+  const openDatabaseConfig = useCallback((profileId?: string, hostKey?: string) => {
     setDatabaseWorkspace(null);
-    setDrawer({ open: true, profileId: null, mode: "database", section: "database", databaseProfileId: profileId });
+    setDrawer({ open: true, profileId: null, mode: "database", section: "database", databaseProfileId: profileId, defaultDatabaseHostKey: profileId ? undefined : hostKey });
   }, []);
 
   const openDatabaseWorkspace = useCallback((target: DatabaseWorkspaceTarget) => {
@@ -1383,6 +1384,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
           initialMode={drawer.mode}
           initialSection={drawer.section}
           databaseProfileId={drawer.databaseProfileId}
+          defaultDatabaseHostKey={drawer.defaultDatabaseHostKey}
           onSave={saveDraft}
           onEditDatabase={openDatabaseConfig}
           onOpenDatabase={profileId => openDatabaseWorkspace({ profileId })}

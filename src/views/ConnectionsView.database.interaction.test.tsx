@@ -69,7 +69,7 @@ it.each([
   expect(invoke.mock.calls.filter(([command]) => command === "database_profiles")).toHaveLength(2);
 });
 
-it.each([false, true])("preserves both legacy route identities but creates new database settings without a remote endpoint (mobile=%s)", async (mobile) => {
+it.each([false, true])("defaults a new related database to the machine card without copying the remote endpoint (mobile=%s)", async (mobile) => {
   await render([host, peer], mobile);
   await click("相關資料庫");
   expect(container.textContent).toContain("舊連線資料庫");
@@ -77,6 +77,8 @@ it.each([false, true])("preserves both legacy route identities but creates new d
   const dialog = allNodes(container).find(node => props(node)?.role === "dialog")!;
   expect(dialog.textContent).not.toContain("其他主機資料庫");
   await click("新增資料庫連線");
+  const cardDisplay = allNodes(container).find(node => node.tagName === "SELECT" && node.textContent.includes("獨立卡片"));
+  expect(cardDisplay && props(cardDisplay)?.value).toBe(host.machineId);
   expect(allNodes(container).find(node => node.tagName === "INPUT" && props(node)?.maxLength === 253 && props(node)?.value === "")).toBeDefined();
   expect(invoke.mock.calls.filter(([command]) => command === "database_profiles")).toHaveLength(2);
 });

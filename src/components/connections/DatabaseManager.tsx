@@ -9,9 +9,10 @@ import {
 import { useModalFocus } from "../overlays/modalFocus";
 import { SqlWorkbench } from "./SqlWorkbench";
 
-export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
+export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?.[0], onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
   profiles: ConnectionProfile[];
   hostKeys?: string[];
+  defaultHostKey?: string;
   onClose: () => void;
   embedded?: boolean;
   initialProfileId?: string;
@@ -36,7 +37,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
-  const [draft, setDraft] = useState(() => emptyDatabase());
+  const [draft, setDraft] = useState(() => emptyDatabase(defaultHostKey));
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -93,11 +94,11 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
       setSnapshot(value);
       const selected = value.profiles.find(profile => profile.id === draft.id);
       if (selected) setDraft(selected);
-      else setDraft(emptyDatabase());
+      else setDraft(emptyDatabase(defaultHostKey));
     }).catch(reason => { if (request === generation.current) setError(String(reason)); });
   }, [catalogRevision, navigationBlocked, snapshot]);
 
-  function reset(profile = emptyDatabase()) {
+  function reset(profile = emptyDatabase(defaultHostKey)) {
     setTouched(false); setView(snapshot?.profiles.some((entry) => entry.id === profile.id) ? "sql" : "settings");
     setDraft(profile); onProfileSelected?.(snapshot?.profiles.some(entry => entry.id === profile.id) ? profile : null); setPassword(""); setShowPassword(false); setResult(null); setResultKind(null); setTables([]);
     setTableIndex(""); setOffset(0); setDeleting(null); setError(""); setNotice("");
@@ -174,7 +175,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
         </header>
         <div className="database-manager__layout">
           <aside className="database-manager__sidebar" aria-label={t("database.savedConnections")}>
-            <div className="database-manager__sidebar-head"><h3>{t("database.connections")} <span>{available.length}</span></h3><button type="button" className="button button--secondary" disabled={navigationBlocked} onClick={() => onConfigure ? onConfigure() : reset()}>{t("database.add")}</button></div>
+            <div className="database-manager__sidebar-head"><h3>{t("database.connections")} <span>{available.length}</span></h3><button type="button" className="button button--secondary" disabled={navigationBlocked} onClick={() => onConfigure ? onConfigure(undefined, defaultHostKey) : reset()}>{t("database.add")}</button></div>
             <input className="database-manager__search" aria-label={t("database.searchLabel")} placeholder={t("database.searchPlaceholder")} value={search} onChange={(event) => setSearch(event.target.value)} />
             <ul className="database-manager__list">{visible.map((profile) => <li key={profile.id}>
               <button type="button" title={profile.name} aria-pressed={draft.id === profile.id} disabled={navigationBlocked} onClick={() => reset(profile)}>{profile.name}<small><span className="database-manager__engine-dot" />{profile.engine === "sqlite" ? "SQLite" : databaseEngines.find((engine) => engine.value === profile.engine)?.label} · {profile.engine === "sqlite" ? t("database.localFile") : `${profile.hostname}:${profile.port}`}</small></button>
@@ -186,7 +187,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
           </aside>
           <section className="database-manager__workspace" aria-label={t("database.content")}>
             <div className="database-manager__connection-head"><div><h3>{saved?.name || t("database.create")}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? t("database.localFile") : `${saved.hostname}:${saved.port} / ${saved.database}`}` : t("database.workspaceHint")}</p></div><span className="database-manager__badge">{saved ? t("database.saved") : t("database.unsaved")}</span></div>
-            {!settingsOnly && <nav className="database-manager__tabs" aria-label={t("database.pages")}>{([ ["sql", t("database.workbench")], ["tables", t("database.browse")], ["settings", t("database.settings")] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey) : setView(key)}>{label}</button>)}</nav>}
+            {!settingsOnly && <nav className="database-manager__tabs" aria-label={t("database.pages")}>{([ ["sql", t("database.workbench")], ["tables", t("database.browse")], ["settings", t("database.settings")] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey) : setView(key)}>{label}</button>)}</nav>}
             <div className="database-manager__content" ref={contentRef}>
               {error && <p role="alert" className="database-manager__notice database-manager__error">{error}</p>}
               {!snapshot && !connectionBusy && <button type="button" className="button button--secondary" onClick={() => void perform(async () => {
@@ -203,7 +204,7 @@ export function DatabaseManager({ profiles, hostKeys, onClose, embedded = false,
               {!!snapshot?.credentialCleanupPending && <div role="alert" className="database-manager__notice"><p>{t("database.cleanupPending", { count: snapshot.credentialCleanupPending })}</p><button type="button" className="button button--secondary" disabled={busy} onClick={() => void perform(async () => {
                 const value = await invoke<DatabaseSnapshot>("database_cleanup", { revision: snapshot.revision }); setSnapshot(value);
               })}>{t("database.retryCleanup")}</button></div>}
-          {onConfigure && activeView === "settings" && <div className="database-manager__section-heading"><h3>{t("database.add")}</h3><p>{t("database.standaloneHint")}</p><button type="button" className="button button--primary" onClick={() => onConfigure(saved?.id, saved?.hostKey)}>{t("database.configure")}</button></div>}
+          {onConfigure && activeView === "settings" && <div className="database-manager__section-heading"><h3>{t("database.add")}</h3><p>{t("database.standaloneHint")}</p><button type="button" className="button button--primary" onClick={() => onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey)}>{t("database.configure")}</button></div>}
           <form id={settingsFormId} onSubmit={save} className="database-manager__settings" hidden={activeView !== "settings" || Boolean(onConfigure)}>
             <div className="database-manager__section-heading"><h3 className="visually-hidden">{saved ? t("database.settings") : t("database.add")}</h3><p>{t("database.settingsHint")}</p></div>
             <fieldset disabled={busy || !snapshot} className="database-manager__fields">
