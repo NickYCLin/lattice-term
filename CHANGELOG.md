@@ -4,6 +4,14 @@
 
 ---
 
+## [2026.11.13](https://github.com/NickYCLin/lattice-term/compare/v2026.11.12...v2026.11.13) (2026-11-12)
+
+
+### 🛠️ 問題修正
+
+* **cliproxy:** 解除新增代理的金鑰輸入限制 ([c30bf93](https://github.com/NickYCLin/lattice-term/commit/c30bf931a4fe4a31126550e9bc0b2df43102af03))
+* **database:** 從遠端卡片新增時預選同一張卡片 ([0f5b783](https://github.com/NickYCLin/lattice-term/commit/0f5b783c70a264c5214d95823b128ddc0a97524c))
+
 ## [2026.11.12](https://github.com/NickYCLin/lattice-term/compare/v2026.11.10...v2026.11.12) (2026-11-11)
 
 
