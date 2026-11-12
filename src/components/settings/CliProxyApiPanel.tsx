@@ -78,7 +78,10 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
 
   const saveKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("cliproxy_save_key", { proxyId: endpoint.id, baseUrl: savedBaseUrl || baseUrl, key });
+    await invoke("cliproxy_save_key", { proxyId: endpoint.id, baseUrl, key });
+    onChange({ ...endpoint, label: label.trim(), baseUrl: baseUrl.trim() });
+    setSavedBaseUrl(baseUrl.trim());
+    setProbe(null);
     setKey("");
     await refreshKey();
     window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
@@ -124,12 +127,12 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
       : t("settings.cliProxy.unreachable", { status: probe.status })}</p>}
 
     <label className="field"><span className="field__label">{t("settings.cliProxy.key")}</span>
-      <input className="input" type="password" value={key} disabled={busy || !savedBaseUrl} maxLength={512}
+      <input className="input" type="password" value={key} disabled={busy} maxLength={512}
         autoComplete="off" spellCheck={false} onChange={(event) => setKey(event.currentTarget.value)} />
       <span className="field__hint">{t("settings.cliProxy.keyHint")}</span></label>
     <p>{hasKey ? t("settings.cliProxy.keySaved") : t("settings.cliProxy.keyMissing")}</p>
     <div>
-      <button type="button" className="button" disabled={busy || !savedBaseUrl || !key.trim()} onClick={saveKey}>
+      <button type="button" className="button" disabled={busy || !baseUrl.trim() || !key.trim()} onClick={saveKey}>
         {t("settings.cliProxy.keySave")}</button>
       {hasKey && <button type="button" className="button button--danger" disabled={busy} onClick={forgetKey}>
         {t("settings.cliProxy.keyForget")}</button>}
