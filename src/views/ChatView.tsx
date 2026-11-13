@@ -253,12 +253,14 @@ export function ChatView({
   const shownSession = selectedSession ?? activeLiveSession;
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
+  const [handingOffThreadId, setHandingOffThreadId] = useState<string | null>(null);
   const [summarySource, setSummarySource] = useState<(Pick<ChatThread, "id" | "title" | "workingDirectory" | "definitionId" | "items"> & Partial<Pick<ChatThread, "permission">> & { sessionId?: string }) | null>(null);
   const summaryDestination = useRef<{ key: string; id: string } | null>(null);
 
   async function continueInSession(thread: ChatThread) {
     if (handingOff.current) return;
     handingOff.current = true;
+    setHandingOffThreadId(thread.id);
     setHandoffProblem(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -266,21 +268,26 @@ export function ChatView({
         await invoke<string>("agent_chat_general_directory", { threadId: thread.id });
       const request = sessionLaunchForThread(thread, directory, agents.catalog, accountProfiles, proxies);
       if (!request) throw new Error(t("chat.continueInSession.unavailable"));
-      await chat.continueInSession(thread.id);
-      const launched = await agents.launch(request);
-      if (launched.closedReason) throw new Error(launched.closedReason);
+      let sessionId = "";
+      await chat.continueInSession(thread.id, async () => {
+        const launched = await agents.launch(request);
+        if (launched.closedReason) throw new Error(launched.closedReason);
+        sessionId = launched.sessionId;
+      });
+      if (!sessionId) return;
       try {
-        await agents.rename(launched.sessionId, thread.title || request.label);
+        await agents.rename(sessionId, thread.title || request.label);
       } catch {
         // The terminal is already running the conversation.
       }
-      onOpenSession(launched.sessionId);
+      onOpenSession(sessionId);
     } catch (reason) {
       setHandoffProblem(t("chat.continueInSession.failed", {
         detail: reason instanceof Error ? reason.message : String(reason),
       }));
     } finally {
       handingOff.current = false;
+      setHandingOffThreadId(null);
     }
   }
 
@@ -785,6 +792,7 @@ export function ChatView({
               agents.catalog, accountProfiles, proxies) && !active.archived
               ? () => void continueInSession(active) : undefined}
             handoffProblem={handoffProblem}
+            handoffPending={handingOffThreadId === active.id}
             sessionRead={sessionRead}
           />
         )}
@@ -825,6 +833,7 @@ function ThreadPane({
   onDelete,
   continueInSession,
   handoffProblem,
+  handoffPending,
   sessionRead,
 }: {
   thread: ChatThread;
@@ -839,6 +848,7 @@ function ThreadPane({
   /** Present when the conversation can go on in a terminal session. */
   continueInSession?: () => void;
   handoffProblem?: string | null;
+  handoffPending?: boolean;
   sessionRead?: { loading: boolean; error: string | null; refresh: () => void } | null;
 }) {
   const { t } = useI18n();
@@ -872,7 +882,7 @@ function ThreadPane({
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
-  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession);
+  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession) || Boolean(handoffPending);
   const settingsLocked = running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
   const directProxy = thread.provider === "cliproxyapi" && !thread.nativeSessionId;
   const cliInstalled = directProxy || installed.includes(thread.definitionId);
@@ -1196,7 +1206,7 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={continueInSession}
-                disabled={running || pendingInputs.length > 0}
+                disabled={running || pendingInputs.length > 0 || awaitingHistory}
                 title={t("chat.continueInSession.hint")}
               >
                 {t("chat.continueInSession")}

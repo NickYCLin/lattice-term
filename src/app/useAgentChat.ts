@@ -168,7 +168,7 @@ export interface AgentChatApi {
    * Hand the conversation to a terminal session: end the chat page's own
    * process for it so only the terminal writes the transcript.
    */
-  continueInSession: (id: string) => Promise<void>;
+  continueInSession: (id: string, launch?: () => Promise<void>) => Promise<void>;
   /** Apply what the terminal added, once the thread is back on this page. */
   updateThreadFromSession: (id: string, update: (thread: ChatThread) => ChatThread) => void;
   /**
@@ -289,6 +289,8 @@ export function useAgentChat(
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
   const pendingApprovals = useRef(new Map<string, Promise<void>>());
+  const handingOffThreads = useRef(new Set<string>());
+  const [pendingHandoffs, setPendingHandoffs] = useState<ReadonlySet<string>>(new Set());
   threadsRef.current = threads;
   const changeThreads = useCallback((update: (current: ChatThread[]) => ChatThread[]) => {
     const next = update(threadsRef.current);
@@ -656,13 +658,25 @@ export function useAgentChat(
     }
   }, [changeThreads]);
 
-  const continueInSession = useCallback(async (id: string) => {
-    if (hasDesktopBackend()) {
-      const { invoke } = await core();
-      await invoke("agent_chat_close", { threadId: id });
+  const continueInSession = useCallback(async (id: string, launch?: () => Promise<void>) => {
+    const thread = threadsRef.current.find(entry => entry.id === id);
+    if (!thread) return;
+    if (handingOffThreads.current.has(id) || thread.continuedInSession) throw new Error("This conversation is already held by a terminal session.");
+    if (thread.runningTurnId) throw new Error("Wait for the current turn before continuing in a terminal session.");
+    handingOffThreads.current.add(id);
+    setPendingHandoffs(new Set(handingOffThreads.current));
+    try {
+      if (hasDesktopBackend()) {
+        const { invoke } = await core();
+        await invoke("agent_chat_close", { threadId: id });
+      }
+      await launch?.();
+      changeThreads((current) => current.map((entry) =>
+        entry.id === id ? { ...entry, continuedInSession: true } : entry));
+    } finally {
+      handingOffThreads.current.delete(id);
+      setPendingHandoffs(new Set(handingOffThreads.current));
     }
-    changeThreads((current) => current.map((thread) =>
-      thread.id === id ? { ...thread, continuedInSession: true } : thread));
   }, [changeThreads]);
 
   const updateThreadFromSession = useCallback((id: string, apply: (thread: ChatThread) => ChatThread) => {
@@ -691,6 +705,7 @@ export function useAgentChat(
 
     const thread = threadsRef.current.find((entry) => entry.id === id);
     if (!thread || thread.runningTurnId) return;
+    if (handingOffThreads.current.has(id) || thread.continuedInSession) throw new Error("This conversation is held by a terminal session. Return after it closes before sending.");
     if (thread.nativeHistorySource && !readyNativeThreads.current.has(JSON.stringify([id, thread.nativeSessionId, thread.accountProfileId, nativeReadProfileKey.current]))) throw new Error("Read the conversation history before sending. Retry if reading failed.");
     const turnId = crypto.randomUUID();
     const next = beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
@@ -871,12 +886,12 @@ export function useAgentChat(
   useEffect(() => {
     for (const thread of threadsRef.current) {
       const next = thread.pendingInputs?.[0];
-      if (thread.runningTurnId || thread.queuePaused || !next) continue;
+      if (thread.runningTurnId || thread.queuePaused || thread.continuedInSession || handingOffThreads.current.has(thread.id) || !next) continue;
       // Reserve this entry synchronously. Duplicate completion events and
       // React effect replays must not start the same queued turn twice.
       void send(thread.id, next.prompt, next.attachments, next.profileConfigPath, next.id, next.mentions ?? []);
     }
-  }, [threads, send, changeThreads]);
+  }, [threads, send, changeThreads, pendingHandoffs]);
 
   const delegate = useCallback(
     (parentId: string, definitionId: ChatDefinitionId, prompt: string, withContext: boolean, attachments: readonly ChatAttachment[] = []) => {
