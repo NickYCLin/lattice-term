@@ -12,6 +12,7 @@ import type {
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
 import { copyTextToClipboard } from "../app/clipboardText";
 import { displayPath } from "../app/displayPath";
+import { sessionPermissionArguments } from "../app/sessionPermissions";
 import {
   loadChatAccountProfiles,
   profileCapable,
@@ -314,7 +315,7 @@ export function AgentsView({
       definitionId: definition.id,
       label: "",
       executable: "",
-      arguments: [],
+      arguments: sessionPermissionArguments(definition.id, "full"),
       resumeSessionId: null,
       note: launchNote.trim(),
       profileConfigPath: profile?.configDirectory ?? null,

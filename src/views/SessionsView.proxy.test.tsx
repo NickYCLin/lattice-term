@@ -8,6 +8,7 @@ import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 import { accountModelSourceKey } from "../app/accountModels";
 import { SessionsView } from "./SessionsView";
 import { ChatView } from "./ChatView";
+import { AgentsView } from "./AgentsView";
 import { sessionPermissionArguments } from "../app/sessionPermissions";
 
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: async () => "C:/Users/test", downloadDir: async () => "C:/Downloads", join: async (...parts: string[]) => parts.join("/") }));
@@ -236,6 +237,38 @@ it.each(["codex", "claude", "gemini"].flatMap(definitionId =>
     }
   },
 );
+
+it.each(["codex", "claude", "gemini", "custom"])("launches and saves Fleet %s with full supported permissions", async definitionId => {
+  const container = installFakeDom();
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
+  vi.stubGlobal("addEventListener", () => {});
+  vi.stubGlobal("removeEventListener", () => {});
+  vi.stubGlobal("dispatchEvent", () => true);
+  const restore = installFakeStorage();
+  const root = createRoot(container as unknown as Element);
+  const agents = fakeAgentApi({ catalog: [fakeDefinition({ id: definitionId })],
+    savePlan: vi.fn(async () => ({} as never)) });
+  const onOpen = vi.fn();
+  const viewProps = { agents, remote: { sessions: [], lastClosed: null }, sandboxAvailable: false, onOpen,
+    mcp: { daemon: { status: { running: false, shared: [], sessions: 0 }, history: null },
+      pending: new Set(), failures: {} } } as unknown as Parameters<typeof AgentsView>[0];
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentsView {...viewProps} /></I18nProvider>));
+    const launch = elements(container).find(node => props(node).className === "button button--secondary button--sm"
+      && Array.isArray(props(node).children) && props(node).children.includes("啟動"));
+    expect(launch).toBeDefined();
+    expect(props(launch!).disabled).toBe(false);
+    await act(async () => props(launch!).onClick());
+    const expected = expect.objectContaining({ definitionId, arguments: sessionPermissionArguments(definitionId, "full") });
+    expect(agents.launch).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(agents.savePlan).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith("s1");
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
 
 it.each([
   { previous: undefined, proxyId: "backup", model: "" },
