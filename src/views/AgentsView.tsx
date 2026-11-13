@@ -420,7 +420,12 @@ export function AgentsView({
         return;
       }
     }
-    setAccountProfiles((current) => current.filter((candidate) => candidate.id !== profile.id));
+    const profiles = (typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage)
+    ).filter((candidate) => candidate.id !== profile.id);
+    if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
+    setAccountProfiles(profiles);
     setSelectedAccountProfile((current) => {
       if (current[profile.definitionId] !== profile.id) return current;
       const next = { ...current };
