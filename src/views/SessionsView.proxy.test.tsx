@@ -8,7 +8,7 @@ import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 import { accountModelSourceKey } from "../app/accountModels";
 import { SessionsView } from "./SessionsView";
 import { ChatView } from "./ChatView";
-import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
+import { sessionPermissionArguments } from "../app/sessionPermissions";
 
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: async () => "C:/Users/test", downloadDir: async () => "C:/Downloads", join: async (...parts: string[]) => parts.join("/") }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => [] }));
@@ -122,14 +122,13 @@ it("keeps the workspace frame and sidebar actions available on first use", async
 });
 
 it.each([
-  { catalog: [], direct: true, folder: false, permission: "default" },
-  { catalog: [fakeDefinition({ installed: false, installedPath: null })], direct: true, folder: false, permission: "default" },
-  { catalog: [fakeDefinition({ id: "claude", label: "Claude Code" })], direct: true, folder: false, permission: "default" },
-  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "default" },
-  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "full" },
-  { catalog: [fakeDefinition()], direct: false, folder: false, permission: "readOnly" },
-  { catalog: [], direct: true, folder: true, permission: "default" },
-])("launches the selected proxy from Sessions: folder=$folder, permission=$permission", async ({ catalog, direct, folder, permission }) => {
+  { catalog: [], direct: true, folder: false },
+  { catalog: [fakeDefinition({ installed: false, installedPath: null })], direct: true, folder: false },
+  { catalog: [fakeDefinition({ id: "claude", label: "Claude Code" })], direct: true, folder: false },
+  { catalog: [fakeDefinition()], direct: false, folder: false },
+  { catalog: [fakeDefinition()], direct: false, folder: true },
+  { catalog: [], direct: true, folder: true },
+])("launches the selected proxy from Sessions: folder=$folder", async ({ catalog, direct, folder }) => {
   const container = installFakeDom();
   const createElement = document.createElement.bind(document);
   vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
@@ -176,13 +175,8 @@ it.each([
     expect(props(launch()!).disabled).toBe(false);
     const permissionSelect = elements(container).find(node => props(node)["aria-describedby"]?.endsWith("-hint")
       && props(node).value === "default" && props(node).onChange);
-    if (direct) {
-      expect(permissionSelect).toBeUndefined();
-    } else {
-      expect(permissionSelect).toBeDefined();
-      await act(async () => props(permissionSelect!).onChange({ currentTarget: { value: permission } }));
-      if (permission === "full") expect(elements(container).some(node => String(props(node).children ?? "").includes("略過工具權限詢問"))).toBe(true);
-    }
+    expect(permissionSelect).toBeUndefined();
+    expect(elements(container).some(node => String(props(node).children ?? "").includes("略過工具權限詢問"))).toBe(false);
     await act(async () => props(launch()!).onClick());
     if (direct) {
       expect(onStartApiChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ definitionId: "codex", accountProfileId: null,
@@ -192,16 +186,56 @@ it.each([
       expect(onStartApiChat).not.toHaveBeenCalled();
       expect(agents.launch).toHaveBeenCalledWith(expect.objectContaining({ definitionId: "codex",
         workingDirectory: folder ? "D:/project/test" : "C:/Users/test",
-        arguments: expect.arrayContaining(sessionPermissionArguments("codex", permission as SessionPermission)) }));
+        arguments: expect.arrayContaining(sessionPermissionArguments("codex", "full")) }));
       await act(async () => props(quick!).onClick());
       const reopened = elements(container).find(node => props(node)["aria-describedby"]?.endsWith("-hint") && props(node).onChange);
-      expect(props(reopened!).value).toBe("default");
+      expect(reopened).toBeUndefined();
     }
   } finally {
     await act(async () => root.unmount());
     restore();
   }
 });
+
+it.each(["codex", "claude", "gemini"].flatMap(definitionId =>
+  [false, true].map(folder => ({ definitionId, folder }))))(
+  "launches native $definitionId with full permissions and no permission field: folder=$folder",
+  async ({ definitionId, folder }) => {
+    const container = installFakeDom();
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
+    vi.stubGlobal("addEventListener", () => {});
+    vi.stubGlobal("removeEventListener", () => {});
+    const restore = installFakeStorage();
+    const root = createRoot(container as unknown as Element);
+    const agents = fakeAgentApi({ catalog: [fakeDefinition({ id: definitionId })] });
+    const emptyRemote = { sessions: [], lastClosed: null };
+    const viewProps = { agents, ssh: emptyRemote, sftp: emptyRemote, remote: emptyRemote, rdp: emptyRemote,
+      vnc: emptyRemote, activeSessionId: null, onSelect: vi.fn(), theme: "dark", sessionRestoreComplete: true,
+      restoredWorkspaceSessions: [], unrestoredWorkspaceSessions: [] } as unknown as Parameters<typeof SessionsView>[0];
+    try {
+      await act(async () => root.render(<I18nProvider locale="zh-TW"><SessionsView {...viewProps} /></I18nProvider>));
+      const entry = elements(container).find(node => props(node)["aria-label"] === (folder ? "加入其他本機專案" : "快速對話"));
+      await act(async () => props(entry!).onClick());
+      const permissionField = () => elements(container).find(node => props(node)["aria-describedby"]?.endsWith("-hint") && props(node).onChange);
+      expect(permissionField()).toBeUndefined();
+      expect(elements(container).some(node => String(props(node).children ?? "").includes("略過工具權限詢問"))).toBe(false);
+      const launch = elements(container).find(node => props(node).className === "button button--primary"
+        && props(node).children === "啟動工作階段");
+      expect(launch).toBeDefined();
+      expect(props(launch!).disabled).toBe(false);
+      await act(async () => props(launch!).onClick());
+      expect(agents.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ definitionId,
+        workingDirectory: folder ? "D:/project/test" : "C:/Users/test",
+        arguments: expect.arrayContaining(sessionPermissionArguments(definitionId, "full")) }));
+      await act(async () => props(entry!).onClick());
+      expect(permissionField()).toBeUndefined();
+    } finally {
+      await act(async () => root.unmount());
+      restore();
+    }
+  },
+);
 
 it.each([
   { previous: undefined, proxyId: "backup", model: "" },

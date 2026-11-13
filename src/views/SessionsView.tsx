@@ -26,7 +26,6 @@ import type {
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
 import {
   accountModelKey,
-  cliProxyAgentFor,
   accountModelLaunchSettings,
   accountModelOptions,
   accountModelTargets,
@@ -39,8 +38,7 @@ import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyAp
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
-import { SessionPermissionField } from "../components/sessions/SessionPermissionField";
-import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
+import { sessionPermissionArguments } from "../app/sessionPermissions";
 import { displayPath } from "../app/displayPath";
 import type { SshApi } from "../app/useSshSessions";
 import type { SftpApi } from "../app/useSftpSessions";
@@ -379,7 +377,6 @@ export function SessionsView({
   const [addCliFor, setAddCliFor] = useState<string | null>(null);
   // 啟動指示未確認的提醒只需讓使用者知道一次，關閉後同一個工作階段不再顯示。
   const [dismissedStartupNotices, setDismissedStartupNotices] = useState<ReadonlySet<string>>(() => new Set());
-  const [projectPermission, setProjectPermission] = useState<SessionPermission>("default");
   const [selectedAddModel, setSelectedAddModel] = useState<AccountModelSelection | null>(null);
   const addCliDialogRef = useRef<HTMLDivElement>(null);
   const addCliButtonRef = useRef<HTMLButtonElement>(null);
@@ -417,9 +414,6 @@ export function SessionsView({
   const [newProjectDirectory, setNewProjectDirectory] = useState<string | null>(
     null,
   );
-  useEffect(() => {
-    if (newProjectDirectory === null) setProjectPermission("default");
-  }, [newProjectDirectory]);
   const [selectedProjectModel, setSelectedProjectModel] = useState<AccountModelSelection | null>(
     null,
   );
@@ -904,7 +898,7 @@ export function SessionsView({
       const session = await agents.launch({
         label: "",
         executable: "",
-        ...sessionLaunchSettings(selection, "full"),
+        ...sessionLaunchSettings(selection),
         resumeSessionId: null,
         groupId: group.groupId,
         sandbox: source?.sandboxed !== false,
@@ -938,7 +932,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...sessionLaunchSettings(selection, "full"),
+        ...sessionLaunchSettings(selection),
         resumeSessionId: null,
         groupId: group.groupId,
         seedInput,
@@ -1104,16 +1098,10 @@ export function SessionsView({
     </div>
   ) : null;
 
-  function sessionDefinitionId(selection: AccountModelSelection | null): string {
-    return selection?.provider === "cliproxyapi"
-      ? cliProxyAgentFor(selection.model, installedAgents.map(definition => definition.id))
-      : selection?.definitionId ?? "";
-  }
-
-  function sessionLaunchSettings(selection: AccountModelSelection, permission: SessionPermission) {
+  function sessionLaunchSettings(selection: AccountModelSelection) {
     const settings = accountModelLaunchSettings(selection, accountProfiles, cliProxySettings.proxies,
       installedAgents.map(definition => definition.id));
-    return { ...settings, arguments: [...settings.arguments, ...sessionPermissionArguments(settings.definitionId, permission)] };
+    return { ...settings, arguments: [...settings.arguments, ...sessionPermissionArguments(settings.definitionId, "full")] };
   }
 
   async function launchNewProject() {
@@ -1138,7 +1126,7 @@ export function SessionsView({
         label: "",
         executable: "",
         // Proxy models may switch to Claude Code or Gemini CLI.
-        ...sessionLaunchSettings(selectedProjectModel, projectPermission),
+        ...sessionLaunchSettings(selectedProjectModel),
         resumeSessionId: null,
         groupId: null,
         seedInput: null,
@@ -1205,10 +1193,8 @@ export function SessionsView({
             proxyModels={cliProxyModels}
             onReloadProxyModels={reloadCliProxyModels}
             disabled={launchingProjectCli !== null}
-            onChange={selection => { setSelectedProjectModel(selection); setProjectPermission("default"); }}
+            onChange={setSelectedProjectModel}
           />
-          {!directProjectChat && <SessionPermissionField definitionId={sessionDefinitionId(selectedProjectModel)}
-            value={projectPermission} onChange={setProjectPermission} disabled={launchingProjectCli !== null} />}
           {directProjectChat ? <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>
             : installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
           {newProjectError && (
