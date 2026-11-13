@@ -4,6 +4,33 @@
 
 ---
 
+## [2026.11.14](https://github.com/NickYCLin/lattice-term/compare/v2026.11.13...v2026.11.14) (2026-11-13)
+
+
+### 🚀 新增功能
+
+* **connections:** 精簡卡片操作並展示完整標籤 ([0c61b86](https://github.com/NickYCLin/lattice-term/commit/0c61b86201d0b6ebfa844b5f0d7d05bd3fb46c49))
+
+
+### 🛠️ 問題修正
+
+* **accounts:** 切頁後仍保存帳號移除結果 ([d65f046](https://github.com/NickYCLin/lattice-term/commit/d65f046d6b966638e94a97c62cfa7438473a4fde))
+* **accounts:** 新增帳號時保留等待期間的清單異動 ([9080021](https://github.com/NickYCLin/lattice-term/commit/90800216e2765b78f932b466527c26675bcb7d91))
+* **accounts:** 達到帳號上限時停止新增與登入 ([3d81c95](https://github.com/NickYCLin/lattice-term/commit/3d81c95be159e6ae2715388f98c1597d9520842d))
+* **accounts:** 選擇目錄期間暫停帳號連結操作 ([dd5e867](https://github.com/NickYCLin/lattice-term/commit/dd5e867976a9c8b169c78484b766e831ca5eea40))
+* **accounts:** 金鑰異動後刷新帳號代理狀態 ([f529f31](https://github.com/NickYCLin/lattice-term/commit/f529f313f94d58feb75c5766779bfbfed84115b9))
+* **agents:** 修正安裝程序提早結束時未更新清單 ([4e16b37](https://github.com/NickYCLin/lattice-term/commit/4e16b3785ffab07d3856332f409d0f8b95c61cfe))
+* **agents:** 統一助理管理的啟動權限 ([8c73852](https://github.com/NickYCLin/lattice-term/commit/8c73852b5edb41db805909e89da99f66d025d4b1))
+* **agents:** 補齊新增帳號終端的預設完整權限 ([4d19502](https://github.com/NickYCLin/lattice-term/commit/4d195027631208ad747c01e06e4795e96b25fbb9))
+* **agents:** 避免舊查詢覆蓋最新工具清單 ([54c81b6](https://github.com/NickYCLin/lattice-term/commit/54c81b6159f69e90e72dd9c1c567c32c31db30e2))
+* **chat:** 避免終端交接期間提早恢復對話 ([56f38ec](https://github.com/NickYCLin/lattice-term/commit/56f38ec9aaf8876dafd291fa2542e16608b97847))
+* **cliproxy:** 保留金鑰刪除失敗的重試入口 ([763f219](https://github.com/NickYCLin/lattice-term/commit/763f219c84bdc61c21572fc75d105fe0e88861b7))
+* **cliproxy:** 避免舊查詢覆蓋最新金鑰狀態 ([1706c25](https://github.com/NickYCLin/lattice-term/commit/1706c25e28ac55246029473641231a2fb63416a3))
+* **cliproxy:** 避免誤報金鑰儲存與刪除失敗 ([49c3fcf](https://github.com/NickYCLin/lattice-term/commit/49c3fcf56675ecba2d1dbc423d7a5f0a22a6cd85))
+* **cliproxy:** 避免非同步儲存覆蓋其他代理 ([75c70c5](https://github.com/NickYCLin/lattice-term/commit/75c70c52fcb69da8f8effc5f1bcba3aa58f4b75f))
+* **sessions:** 隱藏啟動權限選單並固定全部允許 ([7b438e2](https://github.com/NickYCLin/lattice-term/commit/7b438e2ea99d969a3134982d84ea9f7e738b263d))
+* **sessions:** 首次使用保留完整工作區框架 ([a71a67f](https://github.com/NickYCLin/lattice-term/commit/a71a67f34eab8a71c6a0f4932bb19f941987c609))
+
 ## [2026.11.13](https://github.com/NickYCLin/lattice-term/compare/v2026.11.12...v2026.11.13) (2026-11-12)
 
 
