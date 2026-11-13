@@ -31,7 +31,7 @@ let root: Root | undefined;
 let container: Host;
 let values: Map<string, string>;
 
-async function mount(baseUrl?: string, hasKey = false) {
+async function mount(baseUrl?: string, hasKey = false, initialKeyRead?: Promise<boolean>) {
   values = new Map(baseUrl ? [[CLI_PROXY_SETTINGS_KEY, JSON.stringify({
     proxies: [{ id: "default", label: "", baseUrl }],
   })]] : []);
@@ -41,10 +41,18 @@ async function mount(baseUrl?: string, hasKey = false) {
     removeItem: (key: string) => values.delete(key),
   });
   container = installFakeDom();
+  vi.stubGlobal("__TAURI_INTERNALS__", { invoke: (command: string, args: unknown) => invoke(command, args) });
   document.createElementNS = ((_namespace: string | null, name: string) => document.createElement(name)) as typeof document.createElementNS;
   vi.stubGlobal("dispatchEvent", vi.fn());
   invoke.mockImplementation(async (command: string) => {
-    if (command === "cliproxy_key_exists") return hasKey;
+    if (command === "cliproxy_key_exists") {
+      if (initialKeyRead) {
+        const pending = initialKeyRead;
+        initialKeyRead = undefined;
+        return pending;
+      }
+      return hasKey;
+    }
     if (command === "cliproxy_gemini_auth") return { reachesProxy: true };
     if (command === "cliproxy_save_key") return;
     throw new Error(command);
@@ -99,6 +107,24 @@ it.each([
     : ["http://127.0.0.1:8317", "http://127.0.0.1:9317"]);
   expect(inputs()).toHaveLength(removesFirst ? 3 : 6);
   expect(values.get(CLI_PROXY_SETTINGS_KEY)).not.toContain("test-key");
+});
+
+it.each([true, false])("ignores an older key lookup after a newer lookup (key exists: %s)", async hasKey => {
+  let complete!: (value: boolean) => void;
+  const pending = new Promise<boolean>(resolve => { complete = resolve; });
+  await mount("http://127.0.0.1:8317", true, pending);
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("cliproxy_key_exists", { proxyId: "default" }));
+  await change(keyInput(), "status-race-test-key");
+  await saveKey();
+  if (!hasKey) {
+    invoke.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const removeKey = hostProps(container).find(props => props.onClick && props.children === "Delete the key")!;
+    await act(async () => removeKey.onClick!());
+  }
+  const canDelete = () => hostProps(container).some(props => props.onClick && props.children === "Delete the key");
+  expect(canDelete()).toBe(hasKey);
+  await act(async () => { complete(!hasKey); await pending; });
+  expect(canDelete()).toBe(hasKey);
 });
 
 it("lets a new user enter and save a key without probing the address first", async () => {

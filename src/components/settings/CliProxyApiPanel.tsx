@@ -46,6 +46,7 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   const [savedBaseUrl, setSavedBaseUrl] = useState(endpoint.baseUrl);
   const [key, setKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const keyReadVersion = useRef(0);
   const [probe, setProbe] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,10 +55,15 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
 
   const refreshKey = useCallback(async () => {
     if (!available) return;
+    const version = ++keyReadVersion.current;
     const { invoke } = await import("@tauri-apps/api/core");
-    setHasKey(await invoke<boolean>("cliproxy_key_exists", { proxyId: endpoint.id }));
+    const exists = await invoke<boolean>("cliproxy_key_exists", { proxyId: endpoint.id });
+    if (version === keyReadVersion.current) setHasKey(exists);
   }, [available, endpoint.id]);
-  useEffect(() => { void refreshKey().catch(() => {}); }, [refreshKey]);
+  useEffect(() => {
+    void refreshKey().catch(() => {});
+    return () => { keyReadVersion.current += 1; };
+  }, [refreshKey]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
