@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { CLI_PROXY_SETTINGS_KEY } from "../../app/cliProxyApi";
+import { CLI_PROXY_SETTINGS_CHANGED, CLI_PROXY_SETTINGS_KEY } from "../../app/cliProxyApi";
 import { installFakeDom } from "../../app/testFixtures/hookDom";
 import { CliProxyApiPanel } from "./CliProxyApiPanel";
 
@@ -17,6 +17,7 @@ type Props = {
   children?: unknown;
   type?: string;
   disabled?: boolean;
+  role?: string;
   value?: string;
   onChange?: (event: { currentTarget: { value: string } }) => void;
   onClick?: () => void;
@@ -41,6 +42,7 @@ async function mount(baseUrl?: string, hasKey = false, initialKeyRead?: Promise<
     removeItem: (key: string) => values.delete(key),
   });
   container = installFakeDom();
+  vi.stubGlobal("Event", class { constructor(public type: string) {} });
   vi.stubGlobal("__TAURI_INTERNALS__", { invoke: (command: string, args: unknown) => invoke(command, args) });
   document.createElementNS = ((_namespace: string | null, name: string) => document.createElement(name)) as typeof document.createElementNS;
   vi.stubGlobal("dispatchEvent", vi.fn());
@@ -109,7 +111,7 @@ it.each([
   expect(values.get(CLI_PROXY_SETTINGS_KEY)).not.toContain("test-key");
 });
 
-it.each([true, false])("ignores an older key lookup after a newer lookup (key exists: %s)", async hasKey => {
+it.each([true, false])("ignores an older key lookup after a confirmed key change (key exists: %s)", async hasKey => {
   let complete!: (value: boolean) => void;
   const pending = new Promise<boolean>(resolve => { complete = resolve; });
   await mount("http://127.0.0.1:8317", true, pending);
@@ -117,7 +119,7 @@ it.each([true, false])("ignores an older key lookup after a newer lookup (key ex
   await change(keyInput(), "status-race-test-key");
   await saveKey();
   if (!hasKey) {
-    invoke.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    invoke.mockResolvedValueOnce(true);
     const removeKey = hostProps(container).find(props => props.onClick && props.children === "Delete the key")!;
     await act(async () => removeKey.onClick!());
   }
@@ -142,6 +144,30 @@ it("lets a new user enter and save a key without probing the address first", asy
   expect(values.get(CLI_PROXY_SETTINGS_KEY)).toContain("http://127.0.0.1:8317");
   expect(values.get(CLI_PROXY_SETTINGS_KEY)).not.toContain("test-only-key");
   expect(keyInput().value).toBe("");
+});
+
+it.each([true, false])("keeps a confirmed key change usable when status reads fail (saving: %s)", async saving => {
+  await mount("http://127.0.0.1:8317", !saving);
+  await act(async () => { await vi.dynamicImportSettled(); });
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("cliproxy_key_exists", { proxyId: "default" }));
+  invoke.mockImplementation(async (command: string) => {
+    if (command === "cliproxy_key_exists") throw new Error("credential status unavailable");
+    if (command === "cliproxy_save_key") return;
+    if (command === "cliproxy_forget_key") return true;
+    throw new Error(command);
+  });
+  vi.mocked(window.dispatchEvent).mockClear();
+  if (saving) {
+    await change(keyInput(), "confirmed-test-key");
+    await saveKey();
+  } else {
+    const forget = hostProps(container).find(props => props.onClick && props.children === "Delete the key")!;
+    await act(async () => forget.onClick!());
+  }
+  expect(hostProps(container).filter(props => props.role === "alert")).toEqual([]);
+  expect(keyInput().disabled).toBe(false);
+  expect(hostProps(container).some(props => props.children === "Delete the key" && props.onClick)).toBe(saving);
+  expect(vi.mocked(window.dispatchEvent).mock.calls.some(([event]) => event.type === CLI_PROXY_SETTINGS_CHANGED)).toBe(true);
 });
 
 it("allows replacing a stored key and binds it to the address currently shown", async () => {

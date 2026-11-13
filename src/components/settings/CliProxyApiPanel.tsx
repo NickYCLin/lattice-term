@@ -85,18 +85,20 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   const saveKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("cliproxy_save_key", { proxyId: endpoint.id, baseUrl, key });
+    keyReadVersion.current += 1;
+    setHasKey(true);
     onChange({ ...endpoint, label: label.trim(), baseUrl: baseUrl.trim() });
     setSavedBaseUrl(baseUrl.trim());
     setProbe(null);
     setKey("");
-    await refreshKey();
     window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
   const forgetKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id });
-    await refreshKey();
+    keyReadVersion.current += 1;
+    setHasKey(false);
     window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
