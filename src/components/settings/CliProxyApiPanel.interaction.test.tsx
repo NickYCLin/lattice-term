@@ -72,6 +72,35 @@ afterEach(async () => {
   invoke.mockReset();
 });
 
+it.each([
+  { command: "cliproxy_save_key", button: "Save the key", removesFirst: false },
+  { command: "cliproxy_probe", button: "Test and save", removesFirst: false },
+  { command: "cliproxy_forget_key", button: "Remove this proxy", removesFirst: true },
+])("preserves another saved proxy while $command is pending", async ({ command, button, removesFirst }) => {
+  await mount("http://127.0.0.1:8317");
+  await change(keyInput(), "first-test-key");
+  let complete!: (value: unknown) => void;
+  const pending = new Promise(resolve => { complete = resolve; });
+  invoke.mockImplementationOnce(() => pending);
+  const firstAction = hostProps(container).find(props => props.onClick && props.children === button)!;
+  expect(firstAction).toBeDefined();
+  await act(async () => { firstAction.onClick!(); });
+  expect(invoke).toHaveBeenLastCalledWith(command, expect.any(Object));
+  const add = hostProps(container).find(props => props.onClick && props.children === "Add a proxy")!;
+  await act(async () => add.onClick!());
+  await change(inputs()[4], "http://127.0.0.1:9317");
+  await change(inputs()[5], "second-test-key");
+  const secondSave = hostProps(container).filter(props => props.onClick && props.children === "Save the key")[1];
+  await act(async () => secondSave.onClick!());
+  await act(async () => { complete({ healthy: true, status: 200 }); await pending; });
+  const saved = JSON.parse(values.get(CLI_PROXY_SETTINGS_KEY)!);
+  expect(saved.proxies.map((proxy: { baseUrl: string }) => proxy.baseUrl)).toEqual(removesFirst
+    ? ["http://127.0.0.1:9317"]
+    : ["http://127.0.0.1:8317", "http://127.0.0.1:9317"]);
+  expect(inputs()).toHaveLength(removesFirst ? 3 : 6);
+  expect(values.get(CLI_PROXY_SETTINGS_KEY)).not.toContain("test-key");
+});
+
 it("lets a new user enter and save a key without probing the address first", async () => {
   await mount();
   const add = hostProps(container).find(props => props.onClick && props.children === "Add a proxy")!;

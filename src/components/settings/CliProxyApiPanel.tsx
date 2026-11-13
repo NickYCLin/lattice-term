@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CLI_PROXY_DEFAULT_BASE_URL,
   CLI_PROXY_LIMIT,
@@ -220,12 +220,15 @@ function savedProxies(): readonly CliProxyEndpoint[] {
 export function CliProxyApiPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
   const [proxies, setProxies] = useState<readonly CliProxyEndpoint[]>(savedProxies);
+  const currentProxies = useRef(proxies);
 
   // Drafts without an address stay in the page; only accepted addresses are
   // written, so a half-typed entry never reaches a picker.
-  const persist = (next: readonly CliProxyEndpoint[]) => {
-    setProxies(next);
+  const persist = (update: (current: readonly CliProxyEndpoint[]) => readonly CliProxyEndpoint[]) => {
+    const next = update(currentProxies.current);
     if (typeof localStorage !== "undefined") saveCliProxySettings(localStorage, { proxies: next });
+    currentProxies.current = next;
+    setProxies(next);
   };
 
   return <section className="panel glass" aria-label={t("settings.cliProxy.title")}>
@@ -236,7 +239,8 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
       </div>
       {available && <div className="panel__actions">
         <button type="button" className="button button--primary" disabled={proxies.length >= CLI_PROXY_LIMIT}
-          onClick={() => persist([...proxies, { id: newCliProxyId(), label: "", baseUrl: "" }])}>
+          onClick={() => persist(current => current.length >= CLI_PROXY_LIMIT ? current
+            : [...current, { id: newCliProxyId(), label: "", baseUrl: "" }])}>
           {t("settings.cliProxy.add")}</button>
       </div>}
     </header>
@@ -250,8 +254,8 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
             key={endpoint.id}
             endpoint={endpoint}
             available={available}
-            onChange={(next) => persist(proxies.map((entry) => (entry.id === next.id ? next : entry)))}
-            onRemove={() => persist(proxies.filter((entry) => entry.id !== endpoint.id))}
+            onChange={(next) => persist(current => current.map((entry) => (entry.id === next.id ? next : entry)))}
+            onRemove={() => persist(current => current.filter((entry) => entry.id !== endpoint.id))}
           />
         ))}
         <p className="field__hint">{t("settings.cliProxy.limit", { count: CLI_PROXY_LIMIT })}</p>
