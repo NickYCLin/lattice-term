@@ -97,7 +97,7 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   // The key would otherwise outlive the entry that explains what it unlocks.
   const remove = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id }).catch(() => false);
+    await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id });
     onRemove();
   });
 

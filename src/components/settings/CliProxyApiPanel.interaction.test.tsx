@@ -141,3 +141,18 @@ it("preserves the entered key and saved address when credential storage fails", 
   expect(values.get(CLI_PROXY_SETTINGS_KEY)).toContain("http://127.0.0.1:8317");
   expect(hostProps(container).some(props => props.children === "Error: credential store unavailable")).toBe(true);
 });
+
+it.each([true, false])("keeps the proxy retryable when key deletion fails (stored key: %s)", async hasKey => {
+  await mount("http://127.0.0.1:8317", hasKey);
+  const saved = values.get(CLI_PROXY_SETTINGS_KEY);
+  const remove = () => hostProps(container).find(props => props.onClick && props.children === "Remove this proxy")!;
+  invoke.mockRejectedValueOnce(new Error("credential store locked"));
+  await act(async () => remove().onClick!());
+  expect(values.get(CLI_PROXY_SETTINGS_KEY)).toBe(saved);
+  expect(remove().disabled).toBe(false);
+  expect(hostProps(container).some(props => props.children === "Error: credential store locked")).toBe(true);
+  invoke.mockResolvedValueOnce(false);
+  await act(async () => remove().onClick!());
+  expect(values.has(CLI_PROXY_SETTINGS_KEY)).toBe(false);
+  expect(inputs()).toHaveLength(0);
+});
