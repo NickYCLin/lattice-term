@@ -353,14 +353,18 @@ export function AgentsView({
       configDirectory,
       managed: linked === null,
     };
-    const existing = linked && accountProfiles.find(candidate => candidate.definitionId === definition.id && candidate.configDirectory === configDirectory);
+    const currentProfiles = typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage);
+    const existing = linked && currentProfiles.find(candidate => candidate.definitionId === definition.id && candidate.configDirectory === configDirectory);
     if (existing) {
+      setAccountProfiles(currentProfiles);
       setSelectedAccountProfile(current => ({ ...current, [definition.id]: existing.id }));
       setAccountProfileDefinition(null);
       return;
     }
     // Persist before opening the terminal, which may unmount the Fleet view.
-    const profiles = [...accountProfiles, profile];
+    const profiles = [...currentProfiles, profile];
     if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
     setAccountProfiles(profiles);
     setSelectedAccountProfile((current) => ({
