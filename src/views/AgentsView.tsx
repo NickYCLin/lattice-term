@@ -471,11 +471,15 @@ export function AgentsView({
         cols: 120,
         rows: 32,
       });
-      let stopWatching = () => {};
-      stopWatching = agents.onClosed(session.sessionId, () => {
-        stopWatching();
+      if (session.closedReason) {
         void agents.refreshCatalog();
-      });
+      } else {
+        let stopWatching = () => {};
+        stopWatching = agents.onClosed(session.sessionId, () => {
+          stopWatching();
+          void agents.refreshCatalog();
+        });
+      }
       onOpen(session.sessionId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
