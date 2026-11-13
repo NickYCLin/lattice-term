@@ -1053,6 +1053,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "Ajout...",
   "agents.account.profileHint": "Chaque compte conserve son propre état de connexion, prêt lorsque vous le sélectionnez la prochaine fois. LatticeTerm gère automatiquement cette option; aucune sélection de dossier n'est nécessaire.",
   "agents.account.profileFailed": "Impossible d'ajouter le compte : {detail}",
+  "agents.account.profileLimit": "Vous pouvez enregistrer jusqu’à {count} comptes. Supprimez un compte avant d’en ajouter un autre.",
   "agents.account.loginLaunchFailed": "Le compte a été ajouté, mais son terminal de connexion n'a pas pu s'ouvrir. Appuyez sur Lancement avec ce compte sélectionné pour réessayer: {detail}",
   "agents.account.removeAction": "Supprimer le compte",
   "agents.account.removeTitle": "Supprimer le compte{name}C'est-à-dire qu'il s'agit de",

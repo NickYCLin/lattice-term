@@ -33,6 +33,69 @@ function hostProps(node: HostNode): Record<string, unknown>[] {
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it.each(["isolated", "linked", "concurrent", "existing", "default"])("enforces the account limit without blocking existing accounts (%s)", async mode => {
+  const container = installFakeDom();
+  vi.stubGlobal("dispatchEvent", vi.fn());
+  vi.stubGlobal("addEventListener", vi.fn());
+  vi.stubGlobal("removeEventListener", vi.fn());
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((name: string) => {
+    const element = createElement(name);
+    if (name === "select") Object.defineProperty(element, "options", { value: [] });
+    return element;
+  });
+  document.createElementNS = ((_namespace: string | null, name: string) => document.createElement(name)) as typeof document.createElementNS;
+  const profiles: ChatAccountProfile[] = Array.from({ length: 24 }, (_, index) => ({
+    id: "account-" + index, definitionId: "codex", name: "Account " + index,
+    configDirectory: mode === "existing" && index === 0 ? "C:/fixture/linked" : "C:/fixture/account-" + index,
+  }));
+  const restoreStorage = installFakeStorage({ [CHAT_ACCOUNT_PROFILES_KEY]: JSON.stringify(mode === "concurrent" ? profiles.slice(0, 23) : profiles) });
+  let finishLookup!: (value: unknown) => void;
+  const lookup = new Promise(resolve => { finishLookup = resolve; });
+  const invoke = vi.fn(() => lookup);
+  vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+  const agents = fakeAgentApi({ catalog: [fakeDefinition({ id: "codex" })] });
+  const onOpen = vi.fn();
+  const mcp = {
+    daemon: { status: { running: false, mcpOutputScopes: false, shared: [], history: null } },
+    setAccess: vi.fn(), pending: new Set(), failures: {}, retry: vi.fn(),
+  } as unknown as AgentMcpAccessApi;
+  const root = createRoot(container as unknown as Element);
+  const button = (label: string) => {
+    const found = hostProps(container as unknown as HostNode).find(props => props.children === label && typeof props.onClick === "function");
+    expect(found, label).toBeDefined();
+    return found!.onClick as () => Promise<void>;
+  };
+  try {
+    await act(async () => { root.render(<I18nProvider locale="zh-TW"><AgentsView agents={agents} mcp={mcp} remote={fakeRemoteApi()} sandboxAvailable={false} onOpen={onOpen} /></I18nProvider>); });
+    await act(async () => { await button("新增另一個帳號…")(); });
+    let outcome!: Promise<unknown>;
+    await act(async () => {
+      outcome = button(mode === "isolated" || mode === "concurrent" ? "create-account" : "link-account")().then(() => null, reason => reason);
+      await vi.dynamicImportSettled();
+    });
+    if (mode === "isolated") expect(invoke).not.toHaveBeenCalled();
+    if (mode === "concurrent") saveChatAccountProfiles(localStorage, profiles);
+    let error: unknown;
+    await act(async () => {
+      finishLookup(mode === "isolated" || mode === "concurrent" ? "C:/fixture/new" : { configDirectory: "C:/fixture/linked", isDefault: mode === "default" });
+      error = await outcome;
+    });
+    if (mode === "existing" || mode === "default") expect(error).toBeNull();
+    else {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("24");
+      expect(hostProps(container as unknown as HostNode).some(props => props.children === "create-account")).toBe(true);
+    }
+    expect(loadChatAccountProfiles(localStorage)).toEqual(profiles);
+    expect(agents.launch).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    restoreStorage();
+  }
+});
+
 it.each([
   ["codex", ["--ask-for-approval", "never", "--sandbox", "danger-full-access"]],
   ["claude", ["--permission-mode", "bypassPermissions"]],

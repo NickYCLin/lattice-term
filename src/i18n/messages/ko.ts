@@ -1053,6 +1053,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "추가 중…",
   "agents.account.profileHint": "각 계정은 자체 서명 상태 유지, 다음 시간을 선택할 때 준비. LatticeTerm이 자동으로 관리; 폴더 선택이 필요하지 않습니다.",
   "agents.account.profileFailed": "계정을 추가 할 수 없습니다 : {detail}",
+  "agents.account.profileLimit": "계정은 최대 {count}개까지 저장할 수 있습니다. 새 계정을 추가하려면 기존 계정을 삭제하세요.",
   "agents.account.loginLaunchFailed": "계정이 추가되었지만 로그인 터미널이 열 수 없습니다. Retry에 선택한이 계정으로 실행하십시오. {detail}",
   "agents.account.removeAction": "계정 제거",
   "agents.account.removeTitle": "계정 제거 “{name}”",

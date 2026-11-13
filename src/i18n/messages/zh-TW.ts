@@ -1472,6 +1472,7 @@ export const zhTW = {
   "agents.account.addingProfile": "正在加入…",
   "agents.account.profileHint": "各帳號的登入狀態會分開保存，下次選取帳號即可使用。LatticeTerm 會自動管理，無需選擇資料夾。",
   "agents.account.profileFailed": "無法新增帳號：{detail}",
+  "agents.account.profileLimit": "最多可儲存 {count} 個帳號，請先移除一個帳號再新增。",
   "agents.account.loginLaunchFailed": "帳號已加入，但登入視窗未能開啟。請用這個帳號按「啟動」重試：{detail}",
   "agents.account.removeAction": "移除帳號",
   "agents.account.removeTitle": "移除帳號「{name}」",

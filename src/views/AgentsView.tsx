@@ -14,6 +14,7 @@ import { copyTextToClipboard } from "../app/clipboardText";
 import { displayPath } from "../app/displayPath";
 import { sessionPermissionArguments } from "../app/sessionPermissions";
 import {
+  MAX_CHAT_ACCOUNT_PROFILES,
   loadChatAccountProfiles,
   profileCapable,
   profilesFor,
@@ -331,6 +332,11 @@ export function AgentsView({
     nativeDirectory?: string,
   ) {
     if (!profileCapable(definition.id)) return;
+    if (nativeDirectory === undefined && (typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage)).length >= MAX_CHAT_ACCOUNT_PROFILES) {
+      throw new Error(t("agents.account.profileLimit", { count: MAX_CHAT_ACCOUNT_PROFILES }));
+    }
     const id = crypto.randomUUID();
     const { invoke } = await import("@tauri-apps/api/core");
     const linked = nativeDirectory === undefined ? null : await invoke<{ configDirectory: string; isDefault: boolean }>("agent_account_native_directory", {
@@ -364,6 +370,9 @@ export function AgentsView({
       return;
     }
     // Persist before opening the terminal, which may unmount the Fleet view.
+    if (currentProfiles.length >= MAX_CHAT_ACCOUNT_PROFILES) {
+      throw new Error(t("agents.account.profileLimit", { count: MAX_CHAT_ACCOUNT_PROFILES }));
+    }
     const profiles = [...currentProfiles, profile];
     if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
     setAccountProfiles(profiles);

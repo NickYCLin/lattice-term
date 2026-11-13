@@ -1053,6 +1053,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "In den Warenkorb",
   "agents.account.profileHint": "Jedes Konto hält seinen eigenen Anmeldezustand bereit, wenn Sie es beim nächsten Mal auswählen. LatticeTerm verwaltet dies automatisch; keine Ordnerauswahl ist erforderlich.",
   "agents.account.profileFailed": "Konnte das Konto nicht hinzufügen: {detail}",
+  "agents.account.profileLimit": "Du kannst bis zu {count} Konten speichern. Entferne ein Konto, bevor du ein weiteres hinzufügst.",
   "agents.account.loginLaunchFailed": "Das Konto wurde hinzugefügt, aber sein Sign-in-Terminal konnte nicht öffnen. Drücken Sie Start mit diesem Konto ausgewählt, um wieder zu starten: {detail}",
   "agents.account.removeAction": "Konto löschen",
   "agents.account.removeTitle": "Konto entfernen “{name}”",

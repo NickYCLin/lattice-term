@@ -1057,6 +1057,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "追加する...",
   "agents.account.profileHint": "各アカウントは、次の時間を選択すると、独自のサインイン状態を保持します。 LatticeTermはこれを自動的に管理します。フォルダーの選択は必要ありません。",
   "agents.account.profileFailed": "アカウントを追加できません: {detail}",
+  "agents.account.profileLimit": "保存できるアカウントは最大 {count} 個です。追加する前に既存のアカウントを削除してください。",
   "agents.account.loginLaunchFailed": "アカウントは追加されましたが、そのサインインターミナルは開かなかった可能性があります。 再試行するために選択したこのアカウントで起動を押します: {detail}",
   "agents.account.removeAction": "アカウントの削除",
   "agents.account.removeTitle": "「{name}」のアカウントを削除",

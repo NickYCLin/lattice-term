@@ -1077,6 +1077,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "正在加入…",
   "agents.account.profileHint": "各帐号的登录状态会分开保存，下次选取帐号即可使用。LatticeTerm 会自动管理，无需选择文件夹。",
   "agents.account.profileFailed": "无法添加帐号：{detail}",
+  "agents.account.profileLimit": "最多可保存 {count} 个帐号，请先移除一个帐号再新增。",
   "agents.account.loginLaunchFailed": "帐号已加入，但登录窗口未能打开。请用这个帐号按「启动」重试：{detail}",
   "agents.account.removeAction": "移除帐号",
   "agents.account.removeTitle": "移除帐号「{name}」",

@@ -1053,6 +1053,7 @@ export const messages: Messages = {
   "agents.account.addingProfile": "Añadiendo...",
   "agents.account.profileHint": "Cada cuenta mantiene su propio estado de inicio de sesión, listo cuando lo seleccione la próxima vez. LatticeTerm administra esto automáticamente; no se necesita selección de carpetas.",
   "agents.account.profileFailed": "No podía añadir la cuenta: {detail}",
+  "agents.account.profileLimit": "Puedes guardar hasta {count} cuentas. Elimina una cuenta antes de añadir otra.",
   "agents.account.loginLaunchFailed": "La cuenta fue agregada, pero su terminal de inicio de sesión no pudo abrir. Lanzamiento de prensa con esta cuenta seleccionada para reingresar: {detail}",
   "agents.account.removeAction": "Eliminar la cuenta",
   "agents.account.removeTitle": "Eliminar la cuenta “{name}”",
