@@ -432,6 +432,7 @@ export const en: Messages = {
   "row.duplicate": "Duplicate {name}",
   "row.delete": "Delete {name}",
   "row.details": "Show details for {name}",
+  "row.actions": "Actions for {name}",
 
   // Add and edit form -----------------------------------------------------
   "form.addTitle": "New connection",

@@ -38,7 +38,7 @@ describe("mobile connection layout", () => {
   });
   it("separates card details, connection routes and management without shrinking touch targets", () => {
     expect(connectionStyles).toMatch(
-      /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "primary" "foot";/s,
+      /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "tags" "primary";/s,
     );
     expect(connectionStyles).toMatch(
       /\.connection-card__foot\s*\{[^}]*flex-wrap:\s*wrap;/s,
@@ -46,6 +46,13 @@ describe("mobile connection layout", () => {
     expect(mobileStyles).toMatch(
       /\.app--mobile \.icon-button--sm\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/s,
     );
+  });
+
+  it("keeps desktop connection and SQL buttons content-sized", () => {
+    expect(connectionStyles).toMatch(/\.connection-card__head\s*\{[^}]*padding-right: max\(2rem, var\(--control-height\)\);/s);
+    expect(connectionStyles).toMatch(/\.connection-card__primary > \.button\s*\{[^}]*flex: 0 1 auto;[^}]*min-height: calc\(1\.875rem/s);
+    expect(databaseStyles).not.toMatch(/\.connection-card--database \.connection-card__primary > \.button\s*\{[^}]*min-height: 2\.75rem/s);
+    expect(connectionStyles).toMatch(/\.connection-card__management\[open\]\s*\{[^}]*position: static;/s);
   });
 
   it("allows routes and metadata to wrap without squeezing the host heading", () => {

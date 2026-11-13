@@ -159,6 +159,7 @@ export const messages: Messages = {
   "row.duplicate": "{name} 복제",
   "row.delete": "삭제 {name}",
   "row.details": "{name}에 대한 세부 정보보기",
+  "row.actions": "{name}의 추가 작업",
   "form.addTitle": "새로운 연결",
   "form.editTitle": "연결 편집",
   "form.addEyebrow": "추가",

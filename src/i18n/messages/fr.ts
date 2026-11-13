@@ -159,6 +159,7 @@ export const messages: Messages = {
   "row.duplicate": "Dupliquer {name}",
   "row.delete": "Supprimer {name}",
   "row.details": "Afficher les détails pour {name}",
+  "row.actions": "Autres actions pour {name}",
   "form.addTitle": "Nouvelle connexion",
   "form.editTitle": "Modifier la connexion",
   "form.addEyebrow": "Ajouter",

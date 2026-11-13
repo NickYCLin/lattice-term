@@ -159,6 +159,7 @@ export const messages: Messages = {
   "row.duplicate": "重複 {name}",
   "row.delete": "削除 {name}",
   "row.details": "{name} の詳細情報を表示",
+  "row.actions": "{name}のその他の操作",
   "form.addTitle": "新しい接続",
   "form.editTitle": "接続の編集",
   "form.addEyebrow": "追加",

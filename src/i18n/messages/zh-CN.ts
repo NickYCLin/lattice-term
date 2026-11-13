@@ -179,6 +179,7 @@ export const messages: Messages = {
   "row.duplicate": "拷贝「{name}」",
   "row.delete": "删除「{name}」",
   "row.details": "查看「{name}」的详细数据",
+  "row.actions": "{name}的更多操作",
   "form.addTitle": "添加连接",
   "form.editTitle": "编辑连接",
   "form.addEyebrow": "添加",

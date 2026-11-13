@@ -128,7 +128,7 @@ describe("ConnectionsView", () => {
         />
       </I18nProvider>,
     );
-    expect(markup.match(/<details /g)).toHaveLength(1);
+    expect(markup.match(/<details class="connection-group"/g)).toHaveLength(1);
     expect(markup).toContain("第一組");
     expect(markup).not.toContain("第二組");
   });

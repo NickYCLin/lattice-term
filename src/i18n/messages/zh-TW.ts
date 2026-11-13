@@ -422,6 +422,7 @@ export const zhTW = {
   "row.duplicate": "複製「{name}」",
   "row.delete": "刪除「{name}」",
   "row.details": "查看「{name}」的詳細資料",
+  "row.actions": "{name}的更多操作",
 
   // 新增／編輯表單 --------------------------------------------------------
   "form.addTitle": "新增連線",
