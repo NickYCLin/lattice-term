@@ -377,7 +377,7 @@ export function AgentsView({
         // not rendered yet. This is a fresh, visible session for signing in.
         definitionId: definition.id,
         executable: "",
-        arguments: [],
+        arguments: sessionPermissionArguments(definition.id, "full"),
         resumeSessionId: null,
         profileConfigPath: profile.configDirectory,
         label: `${definition.label} · ${profile.name}`,
