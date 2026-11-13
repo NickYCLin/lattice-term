@@ -1,6 +1,5 @@
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useSessionClose } from "../app/useSessionClose";
-import { FileDropZone } from "../components/files/FileDropZone";
 import { localFileError, readSelectedText, type UploadFile } from "../app/localFiles";
 /** Unified workspace for text terminals and graphical remote sessions. */
 
@@ -40,7 +39,6 @@ import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyAp
 import { useAccountProfileStatus } from "../app/useAccountProfileStatus";
 import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { AccountModelField } from "../components/agents/AccountModelField";
-import { QuickChatChoices } from "../components/sessions/QuickChatChoices";
 import { SessionPermissionField } from "../components/sessions/SessionPermissionField";
 import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
 import { displayPath } from "../app/displayPath";
@@ -91,7 +89,7 @@ import {
 } from "../app/workspaceTransfer";
 import { exportTextFile } from "../app/fileExport";
 import { useI18n } from "../i18n/context";
-import { Callout, EmptyState } from "../components/common/Callout";
+import { Callout } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import {
   SessionProjectSidebar,
@@ -107,7 +105,6 @@ import {
   CloseIcon,
   EditIcon,
   FolderIcon,
-  ImportIcon,
   PlusIcon,
   ScreenShareIcon,
   TerminalIcon,
@@ -2085,66 +2082,22 @@ export function SessionsView({
               onClick={() => setMobileTreeOpen(false)}
             />
           )}
-          {sidebarProjects.length > 0 && projectSidebar}
+          {projectSidebar}
           <section className="terminal-project-workspace">
-            <EmptyState
-              icon={<TerminalIcon size={26} />}
-              title={t("terminal.empty.title")}
-              description={t(
-                sidebarProjects.length > 0
-                  ? "terminal.empty.savedBody"
-                  : "terminal.empty.body",
-              )}
-              actions={
-                <>
-                  {sidebarProjects.length > 0 && (
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      onClick={() => setMobileTreeOpen(true)}
-                    >
-                      <FolderIcon size={14} />
-                      {t("terminal.projects")}
-                    </button>
-                  )}
-                  <PathDropZone compact kind="directory" disabled={choosingProject} onSelect={path => chooseProjectDirectory(path)}>
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    disabled={choosingProject}
-                    onClick={() => void chooseProjectDirectory()}
-                  >
-                    <FolderIcon size={14} />
-                    {t(
-                      choosingProject
-                        ? "terminal.projects.choosing"
-                        : "terminal.projects.add",
-                    )}
-                  </button>
-                  </PathDropZone>
-                  <FileDropZone compact disabled={importingWorkspace || workspaceImport !== null} onSelect={readWorkspaceImport}>
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={() => workspaceImportInputRef.current?.click()}
-                  >
-                    <ImportIcon size={14} />
-                    {t("terminal.projects.import")}
-                  </button>
-                  </FileDropZone>
-                  {homeDirectory && (installedAgents.length > 0 || (onStartApiChat && cliProxySettings.proxies.length > 0)) && (
-                  <div className="terminal-empty-quick">
-                    <small>{t("terminal.empty.quickChat")}</small>
-                    <div className="terminal-empty-quick__list">
-                      <QuickChatChoices installedAgents={installedAgents} modelOptions={modelOptions}
-                        onLaunch={definition => void launchQuickChat(defaultModelSelection(definition.id))}
-                        onLaunchProxy={selection => void launchQuickChat(selection)} />
-                    </div>
-                  </div>
-                  )}
-                </>
-              }
-            />
+            <header className="session-header session-header--empty">
+              <button
+                type="button"
+                className="icon-button icon-button--sm session-header__tree-toggle"
+                onClick={() => setMobileTreeOpen(true)}
+                aria-label={t("terminal.projects")}
+                aria-haspopup="dialog"
+                aria-expanded={mobileTreeOpen}
+                aria-controls="session-project-sidebar"
+                title={t("terminal.projects")}
+              >
+                <FolderIcon size={14} />
+              </button>
+            </header>
           </section>
         </div>
         {newProjectDialog}

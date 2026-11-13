@@ -5,6 +5,7 @@ import { I18nProvider } from "../i18n";
 import { fakeAgentApi, fakeChatApi, fakeAutomationsApi, fakeDefinition, fakeSession, fakeThread, installFakeStorage } from "../app/testFixtures/agentApis";
 import { installFakeDom } from "../app/testFixtures/hookDom";
 import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
+import { accountModelSourceKey } from "../app/accountModels";
 import { SessionsView } from "./SessionsView";
 import { ChatView } from "./ChatView";
 import { sessionPermissionArguments, type SessionPermission } from "../app/sessionPermissions";
@@ -77,6 +78,49 @@ function props(node: TestNode): Record<string, any> {
   return key ? node[key] as Record<string, any> : {};
 }
 
+it("keeps the workspace frame and sidebar actions available on first use", async () => {
+  const container = installFakeDom();
+  const createElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((...args) => Object.assign(createElement(...args), { options: [] }));
+  vi.stubGlobal("addEventListener", () => {});
+  vi.stubGlobal("removeEventListener", () => {});
+  const restore = installFakeStorage();
+  const root = createRoot(container as unknown as Element);
+  const agents = fakeAgentApi({ catalog: [], sessions: [] });
+  const emptyRemote = { sessions: [], lastClosed: null };
+  const viewProps = { agents, ssh: emptyRemote, sftp: emptyRemote, remote: emptyRemote, rdp: emptyRemote,
+    vnc: emptyRemote, activeSessionId: null, onSelect: vi.fn(), theme: "dark", sessionRestoreComplete: true,
+    restoredWorkspaceSessions: [], unrestoredWorkspaceSessions: [] } as unknown as Parameters<typeof SessionsView>[0];
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SessionsView {...viewProps} /></I18nProvider>));
+    const sidebar = () => elements(container).find(node => props(node).id === "session-project-sidebar");
+    expect(sidebar()).toBeDefined();
+    for (const label of ["新增自訂資料夾", "管理工作項目", "快速對話", "加入其他本機專案"]) {
+      expect(elements(sidebar()!).some(node => props(node)["aria-label"] === label)).toBe(true);
+    }
+    expect(elements(sidebar()!).some(node => props(node).type === "search")).toBe(true);
+    const workspace = elements(container).find(node => props(node).className === "terminal-project-workspace");
+    expect(workspace).toBeDefined();
+    expect(elements(workspace!).some(node => String(props(node).className ?? "").includes("empty-state"))).toBe(false);
+    expect(elements(container).some(node => props(node).className === "session-tree__project")).toBe(false);
+    const toggle = elements(workspace!).find(node => props(node)["aria-controls"] === "session-project-sidebar");
+    expect(props(toggle!)["aria-expanded"]).toBe(false);
+    await act(async () => props(toggle!).onClick());
+    expect(props(sidebar()!).role).toBe("dialog");
+    expect(props(toggle!)["aria-expanded"]).toBe(true);
+    const scrim = elements(container).find(node => props(node).className === "session-projects-scrim");
+    await act(async () => props(scrim!).onClick());
+    expect(props(sidebar()!).role).toBeUndefined();
+    const choose = elements(sidebar()!).find(node => props(node)["aria-label"] === "加入其他本機專案");
+    await act(async () => props(choose!).onClick());
+    expect(elements(container).some(node => props(node).value === "D:/project/test")).toBe(true);
+    expect(agents.launch).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
+
 it.each([
   { catalog: [], direct: true, folder: false, permission: "default" },
   { catalog: [fakeDefinition({ installed: false, installedPath: null })], direct: true, folder: false, permission: "default" },
@@ -103,17 +147,21 @@ it.each([
     restoredWorkspaceSessions: [], unrestoredWorkspaceSessions: [], onStartApiChat } as unknown as Parameters<typeof SessionsView>[0];
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><SessionsView {...viewProps} /></I18nProvider>));
-    const quick = elements(container).find(node => String(props(node).className ?? "").includes("button--sm")
-      && Array.isArray(props(node).children) && props(node).children.some((child: any) => child?.props?.title === "工作代理"));
+    const quick = elements(container).find(node => props(node)["aria-label"] === "快速對話");
     expect(quick).toBeDefined();
     if (folder) {
-      const choose = elements(container).find(node => props(node).className === "button button--primary"
-        && props(node).children?.includes?.("加入其他本機專案"));
+      const choose = elements(container).find(node => props(node)["aria-label"] === "加入其他本機專案");
       expect(choose).toBeDefined();
       await act(async () => props(choose!).onClick());
     } else {
       await act(async () => props(quick!).onClick());
     }
+    const proxyKey = accountModelSourceKey({ definitionId: "codex", accountProfileId: null,
+      provider: "cliproxyapi", proxyId: "backup", model: "" });
+    const source = elements(container).find(node => props(node).onChange
+      && elements(node).some(child => props(child).value === proxyKey && props(child).children === "工作代理"));
+    expect(source).toBeDefined();
+    await act(async () => props(source!).onChange({ currentTarget: { value: proxyKey } }));
     const modelInput = elements(container).find(node => props(node).placeholder === "gpt-5.6-sol");
     expect(modelInput).toBeDefined();
     const launch = () => elements(container).find(node => props(node).className === "button button--primary"
@@ -137,8 +185,8 @@ it.each([
     }
     await act(async () => props(launch()!).onClick());
     if (direct) {
-      expect(onStartApiChat).toHaveBeenCalledExactlyOnceWith({ definitionId: "codex", accountProfileId: null,
-        provider: "cliproxyapi", proxyId: "backup", model: "proxy-model" }, folder ? "D:/project/test" : "C:/Users/test");
+      expect(onStartApiChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ definitionId: "codex", accountProfileId: null,
+        provider: "cliproxyapi", proxyId: "backup", model: "proxy-model" }), folder ? "D:/project/test" : "C:/Users/test");
       expect(agents.launch).not.toHaveBeenCalled();
     } else {
       expect(onStartApiChat).not.toHaveBeenCalled();

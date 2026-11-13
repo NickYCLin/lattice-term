@@ -2506,6 +2506,14 @@
   display: none;
 }
 
+.session-header--empty {
+  display: none;
+}
+
+.app--mobile .session-header--empty {
+  display: flex;
+}
+
 .session-header__crumbs {
   display: flex;
   align-items: center;
