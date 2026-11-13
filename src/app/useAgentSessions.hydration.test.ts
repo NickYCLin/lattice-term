@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeSession } from "./testFixtures/agentApis";
+import { fakeDefinition, fakeSession } from "./testFixtures/agentApis";
 import { useAgentSessions } from "./useAgentSessions";
 
 // A small hook host keeps state and effects across renders without requiring
@@ -92,6 +92,95 @@ describe("Agent Fleet hydration and MCP permissions", () => {
         default: throw new Error(`Unexpected command ${command}`);
       }
     });
+  });
+
+  it.each(["success", "failure"])("ignores an older catalog refresh finishing with %s", async outcome => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const older = deferred<ReturnType<typeof fakeDefinition>[]>();
+    const newest = fakeDefinition({ installed: true, label: "Newly installed" });
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    let catalogCalls = 0;
+    host.invoke.mockImplementation(async (command, args) => {
+      if (command === "agent_catalog") {
+        if (++catalogCalls === 1) {
+          await older.promise;
+          if (outcome === "failure") throw new Error("Old catalog failed");
+          return [];
+        }
+        return [newest];
+      }
+      return originalInvoke(command, args);
+    });
+    const pending = render().refreshCatalog();
+    await vi.waitFor(() => expect(catalogCalls).toBe(1));
+    await render().refreshCatalog();
+    older.resolve([]);
+    await pending;
+    expect(render().catalog).toEqual([newest]);
+    expect(render().mode).toBe("ready");
+    expect(render().error).toBeNull();
+  });
+
+  it("keeps a newer catalog while still restoring sessions from startup", async () => {
+    const startupCatalog = deferred<ReturnType<typeof fakeDefinition>[]>();
+    const newest = fakeDefinition({ label: "Refreshed catalog" });
+    const session = fakeSession();
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    let catalogCalls = 0;
+    host.invoke.mockImplementation(async (command, args) => {
+      if (command === "agent_catalog") return ++catalogCalls === 1 ? startupCatalog.promise : [newest];
+      if (command === "agent_sessions") return [session];
+      return originalInvoke(command, args);
+    });
+    render();
+    await vi.waitFor(() => expect(catalogCalls).toBe(1));
+    await render().refreshCatalog();
+    startupCatalog.resolve([]);
+    await vi.waitFor(() => expect(render().sessions).toHaveLength(1));
+    expect(render().catalog).toEqual([newest]);
+    expect(render().sessions[0].sessionId).toBe(session.sessionId);
+  });
+
+  it("still reflects a withdrawn MCP grant when startup overlaps a catalog refresh", async () => {
+    const sync = deferred<void>();
+    const newest = fakeDefinition({ label: "Refreshed catalog" });
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    host.invoke.mockImplementation(async (command, args) => {
+      if (command === "agent_catalog") return [newest];
+      if (command === "agent_mcp_plans_sync") {
+        await sync.promise;
+        persistedLaunch = false;
+        throw new Error("MCP launch sync failed");
+      }
+      return originalInvoke(command, args);
+    });
+    render();
+    await vi.waitFor(() => expect(host.invoke).toHaveBeenCalledWith("agent_mcp_plans_sync"));
+    await render().refreshCatalog();
+    expect(render().mcpLaunch).toBe(true);
+    sync.resolve();
+    await vi.waitFor(() => expect(render().mcpLaunch).toBe(false));
+    expect(render().catalog).toEqual([newest]);
+    expect(render().error).toBe("MCP launch sync failed");
+  });
+
+  it("ignores a catalog refresh that finishes after unmount", async () => {
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    const catalog = deferred<ReturnType<typeof fakeDefinition>[]>();
+    const originalInvoke = host.invoke.getMockImplementation()!;
+    host.invoke.mockImplementation((command, args) =>
+      command === "agent_catalog" ? catalog.promise : originalInvoke(command, args));
+    host.invoke.mockClear();
+    const pending = render().refreshCatalog();
+    await vi.waitFor(() => expect(host.invoke).toHaveBeenCalledWith("agent_catalog"));
+    for (const cleanup of host.cleanup) cleanup();
+    host.cleanup = [];
+    const before = [...host.state];
+    catalog.resolve([fakeDefinition()]);
+    await pending;
+    expect(host.state).toEqual(before);
   });
 
   it.each(["before", "after"])("retains a model-switch session when its close event arrives %s the reply", async timing => {
