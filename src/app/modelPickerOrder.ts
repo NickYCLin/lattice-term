@@ -13,7 +13,11 @@ function modelName(id: string): string {
 
 function brandOf(model: ModelIdentity): string | null {
   if (/^(opus|sonnet|haiku)(?:[-.]|$)/.test(modelName(model.id))) return "Anthropic";
-  return cliProxyModelVendor({ id: model.id, ownedBy: model.ownedBy ?? null });
+  const maker = cliProxyModelVendor({ id: model.id, ownedBy: null });
+  if (maker) return maker;
+  const owner = model.ownedBy?.trim() || null;
+  // These values identify a route (or missing metadata), not a model maker.
+  return owner && /^(antigravity|cliproxyapi|unknown|none)$/i.test(owner) ? null : owner;
 }
 
 /** Product-family tiers, not benchmark scores. Versions only break tier ties. */

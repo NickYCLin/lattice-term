@@ -41,5 +41,7 @@ describe("model picker ordering", () => {
     expect(groups.map(group => group.brand)).toEqual(["OpenAI", null]);
     expect(groups[0].models).toEqual([input[1], input[2]]);
     expect(groups[0].models[0]).toBe(input[1]);
+    const routed = groupPickerModels(ids(["custom-alias", "gpt-6"]), model => model);
+    expect(routed.map(group => group.brand)).toEqual(["OpenAI", null]);
   });
 });
