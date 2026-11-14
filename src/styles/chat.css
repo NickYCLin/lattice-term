@@ -2488,36 +2488,26 @@ button.chat-diff__line.is-commentable:focus-visible {
   color: var(--text);
 }
 
-.session-chat__pulse {
-  width: 0.55rem;
-  height: 0.55rem;
+.session-chat__spinner {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
   border-radius: 50%;
-  background: var(--accent);
-  animation: chat-pulse 1.2s ease-in-out infinite;
+  color: var(--accent);
+  animation: session-chat-spin 0.8s linear infinite;
 }
 
-.session-chat__output {
-  width: 100%;
-  min-width: 0;
-  margin-block: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+@keyframes session-chat-spin {
+  to { transform: rotate(360deg); }
 }
-.session-chat__output summary { cursor: pointer; }
-.session-chat__output p { color: var(--text-muted); font-size: var(--text-sm); }
-.session-chat__output pre {
-  max-height: 26rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: var(--output-font-size);
-}
+
 .session-chat__diagnostic { overflow-wrap: anywhere; color: var(--warn); }
 
 
 @media (prefers-reduced-motion: reduce) {
-  .session-chat__pulse {
+  .session-chat__spinner {
     animation: none;
   }
 }

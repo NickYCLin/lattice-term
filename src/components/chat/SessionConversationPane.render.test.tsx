@@ -27,7 +27,7 @@ describe("SessionConversationPane composer", () => {
     expect(html).not.toContain('class="chat-avatar"');
     expect(html).toContain('OpenAI Codex · gpt-6.1-sol');
     expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
-    expect(html).toContain('class="callout callout--info"');
+    expect(html).not.toContain("與工作階段頁共用同一個助理");
     expect(html).toContain('aria-label="終端機"');
     expect(html).not.toContain('session-chat__title');
   });

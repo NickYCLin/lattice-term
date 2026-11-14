@@ -137,7 +137,7 @@ describe("ChatView", () => {
         groupLabel: "Terminal conversation" })],
     });
     const markup = render(chat, running);
-    expect(markup).toContain("與工作階段頁共用同一個助理");
+    expect(markup).not.toContain("與工作階段頁共用同一個助理");
     expect(markup).not.toContain("在終端機繼續");
   });
 
@@ -152,7 +152,7 @@ describe("ChatView", () => {
       </I18nProvider>,
     );
     expect(markup).toContain("Shared project");
-    expect(markup).toContain("與工作階段頁共用同一個助理");
+    expect(markup).not.toContain("與工作階段頁共用同一個助理");
     expect(markup).toContain("傳送訊息到這個工作階段");
     expect(markup).toContain('aria-current="true"');
     expect(agents.launch).not.toHaveBeenCalled();
@@ -166,12 +166,12 @@ describe("ChatView", () => {
           workspaceSessionId="shared" onSelectWorkspaceSession={() => {}} onOpenSession={() => {}} />
       </I18nProvider>,
     );
-    expect(view("working")).toContain("助理正在回覆…");
+    expect(view("working")).toContain("正在處理…");
     expect(view("working", 2)).toContain("還有 2 則訊息排隊");
     expect(view("needsAttention")).toContain("助理可能在等你確認或輸入");
     const idle = view("idle");
     expect(idle).toContain("閒置中");
-    expect(idle).not.toContain("助理正在回覆");
+    expect(idle).not.toContain("session-chat__spinner");
   });
 
   it("lists every CLI conversation directly, without a separate history panel", () => {
