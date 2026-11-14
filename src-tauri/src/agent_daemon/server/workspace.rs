@@ -283,6 +283,7 @@ mod tests {
         }
         let _stop = Stop(Arc::clone(&registry));
         let context = Context {
+            data_dir: temp.path().to_path_buf(),
             workspace: Some(Arc::new(Workspace::new(root.to_str().unwrap()).unwrap())),
             registry: Arc::clone(&registry),
             sink: Arc::clone(&sink),

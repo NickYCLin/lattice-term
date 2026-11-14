@@ -1252,7 +1252,7 @@ fn prompt_grant_matches(entry: &AgentSessionEntry, epoch: Option<u64>) -> bool {
 #[derive(Default)]
 struct StagedAgentImages {
     /// Oldest first, each with its size.
-    files: std::collections::VecDeque<(tempfile::TempPath, u64)>,
+    files: std::collections::VecDeque<(tempfile::NamedTempFile, u64)>,
     total_bytes: u64,
 }
 
@@ -1280,7 +1280,7 @@ impl StagedAgentImages {
         }
 
         let path = file.path().to_path_buf();
-        self.files.push_back((file.into_temp_path(), bytes));
+        self.files.push_back((file, bytes));
         self.total_bytes += bytes;
         Ok(path)
     }
@@ -1288,6 +1288,28 @@ impl StagedAgentImages {
     fn clear(&mut self) {
         self.files.clear();
         self.total_bytes = 0;
+    }
+
+    fn image_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, String> {
+        use std::io::{Seek, SeekFrom};
+        let Some((file, _)) = self.files.iter().find(|(file, _)| file.path() == path) else {
+            return Ok(None);
+        };
+        // Read the retained file handle, not a path a transcript could replace
+        // with a symlink or another session's image.
+        let mut source = file
+            .as_file()
+            .try_clone()
+            .map_err(|error| error.to_string())?;
+        source
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| error.to_string())?;
+        let mut bytes = Vec::new();
+        source
+            .take(16 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        Ok((bytes.len() <= 16 * 1024 * 1024).then_some(bytes))
     }
 }
 
@@ -3298,6 +3320,19 @@ impl AgentRegistry {
             .lock()
             .map_err(|error| error.to_string())?;
         images.add(file)
+    }
+
+    pub(crate) fn staged_clipboard_bytes(
+        &self,
+        session_id: &str,
+        path: &Path,
+    ) -> Result<Option<Vec<u8>>, String> {
+        let entry = self.get(session_id)?;
+        let images = entry
+            .staged_images
+            .lock()
+            .map_err(|error| error.to_string())?;
+        images.image_bytes(path)
     }
 
     pub fn terminal_history_snapshots(&self) -> Vec<AgentTerminalHistorySnapshot> {
@@ -14915,6 +14950,31 @@ notify = ["notify.exe", "turn-ended"]"#,
         images.clear();
         assert!(paths.iter().all(|path| !path.exists()));
         assert!(!newest.exists());
+    }
+
+    #[test]
+    fn clipboard_previews_only_read_the_retained_owned_handle() {
+        let mut images = StagedAgentImages::default();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"owned image bytes").unwrap();
+        let path = images.add(file).unwrap();
+        assert_eq!(
+            images.image_bytes(&path).unwrap().unwrap(),
+            b"owned image bytes"
+        );
+        let other = tempfile::NamedTempFile::new().unwrap();
+        assert!(images.image_bytes(other.path()).unwrap().is_none());
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(other.path(), &path).unwrap();
+            assert_eq!(
+                images.image_bytes(&path).unwrap().unwrap(),
+                b"owned image bytes"
+            );
+        }
+        images.clear();
+        assert!(images.image_bytes(&path).unwrap().is_none());
     }
 
     #[cfg(unix)]

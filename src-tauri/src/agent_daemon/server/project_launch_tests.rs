@@ -3,6 +3,7 @@ use crate::agent_project_launch::ProjectLaunchPolicy;
 
 fn context(dir: &Path) -> Context {
     Context {
+        data_dir: dir.to_path_buf(),
         workspace: None,
         registry: Arc::new(AgentRegistry::new()),
         sink: Arc::new(DaemonSink::default()),

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
 import {
   CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths,
@@ -31,7 +31,6 @@ import { useChatClipboardFallback } from "../../app/chatClipboard";
 import { SentAttachments } from "./SentAttachments";
 import { keepChatAttachmentPreviews } from "../../app/chatAttachmentPreviews";
 import { ConversationReadProgress } from "./ConversationReadProgress";
-import { isChatAtBottom } from "../../app/chatScroll";
 import { useChatScroll } from "../../app/useChatScroll";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
@@ -78,8 +77,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { ref: messagesRef, onScroll, onWheel } = useChatScroll();
-  const outputRef = useRef<HTMLPreElement>(null);
-  const outputPinned = useRef(true);
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
@@ -89,10 +86,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   useEffect(() => {
     acknowledge();
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
-  useLayoutEffect(() => {
-    const node = outputRef.current;
-    if (node && outputPinned.current) node.scrollTop = node.scrollHeight;
-  }, [conversation.output]);
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
   const blocked = Boolean(session.closedReason) || conversation.sending;
   const hasContent = Boolean(draft.trim()) || attachments.length > 0;
@@ -214,7 +207,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           </button>
         </div>
       </div>
-      <Callout tone="info">{t("sessionChat.shared")}</Callout>
     </header>
     <div ref={messagesRef} className="chat-messages" onScroll={onScroll} onWheel={onWheel}>
       <div className="chat-messages__inner">
@@ -252,18 +244,9 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
           </ConversationMessage>;
         })}
         <SessionPromptQueue sessionId={session.sessionId} queue={queue} />
-        <details className="session-chat__output" open={conversation.messages.length === 0}>
-          <summary>{t("sessionChat.output")}</summary>
-          <p>{t("sessionChat.outputHint")}</p>
-          {conversation.outputError && <p className="session-chat__diagnostic" role="status">{conversation.outputError}</p>}
-          <pre ref={outputRef} aria-label={t("sessionChat.output")} onScroll={event => {
-            const node = event.currentTarget;
-            outputPinned.current = isChatAtBottom(node);
-          }}>{conversation.output || t("sessionChat.noOutput")}</pre>
-        </details>
         {working && (
           <p className="session-chat__activity" role="status">
-            <span className="session-chat__pulse" aria-hidden="true" />
+            <span className="session-chat__spinner" aria-hidden="true" />
             {session.queuedPrompts > 0
               ? t("sessionChat.workingQueued", { count: session.queuedPrompts })
               : t("sessionChat.working")}

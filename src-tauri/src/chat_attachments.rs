@@ -3,6 +3,24 @@
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
+/// Called only for bytes staged by an explicit clipboard action. Return the
+/// durable, conversation-scoped path so native transcripts can show it later.
+pub(crate) fn keep_staged_image(
+    data_dir: &Path,
+    session_id: &str,
+    path: &Path,
+) -> Result<PathBuf, String> {
+    let directory = crate::agent_chat::general_chat_directory(data_dir, session_id)?;
+    crate::chat_images::store(
+        &directory,
+        &[crate::chat_images::ToolImage::File(path.into())],
+    )
+    .into_iter()
+    .next()
+    .map(PathBuf::from)
+    .ok_or_else(|| "Cannot keep the pasted image for preview.".into())
+}
+
 pub(crate) fn stage_clipboard_image(
     data_dir: &Path,
     thread_id: &str,
@@ -101,6 +119,38 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::BufReader;
+
+    #[test]
+    fn native_clipboard_previews_survive_the_temporary_file_and_stay_in_their_conversation() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let original =
+            stage_clipboard_image(data.path(), "source", 1, 1, &[20, 40, 60, 255]).unwrap();
+        let png = fs::read(original).unwrap();
+        let source = tempfile::NamedTempFile::new().unwrap();
+        fs::write(source.path(), &png).unwrap();
+        let kept = keep_staged_image(data.path(), "native-one", source.path()).unwrap();
+        let other = crate::agent_chat::general_chat_directory(data.path(), "native-two").unwrap();
+        drop(source);
+        assert_eq!(fs::read(&kept).unwrap(), png);
+        assert!(crate::chat_images::preview(
+            work.path().to_str().unwrap(),
+            kept.parent(),
+            kept.to_str().unwrap()
+        )
+        .unwrap()
+        .is_some());
+        assert!(crate::chat_images::preview(
+            work.path().to_str().unwrap(),
+            Some(&other),
+            kept.to_str().unwrap()
+        )
+        .unwrap()
+        .is_none());
+        assert!(
+            keep_staged_image(data.path(), "native-one", Path::new("/missing-image.png")).is_err()
+        );
+    }
 
     #[test]
     fn pasted_images_are_durable_complete_and_do_not_replace_existing_files() {

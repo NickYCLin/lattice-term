@@ -59,8 +59,19 @@ describe("session chat output disclosure", () => {
     expect(render("working")).toContain('<div class="session-composer__notices"></div>');
   });
 
-  it("keeps the readable fallback visible before native messages arrive", () => {
-    expect(render("working")).toContain('class="session-chat__output" open=""');
+  it("does not show a terminal-output disclosure before native messages arrive", () => {
+    const html = render("working");
+    expect(html).not.toContain("session-chat__output");
+    expect(html).not.toContain("最近的終端輸出");
+  });
+
+  it("renders native pasted image markers as attachments and keeps the caption", () => {
+    conversation.messages = [{ role: "user", text: '<image name=[Image #1] path="/synthetic/pasted.png">\n</image>\n[Image #1] 請檢查圖片' }];
+    const html = render("done");
+    expect(html).toContain("請檢查圖片");
+    expect(html).toContain("pasted.png");
+    expect(html).not.toContain("&lt;image name=");
+    expect(html).not.toContain("[Image #1]");
   });
 
   it("distinguishes a missing native ID from a record that is not readable yet", () => {
@@ -83,12 +94,13 @@ describe("session chat output disclosure", () => {
     expect(html).toContain("最近的回覆");
   });
 
-  it("puts native messages first and stops expanding the terminal on every working turn", () => {
+  it("keeps native messages without a terminal-output disclosure in every lifecycle state", () => {
     conversation.messages = [{ role: "assistant", text: "已完成記憶交接修正" }];
     for (const state of ["working", "needsAttention", "done"] as const) {
       const html = render(state);
-      expect(html).not.toContain('class="session-chat__output" open=""');
-      expect(html.indexOf("已完成記憶交接修正")).toBeLessThan(html.indexOf("session-chat__output"));
+      expect(html).toContain("已完成記憶交接修正");
+      expect(html).not.toContain("session-chat__output");
+      expect(html.includes("session-chat__spinner")).toBe(state === "working");
     }
   });
 

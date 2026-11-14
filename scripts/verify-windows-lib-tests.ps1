@@ -60,15 +60,36 @@ function Get-TestResult {
     return [ordered]@{ passed = $passed; failed = $failed; ignored = $ignored }
 }
 
+function Get-NormalizedTestPath {
+    param([string]$Path)
+    # Cargo can report a local drive path with the extended-length prefix.
+    # Normalize both spellings before comparing them with the owned root.
+    if ($IsWindows -and $Path.StartsWith('\\?\')) {
+        if ($Path -notmatch '^\\\\\?\\[A-Za-z]:\\') {
+            throw "Only local drive paths are supported for native test artifacts."
+        }
+        $Path = $Path.Substring(4)
+    }
+    return [IO.Path]::GetFullPath($Path)
+}
+
 function Assert-ContainedPath {
     param([string]$Path, [string]$Root)
-    $resolved = [IO.Path]::GetFullPath($Path)
-    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $resolved = Get-NormalizedTestPath $Path
+    $resolvedRoot = (Get-NormalizedTestPath $Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if (-not $resolved.StartsWith($resolvedRoot + [IO.Path]::DirectorySeparatorChar,
             [StringComparison]::OrdinalIgnoreCase)) {
-        throw "A native test path is outside its expected directory."
+        throw "A native test path is outside its expected directory: $resolved (root: $resolvedRoot)."
     }
     return $resolved
+}
+
+function Get-OwnedLibTestArtifact {
+    param([string[]]$Lines, [string]$ManifestPath, [string]$TargetDirectory)
+    $artifact = Select-LibTestArtifact $Lines $ManifestPath
+    # Cargo owns the output layout; newer versions can place test binaries
+    # under release/build/<package>/<hash>/out rather than release/deps.
+    return Assert-ContainedPath $artifact (Join-Path $TargetDirectory "release")
 }
 
 function Assert-CommonControlsManifest {
@@ -161,6 +182,26 @@ if ($SelfTest) {
         try { $null = Select-LibTestArtifact $lines $manifest } catch { $rejected = $true }
         if (-not $rejected) { throw "Unsafe Cargo artifact self-test failed." }
     }
+    $fixtureTarget = Join-Path $PSScriptRoot "owned-target"
+    foreach ($relative in @("release/deps/latticeterm_lib-123.exe",
+            "release/build/lattice-term/123/out/latticeterm_lib-123.exe")) {
+        $expected = [IO.Path]::GetFullPath((Join-Path $fixtureTarget $relative))
+        $event = $artifact | ConvertFrom-Json
+        $event.executable = $expected
+        $fixture = $event | ConvertTo-Json -Depth 5 -Compress
+        if ((Get-OwnedLibTestArtifact @($fixture, $success) $manifest $fixtureTarget) -ne $expected) {
+            throw "Cargo library-test output layout self-test failed."
+        }
+    }
+    foreach ($relative in @("debug/latticeterm_lib-123.exe", "release-other/latticeterm_lib-123.exe",
+            "../outside/latticeterm_lib-123.exe")) {
+        $event = $artifact | ConvertFrom-Json
+        $event.executable = Join-Path $fixtureTarget $relative
+        $fixture = $event | ConvertTo-Json -Depth 5 -Compress
+        $rejected = $false
+        try { $null = Get-OwnedLibTestArtifact @($fixture, $success) $manifest $fixtureTarget } catch { $rejected = $true }
+        if (-not $rejected) { throw "Cargo artifact output boundary self-test failed." }
+    }
     $names = @(Get-TestNames @("agent::one: test", "agent::two: test", "2 tests, 0 benchmarks"))
     if ($names.Count -ne 2) { throw "Native test inventory self-test failed." }
     $valid = "test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 9 filtered out; finished in 0.01s"
@@ -179,6 +220,19 @@ if ($SelfTest) {
         $rejected = $false
         try { $null = Assert-ContainedPath $outside $PSScriptRoot } catch { $rejected = $true }
         if (-not $rejected) { throw "Unsafe cleanup path self-test failed." }
+    }
+    if ($IsWindows) {
+        $extendedInside = '\\?\' + $inside
+        if ((Assert-ContainedPath $extendedInside $PSScriptRoot) -ne $inside -or
+            (Assert-ContainedPath $inside ('\\?\' + $PSScriptRoot)) -ne $inside) {
+            throw "Extended local drive path containment self-test failed."
+        }
+        foreach ($outside in @($PSScriptRoot, (Join-Path $PSScriptRoot "../outside.json"),
+                ($PSScriptRoot + "-other/report.json"))) {
+            $rejected = $false
+            try { $null = Assert-ContainedPath ('\\?\' + $outside) $PSScriptRoot } catch { $rejected = $true }
+            if (-not $rejected) { throw "Extended path escape self-test failed." }
+        }
     }
     Assert-CommonControlsManifest (Join-Path $PSScriptRoot "windows-lib-test.manifest")
     Write-Host "Windows native regression runner self-tests passed (no native test process or Cargo started)."
@@ -222,9 +276,9 @@ try {
         & cargo test --lib --release --no-run --locked --message-format=json-render-diagnostics --target-dir $targetDirectory 1> $cargoLog
         if ($LASTEXITCODE -ne 0) { throw "Cargo library-test compilation failed." }
     } finally { Pop-Location }
-    $artifactPath = Select-LibTestArtifact (Get-Content -LiteralPath $cargoLog) $manifestPath
-    $artifactPath = Assert-ContainedPath $artifactPath (Join-Path $targetDirectory "release/deps")
+    $artifactPath = Get-OwnedLibTestArtifact (Get-Content -LiteralPath $cargoLog) $manifestPath $targetDirectory
     $artifactPath = (Resolve-Path -LiteralPath $artifactPath).Path
+    Assert-NoReparseAncestors $artifactPath
     if ([IO.Path]::GetExtension($artifactPath) -ne ".exe" -or
         ((Get-Item -LiteralPath $artifactPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Cargo reported an unexpected native library-test file."

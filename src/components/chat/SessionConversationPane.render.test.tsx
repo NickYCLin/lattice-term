@@ -27,7 +27,7 @@ describe("SessionConversationPane composer", () => {
     expect(html).not.toContain('class="chat-avatar"');
     expect(html).toContain('OpenAI Codex · gpt-6.1-sol');
     expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
-    expect(html).toContain('class="callout callout--info"');
+    expect(html).not.toContain("與工作階段頁共用同一個助理");
     expect(html).toContain('aria-label="終端機"');
     expect(html).not.toContain('session-chat__title');
   });
@@ -50,7 +50,7 @@ describe("SessionConversationPane composer", () => {
     expect(html).toContain("尚未確認就緒");
     expect(html).toContain("這裡的草稿會保留");
     expect(html).not.toContain("任務完成");
-    expect(html).toMatch(/session-composer__model" disabled=""/);
+    expect(html).not.toMatch(/session-composer__model" disabled=""/);
     expect(html).not.toMatch(/<textarea[^>]*disabled/);
     expect(render({ state: "done", stateSource: "integration" })).not.toContain("這裡的草稿會保留");
   });
@@ -79,6 +79,6 @@ describe("SessionConversationPane composer", () => {
     const html = render({ sandboxed: true, model: null, label: "Claude Code" });
     expect(html).toContain('class="session-composer__access is-sandboxed"');
     expect(html).toContain("沙箱保護");
-    expect(html).toMatch(/session-composer__model[^>]*>Claude Code</);
+    expect(html).toContain('class="session-composer__model-label">Claude Code</span>');
   });
 });
