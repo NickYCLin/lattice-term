@@ -230,6 +230,8 @@ describe("ChatView", () => {
     const markup = render();
     expect(markup).toContain("還沒有對話");
     expect(markup).toContain("新對話");
+    expect(markup).not.toContain(">Herdr</button>");
+    expect(markup).not.toContain("交接摘要到新助理");
   });
 
   it("names the default account when it is the only one", () => {

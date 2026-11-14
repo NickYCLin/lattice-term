@@ -1,7 +1,5 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
-import { HerdrPane } from "../components/chat/HerdrPane";
 import { ChatArchiveStatus } from "../components/chat/ChatArchiveStatus";
-import { ConversationHandoffDialog } from "../components/agents/ConversationHandoffDialog";
 import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
 import { ChatProjectDefaultsConflict, clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
 import { useChatClipboardFallback } from "../app/chatClipboard";
@@ -48,7 +46,6 @@ import { CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths, splitSessionAttachments } 
 import { keepChatAttachmentPreviews } from "../app/chatAttachmentPreviews";
 import {
   defaultPermission,
-  handoffTranscript,
   effortChoices,
   toolOutputCount,
   delegationResult,
@@ -170,7 +167,6 @@ export function ChatView({
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
   const selectedSessionId = onSelectWorkspaceSession ? workspaceSessionId : localSessionId;
   function setSelectedSessionId(id: string | null) {
-    setShowHerdr(false);
     setLocalSessionId(id);
     onSelectWorkspaceSession?.(id);
   }
@@ -180,8 +176,6 @@ export function ChatView({
     chat.setActiveThreadId(id);
   }
   const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
-  const [showHerdr, setShowHerdr] = useState(false);
-  const [herdrOpened, setHerdrOpened] = useState(false);
   const modeTabs = useFittingTabs<HTMLDivElement>();
   // A project picked in the projects tab narrows the conversation list to it.
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
@@ -254,8 +248,6 @@ export function ChatView({
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
   const [handingOffThreadId, setHandingOffThreadId] = useState<string | null>(null);
-  const [summarySource, setSummarySource] = useState<(Pick<ChatThread, "id" | "title" | "workingDirectory" | "definitionId" | "items"> & Partial<Pick<ChatThread, "permission">> & { sessionId?: string }) | null>(null);
-  const summaryDestination = useRef<{ key: string; id: string } | null>(null);
 
   async function continueInSession(thread: ChatThread) {
     if (handingOff.current) return;
@@ -349,7 +341,6 @@ export function ChatView({
   }
 
   function startAutomation() {
-    setShowHerdr(false);
     setSelectedAutomationId(null);
     setComposingAutomation(true);
     setMode("automations");
@@ -379,48 +370,8 @@ export function ChatView({
 
   return (
     <section className="chat-view" aria-label={t("chat.title")}>
-      {summarySource && <ConversationHandoffDialog source={summarySource.title || summarySource.id}
-        definitions={agents.catalog.filter(definition => chat.supported.includes(definition.id as ChatDefinitionId))}
-        profiles={accountProfiles}
-        apiTargets={proxies.map(proxy => ({ definitionId: "codex", accountProfileId: null, model: "", provider: "cliproxyapi", proxyId: proxy.id, label: `${cliProxyLabel(proxy)} · Codex API` }))}
-        loadSummary={async () => summarySource.sessionId
-          ? agents.exportTranscript(summarySource.sessionId, { forFile: true })
-          : handoffTranscript(summarySource.items, summarySource.definitionId) || null}
-        onCancel={() => { setSummarySource(null); summaryDestination.current = null; }}
-        onConfirm={async (summary, target) => {
-          const key = JSON.stringify([target, summary]);
-          const destination = summaryDestination.current?.key === key
-            ? chat.getThread(summaryDestination.current.id)
-            : null;
-          const thread = destination ?? chat.createThread({
-            definitionId: target.definitionId as ChatDefinitionId, accountProfileId: target.accountProfileId,
-            provider: target.provider, proxyId: target.proxyId, model: target.model,
-            workingDirectory: summarySource.workingDirectory,
-            permission: summarySource.permission && permissionsFor(target.definitionId as ChatDefinitionId).includes(summarySource.permission)
-              ? summarySource.permission : "readOnly", activate: false,
-          });
-          summaryDestination.current = { key, id: thread.id };
-          const profile = accountProfiles.find(profile => profile.id === target.accountProfileId);
-          const previousItems = thread.items.length;
-          await chat.send(thread.id, `Source conversation: ${summarySource.title || summarySource.id}\nSummary handoff, not native thread continuity.\n\n${summary}`, [], profile?.configDirectory ?? null);
-          const result = chat.getThread(thread.id);
-          const failure = result?.items.slice(previousItems).reverse().find(item => item.type === "turnEnd" && item.error);
-          if (failure?.type === "turnEnd" && failure.error) throw new Error(failure.error);
-          selectThread(thread.id);
-          setSummarySource(null);
-          summaryDestination.current = null;
-        }} />}
       <aside className="chat-threads">
         {archiveStatus}
-        <button type="button" className="button button--ghost" aria-pressed={showHerdr}
-          onClick={() => { setHerdrOpened(true); setShowHerdr(current => !current); }}>{showHerdr ? t("herdr.back") : "Herdr"}</button>
-        {(shownSession || active) && <button type="button" className="button" disabled={!shownSession && Boolean(active?.runningTurnId)}
-          onClick={() => {
-            summaryDestination.current = null;
-            setSummarySource(shownSession ? { id: shownSession.sessionId, sessionId: shownSession.sessionId,
-              title: shownSession.groupLabel || shownSession.label, workingDirectory: shownSession.workingDirectory,
-              definitionId: shownSession.definitionId as ChatDefinitionId, items: [] } : active);
-          }}>{t("handoff.summary.title")}</button>}
         <div className="chat-threads__header">
           <div ref={modeTabs.ref} className={`chat-mode${modeTabs.compact ? " is-compact" : ""}`} role="tablist">
             <button
@@ -428,7 +379,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "threads"}
               className={`chat-mode__tab${mode === "threads" ? " is-active" : ""}`}
-              onClick={() => { setShowHerdr(false); setMode("threads"); }}
+              onClick={() => { setMode("threads"); }}
               title={t("chat.title")}
             >
               <ChatIcon />
@@ -439,7 +390,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "projects"}
               className={`chat-mode__tab${mode === "projects" ? " is-active" : ""}`}
-              onClick={() => { setShowHerdr(false); setMode("projects"); }}
+              onClick={() => { setMode("projects"); }}
               title={t("chat.projects")}
             >
               <FolderIcon />
@@ -450,7 +401,7 @@ export function ChatView({
               role="tab"
               aria-selected={mode === "automations"}
               className={`chat-mode__tab${mode === "automations" ? " is-active" : ""}`}
-              onClick={() => { setShowHerdr(false); setMode("automations"); }}
+              onClick={() => { setMode("automations"); }}
               title={t("automation.title")}
             >
               <ClockIcon />
@@ -703,11 +654,8 @@ export function ChatView({
       </aside>
 
       <div className="chat-main">
-        <div className="herdr-host" hidden={!showHerdr}>
-          {herdrOpened && <HerdrPane enabled={showHerdr && agents.mode === "ready"} />}
-        </div>
         {(chat.removal?.error || chat.archivedReceipt) && <div className="chat-archive-status--mobile">{archiveStatus}</div>}
-        {showHerdr ? null : mode === "automations" && agents.mode !== "unavailable" ? (
+        {mode === "automations" && agents.mode !== "unavailable" ? (
           composingAutomation || selectedAutomationId ? (
             <AutomationPane
               automations={automations}
