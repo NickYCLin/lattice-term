@@ -10,6 +10,7 @@ import {
   AgentIcon,
   BellIcon,
   ChatIcon,
+  ClockIcon,
   ConnectionsIcon,
   SettingsIcon,
   TerminalIcon,
@@ -24,6 +25,7 @@ export type ViewId =
   | "connections"
   | "agents"
   | "chat"
+  | "automations"
   | "terminal"
   | "tunnels"
   | "vault"
@@ -69,6 +71,14 @@ export const navigationItems: NavigationItem[] = [
     labelKey: "nav.chat",
     descriptionKey: "nav.chat.desc",
     icon: ChatIcon,
+    status: "available",
+    desktopOnly: true,
+  },
+  {
+    id: "automations",
+    labelKey: "automation.title",
+    descriptionKey: "nav.automations.desc",
+    icon: ClockIcon,
     status: "available",
     desktopOnly: true,
   },

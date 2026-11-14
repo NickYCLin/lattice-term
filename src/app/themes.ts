@@ -1,7 +1,7 @@
 /** Application themes. Preview cards share the palettes in tokens.css. */
 import type { MessageKey } from "../i18n/messages/zh-TW";
 
-export const themeIds = ["dark", "light", "dusk", "linen", "clarity"] as const;
+export const themeIds = ["dark", "light", "dusk", "linen", "storybook", "clarity"] as const;
 export type ThemeId = (typeof themeIds)[number];
 export type ThemeChoice = "system" | ThemeId;
 export interface ThemeDefinition {
@@ -33,6 +33,12 @@ export const themeCatalog: ThemeDefinition[] = [
     id: "linen",
     labelKey: "theme.linen",
     hintKey: "theme.linen.hint",
+    isDark: false,
+  },
+  {
+    id: "storybook",
+    labelKey: "theme.storybook",
+    hintKey: "theme.storybook.hint",
     isDark: false,
   },
   {

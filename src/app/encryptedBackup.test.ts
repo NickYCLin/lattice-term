@@ -23,6 +23,17 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe("encrypted backup local storage", () => {
+  it("includes display names and preserves them when restoring an older backup", () => {
+    const key = "latticeterm.conversationNames.v1";
+    const names = '[["synthetic-thread","自己的名稱"]]';
+    const storage = memoryStorage({ [key]: names });
+    expect(collectBackupLocalStorage(storage.adapter, defaultPreferences)[key]).toBe(names);
+    applyRestoredLocalStorage(storage.adapter, { "latticeterm.preferences.v2": '{"theme":"storybook"}' });
+    expect(storage.adapter.getItem(key)).toBe(names);
+    const restored = '[["synthetic-thread","還原的名稱"]]';
+    applyRestoredLocalStorage(storage.adapter, { [key]: restored });
+    expect(storage.adapter.getItem(key)).toBe(restored);
+  });
   it("collects only LatticeTerm allowlisted data and current preferences", () => {
     const storage = memoryStorage({
       "latticeterm.tunnels.v1": "[]",

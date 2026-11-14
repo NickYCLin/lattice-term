@@ -62,7 +62,7 @@ describe("sanitizePreferences", () => {
   it.each([
     ["sand", "linen"], ["midnight", "dusk"], ["contrast", "clarity"],
     ["graphite", "dark"], ["nordic", "dark"], ["unknown", "dark"],
-    ["system", "system"], ["light", "light"],
+    ["system", "system"], ["light", "light"], ["storybook", "storybook"],
   ])("migrates theme %s to %s", (old, current) => {
     expect(sanitizePreferences({ theme: old as never }).theme).toBe(current);
   });

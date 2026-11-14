@@ -222,6 +222,40 @@
   --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.36);
 }
 
+[data-theme="storybook"] {
+  color-scheme: light;
+  --canvas: #fffcf6;
+  --canvas-deep: #f3ecdf;
+  --surface-solid: #fffaf1;
+  --surface-raised: #ffffff;
+  --text: #3e3a39;
+  --text-muted: #625b54;
+  --text-faint: #756d61;
+  --line: #b0a297;
+  --line-strong: #3e3a39;
+  --accent: #356176;
+  --accent-hover: #2b5366;
+  --accent-press: #214453;
+  --accent-ink: #fffcf6;
+  --ok: #426b3c;
+  --info: #356176;
+  --warn: #82591c;
+  --danger: #ad424c;
+  --planned: #6d567b;
+  --storybook-yellow: #f6d27a;
+  --storybook-blue: #a8d3e6;
+  --storybook-coral: #f2a497;
+  --storybook-green: #b9daa5;
+  --surface-selected: #fae4b4;
+  --focus: #3e3a39;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --shadow-1: 1px 1px 0 #3e3a3924;
+  --shadow-2: 3px 3px 0 #3e3a39;
+  --shadow-3: 5px 5px 0 #3e3a39;
+}
+
 /* Compact density keeps more hosts on screen for operators. */
 :root[data-density="compact"] {
   --control-height: calc(2rem * var(--interface-text-scale));

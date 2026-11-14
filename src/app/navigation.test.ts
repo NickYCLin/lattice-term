@@ -6,11 +6,13 @@ describe("platform navigation", () => {
     const items = navigationItemsFor(platform);
     expect(items.find((item) => item.id === "agents")?.labelKey).toBe("agents.remoteFleet.title");
     expect(items.some((item) => item.id === "chat")).toBe(false);
+    expect(items.some((item) => item.id === "automations")).toBe(false);
   });
 
   it("keeps the local Agent Fleet and chat on desktop", () => {
     const items = navigationItemsFor("linux");
     expect(items.find((item) => item.id === "agents")?.labelKey).toBe("nav.agents");
     expect(items.some((item) => item.id === "chat")).toBe(true);
+    expect(items.find((item) => item.id === "automations")?.labelKey).toBe("automation.title");
   });
 });

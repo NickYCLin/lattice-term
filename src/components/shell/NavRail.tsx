@@ -14,11 +14,13 @@ export function NavRail({
   onSelect,
   items = navigationItems,
   activityUnreadCount = 0,
+  automationUnreadCount = 0,
 }: {
   current: ViewId;
   onSelect: (view: ViewId) => void;
   items?: NavigationItem[];
   activityUnreadCount?: number;
+  automationUnreadCount?: number;
 }) {
   const { t } = useI18n();
 
@@ -41,9 +43,9 @@ export function NavRail({
           const active = item.id === current;
           const planned = item.status === "planned";
           const label = t(item.labelKey);
-          const unread = item.id === "activity" ? activityUnreadCount : 0;
+          const unread = item.id === "activity" ? activityUnreadCount : item.id === "automations" ? automationUnreadCount : 0;
           const accessibleLabel = unread
-            ? t("activity.navUnread", { count: unread })
+            ? t(item.id === "automations" ? "automation.navUnread" : "activity.navUnread", { count: unread })
             : label;
 
           return (

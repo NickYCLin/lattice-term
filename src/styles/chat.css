@@ -1385,6 +1385,46 @@ button.chat-chip:hover {
   min-width: 0;
 }
 
+.session-composer__model-brand {
+  display: block;
+  padding: 0.5rem 0.625rem 0.25rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.session-composer__model-picker > .session-composer__menu {
+  right: 0;
+  left: auto;
+  width: max-content;
+  min-width: min(18rem, calc(100vw - 3rem));
+  max-width: min(24rem, calc(100vw - 2rem));
+  max-height: min(28rem, 60vh);
+  overflow-y: auto;
+}
+
+.session-composer__model-picker > .session-composer__menu button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .session-composer__model-picker > .session-composer__menu {
+    position: fixed;
+    right: 1rem;
+    bottom: 5rem;
+    left: 1rem;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+.session-composer__menu [role="group"] {
+  display: grid;
+  min-width: 0;
+}
+
 .session-composer__menu button {
   display: flex;
   align-items: center;

@@ -88,7 +88,7 @@ describe("Fleet account model picker", () => {
     ] } as const;
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><AccountModelField options={[normal, proxy]} value={{ ...proxy, model: "gpt-5.6-sol" }} allowCliProxyApi proxyModels={{ default: models }} onChange={vi.fn()} /></I18nProvider>);
     // Same brand shares one group and the stronger model comes first.
-    const brand = html.match(/<optgroup label="openai">(.*?)<\/optgroup>/)?.[1] ?? "";
+    const brand = html.match(/<optgroup label="OpenAI">(.*?)<\/optgroup>/)?.[1] ?? "";
     expect(brand).not.toBe("");
     expect(brand.indexOf("gpt-5.6-sol")).toBeLessThan(brand.indexOf("gpt-image-2.5-flare"));
     expect(html).toContain("claude-opus-5");

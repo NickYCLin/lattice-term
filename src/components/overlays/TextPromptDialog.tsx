@@ -30,17 +30,19 @@ export function TextPromptDialog({
   const dialogRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(initialValue);
+  const [composing, setComposing] = useState(false);
   const trimmed = value.trim();
 
   useModalFocus({
     dialogRef,
     getInitialFocus: () => inputRef.current,
     onEscape: onCancel,
+    escapeDisabled: composing,
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (trimmed) onSubmit(trimmed);
+    if (trimmed && !composing) onSubmit(trimmed);
   }
 
   return (
@@ -54,6 +56,9 @@ export function TextPromptDialog({
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={submit}
+        onKeyDown={event => {
+          if (event.key === "Enter" && (composing || event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
+        }}
       >
         <header className="dialog__head">
           <span className="dialog__icon dialog__icon--inline" aria-hidden="true">
@@ -72,6 +77,8 @@ export function TextPromptDialog({
             value={value}
             placeholder={placeholder}
             onChange={(event) => setValue(event.currentTarget.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
             maxLength={255}
             autoCapitalize="none"
             autoCorrect="off"

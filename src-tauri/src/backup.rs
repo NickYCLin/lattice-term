@@ -52,12 +52,14 @@ const ROLLBACK_APP_FILES: [&str; 5] = [
     "credential_backend.json",
 ];
 
-pub const LOCAL_STORAGE_KEYS: [&str; 4] = [
+pub const LOCAL_STORAGE_KEYS: [&str; 5] = [
     "latticeterm.preferences.v2",
     "latticeterm.tunnels.v1",
     "latticeterm.authPrefs.v1",
     // Scheduled chats: the user's own task text and timing, no credentials.
     "latticeterm.agentAutomations.v1",
+    // User-chosen sidebar labels, without changing native CLI transcripts.
+    "latticeterm.conversationNames.v1",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -590,6 +592,10 @@ mod tests {
         local.insert(
             "latticeterm.preferences.v2".to_string(),
             r#"{"theme":"dark"}"#.to_string(),
+        );
+        local.insert(
+            "latticeterm.conversationNames.v1".to_string(),
+            r#"[["thread:synthetic","自訂對話名稱"]]"#.to_string(),
         );
 
         let encrypted =
