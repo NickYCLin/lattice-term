@@ -19,7 +19,7 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 it.each(["C:\\Work\\LatticeTerm", "c:/work/latticeterm"])("filters retained native rows by the Windows project identity: %s", async (projectFilter) => {
   const container = installHostDom();
   const entry: LocalConversation = { definitionId: "codex", profileId: null, nativeSessionId: "windows-filter",
-    title: "Windows native history", workingDirectory: "C:\\Work\\LatticeTerm", resumable: true, updatedAt: 1 };
+    title: "Windows native history", workingDirectory: "C:\\Work\\LatticeTerm", resumable: true, updatedAt: 1, modelProvider: "openai" };
   const history = { entries: [entry], profiles: [], profileKey: "[]" } as unknown as NativeHistory;
   const chat = fakeChatApi();
   const root = createRoot(container as unknown as Element);
@@ -28,6 +28,7 @@ it.each(["C:\\Work\\LatticeTerm", "c:/work/latticeterm"])("filters retained nati
       <NativeConversationRows chat={chat} projectFilter={projectFilter} onOpened={() => {}} />
     </NativeHistoryContext.Provider></I18nProvider>));
     expect(container.textContent).toContain(entry.title);
+    expect(container.textContent).toContain("供應商: OpenAI");
     const button = allNodes(container).find(node => node.tagName === "BUTTON")!;
     await act(async () => onClick(button)());
     expect(chat.importNativeConversation).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory: entry.workingDirectory }));

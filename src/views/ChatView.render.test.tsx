@@ -241,7 +241,7 @@ describe("ChatView", () => {
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
     const visibleText = markup.replace(/<[^>]+>/g, " ");
-    expect(visibleText).toContain("供應商: 未知 · Codex CLI · 模型: 未知 · 專案: work");
+    expect(visibleText).toContain("供應商: 由 Codex CLI 管理 · Codex CLI · 模型: 未知 · 專案: work");
   });
 
   it("shows the proxy model field even when native Codex is signed out", () => {

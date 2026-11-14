@@ -7,6 +7,7 @@ import { chatSidebarLayout, chatThreadNodeId } from "./chatThreadLayout";
 import type { SessionSidebarLayout } from "./sessionSidebarLayout";
 import { agentWorkspaceProjectNodeId, chatWorkspaceProjection } from "./chatWorkspaceNodes";
 import { displayPath } from "./displayPath";
+import { conversationLabels } from "./conversationLabels";
 import type { LocalConversation } from "./localConversationSessions";
 import { nativeConversationKey } from "./nativeConversationDismissals";
 import { conversationPathKey as pathKey, nativeConversationIdentity } from "./nativeConversationIdentity";
@@ -38,6 +39,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   const references = threads.flatMap(thread => !thread.remote && thread.nativeSessionId ? [{
     definitionId: thread.definitionId, profileId: thread.accountProfileId ?? null,
     nativeSessionId: thread.nativeSessionId, title: thread.title,
+    modelProvider: thread.reportedProvider,
   }] : []);
   const known = new Set(references.map(nativeConversationKey));
   const visibleHistory = history.filter(entry => !entry.archived);
@@ -79,8 +81,13 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   const titledSessions = new Set<string>();
   for (const entry of [...visibleHistory, ...references]) {
     const held = sessionsByIdentity.get(conversationIdentity(entry) ?? "");
-    if (!held || !entry.title.trim()) continue;
+    if (!held) continue;
     const leaf = leavesBySession.get(held.sessionId);
+    if (leaf?.metadata && !leaf.metadata.provider && entry.modelProvider) {
+      leaf.metadata = { ...leaf.metadata, provider: conversationLabels({ definitionId: held.definitionId,
+        provider: entry.modelProvider, endpoint: leaf.metadata.endpoint }).provider };
+    }
+    if (!entry.title.trim()) continue;
     const members = groupMembers.get(held.groupId || held.sessionId)!;
     const presentation = presentAgentSessionGroup(members, definitions, held.sessionId);
     if (leaf && !presentation.hasCustomGroupLabel && !titledSessions.has(held.sessionId)) {

@@ -64,6 +64,7 @@ export const en: Messages = {
   "agents.skills.noResults": "No matching Skills. Adjust or clear the filters.",
   "agents.skills.details": "Details",
   "conversation.meta.provider": "Provider",
+  "conversation.meta.managedBy": "Managed by {source}",
   "conversation.meta.unknown": "Unknown",
   "conversation.meta.connection": "Connection",
   "conversation.meta.account": "Account",

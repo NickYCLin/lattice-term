@@ -5,7 +5,8 @@ import type { ConversationLabels } from "../../app/conversationLabels";
 
 export function ConversationMetadata({ labels }: { labels: ConversationLabels }) {
   const { t } = useI18n();
-  const text = [`${t("conversation.meta.provider")}: ${labels.provider ?? t("conversation.meta.unknown")}`,
+  const provider = labels.provider ?? labels.endpoint ?? t("conversation.meta.managedBy", { source: labels.source });
+  const text = [`${t("conversation.meta.provider")}: ${provider}`,
     labels.source, `${t("conversation.meta.model")}: ${labels.model ?? t("conversation.meta.unknown")}`,
     labels.endpoint && `${t("conversation.meta.connection")}: ${labels.endpoint}`,
     labels.account && `${t("conversation.meta.account")}: ${labels.account}`,

@@ -59,6 +59,7 @@ export const zhTW = {
   "agents.skills.noResults": "沒有符合的 Skill，請調整或清除篩選。",
   "agents.skills.details": "查看說明",
   "conversation.meta.provider": "供應商",
+  "conversation.meta.managedBy": "由 {source} 管理",
   "conversation.meta.unknown": "未知",
   "conversation.meta.connection": "連線",
   "conversation.meta.account": "帳號",

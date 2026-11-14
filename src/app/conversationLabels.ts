@@ -21,7 +21,13 @@ export function conversationLabels({ definitionId, directApi = false, model, end
 }): ConversationLabels {
   const name = definitionId === "codex" ? "Codex" : agentDisplayName(definitionId);
   const path = displayPath(workingDirectory ?? "").replace(/[\\/]+$/, "");
-  const upstream = !directApi && !endpoint && provider?.trim().toLowerCase() === "openai" ? "OpenAI" : null;
+  // A CLI/model brand does not identify its upstream. Keep the provider
+  // actually reported by the session, including user-defined adapters.
+  const reported = provider?.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 128);
+  const providerNames = new Map([["openai", "OpenAI"], ["anthropic", "Anthropic"], ["google", "Google"], ["cliproxyapi", "CLIProxyAPI"]]);
+  const upstream = !directApi && !endpoint && reported
+    ? /^latticeterm_cliproxyapi(?:_[a-z0-9_]+)?$/.test(reported) ? "CLIProxyAPI" : providerNames.get(reported.toLowerCase()) ?? reported
+    : null;
   return { provider: upstream, source: directApi ? `${name} API` : definitionId === "codex" ? "Codex CLI" : name,
     model: model?.trim() || null, endpoint: endpoint?.trim() || null, account: account?.trim() || null,
     project: path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1) || null };
