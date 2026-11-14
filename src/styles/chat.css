@@ -1215,7 +1215,10 @@ button.chat-chip:hover {
 }
 
 .session-composer__model {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: max-content;
   margin-left: auto;
   max-width: 100%;
   padding: var(--space-1) var(--space-2);
@@ -1229,6 +1232,19 @@ button.chat-chip:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.session-composer__model-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-composer__model-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 .session-composer__model:hover:not(:disabled),

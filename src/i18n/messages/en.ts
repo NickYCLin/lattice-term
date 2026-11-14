@@ -187,6 +187,7 @@ export const en: Messages = {
   "sessionChat.model.changeResume": "Click to change the model; the same conversation resumes on it",
   "sessionChat.model.switching": "Switching…",
   "sessionChat.model.loading": "Loading models…",
+  "sessionChat.model.waitUntilReady": "You can browse models now. Switching is available when the assistant is ready.",
   "sessionChat.model.none": "No models to choose from",
   "sessionChat.model.notYet": "This session has not reported its conversation ID yet, so the model cannot be changed without losing the conversation",
   "sessionChat.model.failed": "Could not change the model: {detail}",

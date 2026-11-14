@@ -7,6 +7,7 @@ import { modelSwitchRequest, switchesModelInPlace } from "../../app/sessionModel
 import type { AgentApi, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useCliProxyModels, useCliProxySettings } from "../../app/useCliProxyApi";
 import { useI18n } from "../../i18n/context";
+import { ChevronDownIcon } from "../icons";
 
 type Choices =
   | { state: "idle" | "loading" }
@@ -118,17 +119,19 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const inPlace = switchesModelInPlace(session) && !session.closedReason;
   return (
     <div ref={menuRef} className="session-composer__model-picker">
-      <button type="button" className="session-composer__model" disabled={disabled || switching}
+      <button type="button" className="session-composer__model" disabled={switching}
         aria-haspopup="menu" aria-expanded={open}
         title={t(inPlace ? "sessionChat.model.change" : "sessionChat.model.changeResume")}
         onClick={() => setOpen(value => !value)}>
-        {switching ? t("sessionChat.model.switching") : current}
+        <span className="session-composer__model-label">{switching ? t("sessionChat.model.switching") : current}</span>
+        <ChevronDownIcon size={12} />
       </button>
       {open && (
         <div className="session-composer__menu session-composer__menu--end" role="menu" aria-label={t("sessionChat.model")}>
+          {disabled && <p className="session-composer__model-hint" role="status">{t("sessionChat.model.waitUntilReady")}</p>}
           {choices.state === "ready" && choices.models.length > 0 && choices.models.map(model => (
             <button key={model.value} type="button" role="menuitemradio" aria-checked={model.value === session.model}
-              title={model.value} onClick={() => void pick(model.value)}>
+              disabled={disabled || switching} title={model.value} onClick={() => void pick(model.value)}>
               {model.label}
             </button>
           ))}

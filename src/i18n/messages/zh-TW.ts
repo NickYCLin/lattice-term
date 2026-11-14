@@ -179,6 +179,7 @@ export const zhTW = {
   "sessionChat.model.changeResume": "點一下換模型，會接續同一段對話重新啟動",
   "sessionChat.model.switching": "切換中…",
   "sessionChat.model.loading": "正在讀取模型…",
+  "sessionChat.model.waitUntilReady": "助理就緒後即可切換模型，目前可以先查看選項。",
   "sessionChat.model.none": "沒有可選的模型",
   "sessionChat.model.notYet": "這個工作階段還沒回報對話編號，暫時無法在保留對話的情況下換模型",
   "sessionChat.model.failed": "換模型失敗：{detail}",
