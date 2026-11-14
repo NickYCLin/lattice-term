@@ -151,7 +151,7 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
         {source.options.filter(option => !option.model).map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
           disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
         {groupPickerModels(source.options.filter(option => option.model), option => ({ id: option.model })).map(group => (
-          <optgroup key={group.brand ?? "other"} label={group.brand ?? t("chat.model.otherBrand")}>
+          <optgroup key={JSON.stringify(group.brand)} label={group.brand ?? t("chat.model.otherBrand")}>
             {group.models.map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
               disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
           </optgroup>

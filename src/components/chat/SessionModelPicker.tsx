@@ -140,7 +140,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
           {disabled && <p className="session-composer__model-hint" role="status">{t("sessionChat.model.waitUntilReady")}</p>}
           {choices.state === "ready" && choices.models.filter(model => !model.value).map(renderModel)}
           {modelGroups.map(group => (
-            <div key={group.brand ?? "other"} role="group" aria-label={group.brand ?? t("chat.model.otherBrand")}>
+            <div key={JSON.stringify(group.brand)} role="group" aria-label={group.brand ?? t("chat.model.otherBrand")}>
               <span className="session-composer__model-brand" aria-hidden="true">{group.brand ?? t("chat.model.otherBrand")}</span>
               {group.models.map(renderModel)}
             </div>
