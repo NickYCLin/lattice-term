@@ -4,6 +4,42 @@
 
 ---
 
+## [2026.11.15](https://github.com/NickYCLin/lattice-term/compare/v2026.11.14...v2026.11.15) (2026-11-14)
+
+
+### 🚀 新增功能
+
+* 依品牌與系列等級排列模型選單 ([163ad32](https://github.com/NickYCLin/lattice-term/commit/163ad3267a398ec41c8b10a5fb09758ca35ea3f7))
+* 將排程移到左側功能列 ([b6f6314](https://github.com/NickYCLin/lattice-term/commit/b6f6314fae46f3e15763efcf0497c89983e9e0fb))
+* 支援重新命名側欄對話與工作階段 ([0b44616](https://github.com/NickYCLin/lattice-term/commit/0b44616767d3165efb08c61a8114bb0ab949de5d))
+* 新增冬日繪本主題 ([731c16c](https://github.com/NickYCLin/lattice-term/commit/731c16c0b7ac3ba9759ab04160766c28186db4cf))
+* 簡化工作階段對話並顯示動態執行狀態 ([8f8a033](https://github.com/NickYCLin/lattice-term/commit/8f8a0333122c695c53544a5b757b6a239608ed1f))
+
+
+### 🛠️ 問題修正
+
+* 在對話直接顯示原生貼圖與保存預覽 ([90fab8f](https://github.com/NickYCLin/lattice-term/commit/90fab8f526b95696c316f6329e4720d7b2b8db37))
+* 將工作階段顯示名稱限制於原帳號 ([f47aa18](https://github.com/NickYCLin/lattice-term/commit/f47aa181c9fcb84f1a49adb0f9fa944fec216c0b))
+* 正規化 Windows 測試執行檔路徑 ([5b488ad](https://github.com/NickYCLin/lattice-term/commit/5b488ad92aad0a585a44af5dcea94e9d02e0638c))
+* 相容 Cargo 原生測試產物的新目錄 ([6c93ddd](https://github.com/NickYCLin/lattice-term/commit/6c93dddf4a582d563e168000d8a9afbaa23dcfef))
+* 補齊對話側欄的供應商來源顯示 ([e593f70](https://github.com/NickYCLin/lattice-term/commit/e593f7079a3aa8c46ba0a34bb82c6564f5cf3f03))
+* 讓工作階段標題沿用自訂名稱 ([6f02a2b](https://github.com/NickYCLin/lattice-term/commit/6f02a2b29c2875c1654f83ec6b0a9e9c0dffd9a6))
+* 讓輸入框模型名稱可直接開啟選單 ([5119adb](https://github.com/NickYCLin/lattice-term/commit/5119adb4507c6a5b8d628b3d7918ccd9db6c10e9))
+* 避免將代理通道當成模型品牌 ([0d41a35](https://github.com/NickYCLin/lattice-term/commit/0d41a35c28f384c09937a02c32b590b3ace43cc8))
+* 避免對話背景刷新拉回捲動位置 ([19f4269](https://github.com/NickYCLin/lattice-term/commit/19f426996b97aaff5fe279ac8da6107720c77f1d))
+* 避免模型品牌分組的識別碼重複 ([c0712ea](https://github.com/NickYCLin/lattice-term/commit/c0712eaeabf291b58b02374a6a62b828aad6efc1))
+* 限制模型選單在視窗範圍內 ([33ff004](https://github.com/NickYCLin/lattice-term/commit/33ff004f07924dd77ea82693f5e98570d4936928))
+
+
+### 🎨 介面與視覺調整
+
+* 移除對話側欄的拖曳操作提示 ([662a292](https://github.com/NickYCLin/lattice-term/commit/662a292471f4c2a55e5c65dbee2d75d46f78eec3))
+* 移除對話頁完整權限說明橫幅 ([c04bb4a](https://github.com/NickYCLin/lattice-term/commit/c04bb4afc0aaaf6f9e7c47a1ceee4b4c2a879250))
+* 移除對話頁的額外入口 ([a8db74f](https://github.com/NickYCLin/lattice-term/commit/a8db74f3386650d7c8e7c801be42935f96038e90))
+* 移除對話頭像與回覆者名稱 ([b2c42f2](https://github.com/NickYCLin/lattice-term/commit/b2c42f2683df46c7f54f671d89c714c9f3695895))
+* 調整繪本主題的卡片與訊息框線 ([d63b205](https://github.com/NickYCLin/lattice-term/commit/d63b20567623f0fd3c6f4bb5a1e1e0b5bb122188))
+* 重新整理輸入框權限選單外觀 ([c5b3266](https://github.com/NickYCLin/lattice-term/commit/c5b32664b894554f7daa0b4ab3f7fb4ac20eaa20))
+
 ## [2026.11.14](https://github.com/NickYCLin/lattice-term/compare/v2026.11.13...v2026.11.14) (2026-11-13)
 
 
