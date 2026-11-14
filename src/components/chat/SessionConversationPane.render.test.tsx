@@ -18,6 +18,14 @@ function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
 }
 
 describe("SessionConversationPane composer", () => {
+  it("shows a custom display name without replacing the actual model or CLI metadata", () => {
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><SessionConversationPane
+      session={fakeSession({ label: "Codex", model: "gpt-6-mini" })} displayName="每日工作摘要"
+      agents={fakeAgentApi()} onOpenTerminal={() => {}} onSessionReplaced={() => {}} /></I18nProvider>);
+    expect(html).toContain("<h2>每日工作摘要</h2>");
+    expect(html).toContain("gpt-6-mini");
+    expect(html).toContain("OpenAI Codex");
+  });
   it("uses the sidebar assistant name as the title instead of the group name", () => {
     const html = render({ definitionId: "codex", label: "OpenAI Codex", groupLabel: "Claude Code",
       workingDirectory: "D:/project/LatticeTerm", model: "gpt-6.1-sol" });

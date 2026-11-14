@@ -57,9 +57,10 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   </span>;
 }
 
-export function SessionConversationPane({ session, agents, onOpenTerminal, onSessionReplaced }: {
+export function SessionConversationPane({ session, agents, displayName, onOpenTerminal, onSessionReplaced }: {
   session: AgentSessionSummary;
   agents: AgentApi;
+  displayName?: string;
   onOpenTerminal: () => void;
   /** The session was resumed under a new id, e.g. on another model. */
   onSessionReplaced: (sessionId: string) => void;
@@ -185,7 +186,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   return <>
     <header className="chat-header">
       <div className="chat-header__title">
-        <ConversationIdentity assistant={assistant} title={session.label || assistant}>
+        <ConversationIdentity assistant={assistant} title={displayName || session.label || assistant}>
           <span className="chat-chip">{assistant}{session.model ? ` · ${session.model}` : ""}</span>
           <span className="chat-chip" title={displayPath(session.workingDirectory)}>
             <FolderIcon />{directoryLabel || t("chat.directory.none")}

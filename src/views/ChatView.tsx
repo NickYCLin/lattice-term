@@ -596,6 +596,7 @@ export function ChatView({
           </div>
         ) : shownSession ? (
           <SessionConversationPane key={shownSession.sessionId} session={shownSession}
+            displayName={conversationDisplayName(names.names, nameTargets.session(shownSession), shownSession.label)}
             agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)}
             onSessionReplaced={setSelectedSessionId} />
         ) : selectedSessionId ? (
