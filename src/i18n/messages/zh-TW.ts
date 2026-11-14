@@ -1713,6 +1713,7 @@ export const zhTW = {
   "chat.permission.full.hint":
     "助理會用你的帳號權限做任何事，不會再問你。只在完全信任這個工作目錄與提示內容時使用。",
   "chat.model": "模型",
+  "chat.model.otherBrand": "其他模型",
   "chat.model.default": "預設",
   "chat.model.capabilities.unknown": "尚未確認",
   "chat.model.capabilities.images": "圖片輸入：{value}",

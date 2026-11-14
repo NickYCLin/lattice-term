@@ -1,4 +1,5 @@
-import { CLI_PROXY_DEFAULT_ID, cliProxyMessageKey, cliProxyStatusCode, groupCliProxyModels } from "../../app/cliProxyApi";
+import { CLI_PROXY_DEFAULT_ID, cliProxyMessageKey, cliProxyStatusCode } from "../../app/cliProxyApi";
+import { groupPickerModels } from "../../app/modelPickerOrder";
 import type { CliProxyModelList, CliProxyModelLists } from "../../app/useCliProxyApi";
 import { accountModelKey, accountModelSourceKey, type AccountModelOption, type AccountModelSelection } from "../../app/accountModels";
 import { useI18n } from "../../i18n/context";
@@ -21,7 +22,7 @@ function CliProxyModel({ value, models, disabled, onChange, onReload }: {
 }) {
   const { t } = useI18n();
   const listed = models.state === "ready" ? models.models : [];
-  const grouped = groupCliProxyModels(listed);
+  const grouped = groupPickerModels(listed, model => model);
   const known = listed.some((model) => model.id === value.model);
   const manual = !known;
   const explain = (reason: unknown) => {
@@ -121,7 +122,7 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
     if (!selected) return;
     const list = selected.provider ? listFor(selected.proxyId) : null;
     onChange(list?.state === "ready"
-      ? { ...selected, model: groupCliProxyModels(list.models)[0]?.models[0]?.id ?? "" } : selected);
+      ? { ...selected, model: groupPickerModels(list.models, model => model)[0]?.models[0]?.id ?? "" } : selected);
   };
   const renderSource = (entry: AccountModelSource) =>
     <option key={entry.key} value={entry.key} disabled={entry.disabled}>{entry.label}</option>;
@@ -147,8 +148,14 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
           if (selected && !selected.disabled) onChange(selected);
         }}>
         {modelMissing && <option value="" disabled>{t("accountModel.missing")}</option>}
-        {source.options.map((option) => <option key={accountModelKey(option)} value={accountModelKey(option)}
+        {source.options.filter(option => !option.model).map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
           disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
+        {groupPickerModels(source.options.filter(option => option.model), option => ({ id: option.model })).map(group => (
+          <optgroup key={group.brand ?? "other"} label={group.brand ?? t("chat.model.otherBrand")}>
+            {group.models.map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
+              disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
+          </optgroup>
+        ))}
       </select>
     </label>}
     {allowCliProxyApi && value?.provider === "cliproxyapi" &&

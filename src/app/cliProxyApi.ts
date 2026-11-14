@@ -260,7 +260,7 @@ function dottedVersions(id: string): number[][] {
   return (normalized.match(/\d+(?:\.\d+)*/g) ?? []).map((version) => version.split(".").map(Number));
 }
 
-function compareModelStrength(first: string, second: string): number {
+export function compareModelStrength(first: string, second: string): number {
   const left = dottedVersions(first);
   const right = dottedVersions(second);
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {

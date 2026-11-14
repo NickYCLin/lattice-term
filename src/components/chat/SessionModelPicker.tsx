@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { hasChatModels } from "../../app/accountModels";
 import type { ChatModelChoice } from "../../app/agentChat";
-import { cliProxyIdFromArguments, groupCliProxyModels } from "../../app/cliProxyApi";
+import { cliProxyIdFromArguments } from "../../app/cliProxyApi";
+import { groupPickerModels } from "../../app/modelPickerOrder";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { modelSwitchRequest, switchesModelInPlace } from "../../app/sessionModelSwitch";
 import type { AgentApi, AgentSessionSummary } from "../../app/useAgentSessions";
@@ -9,9 +10,10 @@ import { useCliProxyModels, useCliProxySettings } from "../../app/useCliProxyApi
 import { useI18n } from "../../i18n/context";
 import { ChevronDownIcon } from "../icons";
 
+interface PickerChoice { value: string; label: string; ownedBy?: string | null }
 type Choices =
   | { state: "idle" | "loading" }
-  | { state: "ready"; models: { value: string; label: string }[] }
+  | { state: "ready"; models: PickerChoice[] }
   | { state: "unavailable"; reason: string };
 
 function errorText(reason: unknown): string {
@@ -74,8 +76,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const choices: Choices = proxyId === null
     ? accountChoices
     : proxyModels.state === "ready"
-      ? { state: "ready", models: groupCliProxyModels(proxyModels.models).flatMap(group =>
-        group.models.map(model => ({ value: model.id, label: model.id }))) }
+      ? { state: "ready", models: proxyModels.models.map(model => ({ value: model.id, label: model.id, ownedBy: model.ownedBy })) }
       : proxyModels.state === "unavailable"
         ? { state: "unavailable", reason: proxyModels.reason }
         : endpoint
@@ -117,6 +118,14 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   }
 
   const inPlace = switchesModelInPlace(session) && !session.closedReason;
+  const modelGroups = choices.state === "ready" ? groupPickerModels(choices.models.filter(model => model.value),
+    model => ({ id: model.value, ownedBy: model.ownedBy })) : [];
+  const renderModel = (model: PickerChoice) => (
+    <button key={model.value} type="button" role="menuitemradio" aria-checked={model.value === session.model}
+      disabled={disabled || switching} title={model.value} onClick={() => void pick(model.value)}>
+      {model.label}
+    </button>
+  );
   return (
     <div ref={menuRef} className="session-composer__model-picker">
       <button type="button" className="session-composer__model" disabled={switching}
@@ -129,11 +138,12 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
       {open && (
         <div className="session-composer__menu session-composer__menu--end" role="menu" aria-label={t("sessionChat.model")}>
           {disabled && <p className="session-composer__model-hint" role="status">{t("sessionChat.model.waitUntilReady")}</p>}
-          {choices.state === "ready" && choices.models.length > 0 && choices.models.map(model => (
-            <button key={model.value} type="button" role="menuitemradio" aria-checked={model.value === session.model}
-              disabled={disabled || switching} title={model.value} onClick={() => void pick(model.value)}>
-              {model.label}
-            </button>
+          {choices.state === "ready" && choices.models.filter(model => !model.value).map(renderModel)}
+          {modelGroups.map(group => (
+            <div key={group.brand ?? "other"} role="group" aria-label={group.brand ?? t("chat.model.otherBrand")}>
+              <span className="session-composer__model-brand" aria-hidden="true">{group.brand ?? t("chat.model.otherBrand")}</span>
+              {group.models.map(renderModel)}
+            </div>
           ))}
           {choices.state === "ready" && choices.models.length === 0 && (
             <button type="button" role="menuitem" disabled>{t("sessionChat.model.none")}</button>

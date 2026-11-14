@@ -1782,6 +1782,7 @@ export const en: Messages = {
   "chat.permission.full.hint":
     "The assistant acts with your full account rights and never asks. Use only when you fully trust this directory and the prompt.",
   "chat.model": "Model",
+  "chat.model.otherBrand": "Other models",
   "chat.model.default": "Default",
   "chat.model.capabilities.unknown": "Not confirmed",
   "chat.model.capabilities.images": "Image input: {value}",
