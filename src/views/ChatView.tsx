@@ -1354,9 +1354,6 @@ function ThreadPane({
           {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
           {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && (
             <div className="chat-welcome">
-              <span className="chat-avatar chat-avatar--lg" aria-hidden="true">
-                {assistant.slice(0, 1)}
-              </span>
               <h3>{t("chat.welcome.title", { assistant })}</h3>
               <p>
                 {thread.workingDirectory
@@ -1397,9 +1394,6 @@ function ThreadPane({
           ))}
           {running && thread.items[thread.items.length - 1]?.type === "user" && (
             <div className="chat-msg chat-msg--assistant">
-              <span className="chat-avatar" aria-hidden="true">
-                {assistant.slice(0, 1)}
-              </span>
               <div className="chat-msg__body">
                 <p className="chat-notice chat-cursor">{t("chat.running")}</p>
               </div>
