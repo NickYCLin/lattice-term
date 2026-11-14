@@ -60,13 +60,26 @@ function Get-TestResult {
     return [ordered]@{ passed = $passed; failed = $failed; ignored = $ignored }
 }
 
+function Get-NormalizedTestPath {
+    param([string]$Path)
+    # Cargo can report a local drive path with the extended-length prefix.
+    # Normalize both spellings before comparing them with the owned root.
+    if ($IsWindows -and $Path.StartsWith('\\?\')) {
+        if ($Path -notmatch '^\\\\\?\\[A-Za-z]:\\') {
+            throw "Only local drive paths are supported for native test artifacts."
+        }
+        $Path = $Path.Substring(4)
+    }
+    return [IO.Path]::GetFullPath($Path)
+}
+
 function Assert-ContainedPath {
     param([string]$Path, [string]$Root)
-    $resolved = [IO.Path]::GetFullPath($Path)
-    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $resolved = Get-NormalizedTestPath $Path
+    $resolvedRoot = (Get-NormalizedTestPath $Root).TrimEnd([IO.Path]::DirectorySeparatorChar)
     if (-not $resolved.StartsWith($resolvedRoot + [IO.Path]::DirectorySeparatorChar,
             [StringComparison]::OrdinalIgnoreCase)) {
-        throw "A native test path is outside its expected directory."
+        throw "A native test path is outside its expected directory: $resolved (root: $resolvedRoot)."
     }
     return $resolved
 }
@@ -179,6 +192,19 @@ if ($SelfTest) {
         $rejected = $false
         try { $null = Assert-ContainedPath $outside $PSScriptRoot } catch { $rejected = $true }
         if (-not $rejected) { throw "Unsafe cleanup path self-test failed." }
+    }
+    if ($IsWindows) {
+        $extendedInside = '\\?\' + $inside
+        if ((Assert-ContainedPath $extendedInside $PSScriptRoot) -ne $inside -or
+            (Assert-ContainedPath $inside ('\\?\' + $PSScriptRoot)) -ne $inside) {
+            throw "Extended local drive path containment self-test failed."
+        }
+        foreach ($outside in @($PSScriptRoot, (Join-Path $PSScriptRoot "../outside.json"),
+                ($PSScriptRoot + "-other/report.json"))) {
+            $rejected = $false
+            try { $null = Assert-ContainedPath ('\\?\' + $outside) $PSScriptRoot } catch { $rejected = $true }
+            if (-not $rejected) { throw "Extended path escape self-test failed." }
+        }
     }
     Assert-CommonControlsManifest (Join-Path $PSScriptRoot "windows-lib-test.manifest")
     Write-Host "Windows native regression runner self-tests passed (no native test process or Cargo started)."
