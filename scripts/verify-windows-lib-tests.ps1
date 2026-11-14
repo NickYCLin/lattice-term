@@ -84,6 +84,14 @@ function Assert-ContainedPath {
     return $resolved
 }
 
+function Get-OwnedLibTestArtifact {
+    param([string[]]$Lines, [string]$ManifestPath, [string]$TargetDirectory)
+    $artifact = Select-LibTestArtifact $Lines $ManifestPath
+    # Cargo owns the output layout; newer versions can place test binaries
+    # under release/build/<package>/<hash>/out rather than release/deps.
+    return Assert-ContainedPath $artifact (Join-Path $TargetDirectory "release")
+}
+
 function Assert-CommonControlsManifest {
     param([string]$Path)
     $settings = [Xml.XmlReaderSettings]::new()
@@ -174,6 +182,26 @@ if ($SelfTest) {
         try { $null = Select-LibTestArtifact $lines $manifest } catch { $rejected = $true }
         if (-not $rejected) { throw "Unsafe Cargo artifact self-test failed." }
     }
+    $fixtureTarget = Join-Path $PSScriptRoot "owned-target"
+    foreach ($relative in @("release/deps/latticeterm_lib-123.exe",
+            "release/build/lattice-term/123/out/latticeterm_lib-123.exe")) {
+        $expected = [IO.Path]::GetFullPath((Join-Path $fixtureTarget $relative))
+        $event = $artifact | ConvertFrom-Json
+        $event.executable = $expected
+        $fixture = $event | ConvertTo-Json -Depth 5 -Compress
+        if ((Get-OwnedLibTestArtifact @($fixture, $success) $manifest $fixtureTarget) -ne $expected) {
+            throw "Cargo library-test output layout self-test failed."
+        }
+    }
+    foreach ($relative in @("debug/latticeterm_lib-123.exe", "release-other/latticeterm_lib-123.exe",
+            "../outside/latticeterm_lib-123.exe")) {
+        $event = $artifact | ConvertFrom-Json
+        $event.executable = Join-Path $fixtureTarget $relative
+        $fixture = $event | ConvertTo-Json -Depth 5 -Compress
+        $rejected = $false
+        try { $null = Get-OwnedLibTestArtifact @($fixture, $success) $manifest $fixtureTarget } catch { $rejected = $true }
+        if (-not $rejected) { throw "Cargo artifact output boundary self-test failed." }
+    }
     $names = @(Get-TestNames @("agent::one: test", "agent::two: test", "2 tests, 0 benchmarks"))
     if ($names.Count -ne 2) { throw "Native test inventory self-test failed." }
     $valid = "test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 9 filtered out; finished in 0.01s"
@@ -248,9 +276,9 @@ try {
         & cargo test --lib --release --no-run --locked --message-format=json-render-diagnostics --target-dir $targetDirectory 1> $cargoLog
         if ($LASTEXITCODE -ne 0) { throw "Cargo library-test compilation failed." }
     } finally { Pop-Location }
-    $artifactPath = Select-LibTestArtifact (Get-Content -LiteralPath $cargoLog) $manifestPath
-    $artifactPath = Assert-ContainedPath $artifactPath (Join-Path $targetDirectory "release/deps")
+    $artifactPath = Get-OwnedLibTestArtifact (Get-Content -LiteralPath $cargoLog) $manifestPath $targetDirectory
     $artifactPath = (Resolve-Path -LiteralPath $artifactPath).Path
+    Assert-NoReparseAncestors $artifactPath
     if ([IO.Path]::GetExtension($artifactPath) -ne ".exe" -or
         ((Get-Item -LiteralPath $artifactPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Cargo reported an unexpected native library-test file."
