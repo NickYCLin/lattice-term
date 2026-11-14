@@ -64,6 +64,7 @@ export const en: Messages = {
   "agents.skills.noResults": "No matching Skills. Adjust or clear the filters.",
   "agents.skills.details": "Details",
   "conversation.meta.provider": "Provider",
+  "conversation.meta.managedBy": "Managed by {source}",
   "conversation.meta.unknown": "Unknown",
   "conversation.meta.connection": "Connection",
   "conversation.meta.account": "Account",
@@ -432,6 +433,7 @@ export const en: Messages = {
   "row.duplicate": "Duplicate {name}",
   "row.delete": "Delete {name}",
   "row.details": "Show details for {name}",
+  "row.actions": "Actions for {name}",
 
   // Add and edit form -----------------------------------------------------
   "form.addTitle": "New connection",
@@ -1517,6 +1519,7 @@ export const en: Messages = {
   "agents.account.addingProfile": "Adding…",
   "agents.account.profileHint": "Each account keeps its own sign-in state, ready when you select it next time. LatticeTerm manages this automatically; no folder selection is needed.",
   "agents.account.profileFailed": "Could not add the account: {detail}",
+  "agents.account.profileLimit": "You can save up to {count} accounts. Remove an account before adding another.",
   "agents.account.loginLaunchFailed": "The account was added, but its sign-in terminal could not open. Press Launch with this account selected to retry: {detail}",
   "agents.account.removeAction": "Remove account",
   "agents.account.removeTitle": "Remove account “{name}”",

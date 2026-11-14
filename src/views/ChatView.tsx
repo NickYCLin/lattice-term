@@ -16,7 +16,7 @@ import { SessionConversationPane } from "../components/chat/SessionConversationP
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
 import { ConversationIdentity, ConversationListIdentity, ConversationMessage, ConversationMetadata } from "../components/chat/ConversationPresentation";
 import { ConversationInfo } from "../components/chat/ConversationInfo";
-import { isChatAtBottom } from "../app/chatScroll";
+import { useChatScroll } from "../app/useChatScroll";
 import { conversationLabels } from "../app/conversationLabels";
 import { cliProxyLabel } from "../app/cliProxyApi";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
@@ -253,12 +253,14 @@ export function ChatView({
   const shownSession = selectedSession ?? activeLiveSession;
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
+  const [handingOffThreadId, setHandingOffThreadId] = useState<string | null>(null);
   const [summarySource, setSummarySource] = useState<(Pick<ChatThread, "id" | "title" | "workingDirectory" | "definitionId" | "items"> & Partial<Pick<ChatThread, "permission">> & { sessionId?: string }) | null>(null);
   const summaryDestination = useRef<{ key: string; id: string } | null>(null);
 
   async function continueInSession(thread: ChatThread) {
     if (handingOff.current) return;
     handingOff.current = true;
+    setHandingOffThreadId(thread.id);
     setHandoffProblem(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -266,21 +268,26 @@ export function ChatView({
         await invoke<string>("agent_chat_general_directory", { threadId: thread.id });
       const request = sessionLaunchForThread(thread, directory, agents.catalog, accountProfiles, proxies);
       if (!request) throw new Error(t("chat.continueInSession.unavailable"));
-      await chat.continueInSession(thread.id);
-      const launched = await agents.launch(request);
-      if (launched.closedReason) throw new Error(launched.closedReason);
+      let sessionId = "";
+      await chat.continueInSession(thread.id, async () => {
+        const launched = await agents.launch(request);
+        if (launched.closedReason) throw new Error(launched.closedReason);
+        sessionId = launched.sessionId;
+      });
+      if (!sessionId) return;
       try {
-        await agents.rename(launched.sessionId, thread.title || request.label);
+        await agents.rename(sessionId, thread.title || request.label);
       } catch {
         // The terminal is already running the conversation.
       }
-      onOpenSession(launched.sessionId);
+      onOpenSession(sessionId);
     } catch (reason) {
       setHandoffProblem(t("chat.continueInSession.failed", {
         detail: reason instanceof Error ? reason.message : String(reason),
       }));
     } finally {
       handingOff.current = false;
+      setHandingOffThreadId(null);
     }
   }
 
@@ -785,6 +792,7 @@ export function ChatView({
               agents.catalog, accountProfiles, proxies) && !active.archived
               ? () => void continueInSession(active) : undefined}
             handoffProblem={handoffProblem}
+            handoffPending={handingOffThreadId === active.id}
             sessionRead={sessionRead}
           />
         )}
@@ -825,6 +833,7 @@ function ThreadPane({
   onDelete,
   continueInSession,
   handoffProblem,
+  handoffPending,
   sessionRead,
 }: {
   thread: ChatThread;
@@ -839,6 +848,7 @@ function ThreadPane({
   /** Present when the conversation can go on in a terminal session. */
   continueInSession?: () => void;
   handoffProblem?: string | null;
+  handoffPending?: boolean;
   sessionRead?: { loading: boolean; error: string | null; refresh: () => void } | null;
 }) {
   const { t } = useI18n();
@@ -867,12 +877,11 @@ function ThreadPane({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   const [delegating, setDelegating] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const pinnedToBottom = useRef(true);
+  const { ref: scrollRef, onScroll, onWheel, followBottom } = useChatScroll();
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
-  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession);
+  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession) || Boolean(handoffPending);
   const settingsLocked = running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
   const directProxy = thread.provider === "cliproxyapi" && !thread.nativeSessionId;
   const cliInstalled = directProxy || installed.includes(thread.definitionId);
@@ -902,13 +911,6 @@ function ThreadPane({
     cliInstalled &&
     (draft.trim() !== "" || attachments.length > 0);
   const assistant = directProxy ? "CLIProxyAPI" : cliLabel(thread.definitionId);
-
-  // Follow the reply as it streams, unless the reader scrolled up to look
-  // at something earlier.
-  useLayoutEffect(() => {
-    const node = scrollRef.current;
-    if (node && pinnedToBottom.current) node.scrollTop = node.scrollHeight;
-  }, [thread.items]);
 
   useEffect(() => {
     setNotice(null);
@@ -982,12 +984,6 @@ function ThreadPane({
     onError: reason => setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) })),
   });
 
-  function onScroll() {
-    const node = scrollRef.current;
-    if (!node) return;
-    pinnedToBottom.current = isChatAtBottom(node);
-  }
-
   async function chooseDirectory() {
     setNotice(null);
     try {
@@ -1029,7 +1025,7 @@ function ThreadPane({
       setDraft(current => current === prompt ? "" : current);
       setAttachments(current => current === files ? [] : current);
       setPicks(current => current === selectedPicks ? [] : current);
-      pinnedToBottom.current = true;
+      followBottom();
       if (mounted.current) { setSettingsOpen(false); setNotice(null); }
     } catch (reason) {
       if (mounted.current) setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
@@ -1053,7 +1049,7 @@ function ThreadPane({
       setDraft(current => current === submitted ? "" : current);
       setAttachments(current => current === files ? [] : current);
       setPicks(current => current === selectedPicks ? [] : current);
-      pinnedToBottom.current = true;
+      followBottom();
     } catch (reason) {
       setNotice(t("chat.steer.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
     } finally {
@@ -1196,7 +1192,7 @@ function ThreadPane({
                 type="button"
                 className="button button--ghost button--sm"
                 onClick={continueInSession}
-                disabled={running || pendingInputs.length > 0}
+                disabled={running || pendingInputs.length > 0 || awaitingHistory}
                 title={t("chat.continueInSession.hint")}
               >
                 {t("chat.continueInSession")}
@@ -1348,7 +1344,7 @@ function ThreadPane({
         {handoffProblem && <Callout tone="danger">{handoffProblem}</Callout>}
       </header>
 
-      <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
+      <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
           {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
           {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} onRetry={sessionRead.refresh} />}
@@ -1358,9 +1354,6 @@ function ThreadPane({
           {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
           {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && (
             <div className="chat-welcome">
-              <span className="chat-avatar chat-avatar--lg" aria-hidden="true">
-                {assistant.slice(0, 1)}
-              </span>
               <h3>{t("chat.welcome.title", { assistant })}</h3>
               <p>
                 {thread.workingDirectory
@@ -1401,9 +1394,6 @@ function ThreadPane({
           ))}
           {running && thread.items[thread.items.length - 1]?.type === "user" && (
             <div className="chat-msg chat-msg--assistant">
-              <span className="chat-avatar" aria-hidden="true">
-                {assistant.slice(0, 1)}
-              </span>
               <div className="chat-msg__body">
                 <p className="chat-notice chat-cursor">{t("chat.running")}</p>
               </div>

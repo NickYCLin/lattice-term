@@ -465,27 +465,6 @@
   white-space: nowrap;
 }
 
-.chat-avatar {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-press));
-  color: var(--text-on-accent);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  user-select: none;
-}
-
-.chat-avatar--lg {
-  width: 3.25rem;
-  height: 3.25rem;
-  font-size: var(--text-xl);
-  box-shadow: 0 0 0 8px var(--accent-soft);
-}
-
 .chat-chips {
   display: flex;
   flex-wrap: wrap;
@@ -716,17 +695,7 @@ button.chat-chip:hover {
 .chat-msg__body {
   flex: 1;
   min-width: 0;
-  padding-top: 0.2rem;
   overflow-wrap: anywhere;
-}
-
-.chat-msg__name {
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--text-faint);
-  font-size: var(--text-2xs);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
 }
 
 .chat-markdown > :first-child {
@@ -787,7 +756,6 @@ button.chat-chip:hover {
 /* Cards: tools, reasoning, approvals ---------------------------------- */
 
 .chat-card {
-  margin-left: calc(2rem + var(--space-3));
   border: 1px solid var(--line);
   border-left-width: 3px;
   border-radius: var(--radius-sm);
@@ -931,7 +899,7 @@ button.chat-chip:hover {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin: 0 0 0 calc(2rem + var(--space-3));
+  margin: 0;
 }
 
 .chat-turn__pill {

@@ -47,4 +47,14 @@ describe("chat account profiles", () => {
     expect(profileCapable("claude")).toBe(true);
     expect(profileCapable("gemini")).toBe(false);
   });
+
+  it("rejects overflow without silently truncating or changing the saved list", () => {
+    const profiles = Array.from({ length: 24 }, (_, index) => ({
+      id: "account-" + index, definitionId: "codex" as const, name: "Account " + index, configDirectory: "/profiles/" + index,
+    }));
+    const store = storage();
+    saveChatAccountProfiles(store, profiles);
+    expect(() => saveChatAccountProfiles(store, [...profiles, { ...profiles[0], id: "overflow" }])).toThrow();
+    expect(loadChatAccountProfiles(store)).toEqual(profiles);
+  });
 });

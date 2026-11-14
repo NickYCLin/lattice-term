@@ -5,7 +5,8 @@ import type { ConversationLabels } from "../../app/conversationLabels";
 
 export function ConversationMetadata({ labels }: { labels: ConversationLabels }) {
   const { t } = useI18n();
-  const text = [`${t("conversation.meta.provider")}: ${labels.provider ?? t("conversation.meta.unknown")}`,
+  const provider = labels.provider ?? labels.endpoint ?? t("conversation.meta.managedBy", { source: labels.source });
+  const text = [`${t("conversation.meta.provider")}: ${provider}`,
     labels.source, `${t("conversation.meta.model")}: ${labels.model ?? t("conversation.meta.unknown")}`,
     labels.endpoint && `${t("conversation.meta.connection")}: ${labels.endpoint}`,
     labels.account && `${t("conversation.meta.account")}: ${labels.account}`,
@@ -23,13 +24,12 @@ export function ConversationListIdentity({ title, children }: { title: string; c
   </span>;
 }
 
-export function ConversationIdentity({ assistant, title, children }: {
+export function ConversationIdentity({ title, children }: {
   assistant: string;
   title: string;
   children: ReactNode;
 }) {
   return <div className="chat-header__identity">
-    <span className="chat-avatar" aria-hidden="true">{assistant.slice(0, 1)}</span>
     <div className="chat-header__details">
       <h2>{title}</h2>
       <div className="chat-chips">{children}</div>
@@ -37,18 +37,14 @@ export function ConversationIdentity({ assistant, title, children }: {
   </div>;
 }
 
-export function ConversationMessage({ role, assistant, children, actions }: {
+export function ConversationMessage({ role, children, actions }: {
   role: "user" | "assistant";
   assistant: string;
   children: ReactNode;
   actions?: ReactNode;
 }) {
   return <div className={`chat-msg chat-msg--${role}`}>
-    {role === "assistant" && <span className="chat-avatar" aria-hidden="true">
-      {assistant.slice(0, 1)}
-    </span>}
     <div className={role === "user" ? "chat-bubble" : "chat-msg__body"}>
-      {role === "assistant" && <span className="chat-msg__name">{assistant}</span>}
       {children}
     </div>
     {actions}

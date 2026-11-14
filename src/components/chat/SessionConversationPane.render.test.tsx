@@ -24,7 +24,7 @@ describe("SessionConversationPane composer", () => {
     expect(html).toContain('<h2>OpenAI Codex</h2>');
     expect(html).not.toContain('<h2>Claude Code</h2>');
     expect(html).toContain('class="chat-header__identity"');
-    expect(html).toContain('class="chat-avatar"');
+    expect(html).not.toContain('class="chat-avatar"');
     expect(html).toContain('OpenAI Codex · gpt-6.1-sol');
     expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
     expect(html).toContain('class="callout callout--info"');

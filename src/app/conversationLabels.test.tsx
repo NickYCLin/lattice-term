@@ -7,12 +7,26 @@ import { chatWorkspaceProjection } from "./chatWorkspaceNodes";
 import { fakeDefinition, fakeSession } from "./testFixtures/agentApis";
 import { cliProxyLaunchArguments } from "./cliProxyApi";
 
+it("shows reported provider identities instead of discarding non-OpenAI providers", () => {
+  expect(conversationLabels({ definitionId: "claude", provider: "anthropic" }).provider).toBe("Anthropic");
+  expect(conversationLabels({ definitionId: "codex", provider: "work-adapter" }).provider).toBe("work-adapter");
+  expect(conversationLabels({ definitionId: "codex", provider: "constructor" }).provider).toBe("constructor");
+  expect(conversationLabels({ definitionId: "codex", provider: "latticeterm_cliproxyapi_v3_work_abc" }).provider).toBe("CLIProxyAPI");
+});
+
+it.each(["codex", "claude", "custom-cli"])("identifies the managing CLI when %s has not reported its provider", definitionId => {
+  const labels = conversationLabels({ definitionId });
+  const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><ConversationMetadata labels={labels} /></I18nProvider>);
+  expect(markup).not.toContain("供應商: 未知");
+  expect(markup).toContain(`供應商: 由 ${labels.source} 管理`);
+});
+
 it("never guesses an upstream from endpoint branding, tool branding or a model name", () => {
   for (const endpoint of ["Herdr", "CLIProxyAPI", "OpenAI 自訂連線"]) {
     expect(conversationLabels({ definitionId: "codex", directApi: true, endpoint, model: "gpt-synthetic" }).provider).toBeNull();
   }
   expect(conversationLabels({ definitionId: "codex", provider: "openai" }).provider).toBe("OpenAI");
-  expect(conversationLabels({ definitionId: "codex", provider: "custom-adapter" }).provider).toBeNull();
+  expect(conversationLabels({ definitionId: "codex", provider: "custom-adapter" }).provider).toBe("custom-adapter");
   expect(conversationLabels({ definitionId: "codex", provider: "openai", endpoint: "Custom endpoint" }).provider).toBeNull();
   expect(conversationLabels({ definitionId: "codex", provider: "openai", directApi: true }).provider).toBeNull();
 });
@@ -23,6 +37,8 @@ it("separates CLI, API, model, project, account and custom endpoint without chan
   expect(labels).toEqual({ provider: null, source: "Codex API", model: "synthetic-model", endpoint, account: "測試帳號", project: "daily-log-helper" });
   const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><ConversationMetadata labels={labels} /></I18nProvider>);
   for (const text of ["Codex API", "模型: synthetic-model", `連線: ${endpoint}`, "帳號: 測試帳號", "專案: daily-log-helper"]) expect(markup).toContain(text);
+  expect(markup).toContain(`供應商: ${endpoint}`);
+  expect(markup).not.toContain("供應商: 未知");
   expect(conversationLabels({ definitionId: "codex" }).source).toBe("Codex CLI");
 });
 

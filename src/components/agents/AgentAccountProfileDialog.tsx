@@ -20,6 +20,9 @@ export function AgentAccountProfileDialog({
   const [nativeDirectory, setNativeDirectory] = useState("");
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
+  const choosingRef = useRef(false);
+  const [choosing, setChoosing] = useState(false);
+  const busy = saving || choosing;
   const [error, setError] = useState<string | null>(null);
   const trimmedName = name.trim();
 
@@ -27,11 +30,11 @@ export function AgentAccountProfileDialog({
     dialogRef,
     getInitialFocus: () => nameRef.current,
     onEscape: onCancel,
-    escapeDisabled: saving,
+    escapeDisabled: busy,
   });
 
   async function save() {
-    if ((!shared && !trimmedName) || savingRef.current) return;
+    if ((!shared && !trimmedName) || savingRef.current || choosingRef.current) return;
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -48,6 +51,10 @@ export function AgentAccountProfileDialog({
   }
 
   async function chooseDirectory() {
+    if (savingRef.current || choosingRef.current) return;
+    choosingRef.current = true;
+    setChoosing(true);
+    setError(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({ directory: true, multiple: false });
@@ -56,6 +63,9 @@ export function AgentAccountProfileDialog({
       setError(t("agents.account.profileFailed", {
         detail: reason instanceof Error ? reason.message : String(reason),
       }));
+    } finally {
+      choosingRef.current = false;
+      setChoosing(false);
     }
   }
 
@@ -64,7 +74,7 @@ export function AgentAccountProfileDialog({
       className="scrim scrim--center"
       role="presentation"
       onMouseDown={() => {
-        if (!savingRef.current) onCancel();
+        if (!savingRef.current && !choosingRef.current) onCancel();
       }}
     >
       <div
@@ -74,7 +84,7 @@ export function AgentAccountProfileDialog({
         aria-modal="true"
         aria-labelledby="agent-account-profile-title"
         aria-describedby="agent-account-profile-body"
-        aria-busy={saving || undefined}
+        aria-busy={busy || undefined}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -93,7 +103,7 @@ export function AgentAccountProfileDialog({
           <button
             type="button"
             className="icon-button icon-button--sm"
-            disabled={saving}
+            disabled={busy}
             onClick={onCancel}
             aria-label={t("common.close")}
             style={{ marginLeft: "auto" }}
@@ -108,10 +118,10 @@ export function AgentAccountProfileDialog({
         }}>
           <div className="dialog__stack">
             <div className="dialog__actions" role="group" aria-label={t("agents.account.storageMode")}>
-              <button type="button" className={shared ? "button button--ghost" : "button button--primary"} aria-pressed={!shared} disabled={saving} onClick={() => setShared(false)}>
+              <button type="button" className={shared ? "button button--ghost" : "button button--primary"} aria-pressed={!shared} disabled={busy} onClick={() => setShared(false)}>
                 {t("agents.account.isolated")}
               </button>
-              <button type="button" className={shared ? "button button--primary" : "button button--ghost"} aria-pressed={shared} disabled={saving} onClick={() => setShared(true)}>
+              <button type="button" className={shared ? "button button--primary" : "button button--ghost"} aria-pressed={shared} disabled={busy} onClick={() => setShared(true)}>
                 {t("agents.account.shared")}
               </button>
             </div>
@@ -128,7 +138,7 @@ export function AgentAccountProfileDialog({
                 }}
                 placeholder={t("agents.account.profileNamePlaceholder")}
                 maxLength={64}
-                disabled={saving}
+                disabled={busy}
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
@@ -139,10 +149,10 @@ export function AgentAccountProfileDialog({
               <p className="field__hint">{t("agents.account.sharedHint")}</p>
               <p className="field__hint">{nativeDirectory || t("agents.account.defaultDirectory")}</p>
               <div className="dialog__actions">
-                <button type="button" className="button button--ghost" disabled={saving} onClick={() => void chooseDirectory()}>
+                <button type="button" className="button button--ghost" disabled={busy} onClick={() => void chooseDirectory()}>
                   {t("agents.account.chooseNativeDirectory")}
                 </button>
-                {nativeDirectory && <button type="button" className="button button--ghost" disabled={saving} onClick={() => setNativeDirectory("")}>
+                {nativeDirectory && <button type="button" className="button button--ghost" disabled={busy} onClick={() => setNativeDirectory("")}>
                   {t("agents.account.useDefaultDirectory")}
                 </button>}
               </div>
@@ -155,7 +165,7 @@ export function AgentAccountProfileDialog({
             <button
               type="button"
               className="button button--ghost"
-              disabled={saving}
+              disabled={busy}
               onClick={onCancel}
             >
               {t("common.cancel")}
@@ -163,7 +173,7 @@ export function AgentAccountProfileDialog({
             <button
               type="submit"
               className="button button--primary"
-              disabled={saving || (!shared && !trimmedName)}
+              disabled={busy || (!shared && !trimmedName)}
             >
               {t(saving ? "agents.account.addingProfile" : shared ? "agents.account.linkRecords" : "agents.account.saveProfile")}
             </button>

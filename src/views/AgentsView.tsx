@@ -12,7 +12,9 @@ import type {
 import { agentCatalogForDisplay } from "../app/useAgentSessions";
 import { copyTextToClipboard } from "../app/clipboardText";
 import { displayPath } from "../app/displayPath";
+import { sessionPermissionArguments } from "../app/sessionPermissions";
 import {
+  MAX_CHAT_ACCOUNT_PROFILES,
   loadChatAccountProfiles,
   profileCapable,
   profilesFor,
@@ -314,7 +316,7 @@ export function AgentsView({
       definitionId: definition.id,
       label: "",
       executable: "",
-      arguments: [],
+      arguments: sessionPermissionArguments(definition.id, "full"),
       resumeSessionId: null,
       note: launchNote.trim(),
       profileConfigPath: profile?.configDirectory ?? null,
@@ -330,6 +332,11 @@ export function AgentsView({
     nativeDirectory?: string,
   ) {
     if (!profileCapable(definition.id)) return;
+    if (nativeDirectory === undefined && (typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage)).length >= MAX_CHAT_ACCOUNT_PROFILES) {
+      throw new Error(t("agents.account.profileLimit", { count: MAX_CHAT_ACCOUNT_PROFILES }));
+    }
     const id = crypto.randomUUID();
     const { invoke } = await import("@tauri-apps/api/core");
     const linked = nativeDirectory === undefined ? null : await invoke<{ configDirectory: string; isDefault: boolean }>("agent_account_native_directory", {
@@ -352,14 +359,21 @@ export function AgentsView({
       configDirectory,
       managed: linked === null,
     };
-    const existing = linked && accountProfiles.find(candidate => candidate.definitionId === definition.id && candidate.configDirectory === configDirectory);
+    const currentProfiles = typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage);
+    const existing = linked && currentProfiles.find(candidate => candidate.definitionId === definition.id && candidate.configDirectory === configDirectory);
     if (existing) {
+      setAccountProfiles(currentProfiles);
       setSelectedAccountProfile(current => ({ ...current, [definition.id]: existing.id }));
       setAccountProfileDefinition(null);
       return;
     }
     // Persist before opening the terminal, which may unmount the Fleet view.
-    const profiles = [...accountProfiles, profile];
+    if (currentProfiles.length >= MAX_CHAT_ACCOUNT_PROFILES) {
+      throw new Error(t("agents.account.profileLimit", { count: MAX_CHAT_ACCOUNT_PROFILES }));
+    }
+    const profiles = [...currentProfiles, profile];
     if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
     setAccountProfiles(profiles);
     setSelectedAccountProfile((current) => ({
@@ -376,7 +390,7 @@ export function AgentsView({
         // not rendered yet. This is a fresh, visible session for signing in.
         definitionId: definition.id,
         executable: "",
-        arguments: [],
+        arguments: sessionPermissionArguments(definition.id, "full"),
         resumeSessionId: null,
         profileConfigPath: profile.configDirectory,
         label: `${definition.label} · ${profile.name}`,
@@ -419,7 +433,12 @@ export function AgentsView({
         return;
       }
     }
-    setAccountProfiles((current) => current.filter((candidate) => candidate.id !== profile.id));
+    const profiles = (typeof localStorage === "undefined"
+      ? accountProfiles
+      : loadChatAccountProfiles(localStorage)
+    ).filter((candidate) => candidate.id !== profile.id);
+    if (typeof localStorage !== "undefined") saveChatAccountProfiles(localStorage, profiles);
+    setAccountProfiles(profiles);
     setSelectedAccountProfile((current) => {
       if (current[profile.definitionId] !== profile.id) return current;
       const next = { ...current };
@@ -470,11 +489,15 @@ export function AgentsView({
         cols: 120,
         rows: 32,
       });
-      let stopWatching = () => {};
-      stopWatching = agents.onClosed(session.sessionId, () => {
-        stopWatching();
+      if (session.closedReason) {
         void agents.refreshCatalog();
-      });
+      } else {
+        let stopWatching = () => {};
+        stopWatching = agents.onClosed(session.sessionId, () => {
+          stopWatching();
+          void agents.refreshCatalog();
+        });
+      }
       onOpen(session.sessionId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

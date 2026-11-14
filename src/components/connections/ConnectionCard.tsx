@@ -7,6 +7,7 @@
  * platform boundary instead of offering a button that cannot work.
  */
 
+import { useRef } from "react";
 import {
   connectionTarget,
   findProtocol,
@@ -17,6 +18,7 @@ import { EnvironmentBadge, ProtocolTile, TagChip } from "../common/Badge";
 import {
   DuplicateIcon,
   EditIcon,
+  MoreIcon,
   PlusIcon,
   StarIcon,
   TerminalIcon,
@@ -76,6 +78,14 @@ export function ConnectionCard({
   const routes: LinkedRoute[] = [{ profile, onConnect }, ...linked];
   const connectable = routes.filter((route) => route.onConnect);
   const protocols = [...new Set(routes.map((route) => route.profile.protocol))];
+  const tags = [...new Set(routes.flatMap((route) => route.profile.tags))];
+  const management = useRef<HTMLDetailsElement>(null);
+  const managementToggle = useRef<HTMLElement>(null);
+  const manage = (action: () => void) => () => {
+    management.current?.removeAttribute("open");
+    managementToggle.current?.focus();
+    action();
+  };
 
   return (
     <li
@@ -87,7 +97,7 @@ export function ConnectionCard({
         onClick={onSelect}
         aria-pressed={selected}
         aria-label={t("row.details", { name: profile.name })}
-        title={[profile.name, connectionTarget(profile), ...profile.tags].join("\n")}
+        title={[profile.name, connectionTarget(profile), ...tags].join("\n")}
       />
 
       <div className="connection-card__head">
@@ -112,6 +122,14 @@ export function ConnectionCard({
         {databaseCount > 0 && <span className="badge tone-neutral">SQL{databaseCount > 1 ? ` · ${databaseCount}` : ""}</span>}
         {databaseNames.length > 0 && <span className="connection-card__database-names" title={databaseNames.join(t("database.nameSeparator"))}>{t("database.cardNames", { names: databaseNames.join(t("database.nameSeparator")) })}</span>}
       </div>
+
+      {tags.length > 0 && (
+        <div className="connection-card__tags">
+          {tags.map((tag) => (
+            <TagChip key={tag} label={tag} />
+          ))}
+        </div>
+      )}
 
       <div className="connection-card__primary">
         {connectable.length > 0 ? (
@@ -146,76 +164,78 @@ export function ConnectionCard({
           </span>
         )}
         {onOpenSql && <button type="button" className="button button--secondary button--sm" onClick={onOpenSql}>{databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")}</button>}
+        <button
+          type="button"
+          className="icon-button icon-button--sm connection-card__favorite"
+          onClick={onToggleFavorite}
+          aria-pressed={profile.favorite}
+          aria-label={
+            profile.favorite
+              ? t("row.removeFavorite", { name: profile.name })
+              : t("row.addFavorite", { name: profile.name })
+          }
+        >
+          <StarIcon
+            size={15}
+            filled={profile.favorite}
+            className={profile.favorite ? "is-favorite" : undefined}
+          />
+        </button>
         {linked.length > 0 && <span className="connection-card__route-count">{t("row.routeCount", { count: routes.length })}</span>}
       </div>
 
-      <div className="connection-card__foot">
-        {onMerge && <button type="button" className="button button--ghost button--sm connection-card__merge" onClick={onMerge}>{t("connections.merge.action")}</button>}
-        {onDatabases && <button type="button" className="button button--secondary button--sm" title={t("database.relatedHint")} onClick={onDatabases}>{t("database.related")}</button>}
-        {onAddRoute && (
-          <button
-            type="button"
-            className="button button--ghost button--sm connection-card__add-route"
-            onClick={onAddRoute}
-          >
-            <PlusIcon size={13} />
-            {t("form.route.add")}
-          </button>
-        )}
-        <div className="connection-card__actions">
-          <button
-            type="button"
-            className="icon-button icon-button--sm"
-            onClick={onToggleFavorite}
-            aria-pressed={profile.favorite}
-            aria-label={
-              profile.favorite
-                ? t("row.removeFavorite", { name: profile.name })
-                : t("row.addFavorite", { name: profile.name })
-            }
-          >
-            <StarIcon
-              size={15}
-              filled={profile.favorite}
-              className={profile.favorite ? "is-favorite" : undefined}
-            />
-          </button>
-          <button
-            type="button"
-            className="icon-button icon-button--sm"
-            onClick={onEdit}
-            aria-label={t("row.edit", { name: profile.name })}
-            data-tooltip={t("common.edit")}
-          >
-            <EditIcon size={14} />
-          </button>
-          <button
-            type="button"
-            className="icon-button icon-button--sm"
-            onClick={onDuplicate}
-            aria-label={t("row.duplicate", { name: profile.name })}
-            data-tooltip={t("common.duplicate")}
-          >
-            <DuplicateIcon size={14} />
-          </button>
-          <button
-            type="button"
-            className="icon-button icon-button--sm icon-button--danger"
-            onClick={onDelete}
-            aria-label={t("row.delete", { name: profile.name }) + (linked.length > 0 ? ` · ${t("confirm.delete.choose")}` : "")}
-            data-tooltip={linked.length > 0 ? t("confirm.delete.choose") : t("common.delete")}
-          >
-            <TrashIcon size={14} />
-          </button>
+      <details className="connection-card__management" ref={management}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          management.current?.removeAttribute("open");
+          managementToggle.current?.focus();
+        }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) management.current?.removeAttribute("open");
+        }}>
+        <summary className="icon-button icon-button--sm connection-card__more" ref={managementToggle}
+          aria-label={t("row.actions", { name: profile.name })} title={t("row.actions", { name: profile.name })}>
+          <MoreIcon size={16} />
+        </summary>
+        <div className="connection-card__foot">
+          {onAddRoute && <button type="button" className="button button--ghost button--sm connection-card__add-route" onClick={manage(onAddRoute)}><PlusIcon size={13} />{t("form.route.add")}</button>}
+          {onMerge && <button type="button" className="button button--ghost button--sm connection-card__merge" onClick={manage(onMerge)}>{t("connections.merge.action")}</button>}
+          {onDatabases && <button type="button" className="button button--ghost button--sm" title={t("database.relatedHint")} onClick={manage(onDatabases)}>{t("database.related")}</button>}
+          <div className="connection-card__actions">
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={manage(onEdit)}
+              aria-label={t("row.edit", { name: profile.name })}
+              data-tooltip={t("common.edit")}
+            >
+              <EditIcon size={14} />
+              {t("common.edit")}
+            </button>
+            <button
+              type="button"
+              className="button button--ghost button--sm"
+              onClick={manage(onDuplicate)}
+              aria-label={t("row.duplicate", { name: profile.name })}
+              data-tooltip={t("common.duplicate")}
+            >
+              <DuplicateIcon size={14} />
+              {t("common.duplicate")}
+            </button>
+            <button
+              type="button"
+              className="button button--ghost button--sm connection-card__delete"
+              onClick={manage(onDelete)}
+              aria-label={t("row.delete", { name: profile.name }) + (linked.length > 0 ? ` · ${t("confirm.delete.choose")}` : "")}
+              data-tooltip={linked.length > 0 ? t("confirm.delete.choose") : t("common.delete")}
+            >
+              <TrashIcon size={14} />
+              {t("common.delete")}
+            </button>
+          </div>
         </div>
-      </div>
-      {profile.tags.length > 0 && (
-        <div className="connection-card__tags">
-          {profile.tags.map((tag) => (
-            <TagChip key={tag} label={tag} />
-          ))}
-        </div>
-      )}
+      </details>
     </li>
   );
 }

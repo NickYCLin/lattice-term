@@ -18,7 +18,7 @@ export interface ChatAccountProfile {
 
 export const CHAT_ACCOUNT_PROFILES_KEY = "latticeterm.chatAccountProfiles.v1";
 export const CHAT_ACCOUNT_PROFILES_CHANGED = "latticeterm:accounts-changed";
-const MAX_PROFILES = 24;
+export const MAX_CHAT_ACCOUNT_PROFILES = 24;
 const MAX_NAME_LENGTH = 64;
 
 export function profileCapable(definitionId: string): definitionId is ProfiledChatDefinitionId {
@@ -53,7 +53,7 @@ export function loadChatAccountProfiles(
       if (ids.has(profile.id)) return false;
       ids.add(profile.id);
       return true;
-    }).slice(0, MAX_PROFILES);
+    }).slice(0, MAX_CHAT_ACCOUNT_PROFILES);
   } catch {
     return [];
   }
@@ -63,7 +63,10 @@ export function saveChatAccountProfiles(
   storage: Pick<Storage, "setItem" | "removeItem">,
   profiles: readonly ChatAccountProfile[],
 ): void {
-  const valid = profiles.filter(isProfile).slice(0, MAX_PROFILES);
+  const valid = profiles.filter(isProfile);
+  if (valid.length > MAX_CHAT_ACCOUNT_PROFILES) {
+    throw new RangeError("Cannot save more than " + MAX_CHAT_ACCOUNT_PROFILES + " account profiles.");
+  }
   if (valid.length === 0) storage.removeItem(CHAT_ACCOUNT_PROFILES_KEY);
   else storage.setItem(CHAT_ACCOUNT_PROFILES_KEY, JSON.stringify(valid));
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CHAT_ACCOUNT_PROFILES_CHANGED));

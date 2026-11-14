@@ -27,6 +27,18 @@ function rows(result: ReturnType<typeof sidebar>) {
 }
 
 describe("conversation sidebar identity", () => {
+  it("uses the provider from the exact native session and account", () => {
+    const result = sidebar({ sessions: [fakeSession({ capturedSessionId: "native-1" })],
+      history: [conversation({ profileId: "personal", modelProvider: "wrong-account" }),
+        conversation({ modelProvider: "openai" })] });
+    expect([...result.workspace.sessions.values()][0].metadata?.provider).toBe("OpenAI");
+  });
+
+  it("retains a reported provider from an imported thread before native history loads", () => {
+    const result = sidebar({ sessions: [fakeSession({ capturedSessionId: "native-1" })],
+      threads: [fakeThread({ nativeSessionId: "native-1", reportedProvider: "work-adapter" })] });
+    expect([...result.workspace.sessions.values()][0].metadata?.provider).toBe("work-adapter");
+  });
   it("retains the legacy drive-root sidebar ID while filtering absolute paths", () => {
     const result = sidebar({ history: [conversation({ workingDirectory: "C:\\" })], projectFilter: "c:/" });
     expect([...result.workspace.projects.keys()]).toEqual(["project:local:C:"]);

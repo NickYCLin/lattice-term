@@ -791,6 +791,7 @@ export function useAgentSessions(): AgentApi {
   const [error, setError] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<AgentDefinition[]>(FALLBACK_CATALOG);
   const [defaultWorkingDirectory, setDefaultWorkingDirectory] = useState("");
+  const catalogGeneration = useRef(0);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
   const [lastClosed, setLastClosed] = useState<SessionClosedNotice | null>(null);
   const [workspaceName, setWorkspaceName] = useState("");
@@ -857,6 +858,7 @@ export function useAgentSessions(): AgentApi {
   }, [refreshPlans]);
 
   const refreshCatalog = useCallback(async () => {
+    const generation = ++catalogGeneration.current;
     try {
       const { invoke } = await core();
       const [definitions, directory, planSnapshot] = await Promise.all([
@@ -864,12 +866,14 @@ export function useAgentSessions(): AgentApi {
         invoke<string>("agent_default_working_directory"),
         invoke<AgentPlanSnapshot>("agent_plan_snapshot"),
       ]);
+      if (generation !== catalogGeneration.current) return;
       setCatalog(definitions);
       setDefaultWorkingDirectory(directory);
       applyPlanSnapshot(planSnapshot);
       setError(null);
       setMode("ready");
     } catch (reason) {
+      if (generation !== catalogGeneration.current) return;
       setCatalog(FALLBACK_CATALOG);
       setError(reason instanceof Error ? reason.message : String(reason));
       setMode("unavailable");
@@ -878,6 +882,7 @@ export function useAgentSessions(): AgentApi {
 
   useEffect(() => {
     let disposed = false;
+    const generation = ++catalogGeneration.current;
     let hydrating = true;
     const cleanups: (() => void)[] = [];
     const closedDuringHydration = new Set<string>();
@@ -1299,11 +1304,14 @@ export function useAgentSessions(): AgentApi {
         modelDuringHydration.clear();
         usageDuringHydration.clear();
         launchedDuringHydration.clear();
-        setCatalog(definitions);
-        setDefaultWorkingDirectory(directory);
+        if (generation === catalogGeneration.current) {
+          setCatalog(definitions);
+          setDefaultWorkingDirectory(directory);
+          setError(mcpSyncError);
+          setMode("ready");
+        }
         applyPlanSnapshot(syncedPlanSnapshot);
-        setError(mcpSyncError);
-        setMode("ready");
+        if (mcpSyncError) setError(mcpSyncError);
       } catch (reason) {
         hydrating = false;
         closedDuringHydration.clear();
@@ -1313,15 +1321,18 @@ export function useAgentSessions(): AgentApi {
         modelDuringHydration.clear();
         usageDuringHydration.clear();
         launchedDuringHydration.clear();
-        setCatalog(FALLBACK_CATALOG);
-        setError(reason instanceof Error ? reason.message : String(reason));
-        setMode("unavailable");
+        if (!disposed && generation === catalogGeneration.current) {
+          setCatalog(FALLBACK_CATALOG);
+          setError(reason instanceof Error ? reason.message : String(reason));
+          setMode("unavailable");
+        }
       }
     }
 
     void subscribeAndHydrate();
     return () => {
       disposed = true;
+      catalogGeneration.current++;
       cleanups.forEach((cleanup) => cleanup());
     };
   }, [applyPlanSnapshot]);

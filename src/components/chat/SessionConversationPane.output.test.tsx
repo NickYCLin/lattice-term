@@ -128,12 +128,14 @@ describe("session chat output disclosure", () => {
     expect(html).not.toMatch(/private|photo.png|view_image|pixels unavailable|image-1/);
   });
 });
-  it("renders replies with the same avatar, assistant name and Markdown as built-in chat", () => {
+  it("renders replies without avatars or assistant labels in both conversation views", () => {
     const text = "已完成 **測試**";
     conversation.messages = [{ role: "assistant", text }];
     const frame = renderToStaticMarkup(<ConversationMessage role="assistant" assistant="OpenAI Codex">
       <span>message</span>
     </ConversationMessage>).split('<span>message</span>')[0];
+    expect(frame).not.toContain("chat-avatar");
+    expect(frame).not.toContain("chat-msg__name");
     const thread = fakeThread({ items: [{ id: "reply", type: "text", text }] });
     const builtin = renderToStaticMarkup(<I18nProvider locale="zh-TW">
       <ChatView agents={fakeAgentApi()} chat={fakeChatApi({ threads: [thread], activeThreadId: thread.id })}
@@ -142,7 +144,7 @@ describe("session chat output disclosure", () => {
     for (const html of [render("done"), builtin]) {
       expect(html).toContain(frame);
       expect(html).toContain('<strong>測試</strong>');
-      expect(html).not.toContain('chat-msg__name">助理');
+      expect(html).not.toContain("chat-msg__name");
     }
   });
 

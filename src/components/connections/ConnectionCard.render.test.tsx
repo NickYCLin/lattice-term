@@ -40,16 +40,16 @@ function renderCard(
 }
 
 describe("connection card runtime capability", () => {
-  it("shows every tag in a separate row after the management controls", () => {
+  it("shows every tag before the primary action, outside the management disclosure", () => {
     const tags = ["正式服務平台與維運環境的完整標籤", "service.example.com/" + "long-name".repeat(12), "第三個標籤"];
     const markup = renderCard({ profile: { ...profile, tags } });
     const tagsStart = markup.indexOf('class="connection-card__tags"');
-    expect(tagsStart).toBeGreaterThan(markup.indexOf('class="connection-card__actions"'));
+    expect(tagsStart).toBeLessThan(markup.indexOf('class="connection-card__primary"'));
     const tagsMarkup = markup.slice(tagsStart);
     for (const tag of tags) expect(tagsMarkup).toContain(`>${tag}</span>`);
     expect(tagsMarkup.match(/badge--tag/g)).toHaveLength(3);
     expect(markup).not.toContain("connection-card__tag-count");
-    expect(markup.slice(0, markup.indexOf('class="connection-card__primary"'))).not.toContain("badge--tag");
+    expect(markup.slice(markup.indexOf('<details'))).not.toContain("badge--tag");
   });
 
   it("does not reserve a tag row for a connection without tags", () => {
@@ -73,7 +73,10 @@ describe("connection card runtime capability", () => {
     expect(markup).toContain('class="connection-card__primary"');
     expect(markup).toContain('protocol-tile--sm');
     const footer = markup.slice(markup.indexOf('class="connection-card__foot"'));
-    expect(footer).toContain("加入常用");
+    expect(markup).toContain("加入常用");
+    expect(footer).not.toContain("加入常用");
+    expect(markup).toContain('<details class="connection-card__management">');
+    expect(markup).toContain('aria-label="Office PC的更多操作"');
     expect(footer).not.toContain("connection-card__go");
     expect(markup).toContain('title="Office PC');
     expect(markup).toContain('title="operator@desktop.example.com:3389"');
@@ -84,6 +87,15 @@ describe("connection card runtime capability", () => {
 
     expect(markup).toContain(">連線</button>");
     expect(markup).not.toContain("桌面版限定");
+  });
+
+  it("includes tags from folded routes once without hiding any labels", () => {
+    const markup = renderCard({ profile: { ...profile, tags: ["業主", "維運"] }, linked: [{
+      profile: { ...profile, id: "internal", tags: ["維運", "內網", "資料庫"] },
+    }] });
+    const tagsMarkup = markup.slice(markup.indexOf('class="connection-card__tags"'), markup.indexOf('class="connection-card__primary"'));
+    expect(tagsMarkup.match(/badge--tag/g)).toHaveLength(4);
+    for (const tag of ["業主", "維運", "內網", "資料庫"]) expect(tagsMarkup).toContain('>' + tag + '</span>');
   });
 
   it("states the mobile boundary without calling it coming soon", () => {

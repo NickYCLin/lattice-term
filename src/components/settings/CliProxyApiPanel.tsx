@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CLI_PROXY_DEFAULT_BASE_URL,
   CLI_PROXY_LIMIT,
@@ -46,6 +46,7 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
   const [savedBaseUrl, setSavedBaseUrl] = useState(endpoint.baseUrl);
   const [key, setKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
+  const keyReadVersion = useRef(0);
   const [probe, setProbe] = useState<Probe | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,10 +55,15 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
 
   const refreshKey = useCallback(async () => {
     if (!available) return;
+    const version = ++keyReadVersion.current;
     const { invoke } = await import("@tauri-apps/api/core");
-    setHasKey(await invoke<boolean>("cliproxy_key_exists", { proxyId: endpoint.id }));
+    const exists = await invoke<boolean>("cliproxy_key_exists", { proxyId: endpoint.id });
+    if (version === keyReadVersion.current) setHasKey(exists);
   }, [available, endpoint.id]);
-  useEffect(() => { void refreshKey().catch(() => {}); }, [refreshKey]);
+  useEffect(() => {
+    void refreshKey().catch(() => {});
+    return () => { keyReadVersion.current += 1; };
+  }, [refreshKey]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -78,23 +84,28 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
 
   const saveKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("cliproxy_save_key", { proxyId: endpoint.id, baseUrl: savedBaseUrl || baseUrl, key });
+    await invoke("cliproxy_save_key", { proxyId: endpoint.id, baseUrl, key });
+    keyReadVersion.current += 1;
+    setHasKey(true);
+    onChange({ ...endpoint, label: label.trim(), baseUrl: baseUrl.trim() });
+    setSavedBaseUrl(baseUrl.trim());
+    setProbe(null);
     setKey("");
-    await refreshKey();
     window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
   const forgetKey = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id });
-    await refreshKey();
+    keyReadVersion.current += 1;
+    setHasKey(false);
     window.dispatchEvent(new Event(CLI_PROXY_SETTINGS_CHANGED));
   });
 
   // The key would otherwise outlive the entry that explains what it unlocks.
   const remove = () => run(async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id }).catch(() => false);
+    await invoke<boolean>("cliproxy_forget_key", { proxyId: endpoint.id });
     onRemove();
   });
 
@@ -124,12 +135,12 @@ function ProxyEntry({ endpoint, available, onChange, onRemove }: {
       : t("settings.cliProxy.unreachable", { status: probe.status })}</p>}
 
     <label className="field"><span className="field__label">{t("settings.cliProxy.key")}</span>
-      <input className="input" type="password" value={key} disabled={busy || !savedBaseUrl} maxLength={512}
+      <input className="input" type="password" value={key} disabled={busy} maxLength={512}
         autoComplete="off" spellCheck={false} onChange={(event) => setKey(event.currentTarget.value)} />
       <span className="field__hint">{t("settings.cliProxy.keyHint")}</span></label>
     <p>{hasKey ? t("settings.cliProxy.keySaved") : t("settings.cliProxy.keyMissing")}</p>
     <div>
-      <button type="button" className="button" disabled={busy || !savedBaseUrl || !key.trim()} onClick={saveKey}>
+      <button type="button" className="button" disabled={busy || !baseUrl.trim() || !key.trim()} onClick={saveKey}>
         {t("settings.cliProxy.keySave")}</button>
       {hasKey && <button type="button" className="button button--danger" disabled={busy} onClick={forgetKey}>
         {t("settings.cliProxy.keyForget")}</button>}
@@ -217,12 +228,15 @@ function savedProxies(): readonly CliProxyEndpoint[] {
 export function CliProxyApiPanel({ available }: { available: boolean }) {
   const { t } = useI18n();
   const [proxies, setProxies] = useState<readonly CliProxyEndpoint[]>(savedProxies);
+  const currentProxies = useRef(proxies);
 
   // Drafts without an address stay in the page; only accepted addresses are
   // written, so a half-typed entry never reaches a picker.
-  const persist = (next: readonly CliProxyEndpoint[]) => {
-    setProxies(next);
+  const persist = (update: (current: readonly CliProxyEndpoint[]) => readonly CliProxyEndpoint[]) => {
+    const next = update(currentProxies.current);
     if (typeof localStorage !== "undefined") saveCliProxySettings(localStorage, { proxies: next });
+    currentProxies.current = next;
+    setProxies(next);
   };
 
   return <section className="panel glass" aria-label={t("settings.cliProxy.title")}>
@@ -233,7 +247,8 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
       </div>
       {available && <div className="panel__actions">
         <button type="button" className="button button--primary" disabled={proxies.length >= CLI_PROXY_LIMIT}
-          onClick={() => persist([...proxies, { id: newCliProxyId(), label: "", baseUrl: "" }])}>
+          onClick={() => persist(current => current.length >= CLI_PROXY_LIMIT ? current
+            : [...current, { id: newCliProxyId(), label: "", baseUrl: "" }])}>
           {t("settings.cliProxy.add")}</button>
       </div>}
     </header>
@@ -247,8 +262,8 @@ export function CliProxyApiPanel({ available }: { available: boolean }) {
             key={endpoint.id}
             endpoint={endpoint}
             available={available}
-            onChange={(next) => persist(proxies.map((entry) => (entry.id === next.id ? next : entry)))}
-            onRemove={() => persist(proxies.filter((entry) => entry.id !== endpoint.id))}
+            onChange={(next) => persist(current => current.map((entry) => (entry.id === next.id ? next : entry)))}
+            onRemove={() => persist(current => current.filter((entry) => entry.id !== endpoint.id))}
           />
         ))}
         <p className="field__hint">{t("settings.cliProxy.limit", { count: CLI_PROXY_LIMIT })}</p>
