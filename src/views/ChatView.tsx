@@ -82,6 +82,8 @@ import { useSharedSidebarLayout } from "../app/sharedSidebarLayout";
 import type { MessageKey } from "../i18n/messages/zh-TW";
 import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
+import { useAppDialogs } from "../components/overlays/useAppDialogs";
+import { conversationDisplayName, conversationNameTargets, useConversationNames } from "../app/conversationNames";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
 import { AccountModelField } from "../components/agents/AccountModelField";
 import { findCliProxy } from "../app/cliProxyApi";
@@ -189,12 +191,35 @@ export function ChatView({
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
   const nativeHistory = useNativeHistory();
+  const names = useConversationNames();
+  const dialogs = useAppDialogs();
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const nameTargets = useMemo(() => conversationNameTargets(chat.threads, agents.sessions, nativeHistory?.profiles ?? accountProfiles),
+    [chat.threads, agents.sessions, nativeHistory?.profiles, accountProfiles]);
+  const namedThreads = useMemo(() => chat.threads.map(thread => ({ ...thread,
+    title: conversationDisplayName(names.names, nameTargets.thread(thread), thread.title) })), [chat.threads, names.names, nameTargets]);
+  const namedHistory = useMemo(() => (nativeHistory?.entries ?? []).map(entry => ({ ...entry,
+    title: conversationDisplayName(names.names, nameTargets.native(entry), entry.title) })), [nativeHistory?.entries, names.names, nameTargets]);
+  async function renameConversation(keys: readonly string[], current: string) {
+    const name = await dialogs.prompt({ title: t("chat.rename"), label: t("chat.rename.name"), initialValue: current,
+      confirmLabel: t("common.save"), cancelLabel: t("common.cancel") });
+    if (name === null) return;
+    try { names.save(keys, name); setRenameError(null); }
+    catch { setRenameError(t("chat.rename.failed")); }
+  }
   const { workspace, listedThreads } = useMemo(
-    () =>
-      chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: chat.threads,
-        history: nativeHistory?.entries ?? [], profiles: nativeHistory?.profiles ?? accountProfiles,
-        proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter: null }),
-    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, proxies, t],
+    () => {
+      const projection = chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: namedThreads,
+        history: namedHistory, profiles: nativeHistory?.profiles ?? accountProfiles,
+        proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter: null });
+      const sessions = new Map(agents.sessions.map(session => [session.sessionId, session]));
+      for (const leaf of projection.workspace.sessions.values()) {
+        const session = sessions.get(leaf.sessionId);
+        if (session) leaf.label = conversationDisplayName(names.names, nameTargets.session(session), leaf.label);
+      }
+      return projection;
+    },
+    [agents.catalog, agents.sessions, namedThreads, namedHistory, nativeHistory?.profiles, accountProfiles, proxies, t, names.names, nameTargets],
   );
   const nativeConversations = useNativeConversationList({ chat, projectFilter: null,
     onBeforeOpen: () => setSharedLayout(current => chatSidebarLayout(current, chat.threads, workspace.nodes)),
@@ -203,10 +228,10 @@ export function ChatView({
   // Shelved threads leave the tree and wait in their own list below it.
   const shelvedThreads = useMemo(
     () =>
-      chat.threads
+      namedThreads
         .filter((thread) => thread.shelvedAt)
         .sort((a, b) => (b.shelvedAt ?? 0) - (a.shelvedAt ?? 0)),
-    [chat.threads],
+    [namedThreads],
   );
   const sidebarLayout = useMemo(
     () => chatSidebarLayout(sessionSidebarLayout, listedThreads, workspace.nodes),
@@ -229,7 +254,7 @@ export function ChatView({
   const installed = chat.supported.filter(
     (id) => agents.catalog.find((definition) => definition.id === id)?.installed,
   );
-  const active = chat.threads.find((thread) => thread.id === chat.activeThreadId) ?? null;
+  const active = namedThreads.find((thread) => thread.id === chat.activeThreadId) ?? null;
   const activeLiveSession = active ? liveSessionForThread(active, agents.sessions, accountProfiles) : undefined;
   const shownSession = selectedSession ?? activeLiveSession;
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
@@ -358,6 +383,7 @@ export function ChatView({
     <section className="chat-view" aria-label={t(mode === "automations" ? "automation.title" : "chat.title")}>
       <aside className="chat-threads">
         {archiveStatus}
+        {renameError && <Callout tone="warn">{renameError}</Callout>}
         <div className="chat-threads__header">
           <div className="chat-composer__actions">
             {mode === "threads" && (
@@ -432,6 +458,12 @@ export function ChatView({
               onRenameFolder={chat.renameFolder}
               onRemoveFolder={chat.removeFolder}
               onCreateFolder={chat.createFolder}
+              onRenameThread={thread => { void renameConversation(nameTargets.thread(thread), thread.title); }}
+              onRenameSession={(id, name) => {
+                const session = agents.sessions.find(entry => entry.sessionId === id);
+                if (session) void renameConversation(nameTargets.session(session), name);
+              }}
+              onRenameNative={entry => { void renameConversation(nameTargets.native(entry), entry.title); }}
               onMoveNode={moveSidebarNode}
               renderThread={(thread, active) => (
                 <div
@@ -633,6 +665,7 @@ export function ChatView({
           onCancel={() => setPendingDelete(null)}
         />
       )}
+      {dialogs.dialogs}
     </section>
   );
 }

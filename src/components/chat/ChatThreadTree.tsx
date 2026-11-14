@@ -23,7 +23,7 @@ import {
 } from "../../app/sessionSidebarLayout";
 import { useI18n } from "../../i18n/context";
 import { ConfirmDialog } from "../overlays/ConfirmDialog";
-import { ArchiveFileIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
+import { ArchiveFileIcon, ChevronRightIcon, EditIcon, FolderIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConversationListIdentity, ConversationMetadata } from "./ConversationPresentation";
 
 const DRAG_THRESHOLD_PX = 6;
@@ -43,6 +43,9 @@ export function ChatThreadTree({
   workspace,
   onSelectThread,
   onOpenSession,
+  onRenameThread,
+  onRenameSession,
+  onRenameNative,
   onRemoveThread,
   onShelveThread,
   onToggleFolder,
@@ -60,6 +63,9 @@ export function ChatThreadTree({
   workspace?: ChatSidebarWorkspace;
   onSelectThread: (threadId: string) => void;
   onOpenSession?: (sessionId: string) => void;
+  onRenameThread?: (thread: ChatThread) => void;
+  onRenameSession?: (sessionId: string, name: string) => void;
+  onRenameNative?: (conversation: LocalConversation) => void;
   onRemoveThread: (thread: ChatThread) => void;
   /** Puts a thread away without deleting it. */
   onShelveThread?: (thread: ChatThread) => void;
@@ -323,6 +329,9 @@ export function ChatThreadTree({
           return <div key={row.nodeId} className={`chat-tree__row${dragging === row.nodeId ? " is-dragging" : ""}${dropClass(row.nodeId)}`} style={indent} data-node-id={row.nodeId}
             onPointerDown={(event) => onPointerDown(event, row.nodeId)}>
             {renderNativeConversation?.(row.conversation)}
+            {onRenameNative && <span className="chat-tree__actions"><button type="button" className="chat-tree__action"
+              aria-label={`${t("chat.rename")}：${row.conversation.title || t("chat.untitled")}`} title={t("chat.rename")}
+              onClick={event => { event.stopPropagation(); onRenameNative(row.conversation); }}><EditIcon /></button></span>}
           </div>;
         }
         if (row.kind === "session") {
@@ -355,6 +364,9 @@ export function ChatThreadTree({
                 </ConversationListIdentity>
                 <span className="chat-session__status" aria-hidden="true" />
               </div>
+              {onRenameSession && <span className="chat-tree__actions"><button type="button" className="chat-tree__action"
+                aria-label={`${t("chat.rename")}：${row.session.label}`} title={t("chat.rename")}
+                onClick={event => { event.stopPropagation(); onRenameSession(row.session.sessionId, row.session.label); }}><EditIcon /></button></span>}
             </div>
           );
         }
@@ -371,6 +383,9 @@ export function ChatThreadTree({
           >
             {renderThread(row.thread, row.thread.id === activeThreadId)}
             <span className="chat-tree__actions">
+              {onRenameThread && <button type="button" className="chat-tree__action"
+                aria-label={`${t("chat.rename")}：${row.thread.title || t("chat.untitled")}`} title={t("chat.rename")}
+                onClick={event => { event.stopPropagation(); onRenameThread(row.thread); }}><EditIcon /></button>}
               {onShelveThread && (
                 <button
                   type="button"
