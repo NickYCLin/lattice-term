@@ -1101,6 +1101,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         }}
         items={visibleNavigation}
         activityUnreadCount={agentActivity.unreadCount}
+        automationUnreadCount={chatRuntime?.automations.unreadCount ?? 0}
       />
 
       {showSidebar && (
@@ -1262,8 +1263,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
             <Suspense fallback={null}>
               <ChatRuntime remoteHost={remoteHost.status} locale={preferences.locale} completionSound={preferences.chatCompletionSound} completionVolume={preferences.notificationVolume} completionNotification={preferences.chatCompletionNotification} onChange={setChatRuntime} sessions={agents.sessions} />
             </Suspense>
-            {view === "chat" && chatRuntime && (
+            {(view === "chat" || view === "automations") && chatRuntime && (
               <ChatView
+                mode={view === "automations" ? "automations" : "threads"}
+                onOpenConversation={() => setView("chat")}
                 agents={agents}
                 chat={chatRuntime.chat}
                 workspaceSessionId={chatWorkspaceSessionId}

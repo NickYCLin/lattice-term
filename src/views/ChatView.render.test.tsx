@@ -31,10 +31,12 @@ function render(
       fakeDefinition({ id: "claude", label: "Claude Code", executable: "claude" }),
     ],
   }),
+  mode: "threads" | "automations" = "threads",
 ): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-TW">
       <ChatView
+        mode={mode}
         agents={agents}
         chat={chat}
         automations={fakeAutomationsApi()}
@@ -45,6 +47,15 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("uses the selected navigation area without an internal view switcher", () => {
+    const chatMarkup = render();
+    expect(chatMarkup).not.toContain('class="chat-mode');
+    expect(chatMarkup).not.toContain("拖曳對話或資料夾即可搬移");
+    const schedules = render(fakeChatApi(), fakeAgentApi({ catalog: [fakeDefinition()] }), "automations");
+    expect(schedules).toContain('aria-label="排程"');
+    expect(schedules).not.toContain('class="chat-mode');
+    expect(schedules).toContain("新增排程");
+  });
   it("keeps the handoff explanation behind a header info button", () => {
     const thread = fakeThread({ handoff: { sourceDefinitionId: "claude", transcript: "Recent text only" } });
     const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));

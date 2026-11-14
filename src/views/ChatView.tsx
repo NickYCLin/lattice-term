@@ -1,7 +1,6 @@
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { ChatArchiveStatus } from "../components/chat/ChatArchiveStatus";
-import { ChatProjectDefaults } from "../components/chat/ChatProjectDefaults";
-import { ChatProjectDefaultsConflict, clearChatProjectDefaults, loadChatProjectDefaults, projectDefaultsUnavailable, saveChatProjectDefaults, type ChatProjectDefaults as ProjectDefaults } from "../app/chatProjectDefaults";
+import { ChatProjectDefaultsConflict, loadChatProjectDefaults, projectDefaultsUnavailable } from "../app/chatProjectDefaults";
 import { useChatClipboardFallback } from "../app/chatClipboard";
 import { conversationDraftHasInput, useConversationDraft } from "../app/useConversationDraft";
 import { desktopChatAccess } from "../app/desktopChat";
@@ -19,7 +18,6 @@ import { conversationLabels } from "../app/conversationLabels";
 import { cliProxyLabel } from "../app/cliProxyApi";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
 import { ComposerVoiceControls } from "../components/chat/ComposerVoiceControls";
-import { useFittingTabs } from "../components/chat/useFittingTabs";
 import { liveSessionForThread, sessionLaunchForThread } from "../app/chatSessionHandoff";
 import { useContinuedSessionRead } from "../app/useContinuedSessionRead";
 /**
@@ -96,7 +94,7 @@ import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
 import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
 import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
-import { chatProjectKey, chatProjectsWithHistory, projectName } from "../app/chatProjects";
+import { chatProjectKey } from "../app/chatProjects";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -153,6 +151,8 @@ export function ChatView({
   onOpenSession,
   theme = "dark",
   workspaceSessionId = null,
+  mode = "threads",
+  onOpenConversation,
   onSelectWorkspaceSession,
 }: {
   agents: AgentApi;
@@ -161,6 +161,8 @@ export function ChatView({
   onOpenSession: (sessionId: string) => void;
   theme?: ThemeId;
   workspaceSessionId?: string | null;
+  mode?: "threads" | "automations";
+  onOpenConversation?: () => void;
   onSelectWorkspaceSession?: (id: string | null) => void;
 }) {
   const { t, tag } = useI18n();
@@ -176,21 +178,7 @@ export function ChatView({
     setSelectedSessionId(null);
     chat.setActiveThreadId(id);
   }
-  const [mode, setMode] = useState<"threads" | "projects" | "automations">("threads");
-  const modeTabs = useFittingTabs<HTMLDivElement>();
-  // A project picked in the projects tab narrows the conversation list to it.
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [projectDefaults, setProjectDefaults] = useState<ProjectDefaults | null>(null);
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
-  useEffect(() => {
-    setProjectNotice(null);
-    try {
-      setProjectDefaults(projectFilter ? loadChatProjectDefaults(localStorage, projectFilter) : null);
-    } catch (error) {
-      setProjectDefaults(null);
-      setProjectNotice(t(error instanceof ChatProjectDefaultsConflict ? "chat.projects.defaults.conflict" : "chat.projects.defaults.error"));
-    }
-  }, [projectFilter, t]);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -205,16 +193,14 @@ export function ChatView({
     () =>
       chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: chat.threads,
         history: nativeHistory?.entries ?? [], profiles: nativeHistory?.profiles ?? accountProfiles,
-        proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter }),
-    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, proxies, projectFilter, t],
+        proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter: null }),
+    [agents.catalog, agents.sessions, chat.threads, nativeHistory?.entries, nativeHistory?.profiles, accountProfiles, proxies, t],
   );
-  const nativeConversations = useNativeConversationList({ chat, projectFilter,
+  const nativeConversations = useNativeConversationList({ chat, projectFilter: null,
     onBeforeOpen: () => setSharedLayout(current => chatSidebarLayout(current, chat.threads, workspace.nodes)),
     onOpened: () => setSelectedSessionId(null),
   });
   // Shelved threads leave the tree and wait in their own list below it.
-  const projects = useMemo(() => chatProjectsWithHistory(chat.threads, nativeHistory?.entries ?? []),
-    [chat.threads, nativeHistory?.entries]);
   const shelvedThreads = useMemo(
     () =>
       chat.threads
@@ -344,11 +330,10 @@ export function ChatView({
   function startAutomation() {
     setSelectedAutomationId(null);
     setComposingAutomation(true);
-    setMode("automations");
   }
 
   function openThread(threadId: string) {
-    setMode("threads");
+    onOpenConversation?.();
     selectThread(threadId);
   }
 
@@ -370,50 +355,10 @@ export function ChatView({
     }} onRestore={() => void chat.undoArchive()} />;
 
   return (
-    <section className="chat-view" aria-label={t("chat.title")}>
+    <section className="chat-view" aria-label={t(mode === "automations" ? "automation.title" : "chat.title")}>
       <aside className="chat-threads">
         {archiveStatus}
         <div className="chat-threads__header">
-          <div ref={modeTabs.ref} className={`chat-mode${modeTabs.compact ? " is-compact" : ""}`} role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "threads"}
-              className={`chat-mode__tab${mode === "threads" ? " is-active" : ""}`}
-              onClick={() => { setMode("threads"); }}
-              title={t("chat.title")}
-            >
-              <ChatIcon />
-              <span className="chat-mode__label">{t("chat.title")}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "projects"}
-              className={`chat-mode__tab${mode === "projects" ? " is-active" : ""}`}
-              onClick={() => { setMode("projects"); }}
-              title={t("chat.projects")}
-            >
-              <FolderIcon />
-              <span className="chat-mode__label">{t("chat.projects")}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "automations"}
-              className={`chat-mode__tab${mode === "automations" ? " is-active" : ""}`}
-              onClick={() => { setMode("automations"); }}
-              title={t("automation.title")}
-            >
-              <ClockIcon />
-              <span className="chat-mode__label">{t("automation.title")}</span>
-              {automations.unreadCount > 0 && (
-                <span className="chat-mode__badge" aria-label={t("automation.unread", { count: automations.unreadCount })}>
-                  {automations.unreadCount}
-                </span>
-              )}
-            </button>
-          </div>
           <div className="chat-composer__actions">
             {mode === "threads" && (
               <button
@@ -433,7 +378,7 @@ export function ChatView({
             <button
               type="button"
               className="button button--primary button--sm"
-              onClick={mode === "automations" ? startAutomation : () => startThread(projectFilter ?? "")}
+              onClick={mode === "automations" ? startAutomation : () => startThread()}
               disabled={agents.mode !== "ready"}
               aria-label={mode === "automations" ? t("automation.new") : t("chat.new")}
               title={mode === "automations" ? t("automation.new") : t("chat.new")}
@@ -471,45 +416,7 @@ export function ChatView({
         )}
         {mode === "threads" ? (
           <div className="chat-threads__list">
-            {projectFilter !== null && (
-              <>
-              <div className="chat-project-filter">
-                <FolderIcon />
-                <span title={projectFilter}>{projectName(projectFilter)}</span>
-                <button
-                  type="button"
-                  className="chat-tree__action"
-                  onClick={() => setProjectFilter(null)}
-                  aria-label={t("chat.projects.clear")}
-                  title={t("chat.projects.clear")}
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-              <ChatProjectDefaults defaults={projectDefaults} notice={projectNotice}
-                canSave={Boolean(active && !active.remote && !active.archived && !active.runningTurnId
-                  && !active.pendingInputs?.length && chatProjectKey(active.workingDirectory) === chatProjectKey(projectFilter))}
-                onSave={() => {
-                  if (!active || active.remote || active.archived || active.runningTurnId || active.pendingInputs?.length
-                    || chatProjectKey(active.workingDirectory) !== chatProjectKey(projectFilter)) return;
-                  try {
-                    setProjectDefaults(saveChatProjectDefaults(localStorage, projectFilter, active));
-                    setProjectNotice(t("chat.projects.defaults.saved"));
-                  } catch {
-                    setProjectNotice(t("chat.projects.defaults.error"));
-                  }
-                }}
-                onClear={() => {
-                  try {
-                    clearChatProjectDefaults(localStorage, projectFilter);
-                    setProjectDefaults(null);
-                    setProjectNotice(t("chat.projects.defaults.recent"));
-                  } catch {
-                    setProjectNotice(t("chat.projects.defaults.error"));
-                  }
-                }} />
-              </>
-            )}
+            {projectNotice && <Callout tone="warn">{projectNotice}</Callout>}
             <SidebarStorageNotice />
             <ChatThreadTree
               layout={sidebarLayout}
@@ -583,43 +490,6 @@ export function ChatView({
               </details>
             )}
           </div>
-        ) : mode === "projects" ? (
-          <ul className="chat-threads__list chat-projects">
-            {projects.length === 0 && <li className="chat-threads__hint">{t("chat.projects.none")}</li>}
-            {projects.map((project) => (
-              <li key={project.directory}>
-                <button
-                  type="button"
-                  className={`chat-thread${projectFilter === project.directory ? " is-active" : ""}`}
-                  title={displayPath(project.directory)}
-                  onClick={() => {
-                    setProjectFilter(project.directory);
-                    setMode("threads");
-                  }}
-                >
-                  <span>
-                    <span className="chat-thread__title">{project.name}</span>
-                    <span className="chat-thread__meta">
-                      {t("chat.projects.count", { count: project.threads })} · {displayPath(project.directory)}
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="chat-tree__action"
-                  aria-label={t("chat.projects.newChat", { name: project.name })}
-                  title={t("chat.projects.newChat", { name: project.name })}
-                  onClick={() => {
-                    setProjectFilter(project.directory);
-                    setMode("threads");
-                    startThread(project.directory);
-                  }}
-                >
-                  <PlusIcon />
-                </button>
-              </li>
-            ))}
-          </ul>
         ) : (
           <ul className="chat-threads__list">
             {automations.automations.map((automation) => (
@@ -714,7 +584,7 @@ export function ChatView({
               <button
                 type="button"
                 className="button button--primary"
-                onClick={() => startThread(projectFilter ?? "")}
+                onClick={() => startThread()}
                 disabled={agents.mode !== "ready"}
               >
                 <PlusIcon />

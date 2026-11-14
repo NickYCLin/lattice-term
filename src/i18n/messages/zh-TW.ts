@@ -931,6 +931,8 @@ export const zhTW = {
   "theme.clarity": "清晰",
   "theme.linen": "亞麻",
   "theme.storybook": "冬日繪本",
+  "nav.automations.desc": "建立與管理排程，自動執行固定工作",
+  "automation.navUnread": "排程，{count} 個未讀結果",
   "theme.storybook.hint": "奶油紙色、粉彩與手繪框線，像翻開一本旅行手帳",
   "theme.dusk": "暮藍",
   "theme.dark": "霧墨",

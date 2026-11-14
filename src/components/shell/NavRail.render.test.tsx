@@ -5,6 +5,14 @@ import { I18nProvider } from "../../i18n";
 import { NavRail } from "./NavRail";
 
 describe("navigation activity badge", () => {
+  it("shows schedules as a separate navigation entry with its own unread count", () => {
+    const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><NavRail
+      current="automations" onSelect={vi.fn()} automationUnreadCount={2} /></I18nProvider>);
+    expect(markup).toContain('aria-current="page"');
+    expect(markup).toContain('>2</span>');
+    expect(markup).toContain('aria-label="排程，2 個未讀結果"');
+    expect(markup).toContain("排程");
+  });
   it("shows an accessible unread count on the Activity bell", () => {
     const markup = renderToStaticMarkup(
       <I18nProvider locale="zh-TW">
