@@ -5,6 +5,7 @@ import { imageFileName } from "../../app/chatImages";
 import { useI18n } from "../../i18n/context";
 import { FileIcon, ImageFileIcon } from "../icons";
 import { ChatImagePreview } from "./ChatImagePreview";
+import { ChatImageStrip } from "./ChatImagePreviews";
 
 export function SentAttachments({ attachments, workingDirectory, threadId }: {
   attachments: readonly ChatAttachment[];
@@ -24,6 +25,8 @@ export function SentAttachments({ attachments, workingDirectory, threadId }: {
         : <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
           <FileIcon size={14} /><span>{attachment.name}</span></span>)}
     </div>
+    <ChatImageStrip paths={attachments.filter(file => file.isImage).map(file => file.preview ?? file.path)}
+      workingDirectory={workingDirectory} threadId={threadId} captions={false} />
     {selected && <ChatImagePreview key={selected.preview ?? selected.path} path={selected.preview ?? selected.path}
       name={selected.name} workingDirectory={workingDirectory} threadId={threadId} onClose={() => setSelected(null)} />}
   </>;

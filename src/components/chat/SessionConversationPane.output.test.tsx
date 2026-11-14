@@ -65,6 +65,15 @@ describe("session chat output disclosure", () => {
     expect(html).not.toContain("最近的終端輸出");
   });
 
+  it("renders native pasted image markers as attachments and keeps the caption", () => {
+    conversation.messages = [{ role: "user", text: '<image name=[Image #1] path="/synthetic/pasted.png">\n</image>\n[Image #1] 請檢查圖片' }];
+    const html = render("done");
+    expect(html).toContain("請檢查圖片");
+    expect(html).toContain("pasted.png");
+    expect(html).not.toContain("&lt;image name=");
+    expect(html).not.toContain("[Image #1]");
+  });
+
   it("distinguishes a missing native ID from a record that is not readable yet", () => {
     conversation.availability = "waitingForIdentity";
     expect(render("working")).toContain("尚未取得此工作階段的原生對話 ID");

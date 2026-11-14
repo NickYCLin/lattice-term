@@ -44,17 +44,38 @@ export function sessionPromptWithAttachments(prompt: string, attachments: readon
   return prompt.trim() ? `${prompt.trimEnd()} ${note}` : note;
 }
 
-/** Splits the note back off a transcript message so it shows as chips. */
+/** Recognizes the empty image blocks written by the native clipboard path. */
+function splitNativeImages(text: string): { text: string; paths: string[] } {
+  const paths: string[] = [];
+  const names: string[] = [];
+  const body = text.replace(/<image\s+name=(\[Image #\d+\])\s+path="([^"\r\n]{1,4096})"\s*>\s*<\/image>/g,
+    (block, name: string, path: string) => {
+      if (paths.length >= CHAT_ATTACHMENT_LIMIT || !/^(?:\/|[A-Za-z]:[\\/])/.test(path)
+        || !/\.(?:png|jpe?g|gif|webp|bmp)$/i.test(path) || /[\u0000-\u001f]/.test(path)) return block;
+      if (!paths.includes(path)) paths.push(path);
+      names.push(name);
+      return "";
+    });
+  if (!paths.length) return { text, paths };
+  let caption = body.trim();
+  for (const name of names) {
+    if (caption.startsWith(name)) caption = caption.slice(name.length).trimStart();
+  }
+  return { text: caption, paths };
+}
+
+/** Splits attachment metadata from readable user text without parsing HTML. */
 export function splitSessionAttachments(text: string): { text: string; paths: string[] } {
-  const end = text.trimEnd();
+  const native = splitNativeImages(text);
+  const end = native.text.trimEnd();
   const start = end.lastIndexOf(SESSION_ATTACHMENT_PREFIX);
-  if (start < 0 || !end.endsWith(SESSION_ATTACHMENT_SUFFIX)) return { text, paths: [] };
+  if (start < 0 || !end.endsWith(SESSION_ATTACHMENT_SUFFIX)) return native;
   const list = end.slice(start + SESSION_ATTACHMENT_PREFIX.length, end.length - SESSION_ATTACHMENT_SUFFIX.length);
   try {
     const paths: unknown = JSON.parse(`[${list}]`);
-    if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) return { text, paths: [] };
-    return { text: end.slice(0, start).trimEnd(), paths };
+    if (!Array.isArray(paths) || !paths.every(path => typeof path === "string")) return native;
+    return { text: end.slice(0, start).trimEnd(), paths: [...new Set([...native.paths, ...paths])] };
   } catch {
-    return { text, paths: [] };
+    return native;
   }
 }

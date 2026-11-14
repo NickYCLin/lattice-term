@@ -162,6 +162,7 @@ fn run(data_dir: &Path) -> i32 {
 /// Everything a connection handler needs.
 #[derive(Clone)]
 pub struct Context {
+    data_dir: PathBuf,
     workspace: Option<Arc<workspace::Workspace>>,
     pub registry: Arc<AgentRegistry>,
     pub sink: Arc<DaemonSink>,
@@ -195,6 +196,7 @@ pub async fn serve(
         *history = audit::History::open(&paths.data_dir);
     }
     let context = Arc::new(Context {
+        data_dir: paths.data_dir.clone(),
         workspace: None,
         registry,
         sink,
@@ -1507,8 +1509,28 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
                 .map_err(|error| format!("Cannot stage the pasted image: {error}"))?;
             file.write_all(&bytes)
                 .map_err(|error| format!("Cannot stage the pasted image: {error}"))?;
-            let path = registry.stage_clipboard_image(&session_id, file)?;
-            Ok(json!(path.to_string_lossy()))
+            let preview = crate::chat_attachments::keep_staged_image(
+                &context.data_dir,
+                &session_id,
+                file.path(),
+            )?;
+            registry.stage_clipboard_image(&session_id, file)?;
+            Ok(json!(preview.to_string_lossy()))
+        }
+        Request::KeepStagedImage { session_id, path } => {
+            let Some(bytes) = registry.staged_clipboard_bytes(&session_id, Path::new(&path))?
+            else {
+                return Ok(Value::Null);
+            };
+            let directory =
+                crate::agent_chat::general_chat_directory(&context.data_dir, &session_id)?;
+            let paths = crate::chat_images::store(
+                &directory,
+                &[crate::chat_images::ToolImage::Data(
+                    base64::engine::general_purpose::STANDARD.encode(&bytes),
+                )],
+            );
+            to_value(&paths.into_iter().next())
         }
         Request::Shutdown => {
             context.shutdown.notify_one();
@@ -2750,6 +2772,7 @@ mod observer_transport_tests {
 
     fn test_context(dir: &Path) -> Arc<Context> {
         Arc::new(Context {
+            data_dir: dir.to_path_buf(),
             workspace: None,
             registry: Arc::new(AgentRegistry::new()),
             sink: Arc::new(DaemonSink::default()),
@@ -2759,6 +2782,22 @@ mod observer_transport_tests {
             shutdown: Arc::new(Notify::new()),
             log: Arc::new(Logger::silent()),
         })
+    }
+
+    #[test]
+    fn staged_clipboard_preview_requests_are_not_available_to_observers() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_context(dir.path());
+        assert!(dispatch_as(
+            &context,
+            ClientRole::Observer,
+            "fixture-reader",
+            Request::KeepStagedImage {
+                session_id: "unshared-session".into(),
+                path: "/synthetic/other-session.png".into(),
+            }
+        )
+        .is_err());
     }
 
     async fn send_request<W: AsyncWrite + Unpin>(writer: &mut W, id: u64, body: Request) {
@@ -3107,6 +3146,7 @@ mod operation_tests {
         )
         .unwrap();
         let context = Context {
+            data_dir: dir.path().to_path_buf(),
             workspace: None,
             registry: Arc::clone(&registry),
             sink: Arc::clone(&sink),
@@ -3169,6 +3209,7 @@ mod operation_tests {
         let sink = Arc::new(DaemonSink::default());
         let registry = Arc::new(AgentRegistry::new());
         let context = Context {
+            data_dir: dir.path().to_path_buf(),
             workspace: None,
             registry: Arc::clone(&registry),
             sink: Arc::clone(&sink),

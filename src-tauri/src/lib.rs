@@ -2004,20 +2004,75 @@ async fn agent_chat_keep_image_preview(
 async fn chat_image_preview(
     app: AppHandle,
     working_directory: String,
-    path: String,
+    mut path: String,
     thread_id: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
 ) -> Result<Option<String>, String> {
-    let chat_directory = match thread_id {
+    let chat_directory = match thread_id.as_deref() {
         Some(thread_id) => {
             let data_dir = app.path().app_data_dir().map_err(|error| {
                 format!("Cannot locate the application data directory: {error}")
             })?;
             Some(crate::agent_chat::general_chat_directory(
-                &data_dir, &thread_id,
+                &data_dir, thread_id,
             )?)
         }
         None => None,
     };
+    // Older terminal pastes referred to a session-owned temp file. Migrate
+    // only files the owning registry still holds; arbitrary transcript paths
+    // never become permission to read outside the normal preview roots.
+    let source = std::path::Path::new(&path);
+    if source.parent() == Some(std::env::temp_dir().as_path())
+        && source
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("latticeterm-clip-"))
+    {
+        if let (Some(session_id), Some(directory)) =
+            (thread_id.as_deref(), chat_directory.as_deref())
+        {
+            let migrated = if crate::agent_daemon::owns(session_id) {
+                daemon
+                    .request(
+                        false,
+                        crate::agent_daemon::Request::KeepStagedImage {
+                            session_id: session_id.into(),
+                            path: path.clone(),
+                        },
+                    )
+                    .await
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+            } else {
+                let registry = Arc::clone(registry.inner());
+                let session_id = session_id.to_owned();
+                let source = source.to_path_buf();
+                let directory = directory.to_path_buf();
+                blocking(move || {
+                    use base64::Engine;
+                    Ok(registry
+                        .staged_clipboard_bytes(&session_id, &source)?
+                        .and_then(|bytes| {
+                            crate::chat_images::store(
+                                &directory,
+                                &[crate::chat_images::ToolImage::Data(
+                                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                                )],
+                            )
+                            .into_iter()
+                            .next()
+                        }))
+                })
+                .await
+                .ok()
+                .flatten()
+            };
+            if let Some(migrated) = migrated {
+                path = migrated;
+            }
+        }
+    }
     // A chat without a project runs in its own folder.
     let working_directory = match &chat_directory {
         Some(directory) if working_directory.trim().is_empty() => directory.display().to_string(),
@@ -2215,8 +2270,6 @@ async fn agent_paste_clipboard_image(
             .path()
             .app_data_dir()
             .map_err(|error| error.to_string())?;
-        let directory = crate::agent_chat::general_chat_directory(&data_dir, &session_id)?;
-
         let Some((width, height, rgba)) = clipboard.read_image_rgba(&app)? else {
             return Ok(None);
         };
@@ -2242,18 +2295,10 @@ async fn agent_paste_clipboard_image(
                 .write_image_data(&rgba)
                 .map_err(|err| format!("Cannot encode the pasted image: {err}"))?;
         }
-        if crate::chat_images::store(
-            &directory,
-            &[crate::chat_images::ToolImage::File(
-                file.path().to_path_buf(),
-            )],
-        )
-        .is_empty()
-        {
-            return Err("Cannot keep the pasted image for preview.".into());
-        }
-        let path = registry.stage_clipboard_image(&session_id, file)?;
-        Ok(Some(path.to_string_lossy().into_owned()))
+        let preview =
+            crate::chat_attachments::keep_staged_image(&data_dir, &session_id, file.path())?;
+        registry.stage_clipboard_image(&session_id, file)?;
+        Ok(Some(preview.to_string_lossy().into_owned()))
     })
     .await
     .map_err(|error| format!("Clipboard image operation did not complete: {error}"))?

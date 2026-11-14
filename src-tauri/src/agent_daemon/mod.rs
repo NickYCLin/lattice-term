@@ -506,6 +506,11 @@ pub enum Request {
         session_id: String,
         png: String,
     },
+    /// Desktop-only migration of an image still held by this session.
+    KeepStagedImage {
+        session_id: String,
+        path: String,
+    },
     /// Ends every background session and the daemon itself.
     Shutdown,
     /// The window's whole automation list, runtime marks included.

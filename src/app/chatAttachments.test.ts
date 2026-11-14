@@ -49,6 +49,19 @@ describe("pasted files", () => {
 });
 
 describe("session prompt attachments", () => {
+  it("extracts pasted native image blocks and keeps their accompanying message", () => {
+    const prompt = '<image name=[Image #1] path="/synthetic/clipboard.png">\n</image>\n[Image #1] 請幫我看這張圖';
+    expect(splitSessionAttachments(prompt)).toEqual({ text: "請幫我看這張圖", paths: ["/synthetic/clipboard.png"] });
+  });
+
+  it("extracts multiple native images without interpreting arbitrary HTML or remote URLs", () => {
+    const prompt = '<image name=[Image #1] path="C:\\work\\圖片 1.png">\n</image>\n<image name=[Image #2] path="/work/two.jpg">\n</image>\n比較這兩張';
+    expect(splitSessionAttachments(prompt)).toEqual({ text: "比較這兩張", paths: ["C:\\work\\圖片 1.png", "/work/two.jpg"] });
+    for (const text of ['<image name=[Image #1] path="https://fixture.invalid/image.png"></image>',
+      '<image name=[Image #1] path="/work/secret.txt"></image>', '<image name=[Image #1] path="/work/photo.png">keep this text</image>']) {
+      expect(splitSessionAttachments(text)).toEqual({ text, paths: [] });
+    }
+  });
   const files = [
     { path: "C:\\work\\spec.md", name: "spec.md", isImage: false },
     { path: "C:\\work\\screen \"1\".png", name: "screen \"1\".png", isImage: true },

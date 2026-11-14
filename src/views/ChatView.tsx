@@ -1540,14 +1540,6 @@ function ChatItemView({
         <ConversationMessage role="user" assistant={assistant} actions={branchButton}>
             {sent.text && <div>{sent.text}</div>}
             <SentAttachments attachments={files} workingDirectory={workingDirectory ?? ""} threadId={threadId} />
-            {files.some((attachment) => attachment.isImage) && (
-              <ChatImageStrip
-                paths={files.filter((attachment) => attachment.isImage).map((attachment) => attachment.preview ?? attachment.path)}
-                workingDirectory={workingDirectory ?? ""}
-                threadId={threadId}
-                captions={false}
-              />
-            )}
         </ConversationMessage>
       );
     }

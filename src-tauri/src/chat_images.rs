@@ -152,7 +152,20 @@ fn store_with_prefix(directory: &Path, images: &[ToolImage], prefix: &str) -> Ve
             .collect();
         let target = directory.join(format!("{prefix}-{name}.{}", extension(mime)));
         let kept = |target: &Path| {
-            std::fs::symlink_metadata(target).is_ok_and(|metadata| metadata.is_file())
+            let Ok(file) = crate::local_files::open_regular(target) else {
+                return false;
+            };
+            if !file
+                .metadata()
+                .is_ok_and(|metadata| metadata.len() == bytes.len() as u64)
+            {
+                return false;
+            }
+            let mut existing = Vec::new();
+            file.take(MAX_IMAGE_BYTES + 1)
+                .read_to_end(&mut existing)
+                .is_ok()
+                && existing == bytes
         };
         if !kept(&target) {
             let Ok(mut file) = tempfile::Builder::new()
@@ -334,5 +347,20 @@ mod tests {
                 .is_none(),
             "the chat folder does not open the rest of the disk"
         );
+    }
+
+    #[test]
+    fn changed_preview_files_are_not_reused_or_overwritten() {
+        let chat = tempfile::tempdir().unwrap();
+        let image = ToolImage::Data(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            PNG,
+        ));
+        let original = store(chat.path(), std::slice::from_ref(&image));
+        let mut changed = PNG.to_vec();
+        *changed.last_mut().unwrap() ^= 1;
+        std::fs::write(&original[0], &changed).unwrap();
+        assert!(store(chat.path(), &[image]).is_empty());
+        assert_eq!(std::fs::read(&original[0]).unwrap(), changed);
     }
 }

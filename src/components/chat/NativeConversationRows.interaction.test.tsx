@@ -217,6 +217,22 @@ it("opens sent images in a dialog using the owning thread and reports missing fi
   } finally { await act(async () => root.unmount()); }
 });
 
+it("shows sent image pixels inline without requiring a click", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const pixels = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+  invoke.mockResolvedValue(pixels);
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><SentAttachments
+      attachments={[{ isImage: true, name: "pasted.png", path: "/synthetic/pasted.png" }]}
+      workingDirectory="/synthetic" threadId="owner" /></I18nProvider>));
+    const image = allNodes(container).find(node => node.tagName === "IMG");
+    expect(image?.attributes.src).toBe(pixels);
+    expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/synthetic/pasted.png", workingDirectory: "/synthetic", threadId: "owner" });
+    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("keeps thumbnail order and hides image paths in captions and the enlarged preview", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);
