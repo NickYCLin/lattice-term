@@ -557,9 +557,6 @@ export function ChatView({
               renderNativeConversation={nativeConversations.renderEntry}
             />
             {nativeConversations.footer}
-            {chat.layout.folders.length > 0 && (
-              <p className="chat-threads__hint">{t("chat.folder.dragHint")}</p>
-            )}
             {shelvedThreads.length > 0 && (
               <details className="chat-shelf">
                 <summary>{t("chat.shelf.title", { count: shelvedThreads.length })}</summary>
