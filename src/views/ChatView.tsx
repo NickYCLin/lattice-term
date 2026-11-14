@@ -111,6 +111,7 @@ import {
   ShieldIcon,
   ArchiveFileIcon,
   ChatIcon,
+  ChevronDownIcon,
   CodeFileIcon,
   TerminalIcon,
   CloseIcon,
@@ -1452,12 +1453,13 @@ function ThreadPane({
                   }}
                 />
               </ComposerAttachments>
-              {!directProxy && <label className={`session-composer__access session-composer__access--editable${thread.permission === "full" ? "" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
+              {!directProxy && <label className={`session-composer__access session-composer__access--editable${thread.permission === "full" ? " is-full" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
                 {thread.permission === "full" ? <AlertIcon size={14} /> : <ShieldIcon size={14} />}
                 <select aria-label={t("chat.permission")} value={thread.permission} disabled={settingsLocked}
                   onChange={event => changePermission(event.target.value as ChatPermission)}>
                   {permissionsFor(thread.definitionId).map(permission => <option key={permission} value={permission}>{t(permissionLabelKey[permission])}</option>)}
                 </select>
+                <ChevronDownIcon className="session-composer__access-chevron" size={12} />
               </label>}
               <ComposerPopover model label={composerModelLabel} disabled={settingsLocked}
                 open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
