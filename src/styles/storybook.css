@@ -1,0 +1,103 @@
+/* An optional illustrated-journal treatment. All rules stay inside this theme. */
+:root[data-theme="storybook"] {
+  --font-ui: "Huninn", "jf-openhuninn", ui-rounded, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei UI", sans-serif;
+}
+
+:root[data-theme="storybook"] body {
+  background-image: radial-gradient(#3e3a3912 0.7px, transparent 0.7px);
+  background-size: 18px 18px;
+}
+
+:root[data-theme="storybook"] :is(.rail, .view-header, .chat-threads, .chat-main, .dialog, .drawer, .connection-card, .settings-section) {
+  border: 2px solid var(--line-strong);
+  box-shadow: var(--shadow-1);
+}
+
+:root[data-theme="storybook"] .rail {
+  background: #e8f2f5;
+}
+
+:root[data-theme="storybook"] .rail__brand {
+  background: var(--storybook-green);
+  border: 2px solid var(--line-strong);
+  box-shadow: 2px 2px 0 var(--line-strong);
+}
+
+:root[data-theme="storybook"] :is(.rail__item.is-active, .cli-switch__pill.is-active) {
+  color: var(--text);
+  background: var(--storybook-yellow);
+  border: 2px solid var(--line-strong);
+  box-shadow: 2px 2px 0 var(--line-strong);
+}
+
+:root[data-theme="storybook"] :is(.button--primary, .chat-send) {
+  color: var(--text);
+  background: var(--storybook-yellow);
+  border: 2px solid var(--line-strong);
+  box-shadow: 2px 2px 0 var(--line-strong);
+}
+
+:root[data-theme="storybook"] :is(.button--primary, .chat-send):hover:not(:disabled) {
+  color: var(--text);
+  background: #fae4b4;
+}
+
+:root[data-theme="storybook"] :is(.button--primary, .chat-send):active:not(:disabled) {
+  box-shadow: none;
+  transform: translate(1px, 1px);
+}
+
+:root[data-theme="storybook"] :is(.input, .select, .textarea, .session-composer__box, .chat-composer__box, .session-composer__menu) {
+  border: 2px solid var(--line-strong);
+}
+
+:root[data-theme="storybook"] :is(.session-composer__box, .chat-composer__box, .session-composer__menu) {
+  box-shadow: var(--shadow-2);
+}
+
+:root[data-theme="storybook"] .chat-thread.is-active {
+  background: var(--storybook-blue);
+  color: var(--text);
+  border-radius: var(--radius-md);
+}
+
+:root[data-theme="storybook"] .chat-msg--user {
+  background: #fff0e8;
+  border: 2px solid var(--line-strong);
+  border-radius: 20px 20px 6px 20px;
+  box-shadow: 2px 2px 0 #3e3a3924;
+}
+
+:root[data-theme="storybook"] :is(.theme-option.is-selected, .language-option.is-selected, .protocol-option.is-selected) {
+  border-color: var(--line-strong);
+  box-shadow: 2px 2px 0 var(--line-strong);
+}
+
+:root[data-theme="storybook"] :is(button, input, select, textarea, [role="button"], a):focus-visible {
+  outline: 3px dashed var(--focus);
+  outline-offset: 3px;
+}
+
+:root[data-theme="storybook"] .scrim {
+  background: #3e3a3947;
+}
+
+.theme-option__preview[data-theme="storybook"] {
+  border: 2px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 2px 2px 0 var(--line-strong);
+}
+
+.theme-option__preview[data-theme="storybook"] .theme-option__rail {
+  background: #e8f2f5;
+  border-right: 2px solid var(--line-strong);
+}
+
+.theme-option__preview[data-theme="storybook"] :is(.theme-option__rail i:first-child, .theme-option__composer i) {
+  background: var(--storybook-yellow);
+  opacity: 1;
+}
+
+.theme-option__preview[data-theme="storybook"] .theme-option__bubble {
+  background: var(--storybook-coral);
+}

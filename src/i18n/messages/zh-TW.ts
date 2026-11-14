@@ -930,6 +930,8 @@ export const zhTW = {
   "theme.dusk.hint": "低彩度深藍與暖沙色，夜間閱讀更柔和",
   "theme.clarity": "清晰",
   "theme.linen": "亞麻",
+  "theme.storybook": "冬日繪本",
+  "theme.storybook.hint": "奶油紙色、粉彩與手繪框線，像翻開一本旅行手帳",
   "theme.dusk": "暮藍",
   "theme.dark": "霧墨",
   "theme.light": "霧藍",
