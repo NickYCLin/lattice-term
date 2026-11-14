@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChatThread } from "./agentChat";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
 import type { LocalConversation } from "./localConversationSessions";
-import { nativeConversationIdentity } from "./nativeConversationIdentity";
+import { conversationPathKey, nativeConversationIdentity } from "./nativeConversationIdentity";
 import type { AgentSessionSummary } from "./useAgentSessions";
 
 export const CONVERSATION_NAMES_KEY = "latticeterm.conversationNames.v1";
@@ -61,7 +61,8 @@ export function conversationNameTargets(threads: readonly ChatThread[], sessions
   const identity = nativeConversationIdentity(profiles);
   const linked = new Map<string, Set<string>>();
   const threadKey = (thread: ChatThread) => JSON.stringify(["thread", thread.id]);
-  const sessionKey = (session: AgentSessionSummary) => JSON.stringify(["sessionGroup", session.groupId || session.sessionId]);
+  const sessionKey = (session: AgentSessionSummary) => JSON.stringify(["sessionGroup", session.definitionId,
+    conversationPathKey(session.profileConfigPath ?? ""), session.groupId || session.sessionId]);
   const threadIdentity = (thread: ChatThread) => !thread.remote && thread.nativeSessionId
     ? identity.conversation({ definitionId: thread.definitionId, profileId: thread.accountProfileId, nativeSessionId: thread.nativeSessionId }) : null;
   const add = (native: string | null, key: string) => {

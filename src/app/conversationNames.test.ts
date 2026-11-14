@@ -38,7 +38,8 @@ describe("conversation display names", () => {
       { id: "b", definitionId: "codex" as const, name: "Account B", configDirectory: "/synthetic/b" }];
     const thread = fakeThread({ id: "thread", accountProfileId: "a", nativeSessionId: "native" });
     const session = fakeSession({ groupId: "group-a", capturedSessionId: "native", profileConfigPath: "/synthetic/a" });
-    const other = fakeSession({ groupId: "group-b", capturedSessionId: "native", profileConfigPath: "/synthetic/b" });
+    // A group can contain multiple accounts; its id alone is not an identity.
+    const other = fakeSession({ groupId: "group-a", capturedSessionId: "native", profileConfigPath: "/synthetic/b" });
     const targets = conversationNameTargets([thread], [session, other], profiles);
     const store = storage();
     const saved = saveConversationName(targets.session(session), "修正輸入框", store);
