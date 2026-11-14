@@ -32,6 +32,7 @@ import { SentAttachments } from "./SentAttachments";
 import { keepChatAttachmentPreviews } from "../../app/chatAttachmentPreviews";
 import { ConversationReadProgress } from "./ConversationReadProgress";
 import { isChatAtBottom } from "../../app/chatScroll";
+import { useChatScroll } from "../../app/useChatScroll";
 
 const stateLabel: Record<AgentLifecycle, MessageKey> = {
   working: "agents.state.working",
@@ -76,8 +77,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   const boxRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const messagesRef = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
+  const { ref: messagesRef, onScroll, onWheel } = useChatScroll();
   const outputRef = useRef<HTMLPreElement>(null);
   const outputPinned = useRef(true);
   const live = !session.closedReason;
@@ -89,10 +89,6 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
   useEffect(() => {
     acknowledge();
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
-  useLayoutEffect(() => {
-    const node = messagesRef.current;
-    if (node && pinned.current) node.scrollTop = node.scrollHeight;
-  }, [conversation.messages, conversation.submitted, queue.prompts, working, attention]);
   useLayoutEffect(() => {
     const node = outputRef.current;
     if (node && outputPinned.current) node.scrollTop = node.scrollHeight;
@@ -220,10 +216,7 @@ export function SessionConversationPane({ session, agents, onOpenTerminal, onSes
       </div>
       <Callout tone="info">{t("sessionChat.shared")}</Callout>
     </header>
-    <div ref={messagesRef} className="chat-messages" onScroll={event => {
-      const node = event.currentTarget;
-      pinned.current = isChatAtBottom(node);
-    }}>
+    <div ref={messagesRef} className="chat-messages" onScroll={onScroll} onWheel={onWheel}>
       <div className="chat-messages__inner">
         {supported && <ConversationReadProgress loading={conversation.loading} />}
         {!supported ? <p>{t("sessionChat.unsupported")}</p>

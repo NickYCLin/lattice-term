@@ -16,7 +16,7 @@ import { SessionConversationPane } from "../components/chat/SessionConversationP
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
 import { ConversationIdentity, ConversationListIdentity, ConversationMessage, ConversationMetadata } from "../components/chat/ConversationPresentation";
 import { ConversationInfo } from "../components/chat/ConversationInfo";
-import { isChatAtBottom } from "../app/chatScroll";
+import { useChatScroll } from "../app/useChatScroll";
 import { conversationLabels } from "../app/conversationLabels";
 import { cliProxyLabel } from "../app/cliProxyApi";
 import { ConversationComposerFrame, ComposerAttachments, ComposerPopover } from "../components/chat/ConversationComposer";
@@ -877,8 +877,7 @@ function ThreadPane({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   const [delegating, setDelegating] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const pinnedToBottom = useRef(true);
+  const { ref: scrollRef, onScroll, onWheel, followBottom } = useChatScroll();
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
@@ -912,13 +911,6 @@ function ThreadPane({
     cliInstalled &&
     (draft.trim() !== "" || attachments.length > 0);
   const assistant = directProxy ? "CLIProxyAPI" : cliLabel(thread.definitionId);
-
-  // Follow the reply as it streams, unless the reader scrolled up to look
-  // at something earlier.
-  useLayoutEffect(() => {
-    const node = scrollRef.current;
-    if (node && pinnedToBottom.current) node.scrollTop = node.scrollHeight;
-  }, [thread.items]);
 
   useEffect(() => {
     setNotice(null);
@@ -992,12 +984,6 @@ function ThreadPane({
     onError: reason => setNotice(t("chat.attachment.failed", { detail: reason instanceof Error ? reason.message : String(reason) })),
   });
 
-  function onScroll() {
-    const node = scrollRef.current;
-    if (!node) return;
-    pinnedToBottom.current = isChatAtBottom(node);
-  }
-
   async function chooseDirectory() {
     setNotice(null);
     try {
@@ -1039,7 +1025,7 @@ function ThreadPane({
       setDraft(current => current === prompt ? "" : current);
       setAttachments(current => current === files ? [] : current);
       setPicks(current => current === selectedPicks ? [] : current);
-      pinnedToBottom.current = true;
+      followBottom();
       if (mounted.current) { setSettingsOpen(false); setNotice(null); }
     } catch (reason) {
       if (mounted.current) setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
@@ -1063,7 +1049,7 @@ function ThreadPane({
       setDraft(current => current === submitted ? "" : current);
       setAttachments(current => current === files ? [] : current);
       setPicks(current => current === selectedPicks ? [] : current);
-      pinnedToBottom.current = true;
+      followBottom();
     } catch (reason) {
       setNotice(t("chat.steer.failed", { detail: reason instanceof Error ? reason.message : String(reason) }));
     } finally {
@@ -1358,7 +1344,7 @@ function ThreadPane({
         {handoffProblem && <Callout tone="danger">{handoffProblem}</Callout>}
       </header>
 
-      <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
+      <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
           {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
           {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} onRetry={sessionRead.refresh} />}
