@@ -48,6 +48,14 @@ export function chatSidebarLayout(
     if (!placements[nodeId] && placements[nativeId]) placements[nodeId] = placements[nativeId];
     delete placements[nativeId];
   }
+  // Older layouts saved automatic root rows before their directory was known.
+  // Follow the discovered project unless a user explicitly placed the row.
+  for (const node of workspaceNodes) {
+    const saved = placements[node.id];
+    if (node.defaultParentId && saved?.parentId === null && !saved.manual) {
+      placements[node.id] = { ...saved, parentId: node.defaultParentId };
+    }
+  }
   return reconcileSessionSidebarLayout(
     { ...layout, placements },
     [
