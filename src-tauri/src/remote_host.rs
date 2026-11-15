@@ -317,7 +317,7 @@ fn executable_name() -> &'static str {
     }
 }
 
-fn agent_path() -> Result<PathBuf, String> {
+pub(crate) fn agent_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("LATTICE_REMOTE_AGENT") {
         let path = PathBuf::from(path);
         if path.is_file() {

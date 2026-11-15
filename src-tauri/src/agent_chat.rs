@@ -30,6 +30,8 @@ mod browser;
 mod codex_catalog;
 mod codex_server;
 mod elicitation;
+mod runtime_events;
+pub use runtime_events::{GoalState, PlanStep, RateLimitWindow};
 pub mod proxy_chat;
 
 pub const EVENT_CHAT: &str = "agent-chat://event";
@@ -75,9 +77,27 @@ pub enum ChatPermission {
     Ask,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum NativeReviewTarget {
+    UncommittedChanges,
+    BaseBranch { branch: String },
+    Commit { sha: String },
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NativeChatAction {
+    Compact,
+    Review { target: NativeReviewTarget },
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatTurnRequest {
+    #[serde(default)]
+    pub native_action: Option<NativeChatAction>,
+    #[serde(default)]
+    pub plan_mode: Option<bool>,
     #[serde(default)]
     pub cli_proxy_base_url: Option<String>,
     /// Which configured proxy the address belongs to, so the turn uses that
@@ -101,6 +121,10 @@ pub struct ChatTurnRequest {
     /// `Finished` event. Absent on the first turn.
     #[serde(default)]
     pub native_session_id: Option<String>,
+    #[serde(default)]
+    pub fork_session: bool,
+    #[serde(default)]
+    pub resume_session_at: Option<String>,
     /// An explicitly selected CLI configuration root. It is never read by
     /// LatticeTerm as credentials; it is passed only as the CLI's documented
     /// home/config environment variable when that CLI starts.
@@ -271,6 +295,13 @@ pub struct ToolMeta {
     rename_all_fields = "camelCase"
 )]
 pub enum ChatEvent {
+    NativeMessageId {
+        item_id: String,
+        native_message_id: String,
+    },
+    NativeTurnId {
+        native_turn_id: String,
+    },
     ProviderReport {
         provider: String,
     },
@@ -291,6 +322,31 @@ pub enum ChatEvent {
         item_id: String,
         text: String,
     },
+    ReasoningDelta {
+        item_id: String,
+        delta: String,
+        part: u64,
+        summary: bool,
+    },
+    ToolOutputDelta {
+        item_id: String,
+        delta: String,
+    },
+    PlanUpdated {
+        steps: Vec<PlanStep>,
+        explanation: Option<String>,
+    },
+    GoalUpdated {
+        goal: Option<GoalState>,
+    },
+    ContextUsage {
+        tokens_used: u64,
+        context_window: Option<u64>,
+    },
+    RateLimits {
+        windows: Vec<RateLimitWindow>,
+    },
+    ContextCompacted,
     ToolStarted {
         item_id: String,
         name: String,
@@ -322,6 +378,8 @@ pub enum ChatEvent {
     },
     /// The CLI is waiting for the user to allow or deny one tool call.
     ApprovalRequested {
+        #[serde(default)]
+        can_allow_session: bool,
         request_id: String,
         tool_use_id: Option<String>,
         name: String,
@@ -1593,14 +1651,47 @@ fn send_with_retry<S: ChatSink>(
         if request.browser_enabled && !matches!(dialect, Dialect::Codex | Dialect::Claude) {
             return Err("Browser control currently requires Codex or Claude Code.".to_string());
         }
-        let interactive = request.permission == ChatPermission::Ask;
+        if (request.native_action.is_some() && dialect != Dialect::Codex)
+            || (request.plan_mode.is_some() && !matches!(dialect, Dialect::Codex | Dialect::Claude))
+        {
+            return Err("This CLI does not expose the requested native operation.".into());
+        }
+        if let Some(NativeChatAction::Review { target }) = request.native_action.as_ref() {
+            let reference = match target {
+                NativeReviewTarget::BaseBranch { branch } => Some(branch),
+                NativeReviewTarget::Commit { sha } => Some(sha),
+                _ => None,
+            };
+            if reference.is_some_and(|value| {
+                value.is_empty()
+                    || value.len() > 256
+                    || value.starts_with('-')
+                    || value.chars().any(char::is_control)
+            }) {
+                return Err("Invalid review reference.".into());
+            }
+        }
+        if matches!(request.native_action, Some(NativeChatAction::Compact))
+            && request.native_session_id.is_none()
+        {
+            return Err("Start a native conversation before compacting it.".into());
+        }
+        let permission = if dialect == Dialect::Claude && request.plan_mode == Some(true) {
+            ChatPermission::ReadOnly
+        } else {
+            request.permission
+        };
+        let interactive = permission == ChatPermission::Ask;
         // Claude asks through its stream-json control protocol and Codex
         // through its app-server JSON-RPC; Gemini's headless mode has no
         // channel for an answer.
         if interactive && (dialect == Dialect::Gemini || dialect == Dialect::Antigravity) {
             return Err("This CLI cannot ask for approval in chat mode.".to_string());
         }
-        if request.prompt.trim().is_empty() && request.attachments.is_empty() {
+        if request.native_action.is_none()
+            && request.prompt.trim().is_empty()
+            && request.attachments.is_empty()
+        {
             return Err("Type a message first.".to_string());
         }
         let model = request
@@ -1670,7 +1761,9 @@ fn send_with_retry<S: ChatSink>(
                 &registry.codex,
                 codex_server::TurnRequest {
                     proxy: proxy.as_ref(),
-                    browser_enabled: request.browser_enabled,
+                    browser_enabled: request.browser_enabled && request.native_action.is_none(),
+                    native_action: request.native_action.as_ref(),
+                    plan_mode: request.plan_mode,
                     mcp: registry.mcp.as_ref(),
                     thread_id: &request.thread_id,
                     turn_id: &request.turn_id,
@@ -1705,10 +1798,22 @@ fn send_with_retry<S: ChatSink>(
                 };
             }
         }
+        if request.fork_session {
+            if dialect != Dialect::Claude || request.native_session_id.is_none() {
+                return Err("Native fork source is unavailable for this CLI.".into());
+            }
+            command.arg("--fork-session");
+            if let Some(id) = request.resume_session_at.as_deref() {
+                validate_native_session_id(id)?;
+                command.args(["--resume-session-at", id]);
+            }
+        } else if request.resume_session_at.is_some() {
+            return Err("A resume boundary requires an explicit native fork.".into());
+        }
         command.args(turn_arguments(
             dialect,
             &working_directory,
-            request.permission,
+            permission,
             model,
             request.native_session_id.as_deref(),
             &attachments,
@@ -1717,8 +1822,22 @@ fn send_with_retry<S: ChatSink>(
             // Only Claude reaches this point with an effort (validated above).
             command.args(["--effort", effort]);
         }
-        if request.browser_enabled && dialect == Dialect::Claude {
-            command.args(browser::claude_arguments());
+        if dialect == Dialect::Claude {
+            let tools_url = crate::chat_tools::ensure(
+                &request.thread_id,
+                working_directory.clone(),
+                request.browser_enabled,
+            )
+            .await?;
+            command.env(crate::chat_tools::environment(), tools_url);
+            let browser_endpoint = if request.browser_enabled {
+                crate::chat_tools::browser::endpoint(&request.thread_id)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            command.args(browser::claude_arguments(browser_endpoint.as_deref()));
         }
         command.current_dir(&working_directory);
 
@@ -1903,7 +2022,9 @@ fn send_with_retry<S: ChatSink>(
                 }
             }
 
-            if should_retry_claude_oauth(dialect, had_progress, retry_index, error.as_deref()) {
+            if !retry_request.fork_session
+                && should_retry_claude_oauth(dialect, had_progress, retry_index, error.as_deref())
+            {
                 // Claude says this exact failure is transient. No answer or tool
                 // call was emitted, so resending cannot duplicate a side effect.
                 // A new conversation stays new; an existing one keeps the id
@@ -2081,8 +2202,61 @@ fn control_response_line(
     .to_string()
 }
 
+fn claude_tool_response_line(
+    request_id: &str,
+    pending: &Value,
+    allow: bool,
+    message: Option<&str>,
+    allow_for_session: bool,
+) -> Result<String, String> {
+    let mut response: Value = serde_json::from_str(&control_response_line(
+        request_id,
+        allow,
+        Some(
+            pending
+                .get(CLAUDE_TOOL_INPUT_MARKER)
+                .unwrap_or(pending)
+                .clone(),
+        ),
+        message,
+    ))
+    .map_err(|_| "Invalid approval response")?;
+    if allow_for_session {
+        if !allow {
+            return Err("Session scope requires an allow decision.".into());
+        }
+        let name = str_field(pending, CLAUDE_TOOL_NAME_MARKER)
+            .filter(|name| claude_session_tool(name))
+            .ok_or("This tool does not expose session approval.")?;
+        response["response"]["response"]["updatedPermissions"] = serde_json::json!([{
+            "type":"addRules","rules":[{"toolName":name}],"behavior":"allow","destination":"session"
+        }]);
+    }
+    Ok(response.to_string())
+}
+
 /// Marks a pending Claude elicitation, so its answer is checked against the
 /// server's schema instead of being echoed back as tool input.
+const CLAUDE_TOOL_INPUT_MARKER: &str = "latticeterm_tool_input";
+const CLAUDE_TOOL_NAME_MARKER: &str = "latticeterm_tool_name";
+
+fn claude_session_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "Bash"
+            | "Read"
+            | "Write"
+            | "Edit"
+            | "MultiEdit"
+            | "Glob"
+            | "Grep"
+            | "WebFetch"
+            | "WebSearch"
+            | "TodoWrite"
+            | "NotebookEdit"
+    )
+}
+
 const CLAUDE_ELICITATION_MARKER: &str = "latticeterm_claude_elicitation";
 
 /// Claude's elicitation request in the parameter shape Codex uses, so both
@@ -2155,6 +2329,29 @@ pub async fn respond_expected(
     message: Option<&str>,
     expected_turn_id: Option<&str>,
 ) -> Result<(), String> {
+    respond_scoped_expected(
+        registry,
+        thread_id,
+        request_id,
+        allow,
+        message,
+        expected_turn_id,
+        false,
+    )
+    .await
+}
+pub async fn respond_scoped_expected(
+    registry: Arc<AgentChatRegistry>,
+    thread_id: &str,
+    request_id: &str,
+    allow: bool,
+    message: Option<&str>,
+    expected_turn_id: Option<&str>,
+    allow_for_session: bool,
+) -> Result<(), String> {
+    if allow_for_session && !allow {
+        return Err("Session scope requires an allow decision.".into());
+    }
     validate_id(thread_id, "thread id")?;
     // The request id is the CLI's own token, used here only as a map key,
     // so its alphabet is the CLI's business; only the size is bounded.
@@ -2162,13 +2359,14 @@ pub async fn respond_expected(
         return Err("Invalid request id.".to_string());
     }
     if registry.codex.get(thread_id).is_some() {
-        return codex_server::respond_expected(
+        return codex_server::respond_scoped_expected(
             &registry.codex,
             thread_id,
             request_id,
             allow,
             message,
             expected_turn_id,
+            allow_for_session,
         )
         .await;
     }
@@ -2189,6 +2387,9 @@ pub async fn respond_expected(
             .get(request_id)
             .ok_or_else(|| "This approval has already been answered.".to_string())?;
         let line = if let Some(params) = pending.get(CLAUDE_ELICITATION_MARKER) {
+            if allow_for_session {
+                return Err("Forms cannot be approved for a whole session.".into());
+            }
             // A form answer is checked whole; an answer that breaks the
             // schema leaves the question open so it can be corrected.
             let result = elicitation::result(params, allow, message)?;
@@ -2196,13 +2397,19 @@ pub async fn respond_expected(
         } else {
             let message = message.map(|text| truncate(text.trim(), 1024));
             match pending.get("latticeterm_rpc_id") {
-                Some(rpc_id) => codex_approval_line(rpc_id, allow),
-                None => control_response_line(
+                Some(rpc_id) => {
+                    if allow_for_session {
+                        return Err("This legacy request does not expose session approval.".into());
+                    }
+                    codex_approval_line(rpc_id, allow)
+                }
+                None => claude_tool_response_line(
                     request_id,
+                    pending,
                     allow,
-                    Some(pending.clone()),
                     message.as_deref(),
-                ),
+                    allow_for_session,
+                )?,
             }
         };
         turn.pending_inputs.remove(request_id);
@@ -2233,6 +2440,8 @@ struct TurnState {
     error: Option<String>,
     /// Claude: the API message whose content blocks the deltas belong to.
     current_message_id: Option<String>,
+    context_tokens: Option<u64>,
+    context_model: Option<String>,
     /// The CLI has produced its final result; a bidirectional turn can now
     /// have its stdin closed.
     turn_complete: bool,
@@ -2246,6 +2455,7 @@ struct TurnState {
     /// Claude: the change an Edit/MultiEdit/Write call makes, as a diff,
     /// shown in place of its terse result once the tool succeeds.
     edit_diffs: HashMap<String, String>,
+    pending_todos: HashMap<String, Vec<PlanStep>>,
 }
 
 const MAX_EDIT_DIFF_BYTES: usize = 64 * 1024;
@@ -2350,6 +2560,18 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
             };
             match str_field(event, "type") {
                 Some("message_start") => {
+                    state.context_model = event["message"]["model"].as_str().map(str::to_string);
+                    let usage = &event["message"]["usage"];
+                    if let Some(input) = usage["input_tokens"].as_u64() {
+                        let tokens = input
+                            .saturating_add(u64_field(usage, "cache_read_input_tokens"))
+                            .saturating_add(u64_field(usage, "cache_creation_input_tokens"));
+                        state.context_tokens = Some(tokens);
+                        events.push(ChatEvent::ContextUsage {
+                            tokens_used: tokens,
+                            context_window: None,
+                        });
+                    }
                     state.current_message_id = event
                         .get("message")
                         .and_then(|message| str_field(message, "id"))
@@ -2358,6 +2580,17 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                 Some("content_block_delta") => {
                     let index = u64_field(event, "index");
                     if let Some(delta) = event.get("delta") {
+                        if str_field(delta, "type") == Some("thinking_delta") {
+                            if let Some(text) = str_field(delta, "thinking") {
+                                let message_id = state.current_message_id.as_deref().unwrap_or("m");
+                                events.push(ChatEvent::ReasoningDelta {
+                                    item_id: format!("{message_id}#{index}"),
+                                    delta: text.to_string(),
+                                    part: 0,
+                                    summary: true,
+                                });
+                            }
+                        }
                         if str_field(delta, "type") == Some("text_delta") {
                             if let Some(text) = str_field(delta, "text") {
                                 let message_id = state.current_message_id.as_deref().unwrap_or("m");
@@ -2373,6 +2606,18 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
             }
         }
         Some("assistant") => {
+            if let (Some(tokens), Some(window)) = (
+                value["context_usage"]["total_tokens"].as_u64(),
+                value["context_usage"]["raw_max_tokens"]
+                    .as_u64()
+                    .filter(|window| *window > 0),
+            ) {
+                state.context_tokens = Some(tokens);
+                events.push(ChatEvent::ContextUsage {
+                    tokens_used: tokens,
+                    context_window: Some(window),
+                });
+            }
             let Some(message) = value.get("message") else {
                 return events;
             };
@@ -2400,6 +2645,14 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                     Some("tool_use") => {
                         let name = str_field(block, "name").unwrap_or("tool").to_string();
                         let input = block.get("input").cloned().unwrap_or(Value::Null);
+                        if name == "TodoWrite" && state.pending_todos.len() < 64 {
+                            if let (Some(id), Some(steps)) = (
+                                str_field(block, "id"),
+                                runtime_events::plan_steps(&input["todos"], true),
+                            ) {
+                                state.pending_todos.insert(id.to_string(), steps);
+                            }
+                        }
                         if let (Some(id), Some(diff)) =
                             (str_field(block, "id"), claude_edit_diff(&name, &input))
                         {
@@ -2416,6 +2669,18 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                         });
                     }
                     _ => {}
+                }
+            }
+            if let Some(uuid) =
+                str_field(value, "uuid").filter(|id| !id.is_empty() && id.len() <= 256)
+            {
+                for (index, block) in blocks.iter().enumerate() {
+                    if str_field(block, "type") == Some("text") {
+                        events.push(ChatEvent::NativeMessageId {
+                            item_id: format!("{message_id}#{index}"),
+                            native_message_id: uuid.into(),
+                        });
+                    }
                 }
             }
         }
@@ -2437,6 +2702,14 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                     .get("is_error")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
+                if let Some(steps) = state.pending_todos.remove(item_id) {
+                    if !is_error {
+                        events.push(ChatEvent::PlanUpdated {
+                            steps,
+                            explanation: None,
+                        });
+                    }
+                }
                 let diff = state.edit_diffs.remove(item_id);
                 let output = match diff {
                     Some(diff) if !is_error => diff,
@@ -2470,6 +2743,7 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
             if str_field(request, "subtype") == Some("elicitation") {
                 let params = claude_elicitation_params(request);
                 events.push(ChatEvent::ApprovalRequested {
+                    can_allow_session: false,
                     request_id: request_id.to_string(),
                     tool_use_id: None,
                     name: elicitation::kind(&params).card_name().to_string(),
@@ -2529,15 +2803,72 @@ fn parse_claude(state: &mut TurnState, value: &Value) -> Vec<ChatEvent> {
                 .filter(|text| !text.is_empty())
                 .unwrap_or_else(|| claude_tool_summary(&name, &input));
             events.push(ChatEvent::ApprovalRequested {
+                can_allow_session: claude_session_tool(&name),
                 request_id: request_id.to_string(),
                 tool_use_id: str_field(request, "tool_use_id").map(str::to_string),
                 name,
                 summary,
                 input: complete_input,
             });
-            state.pending_inputs.push((request_id.to_string(), input));
+            state.pending_inputs.push((request_id.to_string(), serde_json::json!({
+                CLAUDE_TOOL_INPUT_MARKER: input, CLAUDE_TOOL_NAME_MARKER: str_field(request, "tool_name")
+            })));
+        }
+        Some("rate_limit_event") => {
+            let info = &value["rate_limit_info"];
+            let mut windows = Vec::new();
+            let mut add = |name: &str, value: &Value| {
+                if ![
+                    "five_hour",
+                    "seven_day",
+                    "seven_day_opus",
+                    "seven_day_sonnet",
+                    "seven_day_overage_included",
+                    "overage",
+                ]
+                .contains(&name)
+                {
+                    return;
+                }
+                if let Some(utilization) = value["utilization"]
+                    .as_f64()
+                    .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                {
+                    windows.push(RateLimitWindow {
+                        key: format!("claude:{name}"),
+                        label: format!("Claude · {name}"),
+                        used_percent: utilization * 100.0,
+                        window_minutes: None,
+                        resets_at: value["resetsAt"].as_i64().filter(|value| *value >= 0),
+                    });
+                }
+            };
+            if let Some(name) = info["rateLimitType"].as_str() {
+                add(name, info);
+            }
+            if let Some(reported) = info["unifiedWindows"].as_object() {
+                for (name, value) in reported.iter().take(8) {
+                    add(name, value);
+                }
+            }
+            if !windows.is_empty() {
+                events.push(ChatEvent::RateLimits { windows });
+            }
         }
         Some("result") => {
+            if let (Some(tokens), Some(window)) = (
+                state.context_tokens,
+                state
+                    .context_model
+                    .as_deref()
+                    .and_then(|model| value["modelUsage"][model]["contextWindow"].as_u64())
+                    .filter(|window| *window > 0),
+            ) {
+                events.push(ChatEvent::ContextUsage {
+                    tokens_used: tokens,
+                    context_window: Some(window),
+                });
+            }
             state.turn_complete = true;
             if let Some(id) = str_field(value, "session_id") {
                 state.native_session_id = Some(id.to_string());
@@ -3279,6 +3610,63 @@ pub async fn delete_native_conversation(
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeForkResult {
+    pub native_session_id: String,
+    pub model: Option<String>,
+    pub provider: String,
+}
+pub async fn fork_codex_conversation(
+    registry: Arc<AgentChatRegistry>,
+    thread_id: &str,
+    native_id: &str,
+    directory: &str,
+    profile: Option<&str>,
+    through_turn: Option<&str>,
+    before_turn: bool,
+) -> Result<NativeForkResult, String> {
+    validate_id(thread_id, "thread id")?;
+    validate_native_session_id(native_id)?;
+    if let Some(turn) = through_turn {
+        validate_id(turn, "native turn id")?;
+    }
+    if before_turn && through_turn.is_none() {
+        return Err("Select a native turn before editing its input.".into());
+    }
+    let directory = validate_working_directory(directory)?;
+    let profile = profile_config_directory(Dialect::Codex, profile)?;
+    registry
+        .codex
+        .release_idle(thread_id, native_id, profile.as_deref())
+        .await?;
+    let executable = crate::agent::catalog_executable("codex").ok_or("Codex is not installed.")?;
+    let result = codex_catalog::fork_thread(
+        &executable,
+        profile.as_deref(),
+        native_id,
+        &directory,
+        through_turn,
+        before_turn,
+    )
+    .await?;
+    let id = result["thread"]["id"]
+        .as_str()
+        .ok_or("Codex did not confirm the new thread.")?;
+    validate_native_session_id(id)?;
+    Ok(NativeForkResult {
+        native_session_id: id.into(),
+        model: result["model"]
+            .as_str()
+            .or_else(|| result["thread"]["model"].as_str())
+            .map(str::to_string),
+        provider: result["thread"]["modelProvider"]
+            .as_str()
+            .unwrap_or_default()
+            .into(),
+    })
+}
+
 pub async fn restore_codex_conversation(
     session_id: &str,
     profile: Option<&str>,
@@ -3571,6 +3959,7 @@ mod tests {
         assert_eq!(
             events,
             vec![ChatEvent::ApprovalRequested {
+                can_allow_session: true,
                 request_id: "576cb46b-e252-44d9-b1ae-593998a16fdd".into(),
                 tool_use_id: Some("toolu_013DU387kSreb3xCEejeof6e".into()),
                 name: "WebFetch".into(),
@@ -3820,6 +4209,10 @@ mod tests {
             Arc::new(RecordingSink(tx)),
             Arc::new(AgentChatRegistry::new()),
             ChatTurnRequest {
+                fork_session: false,
+                resume_session_at: None,
+                native_action: None,
+                plan_mode: None,
                 cli_proxy_base_url: None,
                 cli_proxy_id: None,
                 browser_enabled: false,
@@ -4624,6 +5017,10 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                fork_session: false,
+                resume_session_at: None,
+                native_action: None,
+                plan_mode: None,
                 cli_proxy_base_url: None,
                 cli_proxy_id: None,
                 browser_enabled: false,
@@ -4688,6 +5085,10 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             Arc::new(RecordingSink(tx)),
             Arc::clone(&registry),
             ChatTurnRequest {
+                fork_session: false,
+                resume_session_at: None,
+                native_action: None,
+                plan_mode: None,
                 cli_proxy_base_url: None,
                 cli_proxy_id: None,
                 browser_enabled: false,
@@ -4753,6 +5154,10 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
 
     fn proxy_request(definition_id: &str, workdir: &Path) -> ChatTurnRequest {
         ChatTurnRequest {
+            fork_session: false,
+            resume_session_at: None,
+            native_action: None,
+            plan_mode: None,
             cli_proxy_base_url: Some("http://127.0.0.1:9/prefix".into()),
             cli_proxy_id: None,
             browser_enabled: false,
@@ -4870,5 +5275,79 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             _ => None,
         });
         println!("{definition_id} via proxy, requested {model}, reported {reported:?}");
+    }
+    #[test]
+    fn claude_session_approval_echoes_input_and_only_updates_current_session_rules() {
+        let input =
+            serde_json::json!({"command":"npm test","latticeterm_tool_name":"untrusted input"});
+        let pending =
+            serde_json::json!({CLAUDE_TOOL_INPUT_MARKER:input,CLAUDE_TOOL_NAME_MARKER:"Bash"});
+        let line = claude_tool_response_line("request", &pending, true, None, true).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["response"]["response"]["updatedInput"], input);
+        let update = &value["response"]["response"]["updatedPermissions"][0];
+        assert_eq!(update["destination"], "session");
+        assert_eq!(update["rules"], serde_json::json!([{"toolName":"Bash"}]));
+        assert!(!line.contains("localSettings"));
+        assert!(!line.contains("userSettings"));
+        assert!(claude_tool_response_line("request", &pending, false, None, true).is_err());
+        let unknown = serde_json::json!({CLAUDE_TOOL_INPUT_MARKER:{},CLAUDE_TOOL_NAME_MARKER:"untrusted_tool"});
+        assert!(claude_tool_response_line("request", &unknown, true, None, true).is_err());
+    }
+    #[test]
+    fn claude_todos_are_published_only_after_successful_tool_receipts() {
+        for failed in [false, true] {
+            let mut state = TurnState::default();
+            let start = serde_json::json!({"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"todo","name":"TodoWrite","input":{"todos":[{"content":"test","status":"completed"}]}}]}});
+            assert!(!parse_claude(&mut state, &start)
+                .iter()
+                .any(|event| matches!(event, ChatEvent::PlanUpdated { .. })));
+            let result = serde_json::json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"todo","is_error":failed,"content":"result"}]}});
+            let events = parse_claude(&mut state, &result);
+            assert_eq!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, ChatEvent::PlanUpdated { .. })),
+                !failed
+            );
+        }
+    }
+    #[test]
+    fn claude_usage_is_reported_from_current_api_context_and_actual_quota_events() {
+        let mut state = TurnState::default();
+        let events = parse_claude(
+            &mut state,
+            &serde_json::json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"message","model":"reported-model","usage":{"input_tokens":12,"cache_read_input_tokens":100,"cache_creation_input_tokens":20}}}}),
+        );
+        assert!(matches!(
+            &events[..],
+            [ChatEvent::ContextUsage {
+                tokens_used: 132,
+                context_window: None
+            }]
+        ));
+        let events = parse_claude(
+            &mut state,
+            &serde_json::json!({"type":"result","modelUsage":{"reported-model":{"contextWindow":200000}}}),
+        );
+        assert!(matches!(
+            &events[..],
+            [ChatEvent::ContextUsage {
+                tokens_used: 132,
+                context_window: Some(200000)
+            }]
+        ));
+        let events = parse_claude(
+            &mut state,
+            &serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.25,"resetsAt":1000,"unifiedWindows":{"seven_day":{"utilization":0.4,"resetsAt":2000}}}}),
+        );
+        assert!(
+            matches!(&events[..], [ChatEvent::RateLimits { windows }] if windows.len() == 2 && windows[0].used_percent == 25.0 && windows[1].used_percent == 40.0)
+        );
+        assert!(parse_claude(
+            &mut state,
+            &serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}})
+        )
+        .is_empty());
     }
 }

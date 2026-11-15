@@ -943,6 +943,10 @@ pub struct LocalConversation {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConversationMessage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_turn_id: Option<String>,
     pub role: &'static str,
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2014,7 +2018,11 @@ fn read_conversation_snapshot_with_tools(
     let mut messages = Vec::new();
     let mut bytes = 0;
     let mut truncated = false;
-    let mut push = |role: &'static str, text: String, tool: Option<ConversationTool>| {
+    let mut push = |role: &'static str,
+                    text: String,
+                    tool: Option<ConversationTool>,
+                    native_turn_id: Option<String>,
+                    native_message_id: Option<String>| {
         let text = if role == "user" {
             visible_user_text(&text).to_string()
         } else {
@@ -2026,12 +2034,23 @@ fn read_conversation_snapshot_with_tools(
         let tool_bytes = tool.as_ref().map_or(0, |tool| {
             tool.call_id.len() + tool.name.as_ref().map_or(0, String::len)
         });
-        bytes += text.len() + tool_bytes;
-        messages.push(LocalConversationMessage { role, text, tool });
+        bytes += text.len()
+            + tool_bytes
+            + native_turn_id.as_ref().map_or(0, String::len)
+            + native_message_id.as_ref().map_or(0, String::len);
+        messages.push(LocalConversationMessage {
+            role,
+            text,
+            tool,
+            native_turn_id,
+            native_message_id,
+        });
         while messages.len() > HISTORY_MAX_MESSAGES || bytes > HISTORY_MAX_TEXT_BYTES {
             truncated = true;
             let removed: LocalConversationMessage = messages.remove(0);
-            bytes -= removed.text.len();
+            bytes -= removed.text.len()
+                + removed.native_turn_id.as_ref().map_or(0, String::len)
+                + removed.native_message_id.as_ref().map_or(0, String::len);
             bytes -= removed.tool.as_ref().map_or(0, |tool| {
                 tool.call_id.len() + tool.name.as_ref().map_or(0, String::len)
             });
@@ -2041,7 +2060,7 @@ fn read_conversation_snapshot_with_tools(
         for (role, text) in
             gemini_turns(path).ok_or("The local conversation could not be read safely.")?
         {
-            push(role, text, None);
+            push(role, text, None, None, None);
         }
         return Ok(LocalConversationSnapshot {
             messages,
@@ -2049,12 +2068,41 @@ fn read_conversation_snapshot_with_tools(
             archived: None,
         });
     }
+    let mut current_turn: Option<String> = None;
     let incomplete = visit_transcript_rows(path, |value| {
+        if kind == TranscriptKind::Codex {
+            let native_id = if value["type"].as_str() == Some("turn_context") {
+                Some(&value["payload"]["turn_id"])
+            } else if value["type"].as_str() == Some("event_msg") {
+                match value["payload"]["type"].as_str() {
+                    Some("task_started") => Some(&value["payload"]["turn_id"]),
+                    Some("task_complete" | "turn_aborted") => {
+                        current_turn = None;
+                        None
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some(native_id) = native_id {
+                current_turn = native_id
+                    .as_str()
+                    .filter(|id| {
+                        !id.is_empty()
+                            && id.len() <= 256
+                            && id
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    })
+                    .map(str::to_string);
+            }
+        }
         let (role, content) = match kind {
             TranscriptKind::Codex => {
                 if include_tools {
                     if let Some((text, tool)) = codex_conversation_tool(value) {
-                        push("assistant", text, Some(tool));
+                        push("assistant", text, Some(tool), current_turn.clone(), None);
                         return;
                     }
                 }
@@ -2075,13 +2123,13 @@ fn read_conversation_snapshot_with_tools(
             }
             TranscriptKind::Antigravity => {
                 if let Some((role, text)) = antigravity_turn(value) {
-                    push(role, text.trim().to_string(), None);
+                    push(role, text.trim().to_string(), None, None, None);
                 }
                 return;
             }
             TranscriptKind::Cursor => {
                 if let Some((role, text)) = cursor_turn(value) {
-                    push(role, text, None);
+                    push(role, text, None, None, None);
                 }
                 return;
             }
@@ -2092,7 +2140,20 @@ fn read_conversation_snapshot_with_tools(
             Some("assistant") => "assistant",
             _ => return,
         };
-        push(role, content.map(content_text).unwrap_or_default(), None);
+        push(
+            role,
+            content.map(content_text).unwrap_or_default(),
+            None,
+            current_turn.clone(),
+            if kind == TranscriptKind::Claude {
+                value["uuid"]
+                    .as_str()
+                    .filter(|id| !id.is_empty() && id.len() <= 256)
+                    .map(str::to_string)
+            } else {
+                None
+            },
+        );
     })
     .ok_or("The local conversation could not be read safely.")?;
     Ok(LocalConversationSnapshot {
@@ -4629,5 +4690,38 @@ mod usage_tests {
         assert_eq!(usage.reasoning_tokens, 3);
         assert_eq!(usage.api_calls, 2);
         assert_eq!(session_usage(TranscriptKind::Codex, "/work", ""), None);
+    }
+    #[test]
+    fn codex_history_uses_native_task_boundaries_without_leaking_a_previous_turn_id() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rollout.jsonl");
+        let rows = [
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"first-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}),
+            serde_json::json!({"type":"turn_context","payload":{"turn_id":"first-turn"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"first-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"outside a declared turn"}]}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"second-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}}),
+        ];
+        fs::write(
+            &path,
+            rows.iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        let snapshot =
+            read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, false).unwrap();
+        assert_eq!(snapshot.messages.len(), 3);
+        assert_eq!(
+            snapshot.messages[0].native_turn_id.as_deref(),
+            Some("first-turn")
+        );
+        assert_eq!(snapshot.messages[1].native_turn_id, None);
+        assert_eq!(
+            snapshot.messages[2].native_turn_id.as_deref(),
+            Some("second-turn")
+        );
     }
 }

@@ -11,11 +11,11 @@ export interface ChatAccess { targetId: string; read: boolean; control: boolean;
 export function chatIdentity(thread: ChatThread, profiles: readonly ChatAccountProfile[]): string {
   const profile = profiles.find(p => p.id === thread.accountProfileId && p.definitionId === thread.definitionId);
   return JSON.stringify([thread.id, thread.definitionId, thread.provider, thread.proxyId, thread.model,
-    thread.accountProfileId, profile?.configDirectory, thread.workingDirectory, thread.permission, thread.effort, thread.browserEnabled]);
+    thread.accountProfileId, profile?.configDirectory, thread.workingDirectory, thread.permission, thread.effort, thread.browserEnabled, thread.planMode]);
 }
 export function chatBlockers(thread: ChatThread, draft: boolean): string[] {
   const result: string[] = [];
-  if (thread.runningTurnId || thread.pendingInputs?.length) result.push("busy");
+  if (thread.runningTurnId || thread.pendingInputs?.length || thread.pendingOperation) result.push("busy");
   if (thread.items.some(item => item.type === "approval" && item.decision === "pending")) result.push("approval");
   if (draft) result.push("draft");
   if (thread.archived || thread.nativeHistoryArchived || thread.shelvedAt) result.push("archived");

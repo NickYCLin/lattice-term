@@ -1,94 +1,104 @@
-//! Per-process browser MCP configuration; never edits the user's CLI config.
-
+//! Native tools and Playwright configuration are local to the CLI subprocess.
 pub(super) const PACKAGE: &str = "@playwright/mcp@0.0.80";
-
-fn launch() -> (&'static str, Vec<&'static str>) {
-    if cfg!(windows) {
-        (
-            "cmd",
-            vec![
-                "/d",
-                "/c",
-                "npx",
-                "--yes",
-                PACKAGE,
-                "--isolated",
-                "--browser",
-                "msedge",
-            ],
-        )
-    } else {
-        (
-            "npx",
-            vec!["--yes", PACKAGE, "--isolated", "--browser", "chrome"],
-        )
-    }
+fn command() -> String {
+    std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("lattice-term"))
+        .to_string_lossy()
+        .into_owned()
 }
-
-/// The same browser server for Claude Code, through its documented
-/// `--mcp-config`, which adds servers for this process only. Its tools still
-/// go through Claude's own permission prompts in "ask each time" mode.
-pub(super) fn claude_arguments() -> Vec<String> {
-    let (command, args) = launch();
+fn playwright(endpoint: &str) -> (String, Vec<String>) {
+    let mut args = if cfg!(windows) {
+        vec!["/d", "/c", "npx", "--yes", PACKAGE]
+    } else {
+        vec!["--yes", PACKAGE]
+    }
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    args.extend(["--cdp-endpoint".into(), endpoint.into()]);
+    (if cfg!(windows) { "cmd" } else { "npx" }.into(), args)
+}
+pub(super) fn claude_arguments(endpoint: Option<&str>) -> Vec<String> {
+    let mut servers = serde_json::json!({"latticeterm_chat_tools":{"command":command(),"args":["--mcp-chat-tools"],"env":{"LATTICETERM_CHAT_TOOLS_URL":"${LATTICETERM_CHAT_TOOLS_URL}"}}});
+    if let Some(endpoint) = endpoint {
+        let (command, args) = playwright(endpoint);
+        servers["latticeterm_browser"] = serde_json::json!({"command":command,"args":args});
+    }
     vec![
-        "--mcp-config".to_string(),
-        serde_json::json!({
-            "mcpServers": { "latticeterm_browser": { "command": command, "args": args } }
-        })
-        .to_string(),
+        "--mcp-config".into(),
+        serde_json::json!({"mcpServers":servers}).to_string(),
     ]
 }
-
 pub(super) fn codex_arguments() -> Vec<String> {
-    let (command, args) = launch();
-    let values = [
+    [
+        format!(
+            "mcp_servers.latticeterm_chat_tools.command={}",
+            serde_json::to_string(&command()).unwrap()
+        ),
+        "mcp_servers.latticeterm_chat_tools.args=[\"--mcp-chat-tools\"]".into(),
+        "mcp_servers.latticeterm_chat_tools.env_vars=[\"LATTICETERM_CHAT_TOOLS_URL\"]".into(),
+        "mcp_servers.latticeterm_chat_tools.enabled=true".into(),
+        "mcp_servers.latticeterm_chat_tools.startup_timeout_sec=15".into(),
+        "mcp_servers.latticeterm_chat_tools.default_tools_approval_mode=\"prompt\"".into(),
+    ]
+    .into_iter()
+    .flat_map(|value| ["-c".to_string(), value])
+    .collect()
+}
+pub(super) fn playwright_codex_arguments(endpoint: &str) -> Vec<String> {
+    let (command, args) = playwright(endpoint);
+    [
         format!(
             "mcp_servers.latticeterm_browser.command={}",
-            serde_json::to_string(command).unwrap()
+            serde_json::to_string(&command).unwrap()
         ),
         format!(
             "mcp_servers.latticeterm_browser.args={}",
             serde_json::to_string(&args).unwrap()
         ),
-        "mcp_servers.latticeterm_browser.enabled=true".to_string(),
-        "mcp_servers.latticeterm_browser.startup_timeout_sec=120".to_string(),
-        "mcp_servers.latticeterm_browser.default_tools_approval_mode=\"prompt\"".to_string(),
-    ];
-    values
-        .into_iter()
-        .flat_map(|value| ["-c".to_string(), value])
-        .collect()
+        "mcp_servers.latticeterm_browser.enabled=true".into(),
+        "mcp_servers.latticeterm_browser.startup_timeout_sec=120".into(),
+        "mcp_servers.latticeterm_browser.default_tools_approval_mode=\"prompt\"".into(),
+    ]
+    .into_iter()
+    .flat_map(|value| ["-c".to_string(), value])
+    .collect()
 }
-
 #[cfg(test)]
 mod tests {
     #[test]
-    fn browser_uses_a_pinned_package_and_an_isolated_visible_profile() {
+    fn native_tools_use_the_scoped_bridge_and_playwright_shares_the_embedded_browser() {
         let args = super::codex_arguments();
-        assert!(args.iter().any(|value| value.contains(super::PACKAGE)));
-        assert!(args.iter().any(|value| value.contains("--isolated")));
-        assert!(!args.iter().any(|value| value.contains("--headless")));
+        assert!(args.iter().any(|value| value.contains("--mcp-chat-tools")));
+        assert!(args.iter().any(|value| value.contains("env_vars=")));
+        assert!(!args.iter().any(|value| value.contains("127.0.0.1")));
         assert!(args
             .iter()
             .any(|value| value.contains("approval_mode=\"prompt\"")));
         assert!(args.chunks(2).all(|pair| pair[0] == "-c"));
-    }
-
-    #[test]
-    fn claude_gets_the_same_browser_through_its_own_flag() {
-        let args = super::claude_arguments();
-        assert_eq!(args[0], "--mcp-config");
-        let config: serde_json::Value = serde_json::from_str(&args[1]).unwrap();
-        let server = &config["mcpServers"]["latticeterm_browser"];
-        assert!(server["args"]
+        let endpoint = "http://127.0.0.1:1234";
+        let browser = super::playwright_codex_arguments(endpoint);
+        assert!(browser.iter().any(|value| value.contains(super::PACKAGE)
+            && value.contains("--cdp-endpoint")
+            && value.contains(endpoint)));
+        let claude = super::claude_arguments(Some(endpoint));
+        assert_eq!(claude[0], "--mcp-config");
+        let config: serde_json::Value = serde_json::from_str(&claude[1]).unwrap();
+        assert_eq!(
+            config["mcpServers"]["latticeterm_chat_tools"]["env"]["LATTICETERM_CHAT_TOOLS_URL"],
+            "${LATTICETERM_CHAT_TOOLS_URL}"
+        );
+        assert_eq!(
+            config["mcpServers"]["latticeterm_chat_tools"]["args"],
+            serde_json::json!(["--mcp-chat-tools"])
+        );
+        assert!(config["mcpServers"]["latticeterm_browser"]["args"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|arg| arg == super::PACKAGE));
-        assert!(server["args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "--isolated"));
+            .any(|value| value == endpoint));
+        let disabled: serde_json::Value =
+            serde_json::from_str(&super::claude_arguments(None)[1]).unwrap();
+        assert!(disabled["mcpServers"].get("latticeterm_browser").is_none());
     }
 }

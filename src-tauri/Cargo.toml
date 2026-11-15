@@ -37,6 +37,7 @@ russh-sftp = "2.4.0"
 sha2 = "0.11.0"
 base64 = "0.23.1"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "net", "sync", "time", "process", "signal"] }
+tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2.14.1"
 lattice-remote = { path = "../crates/lattice-remote" }
@@ -60,7 +61,8 @@ tauri-plugin-opener = "2"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "mysql"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 sqlparser = { version = "0.63.0", default-features = false, features = ["std", "visitor"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake"] }
 
 [target.'cfg(windows)'.dependencies.tiberius]
 version = "0.13.0"
@@ -82,7 +84,7 @@ sqlx = { version = "0.9.0", default-features = false, features = ["sqlite"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-clipboard-manager = "2.3.2"

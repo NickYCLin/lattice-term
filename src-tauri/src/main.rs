@@ -6,6 +6,9 @@ use latticeterm_lib::windows_elevation;
 
 fn main() {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(code) = latticeterm_lib::chat_tools::run_cli(&arguments) {
+        std::process::exit(code);
+    }
     if let Some(code) = latticeterm_lib::cliproxy::desktop::run_cli(arguments.iter()) {
         std::process::exit(code);
     }

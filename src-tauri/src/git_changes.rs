@@ -4,7 +4,7 @@
 //! Everything runs the user's own `git` with explicit arguments and no
 //! shell. Paths come back from `git status` and are checked again before
 //! they reach another command: relative, inside the repository, never an
-//! option. Nothing here pushes, rewrites history or touches a remote.
+//! option. Publishing explicitly pulls before a normal push; history is never rewritten.
 
 use serde::Serialize;
 use std::io::Write;
@@ -45,6 +45,7 @@ pub struct GitDiff {
 fn git(directory: &Path) -> Command {
     let mut command = Command::new("git");
     command
+        .arg("--literal-pathspecs")
         .arg("-C")
         .arg(directory)
         // Read-only views must not run a repository's fsmonitor hook or
@@ -303,6 +304,415 @@ pub fn commit(directory: &str, message: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PatchAction {
+    Stage,
+    Unstage,
+    Restore,
+}
+
+/// Apply a server-derived patch only when the displayed diff is still current.
+/// Restoration keeps a recovery patch in git's private metadata directory.
+pub fn patch(
+    directory: &str,
+    path: &str,
+    staged: bool,
+    expected: &str,
+    hunk: Option<usize>,
+    action: PatchAction,
+) -> Result<String, String> {
+    let root = repository_root(directory)?;
+    checked_path(path)?;
+    let current = diff(directory, path, staged)?;
+    if current.truncated || current.text != expected || expected.is_empty() {
+        return Err("變更已更新，請重新讀取後再操作。".into());
+    }
+    if matches!(action, PatchAction::Unstage) != staged
+        || matches!(action, PatchAction::Restore) && staged
+    {
+        return Err("請在正確的暫存區操作。".into());
+    }
+    // Renames, binary files and untracked files require a file-level workflow.
+    if expected.contains("rename from ")
+        || expected.contains("GIT binary patch")
+        || expected.contains("Binary files ")
+        || expected.contains("new file mode ")
+        || expected.contains("deleted file mode ")
+    {
+        return Err("這個檔案需要先使用 Git 處理新增、刪除或二進位變更。".into());
+    }
+    let lines: Vec<&str> = expected.split_inclusive('\n').collect();
+    let starts: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("@@ "))
+        .map(|(i, _)| i)
+        .collect();
+    if starts.is_empty() {
+        return Err("沒有可操作的文字區段。".into());
+    }
+    let patch = if let Some(index) = hunk {
+        let start = *starts.get(index).ok_or("這個區段不存在。")?;
+        let end = starts.get(index + 1).copied().unwrap_or(lines.len());
+        lines[..starts[0]]
+            .iter()
+            .chain(lines[start..end].iter())
+            .copied()
+            .collect::<String>()
+    } else {
+        expected.to_string()
+    };
+    let mut recovery = String::new();
+    if matches!(action, PatchAction::Restore) {
+        let mut command = git(&root);
+        command.args(["rev-parse", "--absolute-git-dir"]);
+        let output = run(command)?;
+        if !output.status.success() {
+            return Err(failure(&output));
+        }
+        let metadata = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        let mut file = tempfile::Builder::new()
+            .prefix("latticeterm-recovery-")
+            .suffix(".patch")
+            .tempfile_in(metadata)
+            .map_err(|e| e.to_string())?;
+        file.write_all(patch.as_bytes())
+            .and_then(|_| file.as_file().sync_all())
+            .map_err(|e| e.to_string())?;
+        let (_, backup) = file.keep().map_err(|e| e.to_string())?;
+        recovery = backup.display().to_string();
+    }
+    let mut command = git(&root);
+    command.args(["apply", "--whitespace=nowarn"]);
+    if matches!(action, PatchAction::Stage | PatchAction::Unstage) {
+        command.arg("--cached");
+    }
+    if matches!(action, PatchAction::Unstage | PatchAction::Restore) {
+        command.arg("--reverse");
+    }
+    command
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    child
+        .stdin
+        .take()
+        .ok_or("Git stdin unavailable")?
+        .write_all(patch.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format!(
+            "{}{}",
+            failure(&output),
+            if recovery.is_empty() {
+                String::new()
+            } else {
+                format!("\n復原 patch：{recovery}")
+            }
+        ));
+    }
+    Ok(recovery)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchView {
+    pub name: String,
+    pub revision: String,
+}
+pub fn branches(directory: &str) -> Result<Vec<BranchView>, String> {
+    let root = repository_root(directory)?;
+    let mut command = git(&root);
+    command.args([
+        "for-each-ref",
+        "--format=%(refname:short)%09%(objectname)",
+        "refs/heads/",
+        "refs/remotes/",
+    ]);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .take(1000)
+        .filter_map(|line| {
+            line.split_once('\t').map(|(name, revision)| BranchView {
+                name: name.into(),
+                revision: revision.into(),
+            })
+        })
+        .collect())
+}
+fn checked_revision(value: &str) -> Result<&str, String> {
+    if (value.len() == 40 || value.len() == 64) && value.bytes().all(|c| c.is_ascii_hexdigit()) {
+        Ok(value)
+    } else {
+        Err("請重新選取分支版本。".into())
+    }
+}
+pub fn comparison(directory: &str, revision: &str, path: Option<&str>) -> Result<GitDiff, String> {
+    let root = repository_root(directory)?;
+    let mut command = git(&root);
+    command.args([
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        checked_revision(revision)?,
+        "--",
+    ]);
+    if let Some(path) = path {
+        command.arg(checked_path(path)?);
+    }
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    Ok(bounded(&output.stdout))
+}
+/// Snapshot the work tree through an isolated index, without changing the user's index.
+pub fn checkpoint(directory: &str) -> Result<String, String> {
+    let root = repository_root(directory)?;
+    if status(directory)?.truncated {
+        return Err("工作目錄太大，未建立上一輪快照。".into());
+    }
+    let temporary = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let index = temporary.path().join("index");
+    for args in [
+        ["read-tree", "HEAD"].as_slice(),
+        ["add", "-A", "--", "."].as_slice(),
+    ] {
+        let mut command = git(&root);
+        command.env("GIT_INDEX_FILE", &index).args(args);
+        let output = run(command)?;
+        if !output.status.success() {
+            return Err(failure(&output));
+        }
+    }
+    let mut command = git(&root);
+    command.env("GIT_INDEX_FILE", &index).arg("write-tree");
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    let revision = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    checked_revision(&revision)?;
+    let mut command = git(&root);
+    command.args([
+        "update-ref",
+        &format!("refs/latticeterm/checkpoints/{revision}"),
+        &revision,
+    ]);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    Ok(revision)
+}
+
+/// Pull must succeed before every push. No force and no implicit branch switch.
+pub fn publish(directory: &str, open_pr: bool) -> Result<String, String> {
+    let root = repository_root(directory)?;
+    let status = status(directory)?;
+    if !status.files.is_empty() || status.truncated {
+        return Err("請先提交或保存工作目錄的變更。".into());
+    }
+    let mut command = git(&root);
+    command.args(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err("請先建立或切換到本機分支。".into());
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut command = git(&root);
+    command.args([
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{upstream}",
+    ]);
+    let has_upstream = run(command)?.status.success();
+    if has_upstream {
+        let mut command = git(&root);
+        command.args(["pull", "--ff-only"]);
+        let output = run(command)?;
+        if !output.status.success() {
+            return Err(failure(&output));
+        }
+    } else {
+        let mut command = git(&root);
+        command.args(["fetch", "origin"]);
+        let output = run(command)?;
+        if !output.status.success() {
+            return Err(failure(&output));
+        }
+        let remote_branch = format!("refs/remotes/origin/{branch}");
+        let mut command = git(&root);
+        command.args(["show-ref", "--verify", &remote_branch]);
+        let pull_branch = if run(command)?.status.success() {
+            branch.clone()
+        } else {
+            let mut command = git(&root);
+            command.args(["ls-remote", "--symref", "origin", "HEAD"]);
+            let output = run(command)?;
+            if !output.status.success() {
+                return Err(failure(&output));
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("ref: refs/heads/")
+                        .and_then(|line| line.strip_suffix("\tHEAD"))
+                })
+                .ok_or("遠端未提供預設分支，請先設定 upstream。")?
+                .to_string()
+        };
+        let mut command = git(&root);
+        command.args(["pull", "--ff-only", "origin", &pull_branch]);
+        let output = run(command)?;
+        if !output.status.success() {
+            return Err(failure(&output));
+        }
+    }
+    let mut command = git(&root);
+    if has_upstream {
+        command.arg("push");
+    } else {
+        command.args(["push", "--set-upstream", "origin", &branch]);
+    }
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    if !open_pr {
+        return Ok("已同步並推送目前分支。".into());
+    }
+    // gh uses existing credentials; it neither receives tokens nor guesses a PR body.
+    let output = Command::new("gh")
+        .current_dir(&root)
+        .args(["pr", "create", "--fill"])
+        .env("GH_PROMPT_DISABLED", "1")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format!("已推送，但建立 PR 失敗：{}", failure(&output)));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().into())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    pub path: String,
+    pub branch: Option<String>,
+    pub current: bool,
+}
+// Git for Windows does not accept canonicalize's verbatim prefix in worktree paths.
+fn canonical_worktree_path(path: &Path) -> Result<PathBuf, String> {
+    let path = path.canonicalize().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    let path = crate::agent::plain_win32_path(path);
+    Ok(path)
+}
+pub fn worktrees(directory: &str) -> Result<Vec<Worktree>, String> {
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
+    let mut command = git(&root);
+    command.args(["worktree", "list", "--porcelain", "-z"]);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    let mut trees: Vec<Worktree> = Vec::new();
+    for entry in output.stdout.split(|c| *c == 0) {
+        let entry = String::from_utf8_lossy(entry);
+        if let Some(path) = entry.strip_prefix("worktree ") {
+            let path =
+                canonical_worktree_path(Path::new(path)).unwrap_or_else(|_| PathBuf::from(path));
+            trees.push(Worktree {
+                current: path == root,
+                path: path.display().to_string(),
+                branch: None,
+            });
+        }
+        if let Some(branch) = entry.strip_prefix("branch ") {
+            if let Some(last) = trees.last_mut() {
+                last.branch = Some(branch.trim_start_matches("refs/heads/").into());
+            }
+        }
+    }
+    Ok(trees)
+}
+pub fn create_worktree(directory: &str, destination: &str, branch: &str) -> Result<String, String> {
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
+    let destination = Path::new(destination);
+    if !destination.is_absolute()
+        || destination.exists()
+        || destination
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+        || destination.file_name().is_none()
+    {
+        return Err("請選擇尚不存在的絕對路徑。".into());
+    }
+    let parent = canonical_worktree_path(destination.parent().ok_or("缺少上層資料夾。")?)?;
+    if parent.starts_with(&root) {
+        return Err("Worktree 請放在原專案外，避免互相讀取。".into());
+    }
+    if branch.is_empty()
+        || branch.len() > 200
+        || branch.starts_with('-')
+        || branch.chars().any(char::is_control)
+    {
+        return Err("分支名稱無效。".into());
+    }
+    let mut command = git(&root);
+    command.args(["check-ref-format", "--branch", branch]);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    let destination = parent.join(destination.file_name().unwrap());
+    let mut command = git(&root);
+    command
+        .args(["worktree", "add", "-b", branch, "--"])
+        .arg(&destination)
+        .arg("HEAD");
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    Ok(destination.display().to_string())
+}
+pub fn remove_worktree(directory: &str, destination: &str) -> Result<(), String> {
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
+    let path = canonical_worktree_path(Path::new(destination))?;
+    let trees = worktrees(directory)?;
+    // First listed worktree is the main checkout and must never be removed.
+    if path == root
+        || trees
+            .first()
+            .is_some_and(|tree| Path::new(&tree.path) == path)
+        || !trees.iter().any(|tree| Path::new(&tree.path) == path)
+    {
+        return Err("只能移除同一儲存庫的其他 worktree。".into());
+    }
+    let status = status(path.to_str().ok_or("Worktree 路徑無效。")?)?;
+    if !status.files.is_empty() || status.truncated {
+        return Err("Worktree 還有未提交變更，已保留。".into());
+    }
+    let mut command = git(&root);
+    command.args(["worktree", "remove", "--"]).arg(path);
+    let output = run(command)?;
+    if !output.status.success() {
+        return Err(failure(&output));
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +733,7 @@ mod tests {
         init(&["config", "user.email", "test@example.com"]);
         init(&["config", "user.name", "Test"]);
         init(&["config", "commit.gpgsign", "false"]);
+        init(&["config", "core.autocrlf", "false"]);
         std::fs::write(path.join("kept.txt"), "one\n").unwrap();
         init(&["add", "kept.txt"]);
         init(&["commit", "-q", "-m", "start"]);
@@ -391,5 +802,136 @@ mod tests {
         assert_eq!(files[0].path, "new.txt");
         assert_eq!(files[0].original_path.as_deref(), Some("old.txt"));
         assert_eq!(files[1].unstaged, "M");
+    }
+    #[test]
+    fn patch_rejects_stale_content_and_restores_with_recovery() {
+        let directory = repo();
+        let root = directory.path().to_str().unwrap();
+        std::fs::write(directory.path().join("kept.txt"), "changed\n").unwrap();
+        let shown = diff(root, "kept.txt", false).unwrap();
+        std::fs::write(directory.path().join("kept.txt"), "newer\n").unwrap();
+        assert!(patch(
+            root,
+            "kept.txt",
+            false,
+            &shown.text,
+            None,
+            PatchAction::Restore
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("kept.txt")).unwrap(),
+            "newer\n"
+        );
+        let current = diff(root, "kept.txt", false).unwrap();
+        let backup = patch(
+            root,
+            "kept.txt",
+            false,
+            &current.text,
+            None,
+            PatchAction::Restore,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), current.text);
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("kept.txt")).unwrap(),
+            "one\n"
+        );
+    }
+    #[test]
+    fn stages_one_hunk_and_checkpoint_does_not_change_index() {
+        let directory = repo();
+        let root = directory.path().to_str().unwrap();
+        let original: String = (0..30).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(directory.path().join("kept.txt"), &original).unwrap();
+        stage(root, &["kept.txt".into()]).unwrap();
+        commit(root, "baseline").unwrap();
+        std::fs::write(
+            directory.path().join("kept.txt"),
+            original
+                .replace("line 1\n", "first\n")
+                .replace("line 28\n", "last\n"),
+        )
+        .unwrap();
+        let shown = diff(root, "kept.txt", false).unwrap();
+        patch(
+            root,
+            "kept.txt",
+            false,
+            &shown.text,
+            Some(0),
+            PatchAction::Stage,
+        )
+        .unwrap();
+        let staged = diff(root, "kept.txt", true).unwrap().text;
+        assert!(staged.contains("+first"));
+        assert!(!staged.contains("+last"));
+        let snapshot = checkpoint(root).unwrap();
+        assert_eq!(diff(root, "kept.txt", true).unwrap().text, staged);
+        assert_eq!(comparison(root, &snapshot, None).unwrap().text, "");
+        assert!(comparison(root, "HEAD; bad", None).is_err());
+    }
+    #[test]
+    fn worktree_creation_preserves_existing_paths_and_refuses_dirty_removal() {
+        let directory = repo();
+        let root = directory.path().to_str().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let inside = directory.path().join("nested-worktree");
+        assert!(create_worktree(root, inside.to_str().unwrap(), "nested-work").is_err());
+        assert!(!inside.exists());
+        assert!(worktrees(root).unwrap().iter().any(|tree| tree.current));
+        let target = parent.path().join("parallel");
+        let path = create_worktree(root, target.to_str().unwrap(), "parallel-work").unwrap();
+        assert!(worktrees(root)
+            .unwrap()
+            .iter()
+            .any(|tree| tree.path == path));
+        assert!(create_worktree(root, &path, "another").is_err());
+        assert!(remove_worktree(root, root).is_err());
+        std::fs::write(target.join("untracked.txt"), "keep").unwrap();
+        assert!(remove_worktree(root, &path).is_err());
+        assert!(target.join("untracked.txt").is_file());
+        std::fs::remove_file(target.join("untracked.txt")).unwrap();
+        remove_worktree(root, &path).unwrap();
+        assert!(!target.exists());
+        assert!(branches(root)
+            .unwrap()
+            .iter()
+            .any(|branch| branch.name == "parallel-work"));
+    }
+    #[test]
+    fn publishing_a_new_branch_pulls_the_actual_remote_default_before_setting_upstream() {
+        let directory = repo();
+        let root = directory.path().to_str().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("remote.git");
+        assert!(Command::new("git")
+            .args(["init", "--bare", "-q", "-b", "main"])
+            .arg(&remote)
+            .status()
+            .unwrap()
+            .success());
+        for args in [
+            vec!["remote", "add", "origin", remote.to_str().unwrap()],
+            vec!["push", "-u", "origin", "main"],
+            vec!["switch", "-c", "new-work"],
+        ] {
+            let mut command = git(directory.path());
+            command.args(args);
+            assert!(run(command).unwrap().status.success());
+        }
+        std::fs::write(directory.path().join("kept.txt"), "updated\n").unwrap();
+        stage(root, &["kept.txt".into()]).unwrap();
+        commit(root, "work").unwrap();
+        publish(root, false).unwrap();
+        let mut command = git(directory.path());
+        command.args(["rev-parse", "HEAD", "origin/new-work"]);
+        let output = run(command).unwrap();
+        let lines: Vec<_> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(lines[0], lines[1]);
     }
 }

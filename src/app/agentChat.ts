@@ -1,3 +1,4 @@
+import { currentRuntimeStatus, runtimeIdentity, validGoal, validPlanSteps, type ContextUsage, type GoalState, type PlanStep, type RateLimitWindow, type RuntimeStatus } from "./chatRuntimeStatus";
 /**
  * Chat threads with an agent CLI: the data model, the rule that folds the
  * backend's event stream into a thread, and the bounds applied before a
@@ -151,10 +152,19 @@ export function looksLikeDiff(output: string | null): boolean {
 
 export type ChatEvent =
   | { kind: "started"; nativeSessionId: string | null; model: string | null }
+  | { kind: "nativeMessageId"; itemId: string; nativeMessageId: string }
+  | { kind: "nativeTurnId"; nativeTurnId: string }
   | { kind: "providerReport"; provider: string }
   | { kind: "textDelta"; itemId: string; delta: string }
   | { kind: "text"; itemId: string; text: string }
   | { kind: "reasoning"; itemId: string; text: string }
+  | { kind: "reasoningDelta"; itemId: string; delta: string; part: number; summary: boolean }
+  | { kind: "toolOutputDelta"; itemId: string; delta: string }
+  | { kind: "planUpdated"; steps: PlanStep[]; explanation: string | null }
+  | { kind: "goalUpdated"; goal: GoalState | null }
+  | ({ kind: "contextUsage" } & ContextUsage)
+  | { kind: "rateLimits"; windows: RateLimitWindow[] }
+  | { kind: "contextCompacted" }
   | { kind: "toolStarted"; itemId: string; name: string; summary: string }
   | {
       kind: "toolFinished";
@@ -170,6 +180,7 @@ export type ChatEvent =
   | { kind: "notice"; message: string }
   | {
       kind: "approvalRequested";
+      canAllowSession?: boolean;
       requestId: string;
       toolUseId: string | null;
       name: string;
@@ -228,9 +239,11 @@ export interface ChatAttachment {
 }
 
 export type ChatItem =
-  | { type: "user"; id: string; text: string; at: number; attachments?: ChatAttachment[] }
-  | { type: "text"; id: string; text: string; assistantDefinitionId?: ChatDefinitionId }
-  | { type: "reasoning"; id: string; text: string; assistantDefinitionId?: ChatDefinitionId }
+  | { type: "user"; id: string; text: string; at: number; nativeTurnId?: string; attachments?: ChatAttachment[] }
+  | { type: "text"; id: string; text: string; nativeTurnId?: string; nativeMessageId?: string; assistantDefinitionId?: ChatDefinitionId }
+  | { type: "reasoning"; id: string; text: string; assistantDefinitionId?: ChatDefinitionId; parts?: Record<string, string> }
+  | { type: "plan"; id: string; steps: PlanStep[]; explanation: string | null; assistantDefinitionId?: ChatDefinitionId }
+  | { type: "goal"; id: string; goal: GoalState | null; assistantDefinitionId?: ChatDefinitionId }
   | {
       type: "tool";
       id: string;
@@ -256,6 +269,8 @@ export type ChatItem =
       summary: string;
       input: string;
       decision: ApprovalDecision;
+      canAllowSession?: boolean;
+      allowedForSession?: boolean;
       assistantDefinitionId?: ChatDefinitionId;
     }
   | {
@@ -312,10 +327,17 @@ export interface ChatThread {
   workingDirectory: string;
   permission: ChatPermission;
   model: string;
+  planMode?: boolean;
+  activeOperation?: "compact" | "review";
+  nativeForkSource?: { sessionId: string; resumeAt?: string };
+  lastTurnCheckpoint?: string;
+  pendingOperation?: "fork" | "edit" | "worktree";
   /** Optional named local config root; credentials stay owned by the CLI. */
   accountProfileId: string | null;
   /** The CLI's own conversation id, once the first turn announced it. */
   nativeSessionId: string | null;
+  /** Reports for this live configuration only; never restored as fresh status. */
+  runtimeStatus?: RuntimeStatus;
   /** Chosen reasoning level; null leaves it to the CLI and model default. */
   effort?: string | null;
   /** Model the CLI reported, when it did; never guessed from the name. */
@@ -340,16 +362,24 @@ export interface ChatThread {
 export interface NativeHistoryMessage {
   role: "user" | "assistant";
   text: string;
+  nativeTurnId?: string;
+  nativeMessageId?: string;
   tool?: { callId: string; name: string | null; kind: "call" | "result" };
 }
 
 export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at: number, offset = 0): ChatItem[] {
   const items: ChatItem[] = [];
   const calls = new Map<string, Extract<ChatItem, { type: "tool" }>>();
+  const identities = new Map<string, number>();
   const imageCalls = new Set(messages.flatMap(message => message.tool?.name &&
     /(?:^|\.)view_image$/.test(message.tool.name) ? [message.tool.callId] : []));
   messages.forEach((message, index) => {
-    const id = `history:${offset + index}`;
+    let id = `history:${offset + index}`;
+    if (message.nativeTurnId || message.nativeMessageId) {
+      let hash = 2166136261; for (let i = 0; i < message.text.length; i++) hash = Math.imul(hash ^ message.text.charCodeAt(i), 16777619);
+      const key = `history:native:${message.nativeTurnId ?? message.nativeMessageId}:${message.role}:${hash >>> 0}`;
+      const count = identities.get(key) ?? 0; identities.set(key, count + 1); id = `${key}:${count}`;
+    }
     const tool = message.tool;
     if (tool) {
       if (imageCalls.has(tool.callId)) return;
@@ -370,8 +400,8 @@ export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at
       items.push(item);
       calls.set(tool.callId, item);
     } else {
-      items.push(message.role === "user" ? { type: "user", id, text: message.text, at }
-        : { type: "text", id, text: message.text });
+      items.push(message.role === "user" ? { type: "user", id, text: message.text, at, ...(message.nativeTurnId ? { nativeTurnId: message.nativeTurnId } : {}) }
+        : { type: "text", id, text: message.text, ...(message.nativeTurnId ? { nativeTurnId: message.nativeTurnId } : {}), ...(message.nativeMessageId ? { nativeMessageId: message.nativeMessageId } : {}) });
     }
   });
   return items;
@@ -547,10 +577,8 @@ export function handoffThreadAccount(
 }
 
 /**
- * A new conversation that starts from an earlier point of this one. The
- * items up to and including `throughItemId` are copied for reading, and the
- * same bounded transcript a CLI switch uses is what the new native session
- * receives, because no CLI can resume a conversation from its middle.
+ * A reference handoff for another workspace or assistant. The copied items
+ * are bounded reference material; nativeFork handles actual CLI history.
  */
 export function branchThread(
   thread: ChatThread,
@@ -663,7 +691,7 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId" | "effort">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId" | "effort" | "planMode">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
@@ -672,6 +700,7 @@ export function createThread(
     provider: settings.definitionId === "codex" ? settings.provider : undefined,
     proxyId: settings.definitionId === "codex" && settings.provider ? settings.proxyId : undefined,
     browserEnabled: supportsBrowser(settings.definitionId) && settings.browserEnabled === true,
+    ...(typeof settings.planMode === "boolean" && (settings.definitionId === "codex" || settings.definitionId === "claude") ? { planMode: settings.planMode } : {}),
     definitionId: settings.definitionId,
     title: settings.title ?? "",
     automationId: settings.automationId ?? null,
@@ -701,6 +730,7 @@ export function beginTurn(
 ): ChatThread {
   return {
     ...thread,
+    activeOperation: undefined,
     title: thread.title || threadTitle(prompt),
     items: [
       ...thread.items,
@@ -795,11 +825,20 @@ export function applyChatEvent(
   const scoped = (itemId: string) => `${envelope.turnId}:${itemId}`;
 
   switch (event.kind) {
+    case "nativeMessageId":
+      if (!/^[a-zA-Z0-9_-]{1,256}$/.test(event.nativeMessageId)) return thread;
+      return { ...thread, items: thread.items.map(item => item.id === scoped(event.itemId) && item.type === "text" ? { ...item, nativeMessageId: event.nativeMessageId } : item) };
+    case "nativeTurnId": {
+      if (thread.activeOperation || !/^[a-zA-Z0-9_-]{1,256}$/.test(event.nativeTurnId)) return thread;
+      return { ...thread, items: thread.items.map(item => (item.type === "user" && item.id === scoped("prompt") || item.type === "text" && item.id.startsWith(`${envelope.turnId}:`))
+        ? { ...item, nativeTurnId: event.nativeTurnId } : item) };
+    }
     case "providerReport":
       return { ...thread, reportedProvider: event.provider.trim().slice(0, 128) || null };
     case "started":
       return {
         ...thread,
+        nativeForkSource: event.nativeSessionId && event.nativeSessionId !== thread.nativeForkSource?.sessionId ? undefined : thread.nativeForkSource,
         nativeSessionId: event.nativeSessionId ?? thread.nativeSessionId,
         reportedModel: event.model ?? thread.reportedModel,
         handoff: null,
@@ -813,6 +852,7 @@ export function applyChatEvent(
           id: scoped(event.itemId),
           text:
             (existing?.type === "text" ? existing.text : "") + event.delta,
+          nativeTurnId: (() => { const user = thread.items.find(item => item.type === "user" && item.id === scoped("prompt")); return user?.type === "user" ? user.nativeTurnId : undefined; })(),
           assistantDefinitionId: thread.definitionId,
         })),
         updatedAt: now,
@@ -824,10 +864,49 @@ export function applyChatEvent(
           type: "text",
           id: scoped(event.itemId),
           text: event.text,
+          nativeTurnId: (() => { const user = thread.items.find(item => item.type === "user" && item.id === scoped("prompt")); return user?.type === "user" ? user.nativeTurnId : undefined; })(),
           assistantDefinitionId: thread.definitionId,
         })),
         updatedAt: now,
       };
+    case "reasoningDelta": {
+      if (!Number.isSafeInteger(event.part) || event.part < 0 || event.part > 1024) return thread;
+      const part = `${event.summary ? "summary" : "text"}:${event.part}`;
+      return { ...thread, items: upsert(thread.items, scoped(event.itemId), existing => {
+        const parts = { ...(existing?.type === "reasoning" ? existing.parts : {}) };
+        if (!parts[part] && Object.keys(parts).length >= 16) delete parts[Object.keys(parts)[0]];
+        parts[part] = ((parts[part] ?? "") + event.delta).slice(-65536);
+        const summary = Object.keys(parts).filter(key => key.startsWith("summary:")).sort((a, b) => Number(a.split(":")[1]) - Number(b.split(":")[1]));
+        const ordered = summary.length ? summary : Object.keys(parts).sort((a, b) => Number(a.split(":")[1]) - Number(b.split(":")[1]));
+        return { type: "reasoning", id: scoped(event.itemId), text: ordered.map(key => parts[key]).join("\n"), parts, assistantDefinitionId: thread.definitionId };
+      }), updatedAt: now };
+    }
+    case "toolOutputDelta":
+      return { ...thread, items: upsert(thread.items, scoped(event.itemId), existing => ({
+        ...(existing?.type === "tool" ? existing : { type: "tool" as const, id: scoped(event.itemId), name: "command", summary: "", isError: false, done: false, assistantDefinitionId: thread.definitionId }),
+        output: ((existing?.type === "tool" ? existing.output ?? "" : "") + event.delta).slice(-65536),
+      })), updatedAt: now };
+    case "planUpdated":
+      if (!validPlanSteps(event.steps)) return thread;
+      return { ...thread, items: upsert(thread.items, scoped("plan"), () => ({ type: "plan", id: scoped("plan"), steps: event.steps, explanation: event.explanation?.slice(0, 4096) ?? null })), updatedAt: now };
+    case "goalUpdated":
+      if (event.goal !== null && !validGoal(event.goal)) return thread;
+      return { ...thread, items: upsert(thread.items, scoped("goal"), () => ({ type: "goal", id: scoped("goal"), goal: event.goal })), updatedAt: now };
+    case "contextUsage": {
+      if (!Number.isSafeInteger(event.tokensUsed) || event.tokensUsed < 0 || (event.contextWindow !== null && (!Number.isSafeInteger(event.contextWindow) || event.contextWindow <= 0))) return thread;
+      const status = currentRuntimeStatus(thread) ?? { identity: runtimeIdentity(thread), observedAt: now };
+      return { ...thread, runtimeStatus: { ...status, observedAt: now, contextUsage: { tokensUsed: event.tokensUsed, contextWindow: event.contextWindow } } };
+    }
+    case "rateLimits": {
+      const status = currentRuntimeStatus(thread) ?? { identity: runtimeIdentity(thread), observedAt: now };
+      const windows = new Map((status.rateLimits ?? []).map(window => [window.key, window]));
+      for (const window of event.windows.slice(0, 32)) {
+        if (typeof window.key === "string" && typeof window.label === "string" && Number.isFinite(window.usedPercent) && window.usedPercent >= 0 && window.usedPercent <= 10000) windows.set(window.key, window);
+      }
+      return { ...thread, runtimeStatus: { ...status, observedAt: now, rateLimits: [...windows.values()].slice(-32) } };
+    }
+    case "contextCompacted":
+      return { ...thread, runtimeStatus: { ...currentRuntimeStatus(thread), identity: runtimeIdentity(thread), observedAt: now, contextUsage: undefined }, updatedAt: now };
     case "reasoning":
       return {
         ...thread,
@@ -924,6 +1003,7 @@ export function applyChatEvent(
             summary: event.summary,
             input: event.input,
             decision: "pending",
+            ...(event.canAllowSession ? { canAllowSession: true } : {}),
             assistantDefinitionId: thread.definitionId,
           },
         ],
@@ -932,7 +1012,9 @@ export function applyChatEvent(
     case "finished":
       return {
         ...thread,
+        activeOperation: undefined,
         queuePaused: thread.queuePaused === true || !!event.error,
+        nativeForkSource: event.nativeSessionId && event.nativeSessionId !== thread.nativeForkSource?.sessionId ? undefined : thread.nativeForkSource,
         nativeSessionId: event.nativeSessionId ?? thread.nativeSessionId,
         handoff: event.nativeSessionId ? null : thread.handoff,
         items: [
@@ -965,6 +1047,7 @@ export function decideApproval(
   requestId: string,
   decision: "allowed" | "denied",
   now: number = Date.now(),
+  allowedForSession = false,
 ): ChatThread {
   return {
     ...thread,
@@ -972,7 +1055,7 @@ export function decideApproval(
       item.type === "approval" &&
       item.requestId === requestId &&
       item.decision === "pending"
-        ? { ...item, decision }
+        ? { ...item, decision, ...(allowedForSession && decision === "allowed" ? { allowedForSession: true } : {}) }
         : item,
     ),
     updatedAt: now,
@@ -992,11 +1075,18 @@ export function boundThreadForStorage(thread: ChatThread): ChatThread {
   const items = thread.items.slice(-MAX_STORED_ITEMS).map((item) => {
     // A stored approval is never still answerable.
     if (item.type === "approval") return closePendingApproval(item);
+    if (item.type === "reasoning" && item.parts) {
+      const saved = { ...item }; delete saved.parts; return saved;
+    }
     if (item.type !== "tool" || item.output === null) return item;
     if (item.output.length <= MAX_STORED_TOOL_OUTPUT) return item;
     return { ...item, output: `${item.output.slice(0, MAX_STORED_TOOL_OUTPUT)}…` };
   });
-  return { ...thread, items, runningTurnId: null };
+  const saved = { ...thread, items, runningTurnId: null };
+  delete saved.runtimeStatus;
+  delete saved.activeOperation;
+  delete saved.pendingOperation;
+  return saved;
 }
 
 /**
@@ -1044,6 +1134,10 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isThread).map((thread) => ({
       ...thread,
+      runtimeStatus: undefined,
+      activeOperation: undefined,
+      pendingOperation: undefined,
+      planMode: typeof thread.planMode === "boolean" && (thread.definitionId === "codex" || thread.definitionId === "claude") ? thread.planMode : undefined,
       pendingInputs: restoreQueuedInputs(thread.pendingInputs),
       queuePaused: restoreQueuedInputs(thread.pendingInputs).length > 0,
       queueProblem: null,
@@ -1055,6 +1149,8 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           typeof item === "object" &&
           typeof (item as { id?: unknown }).id === "string" &&
           typeof (item as { type?: unknown }).type === "string" &&
+          ((item as ChatItem).type !== "plan" || validPlanSteps((item as { steps?: unknown }).steps)) &&
+          ((item as ChatItem).type !== "goal" || (item as { goal?: unknown }).goal === null || validGoal((item as { goal?: unknown }).goal)) &&
           ((item as { type: string }).type !== "tool" ||
             (item as { output?: unknown }).output === null ||
             typeof (item as { output?: unknown }).output === "string"),
@@ -1097,6 +1193,9 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
               transcript: thread.handoff.transcript,
             }
           : null,
+      nativeForkSource: thread.definitionId === "claude" && thread.nativeForkSource && /^[a-zA-Z0-9_-]{1,256}$/.test(thread.nativeForkSource.sessionId)
+        && (!thread.nativeForkSource.resumeAt || /^[a-zA-Z0-9_-]{1,256}$/.test(thread.nativeForkSource.resumeAt)) ? thread.nativeForkSource : undefined,
+      lastTurnCheckpoint: typeof thread.lastTurnCheckpoint === "string" && /^[a-f0-9]{40,64}$/.test(thread.lastTurnCheckpoint) ? thread.lastTurnCheckpoint : undefined,
       createdAt: typeof thread.createdAt === "number" ? thread.createdAt : 0,
       updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : 0,
       automationId:

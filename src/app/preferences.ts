@@ -45,6 +45,8 @@ export interface Preferences {
   /** A system notification when a reply finishes while the window is in the background. */
   chatCompletionNotification: boolean;
   notificationVolume: number;
+  chatSubmitShortcut: "enter" | "modifier-enter";
+  chatWorkingSubmit: "queue" | "steer";
 }
 
 export const defaultPreferences: Preferences = {
@@ -64,6 +66,8 @@ export const defaultPreferences: Preferences = {
   chatCompletionSound: "bloom",
   chatCompletionNotification: true,
   notificationVolume: 60,
+  chatSubmitShortcut: "enter",
+  chatWorkingSubmit: "queue",
 };
 
 const STORAGE_KEY = "latticeterm.preferences.v2";
@@ -117,6 +121,8 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     chatCompletionSound: normalizeNotificationSound(stored.chatCompletionSound ?? stored.agentCompletionSound),
     chatCompletionNotification: stored.chatCompletionNotification !== false,
     notificationVolume: normalizeNotificationVolume(stored.notificationVolume),
+    chatSubmitShortcut: stored.chatSubmitShortcut === "modifier-enter" ? "modifier-enter" : "enter",
+    chatWorkingSubmit: stored.chatWorkingSubmit === "steer" ? "steer" : "queue",
   };
 }
 

@@ -3440,8 +3440,155 @@ async fn run_relay(options: &Options) -> String {
     }
 }
 
+/// Private, bounded stdio helper for a conversation's explicitly enabled computer tool.
+/// It never starts a listener, shares a pairing code, or changes remote-host settings.
+fn computer_stdio() -> Result<(), String> {
+    use base64::Engine as _;
+    use lattice_remote::{PointerButton, RemoteInput};
+    use sha2::{Digest, Sha256};
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .take(64 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > 64 * 1024 {
+        return Err("Computer request exceeds limit".into());
+    }
+    let request: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let monitors = Monitor::all().map_err(|e| e.to_string())?;
+    let monitor = monitors
+        .iter()
+        .find(|monitor| monitor.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or("No display available")?;
+    let mut frame = capture_jpeg(monitor)?;
+    let fingerprint = |frame: &Capture| -> String {
+        Sha256::digest(&frame.jpeg)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    let kind = request["kind"].as_str().ok_or("Missing action")?;
+    if kind != "capture" {
+        if request["expected"].as_str() != Some(fingerprint(&frame).as_str()) {
+            return Err("Screen changed. Capture it again before acting.".into());
+        }
+        let mut input = InputInjector::new(
+            frame.stream_width,
+            frame.stream_height,
+            frame.display_width,
+            frame.display_height,
+        )?;
+        let result = (|| -> Result<(), String> {
+            match kind {
+                "click" => {
+                    let x = request["x"]
+                        .as_u64()
+                        .filter(|x| *x < u64::from(frame.stream_width))
+                        .ok_or("Invalid x")?;
+                    let y = request["y"]
+                        .as_u64()
+                        .filter(|y| *y < u64::from(frame.stream_height))
+                        .ok_or("Invalid y")?;
+                    input.apply(RemoteInput::MouseMove {
+                        x: x as u16,
+                        y: y as u16,
+                    })?;
+                    input.apply(RemoteInput::MouseButton {
+                        button: PointerButton::Left,
+                        pressed: true,
+                    })?;
+                    input.apply(RemoteInput::MouseButton {
+                        button: PointerButton::Left,
+                        pressed: false,
+                    })?;
+                }
+                "type" => {
+                    let text = request["text"]
+                        .as_str()
+                        .filter(|text| text.chars().count() <= 2000)
+                        .ok_or("Text limit exceeded")?;
+                    for character in text.chars() {
+                        let keysym = if character as u32 > 0xff {
+                            0x01000000 | character as u32
+                        } else {
+                            character as u32
+                        };
+                        input.apply(RemoteInput::Key {
+                            keysym,
+                            pressed: true,
+                        })?;
+                        input.apply(RemoteInput::Key {
+                            keysym,
+                            pressed: false,
+                        })?;
+                    }
+                }
+                "key" => {
+                    let keysym = match request["key"].as_str() {
+                        Some("Enter") => 0xff0d,
+                        Some("Tab") => 0xff09,
+                        Some("Escape") => 0xff1b,
+                        Some("Backspace") => 0xff08,
+                        Some("ArrowLeft") => 0xff51,
+                        Some("ArrowUp") => 0xff52,
+                        Some("ArrowRight") => 0xff53,
+                        Some("ArrowDown") => 0xff54,
+                        _ => return Err("Unsupported key".into()),
+                    };
+                    input.apply(RemoteInput::Key {
+                        keysym,
+                        pressed: true,
+                    })?;
+                    input.apply(RemoteInput::Key {
+                        keysym,
+                        pressed: false,
+                    })?;
+                }
+                "scroll" => {
+                    let units = request["units"]
+                        .as_i64()
+                        .filter(|value| *value != 0 && value.abs() <= 8)
+                        .ok_or("Invalid scroll")?;
+                    input.apply(RemoteInput::Wheel {
+                        horizontal: false,
+                        units: units as i8,
+                    })?;
+                }
+                _ => return Err("Unknown computer action".into()),
+            }
+            Ok(())
+        })();
+        input.release_all();
+        result?;
+        // Input delivery can precede the compositor's next paint. Return a
+        // fresh stable frame, without repeating any input operation.
+        std::thread::sleep(Duration::from_millis(75));
+        frame = capture_jpeg(monitor)?;
+        for _ in 0..5 {
+            std::thread::sleep(Duration::from_millis(75));
+            let next = capture_jpeg(monitor)?;
+            let stable = fingerprint(&frame) == fingerprint(&next);
+            frame = next;
+            if stable {
+                break;
+            }
+        }
+    }
+    let value = serde_json::json!({"image":base64::engine::general_purpose::STANDARD.encode(&frame.jpeg),"fingerprint":fingerprint(&frame),"width":frame.stream_width,"height":frame.stream_height});
+    println!("{value}");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
+    if env::args().nth(1).as_deref() == Some("--computer-stdio") {
+        if let Err(error) = computer_stdio() {
+            println!("{}", serde_json::json!({"error":error}));
+            std::process::exit(1);
+        }
+        return;
+    }
     let requested_json = env::args().any(|argument| argument == "--json");
     let mut options = match parse_options() {
         Ok(options) => options,
