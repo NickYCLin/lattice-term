@@ -1174,7 +1174,7 @@ export function ThreadPane({
         {worktreeOpen && <ChatWorktree directory={thread.workingDirectory} busy={settingsLocked} onOpen={(directory, handoff) => {
           if (settingsLocked) return;
           if (handoff && thread.items.length) { const next = chat.branchThread(thread.id, thread.items[thread.items.length - 1].id, t("chat.worktree.suffix")); if (next) chat.updateThread(next.id, { workingDirectory: directory }); }
-          else chat.createThread({ definitionId: thread.definitionId, model: thread.model, permission: thread.permission, accountProfileId: thread.accountProfileId, workingDirectory: directory });
+          else chat.createThread({ definitionId: thread.definitionId, model: thread.model, permission: thread.permission, accountProfileId: thread.accountProfileId, provider: thread.provider, proxyId: thread.proxyId, browserEnabled: thread.browserEnabled, workingDirectory: directory });
         }} />}
         {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
