@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { recordSessionSubmission, reconcileSessionSubmissions, sessionSubmittedPrompts, subscribeSessionSubmissions } from "./sessionSubmittedPrompts";
 import { MAX_AGENT_OUTPUT_TAIL, type AgentApi } from "./useAgentSessions";
 import { renderTerminalPreview } from "./terminalPreview";
+import { initialSessionMessages, sessionMessageReducer } from "./sessionMessageIdentity";
 
 export interface SessionConversationMessage {
   role: "user" | "assistant";
   text: string;
+  /** Local rendering identity; never sent to the CLI or persisted in its history. */
+  renderId?: number;
   tool?: { callId: string; name: string | null; kind: "call" | "result" };
 }
 
@@ -31,7 +34,8 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     () => sessionSubmittedPrompts(sessionId), () => sessionSubmittedPrompts(sessionId));
   const nativeSessionId = agents.sessions.find(session => session.sessionId === sessionId)?.capturedSessionId ?? null;
   const inFlightReads = useRef(new Map<string, Promise<SessionConversationSnapshot>>());
-  const [messages, setMessages] = useState<SessionConversationMessage[]>([]);
+  const [history, dispatchMessages] = useReducer(sessionMessageReducer, initialSessionMessages);
+  const messages = history.messages;
   const [availability, setAvailability] = useState<SessionConversationSnapshot["availability"]>("waitingForIdentity");
   const [truncated, setTruncated] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -137,7 +141,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
-    setMessages([]);
+    dispatchMessages({ kind: "reset" });
     setAvailability(nativeSessionId ? "waitingForTranscript" : "waitingForIdentity");
     setTruncated(false);
     setReadError(null);
@@ -155,7 +159,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
           if (inFlightReads.current.get(sessionId) === pending) inFlightReads.current.delete(sessionId);
         });
         if (!disposed) {
-          setMessages(next.messages);
+          dispatchMessages({ kind: "snapshot", messages: next.messages });
           reconcileSessionSubmissions(sessionId, next.messages);
           setAvailability(next.availability);
           setTruncated(next.truncated);
