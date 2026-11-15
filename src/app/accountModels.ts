@@ -1,3 +1,4 @@
+import { modelDisplayLabel } from "./modelDisplayLabel";
 import type { ChatDefinitionId, ChatModelChoice, ChatModelList } from "./agentChat";
 import { profilesFor, type ChatAccountProfile } from "./chatAccountProfiles";
 import type { AccountProfileStatuses } from "./useAccountProfileStatus";
@@ -167,17 +168,20 @@ export function accountModelOptions(
     }
     const signedOut = target.signedOut ? `（${labels.signedOut}）` : "";
     const sourceLabel = [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel].filter(Boolean).join(" · ") + signedOut;
-    const options: AccountModelOption[] = target.cliLabel ? choices.map((choice) => ({
-      definitionId: target.definitionId,
-      accountProfileId: target.accountProfileId,
-      model: choice.value,
-      label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, choice.label].filter(Boolean).join(" · ") + signedOut,
-      sourceLabel,
-      modelLabel: choice.label,
-      modelInfo: choice,
-      disabled: target.signedOut,
-      ...(target.viaCliProxy ? { viaCliProxy: true } : {}),
-    })) : [];
+    const options: AccountModelOption[] = target.cliLabel ? choices.map((choice) => {
+      const modelLabel = modelDisplayLabel(choice.value, choice.label, labels.defaultModel);
+      return {
+        definitionId: target.definitionId,
+        accountProfileId: target.accountProfileId,
+        model: choice.value,
+        label: [target.showAccount || target.signedOut ? target.accountName : null, target.cliLabel, modelLabel].filter(Boolean).join(" · ") + signedOut,
+        sourceLabel,
+        modelLabel,
+        modelInfo: choice,
+        disabled: target.signedOut,
+        ...(target.viaCliProxy ? { viaCliProxy: true } : {}),
+      };
+    }) : [];
     // One entry per configured proxy; the picker already groups them under
     // the proxy's own heading, so the option names the proxy, not the CLI.
     if (target.definitionId === "codex" && (

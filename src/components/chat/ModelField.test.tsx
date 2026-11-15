@@ -67,6 +67,9 @@ describe("ModelField", () => {
     expect(markup).toContain("GPT-5.6-Sol");
     expect(markup).toContain("Sonnet");
     expect(markup).toContain("Flash");
+    expect(markup).toContain("預設");
+    expect(markup).not.toContain("Auto (default)");
+    expect(markup).not.toContain(">Default<");
   });
 
   it("round-trips the assistant and model without delimiter ambiguity", () => {
