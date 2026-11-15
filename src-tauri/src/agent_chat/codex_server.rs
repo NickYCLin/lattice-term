@@ -749,8 +749,17 @@ pub(super) async fn send_turn<S: ChatSink>(
     if let Some(mcp) = request.mcp {
         command.args(crate::agent_mcp::codex_arguments(mcp));
     }
+    let tools_url = crate::chat_tools::ensure(
+        request.thread_id,
+        request.working_directory.to_path_buf(),
+        request.browser_enabled,
+    )
+    .await?;
+    command.env(crate::chat_tools::environment(), tools_url);
+    command.args(super::browser::codex_arguments());
     if request.browser_enabled {
-        command.args(super::browser::codex_arguments());
+        let endpoint = crate::chat_tools::browser::endpoint(request.thread_id).await?;
+        command.args(super::browser::playwright_codex_arguments(&endpoint));
     }
     command.current_dir(request.working_directory);
     let mut child = command

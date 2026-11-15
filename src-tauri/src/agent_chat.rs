@@ -1822,8 +1822,20 @@ fn send_with_retry<S: ChatSink>(
             // Only Claude reaches this point with an effort (validated above).
             command.args(["--effort", effort]);
         }
-        if request.browser_enabled && dialect == Dialect::Claude {
-            command.args(browser::claude_arguments());
+        if dialect == Dialect::Claude {
+            let tools_url = crate::chat_tools::ensure(
+                &request.thread_id,
+                working_directory.clone(),
+                request.browser_enabled,
+            )
+            .await?;
+            command.env(crate::chat_tools::environment(), tools_url);
+            let browser_endpoint = if request.browser_enabled {
+                Some(crate::chat_tools::browser::endpoint(&request.thread_id).await?)
+            } else {
+                None
+            };
+            command.args(browser::claude_arguments(browser_endpoint.as_deref()));
         }
         command.current_dir(&working_directory);
 

@@ -11,9 +11,11 @@ mod agent_updates;
 #[cfg(desktop)]
 pub mod app_menu;
 pub mod backup;
+mod chat_artifacts;
 mod chat_attachments;
 pub mod chat_images;
 mod chat_project_files;
+pub mod chat_tools;
 pub mod clipboard;
 pub mod cliproxy;
 mod codex_config;
@@ -1789,12 +1791,32 @@ async fn agent_chat_send(
                 .to_string();
     }
     let registry = Arc::clone(registry.inner());
-    crate::agent_chat::send(
-        Arc::new(crate::agent_chat::EventSink(app)),
+    let thread_id = request.thread_id.clone();
+    let turn_id = request.turn_id.clone();
+    let allow_computer = request.native_action.is_none();
+    let result = crate::agent_chat::send(
+        Arc::new(crate::agent_chat::EventSink(app.clone())),
         registry,
         request,
     )
-    .await
+    .await;
+    if result.is_ok() && allow_computer && crate::chat_tools::computer::enabled(&thread_id).await {
+        let minimized = app
+            .get_webview_window("main")
+            .is_some_and(|window| window.minimize().is_ok());
+        if !minimized {
+            let _ = crate::chat_tools::computer::enable(&thread_id, false).await;
+            crate::agent_chat::ChatSink::event(
+                &crate::agent_chat::EventSink(app),
+                &thread_id,
+                &turn_id,
+                crate::agent_chat::ChatEvent::Notice {
+                    message: "無法最小化視窗，電腦控制已暫停；對話仍會繼續。".into(),
+                },
+            );
+        }
+    }
+    result
 }
 
 /// Adds an instruction to the specified active Codex turn.
@@ -1835,7 +1857,11 @@ fn agent_chat_close(
     thread_id: String,
     registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
 ) -> Result<bool, String> {
-    registry.close(&thread_id)
+    let result = registry.close(&thread_id);
+    tauri::async_runtime::spawn(async move {
+        crate::chat_tools::close(&thread_id).await;
+    });
+    result
 }
 
 /// Archives Codex through its official API; other adapters retain their
@@ -3386,6 +3412,85 @@ async fn git_worktree_create(
 #[tauri::command]
 async fn git_worktree_remove(working_directory: String, destination: String) -> Result<(), String> {
     blocking(move || crate::git_changes::remove_worktree(&working_directory, &destination)).await
+}
+
+#[tauri::command]
+async fn chat_artifact_read(
+    working_directory: String,
+    path: String,
+) -> Result<crate::chat_artifacts::Artifact, String> {
+    blocking(move || crate::chat_artifacts::read(&working_directory, &path)).await
+}
+
+#[tauri::command]
+async fn chat_browser_action(
+    thread_id: String,
+    action: String,
+    args: serde_json::Value,
+    registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
+) -> Result<serde_json::Value, String> {
+    crate::chat_tools::checked_id(&thread_id)?;
+    if action == "close" {
+        // The next turn resumes native history with the new CDP endpoint.
+        registry.close(&thread_id)?;
+        crate::chat_tools::browser::close(&thread_id).await;
+        return Ok(serde_json::json!({}));
+    }
+    crate::chat_tools::browser::action(&thread_id, &action, args).await
+}
+#[tauri::command]
+async fn chat_computer_enable(
+    app: AppHandle,
+    thread_id: String,
+    enabled: bool,
+    start_now: Option<bool>,
+) -> Result<(), String> {
+    crate::chat_tools::computer::enable(&thread_id, enabled).await?;
+    if enabled && start_now.unwrap_or(false) {
+        let result = app
+            .get_webview_window("main")
+            .ok_or("主要視窗不可用。")?
+            .minimize()
+            .map_err(|e| e.to_string());
+        if result.is_err() {
+            let _ = crate::chat_tools::computer::enable(&thread_id, false).await;
+        }
+        result?;
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn chat_computer_action(
+    thread_id: String,
+    action: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    crate::chat_tools::computer::action(&thread_id, &action, args).await
+}
+#[tauri::command]
+async fn chat_image_configure(
+    thread_id: String,
+    source: Option<crate::chat_tools::images::ImageSource>,
+) -> Result<(), String> {
+    crate::chat_tools::images::configure(&thread_id, source).await
+}
+#[tauri::command]
+async fn chat_image_generate(
+    app: AppHandle,
+    thread_id: String,
+    prompt: String,
+) -> Result<serde_json::Value, String> {
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let root = crate::agent_chat::general_chat_directory(&data, &thread_id)?;
+    crate::chat_tools::images::generate(&thread_id, &root, serde_json::json!({"prompt":prompt}))
+        .await
+}
+#[tauri::command]
+async fn chat_tools_status(thread_id: String) -> Result<serde_json::Value, String> {
+    crate::chat_tools::checked_id(&thread_id)?;
+    Ok(
+        serde_json::json!({"computer":crate::chat_tools::computer::enabled(&thread_id).await,"images":crate::chat_tools::images::configured(&thread_id).await,"imageSource":crate::chat_tools::images::source(&thread_id).await}),
+    )
 }
 
 /// Shows a system notification for a chat reply; clicking it (where the
@@ -5652,6 +5757,13 @@ pub fn run() {
     // Both Tauri restart and the Windows updater reuse this managed Env.
     #[cfg(windows)]
     let builder = builder.manage(windows_elevation::restart_environment());
+    let builder = builder.on_window_event(|window, event| {
+        if window.label() == "main" {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                crate::chat_tools::computer::focus_changed(*focused);
+            }
+        }
+    });
     let builder = builder.plugin(tauri_plugin_dialog::init());
     // Opens web links the user clicks (search sources) in the default
     // browser; the capability limits it to http(s) URLs.
@@ -5674,6 +5786,7 @@ pub fn run() {
             // the executable, so it survives an update and follows the user
             // profile on a shared machine.
             let dir = app.path().app_data_dir()?;
+            crate::chat_tools::set_data_root(dir.clone());
             // A Windows scanner can transiently block final deletion after a
             // write-through rename. Retry only our recognisable, unreachable
             // tombstones before opening any application stores.
@@ -5941,6 +6054,13 @@ pub fn run() {
             local_terminal_write,
             local_terminal_resize,
             local_terminal_close,
+            chat_browser_action,
+            chat_computer_enable,
+            chat_computer_action,
+            chat_image_configure,
+            chat_image_generate,
+            chat_tools_status,
+            chat_artifact_read,
             git_worktrees,
             git_worktree_create,
             git_worktree_remove,
@@ -6079,6 +6199,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building LatticeTerm");
     app.run(|handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            tauri::async_runtime::block_on(crate::chat_tools::close_all());
+        }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             let clipboard = Arc::clone(handle.state::<Arc<SensitiveClipboard>>().inner());
             let is_restart = code == Some(tauri::RESTART_EXIT_CODE);
