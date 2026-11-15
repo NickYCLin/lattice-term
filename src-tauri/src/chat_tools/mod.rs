@@ -399,7 +399,7 @@ async fn stdio() -> i32 {
             continue;
         };
         let result = match request["method"].as_str() {
-            Some("initialize") => Ok(json!({"protocolVersion":match request["params"]["protocolVersion"].as_str() { Some(version @ ("2024-11-05" | "2025-03-26" | "2025-06-18" | "2025-11-25")) => version, _ => "2025-11-25" },"capabilities":{"tools":{}},"serverInfo":{"name":"latticeterm-chat-tools","version":env!("CARGO_PKG_VERSION")}})),
+            Some("initialize") => Ok(json!({"protocolVersion":request["params"]["protocolVersion"].as_str().filter(|version| matches!(*version, "2024-11-05" | "2025-03-26" | "2025-06-18" | "2025-11-25")).unwrap_or("2025-11-25"),"capabilities":{"tools":{}},"serverInfo":{"name":"latticeterm-chat-tools","version":env!("CARGO_PKG_VERSION")}})),
             Some("ping") => Ok(json!({})),
             Some("tools/list" | "tools/call") => match client.post(&url).json(&request).send().await { Ok(response) => match response.json::<Value>().await { Ok(value) if value.get("result").is_some() => Ok(value["result"].clone()), Ok(value) => Err(value["error"].as_str().unwrap_or("Tool request failed").to_string()), Err(_) => Err("Tool response unavailable".into()) }, Err(_) => Err("Tool connection unavailable; the outcome may be unknown. Inspect before retrying.".into()) },
             _ => Err("Unsupported method".into()),
