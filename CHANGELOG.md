@@ -15,7 +15,6 @@
 * 接上原生對話事件與回合操作 ([56c16d7](https://github.com/NickYCLin/lattice-term/commit/56c16d7d8c5131ea18e1df2ab831d4365ed3ef89))
 * 新對話預設允許瀏覽器與 MCP 分享 ([ff590e3](https://github.com/NickYCLin/lattice-term/commit/ff590e3a081531728f18b3e79b1ffa7198fe20be))
 * 補齊對話 Markdown 與程式碼呈現 ([4d12300](https://github.com/NickYCLin/lattice-term/commit/4d123009e5e338572c33a80750e3083c711c984f))
-* 補齊對話 Markdown 與程式碼呈現 ([c342d9f](https://github.com/NickYCLin/lattice-term/commit/c342d9fdceaf3a4800a22aeae503bb76f18b9858))
 * 補齊對話輸入與原生歷史導覽 ([dd9eba2](https://github.com/NickYCLin/lattice-term/commit/dd9eba2c0667e7b747f371c1cf2841776aacf7f7))
 * 補齊對話頁原生操作與工具整合 ([cd9e86b](https://github.com/NickYCLin/lattice-term/commit/cd9e86b4ccf54e5e86b5eee7ee4c5fbc5228504d))
 * 補齊變更面板與平行工作目錄 ([e7f3218](https://github.com/NickYCLin/lattice-term/commit/e7f3218f577335d0188ad779425cf41981bad881))
