@@ -116,6 +116,7 @@ pub async fn close(id: &str) {
     browser::close(id).await;
 }
 pub async fn close_all() {
+    computer::shutdown().await;
     for (_, endpoint) in endpoints().lock().await.drain() {
         endpoint.task.abort();
     }

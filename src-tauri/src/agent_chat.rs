@@ -1831,7 +1831,9 @@ fn send_with_retry<S: ChatSink>(
             .await?;
             command.env(crate::chat_tools::environment(), tools_url);
             let browser_endpoint = if request.browser_enabled {
-                Some(crate::chat_tools::browser::endpoint(&request.thread_id).await?)
+                crate::chat_tools::browser::endpoint(&request.thread_id)
+                    .await
+                    .ok()
             } else {
                 None
             };

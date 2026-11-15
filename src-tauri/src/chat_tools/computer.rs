@@ -59,6 +59,12 @@ pub async fn enabled(id: &str) -> bool {
         .is_some_and(|grant| grant.epoch == FOCUS_EPOCH.load(Ordering::SeqCst))
 }
 
+pub async fn shutdown() {
+    focus_changed(true);
+    // Let a bounded input batch release its keys before the app exits.
+    registry().lock().await.clear();
+}
+
 pub async fn action(id: &str, kind: &str, mut args: Value) -> Result<Value, String> {
     let mut grants = registry().lock().await;
     let grant = grants.get_mut(id).ok_or("這個對話尚未允許電腦控制。")?;

@@ -9,6 +9,14 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
+struct CdpEndpoint {
+    port: u16,
+    task: tokio::task::AbortHandle,
+}
+static CDP_ENDPOINTS: OnceLock<Mutex<HashMap<String, CdpEndpoint>>> = OnceLock::new();
+fn cdp_endpoints() -> &'static Mutex<HashMap<String, CdpEndpoint>> {
+    CDP_ENDPOINTS.get_or_init(Mutex::default)
+}
 struct Browser {
     child: Child,
     _profile: tempfile::TempDir,
@@ -139,16 +147,151 @@ pub async fn ensure(id: &str) -> Result<(), String> {
     browsers.insert(id.into(), browser);
     Ok(())
 }
+/// Playwright connects only when a browser tool is called. This lightweight
+/// discovery endpoint starts Chromium on its first /json/version request.
 pub async fn endpoint(id: &str) -> Result<String, String> {
-    ensure(id).await?;
-    let browsers = registry().lock().await;
-    let browser = browsers.get(id).ok_or("瀏覽器已關閉。")?;
-    Ok(format!("http://127.0.0.1:{}", browser.port))
+    super::checked_id(id)?;
+    let mut endpoints = cdp_endpoints().lock().await;
+    if let Some(endpoint) = endpoints.get(id) {
+        return Ok(format!("http://127.0.0.1:{}", endpoint.port));
+    }
+    if endpoints.len() >= 32 {
+        return Err("瀏覽器連線已達上限。".into());
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let thread_id = id.to_string();
+    let task = tokio::spawn(async move {
+        let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+        loop {
+            let Ok((stream, address)) = listener.accept().await else {
+                break;
+            };
+            if !address.ip().is_loopback() {
+                continue;
+            }
+            let Ok(permit) = slots.clone().try_acquire_owned() else {
+                continue;
+            };
+            let id = thread_id.clone();
+            tokio::spawn(async move {
+                let _permit = permit;
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    serve_discovery(stream, &id, port),
+                )
+                .await;
+            });
+        }
+    });
+    endpoints.insert(
+        id.into(),
+        CdpEndpoint {
+            port,
+            task: task.abort_handle(),
+        },
+    );
+    Ok(format!("http://127.0.0.1:{port}"))
+}
+async fn serve_discovery(
+    mut stream: tokio::net::TcpStream,
+    id: &str,
+    port: u16,
+) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut header = Vec::new();
+    loop {
+        let mut byte = [0];
+        stream
+            .read_exact(&mut byte)
+            .await
+            .map_err(|e| e.to_string())?;
+        header.push(byte[0]);
+        if header.len() > 8192 {
+            return Err("header limit".into());
+        }
+        if header.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let header = String::from_utf8(header).map_err(|e| e.to_string())?;
+    if !(header.starts_with("GET /json/version HTTP/1.1\r\n")
+        || header.starts_with("GET /json/version/ HTTP/1.1\r\n"))
+        || header
+            .lines()
+            .any(|line| line.to_ascii_lowercase().starts_with("origin:"))
+    {
+        return Err("invalid discovery request".into());
+    }
+    let result = async {
+        // Closing an endpoint must not race a late Chromium launch.
+        let browser_port = {
+            let endpoints = cdp_endpoints().lock().await;
+            if !endpoints
+                .get(id)
+                .is_some_and(|endpoint| endpoint.port == port)
+            {
+                return Err("closed endpoint".to_string());
+            }
+            ensure(id).await?;
+            registry()
+                .lock()
+                .await
+                .get(id)
+                .ok_or("browser closed")?
+                .port
+        };
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut response = client
+            .get(format!("http://127.0.0.1:{browser_port}/json/version"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            if body.len() + chunk.len() > 65536 {
+                return Err("discovery limit".into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok::<_, String>(body)
+    }
+    .await;
+    let (status, body) = match result {
+        Ok(body) => ("200 OK", body),
+        Err(_) => (
+            "503 Service Unavailable",
+            b"{\"error\":\"Browser unavailable; install Chrome or Edge.\"}".to_vec(),
+        ),
+    };
+    if !cdp_endpoints()
+        .lock()
+        .await
+        .get(id)
+        .is_some_and(|endpoint| endpoint.port == port)
+    {
+        return Err("closed endpoint".into());
+    }
+    stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.map_err(|e| e.to_string())?;
+    stream.write_all(&body).await.map_err(|e| e.to_string())?;
+    Ok(())
 }
 pub async fn close(id: &str) {
+    if let Some(endpoint) = cdp_endpoints().lock().await.remove(id) {
+        endpoint.task.abort();
+    }
     registry().lock().await.remove(id);
 }
 pub async fn close_all() {
+    for (_, endpoint) in cdp_endpoints().lock().await.drain() {
+        endpoint.task.abort();
+    }
     registry().lock().await.clear();
 }
 async fn target(port: u16) -> Result<Value, String> {
@@ -395,6 +538,24 @@ mod tests {
         });
         let id = "test-browser-scoped";
         let operation = async {
+            let discovery = endpoint(id).await?;
+            assert!(!registry().lock().await.contains_key(id));
+            let version: Value = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap()
+                .get(format!("{discovery}/json/version/"))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?
+                .json()
+                .await
+                .map_err(|e| e.to_string())?;
+            assert!(version["webSocketDebuggerUrl"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("ws://127.0.0.1:"));
             action(
                 id,
                 "navigate",

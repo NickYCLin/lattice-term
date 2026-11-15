@@ -758,8 +758,9 @@ pub(super) async fn send_turn<S: ChatSink>(
     command.env(crate::chat_tools::environment(), tools_url);
     command.args(super::browser::codex_arguments());
     if request.browser_enabled {
-        let endpoint = crate::chat_tools::browser::endpoint(request.thread_id).await?;
-        command.args(super::browser::playwright_codex_arguments(&endpoint));
+        if let Ok(endpoint) = crate::chat_tools::browser::endpoint(request.thread_id).await {
+            command.args(super::browser::playwright_codex_arguments(&endpoint));
+        }
     }
     command.current_dir(request.working_directory);
     let mut child = command
@@ -1111,7 +1112,8 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
             RpcPurpose::BrowserReady { model } => {
                 let available = value["result"]["data"].as_array().is_some_and(|servers| {
                     servers.iter().any(|server| {
-                        server["name"] == "latticeterm_browser"
+                        (server["name"] == "latticeterm_browser"
+                            || server["name"] == "latticeterm_chat_tools")
                             && server["tools"].as_object().is_some_and(|tools| {
                                 tools.contains_key("browser_navigate")
                                     && tools.contains_key("browser_click")
@@ -2328,7 +2330,12 @@ mod tests {
 
     #[tokio::test]
     async fn browser_start_waits_for_tools_and_reports_startup_failures() {
-        for ready in [true, false] {
+        for name in [
+            Some("latticeterm_browser"),
+            Some("latticeterm_chat_tools"),
+            None,
+        ] {
+            let ready = name.is_some();
             let mut server = server_with(fresh_state("turn-1"));
             server.browser_enabled = true;
             let opened = feed(
@@ -2340,7 +2347,7 @@ mod tests {
             assert!(opened.events.is_empty());
             assert!(server.state().queued.is_some());
             let data = if ready {
-                serde_json::json!([{"name":"latticeterm_browser","tools":{"browser_navigate":{},"browser_click":{}}}])
+                serde_json::json!([{"name":name.unwrap(),"tools":{"browser_navigate":{},"browser_click":{}}}])
             } else {
                 serde_json::json!([])
             };
