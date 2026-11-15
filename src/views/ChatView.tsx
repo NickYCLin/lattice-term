@@ -1,4 +1,6 @@
 import { EditIcon } from "../components/icons";
+import { ChatTools } from "../components/chat/ChatTools";
+import { ChatArtifact } from "../components/chat/ChatArtifact";
 import { searchConversation, useConversationPins, conversationLink } from "../app/conversationNavigation";
 import { ChatWorktree } from "../components/chat/ChatWorktree";
 import { approvalShortcut } from "../app/approvalShortcut";
@@ -770,6 +772,7 @@ export function ThreadPane({
   const searchMatches = useMemo(() => searchConversation(thread.items, search), [thread.items, search]);
   const matchedItem = searchMatches[searchIndex % Math.max(1, searchMatches.length)];
   const [worktreeOpen, setWorktreeOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const runtimeStatus = currentRuntimeStatus(thread);
   const latestPlan = thread.items.slice().reverse().find(item => item.type === "plan");
@@ -1075,6 +1078,7 @@ export function ThreadPane({
             <details className="chat-header__menu" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.currentTarget.open = false; } }}>
               <summary className="button button--ghost button--sm" aria-label={t("chat.nav.more")}>⋯</summary>
               <div onClick={event => { if ((event.target as HTMLElement).closest("button")) { const menu = event.currentTarget.closest("details"); if (menu) menu.open = false; } }}>
+            {!thread.remote && <button type="button" className="button button--ghost button--sm" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{t("chat.tools.title")}</button>}
             <button type="button" className="button button--ghost button--sm" aria-pressed={pins.includes(thread.id)} onClick={() => { try { togglePin(thread.id); } catch (reason) { setNotice(String(reason)); } }}>{t(pins.includes(thread.id) ? "chat.nav.unpin" : "chat.nav.pin")}</button>
             <button type="button" className="button button--ghost button--sm" onClick={() => setSearchOpen(value => !value)}>{t("chat.nav.search")}</button>
             {onSideChat && <button type="button" className="button button--ghost button--sm" onClick={onSideChat}>{t("chat.nav.side")}</button>}
@@ -1376,6 +1380,7 @@ export function ThreadPane({
           onInsert={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
         />
       )}
+      {toolsOpen && <ChatTools key={thread.id} threadId={thread.id} directory={thread.workingDirectory} busy={running || Boolean(thread.pendingOperation)} assistantTools={!directProxy && ["codex", "claude"].includes(thread.definitionId)} browserEnabled={thread.browserEnabled === true} onBrowserEnabled={enabled => chat.updateThread(thread.id, { browserEnabled: enabled })} onClose={() => setToolsOpen(false)} />}
       {changesOpen && !thread.archived && thread.workingDirectory && (
         <ChatChangesPanel
           workingDirectory={thread.workingDirectory}
@@ -1550,6 +1555,7 @@ function ChatItemView({
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState("");
   const [editError, setEditError] = useState("");
+  const [artifactPath, setArtifactPath] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const branchButton = <span className="chat-msg__actionGroup">{onEdit && <button type="button" className="chat-msg__branch" aria-label={t("chat.message.edit")}
     onClick={() => { setEdited(item.type === "user" ? item.text : ""); setEditing(true); }} title={t("chat.message.edit")}><EditIcon size={13} /></button>}{onBranch && (
@@ -1577,7 +1583,8 @@ function ChatItemView({
       return (
         <ConversationMessage role="assistant" assistant={assistant} actions={!streaming && branchButton}>
             <div className={streaming ? "chat-cursor" : undefined}>
-              <ChatMarkdown source={item.text} />
+              <ChatMarkdown source={item.text} onOpenFile={workingDirectory ? setArtifactPath : undefined} />
+              {artifactPath && <ChatArtifact directory={workingDirectory} path={artifactPath} onClose={() => setArtifactPath(null)} />}
             </div>
             {!streaming && workingDirectory && (
               <ChatImagePreviews text={item.text} workingDirectory={workingDirectory} />
