@@ -96,3 +96,10 @@ export function commentsMessage(comments: readonly DiffComment[]): string {
     )
     .join("\n\n---\n\n");
 }
+
+export const gitPatch = (workingDirectory: string, path: string, staged: boolean, expected: string, action: "stage" | "unstage" | "restore", hunk: number | null = null) =>
+  invoke<string>("git_changes_patch", { workingDirectory, path, staged, expected, hunk, action });
+export const gitBranches = (workingDirectory: string) => invoke<{ name: string; revision: string }[]>("git_changes_branches", { workingDirectory });
+export const gitComparison = (workingDirectory: string, revision: string) => invoke<GitDiff>("git_changes_comparison", { workingDirectory, revision, path: null });
+export const gitCheckpoint = (workingDirectory: string) => invoke<string>("git_changes_checkpoint", { workingDirectory });
+export const gitPublish = (workingDirectory: string, openPr: boolean) => invoke<string>("git_changes_publish", { workingDirectory, openPr });

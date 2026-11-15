@@ -3330,6 +3330,64 @@ async fn git_changes_commit(working_directory: String, message: String) -> Resul
     blocking(move || crate::git_changes::commit(&working_directory, &message)).await
 }
 
+#[tauri::command]
+async fn git_changes_patch(
+    working_directory: String,
+    path: String,
+    staged: bool,
+    expected: String,
+    hunk: Option<usize>,
+    action: crate::git_changes::PatchAction,
+) -> Result<String, String> {
+    blocking(move || {
+        crate::git_changes::patch(&working_directory, &path, staged, &expected, hunk, action)
+    })
+    .await
+}
+#[tauri::command]
+async fn git_changes_branches(
+    working_directory: String,
+) -> Result<Vec<crate::git_changes::BranchView>, String> {
+    blocking(move || crate::git_changes::branches(&working_directory)).await
+}
+#[tauri::command]
+async fn git_changes_comparison(
+    working_directory: String,
+    revision: String,
+    path: Option<String>,
+) -> Result<crate::git_changes::GitDiff, String> {
+    blocking(move || crate::git_changes::comparison(&working_directory, &revision, path.as_deref()))
+        .await
+}
+#[tauri::command]
+async fn git_changes_checkpoint(working_directory: String) -> Result<String, String> {
+    blocking(move || crate::git_changes::checkpoint(&working_directory)).await
+}
+#[tauri::command]
+async fn git_changes_publish(working_directory: String, open_pr: bool) -> Result<String, String> {
+    blocking(move || crate::git_changes::publish(&working_directory, open_pr)).await
+}
+
+#[tauri::command]
+async fn git_worktrees(
+    working_directory: String,
+) -> Result<Vec<crate::git_changes::Worktree>, String> {
+    blocking(move || crate::git_changes::worktrees(&working_directory)).await
+}
+#[tauri::command]
+async fn git_worktree_create(
+    working_directory: String,
+    destination: String,
+    branch: String,
+) -> Result<String, String> {
+    blocking(move || crate::git_changes::create_worktree(&working_directory, &destination, &branch))
+        .await
+}
+#[tauri::command]
+async fn git_worktree_remove(working_directory: String, destination: String) -> Result<(), String> {
+    blocking(move || crate::git_changes::remove_worktree(&working_directory, &destination)).await
+}
+
 /// Shows a system notification for a chat reply; clicking it (where the
 /// system reports clicks) brings the window back to that conversation.
 #[tauri::command]
@@ -5883,6 +5941,14 @@ pub fn run() {
             local_terminal_write,
             local_terminal_resize,
             local_terminal_close,
+            git_worktrees,
+            git_worktree_create,
+            git_worktree_remove,
+            git_changes_patch,
+            git_changes_branches,
+            git_changes_comparison,
+            git_changes_checkpoint,
+            git_changes_publish,
             git_changes_status,
             git_changes_diff,
             git_changes_stage,
