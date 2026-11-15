@@ -63,6 +63,7 @@ struct ActiveTurn {
 }
 
 struct QueuedTurn {
+    method: &'static str,
     turn_id: String,
     params: Value,
 }
@@ -212,6 +213,38 @@ impl CodexServers {
             }
             None => false,
         }
+    }
+
+    pub(super) async fn release_idle(
+        &self,
+        thread_id: &str,
+        native_id: &str,
+        profile: Option<&Path>,
+    ) -> Result<(), String> {
+        let Some(server) = self.get(thread_id) else {
+            return Ok(());
+        };
+        {
+            let state = server.state();
+            if state.active.is_some() || state.queued.is_some() || !state.pending_steers.is_empty()
+            {
+                return Err("Wait for the native turn to finish before forking.".into());
+            }
+            if !same_server_identity(
+                server.profile_config_directory.as_deref(),
+                state.codex_thread_id.as_deref(),
+                profile,
+                Some(native_id),
+            ) {
+                return Err("The native conversation or account changed.".into());
+            }
+        }
+        server.release_after_turn().await;
+        server.wait_exit().await;
+        if server.running() {
+            return Err("The native writer has not released the conversation.".into());
+        }
+        Ok(())
     }
 
     pub(super) fn shutdown(&self) {
@@ -508,6 +541,8 @@ fn opening_lines(
 pub(super) struct TurnRequest<'a> {
     pub proxy: Option<&'a crate::cliproxy::launch::ProxyLaunch>,
     pub browser_enabled: bool,
+    pub native_action: Option<&'a super::NativeChatAction>,
+    pub plan_mode: Option<bool>,
     pub mcp: Option<&'a crate::agent_mcp::McpLaunch>,
     pub thread_id: &'a str,
     pub turn_id: &'a str,
@@ -523,6 +558,45 @@ pub(super) struct TurnRequest<'a> {
     pub working_directory: &'a Path,
     pub profile_config_directory: Option<&'a Path>,
     pub executable: &'a Path,
+}
+
+fn action_params(
+    action: Option<&super::NativeChatAction>,
+    params: Value,
+    plan_mode: Option<bool>,
+) -> (&'static str, Value) {
+    match action {
+        Some(super::NativeChatAction::Compact) => (
+            "thread/compact/start",
+            serde_json::json!({"threadId": params["threadId"]}),
+        ),
+        Some(super::NativeChatAction::Review { target }) => (
+            "review/start",
+            serde_json::json!({"threadId": params["threadId"], "target": target, "delivery": "inline"}),
+        ),
+        None => {
+            let mut params = params;
+            if let Some(mode) = plan_mode {
+                params["_latticetermPlanMode"] = Value::Bool(mode);
+            }
+            ("turn/start", params)
+        }
+    }
+}
+fn apply_plan_mode(params: &mut Value, reported_model: Option<&str>) -> Result<(), String> {
+    let Some(mode) = params
+        .as_object_mut()
+        .and_then(|params| params.remove("_latticetermPlanMode"))
+        .and_then(|value| value.as_bool())
+    else {
+        return Ok(());
+    };
+    let model = str_field(params, "model")
+        .or(reported_model)
+        .ok_or("Codex did not report a model for planning mode.")?
+        .to_string();
+    params["collaborationMode"] = serde_json::json!({"mode": if mode {"plan"} else {"default"}, "settings": {"model": model, "reasoning_effort": params.get("effort"), "developer_instructions": null}});
+    Ok(())
 }
 
 fn same_server_identity(
@@ -585,6 +659,9 @@ pub(super) async fn send_turn<S: ChatSink>(
                 if let Some(effort) = request.effort {
                     params["effort"] = Value::from(effort);
                 }
+                let (method, mut params) =
+                    action_params(request.native_action, params, request.plan_mode);
+                apply_plan_mode(&mut params, request.model)?;
                 let id = state.next_rpc;
                 state.next_rpc += 1;
                 state.pending_rpc.insert(
@@ -601,7 +678,7 @@ pub(super) async fn send_turn<S: ChatSink>(
                     pending: HashMap::new(),
                 });
                 state.last_activity = Instant::now();
-                Some(rpc_line(id, "turn/start", params))
+                Some(rpc_line(id, method, params))
             }
         };
         match line {
@@ -707,6 +784,8 @@ pub(super) async fn send_turn<S: ChatSink>(
     if let Some(effort) = request.effort {
         queued_params["effort"] = Value::from(effort);
     }
+    let (queued_method, queued_params) =
+        action_params(request.native_action, queued_params, request.plan_mode);
     let server = Arc::new(CodexServer {
         proxy_identity: request.proxy.map(|proxy| proxy.identity()),
         browser_enabled: request.browser_enabled,
@@ -725,6 +804,7 @@ pub(super) async fn send_turn<S: ChatSink>(
                 pending: HashMap::new(),
             }),
             queued: Some(QueuedTurn {
+                method: queued_method,
                 turn_id: request.turn_id.to_string(),
                 params: queued_params,
             }),
@@ -819,13 +899,19 @@ pub(super) async fn send_turn<S: ChatSink>(
         }
     });
 
-    let opening = opening_lines(
+    let mut opening = opening_lines(
         request.working_directory,
         request.permission,
         request.model,
         request.native_session_id,
         request.proxy.map(|proxy| proxy.provider()),
     );
+    if request.plan_mode.is_some() {
+        if let Ok(mut initialize) = serde_json::from_str::<Value>(&opening[0]) {
+            initialize["params"]["capabilities"] = serde_json::json!({"experimentalApi": true});
+            opening[0] = initialize.to_string();
+        }
+    }
     for line in &opening {
         if let Err(error) = server.write_line(line).await {
             servers.close(request.thread_id);
@@ -876,6 +962,20 @@ fn start_queued_turn(state: &mut ServerState, out: &mut LineOutcome, model: Opti
         return;
     };
     queued.params["threadId"] = Value::String(codex_thread_id.clone());
+    if let Err(error) = apply_plan_mode(&mut queued.params, model.as_deref()) {
+        state.active = None;
+        out.events.push((
+            queued.turn_id,
+            ChatEvent::Finished {
+                native_session_id: Some(codex_thread_id),
+                usage: None,
+                cost_usd: None,
+                duration_ms: None,
+                error: Some(error),
+            },
+        ));
+        return;
+    }
     let id = state.next_rpc;
     state.next_rpc += 1;
     state.pending_rpc.insert(
@@ -891,7 +991,7 @@ fn start_queued_turn(state: &mut ServerState, out: &mut LineOutcome, model: Opti
             model,
         },
     ));
-    out.writes.push(rpc_line(id, "turn/start", queued.params));
+    out.writes.push(rpc_line(id, queued.method, queued.params));
 }
 
 fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
@@ -1051,6 +1151,12 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                             .and_then(|result| result.get("turn"))
                             .and_then(|turn| str_field(turn, "id"))
                             .map(str::to_string);
+                        if let Some(native_turn_id) = turn.codex_turn_id.clone() {
+                            out.events.push((
+                                turn.turn_id.clone(),
+                                ChatEvent::NativeTurnId { native_turn_id },
+                            ));
+                        }
                     }
                 }
             }
@@ -1079,6 +1185,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 out.events.push((
                     turn.turn_id.clone(),
                     ChatEvent::ApprovalRequested {
+                        can_allow_session: false,
                         request_id: request_id.clone(),
                         tool_use_id: None,
                         name: super::elicitation::kind(&params).card_name().to_string(),
@@ -1119,6 +1226,7 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 out.events.push((
                     turn.turn_id.clone(),
                     ChatEvent::ApprovalRequested {
+                        can_allow_session: false,
                         request_id: request_id.clone(),
                         tool_use_id: None,
                         name: "user_input".to_string(),
@@ -1172,10 +1280,12 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                     "cwd": params.get("cwd"),
                     "reason": params.get("reason"),
                     "permissions": params.get("permissions"),
+                    "grantRoot": params.get("grantRoot"),
                 });
                 out.events.push((
                     turn.turn_id.clone(),
                     ChatEvent::ApprovalRequested {
+                        can_allow_session: session_approval_supported(method, &params),
                         request_id: request_id.clone(),
                         tool_use_id: str_field(&params, "itemId").map(str::to_string),
                         name: name.to_string(),
@@ -1211,8 +1321,21 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
     let Some(turn_id) = active_turn_id else {
         return out;
     };
+    out.events.extend(
+        super::runtime_events::codex_notification(method, &params)
+            .into_iter()
+            .map(|event| (turn_id.clone(), event)),
+    );
     match method {
         "turn/started" => {
+            if let Some(id) = params["turn"]["id"].as_str() {
+                out.events.push((
+                    turn_id.clone(),
+                    ChatEvent::NativeTurnId {
+                        native_turn_id: id.into(),
+                    },
+                ));
+            }
             if let Some(turn) = state.active.as_mut() {
                 if turn.codex_turn_id.is_none() {
                     turn.codex_turn_id = params
@@ -1321,6 +1444,7 @@ pub(super) async fn respond(
 ) -> Result<(), String> {
     respond_expected(servers, thread_id, request_id, allow, message, None).await
 }
+#[cfg(test)]
 pub(super) async fn respond_expected(
     servers: &CodexServers,
     thread_id: &str,
@@ -1328,6 +1452,26 @@ pub(super) async fn respond_expected(
     allow: bool,
     message: Option<&str>,
     expected_turn_id: Option<&str>,
+) -> Result<(), String> {
+    respond_scoped_expected(
+        servers,
+        thread_id,
+        request_id,
+        allow,
+        message,
+        expected_turn_id,
+        false,
+    )
+    .await
+}
+pub(super) async fn respond_scoped_expected(
+    servers: &CodexServers,
+    thread_id: &str,
+    request_id: &str,
+    allow: bool,
+    message: Option<&str>,
+    expected_turn_id: Option<&str>,
+    allow_for_session: bool,
 ) -> Result<(), String> {
     let server = servers
         .get(thread_id)
@@ -1345,14 +1489,46 @@ pub(super) async fn respond_expected(
             .pending
             .get(request_id)
             .ok_or_else(|| "This approval has already been answered.".to_string())?;
-        let response = response_line(pending, allow, message)?;
+        let response = response_line_scoped(pending, allow, message, allow_for_session)?;
         turn.pending.remove(request_id);
         response
     };
     server.write_line(&response).await
 }
 
+fn session_approval_supported(method: &str, params: &Value) -> bool {
+    match method {
+        "item/commandExecution/requestApproval" => params
+            .get("availableDecisions")
+            .and_then(Value::as_array)
+            .map(|choices| {
+                choices
+                    .iter()
+                    .any(|choice| choice.as_str() == Some("acceptForSession"))
+            })
+            .unwrap_or(true),
+        "item/fileChange/requestApproval" | "item/permissions/requestApproval" => true,
+        _ => false,
+    }
+}
 fn response_line(pending: &Value, allow: bool, message: Option<&str>) -> Result<String, String> {
+    response_line_scoped(pending, allow, message, false)
+}
+fn response_line_scoped(
+    pending: &Value,
+    allow: bool,
+    message: Option<&str>,
+    allow_for_session: bool,
+) -> Result<String, String> {
+    if allow_for_session
+        && (!allow
+            || !session_approval_supported(
+                pending["method"].as_str().unwrap_or_default(),
+                &pending["params"],
+            ))
+    {
+        return Err("This request does not permit session-scoped approval.".into());
+    }
     let id = &pending["latticeterm_rpc_id"];
     let result = match pending["method"].as_str() {
         Some("mcpServer/elicitation/request") => {
@@ -1390,9 +1566,14 @@ fn response_line(pending: &Value, allow: bool, message: Option<&str>) -> Result<
         }
         Some("item/permissions/requestApproval") => serde_json::json!({
             "permissions": if allow { pending["params"]["permissions"].clone() } else { serde_json::json!({}) },
-            "scope": "turn",
+            "scope": if allow_for_session { "session" } else { "turn" },
         }),
-        _ => return Ok(codex_approval_line(id, allow)),
+        _ => {
+            if allow_for_session {
+                return Ok(serde_json::json!({"jsonrpc":"2.0", "id":id, "result":{"decision":"acceptForSession"}}).to_string());
+            }
+            return Ok(codex_approval_line(id, allow));
+        }
     };
     Ok(serde_json::json!({"id": id, "result": result}).to_string())
 }
@@ -1556,6 +1737,8 @@ mod tests {
                 Arc::clone(&sink),
                 &servers,
                 TurnRequest {
+                    native_action: None,
+                    plan_mode: None,
                     proxy: None,
                     browser_enabled: false,
                     mcp: None,
@@ -1667,6 +1850,8 @@ mod tests {
             Arc::clone(&sink),
             &servers,
             TurnRequest {
+                native_action: None,
+                plan_mode: None,
                 proxy: None,
                 browser_enabled: false,
                 mcp: Some(&mcp),
@@ -1816,6 +2001,7 @@ mod tests {
                 pending: HashMap::new(),
             }),
             queued: Some(QueuedTurn {
+                method: "turn/start",
                 turn_id: turn_id.into(),
                 params: turn_params(
                     "",
@@ -2224,7 +2410,9 @@ mod tests {
             &server,
             r#"{"id":3,"result":{"turn":{"id":"codex-turn-1"}}}"#,
         );
-        assert!(out.events.is_empty());
+        assert!(
+            matches!(&out.events[..], [(_, ChatEvent::NativeTurnId { native_turn_id })] if native_turn_id == "codex-turn-1")
+        );
         assert_eq!(
             server
                 .state()
@@ -2448,5 +2636,68 @@ mod tests {
                 "latticeterm_cliproxyapi_fresh"
             );
         }
+    }
+    #[test]
+    fn native_commands_use_their_official_methods_and_do_not_send_prompt_text() {
+        let params =
+            serde_json::json!({"threadId":"native", "input":[{"type":"text","text":"not sent"}]});
+        let (method, compact) = action_params(
+            Some(&super::super::NativeChatAction::Compact),
+            params.clone(),
+            None,
+        );
+        assert_eq!(method, "thread/compact/start");
+        assert_eq!(compact, serde_json::json!({"threadId":"native"}));
+        let action = super::super::NativeChatAction::Review {
+            target: super::super::NativeReviewTarget::BaseBranch {
+                branch: "main".into(),
+            },
+        };
+        let (method, review) = action_params(Some(&action), params, None);
+        assert_eq!(method, "review/start");
+        assert_eq!(
+            review["target"],
+            serde_json::json!({"type":"baseBranch","branch":"main"})
+        );
+        assert!(review.get("input").is_none());
+    }
+    #[test]
+    fn planning_uses_the_reported_model_and_builtin_mode_instructions() {
+        let (_, mut params) =
+            action_params(None, serde_json::json!({"threadId":"native"}), Some(true));
+        apply_plan_mode(&mut params, Some("reported-model")).unwrap();
+        assert_eq!(params["collaborationMode"]["mode"], "plan");
+        assert_eq!(
+            params["collaborationMode"]["settings"]["model"],
+            "reported-model"
+        );
+        assert!(params["collaborationMode"]["settings"]["developer_instructions"].is_null());
+        assert!(params.get("_latticetermPlanMode").is_none());
+        let (_, mut params) = action_params(None, serde_json::json!({}), Some(true));
+        assert!(apply_plan_mode(&mut params, None).is_err());
+    }
+    #[test]
+    fn session_approval_honours_native_decisions_and_never_extends_forms() {
+        let pending = serde_json::json!({"latticeterm_rpc_id":7,"method":"item/commandExecution/requestApproval","params":{"availableDecisions":["accept","acceptForSession","decline"]}});
+        let reply: Value =
+            serde_json::from_str(&response_line_scoped(&pending, true, None, true).unwrap())
+                .unwrap();
+        assert_eq!(reply["id"], 7);
+        assert_eq!(reply["result"]["decision"], "acceptForSession");
+        let mut unavailable = pending.clone();
+        unavailable["params"]["availableDecisions"] = serde_json::json!(["accept", "decline"]);
+        assert!(response_line_scoped(&unavailable, true, None, true).is_err());
+        assert!(response_line_scoped(&pending, false, None, true).is_err());
+        let form = serde_json::json!({"latticeterm_rpc_id":8,"method":"mcpServer/elicitation/request","params":{}});
+        assert!(response_line_scoped(&form, true, None, true).is_err());
+        let permissions = serde_json::json!({"latticeterm_rpc_id":9,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}}}});
+        let reply: Value =
+            serde_json::from_str(&response_line_scoped(&permissions, true, None, true).unwrap())
+                .unwrap();
+        assert_eq!(reply["result"]["scope"], "session");
+        assert_eq!(
+            reply["result"]["permissions"],
+            permissions["params"]["permissions"]
+        );
     }
 }

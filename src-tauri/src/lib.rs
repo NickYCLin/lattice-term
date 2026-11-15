@@ -13,6 +13,7 @@ pub mod app_menu;
 pub mod backup;
 mod chat_attachments;
 pub mod chat_images;
+mod chat_project_files;
 pub mod clipboard;
 pub mod cliproxy;
 mod codex_config;
@@ -1874,17 +1875,41 @@ async fn agent_chat_respond(
     request_id: String,
     allow: bool,
     message: Option<String>,
+    allow_for_session: Option<bool>,
     expected_turn_id: Option<String>,
     registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
 ) -> Result<(), String> {
     let registry = Arc::clone(registry.inner());
-    crate::agent_chat::respond_expected(
+    crate::agent_chat::respond_scoped_expected(
         registry,
         &thread_id,
         &request_id,
         allow,
         message.as_deref(),
         expected_turn_id.as_deref(),
+        allow_for_session.unwrap_or(false),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn agent_chat_fork(
+    thread_id: String,
+    native_session_id: String,
+    working_directory: String,
+    profile_config_path: Option<String>,
+    through_turn_id: Option<String>,
+    before_turn: Option<bool>,
+    registry: State<'_, Arc<crate::agent_chat::AgentChatRegistry>>,
+) -> Result<crate::agent_chat::NativeForkResult, String> {
+    crate::agent_chat::fork_codex_conversation(
+        Arc::clone(registry.inner()),
+        &thread_id,
+        &native_session_id,
+        &working_directory,
+        profile_config_path.as_deref(),
+        through_turn_id.as_deref(),
+        before_turn.unwrap_or(false),
     )
     .await
 }
@@ -3264,6 +3289,14 @@ async fn blocking<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(work)
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn chat_project_files(
+    working_directory: String,
+    query: String,
+) -> Result<crate::chat_project_files::ProjectFiles, String> {
+    blocking(move || crate::chat_project_files::search(&working_directory, &query)).await
 }
 
 #[tauri::command]
@@ -5810,6 +5843,8 @@ pub fn run() {
             agent_chat_restore_codex_conversation,
             agent_chat_respond,
             agent_chat_models,
+            agent_chat_fork,
+            chat_project_files,
             agent_chat_skills,
             agent_paste_clipboard_image,
             agent_chat_paste_image,

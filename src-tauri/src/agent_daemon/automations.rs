@@ -504,6 +504,10 @@ pub async fn execute(
 ) {
     let automation_id = planned.record.automation_id.clone();
     let request = ChatTurnRequest {
+        fork_session: false,
+        resume_session_at: None,
+        native_action: None,
+        plan_mode: None,
         cli_proxy_base_url: None,
         cli_proxy_id: None,
         browser_enabled: false,

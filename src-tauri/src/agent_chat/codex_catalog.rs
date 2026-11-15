@@ -72,6 +72,99 @@ pub(super) async fn set_archived(
     result?
 }
 
+/// Fork through the native store, preserving the account, model and provider.
+pub(super) async fn fork_thread(
+    executable: &Path,
+    profile: Option<&Path>,
+    source_id: &str,
+    working_directory: &Path,
+    through_turn: Option<&str>,
+    before_turn: bool,
+) -> Result<Value, String> {
+    let mut command = headless_command(executable);
+    command.arg("app-server");
+    apply_profile_environment(&mut command, Dialect::Codex, profile);
+    command.kill_on_drop(true);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Cannot start Codex: {e}"))?;
+    let result = async {
+        let mut stdin = child.stdin.take().ok_or("Codex input unavailable")?;
+        let stdout = child.stdout.take().ok_or("Codex output unavailable")?;
+        tauri::async_runtime::spawn(stderr_tail(child.stderr.take()));
+        let mut reader = BufReader::new(stdout);
+        let mut initialize: Value = serde_json::from_str(&requests(None).remove(0))
+            .map_err(|_| "Invalid initialization")?;
+        if before_turn {
+            initialize["params"]["capabilities"] = serde_json::json!({"experimentalApi":true});
+        }
+        stdin
+            .write_all(format!("{initialize}\n").as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())?;
+        read_rpc_reply(&mut reader, 1).await?;
+        let read = serde_json::json!({"id":2,"method":"thread/read","params":{"threadId":source_id,"includeTurns":false}});
+        stdin
+            .write_all(
+                format!("{{\"method\":\"initialized\",\"params\":{{}}}}\n{read}\n").as_bytes(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())?;
+        let source = read_rpc_reply(&mut reader, 2).await?;
+        let source = &source["thread"];
+        if source["id"].as_str() != Some(source_id) {
+            return Err("Codex did not confirm the selected source conversation.".into());
+        }
+        let source_cwd = source["cwd"]
+            .as_str()
+            .ok_or("Codex did not report the source directory.")?;
+        if std::fs::canonicalize(source_cwd).ok().as_deref() != Some(working_directory) {
+            return Err(
+                "The source conversation directory changed. Refresh before forking.".into(),
+            );
+        }
+        let provider = source["modelProvider"]
+            .as_str()
+            .ok_or("Codex did not report the source provider.")?;
+        let mut params = serde_json::json!({"threadId":source_id,"modelProvider":provider,"cwd":working_directory,"excludeTurns":true});
+        if let Some(model) = source["model"].as_str() {
+            params["model"] = Value::String(model.into());
+        }
+        if let Some(turn) = through_turn {
+            params[if before_turn {
+                "beforeTurnId"
+            } else {
+                "lastTurnId"
+            }] = Value::String(turn.into());
+        }
+        let fork = serde_json::json!({"id":3,"method":"thread/fork","params":params});
+        stdin
+            .write_all(format!("{fork}\n").as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())?;
+        let result = read_rpc_reply(&mut reader, 3).await?;
+        let fork_id = result["thread"]["id"]
+            .as_str()
+            .ok_or("Codex did not confirm a fork id.")?;
+        if fork_id == source_id || result["thread"]["modelProvider"].as_str() != Some(provider) {
+            return Err("Codex did not confirm an independent fork with the original provider. Check native history before retrying.".into());
+        }
+        Ok(result)
+    };
+    let result = tokio::time::timeout(CATALOG_TIMEOUT, result)
+        .await
+        .map_err(|_| {
+            "Native fork outcome is unknown after timeout. Check native history before retrying."
+                .to_string()
+        });
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    result?
+}
+
 async fn read_rpc_reply<R: tokio::io::AsyncBufRead + Unpin>(
     reader: &mut R,
     id: u64,
@@ -461,5 +554,54 @@ mod tests {
     fn catalog_survives_missing_plugin_and_app_replies() {
         let skills = serde_json::json!({ "data": [] });
         assert!(catalog(&skills, None, None).is_empty());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_fork_preserves_source_provider_and_uses_the_requested_turn_boundary() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("codex-fork-fixture");
+        let source = r##"#!/usr/bin/env python3
+import sys,json
+experimental=False
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    if method=='initialize':
+        experimental=request.get('params',{}).get('capabilities',{}).get('experimentalApi',False)
+        result={}
+    elif method=='initialized':
+        continue
+    elif method=='thread/read':
+        assert request['params']=={'threadId':'source-native','includeTurns':False}
+        result={'thread':{'id':'source-native','cwd':__CWD__,'modelProvider':'synthetic-provider','model':'synthetic-model'}}
+    elif method=='thread/fork':
+        params=request['params']
+        assert params['threadId']=='source-native' and params['modelProvider']=='synthetic-provider'
+        assert params['model']=='synthetic-model' and params['excludeTurns']==True
+        if experimental:
+            assert params['beforeTurnId']=='native-turn' and 'lastTurnId' not in params
+        else:
+            assert params['lastTurnId']=='native-turn' and 'beforeTurnId' not in params
+        result={'thread':{'id':'fork-native','modelProvider':'synthetic-provider'},'model':'synthetic-model'}
+    else:
+        raise Exception('Unexpected method')
+    print(json.dumps({'id':request['id'],'result':result}),flush=True)
+"##.replace("__CWD__", &serde_json::to_string(root.path().to_str().unwrap()).unwrap());
+        std::fs::write(&executable, source).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for before in [false, true] {
+            let result = super::fork_thread(
+                &executable,
+                None,
+                "source-native",
+                root.path(),
+                Some("native-turn"),
+                before,
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["thread"]["id"], "fork-native");
+        }
     }
 }
