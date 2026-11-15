@@ -1195,8 +1195,7 @@ export function SessionsView({
             disabled={launchingProjectCli !== null}
             onChange={setSelectedProjectModel}
           />
-          {directProjectChat ? <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>
-            : installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
+          {!directProjectChat && installedAgents.length === 0 && <p className="dialog__body">{t("terminal.addCli.none")}</p>}
           {newProjectError && (
             <Callout tone="danger" title={t("terminal.projects.launchFailed")}>
               <span className="mono">{newProjectError}</span>
