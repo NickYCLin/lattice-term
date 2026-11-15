@@ -592,8 +592,10 @@ Agent Fleet 的執行中清單現在也能對前景工作階段選擇「MCP 權�
 
 ### 與獨立對話頁交談
 
-在 LatticeTerm 開啟要使用的原對話，依需要勾選該對話的「允許讀取」及
-「允許傳訊」。兩項預設都關閉，不會因為已分享 Fleet 或 Remote 而一併開放。
+在桌面新建原生 CLI 對話時，預設登記該對話的「允許讀取」及「允許傳訊」，
+可在原對話設定分別關閉。既有或匯入的對話不會自動開放，CLIProxyAPI 對話
+仍需手動分享，也不會因為已分享 Fleet 或 Remote 而一併開放。
+服務尚未就緒時會等候登記；登記失敗會顯示錯誤，不會顯示為已允許。
 先呼叫 `list_authorized_connections`，選 `backend: desktopChat`，再用
 `desktop_chat` 的 `state`、`read`、`send`。`read` 以回傳的 `before` 讀取較舊頁；
 `send` 必須附上 `requestId`，且不得在不確定結果後換新 ID 重送。

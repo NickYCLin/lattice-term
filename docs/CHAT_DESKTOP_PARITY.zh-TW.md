@@ -340,7 +340,8 @@ LatticeTerm 的整合必須自己提供瀏覽器執行環境。
 - 一般對話不需要選擇專案。執行目錄位於應用程式資料目錄的
   `chat-workspaces/<thread-id>`，不使用使用者家目錄作為隱含專案。
   刪除對話不會順便刪除助理產生的檔案。
-- Codex 對話可勾選「允許使用瀏覽器」。使用固定版本的
+- 新建 Codex 與 Claude Code 對話預設勾選「允許使用瀏覽器」，可自行關閉；
+  既有對話保留原設定，不支援的 CLI 不會啟用。使用固定版本的
   `@playwright/mcp@0.0.80`，由本機 Node.js 啟動；Windows 使用 Edge，
   其他桌面平台使用 Chrome。配置只傳給該次 app-server，不寫入使用者設定。
   [Playwright 的隔離模式](https://github.com/microsoft/playwright-mcp#configuration)

@@ -741,7 +741,10 @@ Windows Codex 另有 `promptReadiness.inputProfile`，回傳 `verified`、`reaso
 
 ## 獨立對話頁的 MCP
 
-在原對話上分別勾選「允許讀取」及「允許傳訊」，預設兩項都關閉。
+桌面新建的原生 CLI 對話預設開啟「允許讀取」與「允許傳訊」，
+可在原對話上分別關閉。分享登記僅在本次建立時執行一次，服務未就緒時等候，
+失敗時顯示錯誤；不會自動重新開啟已撤銷或因設定變更而失效的權限。
+既有、匯入與 CLIProxyAPI 對話仍需手動分享，重新載入後也不會自動恢復分享。
 `list_authorized_connections` 只列出已分享的 `backend: desktopChat`；使用其中
 `id` 作為 `desktop_chat` 的 `targetId`，不能猜 thread ID 或代替使用者分享。
 
