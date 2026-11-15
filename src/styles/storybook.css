@@ -79,8 +79,22 @@
 }
 
 :root[data-theme="storybook"] :is(button, input, select, textarea, [role="button"], a):focus-visible {
-  outline: 3px dashed var(--focus);
-  outline-offset: 3px;
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+:root[data-theme="storybook"] .chat-composer__input:focus-visible {
+  outline: none;
+}
+
+:root[data-theme="storybook"] .session-composer__frame:has(.chat-composer__input:focus-visible) {
+  border-radius: 1.25rem;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+:root[data-theme="storybook"] .session-composer__frame:has(.chat-composer__input:focus-visible) :is(.session-composer__context, .session-composer__box),
+:root[data-theme="storybook"] .chat-composer__box:has(.chat-composer__input:focus-visible) {
+  border-color: var(--accent);
 }
 
 :root[data-theme="storybook"] .scrim {
