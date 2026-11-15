@@ -38,6 +38,7 @@ import {
   clearSensitiveClipboard,
   type SensitiveClipboardClearOutcome,
 } from "../app/sensitiveClipboard";
+import { ChatInputSettings } from "../components/settings/ChatInputSettings";
 import { NotificationSoundPanel } from "../components/settings/NotificationSoundPanel";
 import { TypographySettings } from "../components/settings/TypographySettings";
 import { moveRadioGroupFocus } from "../components/overlays/radioNavigation";
@@ -366,6 +367,8 @@ export function SettingsView({
           </div>
         </div>
       </section>
+
+      <ChatInputSettings preferences={preferences} onChange={onChange} />
 
       <section className="panel glass glass--sheen">
         <header className="panel__head">

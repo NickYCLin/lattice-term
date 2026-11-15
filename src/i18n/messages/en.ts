@@ -2950,4 +2950,12 @@ export const en: Messages = {
   "chat.worktree.path": "New absolute path (parent must exist)",
   "chat.worktree.create": "Create and open conversation",
   "chat.worktree.suffix": "Handoff",
+  "settings.chatInput.title": "Chat input",
+  "settings.chatInput.shortcut": "Send shortcut",
+  "settings.chatInput.enter": "Enter sends, Shift+Enter inserts a new line",
+  "settings.chatInput.modifierEnter": "Ctrl/⌘+Enter sends, Enter inserts a new line",
+  "settings.chatInput.working": "Send while the assistant is working",
+  "settings.chatInput.queue": "Queue until the current turn finishes",
+  "settings.chatInput.steer": "Prefer steering when natively supported",
+  "settings.chatInput.hint": "Steering currently applies to native Codex chats. Other providers and terminal sessions queue messages. A failed steer keeps the draft and is never automatically resent.",
 };

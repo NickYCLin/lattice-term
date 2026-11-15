@@ -2862,6 +2862,14 @@ export const zhTW = {
   "chat.worktree.path": "新的絕對路徑（上層目錄需已存在）",
   "chat.worktree.create": "建立並開啟對話",
   "chat.worktree.suffix": "交接",
+  "settings.chatInput.title": "對話輸入",
+  "settings.chatInput.shortcut": "送出快捷鍵",
+  "settings.chatInput.enter": "Enter 送出，Shift+Enter 換行",
+  "settings.chatInput.modifierEnter": "Ctrl／⌘+Enter 送出，Enter 換行",
+  "settings.chatInput.working": "助理執行中送出訊息",
+  "settings.chatInput.queue": "排隊，完成目前工作後處理",
+  "settings.chatInput.steer": "優先插話（原生支援時）",
+  "settings.chatInput.hint": "插話目前適用於原生 Codex 對話。其他來源與終端工作階段維持排隊，插話失敗時會保留草稿，不自動重送。",
 } as const;
 
 export type MessageKey = keyof typeof zhTW;
