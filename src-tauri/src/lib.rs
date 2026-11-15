@@ -1801,9 +1801,7 @@ async fn agent_chat_send(
     )
     .await;
     if result.is_ok() && allow_computer && crate::chat_tools::computer::enabled(&thread_id).await {
-        let minimized = app
-            .get_webview_window("main")
-            .is_some_and(|window| window.minimize().is_ok());
+        let minimized = minimize_for_computer(&app).is_ok();
         if !minimized {
             let _ = crate::chat_tools::computer::enable(&thread_id, false).await;
             crate::agent_chat::ChatSink::event(
@@ -3451,6 +3449,20 @@ async fn chat_browser_action(
     }
     crate::chat_tools::browser::action(&thread_id, &action, args).await
 }
+fn minimize_for_computer(app: &AppHandle) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        app.get_webview_window("main")
+            .ok_or("主要視窗不可用。")?
+            .minimize()
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Err("電腦控制僅支援桌面版。".into())
+    }
+}
 #[tauri::command]
 async fn chat_computer_enable(
     app: AppHandle,
@@ -3458,13 +3470,13 @@ async fn chat_computer_enable(
     enabled: bool,
     start_now: Option<bool>,
 ) -> Result<(), String> {
+    #[cfg(mobile)]
+    if enabled {
+        return Err("電腦控制僅支援桌面版。".into());
+    }
     crate::chat_tools::computer::enable(&thread_id, enabled).await?;
     if enabled && start_now.unwrap_or(false) {
-        let result = app
-            .get_webview_window("main")
-            .ok_or("主要視窗不可用。")?
-            .minimize()
-            .map_err(|e| e.to_string());
+        let result = minimize_for_computer(&app);
         if result.is_err() {
             let _ = crate::chat_tools::computer::enable(&thread_id, false).await;
         }
