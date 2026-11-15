@@ -4,6 +4,46 @@
 
 ---
 
+## [2026.11.16](https://github.com/NickYCLin/lattice-term/compare/v2026.11.15...v2026.11.16) (2026-11-15)
+
+
+### 🚀 新增功能
+
+* 加入對話專用瀏覽器與原生工具 ([7a8cc64](https://github.com/NickYCLin/lattice-term/commit/7a8cc64d06b8daeb5428cd667dcbfa3413870f0f))
+* 加入對話工具與產物預覽介面 ([863a4f1](https://github.com/NickYCLin/lattice-term/commit/863a4f1124a387301182426b679b9e53da2df630))
+* 加入對話送出方式偏好 ([7356a18](https://github.com/NickYCLin/lattice-term/commit/7356a18da7eb783ff15477c5ef2201eb69d03522))
+* 接上原生對話事件與回合操作 ([56c16d7](https://github.com/NickYCLin/lattice-term/commit/56c16d7d8c5131ea18e1df2ab831d4365ed3ef89))
+* 新對話預設允許瀏覽器與 MCP 分享 ([ff590e3](https://github.com/NickYCLin/lattice-term/commit/ff590e3a081531728f18b3e79b1ffa7198fe20be))
+* 補齊對話 Markdown 與程式碼呈現 ([4d12300](https://github.com/NickYCLin/lattice-term/commit/4d123009e5e338572c33a80750e3083c711c984f))
+* 補齊對話輸入與原生歷史導覽 ([dd9eba2](https://github.com/NickYCLin/lattice-term/commit/dd9eba2c0667e7b747f371c1cf2841776aacf7f7))
+* 補齊對話頁原生操作與工具整合 ([cd9e86b](https://github.com/NickYCLin/lattice-term/commit/cd9e86b4ccf54e5e86b5eee7ee4c5fbc5228504d))
+* 補齊變更面板與平行工作目錄 ([e7f3218](https://github.com/NickYCLin/lattice-term/commit/e7f3218f577335d0188ad779425cf41981bad881))
+
+
+### 🛠️ 問題修正
+
+* 依原生任務邊界標記歷史訊息 ([a6d9c03](https://github.com/NickYCLin/lattice-term/commit/a6d9c033ca333e23b8f3dbe874ef8972921dddac))
+* 保留 CLI 對話訊息的識別避免捲動閃跳 ([f632ac2](https://github.com/NickYCLin/lattice-term/commit/f632ac2d8a86d1824de906b95e81b11e339136a3))
+* 修正 Windows 工作目錄路徑與測試換行 ([428f66d](https://github.com/NickYCLin/lattice-term/commit/428f66d7da9d842acceec1eef6dd79d258e322ac))
+* 修正對話初次派送與執行狀態提示 ([#395](https://github.com/NickYCLin/lattice-term/issues/395)) ([80d8a2e](https://github.com/NickYCLin/lattice-term/commit/80d8a2e90ba5f4fc2152d5d5aa6e351139b198a4))
+* 修正對話第一則訊息卡在待送佇列 ([a2245f4](https://github.com/NickYCLin/lattice-term/commit/a2245f466c4fab69027ad6045a6697497d88bc08))
+* 在平行對話保留原代理設定 ([e58f05a](https://github.com/NickYCLin/lattice-term/commit/e58f05a6932405aac581bb5159fe150e1c693c2e))
+* 將 Skills 管理收合為入口卡片 ([3e00c74](https://github.com/NickYCLin/lattice-term/commit/3e00c74a3bce338f786156c928c262f483c0e1be))
+* 將未歸檔的對話補入工作目錄資料夾 ([87c2908](https://github.com/NickYCLin/lattice-term/commit/87c290876e4836396b4a60413f50342ed9760845))
+* 將繪本主題的虛線焦點改為細實線 ([edf587e](https://github.com/NickYCLin/lattice-term/commit/edf587e7e03506839d920aad8d5c8803e5dfa67a))
+* 將電腦控制視窗操作限定在桌面版 ([07f86aa](https://github.com/NickYCLin/lattice-term/commit/07f86aa7ee5f804dac7cff804e0b1c61a4828936))
+* 恢復 Markdown 清單的縮排與項目符號 ([8b03cc9](https://github.com/NickYCLin/lattice-term/commit/8b03cc978250798612becdeecde770975df21663))
+* 改善對話顯示與預設設定 ([#398](https://github.com/NickYCLin/lattice-term/issues/398)) ([932ac56](https://github.com/NickYCLin/lattice-term/commit/932ac567a891f27490522be9f1725f518d144680))
+* 簡化圖片附件與 Skills 管理顯示 ([#396](https://github.com/NickYCLin/lattice-term/issues/396)) ([e4fc177](https://github.com/NickYCLin/lattice-term/commit/e4fc1775c72b0a09d6dfecc34f3436596b68dabe))
+* 統一預設模型的顯示名稱 ([a7bc981](https://github.com/NickYCLin/lattice-term/commit/a7bc9813d2611b183a0df8e065e51473474709cd))
+* 補齊生成圖片與對話產物的預覽範圍 ([6e5acd5](https://github.com/NickYCLin/lattice-term/commit/6e5acd58e5c3fb4ff3610428524e11d95d597e66))
+* 調整工具協定版本的預設處理 ([5529373](https://github.com/NickYCLin/lattice-term/commit/55293730af247b3a0fd420e15cbea7ff30286974))
+* 調整繪本主題的標誌底座 ([#397](https://github.com/NickYCLin/lattice-term/issues/397)) ([7bb50b0](https://github.com/NickYCLin/lattice-term/commit/7bb50b0e45ea192a82836590bbdff152057cc190))
+* 調整繪本主題的標誌底色與陰影 ([0c8aca2](https://github.com/NickYCLin/lattice-term/commit/0c8aca2553bde650c7ba3d24da1d30d9ec8771e0))
+* 讓對話執行狀態顯示明顯的旋轉圖示 ([c47c7ee](https://github.com/NickYCLin/lattice-term/commit/c47c7ee16009e4083c4916c4c199516afd0ee045))
+* 避免瀏覽器初始化阻擋一般對話 ([44a2015](https://github.com/NickYCLin/lattice-term/commit/44a2015bc8360abe5eddc0542e4f4bc6c5e5173a))
+* 隱藏對話圖片的檔名列 ([b2e188b](https://github.com/NickYCLin/lattice-term/commit/b2e188b7e0c94eca71a5c86a7508a653e37955d9))
+
 ## [2026.11.15](https://github.com/NickYCLin/lattice-term/compare/v2026.11.14...v2026.11.15) (2026-11-14)
 
 
