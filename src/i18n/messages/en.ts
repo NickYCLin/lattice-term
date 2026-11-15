@@ -2922,4 +2922,8 @@ export const en: Messages = {
   "database.cardNames": "Databases · {names}",
   "database.openSqlCount": "Open SQL ({count})",
   "database.connectionCounts": "Remote {remote} · Databases {database}",
+  "chat.markdown.code": "Code",
+  "chat.markdown.copy": "Copy",
+  "chat.markdown.copied": "Copied",
+  "chat.markdown.copyFailed": "Could not copy. Select the code and copy it manually.",
 };

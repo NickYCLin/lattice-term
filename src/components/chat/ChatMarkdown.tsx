@@ -1,50 +1,47 @@
-/** Renders an assistant reply from the block tree `parseMarkdown` builds. */
+import { Children, isValidElement, useId, type ReactNode } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { markdownLinkKind, stripAgentMetadata } from "../../app/chatMarkdown";
+import { hasDesktopBackend } from "../../app/nativeRuntime";
+import { ChatCodeBlock } from "./ChatCodeBlock";
 
-import { useMemo, type ReactNode } from "react";
-import { parseMarkdown, type InlineNode } from "../../app/chatMarkdown";
-
-function renderInline(nodes: InlineNode[]): ReactNode[] {
-  return nodes.map((node, index) => {
-    switch (node.type) {
-      case "text":
-        return node.text;
-      case "code":
-        return <code key={index}>{node.text}</code>;
-      case "strong":
-        return <strong key={index}>{renderInline(node.children)}</strong>;
-    }
-  });
+async function openExternal(url: string) {
+  if (hasDesktopBackend()) {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } else window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function ChatMarkdown({ source }: { source: string }) {
-  const blocks = useMemo(() => parseMarkdown(source), [source]);
-  return (
-    <div className="chat-markdown">
-      {blocks.map((block, index) => {
-        switch (block.type) {
-          case "paragraph":
-            return <p key={index}>{renderInline(block.children)}</p>;
-          case "heading": {
-            // Replies sit inside a view that already has h2/h3 headings, so
-            // a reply's own heading levels are offset to stay below them.
-            const level = Math.min(block.level + 3, 6);
-            const Tag = `h${level}` as "h4" | "h5" | "h6";
-            return <Tag key={index}>{renderInline(block.children)}</Tag>;
-          }
-          case "code":
-            return (
-              <pre key={index} data-language={block.language || undefined}>
-                <code>{block.text}</code>
-              </pre>
-            );
-          case "list": {
-            const items = block.items.map((item, itemIndex) => (
-              <li key={itemIndex}>{renderInline(item)}</li>
-            ));
-            return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>;
-          }
-        }
-      })}
-    </div>
-  );
+export function ChatMarkdown({ source, onOpenFile }: { source: string; onOpenFile?: (path: string) => void }) {
+  const id = useId();
+  return <div className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml
+    remarkRehypeOptions={{ clobberPrefix: `message-${id}-` }}
+    urlTransform={url => markdownLinkKind(url) ? url : ""}
+    components={{
+      h1: ({ children }) => <h4>{children}</h4>,
+      h2: ({ children }) => <h5>{children}</h5>,
+      h3: ({ children }) => <h6>{children}</h6>,
+      a: ({ href, children, title }) => {
+        const kind = href ? markdownLinkKind(href) : null;
+        if (kind === "file") return onOpenFile
+          ? <button type="button" className="chat-markdown__file" title={title ?? href} onClick={() => onOpenFile(href!)}>{children}</button>
+          : <span title={title ?? href}>{children}</span>;
+        if (!kind) return <span>{children}</span>;
+        return <a href={href} title={title} target={kind === "external" ? "_blank" : undefined} rel="noopener noreferrer"
+          onClick={event => {
+            if (kind === "external") { event.preventDefault(); void openExternal(href!).catch(() => {}); }
+          }}>{children}</a>;
+      },
+      // File images are rendered by the conversation's scoped image preview.
+      // Rendering Markdown must not load remote tracking images in the background.
+      img: () => null,
+      table: ({ children }) => <div className="chat-markdown__table"><table>{children}</table></div>,
+      pre: ({ children }) => {
+        const code = Children.toArray(children)[0];
+        if (!isValidElement<{ children?: ReactNode; className?: string }>(code)) return <pre>{children}</pre>;
+        const language = /(?:^|\s)language-(\S+)/.exec(code.props.className ?? "")?.[1] ?? "";
+        const text = String(code.props.children ?? "").replace(/\n$/, "");
+        return <ChatCodeBlock language={language} text={text} />;
+      },
+    }}>{stripAgentMetadata(source)}</Markdown></div>;
 }

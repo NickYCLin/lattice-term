@@ -2627,3 +2627,72 @@ button.chat-diff__line.is-commentable:focus-visible {
     animation: none;
   }
 }
+
+.chat-markdown :is(ul, ol) { padding-inline-start: 1.5em; }
+.chat-markdown ul { list-style-type: disc; }
+.chat-markdown ul ul { list-style-type: circle; }
+.chat-markdown ul ul ul { list-style-type: square; }
+.chat-markdown ol { list-style-type: decimal; }
+
+.chat-markdown a,
+.chat-markdown__file {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.chat-markdown__file {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.chat-markdown blockquote {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-inline-start: 3px solid var(--accent);
+  color: var(--text-muted);
+}
+.chat-markdown blockquote > :last-child { margin-bottom: 0; }
+.chat-markdown li > :last-child { margin-bottom: 0; }
+.chat-markdown li > :is(ul, ol) { margin-top: var(--space-1); }
+.chat-markdown__table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
+}
+.chat-markdown table { border-collapse: collapse; font-size: inherit; }
+.chat-markdown :is(th, td) {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  text-align: start;
+}
+.chat-markdown th { background: var(--surface-active); }
+.chat-markdown .contains-task-list { list-style: none; padding-inline-start: var(--space-3); }
+.chat-markdown .task-list-item > input { margin-inline-end: var(--space-2); }
+.chat-code {
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-deep);
+  overflow: hidden;
+}
+.chat-code__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+.chat-code pre { margin: 0; border: 0; border-radius: 0; }
+.chat-code :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in) { color: var(--accent); }
+.chat-code :is(.hljs-string, .hljs-regexp, .hljs-addition) { color: var(--ok); }
+.chat-code :is(.hljs-number, .hljs-attr, .hljs-attribute, .hljs-symbol) { color: var(--warn); }
+.chat-code :is(.hljs-comment, .hljs-quote) { color: var(--text-faint); font-style: italic; }
+.chat-code :is(.hljs-title, .hljs-section, .hljs-name) { color: var(--accent); font-weight: 600; }
+.chat-code .hljs-deletion { color: var(--danger); }
