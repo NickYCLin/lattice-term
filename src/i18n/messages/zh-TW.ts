@@ -2834,6 +2834,10 @@ export const zhTW = {
   "database.cardNames": "資料庫 · {names}",
   "database.openSqlCount": "開啟 SQL（{count}）",
   "database.connectionCounts": "遠端 {remote} · 資料庫 {database}",
+  "chat.markdown.code": "程式碼",
+  "chat.markdown.copy": "複製",
+  "chat.markdown.copied": "已複製",
+  "chat.markdown.copyFailed": "無法複製，請選取程式碼後手動複製。",
 } as const;
 
 export type MessageKey = keyof typeof zhTW;
