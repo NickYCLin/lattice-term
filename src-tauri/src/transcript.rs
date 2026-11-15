@@ -2070,17 +2070,33 @@ fn read_conversation_snapshot_with_tools(
     }
     let mut current_turn: Option<String> = None;
     let incomplete = visit_transcript_rows(path, |value| {
-        if kind == TranscriptKind::Codex && value["type"].as_str() == Some("turn_context") {
-            current_turn = value["payload"]["turn_id"]
-                .as_str()
-                .filter(|id| {
-                    !id.is_empty()
-                        && id.len() <= 256
-                        && id
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                })
-                .map(str::to_string);
+        if kind == TranscriptKind::Codex {
+            let native_id = if value["type"].as_str() == Some("turn_context") {
+                Some(&value["payload"]["turn_id"])
+            } else if value["type"].as_str() == Some("event_msg") {
+                match value["payload"]["type"].as_str() {
+                    Some("task_started") => Some(&value["payload"]["turn_id"]),
+                    Some("task_complete" | "turn_aborted") => {
+                        current_turn = None;
+                        None
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some(native_id) = native_id {
+                current_turn = native_id
+                    .as_str()
+                    .filter(|id| {
+                        !id.is_empty()
+                            && id.len() <= 256
+                            && id
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    })
+                    .map(str::to_string);
+            }
         }
         let (role, content) = match kind {
             TranscriptKind::Codex => {
@@ -4674,5 +4690,38 @@ mod usage_tests {
         assert_eq!(usage.reasoning_tokens, 3);
         assert_eq!(usage.api_calls, 2);
         assert_eq!(session_usage(TranscriptKind::Codex, "/work", ""), None);
+    }
+    #[test]
+    fn codex_history_uses_native_task_boundaries_without_leaking_a_previous_turn_id() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rollout.jsonl");
+        let rows = [
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"first-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}),
+            serde_json::json!({"type":"turn_context","payload":{"turn_id":"first-turn"}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"first-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"outside a declared turn"}]}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"second-turn"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}}),
+        ];
+        fs::write(
+            &path,
+            rows.iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        let snapshot =
+            read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, false).unwrap();
+        assert_eq!(snapshot.messages.len(), 3);
+        assert_eq!(
+            snapshot.messages[0].native_turn_id.as_deref(),
+            Some("first-turn")
+        );
+        assert_eq!(snapshot.messages[1].native_turn_id, None);
+        assert_eq!(
+            snapshot.messages[2].native_turn_id.as_deref(),
+            Some("second-turn")
+        );
     }
 }
