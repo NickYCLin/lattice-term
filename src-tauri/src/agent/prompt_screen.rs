@@ -15,6 +15,7 @@ pub(super) struct PromptScreen {
     awaiting_clear: bool,
     synchronized: bool,
     size_supported: bool,
+    codex_idle: bool,
 }
 
 impl PromptScreen {
@@ -32,6 +33,7 @@ impl PromptScreen {
             awaiting_clear: false,
             synchronized: false,
             size_supported: rows <= MAX_ROWS && cols <= MAX_COLS,
+            codex_idle: false,
         }
     }
 
@@ -44,6 +46,10 @@ impl PromptScreen {
         self.pending.extend_from_slice(bytes);
         let end = crate::agent_daemon::mcp::complete_terminal_prefix(&self.pending);
         for control in crate::agent_daemon::mcp::terminal_controls(&self.pending[..end]) {
+            if control.starts_with(b"\x1b]7501;") {
+                self.codex_idle = control == b"\x1b]7501;state=idle:app=codex\x1b\\"
+                    || control == b"\x1b]7501;state=idle:app=codex\x07";
+            }
             match control {
                 b"\x1b[2J" | b"\x1bc" => self.awaiting_clear = false,
                 b"\x1b[?2026h" => self.synchronized = true,
@@ -134,34 +140,6 @@ impl PromptScreen {
                 text.push('\n');
             }
         }
-        let text = text.to_lowercase();
-        if super::has_explicit_working_status(&text)
-            || super::has_attention_marker(&text)
-            || super::has_actionable_attention_prompt(&text)
-            || [
-                "esc to",
-                "ctrl+c to",
-                "shift+tab",
-                "select an",
-                "select a ",
-                "would you like",
-                "do you trust",
-                "permission",
-                "approve",
-                "approval",
-                "1. ",
-                "1) ",
-                "working",
-                "thinking",
-                "正在",
-                "核准",
-                "選擇",
-            ]
-            .iter()
-            .any(|marker| text.contains(marker))
-        {
-            return Some("terminal_dialog_or_work");
-        }
         let (row, col) = screen.cursor_position();
         let Some(line) = rows.get(usize::from(row)) else {
             return Some("terminal_screen_unknown");
@@ -192,6 +170,51 @@ impl PromptScreen {
             });
         // Cursor position and dimmed, exact placeholders distinguish an empty
         // composer from real text; all unknown placeholders stay rejected.
+        // Codex 0.169 renders old turns above its main composer. Words in
+        // those turns are not live dialogs. Require all three independent
+        // surfaces: native idle, the exact dimmed main-composer placeholder,
+        // and its model/status plus shortcut footer. Idle alone also occurs
+        // in selection menus, which must never authorize Enter.
+        let native_main_composer = definition == "codex"
+            && self.codex_idle
+            && placeholder
+            && rows
+                .iter()
+                .skip(usize::from(row) + 1)
+                .any(|line| is_codex_shortcut_footer(line.trim()))
+            && rows
+                .iter()
+                .skip(usize::from(row) + 1)
+                .any(|line| !line.trim().starts_with('⚠') && is_codex_status_line(line.trim()));
+        let text = text.to_lowercase();
+        if super::has_explicit_working_status(&text)
+            || (!native_main_composer
+                && (super::has_attention_marker(&text)
+                    || super::has_actionable_attention_prompt(&text)
+                    || [
+                        "esc to",
+                        "ctrl+c to",
+                        "shift+tab",
+                        "select an",
+                        "select a ",
+                        "would you like",
+                        "do you trust",
+                        "permission",
+                        "approve",
+                        "approval",
+                        "1. ",
+                        "1) ",
+                        "working",
+                        "thinking",
+                        "正在",
+                        "核准",
+                        "選擇",
+                    ]
+                    .iter()
+                    .any(|marker| text.contains(marker))))
+        {
+            return Some("terminal_dialog_or_work");
+        }
         if !(empty || placeholder)
             || col != 2
             || !line.starts_with(marker)
@@ -209,7 +232,8 @@ impl PromptScreen {
                 && !percentage
                     .strip_suffix("% context left")
                     .is_some_and(|number| number.parse::<u8>().is_ok_and(|number| number <= 100))
-                && !(definition == "codex" && is_codex_status_line(line))
+                && !(definition == "codex"
+                    && (is_codex_status_line(line) || is_codex_shortcut_footer(line)))
         }) {
             return Some("terminal_screen_unknown");
         }
@@ -236,6 +260,15 @@ fn is_codex_permission_header(screen: &vt100::Screen, rows: &[String], index: us
                 || line
                     .strip_prefix(">_ OpenAI Codex (")
                     .is_some_and(|suffix| !suffix.is_empty() && suffix.ends_with(')'))
+        })
+}
+
+/// Exact Codex 0.169 main-composer footer, with an optional warning count.
+fn is_codex_shortcut_footer(line: &str) -> bool {
+    line.strip_prefix("← for agents · ? for shortcuts")
+        .is_some_and(|rest| {
+            rest.trim().is_empty()
+                || (rest.trim().starts_with('⚠') && is_codex_status_line(rest.trim()))
         })
 }
 
@@ -299,6 +332,69 @@ mod tests {
         );
         screen.settle_for_test();
         screen
+    }
+
+    fn codex_0169_fixture() -> PromptScreen {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-0169-resumed-idle.json"
+        ))
+        .unwrap();
+        let mut screen = PromptScreen::new(30, 120);
+        screen.feed(
+            fixture["output"].as_str().unwrap().as_bytes(),
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        screen
+    }
+
+    #[test]
+    fn native_idle_main_composer_accepts_real_0169_resumed_history() {
+        let screen = codex_0169_fixture();
+        assert_eq!(screen.blocker("codex", Instant::now()), None);
+        for state in ["working", "blocked", "idle:app=other"] {
+            let mut screen = codex_0169_fixture();
+            let report = if state.contains(':') {
+                format!("\x1b]7501;state={state}\x1b\\")
+            } else {
+                format!("\x1b]7501;state={state}:app=codex\x1b\\")
+            };
+            screen.feed(report.as_bytes(), Instant::now());
+            screen.settle_for_test();
+            assert!(screen.blocker("codex", Instant::now()).is_some(), "{state}");
+        }
+    }
+
+    #[test]
+    fn native_idle_does_not_authorize_menus_drafts_or_an_unknown_footer() {
+        for redraw in [
+            "\x1b[2J\x1b[HResume paused goal?\r\n› 1. Resume goal\r\n  2. Keep paused\x1b[2;3H",
+            "\x1b[22;1H› human draft\x1b[K\x1b[22;3H",
+            "\x1b[25;1H  unknown menu\x1b[K\x1b[22;3H",
+            "\x1b[20;1HWorking (12s • esc to interrupt)\x1b[22;3H",
+            "\x1b[22;3H\x1b[0mAsk Codex to do anything\x1b[22;3H",
+        ] {
+            let mut screen = codex_0169_fixture();
+            screen.feed(redraw.as_bytes(), Instant::now());
+            screen.settle_for_test();
+            assert!(
+                screen.blocker("codex", Instant::now()).is_some(),
+                "{redraw:?}"
+            );
+        }
+        for footer in [
+            "← for agents · ? for shortcuts",
+            "← for agents · ? for shortcuts  ⚠ 2 warnings · f2 to view",
+        ] {
+            assert!(is_codex_shortcut_footer(footer));
+        }
+        for footer in [
+            "← for agents · ? for shortcuts approve?",
+            "← for agents · ? for shortcuts ⚠ two warnings · f2 to view",
+            "← for agents · ? for shortcuts ⚠ 1 warning · f3 to view",
+        ] {
+            assert!(!is_codex_shortcut_footer(footer));
+        }
     }
 
     #[test]

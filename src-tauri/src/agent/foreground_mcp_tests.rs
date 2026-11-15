@@ -330,3 +330,28 @@ async fn project_background_first_prompt_uses_the_same_screen_gate_and_never_gue
         assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"terminal_turn_unconfirmed"));
     }
 }
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_composer_sends_once_from_the_real_codex_0169_resumed_screen() {
+    let f = ForegroundFixture::with_resume(true);
+    f.unreported_prompt();
+    let entry = f.registry.get(&f.id).unwrap();
+    *entry.prompt_screen.lock().unwrap() = prompt_screen::PromptScreen::new(30, 120);
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/codex-0169-resumed-idle.json"
+    )).unwrap();
+    f.registry.record_output(&f.id, fixture["output"].as_str().unwrap().as_bytes()).unwrap();
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    // An actual pending approval still blocks the user's send, despite idle
+    // and the otherwise recognizable main composer. The draft stays upstream.
+    f.registry.approvals.open(&f.id, approval::ApprovalAsk {
+        tool_name:"fixture".into(), summary:"pending".into()
+    }, "approval".into()).unwrap();
+    assert_eq!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"must stay draft\r")).unwrap_err(), DESKTOP_PROMPT_NOT_READY);
+    assert!(f.registry.approvals.take(&f.id, "approval").is_some());
+    assert_eq!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"synthetic desktop delivery\r")).unwrap(), 0);
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
+    assert!(entry.queued_prompts.lock().unwrap().is_empty());
+}
