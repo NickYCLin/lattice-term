@@ -8,7 +8,7 @@ import type { AgentDefinition } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
 import { skillSourceLabel } from "../chat/ChatSkillPicker";
 import { Callout } from "../common/Callout";
-import { AgentIcon } from "../icons";
+import { AgentIcon, ChevronRightIcon } from "../icons";
 
 interface DiscoveredSkill {
   name: string;
@@ -59,6 +59,7 @@ export function AgentSkillsPanel({
 }) {
   const { t } = useI18n();
   const requestRef = useRef(0);
+  const [expanded, setExpanded] = useState(false);
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [skills, setSkills] = useState<DiscoveredSkill[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,7 +85,7 @@ export function AgentSkillsPanel({
 
   useEffect(() => {
     const request = ++requestRef.current;
-    if (!normalizedDirectory || !activeTarget) {
+    if (!expanded || !normalizedDirectory || !activeTarget) {
       setSkills(null);
       setLoading(false);
       setError(null);
@@ -113,7 +114,7 @@ export function AgentSkillsPanel({
         if (request === requestRef.current) setLoading(false);
       }
     })();
-  }, [activeTarget, normalizedDirectory]);
+  }, [activeTarget, normalizedDirectory, expanded]);
 
   useEffect(
     () => () => {
@@ -123,81 +124,88 @@ export function AgentSkillsPanel({
   );
 
   return (
-    <section className="agents-skills">
-      <div className="agents-section-heading">
+    <details className="agents-skills" open={expanded} onToggle={event => {
+      if (event.target === event.currentTarget) setExpanded(event.currentTarget.open);
+    }}>
+      <summary className="agents-section-heading agents-skills__summary">
         <div>
           <span className="eyebrow">{t("agents.skills.eyebrow")}</span>
           <h3>{t("agents.skills.title")}</h3>
         </div>
-        <span className={`badge ${loading ? "tone-neutral" : "tone-ok"}`}>
-          {loading
-            ? t("agents.skills.discovering")
-            : t("agents.skills.count", { count: distinctSkills.length })}
+        <span className="agents-skills__summary-actions">
+          {expanded && <span className={`badge ${loading ? "tone-neutral" : "tone-ok"}`}>
+            {loading
+              ? t("agents.skills.discovering")
+              : t("agents.skills.count", { count: distinctSkills.length })}
+          </span>}
+          <ChevronRightIcon size={18} />
         </span>
-      </div>
-      <p className="agents-skills__body">{t("agents.skills.body")}</p>
+      </summary>
+      {expanded && <div className="agents-skills__content">
+        <p className="agents-skills__body">{t("agents.skills.body")}</p>
 
-      {!normalizedDirectory ? (
-        <Callout tone="info">{t("agents.skills.directoryRequired")}</Callout>
-      ) : targets.length === 0 ? (
-        <Callout tone="info">{t("agents.skills.agentRequired")}</Callout>
-      ) : (
-        <>
-          <label className="field agents-skills__target">
-            <span className="field__label">{t("agents.skills.target")}</span>
-            <select
-              className="select"
-              value={activeTarget?.id ?? ""}
-              onChange={(event) => setSelectedTargetId(event.currentTarget.value)}
-            >
-              {targets.map((target) => (
-                <option key={target.id} value={target.id}>{target.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="agents-skills__filters">
-            <label className="field"><span>{t("agents.skills.search")}</span>
-              <input className="input" value={query} onChange={event => setQuery(event.currentTarget.value)} />
-            </label>
-            <label className="field"><span>{t("agents.skills.source")}</span>
-              <select className="select" value={sourceFilter} onChange={event => setSourceFilter(event.currentTarget.value)}>
-                <option value="">{t("agents.skills.allSources")}</option>
-                {[...new Set((skills ?? []).map(skill => skill.source))].sort().map(source =>
-                  <option key={source} value={source}>{skillSourceLabel(source, t)}</option>)}
+        {!normalizedDirectory ? (
+          <Callout tone="info">{t("agents.skills.directoryRequired")}</Callout>
+        ) : targets.length === 0 ? (
+          <Callout tone="info">{t("agents.skills.agentRequired")}</Callout>
+        ) : (
+          <>
+            <label className="field agents-skills__target">
+              <span className="field__label">{t("agents.skills.target")}</span>
+              <select
+                className="select"
+                value={activeTarget?.id ?? ""}
+                onChange={(event) => setSelectedTargetId(event.currentTarget.value)}
+              >
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>{target.label}</option>
+                ))}
               </select>
             </label>
-            <button type="button" className="button button--quiet" onClick={() => { setQuery(""); setSourceFilter(""); }}>
-              {t("agents.skills.clear")}</button>
-          </div>
+            <div className="agents-skills__filters">
+              <label className="field"><span>{t("agents.skills.search")}</span>
+                <input className="input" value={query} onChange={event => setQuery(event.currentTarget.value)} />
+              </label>
+              <label className="field"><span>{t("agents.skills.source")}</span>
+                <select className="select" value={sourceFilter} onChange={event => setSourceFilter(event.currentTarget.value)}>
+                  <option value="">{t("agents.skills.allSources")}</option>
+                  {[...new Set((skills ?? []).map(skill => skill.source))].sort().map(source =>
+                    <option key={source} value={source}>{skillSourceLabel(source, t)}</option>)}
+                </select>
+              </label>
+              <button type="button" className="button button--quiet" onClick={() => { setQuery(""); setSourceFilter(""); }}>
+                {t("agents.skills.clear")}</button>
+            </div>
 
-          {error && (
-            <Callout tone="danger" title={t("agents.skills.failedTitle")}>
-              {t("agents.skills.failed", { detail: error })}
-            </Callout>
-          )}
-          {loading && <p className="agents-skills__loading">{t("agents.skills.discoveringBody")}</p>}
-          {skills?.length === 0 && !loading && (
-            <p className="agents-skills__empty">{t("agents.skills.empty")}</p>
-          )}
-          {skills && skills.length > 0 && !loading && (
-            visibleSkills.length === 0 ? <p role="status">{t("agents.skills.noResults")}</p> :
-            <ul className="agents-skills__list" aria-label={t("agents.skills.title")}>
-              {visibleSkills.map((skill) => (
-                <li key={skillIdentity(skill)}>
-                  <span className="agents-skills__icon" aria-hidden="true"><AgentIcon size={14} /></span>
-                  <div>
-                    <div className="agents-skills__name-row">
-                      <strong>{skill.name}</strong>
-                      <span className="badge tone-neutral">{skillSourceLabel(skill.source, t)}</span>
+            {error && (
+              <Callout tone="danger" title={t("agents.skills.failedTitle")}>
+                {t("agents.skills.failed", { detail: error })}
+              </Callout>
+            )}
+            {loading && <p className="agents-skills__loading">{t("agents.skills.discoveringBody")}</p>}
+            {skills?.length === 0 && !loading && (
+              <p className="agents-skills__empty">{t("agents.skills.empty")}</p>
+            )}
+            {skills && skills.length > 0 && !loading && (
+              visibleSkills.length === 0 ? <p role="status">{t("agents.skills.noResults")}</p> :
+              <ul className="agents-skills__list" aria-label={t("agents.skills.title")}>
+                {visibleSkills.map((skill) => (
+                  <li key={skillIdentity(skill)}>
+                    <span className="agents-skills__icon" aria-hidden="true"><AgentIcon size={14} /></span>
+                    <div>
+                      <div className="agents-skills__name-row">
+                        <strong>{skill.name}</strong>
+                        <span className="badge tone-neutral">{skillSourceLabel(skill.source, t)}</span>
+                      </div>
+                      {skill.description && <details><summary>{t("agents.skills.details")}</summary><p>{skill.description}</p></details>}
                     </div>
-                    {skill.description && <details><summary>{t("agents.skills.details")}</summary><p>{skill.description}</p></details>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </section>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>}
+    </details>
   );
 }
