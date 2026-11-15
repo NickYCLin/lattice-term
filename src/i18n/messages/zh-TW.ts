@@ -1881,6 +1881,7 @@ export const zhTW = {
   "chat.projects.clear": "顯示全部對話",
   "chat.tool.exitCode": "結束碼 {code}",
   "chat.images": "回覆裡提到的圖片",
+  "chat.images.title": "圖片預覽",
   "chat.images.enlarge": "放大",
   "chat.images.preview": "查看圖片：{name}",
   "chat.images.unavailable": "無法載入圖片。檔案可能已移動或刪除，或不在這個對話可預覽的資料夾內。",

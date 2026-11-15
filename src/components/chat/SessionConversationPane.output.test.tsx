@@ -78,7 +78,7 @@ describe("session chat output disclosure", () => {
     conversation.messages = [{ role: "user", text: '<image name=[Image #1] path="/synthetic/pasted.png">\n</image>\n[Image #1] 請檢查圖片' }];
     const html = render("done");
     expect(html).toContain("請檢查圖片");
-    expect(html).toContain("pasted.png");
+    expect(html).not.toContain("pasted.png");
     expect(html).not.toContain("&lt;image name=");
     expect(html).not.toContain("[Image #1]");
   });

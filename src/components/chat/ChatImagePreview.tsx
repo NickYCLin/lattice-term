@@ -39,7 +39,7 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
     <div ref={dialogRef} className="chat-image-preview__dialog" role="dialog" aria-modal="true"
       aria-label={t("chat.images.preview", { name: imageName })} tabIndex={-1}>
       <header>
-        <span>{imageName}</span>
+        <span>{t("chat.images.title")}</span>
         <button type="button" className="icon-button" aria-label={t("common.close")} onClick={onClose}><CloseIcon /></button>
       </header>
       <div className="chat-image-preview__content">

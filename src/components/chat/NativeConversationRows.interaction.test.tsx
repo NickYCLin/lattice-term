@@ -206,8 +206,9 @@ it("opens sent images in a dialog using the owning thread and reports missing fi
     await act(async () => root.render(<I18nProvider locale="zh-TW"><SentAttachments
       attachments={[{ isImage: true, name: "shot.png", path: "/work/shot.png" }, { isImage: false, name: "notes.txt", path: "/work/notes.txt" }]}
       workingDirectory="/work" threadId="owner" /></I18nProvider>));
+    expect(container.textContent).toContain("notes.txt");
+    expect(container.textContent).not.toContain("shot.png");
     expect(allNodes(container).filter(node => node.tagName === "BUTTON")).toHaveLength(1);
-    expect(allNodes(container).find(node => node.tagName === "BUTTON")!.attributes.title).toBeUndefined();
     await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
     expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/work/shot.png", workingDirectory: "/work", threadId: "owner" });
     expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(true);
@@ -228,6 +229,12 @@ it("shows sent image pixels inline without requiring a click", async () => {
       workingDirectory="/synthetic" threadId="owner" /></I18nProvider>));
     const image = allNodes(container).find(node => node.tagName === "IMG");
     expect(image?.attributes.src).toBe(pixels);
+    expect(container.textContent).not.toContain("pasted.png");
+    expect(allNodes(container).filter(node => node.tagName === "BUTTON")).toHaveLength(1);
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(container.textContent).toContain("圖片預覽");
+    expect(container.textContent).not.toContain("pasted.png");
+    await act(async () => onClick(allNodes(container).find(node => node.attributes["aria-label"] === "關閉")!)());
     expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/synthetic/pasted.png", workingDirectory: "/synthetic", threadId: "owner" });
     expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(false);
   } finally { await act(async () => root.unmount()); }
