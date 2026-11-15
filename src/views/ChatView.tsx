@@ -1583,11 +1583,11 @@ function ChatItemView({
       return (
         <ConversationMessage role="assistant" assistant={assistant} actions={!streaming && branchButton}>
             <div className={streaming ? "chat-cursor" : undefined}>
-              <ChatMarkdown source={item.text} onOpenFile={workingDirectory ? setArtifactPath : undefined} />
-              {artifactPath && <ChatArtifact directory={workingDirectory} path={artifactPath} onClose={() => setArtifactPath(null)} />}
+              <ChatMarkdown source={item.text} onOpenFile={workingDirectory || threadId ? setArtifactPath : undefined} />
+              {artifactPath && <ChatArtifact directory={workingDirectory} path={artifactPath} threadId={threadId} onClose={() => setArtifactPath(null)} />}
             </div>
-            {!streaming && workingDirectory && (
-              <ChatImagePreviews text={item.text} workingDirectory={workingDirectory} />
+            {!streaming && (workingDirectory || threadId) && (
+              <ChatImagePreviews text={item.text} workingDirectory={workingDirectory} threadId={threadId} />
             )}
         </ConversationMessage>
       );

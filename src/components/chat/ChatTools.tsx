@@ -71,7 +71,7 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
         <textarea className="input" value={prompt} onChange={event => setPrompt(event.target.value)} disabled={working || busy || !configured} placeholder={t("chat.tools.imagePrompt")} aria-label={t("chat.tools.imagePrompt")} rows={3} />
         <button className="button button--primary button--sm" disabled={working || busy || !configured || !prompt.trim()}>{t(working ? "chat.tools.generating" : "chat.tools.generate")}</button>
       </form>
-      {image && <ChatImageStrip paths={[image]} workingDirectory={directory} threadId={threadId} />}
+      {image && <ChatImageStrip paths={[image]} workingDirectory={directory} threadId={threadId} captions={false} />}
     </>}
   </section>;
 }

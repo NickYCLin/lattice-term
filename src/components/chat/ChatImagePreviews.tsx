@@ -79,7 +79,7 @@ export function ChatImageStrip({
 }
 
 /** Thumbnails of the images a finished reply mentions, from its folder. */
-export function ChatImagePreviews({ text, workingDirectory }: { text: string; workingDirectory: string }) {
+export function ChatImagePreviews({ text, workingDirectory, threadId }: { text: string; workingDirectory: string; threadId?: string }) {
   const paths = useMemo(() => mentionedImagePaths(text), [text]);
-  return <ChatImageStrip paths={paths} workingDirectory={workingDirectory} />;
+  return <ChatImageStrip paths={paths} workingDirectory={workingDirectory} threadId={threadId} />;
 }

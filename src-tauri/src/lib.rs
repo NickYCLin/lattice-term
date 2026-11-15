@@ -3416,10 +3416,23 @@ async fn git_worktree_remove(working_directory: String, destination: String) -> 
 
 #[tauri::command]
 async fn chat_artifact_read(
+    app: AppHandle,
     working_directory: String,
     path: String,
+    thread_id: Option<String>,
 ) -> Result<crate::chat_artifacts::Artifact, String> {
-    blocking(move || crate::chat_artifacts::read(&working_directory, &path)).await
+    let chat_directory = if let Some(id) = thread_id {
+        Some(crate::agent_chat::general_chat_directory(
+            &app.path().app_data_dir().map_err(|e| e.to_string())?,
+            &id,
+        )?)
+    } else {
+        None
+    };
+    blocking(move || {
+        crate::chat_artifacts::read(&working_directory, &path, chat_directory.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]

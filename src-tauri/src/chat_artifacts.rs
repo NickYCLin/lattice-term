@@ -1,4 +1,4 @@
-//! Bounded artifact reads from the current project's canonical directory.
+//! Bounded artifact reads from the project or this conversation's own directory.
 use base64::Engine;
 use serde::Serialize;
 use std::{
@@ -12,7 +12,11 @@ pub struct Artifact {
     pub kind: &'static str,
     pub content: String,
 }
-pub fn read(directory: &str, value: &str) -> Result<Artifact, String> {
+pub fn read(
+    directory: &str,
+    value: &str,
+    chat_directory: Option<&Path>,
+) -> Result<Artifact, String> {
     if value.len() > 4096 || value.chars().any(char::is_control) {
         return Err("產物路徑無效。".into());
     }
@@ -21,9 +25,16 @@ pub fn read(directory: &str, value: &str) -> Result<Artifact, String> {
         .rsplit_once(':')
         .filter(|(_, line)| !line.is_empty() && line.bytes().all(|c| c.is_ascii_digit()))
         .map_or(without_fragment, |(path, _)| path);
-    let root = Path::new(directory)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let chat_root = chat_directory.and_then(|path| path.canonicalize().ok());
+    let root = if directory.trim().is_empty() {
+        chat_root.clone().ok_or("對話產物資料夾不可用。")?
+    } else {
+        let root = Path::new(directory);
+        if !root.is_absolute() {
+            return Err("專案路徑必須是絕對路徑。".into());
+        }
+        root.canonicalize().map_err(|e| e.to_string())?
+    };
     let requested = Path::new(value);
     if requested
         .components()
@@ -37,8 +48,12 @@ pub fn read(directory: &str, value: &str) -> Result<Artifact, String> {
         root.join(requested)
     };
     let resolved = path.canonicalize().map_err(|e| e.to_string())?;
-    if !resolved.starts_with(&root) {
-        return Err("只能預覽目前專案內的產物。".into());
+    if !resolved.starts_with(&root)
+        && !chat_root
+            .as_ref()
+            .is_some_and(|root| resolved.starts_with(root))
+    {
+        return Err("只能預覽目前專案與本對話的產物。".into());
     }
     let mut file = crate::local_files::open_regular(&resolved)?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
@@ -116,9 +131,14 @@ mod tests {
         std::fs::write(root.path().join("page.html"), "<script>bad()</script>").unwrap();
         std::fs::write(outside.path().join("private.txt"), "private").unwrap();
         let dir = root.path().to_str().unwrap();
-        assert_eq!(read(dir, "page.html:12").unwrap().kind, "html");
-        assert!(read(dir, "../private.txt").is_err());
-        assert!(read(dir, outside.path().join("private.txt").to_str().unwrap()).is_err());
+        assert_eq!(read(dir, "page.html:12", None).unwrap().kind, "html");
+        assert!(read(dir, "../private.txt", None).is_err());
+        assert!(read(
+            dir,
+            outside.path().join("private.txt").to_str().unwrap(),
+            None
+        )
+        .is_err());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(
@@ -126,9 +146,33 @@ mod tests {
                 root.path().join("link"),
             )
             .unwrap();
-            assert!(read(dir, "link").is_err());
+            assert!(read(dir, "link", None).is_err());
         }
         std::fs::write(root.path().join("bad.txt"), b"binary\0data").unwrap();
-        assert!(read(dir, "bad.txt").is_err());
+        assert!(read(dir, "bad.txt", None).is_err());
+    }
+    #[test]
+    fn own_chat_artifacts_are_available_without_reading_other_conversations() {
+        let project = tempfile::tempdir().unwrap();
+        let own = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(own.path().join("generated.svg"), "<svg/>").unwrap();
+        std::fs::write(other.path().join("private.txt"), "private").unwrap();
+        assert_eq!(
+            read("", "generated.svg", Some(own.path())).unwrap().kind,
+            "svg"
+        );
+        assert!(read(
+            project.path().to_str().unwrap(),
+            own.path().join("generated.svg").to_str().unwrap(),
+            Some(own.path())
+        )
+        .is_ok());
+        assert!(read(
+            project.path().to_str().unwrap(),
+            other.path().join("private.txt").to_str().unwrap(),
+            Some(own.path())
+        )
+        .is_err());
     }
 }
