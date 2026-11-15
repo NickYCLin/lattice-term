@@ -168,7 +168,7 @@ export const en: Messages = {
   "sessionChat.chooseAnother": "Choose another session or conversation from the sidebar.",
   "sessionChat.accepted": "Message sent. Replies sync from the original conversation.",
   "sessionChat.unconfirmed": "Readiness unconfirmed",
-  "sessionChat.notReady": "The assistant has not confirmed that it can receive messages; idle or done is only an estimate. Open Terminal to check sign-in, folder trust or pending prompts. If it is at the input prompt, send a message there first. Your draft here is preserved.",
+  "sessionChat.notReady": "The assistant has not reached a ready input prompt. Try sending again shortly, or open Terminal to check sign-in, folder trust and pending prompts. Your draft here is preserved; the message was not sent or queued.",
   "sessionChat.queued": "{count} messages are queued and have not been sent to the assistant.",
   "sessionChat.queuedWaiting": "These messages are waiting for the assistant to report readiness. Showing done does not release them automatically.",
   "sessionChat.input": "Send a message to this session",

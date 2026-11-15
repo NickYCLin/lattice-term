@@ -160,7 +160,7 @@ export const zhTW = {
   "sessionChat.chooseAnother": "請從左側選擇另一個工作階段或對話。",
   "sessionChat.accepted": "訊息已送出，回覆會從原對話同步。",
   "sessionChat.unconfirmed": "尚未確認就緒",
-  "sessionChat.notReady": "助理尚未回報可接收訊息，畫面的閒置或完成只是推測。請開啟終端機確認登入、資料夾信任或待確認事項；若已在提示列，先從終端機送出訊息。這裡的草稿會保留。",
+  "sessionChat.notReady": "助理尚未到達可接收訊息的提示列。請稍候再送出，或開啟終端機確認登入、資料夾信任與待確認事項。這裡的草稿會保留，訊息尚未送出或加入佇列。",
   "sessionChat.queued": "還有 {count} 則訊息排隊，尚未送到助理。",
   "sessionChat.queuedWaiting": "這些訊息正在等助理回報就緒，不會因畫面顯示完成就自動送出。",
   "sessionChat.input": "傳送訊息到這個工作階段",

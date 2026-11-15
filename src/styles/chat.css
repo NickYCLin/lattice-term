@@ -127,16 +127,19 @@
 }
 
 .chat-session__status {
-  width: 0.45rem;
-  height: 0.45rem;
+  width: 0.65rem;
+  height: 0.65rem;
   flex: none;
   border-radius: 50%;
   background: var(--text-faint);
 }
 
 .chat-session.is-working .chat-session__status {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  background: transparent;
+  animation: session-chat-spin 0.8s linear infinite;
 }
 
 .chat-session.is-attention .chat-session__status {
@@ -2545,6 +2548,9 @@ button.chat-diff__line.is-commentable:focus-visible {
 /* Shared CLI session conversation ------------------------------------ */
 
 .session-chat__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   flex: none;
   padding: 2px var(--space-3);
   border: 1px solid var(--line);
@@ -2558,6 +2564,16 @@ button.chat-diff__line.is-commentable:focus-visible {
 .session-chat__state.is-working {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.session-chat__state.is-working::before {
+  content: "";
+  width: 0.65rem;
+  height: 0.65rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: session-chat-spin 0.8s linear infinite;
 }
 
 .session-chat__state.is-needsAttention {
@@ -2605,7 +2621,9 @@ button.chat-diff__line.is-commentable:focus-visible {
 
 
 @media (prefers-reduced-motion: reduce) {
-  .session-chat__spinner {
+  .session-chat__spinner,
+  .session-chat__state.is-working::before,
+  .chat-session.is-working .chat-session__status {
     animation: none;
   }
 }

@@ -11,7 +11,7 @@ const { conversation } = vi.hoisted(() => ({
     messages: [] as SessionConversationMessage[],
     availability: "ready" as "waitingForIdentity" | "waitingForTranscript" | "ready", truncated: false,
     readError: null, loading: false, slow: false, output: "Working", outputError: null,
-    sendError: null, sending: false, queued: null as number | null, send: vi.fn(), acknowledge: vi.fn(),
+    sendError: null as string | null, sending: false, queued: null as number | null, send: vi.fn(), acknowledge: vi.fn(),
     approval: null, answering: false, answerError: null, answer: vi.fn(),
   },
 }));
@@ -26,7 +26,16 @@ function render(state: "working" | "needsAttention" | "done", definitionId = "co
 }
 
 describe("session chat output disclosure", () => {
-  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; });
+  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; conversation.sendError = null; });
+
+  it("keeps an initial readiness rejection actionable without claiming the draft was queued", () => {
+    conversation.sendError = "session-prompt-not-ready";
+    const html = render("done", "codex", { stateSource: "heuristic" });
+    expect(html).toContain("這裡的草稿會保留，訊息尚未送出或加入佇列");
+    expect(html).toContain("開啟這個工作階段的終端機");
+    expect(html).not.toContain("session-prompt-not-ready</");
+    expect(html).not.toMatch(/<textarea[^>]*disabled/);
+  });
 
   it("does not report a queued prompt as sent after a heuristic completion", () => {
     conversation.queued = 1;

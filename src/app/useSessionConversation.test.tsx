@@ -18,12 +18,12 @@ beforeEach(() => {
     snapshot.replace(/\x1b\[[0-9;]*m/g, ""));
 });
 
-it.each(["idle", "done"] as const)("keeps a restored %s prompt out of the queue until readiness is confirmed", async state => {
+it.each(["idle", "done", "working"] as const)("checks backend readiness for a restored %s prompt and preserves a rejected draft", async state => {
   vi.useFakeTimers();
   const root = createRoot(installFakeDom() as unknown as Element);
   invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_approval" ? null : snapshot()));
-  const enqueue = vi.fn().mockResolvedValue(0);
-  let agents = fakeAgentApi({ enqueue, sessions: [fakeSession({ sessionId: "restored", state,
+  const enqueue = vi.fn().mockRejectedValueOnce(SESSION_PROMPT_NOT_READY).mockResolvedValue(0);
+  const agents = fakeAgentApi({ enqueue, sessions: [fakeSession({ sessionId: "restored", state,
     stateSource: "heuristic", restoreExistingSession: true })] });
   let api!: ReturnType<typeof useSessionConversation>;
   function Probe() { api = useSessionConversation("restored", agents); return null; }
@@ -31,14 +31,11 @@ it.each(["idle", "done"] as const)("keeps a restored %s prompt out of the queue 
     await act(async () => { root.render(<Probe />); });
     await act(async () => { expect(await api.send("這是保留的草稿")).toBe(false); });
     expect(api.sendError).toBe(SESSION_PROMPT_NOT_READY);
-    expect(enqueue).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith("restored", "這是保留的草稿");
     expect(agents.send).not.toHaveBeenCalled();
     expect(agents.launch).not.toHaveBeenCalled();
-    agents = { ...agents, sessions: [fakeSession({ sessionId: "restored", state,
-      stateSource: "integration", restoreExistingSession: true })] };
-    await act(async () => { root.render(<Probe />); });
     await act(async () => { expect(await api.send("這是保留的草稿")).toBe(true); });
-    expect(enqueue).toHaveBeenCalledExactlyOnceWith("restored", "這是保留的草稿");
+    expect(enqueue.mock.calls).toEqual([["restored", "這是保留的草稿"], ["restored", "這是保留的草稿"]]);
     expect(api.sendError).toBeNull();
     expect(api.queued).toBe(0);
     await act(async () => { root.unmount(); });

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { recordSessionSubmission, reconcileSessionSubmissions, sessionSubmittedPrompts, subscribeSessionSubmissions } from "./sessionSubmittedPrompts";
 import { MAX_AGENT_OUTPUT_TAIL, type AgentApi } from "./useAgentSessions";
 import { renderTerminalPreview } from "./terminalPreview";
-import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "./sessionConversationReadiness";
 
 export interface SessionConversationMessage {
   role: "user" | "assistant";
@@ -176,11 +175,6 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
 
   async function send(text: string): Promise<boolean> {
     if (!text.trim() || sendingRef.current) return false;
-    const session = agents.sessions.find(candidate => candidate.sessionId === sessionId);
-    if (session && sessionNeedsReadyConfirmation(session)) {
-      setSendError(SESSION_PROMPT_NOT_READY);
-      return false;
-    }
     sendingRef.current = true;
     setSending(true);
     setSendError(null);
