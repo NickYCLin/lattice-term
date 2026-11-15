@@ -1,3 +1,4 @@
+import { approvalShortcut } from "../../app/approvalShortcut";
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
 import {
@@ -22,6 +23,11 @@ import type { MessageKey } from "../../i18n/messages/zh-TW";
 import {
   AlertIcon, CloseIcon, FileIcon, FolderIcon, ImageFileIcon, ShieldIcon, TerminalIcon,
 } from "../icons";
+import { readStoredPreferences } from "../../app/preferences";
+import { shouldSubmitChatInput } from "../../app/chatInputPreferences";
+import { ChatStatus } from "./ChatStatus";
+import { useComposerAssistance } from "./ComposerAssistance";
+import { shouldRecallPrompt } from "../../app/composerAssistance";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
 import { imageFileName } from "../../app/chatImages";
@@ -71,6 +77,8 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const { draft, setDraft, attachments, setAttachments, pasting, setPasting,
     addAttachmentPaths, readDraft } = useConversationDraft("session", session.sessionId);
   const [notice, setNotice] = useState<string | null>(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [modelOpenRequest, setModelOpenRequest] = useState(0);
   const pastingRef = useRef(false);
   pastingRef.current = pasting;
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -175,9 +183,22 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     onPaths: paths => { addAttachments(paths); },
     onError: reason => setNotice(t("chat.attachment.failed", { detail: errorText(reason) })),
   });
+  const assistance = useComposerAssistance({ draft, onText: setDraft, inputRef,
+    workingDirectory: session.workingDirectory, filesEnabled: supported, onFile: () => true,
+    commands: { model: () => setModelOpenRequest(value => value + 1), status: () => setStatusOpen(true) },
+  });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     clipboard.onKeyDown(event.nativeEvent);
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (assistance.keyDown(event)) return;
+    if (shouldRecallPrompt(event, draft, attachments.length)) {
+      const previous = conversation.messages.slice().reverse().find(message => message.role === "user" && !message.tool);
+      if (previous) {
+        const recalled = splitSessionAttachments(previous.text);
+        event.preventDefault(); setDraft(recalled.text); setAttachments(mergeAttachmentPaths([], recalled.paths) ?? []);
+        assistance.select(recalled.text.length); return;
+      }
+    }
+    if (!shouldSubmitChatInput(event)) return;
     event.preventDefault();
     void submit();
   }
@@ -210,6 +231,8 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
         </div>
       </div>
     </header>
+    {statusOpen && <ChatStatus model={session.model || ""} directory={session.workingDirectory}
+      state={t(stateLabel[session.state] ?? "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
     <div ref={messagesRef} className="chat-messages" onScroll={onScroll} onWheel={onWheel}>
       <div className="chat-messages__inner">
         {supported && <ConversationReadProgress loading={conversation.loading} />}
@@ -255,8 +278,12 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           </p>
         )}
         {conversation.approval ? (
-          <div className="chat-card chat-card--approval chat-approval--pending" role="group"
-            aria-label={t("chat.approval.title")}>
+          <div className="chat-card chat-card--approval chat-approval--pending" role="group" tabIndex={0}
+            aria-label={t("chat.approval.title")} onKeyDown={event => {
+              if (conversation.answering) return;
+              const decision = approvalShortcut(event, event.target === event.currentTarget);
+              if (decision) { event.preventDefault(); event.stopPropagation(); void conversation.answer(decision === "allow"); }
+            }}>
             <div className="chat-card__head">
               <span className="chat-card__label">{conversation.approval.toolName}</span>
               <code className="chat-card__summary" title={conversation.approval.summary}>
@@ -310,6 +337,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
       </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
         <div ref={boxRef} className={`chat-composer__box session-composer__box${dragging ? " is-file-dragging" : ""}`}>
+          {assistance.menu}
           {attachments.length > 0 && (
             <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
               {attachments.map(attachment => <AttachmentChip key={attachment.path} attachment={attachment}
@@ -319,10 +347,13 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           )}
           <textarea ref={inputRef} className="chat-composer__input" value={draft} rows={2}
             aria-label={t("sessionChat.input")}
-            aria-keyshortcuts="Enter"
+            aria-keyshortcuts={readStoredPreferences().chatSubmitShortcut === "modifier-enter" ? "Control+Enter Meta+Enter" : "Enter"}
             disabled={blocked}
             placeholder={t("sessionChat.placeholder")}
-            onChange={event => setDraft(event.target.value)}
+            onChange={event => { setDraft(event.target.value); assistance.select(event.target.selectionStart); }}
+            onSelect={event => assistance.select(event.currentTarget.selectionStart)}
+            {...assistance.inputProps}
+              onBlur={assistance.dismiss} onFocus={assistance.reopen}
             onPaste={onPaste}
             onKeyDown={onKeyDown} />
           <div className="session-composer__toolbar">
@@ -331,7 +362,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
               {session.sandboxed ? <ShieldIcon size={14} /> : <AlertIcon size={14} />}
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
-            <SessionModelPicker session={session} agents={agents}
+            <SessionModelPicker session={session} agents={agents} openRequest={modelOpenRequest}
               disabled={unconfirmed || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}

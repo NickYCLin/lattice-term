@@ -184,6 +184,7 @@ export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi
     continueInSession: vi.fn(async () => {}),
     updateThreadFromSession: vi.fn(),
     branchThread: vi.fn(() => null),
+    nativeFork: vi.fn(async () => null),
     delegate: vi.fn(() => null),
     delegateRemote: vi.fn(async () => null),
     send: vi.fn(async () => {}),

@@ -144,3 +144,14 @@ it("releases a failed answer for retry without blocking a different request", as
     ]);
   } finally { await act(async () => { runtime.root.unmount(); }); }
 });
+
+it("offers session scope only when the native request reports it and records it after acknowledgment", async () => {
+  const runtime = await setup();
+  try {
+    await expect(runtime.chat.respond(runtime.id, "request", true, undefined, undefined, true)).rejects.toThrow("session scope");
+    await runtime.emit({ kind: "approvalRequested", requestId: "session", toolUseId: null, name: "command", summary: "npm test", input: "{}", canAllowSession: true });
+    await act(async () => { await runtime.chat.respond(runtime.id, "session", true, undefined, undefined, true); });
+    expect(invoke.mock.calls.find(([command]) => command === "agent_chat_respond")?.[1]).toMatchObject({ requestId: "session", allow: true, allowForSession: true });
+    expect(runtime.chat.getThread(runtime.id)!.items.find(item => item.type === "approval" && item.requestId === "session")).toMatchObject({ decision: "allowed", allowedForSession: true });
+  } finally { await act(async () => { runtime.root.unmount(); }); }
+});

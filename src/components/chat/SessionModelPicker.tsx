@@ -25,7 +25,8 @@ function errorText(reason: unknown): string {
  * The composer's model name, as a menu that switches the running session to
  * another model while keeping its conversation.
  */
-export function SessionModelPicker({ session, agents, disabled, onNotice, onReplaced }: {
+export function SessionModelPicker({ session, agents, disabled, onNotice, onReplaced, openRequest = 0 }: {
+  openRequest?: number;
   session: AgentSessionSummary;
   agents: AgentApi;
   /** A relaunch would cut off the turn in progress. */
@@ -36,6 +37,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (openRequest) setOpen(true); }, [openRequest]);
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
   const [accountChoices, setAccountChoices] = useState<Choices>({ state: "idle" });

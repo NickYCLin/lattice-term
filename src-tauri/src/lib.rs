@@ -5757,6 +5757,7 @@ pub fn run() {
     // Both Tauri restart and the Windows updater reuse this managed Env.
     #[cfg(windows)]
     let builder = builder.manage(windows_elevation::restart_environment());
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
     let builder = builder.on_window_event(|window, event| {
         if window.label() == "main" {
             if let tauri::WindowEvent::Focused(focused) = event {

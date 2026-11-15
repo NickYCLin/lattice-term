@@ -1,3 +1,8 @@
+import { EditIcon } from "../components/icons";
+import { searchConversation, useConversationPins, conversationLink } from "../app/conversationNavigation";
+import { ChatWorktree } from "../components/chat/ChatWorktree";
+import { approvalShortcut } from "../app/approvalShortcut";
+import type { NativeChatAction } from "../app/chatNativeActions";
 import { ChatMcpAccess } from "../components/chat/ChatMcpAccess";
 import { ChatArchiveStatus } from "../components/chat/ChatArchiveStatus";
 import { ChatProjectDefaultsConflict, loadChatProjectDefaults, projectDefaultsUnavailable } from "../app/chatProjectDefaults";
@@ -84,6 +89,12 @@ import { Callout, EmptyState } from "../components/common/Callout";
 import { ConfirmDialog } from "../components/overlays/ConfirmDialog";
 import { useAppDialogs } from "../components/overlays/useAppDialogs";
 import { conversationDisplayName, conversationNameTargets, useConversationNames } from "../app/conversationNames";
+import { preferChatSteer, shouldSubmitChatInput } from "../app/chatInputPreferences";
+import { PlanProgress, GoalProgress } from "../components/chat/PlanProgress";
+import { currentRuntimeStatus } from "../app/chatRuntimeStatus";
+import { ChatStatus } from "../components/chat/ChatStatus";
+import { useComposerAssistance } from "../components/chat/ComposerAssistance";
+import { shouldRecallPrompt } from "../app/composerAssistance";
 import { ChatMarkdown } from "../components/chat/ChatMarkdown";
 import { AccountModelField } from "../components/agents/AccountModelField";
 import { findCliProxy } from "../app/cliProxyApi";
@@ -187,6 +198,19 @@ export function ChatView({
   const [newFolderName, setNewFolderName] = useState("");
   const [sessionSidebarLayout, setSharedLayout] = useSharedSidebarLayout();
   const accountProfiles = useChatAccountProfiles();
+  const { pins } = useConversationPins();
+  const [sideThreadId, setSideThreadId] = useState<string | null>(null);
+  const sideThread = chat.threads.find(thread => thread.id === sideThreadId);
+  useEffect(() => {
+    if (mode !== "threads") return;
+    const key = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || !/^[1-9]$/.test(event.key)) return;
+      const target = chat.threads.filter(thread => !thread.shelvedAt)[Number(event.key) - 1];
+      if (target) { event.preventDefault(); chat.setActiveThreadId(target.id); setSelectedSessionId(null); }
+    };
+    window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
+  }, [chat.threads, mode]);
+
   const { proxies } = useCliProxySettings();
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
@@ -413,6 +437,9 @@ export function ChatView({
             </button>
           </div>
         </div>
+        {mode === "threads" && pins.some(id => namedThreads.some(thread => thread.id === id)) && <nav className="chat-pins" aria-label={t("chat.nav.pinned")}>
+          <h4>{t("chat.nav.pinned")}</h4>{pins.map(id => { const thread = namedThreads.find(thread => thread.id === id); return thread && <button key={id} type="button" className="button button--ghost button--sm" onClick={() => { chat.setActiveThreadId(id); setSelectedSessionId(null); }}>{thread.title || t("chat.untitled")}</button>; })}
+        </nav>}
         {mode === "threads" && newFolderOpen && (
           <form
             className="chat-folder-form"
@@ -637,6 +664,7 @@ export function ChatView({
             accountProfiles={accountProfiles}
             theme={theme}
             onDelete={() => setPendingDelete(active)}
+            onSideChat={() => { const side = chat.createThread({ definitionId: active.definitionId, workingDirectory: active.workingDirectory, model: active.model, permission: active.permission, accountProfileId: active.accountProfileId, provider: active.provider, proxyId: active.proxyId, activate: false }); setSideThreadId(side.id); }}
             continueInSession={sessionLaunchForThread(active, active.workingDirectory || "general",
               agents.catalog, accountProfiles, proxies) && !active.archived
               ? () => void continueInSession(active) : undefined}
@@ -647,6 +675,10 @@ export function ChatView({
         )}
       </div>
 
+      {sideThread && sideThread.id !== active?.id && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
+        <button type="button" className="button button--ghost button--sm" onClick={() => setSideThreadId(null)}>{t("chat.nav.closeSide")}</button>
+        <ThreadPane key={sideThread.id} thread={sideThread} chat={chat} installed={installed} definitions={agents.catalog.filter(definition => chat.supported.some(id => id === definition.id) && definition.installed)} cliLabel={cliLabel} tag={tag} accountProfiles={accountProfiles} theme={theme} onDelete={() => setPendingDelete(sideThread)} />
+      </aside>}
       {pendingDelete && (
         <ConfirmDialog
           title={t("chat.delete.confirm.title", {
@@ -671,7 +703,7 @@ export function ChatView({
   );
 }
 
-function ThreadPane({
+export function ThreadPane({
   thread,
   chat,
   installed,
@@ -681,6 +713,7 @@ function ThreadPane({
   accountProfiles,
   theme,
   onDelete,
+  onSideChat,
   continueInSession,
   handoffProblem,
   handoffPending,
@@ -695,6 +728,7 @@ function ThreadPane({
   accountProfiles: readonly ChatAccountProfile[];
   theme: ThemeId;
   onDelete: () => void;
+  onSideChat?: () => void;
   /** Present when the conversation can go on in a terminal session. */
   continueInSession?: () => void;
   handoffProblem?: string | null;
@@ -706,6 +740,8 @@ function ThreadPane({
     pasting: pastingImage, setPasting: setPastingImage, steering, setSteering,
     addAttachmentPaths, readDraft } = useConversationDraft("thread", thread.id);
   const [notice, setNotice] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [repositoryBusy, setRepositoryBusy] = useState(false);
   const pastingImageRef = useRef(false);
   pastingImageRef.current = pastingImage;
   const mounted = useRef(true);
@@ -726,13 +762,28 @@ function ThreadPane({
   const [settingsOpen, setSettingsOpen] = useState(fresh);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const { pins, toggle: togglePin } = useConversationPins();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState(""); const [searchIndex, setSearchIndex] = useState(0);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchMatches = useMemo(() => searchConversation(thread.items, search), [thread.items, search]);
+  const matchedItem = searchMatches[searchIndex % Math.max(1, searchMatches.length)];
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
+
+  const runtimeStatus = currentRuntimeStatus(thread);
+  const latestPlan = thread.items.slice().reverse().find(item => item.type === "plan");
+  const latestGoal = thread.items.slice().reverse().find(item => item.type === "goal");
   const [delegating, setDelegating] = useState(false);
   const { ref: scrollRef, onScroll, onWheel, followBottom } = useChatScroll();
+  useEffect(() => { if (matchedItem) { const item = [...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-chat-item]") ?? [])].find(node => node.dataset.chatItem === matchedItem); item?.scrollIntoView({ block: "center", behavior: "auto" }); } }, [matchedItem, scrollRef]);
+  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
+
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
   const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession) || Boolean(handoffPending);
-  const settingsLocked = running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
+  const settingsLocked = repositoryBusy || Boolean(thread.pendingOperation) || running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
   const directProxy = thread.provider === "cliproxyapi" && !thread.nativeSessionId;
   const cliInstalled = directProxy || installed.includes(thread.definitionId);
   const availableProfiles = profilesFor(accountProfiles, thread.definitionId);
@@ -752,7 +803,7 @@ function ThreadPane({
   const activeProfileMissing = !directProxy && thread.accountProfileId !== null && activeProfile === null;
   const activeProfileSignedOut = !directProxy && selectedOption?.disabled === true;
   const canSend =
-    !awaitingHistory &&
+    !thread.pendingOperation && !awaitingHistory &&
     !steering &&
     !pastingImage &&
     !activeProfileMissing &&
@@ -854,9 +905,10 @@ function ThreadPane({
     }
   }
 
-  async function submit(event?: FormEvent) {
+  async function submit(event?: FormEvent, delivery?: "queue") {
     event?.preventDefault();
     if (!canSend || steeringRef.current || pastingImageRef.current) return;
+    if (delivery !== "queue" && preferChatSteer(thread)) { await steer(); return; }
     const prompt = draft;
     const files = attachments;
     const selectedPicks = picks;
@@ -908,19 +960,49 @@ function ThreadPane({
     }
   }
 
+  async function runNativeCommand(action: NativeChatAction) {
+    setNotice(null);
+    try { await chat.send(thread.id, "", [], activeProfile?.configDirectory ?? null, undefined, [], action); }
+    catch (reason) { setNotice(reason instanceof Error ? reason.message : String(reason)); }
+  }
+  const nativeCodex = thread.definitionId === "codex" && !directProxy && !settingsLocked;
+  const assistance = useComposerAssistance({ draft, onText: setDraft, inputRef,
+    workingDirectory: thread.workingDirectory, filesEnabled: !directProxy,
+    onFile: () => true,
+    commands: {
+      model: !settingsLocked ? () => setModelPickerOpen(true) : undefined,
+      status: () => setStatusOpen(true),
+      plan: !directProxy && !settingsLocked && (thread.definitionId === "codex" || thread.definitionId === "claude")
+        ? () => chat.updateThread(thread.id, { planMode: !thread.planMode }) : undefined,
+      review: nativeCodex ? () => { void runNativeCommand({ kind: "review", target: { type: "uncommittedChanges" } }); } : undefined,
+      compact: nativeCodex && thread.nativeSessionId ? () => { void runNativeCommand({ kind: "compact" }); } : undefined,
+      fork: !settingsLocked && !directProxy && ["codex", "claude"].includes(thread.definitionId) && thread.nativeSessionId ? () => {
+        void chat.nativeFork(thread.id, t("chat.branch.suffix")).catch(reason => setNotice(reason instanceof Error ? reason.message : String(reason)));
+      } : undefined,
+    },
+  });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     clipboard.onKeyDown(event.nativeEvent);
+    if (assistance.keyDown(event)) return;
+    if (shouldRecallPrompt(event, draft, attachments.length)) {
+      const previous = thread.items.slice().reverse().find(item => item.type === "user");
+      if (previous?.type === "user") {
+        event.preventDefault(); setDraft(previous.text); setAttachments(previous.attachments ?? []);
+        assistance.select(previous.text.length); return;
+      }
+    }
     // Enter while an input method is composing picks a candidate; it must
     // not send half a sentence.
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (!shouldSubmitChatInput(event)) return;
     event.preventDefault();
     submit();
   }
 
-  async function answer(requestId: string, allow: boolean, message?: string) {
+  async function answer(requestId: string, allow: boolean, message?: string, allowForSession = false) {
     setNotice(null);
     try {
-      await chat.respond(thread.id, requestId, allow, message, thread.runningTurnId ?? undefined);
+      if (allowForSession) await chat.respond(thread.id, requestId, allow, message, thread.runningTurnId ?? undefined, true);
+      else await chat.respond(thread.id, requestId, allow, message, thread.runningTurnId ?? undefined);
     } catch (reason) {
       setNotice(
         t("chat.approval.failed", {
@@ -967,7 +1049,7 @@ function ThreadPane({
   const latestReply = [...thread.items].reverse().find((item): item is Extract<ChatItem, { type: "text" }> => item.type === "text");
 
   return (
-    <>
+    <div className="chat-thread-pane" onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && !event.nativeEvent.isComposing) { event.preventDefault(); setSearchOpen(true); } }}>
       <header className="chat-header">
         <div className="chat-header__title">
           <ConversationIdentity assistant={assistant} title={thread.title || t("chat.untitled")}>
@@ -990,6 +1072,16 @@ function ThreadPane({
                 {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : !directProxy && <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
           </ConversationIdentity>
           <div className="chat-composer__actions">
+            <details className="chat-header__menu" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.currentTarget.open = false; } }}>
+              <summary className="button button--ghost button--sm" aria-label={t("chat.nav.more")}>⋯</summary>
+              <div onClick={event => { if ((event.target as HTMLElement).closest("button")) { const menu = event.currentTarget.closest("details"); if (menu) menu.open = false; } }}>
+            <button type="button" className="button button--ghost button--sm" aria-pressed={pins.includes(thread.id)} onClick={() => { try { togglePin(thread.id); } catch (reason) { setNotice(String(reason)); } }}>{t(pins.includes(thread.id) ? "chat.nav.unpin" : "chat.nav.pin")}</button>
+            <button type="button" className="button button--ghost button--sm" onClick={() => setSearchOpen(value => !value)}>{t("chat.nav.search")}</button>
+            {onSideChat && <button type="button" className="button button--ghost button--sm" onClick={onSideChat}>{t("chat.nav.side")}</button>}
+            <button type="button" className="button button--ghost button--sm" onClick={() => { void import("../app/clipboardText").then(module => module.copyTextToClipboard(conversationLink(thread.id))).then(() => setStatusMessage(t("chat.nav.copied"))).catch(reason => setNotice(String(reason))); }}>{t("chat.nav.link")}</button>
+            {thread.workingDirectory && !thread.remote && <button type="button" className="button button--ghost button--sm" onClick={() => setWorktreeOpen(value => !value)}>{t("chat.worktree.title")}</button>}
+              </div>
+            </details>
             {thread.handoff && <ConversationInfo key={thread.id} label={t("chat.handoff.info")}>
               {t("chat.handoff.pending", { assistant })}
             </ConversationInfo>}
@@ -1068,6 +1160,18 @@ function ThreadPane({
             </button>
           </div>
         </div>
+        {searchOpen && <form className="chat-search" onSubmit={event => { event.preventDefault(); setSearchIndex(index => index + 1); }}>
+          <input ref={searchInput} className="input" value={search} onChange={event => { setSearch(event.target.value); setSearchIndex(0); }} onKeyDown={event => { if (event.key === "Escape") { setSearchOpen(false); setSearch(""); } }} aria-label={t("chat.nav.search")} />
+          <span role="status">{searchMatches.length ? searchIndex % searchMatches.length + 1 : 0} / {searchMatches.length}</span>
+          <button className="button button--ghost button--sm" type="button" disabled={!searchMatches.length} onClick={() => setSearchIndex(index => (index + searchMatches.length - 1) % searchMatches.length)}>↑</button>
+          <button className="button button--ghost button--sm" disabled={!searchMatches.length}>↓</button>
+          <button type="button" className="button button--ghost button--sm" onClick={() => { setSearchOpen(false); setSearch(""); }}>{t("common.cancel")}</button>
+        </form>}
+        {worktreeOpen && <ChatWorktree directory={thread.workingDirectory} busy={settingsLocked} onOpen={(directory, handoff) => {
+          if (settingsLocked) return;
+          if (handoff && thread.items.length) { const next = chat.branchThread(thread.id, thread.items[thread.items.length - 1].id, t("chat.worktree.suffix")); if (next) chat.updateThread(next.id, { workingDirectory: directory }); }
+          else chat.createThread({ definitionId: thread.definitionId, model: thread.model, permission: thread.permission, accountProfileId: thread.accountProfileId, workingDirectory: directory });
+        }} />}
         {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             <AccountModelField
@@ -1187,10 +1291,18 @@ function ThreadPane({
             {t("chat.notInstalled", { cli: cliLabel(thread.definitionId) })}
           </Callout>
         )}
+        {thread.pendingOperation && <p role="status">{t("chat.nativeOperation.running")}</p>}
+        {thread.planMode && <span className="chat-chip">{t("chat.plan.mode")}</span>}
+        {running && thread.activeOperation && <p role="status">{t(thread.activeOperation === "compact" ? "chat.compact.running" : "chat.review.running")}</p>}
         {notice && <Callout tone="danger">{notice}</Callout>}
+        {statusMessage && <p className="chat-settings__hint" role="status">{statusMessage}</p>}
         {handoffProblem && <Callout tone="danger">{handoffProblem}</Callout>}
       </header>
 
+      {latestPlan?.type === "plan" && <PlanProgress compact steps={latestPlan.steps} explanation={latestPlan.explanation} />}
+      {latestGoal?.type === "goal" && <GoalProgress goal={latestGoal.goal} compact />}
+      {statusOpen && <ChatStatus model={thread.model} directory={thread.workingDirectory} context={runtimeStatus?.contextUsage} rateLimits={runtimeStatus?.rateLimits}
+        state={t(running ? "agents.state.working" : "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
           {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
@@ -1210,13 +1322,13 @@ function ThreadPane({
             </div>
           )}
           {thread.items.map((item, index) => (
-            <ChatItemView
+            <div key={item.id} data-chat-item={item.id} className={item.id === matchedItem ? "chat-search__match" : undefined}><ChatItemView
               key={item.id}
               item={item}
               assistant={cliLabel(item.type !== "user" && item.type !== "notice" && item.type !== "turnEnd" && item.type !== "delegation"
                 ? item.assistantDefinitionId ?? thread.definitionId
                 : thread.definitionId)}
-              streaming={running && index === thread.items.length - 1}
+              streaming={running && (item.type === "reasoning" ? item.id.startsWith(`${thread.runningTurnId}:`) : index === thread.items.length - 1)}
               tag={tag}
               onAnswer={answer}
               workingDirectory={thread.workingDirectory}
@@ -1232,12 +1344,16 @@ function ThreadPane({
                   bringBack: () => setDraft((current) => (current ? `${current}\n\n${result}` : result)),
                 };
               }}
-              onBranch={
-                running && index === thread.items.length - 1
-                  ? undefined
-                  : () => chat.branchThread(thread.id, item.id, t("chat.branch.suffix"))
-              }
-            />
+              onBranch={!settingsLocked && thread.nativeSessionId && (thread.definitionId === "codex"
+                  ? (item.type === "user" || item.type === "text") && Boolean(item.nativeTurnId)
+                  : thread.definitionId === "claude" && item.type === "text" && Boolean(item.nativeMessageId))
+                ? () => { void chat.nativeFork(thread.id, t("chat.branch.suffix"), item.id).catch(reason => setNotice(String(reason))); } : undefined}
+              onEdit={!settingsLocked && thread.nativeSessionId && item.type === "user" && (thread.definitionId === "codex" ? Boolean(item.nativeTurnId) : thread.definitionId === "claude" && (index === 0 || thread.items.slice(0, index).some(entry => entry.type === "text" && entry.nativeMessageId)))
+                ? async text => {
+                  const fork = await chat.nativeFork(thread.id, t("chat.branch.suffix"), item.id, true);
+                  if (fork) await chat.send(fork.id, text, item.attachments ?? [], activeProfile?.configDirectory ?? null);
+                } : undefined}
+            /></div>
           ))}
           {running && thread.items[thread.items.length - 1]?.type === "user" && (
             <div className="chat-msg chat-msg--assistant">
@@ -1264,6 +1380,9 @@ function ThreadPane({
         <ChatChangesPanel
           workingDirectory={thread.workingDirectory}
           busy={running}
+          onWorking={setRepositoryBusy}
+          checkpoint={thread.lastTurnCheckpoint}
+          onReview={nativeCodex ? () => { void runNativeCommand({ kind: "review", target: { type: "uncommittedChanges" } }); } : undefined}
           onQuote={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
           onClose={() => setChangesOpen(false)}
         />
@@ -1279,6 +1398,7 @@ function ThreadPane({
       {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer session-composer" onSubmit={submit}>
         <ConversationComposerFrame workingDirectory={thread.workingDirectory}>
           <div ref={composerDropRef} className={`chat-composer__box session-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
+            {assistance.menu}
             {attachments.length > 0 && (
               <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
                 {attachments.map((attachment) => (
@@ -1331,7 +1451,10 @@ function ThreadPane({
               value={draft}
               readOnly={steering}
               placeholder={t("sessionChat.placeholder")}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => { setDraft(event.target.value); assistance.select(event.target.selectionStart); }}
+              onSelect={event => assistance.select(event.currentTarget.selectionStart)}
+              {...assistance.inputProps}
+              onBlur={assistance.dismiss} onFocus={assistance.reopen}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               aria-label={t("chat.composer.label")}
@@ -1367,8 +1490,8 @@ function ThreadPane({
               </ComposerPopover>
               {running && !directProxy && thread.definitionId === "codex" && (
                 <button type="button" className="button button--secondary button--sm"
-                  disabled={!canSend} title={t("chat.steer.hint")}
-                  onClick={() => void steer()}>{t(steering ? "chat.steer.sending" : "chat.steer.send")}</button>
+                  disabled={!canSend} title={t(preferChatSteer(thread) ? "chat.queue.hint" : "chat.steer.hint")}
+                  onClick={() => { if (preferChatSteer(thread)) void submit(undefined, "queue"); else void steer(); }}>{t(steering ? "chat.steer.sending" : preferChatSteer(thread) ? "chat.queue.add" : "chat.steer.send")}</button>
               )}
               {running && (
                 <button
@@ -1384,7 +1507,7 @@ function ThreadPane({
                 hasContent={Boolean(draft.trim()) || attachments.length > 0}
                 blocked={steering || pastingImage || !cliInstalled || activeProfileMissing || activeProfileSignedOut}
                 working={running || pendingInputs.length > 0} sending={steering} canSend={canSend}
-                sendLabel={t(running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
+                sendLabel={t(preferChatSteer(thread) ? "chat.steer.send" : running || pendingInputs.length > 0 ? "chat.queue.add" : "chat.send")}
                 replyVersion={latestReply ? `${latestReply.id}:${latestReply.text}` : ""} replyText={latestReply?.text ?? ""}
                 onText={text => setDraft(current => current.trim() ? `${current.trimEnd()} ${text}` : text)}
                 onSubmit={submit} onNotice={setNotice} />
@@ -1392,7 +1515,7 @@ function ThreadPane({
           </div>
         </ConversationComposerFrame>
       </form>}
-    </>
+    </div>
   );
 }
 
@@ -1403,6 +1526,7 @@ function ChatItemView({
   tag,
   onAnswer,
   onBranch,
+  onEdit,
   workingDirectory = "",
   threadId,
   subtask,
@@ -1411,9 +1535,10 @@ function ChatItemView({
   assistant: string;
   streaming: boolean;
   tag: string;
-  onAnswer: (requestId: string, allow: boolean, message?: string) => Promise<void>;
+  onAnswer: (requestId: string, allow: boolean, message?: string, allowForSession?: boolean) => Promise<void>;
   /** Starts a new conversation that ends at this message. */
   onBranch?: () => void;
+  onEdit?: (text: string) => Promise<void>;
   /** Where images a reply mentions may be previewed from. */
   workingDirectory?: string;
   /** Lets pasted pictures and tool screenshots be shown from the chat's folder. */
@@ -1422,24 +1547,28 @@ function ChatItemView({
   subtask?: (childId: string) => { title: string; result: string; open: () => void; bringBack: () => void } | null;
 }) {
   const { t } = useI18n();
-  const branchButton = onBranch && (
-    <button
-      type="button"
-      className="chat-msg__branch"
-      onClick={onBranch}
-      aria-label={t("chat.branch")}
-      title={t("chat.branch")}
-    >
-      <DuplicateIcon size={13} />
-    </button>
-  );
+  const [editing, setEditing] = useState(false);
+  const [edited, setEdited] = useState("");
+  const [editError, setEditError] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const branchButton = <span className="chat-msg__actionGroup">{onEdit && <button type="button" className="chat-msg__branch" aria-label={t("chat.message.edit")}
+    onClick={() => { setEdited(item.type === "user" ? item.text : ""); setEditing(true); }} title={t("chat.message.edit")}><EditIcon size={13} /></button>}{onBranch && (
+    <button type="button" className="chat-msg__branch" onClick={onBranch} aria-label={t("chat.branch")} title={t("chat.branch")}><DuplicateIcon size={13} /></button>
+  )}</span>;
   switch (item.type) {
     case "user": {
       const sent = splitSessionAttachments(item.text);
       const files = item.attachments?.length ? item.attachments : mergeAttachmentPaths([], sent.paths) ?? [];
       return (
         <ConversationMessage role="user" assistant={assistant} actions={branchButton}>
-            {sent.text && <div>{sent.text}</div>}
+            {editing ? <form onSubmit={event => { event.preventDefault(); if (!edited.trim() || savingEdit) return;
+              setSavingEdit(true); setEditError(""); void onEdit?.(edited).then(() => setEditing(false)).catch(reason => setEditError(String(reason))).finally(() => setSavingEdit(false)); }}>
+              <textarea className="input" value={edited} onChange={event => setEdited(event.target.value)} disabled={savingEdit} aria-label={t("chat.message.edit")} />
+              <p className="chat-settings__hint">{t("chat.message.editHint")}</p>
+              {editError && <p role="alert">{editError}</p>}
+              <button type="submit" className="button button--primary button--sm" disabled={savingEdit || !edited.trim()}>{t("chat.message.rerun")}</button>
+              <button type="button" className="button button--ghost button--sm" disabled={savingEdit} onClick={() => setEditing(false)}>{t("common.cancel")}</button>
+            </form> : sent.text && <div>{sent.text}</div>}
             <SentAttachments attachments={files} workingDirectory={workingDirectory ?? ""} threadId={threadId} />
         </ConversationMessage>
       );
@@ -1455,9 +1584,11 @@ function ChatItemView({
             )}
         </ConversationMessage>
       );
+    case "plan": return <PlanProgress steps={item.steps} explanation={item.explanation} />;
+    case "goal": return item.goal ? <GoalProgress goal={item.goal} /> : null;
     case "reasoning":
       return (
-        <details className="chat-card chat-card--reasoning">
+        <details className="chat-card chat-card--reasoning" open={streaming || undefined}>
           <summary>
             <span className="chat-card__label">{t("chat.reasoning")}</span>
           </summary>
@@ -1469,7 +1600,7 @@ function ChatItemView({
         <>
           <details
             className={`chat-card chat-card--tool${item.isError ? " is-error" : ""}${!item.done ? " is-running" : ""}`}
-            open={item.isError || undefined}
+            open={item.isError || !item.done || undefined}
           >
             <summary>
               <span className="chat-card__label">{item.name}</span>
@@ -1529,6 +1660,12 @@ function ChatItemView({
           className={`chat-card chat-card--approval chat-approval--${item.decision}`}
           role="group"
           aria-label={t("chat.approval.title")}
+          tabIndex={item.decision === "pending" && !["user_input", "unsupported_input", "mcp_form", "mcp_url"].includes(item.name) ? 0 : undefined}
+          onKeyDown={event => {
+            if (item.decision !== "pending" || ["user_input", "unsupported_input", "mcp_form", "mcp_url"].includes(item.name)) return;
+            const decision = approvalShortcut(event, event.target === event.currentTarget);
+            if (decision) { event.preventDefault(); event.stopPropagation(); void onAnswer(item.requestId, decision === "allow"); }
+          }}
         >
           <div className="chat-card__head">
             <span className="chat-card__label">{item.name}</span>
@@ -1538,7 +1675,7 @@ function ChatItemView({
             <span className="chat-card__state">
               {item.decision === "pending"
                 ? t("chat.approval.title")
-                : t(`chat.approval.${item.decision}` as MessageKey)}
+                : item.allowedForSession ? t("chat.approval.sessionAllowed") : t(`chat.approval.${item.decision}` as MessageKey)}
             </span>
           </div>
           {item.name === "user_input" && item.decision === "pending" && (
@@ -1579,6 +1716,9 @@ function ChatItemView({
                   {t("chat.approval.allow")}
                 </button>
               )}
+              {item.canAllowSession && <button type="button" className="button button--secondary button--sm"
+                title={t("chat.approval.sessionHint")}
+                onClick={() => void onAnswer(item.requestId, true, undefined, true)}>{t("chat.approval.allowSession")}</button>}
               <button
                 type="button"
                 className="button button--secondary button--sm"

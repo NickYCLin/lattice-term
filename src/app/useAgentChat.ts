@@ -1,3 +1,6 @@
+import { loadChatAccountProfiles } from "./chatAccountProfiles";
+import { runtimeIdentity } from "./chatRuntimeStatus";
+import type { NativeChatAction } from "./chatNativeActions";
 import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
 import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
 import { dismissNativeConversation, restoreNativeConversation } from "./nativeConversationDismissals";
@@ -101,6 +104,7 @@ export interface ChatThreadSettings {
   provider?: "cliproxyapi";
   proxyId?: string;
   browserEnabled?: boolean;
+  planMode?: boolean;
   definitionId: ChatDefinitionId;
   workingDirectory: string;
   permission: ChatPermission;
@@ -176,6 +180,7 @@ export interface AgentChatApi {
    * Starts a new thread from an earlier point of `id`, up to and including
    * `throughItemId`, and opens it. `suffix` marks its title as a branch.
    */
+  nativeFork: (id: string, suffix: string, throughItemId?: string, beforeTurn?: boolean) => Promise<ChatThread | null>;
   branchThread: (id: string, throughItemId: string, suffix: string) => ChatThread | null;
   /**
    * Hands a subtask to an assistant as its own conversation in the same
@@ -207,6 +212,7 @@ export interface AgentChatApi {
     profileConfigPath?: string | null,
     queuedInputId?: string,
     mentions?: readonly ChatMention[],
+    nativeAction?: NativeChatAction,
   ) => Promise<void>;
   stop: (id: string, expectedTurnId?: string) => Promise<void>;
   steer: (id: string, prompt: string, attachments: readonly ChatAttachment[], expectedTurnId?: string, mentions?: readonly ChatMention[]) => Promise<void>;
@@ -215,7 +221,7 @@ export interface AgentChatApi {
   editQueued: (id: string, expected: QueuedChatInput, prompt: string) => boolean;
   resumeQueue: (id: string) => void;
   /** Answers an approval card; rejects with the reason when it cannot. */
-  respond: (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => Promise<void>;
+  respond: (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string, allowForSession?: boolean) => Promise<void>;
   /** The models a CLI offers, fetched once per session on first request. */
   models: Record<ChatDefinitionId, ChatModelList>;
   loadModels: (definitionId: ChatDefinitionId) => void;
@@ -530,7 +536,7 @@ export function useAgentChat(
   const update = useCallback((id: string, patch: Partial<ChatThreadSettings>) => {
     changeThreads((current) =>
       current.map((thread) => {
-        if (thread.id !== id || thread.runningTurnId || thread.pendingInputs?.length) return thread;
+        if (thread.id !== id || thread.runningTurnId || thread.pendingInputs?.length || thread.pendingOperation) return thread;
         const next = selectThreadModel(thread, {
           definitionId: patch.definitionId ?? thread.definitionId,
           accountProfileId: patch.accountProfileId === undefined
@@ -554,6 +560,8 @@ export function useAgentChat(
           ...changeThreadDirectory(next, patch.workingDirectory ?? next.workingDirectory),
           browserEnabled: supportsBrowser(next.definitionId) && (patch.browserEnabled ?? next.browserEnabled) === true,
           permission: patch.permission ?? next.permission,
+          planMode: (next.definitionId === "codex" || next.definitionId === "claude") && !(next.provider === "cliproxyapi" && !next.nativeSessionId) ? patch.planMode ?? next.planMode : undefined,
+          nativeForkSource: next.definitionId === thread.definitionId && next.accountProfileId === thread.accountProfileId && next.workingDirectory === thread.workingDirectory && next.provider === thread.provider && next.proxyId === thread.proxyId ? next.nativeForkSource : undefined,
           effort,
         };
       }),
@@ -577,6 +585,7 @@ export function useAgentChat(
   }, []);
 
   const remove = useCallback(async (id: string, profileConfigPath?: string | null) => {
+    if (threadsRef.current.find(thread => thread.id === id)?.pendingOperation) throw new Error("Wait for the native operation to finish before deleting this conversation.");
     if (removals.current.has(id)) return;
     removals.current.add(id);
     setRemoval({ id, pending: true, error: null });
@@ -693,8 +702,63 @@ export function useAgentChat(
     const thread = source ? branchThread(source, throughItemId, suffix) : null;
     if (!thread) return null;
     changeThreads((current) => [thread, ...current]);
+    if (hasDesktopBackend() && !thread.provider) desktopChatAccess.requestDefaultShare(thread.id);
     setActiveThreadId(thread.id);
     return thread;
+  }, [changeThreads]);
+
+  const nativeFork = useCallback(async (id: string, suffix: string, throughItemId?: string, beforeTurn = false) => {
+    const source = threadsRef.current.find(thread => thread.id === id);
+    if (!source || !["codex", "claude"].includes(source.definitionId) || !source.nativeSessionId) throw new Error("This conversation has no supported native fork source.");
+    if (source.runningTurnId || source.pendingInputs?.length || source.pendingOperation || source.continuedInSession || handingOffThreads.current.has(id)) throw new Error("Wait for this conversation to become idle before forking.");
+    const profile = source.accountProfileId ? loadChatAccountProfiles(localStorage).find(profile => profile.id === source.accountProfileId && profile.definitionId === source.definitionId) : null;
+    if (source.accountProfileId && !profile) throw new Error("The original account profile is missing. Restore it before forking.");
+    const sourceIdentity = runtimeIdentity(source);
+    const through = throughItemId ? source.items.find(item => item.id === throughItemId) : source.items[source.items.length - 1];
+    if (!through) throw new Error("There is no completed message to fork.");
+    if (source.definitionId === "claude") {
+      const index = source.items.findIndex(item => item.id === through.id);
+      const previous = source.items.slice(0, beforeTurn ? index : index + 1).reverse().find(item => item.type === "text" && item.nativeMessageId);
+      const hasEarlierMessages = beforeTurn && source.items.slice(0, index).some(item => item.type === "user" || item.type === "text");
+      if ((throughItemId || beforeTurn) && !previous && hasEarlierMessages) throw new Error("This message has no verified Claude resume boundary.");
+      if (throughItemId && !beforeTurn && (through.type !== "text" || !through.nativeMessageId)) throw new Error("Select a native assistant message to fork.");
+      const branch = branchThread(source, through.id, suffix);
+      if (!branch) return null;
+      const fork = { ...branch, items: source.items.slice(0, beforeTurn ? index : index + 1), handoff: null,
+        nativeForkSource: beforeTurn && !hasEarlierMessages ? undefined : { sessionId: source.nativeSessionId, ...(previous?.type === "text" && (throughItemId || beforeTurn) ? { resumeAt: previous.nativeMessageId } : {}) },
+        planMode: source.planMode };
+      changeThreads(current => [fork, ...current]);
+      if (hasDesktopBackend()) desktopChatAccess.requestDefaultShare(fork.id);
+      setActiveThreadId(fork.id);
+      return fork;
+    }
+    const boundaryIndex = source.items.findIndex(item => item.id === through.id);
+    const userIndex = source.items.slice(0, boundaryIndex + 1).map(item => item.type).lastIndexOf("user");
+    const user = source.items[userIndex];
+    const nativeTurn = through.type === "text" ? through.nativeTurnId : user?.type === "user" ? user.nativeTurnId : undefined;
+    if ((throughItemId || beforeTurn) && !nativeTurn) throw new Error("This message has no verified native turn boundary yet.");
+    const nextUser = source.items.findIndex((item, index) => index > userIndex && item.type === "user");
+    const end = beforeTurn ? userIndex - 1 : throughItemId ? (nextUser < 0 ? source.items.length - 1 : nextUser - 1) : source.items.length - 1;
+    changeThreads(current => current.map(thread => thread.id === id ? { ...thread, pendingOperation: "fork" } : thread));
+    try {
+      const { invoke } = await core();
+      const result = await invoke<{ nativeSessionId: string; model: string | null; provider: string }>("agent_chat_fork", {
+        threadId: id, nativeSessionId: source.nativeSessionId, workingDirectory: source.workingDirectory,
+        profileConfigPath: profile?.configDirectory ?? null, throughTurnId: throughItemId ? nativeTurn : null, beforeTurn,
+      });
+      const latest = threadsRef.current.find(thread => thread.id === id);
+      if (!latest || runtimeIdentity(latest) !== sourceIdentity) throw new Error("The native fork was created, but the source changed. Check native history before retrying.");
+      const branch = branchThread(source, through.id, suffix);
+      if (!branch) return null;
+      const fork = { ...branch, items: branch.items.slice(0, Math.max(0, end + 1)), nativeSessionId: result.nativeSessionId, reportedModel: result.model, reportedProvider: result.provider,
+        handoff: null, planMode: source.planMode, pendingOperation: undefined };
+      changeThreads(current => [fork, ...current]);
+      if (hasDesktopBackend()) desktopChatAccess.requestDefaultShare(fork.id);
+      setActiveThreadId(fork.id);
+      return fork;
+    } finally {
+      changeThreads(current => current.map(thread => thread.id === id ? { ...thread, pendingOperation: undefined } : thread));
+    }
   }, [changeThreads]);
 
   const send = useCallback(async (
@@ -704,21 +768,25 @@ export function useAgentChat(
     profileConfigPath: string | null = null,
     queuedInputId?: string,
     mentions: readonly ChatMention[] = [],
+    nativeAction?: NativeChatAction,
   ) => {
     if (threadsRef.current.find(thread => thread.id === id)?.nativeHistoryArchived) throw new Error("This conversation is archived in the original app. Unarchive it there before resuming.");
 
     const thread = threadsRef.current.find((entry) => entry.id === id);
+    if (thread?.pendingOperation) throw new Error("Wait for the native conversation operation to finish.");
     if (!thread || thread.runningTurnId) return;
+    if (nativeAction && (thread.definitionId !== "codex" || (thread.provider === "cliproxyapi" && !thread.nativeSessionId))) throw new Error("This source does not expose the requested native operation.");
     if (handingOffThreads.current.has(id) || thread.continuedInSession) throw new Error("This conversation is held by a terminal session. Return after it closes before sending.");
     if (thread.nativeHistorySource && !readyNativeThreads.current.has(JSON.stringify([id, thread.nativeSessionId, thread.accountProfileId, nativeReadProfileKey.current]))) throw new Error("Read the conversation history before sending. Retry if reading failed.");
     const turnId = crypto.randomUUID();
-    const next = beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
+    const next = nativeAction ? { ...thread, runningTurnId: turnId, activeOperation: nativeAction.kind, updatedAt: Date.now() }
+      : beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
     const snapshot = threadsRef.current.map(entry => entry.id === id ? next : entry);
     if (queuedInputId && typeof localStorage !== "undefined" && !saveStoredThreads(localStorage, snapshot, [id])) {
       changeThreads(current => current.map(entry => entry.id === id ? { ...entry, queuePaused: true, queueProblem: "storage" } : entry));
       return;
     }
-    completionTracker.current.start(id, turnId);
+    if (nativeAction?.kind !== "compact") completionTracker.current.start(id, turnId);
     const visiblePrompt = prompt.trim() ? prompt : "Please inspect the attached files.";
     // Resolved per turn: the address or the key of that proxy may have changed
     // since the thread was created.
@@ -730,6 +798,10 @@ export function useAgentChat(
       const { invoke } = await core();
       if (thread.provider === "cliproxyapi" && !proxy) throw new Error("The selected CLIProxyAPI endpoint no longer exists.");
       const directProxy = Boolean(proxy && !thread.nativeSessionId);
+      if (!directProxy && !nativeAction && thread.workingDirectory) {
+        const revision = await invoke<string>("git_changes_checkpoint", { workingDirectory: thread.workingDirectory }).catch(() => undefined);
+        changeThreads(current => current.map(entry => entry.id === id && entry.runningTurnId === turnId ? { ...entry, lastTurnCheckpoint: revision } : entry));
+      }
       await invoke(directProxy ? "agent_chat_proxy_send" : "agent_chat_send", {
         ...(directProxy ? { history: proxyChatHistory(thread.items) } : {}),
         request: {
@@ -738,14 +810,17 @@ export function useAgentChat(
           definitionId: thread.definitionId,
           workingDirectory: thread.workingDirectory,
           browserEnabled: !directProxy && supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
-          prompt: promptForTurn(thread, visiblePrompt),
+          prompt: nativeAction ? "" : promptForTurn(thread, visiblePrompt),
+          ...(nativeAction ? { nativeAction } : {}),
+          ...(typeof thread.planMode === "boolean" ? { planMode: thread.planMode } : {}),
           permission: thread.permission,
           model: thread.model.trim() || null,
           effort: effortForTurn(thread, modelsRef.current[thread.definitionId]),
           profileConfigPath,
           cliProxyBaseUrl: proxy?.baseUrl ?? null,
           cliProxyId: proxy?.id ?? null,
-          nativeSessionId: thread.nativeSessionId,
+          nativeSessionId: thread.nativeSessionId ?? thread.nativeForkSource?.sessionId ?? null,
+          ...(thread.nativeForkSource ? { forkSession: true, resumeSessionAt: thread.nativeForkSource.resumeAt ?? null } : {}),
           attachments: attachments.map(({ path }) => ({ path })),
           mentions: !directProxy && thread.definitionId === "codex"
             ? mentions.map(({ kind, name, path }) => ({ kind, name, path }))
@@ -784,7 +859,7 @@ export function useAgentChat(
     }
   }, []);
 
-  const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string) => {
+  const respond = useCallback(async (id: string, requestId: string, allow: boolean, message?: string, expectedTurnId?: string, allowForSession = false) => {
     const thread = threadsRef.current.find(entry => entry.id === id);
     if (expectedTurnId !== undefined && thread?.runningTurnId !== expectedTurnId) throw new Error("The active turn changed. Refresh before answering.");
     const turnId = thread?.runningTurnId;
@@ -792,14 +867,15 @@ export function useAgentChat(
       && item.id === `${turnId}:approval:${requestId}` && item.decision === "pending")) {
       throw new Error("This approval is no longer waiting for an answer.");
     }
+    if (allowForSession && (!allow || !thread.items.some(item => item.type === "approval" && item.requestId === requestId && item.canAllowSession))) throw new Error("This approval does not expose session scope.");
     const key = JSON.stringify([id, turnId, requestId]);
     const previous = pendingApprovals.current.get(key);
     if (previous) return previous;
     const pending = (async () => {
       const { invoke } = await core();
-      await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: turnId });
+      await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: turnId, ...(allowForSession ? { allowForSession: true } : {}) });
       changeThreads(current => current.map(entry => entry.id === id && entry.runningTurnId === turnId
-        ? decideApproval(entry, requestId, allow ? "allowed" : "denied") : entry));
+        ? decideApproval(entry, requestId, allow ? "allowed" : "denied", Date.now(), allowForSession) : entry));
     })();
     pendingApprovals.current.set(key, pending);
     try { await pending; } finally { pendingApprovals.current.delete(key); }
@@ -1079,6 +1155,7 @@ export function useAgentChat(
       continueInSession,
       updateThreadFromSession,
       branchThread: branch,
+      nativeFork,
       delegate,
       delegateRemote,
       send,
@@ -1123,6 +1200,7 @@ export function useAgentChat(
       continueInSession,
       updateThreadFromSession,
       branch,
+      nativeFork,
       delegate,
       delegateRemote,
       send,

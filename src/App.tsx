@@ -1,3 +1,4 @@
+import { parseConversationLink } from "./app/conversationNavigation";
 /**
  * Application shell.
  *
@@ -345,6 +346,24 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [chatRuntime, setChatRuntime] = useState<ChatRuntimeApi | null>(null);
   const chatRuntimeRef = useRef(chatRuntime);
   chatRuntimeRef.current = chatRuntime;
+  useEffect(() => {
+    if (!hasDesktopBackend() || !chatRuntime) return;
+    let disposed = false; let stop: (() => void) | undefined;
+    const open = (urls: string[]) => {
+      const chat = chatRuntimeRef.current?.chat;
+      for (const url of urls) {
+        const id = parseConversationLink(url);
+        if (id && chat?.getThread(id)) { setView("chat"); chat.setActiveThreadId(id); break; }
+      }
+    };
+    void import("@tauri-apps/plugin-deep-link").then(async module => {
+      const unlisten = await module.onOpenUrl(urls => { if (!disposed) open(urls); });
+      if (disposed) { unlisten(); return; } stop = unlisten;
+      const current = await module.getCurrent(); if (!disposed && current) open(current);
+    }).catch(() => {});
+    return () => { disposed = true; stop?.(); };
+  }, [Boolean(chatRuntime)]);
+
   // A clicked reply notification brings the window forward (the desktop
   // does that) and asks for its conversation; open it.
   useEffect(() => {
