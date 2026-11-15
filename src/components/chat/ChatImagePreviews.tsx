@@ -13,16 +13,19 @@ export function ChatImageStrip({
   workingDirectory,
   threadId,
   captions = true,
+  showUnavailable = false,
 }: {
   paths: readonly string[];
   workingDirectory: string;
   threadId?: string;
-  /** File names under the pictures; a sent message already lists them. */
+  /** Optional file names under the pictures. */
   captions?: boolean;
+  /** Keep an actionable placeholder for sent images that cannot be loaded. */
+  showUnavailable?: boolean;
 }) {
   const { t } = useI18n();
-  const [images, setImages] = useState<{ path: string; url: string }[]>([]);
-  const [selected, setSelected] = useState<{ path: string; url: string } | null>(null);
+  const [images, setImages] = useState<{ path: string; url: string | null }[]>([]);
+  const [selected, setSelected] = useState<{ path: string; url: string | null } | null>(null);
   const key = JSON.stringify(orderedImagePaths(paths));
 
   useEffect(() => {
@@ -35,7 +38,7 @@ export function ChatImageStrip({
     }
     let cancelled = false;
     void import("@tauri-apps/api/core").then(async ({ invoke }) => {
-      const found: { path: string; url: string }[] = [];
+      const found: { path: string; url: string | null }[] = [];
       for (const path of wanted) {
         if (cancelled) return;
         const url = await invoke<string | null>("chat_image_preview", {
@@ -43,14 +46,14 @@ export function ChatImageStrip({
           path,
           threadId: threadId ?? null,
         }).catch(() => null);
-        if (url) found.push({ path, url });
+        if (url || showUnavailable) found.push({ path, url });
       }
       if (!cancelled) setImages(found);
     }).catch(() => { if (!cancelled) setImages([]); });
     return () => {
       cancelled = true;
     };
-  }, [key, workingDirectory, threadId]);
+  }, [key, workingDirectory, threadId, showUnavailable]);
 
   if (images.length === 0) return null;
   return (
@@ -63,13 +66,14 @@ export function ChatImageStrip({
             title={t("chat.images.enlarge")}
             aria-label={t("chat.images.preview", { name: imageFileName(image.path) })}
           >
-            <img src={image.url} alt={imageFileName(image.path)} loading="lazy" />
+            {image.url ? <img src={image.url} alt={imageFileName(image.path)} loading="lazy" />
+              : <span>{t("chat.images.unavailable")}</span>}
           </button>
           {captions && <figcaption>{imageFileName(image.path)}</figcaption>}
         </figure>
       ))}
       {selected && <ChatImagePreview path={selected.path} name={imageFileName(selected.path)}
-        workingDirectory={workingDirectory} threadId={threadId} initialUrl={selected.url} onClose={() => setSelected(null)} />}
+        workingDirectory={workingDirectory} threadId={threadId} initialUrl={selected.url ?? undefined} onClose={() => setSelected(null)} />}
     </div>
   );
 }

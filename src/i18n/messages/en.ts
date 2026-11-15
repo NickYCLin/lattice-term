@@ -1947,6 +1947,7 @@ export const en: Messages = {
   "chat.projects.clear": "Show all conversations",
   "chat.tool.exitCode": "exit {code}",
   "chat.images": "Images mentioned in the reply",
+  "chat.images.title": "Image preview",
   "chat.images.enlarge": "Enlarge",
   "chat.images.preview": "View image: {name}",
   "chat.images.unavailable": "Cannot load this image. The file may have been moved or deleted, or is outside this conversation’s preview folders.",

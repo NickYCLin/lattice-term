@@ -108,12 +108,13 @@ describe("ChatView", () => {
     expect(html).not.toContain('class="chat-welcome"');
   });
 
-  it("makes sent image filenames clickable without making ordinary files image previews", () => {
+  it("omits sent image filename chips and keeps ordinary attachment names", () => {
     const thread = fakeThread({ items: [{ type: "user", id: "sent", at: 1, text: "See attachments", attachments: [
       { isImage: true, path: "/work/shot.png", name: "shot.png" }, { isImage: false, path: "/work/notes.txt", name: "notes.txt" },
     ] }] });
     const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
-    expect(html).toContain('aria-label="查看圖片：shot.png"');
+    expect(html).not.toContain('shot.png');
+    expect(html).toContain('notes.txt');
     expect(html).not.toContain('aria-label="查看圖片：notes.txt"');
   });
   it("uses the shared composer with a short model label and actual access", () => {

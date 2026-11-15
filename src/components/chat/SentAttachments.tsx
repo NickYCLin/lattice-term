@@ -1,10 +1,6 @@
-import { useEffect, useState } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
 import { displayPath } from "../../app/displayPath";
-import { imageFileName } from "../../app/chatImages";
-import { useI18n } from "../../i18n/context";
-import { FileIcon, ImageFileIcon } from "../icons";
-import { ChatImagePreview } from "./ChatImagePreview";
+import { FileIcon } from "../icons";
 import { ChatImageStrip } from "./ChatImagePreviews";
 
 export function SentAttachments({ attachments, workingDirectory, threadId }: {
@@ -12,22 +8,14 @@ export function SentAttachments({ attachments, workingDirectory, threadId }: {
   workingDirectory: string;
   threadId?: string;
 }) {
-  const { t } = useI18n();
-  const [selected, setSelected] = useState<ChatAttachment | null>(null);
-  useEffect(() => setSelected(null), [threadId, workingDirectory]);
+  const files = attachments.filter(file => !file.isImage);
   if (attachments.length === 0) return null;
   return <>
-    <div className="chat-attachments chat-attachments--sent">
-      {attachments.map(attachment => attachment.isImage
-        ? <button type="button" className="chat-attachment chat-attachment--preview" key={attachment.path}
-          aria-label={t("chat.images.preview", { name: imageFileName(attachment.name) })}
-          onClick={() => setSelected(attachment)}><ImageFileIcon size={14} /><span>{imageFileName(attachment.name)}</span></button>
-        : <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
-          <FileIcon size={14} /><span>{attachment.name}</span></span>)}
-    </div>
+    {files.length > 0 && <div className="chat-attachments chat-attachments--sent">
+      {files.map(attachment => <span className="chat-attachment" key={attachment.path} title={displayPath(attachment.path)}>
+        <FileIcon size={14} /><span>{attachment.name}</span></span>)}
+    </div>}
     <ChatImageStrip paths={attachments.filter(file => file.isImage).map(file => file.preview ?? file.path)}
-      workingDirectory={workingDirectory} threadId={threadId} captions={false} />
-    {selected && <ChatImagePreview key={selected.preview ?? selected.path} path={selected.preview ?? selected.path}
-      name={selected.name} workingDirectory={workingDirectory} threadId={threadId} onClose={() => setSelected(null)} />}
+      workingDirectory={workingDirectory} threadId={threadId} captions={false} showUnavailable />
   </>;
 }
