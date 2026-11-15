@@ -16,6 +16,16 @@ const proxies: CliProxyEndpoint[] = [
 ];
 
 describe("account-aware model choices", () => {
+  it("localizes a CLI default alias without renaming explicit recommended models", () => {
+    const targets = accountModelTargets([definition], [], {}, "預設帳號");
+    const choices = [{ value: "", label: "Default (recommended)", description: null, isDefault: true },
+      { ...model, isDefault: true }];
+    const result = accountModelOptions(targets, { [accountModelTargetKey(targets[0])]: { state: "ready", models: choices } }, labels);
+    expect(result[0].modelLabel).toBe("預設模型");
+    expect(result[0].modelInfo?.label).toBe("Default (recommended)");
+    expect(result.find(option => option.model === model.value)?.modelLabel).toBe(model.label);
+  });
+
   it("offers configured proxies without an installed CLI or phantom native models", () => {
     const options = accountModelOptions([], {}, labels, undefined, proxies, true);
     expect(options).toHaveLength(2);

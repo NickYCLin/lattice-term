@@ -211,9 +211,21 @@ describe("conversation sidebar placement", () => {
     ]);
   });
 
+  it("groups a previously automatic root row once its directory is known", () => {
+    const oldThread = fakeThread({ workingDirectory: "" });
+    const previous = chatSidebarLayout(emptySessionSidebarLayout, [oldThread]);
+    const thread = { ...oldThread, workingDirectory: "D:\\work\\smoke" };
+    const result = sidebar({ threads: [thread] });
+    const next = chatSidebarLayout(previous, result.listedThreads, result.workspace.nodes);
+    expect(chatSidebarRows(next, result.listedThreads, result.workspace).map(row => row.kind)).toEqual(["project", "thread"]);
+    expect(next.placements[chatThreadNodeId(thread.id)].parentId).not.toBeNull();
+    expect(chatSidebarLayout(next, result.listedThreads, result.workspace.nodes)).toEqual(next);
+  });
+
   it("does not move an explicitly top-level thread into its project", () => {
     const thread = fakeThread();
-    const previous = chatSidebarLayout(emptySessionSidebarLayout, [thread]);
+    const initial = chatSidebarLayout(emptySessionSidebarLayout, [thread]);
+    const previous = moveSessionSidebarNode(initial, chatThreadNodeId(thread.id), null);
     const result = sidebar({ threads: [thread], history: [conversation()] });
     const next = chatSidebarLayout(reconcileProjectChatLayout(previous, [thread]), result.listedThreads, result.workspace.nodes);
     expect(next.placements[chatThreadNodeId(thread.id)].parentId).toBeNull();

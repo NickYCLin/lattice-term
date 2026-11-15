@@ -1,3 +1,4 @@
+import { modelDisplayLabel } from "../../app/modelDisplayLabel";
 /** One model picker across every installed assistant. Choosing a model also
  * chooses the CLI that owns it, so people never have to switch a brand first. */
 
@@ -118,7 +119,7 @@ export function ModelField({
                   value={encodeModelSelection({ definitionId: id, model: model.value })}
                   disabled={isSelectionDisabled?.({ definitionId: id, model: model.value })}
                 >
-                  {model.label}
+                  {modelDisplayLabel(model.value, model.label, t("chat.model.default"))}
                 </option>
               ))}
             </optgroup>

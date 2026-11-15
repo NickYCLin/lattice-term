@@ -1,3 +1,4 @@
+import { modelDisplayLabel } from "../../app/modelDisplayLabel";
 import { useEffect, useRef, useState } from "react";
 import { hasChatModels } from "../../app/accountModels";
 import type { ChatModelChoice } from "../../app/agentChat";
@@ -43,7 +44,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const settings = useCliProxySettings();
   const endpoint = proxyId ? settings.proxies.find(proxy => proxy.id === proxyId) ?? null : null;
   const proxyModels = useCliProxyModels(endpoint, open && proxyId !== null);
-  const current = session.model || session.label;
+  const current = modelDisplayLabel(session.model ?? "", session.model, t("chat.model.default"));
 
   useEffect(() => {
     if (!open || proxyId !== null || accountChoices.state !== "idle") return;
@@ -123,7 +124,7 @@ export function SessionModelPicker({ session, agents, disabled, onNotice, onRepl
   const renderModel = (model: PickerChoice) => (
     <button key={model.value} type="button" role="menuitemradio" aria-checked={model.value === session.model}
       disabled={disabled || switching} title={model.value} onClick={() => void pick(model.value)}>
-      {model.label}
+      {modelDisplayLabel(model.value, model.label, t("chat.model.default"))}
     </button>
   );
   return (

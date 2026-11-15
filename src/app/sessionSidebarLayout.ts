@@ -16,6 +16,8 @@ export interface SessionSidebarFolder {
 export interface SessionSidebarPlacement {
   parentId: string | null;
   order: number;
+  /** Explicit drag placement; automatic root placement may follow its project later. */
+  manual?: boolean;
 }
 
 export interface SessionSidebarLayout {
@@ -110,7 +112,7 @@ export function sanitizeSessionSidebarLayout(
     ) {
       return null;
     }
-    placements[id] = { parentId, order };
+    placements[id] = { parentId, order, ...(placement.manual === true ? { manual: true } : {}) };
   }
 
   const collapsedFolderIds = record.collapsedFolderIds.map(safeId);
@@ -223,6 +225,7 @@ export function reconcileSessionSidebarLayout(
     placements[id] = {
       parentId: parentId && knownIds.has(parentId) && parentId !== id ? parentId : null,
       order: saved?.order ?? MAX_NODES,
+      ...(saved?.manual ? { manual: true } : {}),
     };
   }
 
@@ -418,6 +421,7 @@ export function moveSessionSidebarNode(
     Object.entries(layout.placements).map(([id, placement]) => [id, { ...placement }]),
   );
   placements[nodeId].parentId = parentId;
+  placements[nodeId].manual = true;
   const siblings = sessionSidebarChildren(
     { ...layout, placements },
     parentId,

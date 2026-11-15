@@ -83,10 +83,10 @@ describe("SessionConversationPane composer", () => {
     expect(html).toContain("Claude Code 或 Codex 要求權限時可以直接在這裡允許或拒絕；其他互動請開啟終端機處理。");
   });
 
-  it("marks a sandboxed session and falls back to the CLI name without a model", () => {
+  it("marks a sandboxed session and labels an unspecified model as default", () => {
     const html = render({ sandboxed: true, model: null, label: "Claude Code" });
     expect(html).toContain('class="session-composer__access is-sandboxed"');
     expect(html).toContain("沙箱保護");
-    expect(html).toContain('class="session-composer__model-label">Claude Code</span>');
+    expect(html).toContain('class="session-composer__model-label">預設</span>');
   });
 });

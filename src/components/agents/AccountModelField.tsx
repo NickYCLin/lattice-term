@@ -1,3 +1,4 @@
+import { modelDisplayLabel } from "../../app/modelDisplayLabel";
 import { CLI_PROXY_DEFAULT_ID, cliProxyMessageKey, cliProxyStatusCode } from "../../app/cliProxyApi";
 import { groupPickerModels } from "../../app/modelPickerOrder";
 import type { CliProxyModelList, CliProxyModelLists } from "../../app/useCliProxyApi";
@@ -149,11 +150,11 @@ export function AccountModelField({ options, value, disabled, onChange, allowCli
         }}>
         {modelMissing && <option value="" disabled>{t("accountModel.missing")}</option>}
         {source.options.filter(option => !option.model).map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
-          disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
+          disabled={option.disabled}>{modelDisplayLabel(option.model, option.modelLabel ?? option.label, t("chat.model.default"))}</option>)}
         {groupPickerModels(source.options.filter(option => option.model), option => ({ id: option.model })).map(group => (
           <optgroup key={JSON.stringify(group.brand)} label={group.brand ?? t("chat.model.otherBrand")}>
             {group.models.map(option => <option key={accountModelKey(option)} value={accountModelKey(option)}
-              disabled={option.disabled}>{option.modelLabel ?? option.label}</option>)}
+              disabled={option.disabled}>{modelDisplayLabel(option.model, option.modelLabel ?? option.label, t("chat.model.default"))}</option>)}
           </optgroup>
         ))}
       </select>

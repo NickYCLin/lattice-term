@@ -231,7 +231,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           if (message.tool) return null;
           const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
           const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
-          return <ConversationMessage key={index} role={message.role} assistant={assistant}>
+          return <ConversationMessage key={message.renderId ?? index} role={message.role} assistant={assistant}>
             {sent ? <div>{sent.text}</div> : <ChatMarkdown source={message.text} />}
             <SentAttachments attachments={files} workingDirectory={session.workingDirectory} threadId={session.sessionId} />
           </ConversationMessage>;
