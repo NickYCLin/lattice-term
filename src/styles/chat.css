@@ -2628,6 +2628,12 @@ button.chat-diff__line.is-commentable:focus-visible {
   }
 }
 
+.chat-markdown :is(ul, ol) { padding-inline-start: 1.5em; }
+.chat-markdown ul { list-style-type: disc; }
+.chat-markdown ul ul { list-style-type: circle; }
+.chat-markdown ul ul ul { list-style-type: square; }
+.chat-markdown ol { list-style-type: decimal; }
+
 .chat-markdown a,
 .chat-markdown__file {
   color: var(--accent);
