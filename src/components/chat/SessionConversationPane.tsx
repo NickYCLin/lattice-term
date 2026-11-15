@@ -81,7 +81,8 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
-  const waitingForReady = sessionNeedsReadyConfirmation(session);
+  const unconfirmed = sessionNeedsReadyConfirmation(session);
+  const waitingForReady = conversation.sendError === SESSION_PROMPT_NOT_READY;
   const queuedCount = Math.max(session.queuedPrompts, conversation.queued ?? 0);
   const { acknowledge } = conversation;
   useEffect(() => {
@@ -90,7 +91,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
   const blocked = Boolean(session.closedReason) || conversation.sending;
   const hasContent = Boolean(draft.trim()) || attachments.length > 0;
-  const canSend = hasContent && !blocked && !waitingForReady;
+  const canSend = hasContent && !blocked;
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend || pastingRef.current) return;
@@ -198,7 +199,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
             {t("form.group")} · {session.groupLabel}
           </span>}
           {live && <span className={`session-chat__state is-${session.state}`}>
-            {t(waitingForReady ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
+            {t(unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}
         </ConversationIdentity>
         <div className="chat-composer__actions">
@@ -304,7 +305,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           <p>{t("sessionChat.queued", { count: queuedCount })}</p>
           {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
         </div>}
-        {conversation.queued === 0 && queuedCount === 0 && !working && !waitingForReady && <p role="status">{t("sessionChat.accepted")}</p>}
+        {conversation.queued === 0 && queuedCount === 0 && !working && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
         {notice && <p role="status">{notice}</p>}
       </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
@@ -331,10 +332,10 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
             <SessionModelPicker session={session} agents={agents}
-              disabled={waitingForReady || (working && !switchesModelInPlace(session))}
+              disabled={unconfirmed || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
-              blocked={blocked || pasting || waitingForReady} working={working} sending={conversation.sending} canSend={canSend}
+              blocked={blocked || pasting} working={working} sending={conversation.sending} canSend={canSend}
               sendLabel={t(conversation.sending ? "sessionChat.sending" : "sessionChat.send")}
               replyVersion={String(conversation.messages.length)}
               replyText={spokenSessionReply(conversation.messages[conversation.messages.length - 1]) ?? ""}

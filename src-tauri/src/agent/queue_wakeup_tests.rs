@@ -11,22 +11,34 @@ impl Write for QueueWriter {
     }
 }
 
-struct QueueFixture {
-    sink: Arc<TestSink>,
-    registry: Arc<AgentRegistry>,
-    id: String,
-    writes: Arc<Mutex<Vec<u8>>>,
+pub(super) struct QueueFixture {
+    pub(super) sink: Arc<TestSink>,
+    pub(super) registry: Arc<AgentRegistry>,
+    pub(super) id: String,
+    pub(super) writes: Arc<Mutex<Vec<u8>>>,
     _original_writer: Box<dyn Write + Send>,
 }
 
 impl QueueFixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
+        Self::with_resume(false)
+    }
+
+    pub(super) fn with_resume(resumed: bool) -> Self {
         let sink = Arc::new(TestSink::default());
         let registry = AgentRegistry::with_local_reporter(sink.clone()).unwrap();
         #[cfg(unix)]
         let (executable, arguments) = ("/bin/cat".into(), Vec::new());
         #[cfg(windows)]
-        let (executable, arguments) = ("cmd.exe".into(), vec!["/d".into(), "/q".into()]);
+        let (executable, arguments) = (
+            "cmd.exe".into(),
+            vec![
+                "/d".into(),
+                "/q".into(),
+                "/c".into(),
+                "set /p lattice_queue_fixture=".into(),
+            ],
+        );
         let session = launch(
             sink.clone(),
             registry.clone(),
@@ -38,7 +50,7 @@ impl QueueFixture {
                 resume_session_id: None,
                 group_id: None,
                 seed_input: None,
-                restore_existing_session: false,
+                restore_existing_session: resumed,
                 profile_config_path: None,
                 sandbox: false,
                 detached: false,

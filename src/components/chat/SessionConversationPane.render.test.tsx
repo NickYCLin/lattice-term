@@ -47,16 +47,16 @@ describe("SessionConversationPane composer", () => {
     expect(html).not.toContain('OpenAI Codex');
   });
 
-  it("offers the terminal for unconfirmed readiness and pending user input", () => {
+  it("lets the backend check initial readiness and offers the terminal for pending user input", () => {
     expect(render({ state: "idle", stateSource: "integration" })).not.toContain("開啟這個工作階段的終端機");
-    expect(render({ state: "idle", stateSource: "heuristic" })).toContain("開啟這個工作階段的終端機");
+    expect(render({ state: "idle", stateSource: "heuristic" })).not.toContain("開啟這個工作階段的終端機");
     expect(render({ state: "needsAttention" })).toContain("開啟這個工作階段的終端機");
   });
 
   it("does not label a restored heuristic completion as ready to receive messages", () => {
     const html = render({ state: "done", stateSource: "heuristic", restoreExistingSession: true });
     expect(html).toContain("尚未確認就緒");
-    expect(html).toContain("這裡的草稿會保留");
+    expect(html).not.toContain("先從終端機送出訊息");
     expect(html).not.toContain("任務完成");
     expect(html).not.toMatch(/session-composer__model" disabled=""/);
     expect(html).not.toMatch(/<textarea[^>]*disabled/);

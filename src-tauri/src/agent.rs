@@ -9022,6 +9022,8 @@ pub const MCP_NOT_CONTROLLED: &str = "This session is not under MCP control.";
 pub const MCP_GRANT_CHANGED: &str = "This session is not under the original MCP control grant.";
 /// The CLI has not reported itself free, or a person is mid-prompt.
 pub const MCP_NOT_READY: &str = "The CLI has not confirmed it is ready, or the user is editing its prompt. Queue the prompt or wait for an official idle/done report.";
+/// The desktop keeps its composer draft when an initial prompt is not ready.
+pub const DESKTOP_PROMPT_NOT_READY: &str = "session-prompt-not-ready";
 pub const MCP_QUEUE_IN_ORDER: &str =
     "This session already has queued prompts. Use queue mode to preserve their order.";
 pub const MCP_SESSION_GONE: &str = "Agent session no longer exists.";
@@ -9500,6 +9502,36 @@ pub fn enqueue(
         return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
     }
     discard_profile_invalidated_queue(sink, registry, session_id, &entry);
+    let summary = entry.summary.lock().map_err(|error| error.to_string())?;
+    let first_native_prompt = matches!(summary.definition_id.as_str(), "codex" | "claude")
+        && summary.state_source == AgentStateSource::Heuristic
+        && !entry.terminal_turn_started.load(Ordering::Acquire);
+    if first_native_prompt {
+        // These integrations report completion only after a submitted turn.
+        // Waiting in the queue for that first report would deadlock startup.
+        // Reuse the foreground first-turn gate under the input lock; never
+        // use terminal silence to release later prompts or existing queues.
+        if input.desktop_busy()
+            || input.startup_seed_pending
+            || registry
+                .foreground_terminal_blocker(&entry, &summary)
+                .is_some()
+            || !entry
+                .queued_prompts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .is_empty()
+        {
+            return Err(DESKTOP_PROMPT_NOT_READY.to_string());
+        }
+        drop(summary);
+        if queue_hold(registry, session_id).is_some() {
+            return Err(DESKTOP_PROMPT_NOT_READY.to_string());
+        }
+        send_prompt_bytes_locked(sink, registry, session_id, &bytes, None, &mut input)?;
+        return Ok(0);
+    }
+    drop(summary);
     enqueue_locked(sink, registry, session_id, bytes, None, &mut input)
 }
 
@@ -18299,5 +18331,9 @@ notify = ["notify.exe", "turn-ended"]"#,
     mod queue_wakeup_tests {
         use super::*;
         include!("agent/queue_wakeup_tests.rs");
+    }
+    mod desktop_chat_queue_tests {
+        use super::*;
+        include!("agent/desktop_chat_queue_tests.rs");
     }
 }
