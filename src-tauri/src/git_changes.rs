@@ -612,8 +612,15 @@ pub struct Worktree {
     pub branch: Option<String>,
     pub current: bool,
 }
+// Git for Windows does not accept canonicalize's verbatim prefix in worktree paths.
+fn canonical_worktree_path(path: &Path) -> Result<PathBuf, String> {
+    let path = path.canonicalize().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    let path = crate::agent::plain_win32_path(path);
+    Ok(path)
+}
 pub fn worktrees(directory: &str) -> Result<Vec<Worktree>, String> {
-    let root = repository_root(directory)?;
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
     let mut command = git(&root);
     command.args(["worktree", "list", "--porcelain", "-z"]);
     let output = run(command)?;
@@ -624,9 +631,11 @@ pub fn worktrees(directory: &str) -> Result<Vec<Worktree>, String> {
     for entry in output.stdout.split(|c| *c == 0) {
         let entry = String::from_utf8_lossy(entry);
         if let Some(path) = entry.strip_prefix("worktree ") {
+            let path =
+                canonical_worktree_path(Path::new(path)).unwrap_or_else(|_| PathBuf::from(path));
             trees.push(Worktree {
-                current: Path::new(path) == root,
-                path: path.into(),
+                current: path == root,
+                path: path.display().to_string(),
                 branch: None,
             });
         }
@@ -639,7 +648,7 @@ pub fn worktrees(directory: &str) -> Result<Vec<Worktree>, String> {
     Ok(trees)
 }
 pub fn create_worktree(directory: &str, destination: &str, branch: &str) -> Result<String, String> {
-    let root = repository_root(directory)?;
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
     let destination = Path::new(destination);
     if !destination.is_absolute()
         || destination.exists()
@@ -650,11 +659,7 @@ pub fn create_worktree(directory: &str, destination: &str, branch: &str) -> Resu
     {
         return Err("請選擇尚不存在的絕對路徑。".into());
     }
-    let parent = destination
-        .parent()
-        .ok_or("缺少上層資料夾。")?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let parent = canonical_worktree_path(destination.parent().ok_or("缺少上層資料夾。")?)?;
     if parent.starts_with(&root) {
         return Err("Worktree 請放在原專案外，避免互相讀取。".into());
     }
@@ -684,10 +689,8 @@ pub fn create_worktree(directory: &str, destination: &str, branch: &str) -> Resu
     Ok(destination.display().to_string())
 }
 pub fn remove_worktree(directory: &str, destination: &str) -> Result<(), String> {
-    let root = repository_root(directory)?;
-    let path = Path::new(destination)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let root = canonical_worktree_path(&repository_root(directory)?)?;
+    let path = canonical_worktree_path(Path::new(destination))?;
     let trees = worktrees(directory)?;
     // First listed worktree is the main checkout and must never be removed.
     if path == root
@@ -730,6 +733,7 @@ mod tests {
         init(&["config", "user.email", "test@example.com"]);
         init(&["config", "user.name", "Test"]);
         init(&["config", "commit.gpgsign", "false"]);
+        init(&["config", "core.autocrlf", "false"]);
         std::fs::write(path.join("kept.txt"), "one\n").unwrap();
         init(&["add", "kept.txt"]);
         init(&["commit", "-q", "-m", "start"]);
@@ -873,6 +877,10 @@ mod tests {
         let directory = repo();
         let root = directory.path().to_str().unwrap();
         let parent = tempfile::tempdir().unwrap();
+        let inside = directory.path().join("nested-worktree");
+        assert!(create_worktree(root, inside.to_str().unwrap(), "nested-work").is_err());
+        assert!(!inside.exists());
+        assert!(worktrees(root).unwrap().iter().any(|tree| tree.current));
         let target = parent.path().join("parallel");
         let path = create_worktree(root, target.to_str().unwrap(), "parallel-work").unwrap();
         assert!(worktrees(root)
