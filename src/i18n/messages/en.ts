@@ -1722,7 +1722,7 @@ export const en: Messages = {
   "chat.mcpAccess.title": "MCP sharing for this conversation",
   "chat.mcpAccess.read": "Allow reading",
   "chat.mcpAccess.control": "Allow sending",
-  "chat.mcpAccess.hint": "Off by default. Shares only this original thread with its existing model and account. Does not approve tools or send while busy or a draft is present. Share again after closing or reloading the desktop.",
+  "chat.mcpAccess.hint": "Reading and sending are enabled for new conversations. Shares only this original thread with its existing model and account. Does not approve tools or send while busy or a draft is present. Share again after closing or reloading the desktop.",
   "chat.mcpAccess.failed": "Could not update sharing. Check the background service version and reload the desktop.",
   "chat.title": "Chat",
   "chat.new": "New chat",

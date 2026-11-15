@@ -30,6 +30,6 @@ export function ChatMcpAccess({ thread }: { thread: ChatThread }) {
       <span>{t("chat.mcpAccess.control")}</span>
     </label>
     <p className="chat-settings__hint">{t("chat.mcpAccess.hint")}</p>
-    {error && <p role="alert">{error}</p>}
+    {(error || access.defaultShareErrors.has(thread.id)) && <p role="alert">{error || t("chat.mcpAccess.failed")}</p>}
   </fieldset>;
 }

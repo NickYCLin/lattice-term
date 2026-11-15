@@ -77,3 +77,52 @@ it("fails closed when the runtime heartbeat stops", async () => {
     expect(access.nonce).toBeNull(); expect(access.grants.size).toBe(0);
   } finally { await act(async () => { root.unmount(); }); }
 });
+
+it("shares a newly created thread once, preserving later revocation", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const thread = fakeThread({ id: "new" });
+  const chat = fakeChatApi({ threads: [thread] });
+  function Probe() { useDesktopChatHost(chat); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    await act(async () => { access.requestDefaultShare(thread.id); });
+    expect(access.grants.get(thread.id)).toMatchObject({ read: true, control: true });
+    expect(access.defaultShares.size).toBe(0);
+    await act(async () => { await access.share(thread, false, false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(access.grants.has(thread.id)).toBe(false);
+    expect(invoke.mock.calls.filter(([name, args]) => name === "mcp_chat_share" && args.request.control)).toHaveLength(1);
+  } finally { await act(async () => { root.unmount(); }); }
+});
+
+it("waits for host registration before enabling a new conversation", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const thread = fakeThread({ id: "new" });
+  const chat = fakeChatApi({ threads: [thread] });
+  const usual = invoke.getMockImplementation()!;
+  let open!: (nonce: string) => void;
+  invoke.mockImplementation((name, args) => name === "mcp_chat_open" ? new Promise(resolve => { open = resolve; }) : usual(name, args));
+  function Probe() { useDesktopChatHost(chat); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); access.requestDefaultShare(thread.id); });
+    expect(access.grants.size).toBe(0);
+    await act(async () => { open("runtime"); });
+    expect(access.grants.get(thread.id)).toMatchObject({ read: true, control: true });
+  } finally { await act(async () => { root.unmount(); }); }
+});
+
+it("reports a failed default share without retrying or claiming permission", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const thread = fakeThread({ id: "new" }); const chat = fakeChatApi({ threads: [thread] });
+  function Probe() { useDesktopChatHost(chat); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    const usual = invoke.getMockImplementation()!;
+    invoke.mockImplementation((name, args) => name === "mcp_chat_share" && args.request.control ? Promise.reject(Error("unavailable")) : usual(name, args));
+    await act(async () => { access.requestDefaultShare(thread.id); });
+    expect(access.grants.has(thread.id)).toBe(false);
+    expect(access.defaultShareErrors.has(thread.id)).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(invoke.mock.calls.filter(([name, args]) => name === "mcp_chat_share" && args.request.control)).toHaveLength(1);
+  } finally { await act(async () => { root.unmount(); }); }
+});

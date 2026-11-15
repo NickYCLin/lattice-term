@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { hasDesktopBackend } from "./nativeRuntime";
@@ -6,9 +6,28 @@ import { loadChatAccountProfiles } from "./chatAccountProfiles";
 import { desktopChatAccess as access, chatIdentity, performDesktopChat, type DesktopChatRequest } from "./desktopChat";
 import type { AgentChatApi } from "./useAgentChat";
 
+const subscribe = (listener: () => void) => {
+  access.listeners.add(listener);
+  return () => { access.listeners.delete(listener); };
+};
+
 export function useDesktopChatHost(chat: AgentChatApi) {
   const current = useRef(chat);
   current.current = chat;
+  const revision = useSyncExternalStore(subscribe, () => access.revision, () => 0);
+  useEffect(() => {
+    if (!access.nonce) return;
+    for (const id of access.defaultShares) {
+      const thread = current.current.getThread(id);
+      if (!thread) continue; // Creation can precede the next React render.
+      access.defaultShares.delete(id);
+      if (thread.archived || thread.remote || thread.provider === "cliproxyapi") continue;
+      const nonce = access.nonce;
+      void access.share(thread, true, true).catch(() => {
+        if (access.nonce === nonce) { access.defaultShareErrors.add(id); access.notify(); }
+      });
+    }
+  }, [chat.threads, revision]);
   useEffect(() => {
     if (!hasDesktopBackend()) return;
     let stopped = false;

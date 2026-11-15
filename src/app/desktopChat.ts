@@ -48,13 +48,22 @@ export const desktopChatAccess = {
   grants: new Map<string, ChatAccess>(),
   drafts: new Set<string>(),
   pending: new Set<string>(),
+  defaultShares: new Set<string>(),
+  defaultShareErrors: new Set<string>(),
+  requestDefaultShare(threadId: string) { this.defaultShares.add(threadId); this.notify(); },
   revision: 0,
   listeners: new Set<() => void>(),
   notify() { this.revision++; this.listeners.forEach(listener => listener()); },
-  reset(nonce: string | null) { this.nonce = nonce; this.grants.clear(); this.notify(); },
+  reset(nonce: string | null) {
+    this.nonce = nonce; this.grants.clear(); this.defaultShareErrors.clear();
+    if (!nonce) this.defaultShares.clear();
+    this.notify();
+  },
   async share(thread: ChatThread, read: boolean, control: boolean) {
     const nonce = this.nonce;
     if (!nonce || this.pending.has(thread.id)) throw new Error("The chat sharing service is not ready.");
+    this.defaultShares.delete(thread.id);
+    this.defaultShareErrors.delete(thread.id);
     this.pending.add(thread.id);
     this.grants.delete(thread.id); this.notify();
     try {

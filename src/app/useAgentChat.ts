@@ -55,6 +55,7 @@ import {
   type ChatThread,
   type NativeHistoryMessage,
 } from "./agentChat";
+import { desktopChatAccess } from "./desktopChat";
 import { hasDesktopBackend } from "./nativeRuntime";
 import {
   cancelFleetTurn,
@@ -402,11 +403,14 @@ export function useAgentChat(
   }, []);
 
   const create = useCallback((settings: ChatThreadCreation) => {
-    const thread = createThread(settings);
+    const thread = createThread({ ...settings,
+      browserEnabled: settings.browserEnabled ?? settings.provider !== "cliproxyapi",
+    });
     // The ref is what `send` consults, and a caller that creates a thread
     // and sends into it in the same tick (an automation firing) runs before
     // React has rendered the new state. Keep the ref current now.
     changeThreads((current) => [thread, ...current]);
+    if (hasDesktopBackend() && thread.provider !== "cliproxyapi") desktopChatAccess.requestDefaultShare(thread.id);
     if (settings.activate !== false) setActiveThreadId(thread.id);
     return thread;
   }, []);
