@@ -37,7 +37,7 @@ class HostNode {
   appendChild(child: HostNode) { this.childNodes.push(child); child.parentNode = this; return child; }
   removeChild(child: HostNode) { this.childNodes = this.childNodes.filter((node) => node !== child); child.parentNode = null; return child; }
   insertBefore(child: HostNode, before: HostNode) { this.childNodes.splice(this.childNodes.indexOf(before), 0, child); child.parentNode = this; return child; }
-  setAttribute(name: string, value: string) { this.attributes[name] = value; if (name === "disabled") this.disabled = true; }
+  setAttribute(name: string, value: string) { this.attributes[name] = String(value); if (name === "disabled") this.disabled = true; }
   setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
   removeAttribute(name: string) { delete this.attributes[name]; if (name === "disabled") this.disabled = false; }
   addEventListener() {}
@@ -52,7 +52,7 @@ function allNodes(node: HostNode): HostNode[] {
 
 function onClick(node: HostNode): () => void {
   const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
-  return (node as unknown as Record<string, { onClick: () => void }>)[key].onClick;
+  return () => (node as unknown as Record<string, { onClick: (event: unknown) => void }>)[key].onClick({ stopPropagation: vi.fn() });
 }
 
 function installHostDom() {
@@ -103,6 +103,10 @@ function props(node: HostNode): Record<string, unknown> {
   return (node as unknown as Record<string, Record<string, unknown>>)[key];
 }
 function tiles(host: HostNode) { return allNodes(host).filter(node => node.attributes.class === "agent-session-images__tile"); }
+function toggle(host: HostNode) { return allNodes(host).find(node => node.attributes.class?.includes("agent-session-images__toggle"))!; }
+async function expand(host: HostNode) {
+  if (toggle(host).attributes["aria-expanded"] === "false") await act(async () => onClick(toggle(host))());
+}
 function dialog(host: HostNode) { return allNodes(host).find(node => node.attributes.role === "dialog"); }
 async function clickTile(node: HostNode) {
   await act(async () => (props(node).onClick as (event: unknown) => void)({ currentTarget: node }));
@@ -119,16 +123,73 @@ function fixture(extra: Partial<SessionImagesSnapshot> = {}) {
     ? { paths, truncated: false, historyAvailable: true, ...extra } : "data:image/png;base64,fixture");
 }
 
-it("defaults to one thumbnail strip with a count and no expanded dialog or pagination", async () => {
+it("defaults to a collapsed header with its count and toggles the numbered strip", async () => {
   const host = installHostDom(); const root = createRoot(host as unknown as Element);
   fixture({ paths: Array.from({ length: 12 }, (_, i) => `/cache/${i}.png`) });
   try {
     await act(async () => root.render(renderImages()));
+    expect(tiles(host)).toHaveLength(0);
+    expect(toggle(host).attributes["aria-expanded"]).toBe("false");
+    expect(host.textContent).toContain("圖片附件 · 12");
+    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(0);
+    await expand(host);
+    expect(toggle(host).attributes["aria-expanded"]).toBe("true");
     expect(tiles(host)).toHaveLength(12);
     expect(host.textContent).toContain("圖片附件 · 12");
     expect(dialog(host)).toBeUndefined();
     expect(host.textContent).not.toContain("下一頁");
     expect(tiles(host).map(node => node.textContent)).toEqual(Array.from({ length: 12 }, (_, i) => `#${i + 1}`));
+    await act(async () => onClick(toggle(host))());
+    expect(toggle(host).attributes["aria-expanded"]).toBe("false");
+    expect(tiles(host)).toHaveLength(0);
+    expect(host.textContent).toContain("圖片附件 · 12");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("refreshes without toggling the collapsed or expanded state and stops propagation", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture();
+  const refresh = async () => {
+    const button = allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "重新讀取")!;
+    const stopPropagation = vi.fn();
+    await act(async () => (props(button).onClick as (event: unknown) => void)({ stopPropagation }));
+    expect(stopPropagation).toHaveBeenCalledOnce();
+  };
+  try {
+    await act(async () => root.render(renderImages()));
+    await refresh();
+    expect(toggle(host).attributes["aria-expanded"]).toBe("false");
+    expect(tiles(host)).toHaveLength(0);
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_session_images_snapshot")).toHaveLength(2);
+    await expand(host);
+    await refresh();
+    expect(toggle(host).attributes["aria-expanded"]).toBe("true");
+    expect(tiles(host)).toHaveLength(3);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("shows a zero-count header while loading and hides status details until expanded", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  let resolve!: (snapshot: SessionImagesSnapshot) => void;
+  invoke.mockImplementationOnce(() => new Promise<SessionImagesSnapshot>(done => { resolve = done; }));
+  try {
+    await act(async () => root.render(renderImages()));
+    expect(host.textContent).toContain("圖片附件 · 0");
+    expect(allNodes(host).filter(node => node.attributes.role === "status")).toHaveLength(0);
+    expect(tiles(host)).toHaveLength(0);
+    await expand(host);
+    expect(allNodes(host).filter(node => node.attributes.role === "status")).toHaveLength(1);
+    const contentId = toggle(host).attributes["aria-controls"];
+    expect(allNodes(host).find(node => node.attributes.id === contentId)).toBeDefined();
+    await act(async () => onClick(toggle(host))());
+    invoke.mockResolvedValue(null);
+    await act(async () => resolve({ paths, truncated: true, historyAvailable: false }));
+    expect(host.textContent).toContain("圖片附件 · 3");
+    expect(allNodes(host).filter(node => node.attributes.role === "status")).toHaveLength(0);
+    expect(tiles(host)).toHaveLength(0);
+    await expand(host);
+    expect(host.textContent).toContain("不是完整圖片紀錄");
+    expect(allNodes(host).filter(node => node.attributes.role === "status")).toHaveLength(2);
+    expect(tiles(host)).toHaveLength(3);
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -136,9 +197,11 @@ it("switches by arrows and buttons, updates the highlighted thumbnail, and retur
   const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture();
   try {
     await act(async () => root.render(renderImages()));
+    await expand(host);
     const trigger = tiles(host)[1];
     await clickTile(trigger);
     expect(dialog(host)).toBeDefined();
+    expect(toggle(host).attributes["aria-expanded"]).toBe("true");
     expect(host.textContent).toContain("第 2／共 3 張");
     expect(tiles(host)[1].attributes["aria-current"]).toBe("true");
     await key(host, "ArrowRight");
@@ -172,6 +235,7 @@ it("opens a numbered terminal marker directly in the lightbox using its prompt, 
     expect(dialog(host)).toBeUndefined();
     await act(async () => root.render(render(1, 2)));
     expect(dialog(host)).toBeDefined();
+    expect(toggle(host).attributes["aria-expanded"]).toBe("true");
     expect(host.textContent).toContain("第 2／共 3 張");
     expect(tiles(host)[1].attributes["aria-label"]).toContain("b.png");
     expect(tiles(host)[1].attributes["aria-current"]).toBe("true");
@@ -219,6 +283,7 @@ it("merges observed pictures without paths or tool metadata and handles unavaila
     ] } : null);
   try {
     await act(async () => root.render(renderImages()));
+    await expand(host);
     expect(tiles(host)).toHaveLength(2);
     expect(host.textContent).not.toMatch(/cache|private/);
     expect(host.textContent).toContain("無法載入圖片");
@@ -233,10 +298,13 @@ it("ignores a delayed snapshot when inactive and reloads on re-entry", async () 
   invoke.mockImplementationOnce(() => new Promise<SessionImagesSnapshot>(done => { resolve = done; }));
   try {
     await act(async () => root.render(renderImages()));
+    await expand(host);
     await act(async () => root.render(renderImages("owner", false)));
     await act(async () => resolve({ paths, truncated: false, historyAvailable: true }));
     expect(tiles(host)).toHaveLength(0);
     fixture(); await act(async () => root.render(renderImages()));
+    expect(tiles(host)).toHaveLength(0);
+    await expand(host);
     expect(tiles(host)).toHaveLength(3);
     await clickTile(tiles(host)[0]);
     await act(async () => root.render(renderImages("other", false)));
@@ -244,11 +312,14 @@ it("ignores a delayed snapshot when inactive and reloads on re-entry", async () 
   } finally { await act(async () => root.unmount()); }
 });
 
-it("reports errors and reloads with bounded-history information", async () => {
+it("hides errors until expanded and reloads with bounded-history information", async () => {
   const host = installHostDom(); const root = createRoot(host as unknown as Element);
   invoke.mockRejectedValueOnce("read denied");
   try {
     await act(async () => root.render(renderImages()));
+    expect(host.textContent).not.toContain("圖片讀取失敗");
+    expect(allNodes(host).some(node => node.attributes.role === "alert")).toBe(false);
+    await expand(host);
     expect(host.textContent).toContain("圖片讀取失敗");
     fixture({ paths: [], truncated: true, historyAvailable: false });
     await act(async () => onClick(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "重新讀取")!)());
@@ -277,6 +348,7 @@ it("loads thumbnail pixels only when they enter the visible strip", async () => 
   const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture();
   try {
     await act(async () => root.render(renderImages()));
+    await expand(host);
     expect(tiles(host)).toHaveLength(3);
     expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(0);
     await act(async () => observers[1].callback([{ isIntersecting: true }]));
@@ -290,6 +362,7 @@ it("returns focus after the close button or backdrop and keeps the single-image 
   const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture({ paths: [paths[0]] });
   try {
     await act(async () => root.render(renderImages()));
+    await expand(host);
     const trigger = tiles(host)[0];
     await clickTile(trigger);
     expect(host.textContent).toContain("第 1／共 1 張");
@@ -311,6 +384,7 @@ it("loads old-folder attachments after a PTY session is restored with a new runt
   fixture({ paths: [path] });
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="new-runtime" active revision={0} /></I18nProvider>));
+    await expand(host);
     expect(tiles(host)).toHaveLength(1);
     expect(allNodes(host).find(node => node.tagName === "IMG")?.attributes.src).toContain("data:image/png");
     await clickTile(tiles(host)[0]);
@@ -321,6 +395,8 @@ it("loads old-folder attachments after a PTY session is restored with a new runt
       throw "chat.images.missing";
     });
     await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="next-runtime" active revision={0} /></I18nProvider>));
+    expect(tiles(host)).toHaveLength(0);
+    await expand(host);
     expect(host.textContent).toContain("圖片檔案已移動或刪除。");
     await clickTile(tiles(host)[0]);
     expect(dialog(host)?.textContent).toContain("圖片檔案已移動或刪除。");

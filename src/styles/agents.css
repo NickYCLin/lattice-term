@@ -976,9 +976,9 @@
   border-bottom: 1px solid var(--line);
 }
 .agent-session-images__toolbar > header,
-.agent-session-images__toolbar > header > span { display: flex; align-items: center; gap: var(--space-2); }
-.agent-session-images__toolbar > header > span { flex: 1; font-size: var(--text-xs); }
-.agent-session-images__toolbar > p,
+.agent-session-images__toggle { display: flex; align-items: center; gap: var(--space-2); }
+.agent-session-images__toggle { flex: 1; min-width: 0; justify-content: flex-start; font-size: var(--text-xs); }
+.agent-session-images__toolbar > div > p,
 .agent-session-images__toolbar pre { margin: var(--space-1) 0; font-size: var(--text-xs); overflow-wrap: anywhere; }
 .agent-session-images__strip {
   display: flex;
