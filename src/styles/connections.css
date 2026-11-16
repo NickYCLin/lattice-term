@@ -2065,28 +2065,22 @@
 }
 
 .session-tree__folder-actions {
-  position: absolute;
-  z-index: 2;
-  right: 1.65rem;
+  position: static;
+  flex: 0 0 auto;
+  order: 1;
   display: flex;
   padding: 0.1rem;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   opacity: 0;
   pointer-events: none;
-  background: var(--surface-solid);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-0.15rem);
-  transition:
-    opacity var(--duration-fast) var(--ease),
-    transform var(--duration-fast) var(--ease);
+  transition: opacity var(--duration-fast) var(--ease);
 }
-
+.session-tree__folder-row > .session-tree__branch-toggle { order: 2; }
 .session-tree__folder-row:hover .session-tree__folder-actions,
-.session-tree__folder-row:focus-within .session-tree__folder-actions {
+.session-tree__folder-actions:focus-within {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
 }
 
 .session-tree__project-actions {

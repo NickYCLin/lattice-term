@@ -1136,6 +1136,7 @@ export const en: Messages = {
   "terminal.projects.folderSave": "Save name",
   "terminal.projects.folderDelete": "Delete folder",
   "terminal.projects.folderDeleteTitle": "Delete “{name}”?",
+  "terminal.projects.moveToParent": "Move “{name}” to the parent level",
   "terminal.projects.folderOrder": "Reorder “{name}”",
   "terminal.projects.folderDeleteBody": "This folder will be removed from both Chat and Work Sessions. Its contents move up one level; conversations are kept and sessions keep running.",
   "terminal.projects.folderDeleteAction": "Delete folder",

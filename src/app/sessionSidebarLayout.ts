@@ -323,6 +323,16 @@ export function sessionSidebarStepPlacement(layout: SessionSidebarLayout, nodeId
   return { parentId: placement.parentId, beforeNodeId: direction === "up" ? siblings[index - 1] : siblings[index + 2] ?? null };
 }
 
+/** Move a folder beside its parent, one level outward; never into a sibling folder. */
+export function sessionSidebarParentPlacement(layout: SessionSidebarLayout, nodeId: string): SessionSidebarDropPlacement | null {
+  const parentId = layout.placements[nodeId]?.parentId;
+  if (!parentId || !layout.placements[parentId]) return null;
+  const parent = layout.placements[parentId];
+  const siblings = sessionSidebarChildren(layout, parent.parentId);
+  const index = siblings.indexOf(parentId);
+  return { parentId: parent.parentId, beforeNodeId: siblings[index + 1] ?? null };
+}
+
 /**
  * Resolves the layout destination for a pointer drop. Container rows receive
  * the node as a child; ordinary rows use their upper/lower half to insert the
@@ -343,7 +353,6 @@ export function sessionSidebarDropPlacement(
     return null;
   }
   const sourceIsFolder = layout.folders.some(folder => folder.id === sourceNodeId);
-  if (sourceIsFolder && layout.placements[sourceNodeId].parentId !== layout.placements[targetNodeId].parentId) return null;
   const folderToFolder = sourceIsFolder && layout.folders.some(folder => folder.id === targetNodeId);
   if (targetIsContainer && !folderToFolder) {
     return wouldCreateCycle(layout.placements, sourceNodeId, targetNodeId) ? null : { parentId: targetNodeId, beforeNodeId: null };

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createSessionSidebarFolder, emptySessionSidebarLayout, moveSessionSidebarNode, reconcileSessionSidebarLayout, sessionSidebarChildren,
-  sessionSidebarDropIntent, sessionSidebarDropPlacement, sessionSidebarStepPlacement, sanitizeSessionSidebarLayout } from "./sessionSidebarLayout";
+  sessionSidebarDropIntent, sessionSidebarDropPlacement, sessionSidebarParentPlacement, sessionSidebarStepPlacement, sanitizeSessionSidebarLayout } from "./sessionSidebarLayout";
 import { readSharedSidebarLayout, updateSharedSidebarLayout, SHARED_SIDEBAR_LAYOUT_KEY } from "./sharedSidebarLayout";
 const remote = { id: "project:remote-connections", defaultParentId: null };
 const project = { id: "project:local:fixture", defaultParentId: null };
@@ -54,5 +54,24 @@ it("menu step movement matches drops and disables endpoints within the current p
   layout = moveSessionSidebarNode(layout, "folder:b", back.parentId, back.beforeNodeId);
   expect(sessionSidebarChildren(layout, null).slice(-2)).toEqual(["folder:a", "folder:b"]);
   layout = createSessionSidebarFolder(layout, { id: "folder:child", name: "子資料夾" }, "folder:a");
-  expect(sessionSidebarDropPlacement(layout, "folder:b", "folder:child", false, false)).toBeNull();
+  expect(sessionSidebarDropPlacement(layout, "folder:b", "folder:child", false, false)).toEqual({ parentId: "folder:a", beforeNodeId: "folder:child" });
+  expect(sessionSidebarDropPlacement(layout, "folder:a", "folder:child", false, false)).toBeNull();
+});
+
+it("moves a nested folder to another level at row edges and rejects descendant cycles", () => {
+  let layout = fixture();
+  layout = createSessionSidebarFolder(layout, { id: "folder:child", name: "Synthetic Child" }, "folder:a");
+  layout = createSessionSidebarFolder(layout, { id: "folder:grandchild", name: "Synthetic Grandchild" }, "folder:child");
+  const outside = sessionSidebarDropPlacement(layout, "folder:child", remote.id, false, false)!;
+  const moved = moveSessionSidebarNode(layout, "folder:child", outside.parentId, outside.beforeNodeId);
+  expect(moved.placements["folder:child"].parentId).toBeNull(); expect(sessionSidebarChildren(moved, null)[0]).toBe("folder:child");
+  expect(sessionSidebarDropPlacement(layout, "folder:a", "folder:grandchild", false, true)).toBeNull();
+  const toOtherLevel = sessionSidebarDropPlacement(moved, "folder:b", "folder:grandchild", false, false)!;
+  expect(toOtherLevel).toEqual({ parentId: "folder:child", beforeNodeId: "folder:grandchild" });
+  const reparented = moveSessionSidebarNode(moved, "folder:b", toOtherLevel.parentId, toOtherLevel.beforeNodeId);
+  const reloaded = reconcileSessionSidebarLayout(sanitizeSessionSidebarLayout(JSON.parse(JSON.stringify(reparented)))!, [remote, project, session]);
+  expect(reloaded.placements["folder:b"].parentId).toBe("folder:child");
+  expect(sessionSidebarChildren(reloaded, "folder:child")).toEqual(["folder:b", "folder:grandchild"]);
+  expect(sessionSidebarParentPlacement(layout, "folder:child")).toEqual({ parentId: null, beforeNodeId: "folder:b" });
+  expect(sessionSidebarParentPlacement(layout, "folder:a")).toBeNull();
 });

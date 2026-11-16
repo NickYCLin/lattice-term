@@ -4,6 +4,7 @@ import { FileDropZone } from "../files/FileDropZone";
 import type { UploadFile } from "../../app/localFiles";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -187,6 +188,15 @@ export function SessionProjectSidebar({
     () => new Map(sessions.map((session) => [session.nodeId, session])),
     [sessions],
   );
+  const [menuFolderId, setMenuFolderId] = useState<string | null>(null);
+  const [focusFolderId, setFocusFolderId] = useState<string | null>(null);
+  const folderButtons = useRef(new Map<string, HTMLButtonElement>());
+  const treeRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!focusFolderId) return;
+    folderButtons.current.get(focusFolderId)?.focus();
+    setFocusFolderId(null);
+  }, [focusFolderId, layout]);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<SessionSidebarDropIntent>("into");
@@ -442,7 +452,7 @@ export function SessionProjectSidebar({
       }
       moveEvent.preventDefault();
       const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-      if (hit?.closest("[data-tree-root-drop]")) {
+      if (hit === treeRef.current || hit === sidebarRef.current || hit?.closest("[data-tree-root-drop]")) {
         dropRef.current = { nodeId: TREE_ROOT_DROP, intent: "into" };
         setDropTargetNodeId(TREE_ROOT_DROP);
         return;
@@ -474,6 +484,7 @@ export function SessionProjectSidebar({
       if (!drop) return;
       if (drop.nodeId === TREE_ROOT_DROP) {
         onMove(press.nodeId, null);
+        if (nodeKindRef.current(press.nodeId) === "folder") setFocusFolderId(press.nodeId);
         return;
       }
       const placement = sessionSidebarDropPlacement(
@@ -485,6 +496,7 @@ export function SessionProjectSidebar({
       );
       if (!placement) return;
       onMove(press.nodeId, placement.parentId, placement.beforeNodeId);
+      if (nodeKindRef.current(press.nodeId) === "folder") setFocusFolderId(press.nodeId);
       // Projects are collapsible containers too, and a destination may itself
       // sit inside a collapsed branch, so reveal the whole chain rather than
       // toggling the drop target alone.
@@ -775,8 +787,9 @@ export function SessionProjectSidebar({
           <button
             type="button"
             className="session-tree__folder-select"
+            ref={button => { if (button) folderButtons.current.set(folder.id, button); else folderButtons.current.delete(folder.id); }}
             onClick={() => onToggleFolder(folder.id)}
-            title={`${folder.name} · ${t("terminal.projects.dragHint")}`}
+            title={menuFolderId === folder.id ? undefined : `${folder.name} · ${t("terminal.projects.dragHint")}`}
             aria-expanded={expanded}
           >
             <FolderGlyph size={13} data-folder-state={expanded ? "open" : "closed"} />
@@ -794,7 +807,7 @@ export function SessionProjectSidebar({
             <ChevronDownIcon size={12} className={collapsed ? "is-collapsed" : undefined} />
           </button>
           <div className="session-tree__folder-actions">
-            <SessionFolderOrderMenu folder={folder} layout={layout} onMove={onMove} />
+            <SessionFolderOrderMenu folder={folder} layout={layout} onMove={onMove} onMoved={() => setFocusFolderId(folder.id)} onOpenChange={open => setMenuFolderId(open ? folder.id : null)} />
             <button
               type="button"
               className="icon-button icon-button--sm"
@@ -1070,6 +1083,7 @@ export function SessionProjectSidebar({
       </div>
       <SidebarStorageNotice />
       <div
+        ref={treeRef}
         className={`session-tree${draggedNodeId ? " is-dragging" : ""}`}
         role="list"
         aria-label={t("terminal.projects")}

@@ -76,11 +76,14 @@ it("retains middle-into-folder for sessions and treats remote-connections as an 
 it("offers keyboard menu movement, disabled endpoints, Escape and outside dismissal", async () => {
   const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "調整「桃源水情」的順序" && node.tagName === "BUTTON")!;
   await act(async () => props(toggle()).onClick());
+  expect(props(toggle()).title).toBeUndefined();
+  expect(props(allNodes(row("folder:b")).find(node => props(node)?.className === "session-tree__folder-select")!).title).toBeUndefined();
   const menu = () => allNodes(host).find(node => props(node)?.role === "menu")!;
   const items = () => allNodes(menu()).filter(node => props(node)?.role === "menuitem");
   expect(props(items()[1]).disabled).toBe(true); expect(document.activeElement).toBe(items()[0]);
   await act(async () => props(items()[0]).onClick());
-  expect(actions.onMove).toHaveBeenLastCalledWith("folder:b", null, "folder:a"); expect(document.activeElement).toBe(toggle());
+  expect(actions.onMove).toHaveBeenLastCalledWith("folder:b", null, "folder:a");
+  expect(props(document.activeElement as unknown as HostNode).className).toBe("session-tree__folder-select");
   await act(async () => props(toggle()).onClick());
   const event = (key: string) => ({ key, currentTarget: menu(), preventDefault: vi.fn(), stopPropagation: vi.fn() });
   await act(async () => props(menu()).onKeyDown(event("ArrowDown"))); expect(document.activeElement).toBe(items()[1]);
@@ -94,4 +97,27 @@ it("offers keyboard menu movement, disabled endpoints, Escape and outside dismis
   expect(props(items()[0]).disabled).toBe(true); expect(props(items()[1]).disabled).toBe(false);
   const calls = actions.onMove.mock.calls.length;
   await act(async () => props(items()[0]).onClick()); expect(actions.onMove).toHaveBeenCalledTimes(calls);
+});
+
+it("moves nested folders outward with the menu or root blank area and persists the new parent", async () => {
+  layout = createSessionSidebarFolder(layout, { id: "folder:child", name: "Synthetic Child" }, "folder:a");
+  await act(async () => render());
+  const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "調整「Synthetic Child」的順序" && node.tagName === "BUTTON")!;
+  await act(async () => props(toggle()).onClick());
+  const parent = allNodes(host).find(node => props(node)?.role === "menuitem" && node.textContent.includes("移到上一層"))!;
+  expect(props(parent).disabled).toBe(false);
+  await act(async () => props(parent).onClick());
+  expect(actions.onMove).toHaveBeenLastCalledWith("folder:child", null, "folder:b");
+  expect(props(document.activeElement as unknown as HostNode).className).toBe("session-tree__folder-select");
+  expect(JSON.parse(localStorage.getItem(SHARED_SIDEBAR_LAYOUT_KEY)!).placements["folder:child"].parentId).toBeNull();
+  for (const area of ["tree", "sidebar"]) {
+    layout = moveSessionSidebarNode(layout, "folder:child", "folder:a"); await act(async () => render());
+    await act(async () => props(row("folder:child")).onPointerDown({ pointerType: "mouse", button: 0, pointerId: 2, clientX: 0, clientY: 0, target: { closest: () => null } }));
+    const blank = allNodes(host).find(node => area === "tree" ? props(node)?.className === "session-tree" : props(node)?.id === "session-project-sidebar")!;
+    document.elementFromPoint = (() => blank) as unknown as typeof document.elementFromPoint;
+    await dispatch("pointermove", { pointerId: 2, clientX: 20, clientY: 200, preventDefault() {} });
+    await dispatch("pointerup", { pointerId: 2 });
+    expect(actions.onMove).toHaveBeenLastCalledWith("folder:child", null);
+    expect(JSON.parse(localStorage.getItem(SHARED_SIDEBAR_LAYOUT_KEY)!).placements["folder:child"].parentId).toBeNull();
+  }
 });
