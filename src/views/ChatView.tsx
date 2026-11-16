@@ -1289,7 +1289,6 @@ export function ThreadPane({
             )}
           </div>
         )}
-        {directProxy && <Callout tone="info" title="CLIProxyAPI">{t("chat.proxy.direct")}</Callout>}
         {!cliInstalled && !thread.archived && (
           <Callout tone="warn">
             {t("chat.notInstalled", { cli: cliLabel(thread.definitionId) })}
