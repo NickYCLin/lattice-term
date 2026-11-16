@@ -506,6 +506,21 @@ pub(super) async fn read_goal(
 
 #[cfg(test)]
 mod tests {
+    // Only the isolated child opens this executable for writing. A writable
+    // parent FD can be inherited by another test's fork before close-on-exec,
+    // producing ETXTBSY even after this thread has closed its own handle.
+    #[cfg(unix)]
+    fn executable_fixture(path: &std::path::Path, script: &str) {
+        let mut writer = std::process::Command::new("/bin/sh")
+            .args(["-c", "cat > \"$1\" && chmod 700 \"$1\"", "fixture"])
+            .arg(path)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut writer.stdin.take().unwrap(), script.as_bytes()).unwrap();
+        assert!(writer.wait().unwrap().success());
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -564,7 +579,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn session_goal_reads_metadata_only_and_rejects_another_thread() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().canonicalize().unwrap();
         let executable = directory.join("goal-fixture");
@@ -587,8 +601,7 @@ for line in sys.stdin:
     else: raise Exception('No turn, resume, fork, or goal write is permitted')
     print(json.dumps({'id':request['id'],'result':result}),flush=True)
 "##.replace("__CWD__", &serde_json::to_string(&directory).unwrap());
-        std::fs::write(&executable, source).unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        executable_fixture(&executable, &source);
         let goal = super::read_goal(
             &executable,
             Some(&directory),
@@ -683,7 +696,6 @@ for line in sys.stdin:
     #[cfg(unix)]
     #[tokio::test]
     async fn native_fork_preserves_source_provider_and_uses_the_requested_turn_boundary() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("codex-fork-fixture");
         let source = r##"#!/usr/bin/env python3
@@ -713,8 +725,7 @@ for line in sys.stdin:
         raise Exception('Unexpected method')
     print(json.dumps({'id':request['id'],'result':result}),flush=True)
 "##.replace("__CWD__", &serde_json::to_string(root.path().to_str().unwrap()).unwrap());
-        std::fs::write(&executable, source).unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        executable_fixture(&executable, &source);
         for before in [false, true] {
             let result = super::fork_thread(
                 &executable,
