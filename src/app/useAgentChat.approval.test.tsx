@@ -155,3 +155,83 @@ it("offers session scope only when the native request reports it and records it 
     expect(runtime.chat.getThread(runtime.id)!.items.find(item => item.type === "approval" && item.requestId === "session")).toMatchObject({ decision: "allowed", allowedForSession: true });
   } finally { await act(async () => { runtime.root.unmount(); }); }
 });
+
+const commandApproval = (requestId: string, command = "ls -la"): ChatEvent => ({
+  kind: "approvalRequested", requestId, toolUseId: null, name: "command", summary: command,
+  input: JSON.stringify({ command, cwd: "/isolated/work", permissions: null, approvalContext: { command, cwd: "/isolated/work" } }), canAllowSession: true,
+});
+
+it("reuses acknowledged session approval for the identical command across turns only", async () => {
+  const runtime = await setup();
+  try {
+    await runtime.emit(commandApproval("session-first"));
+    await act(async () => { await runtime.chat.respond(runtime.id, "session-first", true, undefined, undefined, true); });
+    await runtime.emit({ kind: "finished", nativeSessionId: null, usage: null, costUsd: null, durationMs: 1, error: null });
+    await act(async () => { await runtime.chat.send(runtime.id, "second turn"); });
+    await runtime.emit(commandApproval("session-repeat"));
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_respond").map(([,args]) => args)).toMatchObject([
+      { requestId: "session-first", allowForSession: true }, { requestId: "session-repeat", allowForSession: true },
+    ]);
+    await runtime.emit(commandApproval("different-command", "pwd"));
+    expect(runtime.chat.getThread(runtime.id)!.items.find(item => item.type === "approval" && item.requestId === "different-command")).toMatchObject({ decision: "pending" });
+    const changedPermissions = commandApproval("extra-permission");
+    if (changedPermissions.kind === "approvalRequested") {
+      const input = JSON.parse(changedPermissions.input);
+      input.approvalContext.additionalPermissions = { network: { enabled: true } };
+      changedPermissions.input = JSON.stringify(input);
+    }
+    await runtime.emit(changedPermissions);
+    expect(runtime.chat.getThread(runtime.id)!.items.find(item => item.type === "approval" && item.requestId === "extra-permission")).toMatchObject({ decision: "pending" });
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_respond")).toHaveLength(2);
+  } finally { await act(async () => runtime.root.unmount()); }
+});
+
+it("does not cache a failed session answer", async () => {
+  const runtime = await setup();
+  try {
+    await runtime.emit(commandApproval("failed-session"));
+    invoke.mockImplementation(async command => { if (command === "agent_chat_respond") throw new Error("not acknowledged"); });
+    await expect(runtime.chat.respond(runtime.id, "failed-session", true, undefined, undefined, true)).rejects.toThrow("not acknowledged");
+    await runtime.emit(commandApproval("next-request"));
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_respond")).toHaveLength(1);
+  } finally { await act(async () => runtime.root.unmount()); }
+});
+
+it.each([
+  { permission: "readOnly" as const }, { accountProfileId: "another-profile" },
+  { model: "another-model" }, { workingDirectory: "/other/work" },
+])("clears session approval when configuration changes: %j", async patch => {
+  const runtime = await setup();
+  try {
+    await runtime.emit(commandApproval("scope-first"));
+    await act(async () => { await runtime.chat.respond(runtime.id, "scope-first", true, undefined, undefined, true); });
+    await runtime.emit({ kind: "finished", nativeSessionId: null, usage: null, costUsd: null, durationMs: 1, error: null });
+    await act(async () => { runtime.chat.updateThread(runtime.id, patch); await runtime.chat.send(runtime.id, "changed scope"); });
+    await runtime.emit(commandApproval("changed-scope"));
+    expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_respond")).toHaveLength(1);
+    expect(runtime.chat.getThread(runtime.id)!.items.find(item => item.type === "approval" && item.requestId === "changed-scope")).toMatchObject({ decision: "pending" });
+  } finally { await act(async () => runtime.root.unmount()); }
+});
+
+it("never restores session approval from saved history", async () => {
+  const runtime = await setup();
+  let remounted = false;
+  try {
+    await runtime.emit(commandApproval("before-reload"));
+    await act(async () => { await runtime.chat.respond(runtime.id, "before-reload", true, undefined, undefined, true); });
+    await runtime.emit({ kind: "finished", nativeSessionId: null, usage: null, costUsd: null, durationMs: 1, error: null });
+    await act(async () => runtime.root.unmount());
+    remounted = true;
+    const calls = invoke.mock.calls.filter(([command]) => command === "agent_chat_respond").length;
+    const container = installFakeDom();
+    let chat!: AgentChatApi;
+    function Probe() { chat = useAgentChat(); return null; }
+    const root = createRoot(container as unknown as Element);
+    try {
+      await act(async () => root.render(<Probe />));
+      await act(async () => { await chat.send(runtime.id, "after reload"); });
+      await act(async () => events.listener!({ payload: { threadId: runtime.id, turnId: chat.getThread(runtime.id)!.runningTurnId!, event: commandApproval("after-reload") } }));
+      expect(invoke.mock.calls.filter(([command]) => command === "agent_chat_respond")).toHaveLength(calls);
+    } finally { await act(async () => root.unmount()); }
+  } finally { if (!remounted) await act(async () => runtime.root.unmount()); }
+});

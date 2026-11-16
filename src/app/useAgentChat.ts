@@ -242,6 +242,21 @@ export interface AgentChatApi {
 export const OPEN_CHAT_EVENT = "latticeterm:open-chat";
 const NOTIFICATION_RETURN_MS = 2 * 60 * 1000;
 
+function sessionApprovalScope(thread: ChatThread): string {
+  return JSON.stringify([runtimeIdentity(thread), thread.permission, thread.archived, thread.continuedInSession]);
+}
+function sessionCommandKey(name: string, input: string): string | null {
+  if (name !== "command") return null;
+  try {
+    const value = JSON.parse(input);
+    if (!value.approvalContext || typeof value.approvalContext !== "object" || Array.isArray(value.approvalContext)
+      || typeof value.cwd !== "string" || !value.cwd || !(typeof value.command === "string" && value.command
+      || Array.isArray(value.command) && value.command.length && value.command.every((part: unknown) => typeof part === "string"))) return null;
+    return JSON.stringify([name, input]);
+  } catch { return null; }
+}
+
+
 export function useAgentChat(
   completionSound: NotificationSoundChoice = "off",
   completionVolume = 60,
@@ -300,11 +315,20 @@ export function useAgentChat(
   const threadsRef = useRef(threads);
   const pendingSteers = useRef(new Set<string>());
   const pendingApprovals = useRef(new Map<string, Promise<void>>());
+  // In-memory only: native writers are released between turns, losing their
+  // approval cache. Reuse only an acknowledged identical command in this UI
+  // session, never a different command, account, permission or restored window.
+  const sessionApprovals = useRef(new Map<string, { scope: string; commands: Set<string> }>());
+  const respondRef = useRef<AgentChatApi["respond"] | null>(null);
   const handingOffThreads = useRef(new Set<string>());
   const [pendingHandoffs, setPendingHandoffs] = useState<ReadonlySet<string>>(new Set());
   threadsRef.current = threads;
   const changeThreads = useCallback((update: (current: ChatThread[]) => ChatThread[]) => {
     const next = update(threadsRef.current);
+    for (const [id, approved] of sessionApprovals.current) {
+      const thread = next.find(entry => entry.id === id);
+      if (!thread || approved.scope !== sessionApprovalScope(thread)) sessionApprovals.current.delete(id);
+    }
     threadsRef.current = next;
     setThreads(next);
   }, []);
@@ -398,6 +422,18 @@ export function useAgentChat(
               : thread,
           );
         });
+        const request = envelope.event;
+        const thread = threadsRef.current.find(entry => entry.id === envelope.threadId);
+        if (request.kind === "approvalRequested" && request.canAllowSession && thread?.definitionId === "codex"
+          && !thread.provider && thread.runningTurnId === envelope.turnId) {
+          const key = sessionCommandKey(request.name, request.input);
+          const cached = sessionApprovals.current.get(thread.id);
+          if (key && cached?.scope === sessionApprovalScope(thread) && cached.commands.has(key)) {
+            // Normal respond guards pin this answer to the current turn and
+            // leave the card pending if the backend does not acknowledge it.
+            void respondRef.current?.(thread.id, request.requestId, true, undefined, envelope.turnId, true).catch(() => {});
+          }
+        }
       });
       if (disposed) unlisten();
       else stop = unlisten;
@@ -889,12 +925,25 @@ export function useAgentChat(
     const pending = (async () => {
       const { invoke } = await core();
       await invoke("agent_chat_respond", { threadId: id, requestId, allow, message: message ?? null, expectedTurnId: turnId, ...(allowForSession ? { allowForSession: true } : {}) });
+      const live = threadsRef.current.find(entry => entry.id === id);
+      if (allowForSession && live?.runningTurnId === turnId && live.definitionId === "codex" && !live.provider
+        && sessionApprovalScope(live) === sessionApprovalScope(thread)) {
+        const approval = thread.items.find(item => item.type === "approval" && item.id === `${turnId}:approval:${requestId}`);
+        const command = approval?.type === "approval" ? sessionCommandKey(approval.name, approval.input) : null;
+        if (command) {
+          const cached = sessionApprovals.current.get(id) ?? { scope: sessionApprovalScope(live), commands: new Set<string>() };
+          cached.commands.add(command);
+          sessionApprovals.current.set(id, cached);
+        }
+      }
       changeThreads(current => current.map(entry => entry.id === id && entry.runningTurnId === turnId
         ? decideApproval(entry, requestId, allow ? "allowed" : "denied", Date.now(), allowForSession) : entry));
     })();
     pendingApprovals.current.set(key, pending);
     try { await pending; } finally { pendingApprovals.current.delete(key); }
   }, []);
+
+  respondRef.current = respond;
 
   const loadModels = useCallback((definitionId: ChatDefinitionId) => {
     if (modelsRef.current[definitionId].state !== "idle") return;

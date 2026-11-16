@@ -1253,6 +1253,8 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 );
             }
             "item/commandExecution/requestApproval"
+            | "execCommandApproval"
+            | "applyPatchApproval"
             | "item/fileChange/requestApproval"
             | "item/permissions/requestApproval" => {
                 let Some(turn) = state.active.as_mut() else {
@@ -1266,13 +1268,24 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                 };
                 let request_id = codex_request_id(rpc_id);
                 let (name, summary) = match method {
-                    "item/commandExecution/requestApproval" => (
+                    "item/commandExecution/requestApproval" | "execCommandApproval" => (
                         "command",
                         str_field(&params, "command")
-                            .unwrap_or_default()
-                            .to_string(),
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| {
+                                params["command"]
+                                    .as_array()
+                                    .map(|parts| {
+                                        parts
+                                            .iter()
+                                            .filter_map(Value::as_str)
+                                            .collect::<Vec<_>>()
+                                            .join(" ")
+                                    })
+                                    .unwrap_or_default()
+                            }),
                     ),
-                    "item/fileChange/requestApproval" => (
+                    "item/fileChange/requestApproval" | "applyPatchApproval" => (
                         "file_change",
                         str_field(&params, "reason")
                             .or_else(|| str_field(&params, "grantRoot"))
@@ -1286,7 +1299,24 @@ fn handle_line(server: &CodexServer, value: &Value) -> LineOutcome {
                             .to_string(),
                     ),
                 };
+                // Keep every approval-relevant field for the UI's exact-match
+                // cache. Exclude only per-request identity/timing, never a new
+                // permissions or execution-environment field from the CLI.
+                let mut approval_context = params.clone();
+                if let Some(context) = approval_context.as_object_mut() {
+                    for field in [
+                        "threadId",
+                        "turnId",
+                        "itemId",
+                        "callId",
+                        "call_id",
+                        "startedAtMs",
+                    ] {
+                        context.remove(field);
+                    }
+                }
                 let shown = serde_json::json!({
+                    "approvalContext": approval_context,
                     "command": params.get("command"),
                     "cwd": params.get("cwd"),
                     "reason": params.get("reason"),
@@ -1507,18 +1537,31 @@ pub(super) async fn respond_scoped_expected(
     server.write_line(&response).await
 }
 
+// Unit enum variants may be strings or tagged objects in availableDecisions.
+// Execpolicy amendments are persistent rules: never send one for session scope.
+// Codex 0.169 advertises only that object beside accept/cancel, but accepts
+// acceptForSession and caches matching commands (verified with its app-server).
+fn session_command_choice(choice: &Value) -> bool {
+    let known = |name: &str| matches!(name, "acceptForSession" | "acceptWithExecpolicyAmendment");
+    choice.as_str().is_some_and(known)
+        || choice.as_object().is_some_and(|object| {
+            (object.len() == 1 && object.keys().any(|key| known(key)))
+                || ["type", "kind", "decision"]
+                    .iter()
+                    .any(|key| object.get(*key).and_then(Value::as_str).is_some_and(known))
+        })
+}
 fn session_approval_supported(method: &str, params: &Value) -> bool {
     match method {
-        "item/commandExecution/requestApproval" => params
-            .get("availableDecisions")
-            .and_then(Value::as_array)
-            .map(|choices| {
-                choices
-                    .iter()
-                    .any(|choice| choice.as_str() == Some("acceptForSession"))
-            })
-            .unwrap_or(true),
-        "item/fileChange/requestApproval" | "item/permissions/requestApproval" => true,
+        "item/commandExecution/requestApproval" => match params.get("availableDecisions") {
+            None | Some(Value::Null) => true,
+            Some(Value::Array(choices)) => choices.iter().any(session_command_choice),
+            _ => false,
+        },
+        "item/fileChange/requestApproval"
+        | "item/permissions/requestApproval"
+        | "execCommandApproval"
+        | "applyPatchApproval" => true,
         _ => false,
     }
 }
@@ -1575,6 +1618,10 @@ fn response_line_scoped(
                 serde_json::json!({"answers": answers})
             }
         }
+        Some("execCommandApproval" | "applyPatchApproval") => serde_json::json!({
+            "decision": if allow_for_session { "approved_for_session" }
+                else if allow { "approved" } else { "denied" },
+        }),
         Some("item/permissions/requestApproval") => serde_json::json!({
             "permissions": if allow { pending["params"]["permissions"].clone() } else { serde_json::json!({}) },
             "scope": if allow_for_session { "session" } else { "turn" },
@@ -2715,5 +2762,104 @@ mod tests {
             reply["result"]["permissions"],
             permissions["params"]["permissions"]
         );
+    }
+    #[test]
+    fn session_decisions_accept_string_and_tagged_forms_without_persisting_policy() {
+        for choice in [
+            serde_json::json!("acceptForSession"),
+            serde_json::json!({"acceptForSession":{}}),
+            serde_json::json!({"type":"acceptForSession"}),
+            serde_json::json!({"decision":"acceptForSession"}),
+            serde_json::json!({"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["ls","-la"]}}),
+        ] {
+            let pending = serde_json::json!({"latticeterm_rpc_id":4,"method":"item/commandExecution/requestApproval",
+                "params":{"availableDecisions":["accept",choice,"cancel"]}});
+            assert!(session_approval_supported(
+                pending["method"].as_str().unwrap(),
+                &pending["params"]
+            ));
+            let reply: Value =
+                serde_json::from_str(&response_line_scoped(&pending, true, None, true).unwrap())
+                    .unwrap();
+            assert_eq!(
+                reply["result"],
+                serde_json::json!({"decision":"acceptForSession"})
+            );
+        }
+        for choices in [
+            serde_json::json!([]),
+            serde_json::json!(["accept", "cancel"]),
+            serde_json::json!([{"applyNetworkPolicyAmendment":{}}]),
+            serde_json::json!({"unknown":true}),
+        ] {
+            assert!(!session_approval_supported(
+                "item/commandExecution/requestApproval",
+                &serde_json::json!({"availableDecisions":choices})
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn installed_codex_0169_approval_exposes_session_card_and_uses_native_session_reply() {
+        let request: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-0169-command-approval.json"
+        ))
+        .unwrap();
+        let server = server_with(fresh_state("turn-1"));
+        let out = handle_line(&server, &request);
+        assert!(out.events.iter().any(|(_,event)| matches!(event, ChatEvent::ApprovalRequested {can_allow_session:true,name,..} if name == "command")));
+        let state = server.state();
+        let pending = state
+            .active
+            .as_ref()
+            .unwrap()
+            .pending
+            .values()
+            .next()
+            .unwrap();
+        let reply: Value =
+            serde_json::from_str(&response_line_scoped(pending, true, None, true).unwrap())
+                .unwrap();
+        assert_eq!(reply["result"]["decision"], "acceptForSession");
+    }
+
+    #[tokio::test]
+    async fn legacy_command_and_patch_approvals_use_legacy_decisions() {
+        for method in ["execCommandApproval", "applyPatchApproval"] {
+            let server = server_with(fresh_state("turn-1"));
+            let out = handle_line(
+                &server,
+                &serde_json::json!({"id":"legacy","method":method,
+                "params":{"command":["ls","-la"],"cwd":"/isolated/work"}}),
+            );
+            assert!(out.events.iter().any(|(_, event)| matches!(
+                event,
+                ChatEvent::ApprovalRequested {
+                    can_allow_session: true,
+                    ..
+                }
+            )));
+            let state = server.state();
+            let pending = state
+                .active
+                .as_ref()
+                .unwrap()
+                .pending
+                .values()
+                .next()
+                .unwrap();
+            for (allow, session, expected) in [
+                (true, true, "approved_for_session"),
+                (true, false, "approved"),
+                (false, false, "denied"),
+            ] {
+                let reply: Value = serde_json::from_str(
+                    &response_line_scoped(pending, allow, None, session).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(reply["id"], "legacy");
+                assert_eq!(reply["result"]["decision"], expected);
+            }
+        }
     }
 }

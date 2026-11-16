@@ -2974,7 +2974,7 @@ export const en: Messages = {
   "chat.review.running": "Reviewing project changes…",
   "chat.approval.allowSession": "Allow for this session",
   "chat.approval.sessionAllowed": "Allowed for this CLI session",
-  "chat.approval.sessionHint": "Applies only to the scope of this native approval. It ends when the CLI session restarts and never writes permanent settings.",
+  "chat.approval.sessionHint": "Uses the scope approved by the CLI. This window can reuse identical command approvals; changing conversation settings or reloading clears them. No permanent policy is written.",
   "chat.nativeOperation.running": "Updating the native conversation…",
   "chat.assist.noLocalTools": "This source has no local file tools. Use + to attach a file.",
   "chat.assist.noCommands": "No matching command. Press Esc to keep this as an ordinary message.",

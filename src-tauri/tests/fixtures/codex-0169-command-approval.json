@@ -1,0 +1,37 @@
+{
+  "method": "item/commandExecution/requestApproval",
+  "id": 0,
+  "params": {
+    "kind": "command",
+    "threadId": "thread-fixture",
+    "turnId": "turn-fixture",
+    "itemId": "call_1",
+    "environmentId": "local",
+    "reason": "Isolated approval protocol test",
+    "command": "/bin/bash -lc 'ls -la'",
+    "cwd": "/isolated/work",
+    "commandActions": [
+      {
+        "type": "listFiles",
+        "command": "ls -la",
+        "path": null
+      }
+    ],
+    "proposedExecpolicyAmendment": [
+      "ls",
+      "-la"
+    ],
+    "availableDecisions": [
+      "accept",
+      {
+        "acceptWithExecpolicyAmendment": {
+          "execpolicy_amendment": [
+            "ls",
+            "-la"
+          ]
+        }
+      },
+      "cancel"
+    ]
+  }
+}
