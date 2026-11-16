@@ -372,10 +372,6 @@
   color: var(--text);
 }
 
-.statusbar__action:disabled {
-  cursor: default;
-}
-
 .statusbar__update--available,
 .statusbar__update--downloaded {
   color: var(--accent);

@@ -23,7 +23,7 @@
 }
 
 .connections__tools {
-  --connection-tool-height: calc(1.875rem * var(--interface-text-scale));
+  --connection-tool-height: var(--control-compact-height);
   display: flex;
   flex-wrap: wrap;
   min-width: 0;
@@ -39,7 +39,7 @@
   height: var(--connection-tool-height);
   border: 1px solid var(--control-line);
   border-radius: var(--radius-pill);
-  background: var(--surface-raised);
+  background-color: var(--surface-raised);
   color: var(--text);
 }
 
@@ -49,14 +49,9 @@
 }
 
 .connections__tools :is(.button, .select select):hover:not(:disabled) {
-  background: var(--surface-active);
+  background-color: var(--surface-active);
 }
 
-.connections__toolbar .connections__tools :is(button, select):focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  box-shadow: none;
-}
 
 .connections__tools .connection-kind-filter {
   padding: 2px;
@@ -1000,9 +995,9 @@
 .sound-events { display: grid; gap: var(--space-3); }
 .sound-event { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 1fr) auto; align-items: center; gap: var(--space-3); }
 .sound-event label, .sound-volume label { font-size: var(--text-sm); font-weight: 600; }
-.sound-event select { width: 100%; min-width: 0; padding: var(--space-2); color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.sound-event select { width: 100%; min-width: 0; }
 .sound-volume { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-5) 0 var(--space-2); }
-.sound-volume input { flex: 1; min-width: 3rem; accent-color: var(--accent); }
+.sound-volume input { flex: 1; min-width: 3rem; }
 .sound-volume output { min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: right; }
 .sound-library { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
 .sound-group h3 { margin: 0 0 var(--space-2); color: var(--text-muted); font-size: var(--text-xs); }
@@ -1011,7 +1006,7 @@
 .sound-cue strong { font-size: var(--text-sm); }
 .sound-cue small { font-size: var(--text-xs); color: var(--text-muted); }
 .sound-cue:hover:not(:disabled), .sound-cue.is-playing { border-color: var(--accent); }
-.sound-cue:disabled { cursor: default; opacity: .6; }
+
 .sound-cue.is-playing { opacity: 1; }
 .sound-status { min-height: 1.5em; margin-top: var(--space-3); font-size: var(--text-xs); color: var(--text-muted); }
 .sound-status.is-danger { color: var(--danger); }

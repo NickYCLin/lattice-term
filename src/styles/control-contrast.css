@@ -45,11 +45,6 @@
   border-color: var(--control-line);
 }
 
-:is(button, [role="button"], a.button):focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 3px;
-  box-shadow: 0 0 0 3px var(--canvas-deep);
-}
 
 .segmented__option:disabled,
 .button:disabled {

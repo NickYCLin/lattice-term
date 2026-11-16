@@ -192,3 +192,6 @@
   .app--mobile { padding-top: max(var(--space-1), env(safe-area-inset-top, 0px)); }
   .app--mobile .view-header { padding-block: 0; }
 }
+
+/* Standard fields share the mobile touch height; inline composite selects opt out. */
+.app--mobile { --control-field-height: max(2.75rem, calc(var(--control-height) + .25rem * var(--interface-text-scale))); }

@@ -22,7 +22,7 @@ export function ProjectLaunchSettings({ policy = defaultProjectLaunchPolicy, dis
     <legend>{t("agents.mcp.project.title")}</legend>
     <p className="agents-field-hint">{t("agents.mcp.project.risk")}</p>
     <label><span>{t("agents.mcp.project.roots")}</span>
-      <textarea value={roots} onChange={(e) => setRoots(e.currentTarget.value)} />
+      <textarea className="textarea" value={roots} onChange={(e) => setRoots(e.currentTarget.value)} />
     </label>
     <label><span>{t("agents.mcp.project.permissions")}</span>
       <select value={draft.fullPermissions ? "full" : "saved"} onChange={(e) => setDraft({ ...draft, fullPermissions: e.currentTarget.value === "full" })}>

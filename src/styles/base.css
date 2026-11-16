@@ -74,7 +74,7 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.48;
+  opacity: var(--control-disabled-opacity);
 }
 
 button:disabled:active {
@@ -86,8 +86,8 @@ button:disabled:active {
 }
 
 :focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline: var(--control-focus-width) solid var(--focus);
+  outline-offset: var(--control-focus-offset);
   border-radius: var(--radius-sm);
 }
 

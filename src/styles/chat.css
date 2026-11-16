@@ -509,7 +509,7 @@ button.chat-chip:hover {
    whole row look ragged. */
 .chat-settings,
 .automation-schedule {
-  --chat-control-height: 2.5rem;
+  --chat-control-height: var(--control-field-height);
 }
 
 .chat-settings {
@@ -1087,7 +1087,6 @@ button.chat-chip:hover {
 .chat-send:disabled {
   background: var(--surface-active);
   color: var(--text-faint);
-  cursor: default;
 }
 
 .session-composer {
@@ -1227,6 +1226,8 @@ button.chat-chip:hover {
 }
 .session-composer__access--editable select {
   appearance: none;
+  width: auto;
+  height: auto;
   min-width: 0;
   max-width: 100%;
   min-height: 0;
@@ -1249,8 +1250,8 @@ button.chat-chip:hover {
   pointer-events: none;
   line-height: 1;
 }
-.session-composer__access--editable:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.session-composer__access--editable select:disabled { opacity: .55; cursor: default; }
+.session-composer__access--editable:focus-within { outline: var(--control-focus-width) solid var(--focus); outline-offset: var(--control-focus-offset); }
+.session-composer__access--editable select:focus-visible { outline: none; box-shadow: none; }
 
 .session-composer__model-picker {
   position: relative;
@@ -1296,10 +1297,6 @@ button.chat-chip:hover {
 .session-composer__model[aria-expanded="true"] {
   background: var(--surface-sunken);
   color: var(--text);
-}
-
-.session-composer__model:disabled {
-  cursor: default;
 }
 
 .session-composer__menu--end {
@@ -1357,7 +1354,6 @@ button.chat-chip:hover {
 
 .session-composer__icon:disabled {
   color: var(--text-faint);
-  cursor: default;
 }
 
 .session-composer__menu {
@@ -1449,7 +1445,6 @@ button.chat-chip:hover {
 
 .session-composer__menu button:disabled {
   color: var(--text-faint);
-  cursor: default;
 }
 
 .session-composer__voice {
@@ -1479,7 +1474,6 @@ button.chat-chip:hover {
 .session-composer__voice:disabled {
   background: var(--surface-sunken);
   color: var(--text-faint);
-  cursor: default;
 }
 
 @keyframes session-voice-pulse {
@@ -2618,7 +2612,6 @@ button.chat-diff__line.is-commentable:focus-visible {
 }
 
 .session-chat__diagnostic { overflow-wrap: anywhere; color: var(--warn); }
-
 
 @media (prefers-reduced-motion: reduce) {
   .session-chat__spinner,

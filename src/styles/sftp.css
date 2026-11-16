@@ -213,7 +213,7 @@
 
 .sftp-entry:disabled {
   cursor: progress;
-  opacity: 0.65;
+  opacity: var(--control-disabled-opacity);
 }
 
 .sftp-row-actions {

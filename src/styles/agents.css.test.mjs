@@ -21,7 +21,7 @@ describe("running agent list layout", () => {
 
   it("keeps row selects compact rather than full form fields", () => {
     expect(styles).toMatch(
-      /\.agent-session-row__actions select\.select,\s*\.agents-pacing__limit select\.select\s*\{[^}]*width:\s*auto;[^}]*height:\s*1\.75rem;/s,
+      /\.agent-session-row__actions select\.select,\s*\.agents-pacing__limit select\.select\s*\{[^}]*width:\s*auto;[^}]*height:\s*var\(--control-compact-height\);/s,
     );
   });
 

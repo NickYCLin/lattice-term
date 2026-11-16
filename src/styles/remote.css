@@ -273,8 +273,7 @@
 }
 
 .remote-files-entry:disabled {
-  opacity: 0.55;
-  cursor: default;
+  opacity: var(--control-disabled-opacity);
 }
 
 .remote-files-transfers {
@@ -471,7 +470,7 @@
 }
 
 .capture-button:disabled {
-  opacity: 0.45;
+  opacity: var(--control-disabled-opacity);
   cursor: not-allowed;
 }
 

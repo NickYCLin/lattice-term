@@ -50,7 +50,7 @@ export function HerdrPane({ enabled }: { enabled: boolean }) {
         setSession(sessionInput.trim()); setSelection(""); setSendError(null); setSent(false);
         agents.refresh();
       }}>
-        <label>{t("herdr.session")}<input value={sessionInput} disabled={sending} maxLength={80}
+        <label>{t("herdr.session")}<input className="input" value={sessionInput} disabled={sending} maxLength={80}
           pattern="[A-Za-z0-9_-]+" required onChange={event => setSessionInput(event.target.value)} /></label>
         <button className="button" type="submit" disabled={sending}>{t("herdr.connect")}</button>
         <button className="button button--ghost" type="button" disabled={agents.busy} onClick={agents.refresh}>{t("herdr.refresh")}</button>
@@ -70,7 +70,7 @@ export function HerdrPane({ enabled }: { enabled: boolean }) {
         <ConversationReadProgress loading={read.busy && read.value === null} error={read.error} onRetry={read.refresh} />
         <pre className="herdr-pane__output" tabIndex={0} aria-label={t("herdr.output")}>{read.value?.text ?? ""}</pre>
         <form className="herdr-pane__composer" onSubmit={event => { event.preventDefault(); void send(); }}>
-          <label>{t("herdr.message")}<input value={draft} disabled={sending} onChange={event => {
+          <label>{t("herdr.message")}<input className="input" value={draft} disabled={sending} onChange={event => {
             setDrafts(current => ({ ...current, [draftKey]: event.target.value })); setSent(false);
           }} /></label>
           <p>{t("herdr.sendHint")}</p>

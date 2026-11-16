@@ -49,9 +49,7 @@
 .database-manager label { display: grid; gap: var(--space-2); font-size: var(--text-xs); text-align: left; color: var(--text-muted); }
 .database-manager__span { grid-column: 1 / -1; }
 .database-manager__layout > *, .database-manager__fields, .database-manager label, .database-manager__result { min-width: 0; }
-.database-manager input:not([type="checkbox"]), .database-manager textarea, .database-manager select { min-width: 0; width: 100%; min-height: 2.5rem; padding: var(--space-3) var(--space-4); background: var(--surface-raised); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: var(--text-sm); }
-.database-manager input::placeholder { color: var(--text-faint); }
-.database-manager .button, .sql-workbench .button { height: auto; min-height: 2.25rem; padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); white-space: normal; font-size: var(--text-xs); }
+.database-manager .button, .sql-workbench .button { height: auto; min-height: var(--control-field-height); padding: var(--space-2) var(--space-4); border-radius: var(--radius-pill); white-space: normal; font-size: var(--text-xs); }
 .database-manager__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-block: var(--space-4); }
 .database-manager__permission { grid-template-columns: auto 1fr; align-items: start; padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .database-manager__advanced { border-top: 1px solid var(--line); padding-top: var(--space-4); }
@@ -162,16 +160,14 @@
 .database-manager__form-section > span:first-child { display: grid; place-items: center; width: 2rem; height: 2rem; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 500 var(--text-xs) var(--font-mono); }
 .database-manager__form-section small { display: block; margin-top: .3rem; font-size: var(--text-xs); font-weight: 400; line-height: 1.6; color: var(--text-muted); }
 .database-manager__fields { gap: 1.25rem; align-content: start; }
-.database-manager__fields input:not([type="checkbox"]), .database-manager__fields select { min-height: 2.875rem; font-size: var(--text-md); }
 .database-manager__password { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: end; }
 .database-manager__password > small { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--text-xs); }
-.database-manager__password > button { min-height: 2.875rem; }
+.database-manager__password > button { min-height: var(--control-field-height); }
 .database-manager__save-bar { position: sticky; bottom: -1px; z-index: 2; padding-block: 1rem; background: var(--surface-solid); border-top: 1px solid var(--line); margin-bottom: 0; }
 .sql-workbench__execution-permission { flex-wrap: wrap; }
-.sql-workbench__execution-permission select { width: 100%; min-height: 2.75rem; padding: .5rem; background: var(--surface-solid); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.sql-workbench__execution-permission select { width: 100%; }
 .sql-results__tools { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
 .sql-results__tools label { display: grid; gap: .4rem; flex: 1; min-width: 12rem; color: var(--text-muted); font-size: var(--text-xs); }
-.sql-results__tools input { width: 100%; min-height: 2.5rem; padding: .5rem .75rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-solid); color: var(--text); }
 .sql-results__tools > span { color: var(--text-muted); font-size: var(--text-xs); }
 .sql-results__table { max-height: 50vh; }
 .sql-results__table table { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
@@ -226,7 +222,6 @@
 }
 
 .sql-workbench { container-type: inline-size; }
-.database-manager__fields select, .sql-workbench__execution-permission select { appearance: none; height: 2.875rem; padding-right: 2.5rem; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) calc(50% - 1px), calc(100% - 13px) calc(50% - 1px); background-size: 5px 5px; background-repeat: no-repeat; }
 @container (max-width: 38rem) { .database-manager__field-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .connection-drawer__remote-form[hidden], .drawer__foot button[hidden] { display: none; }

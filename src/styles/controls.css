@@ -7,7 +7,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  height: var(--control-height);
+  height: var(--control-field-height);
   padding: 0 var(--space-5);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
@@ -27,7 +27,7 @@
 }
 
 .button--sm {
-  height: calc(1.875rem * var(--interface-text-scale));
+  height: var(--control-compact-height);
   padding: 0 var(--space-4);
   font-size: var(--text-xs);
 }
@@ -159,27 +159,29 @@
   flex-basis: 100%;
 }
 
-.input {
-  height: 2.5rem;
-  padding: 0 var(--space-4);
+:is(.input, .textarea, select) {
+  box-sizing: border-box;
+  height: var(--control-field-height);
+  min-width: 0;
   width: 100%;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-hover);
+  padding: 0 var(--space-4);
+  border: var(--control-field-border-width) solid var(--control-field-line);
+  border-radius: var(--control-field-radius);
+  background-color: var(--control-field-surface);
   color: var(--text);
   transition:
     border-color var(--duration-fast) var(--ease),
-    box-shadow var(--duration-fast) var(--ease),
     background-color var(--duration-fast) var(--ease);
 }
 
-.input::placeholder {
-  color: var(--text-faint);
+:is(textarea.input, .textarea) {
+  height: auto;
+  min-height: 6rem;
+  padding-block: var(--space-3);
+  resize: vertical;
 }
 
-/* A value shown in an input's shape but with nothing to edit, such as the
-   device identity of a remembered relay entry. A paragraph rather than a
-   disabled field: there is no control here to re-enable. */
+:is(.input, .textarea)::placeholder { color: var(--text-faint); }
 .input--readonly {
   display: flex;
   align-items: center;
@@ -187,23 +189,33 @@
   color: var(--text-muted);
 }
 
-.input:hover {
-  border-color: var(--text-faint);
-}
-
-.input:focus {
+:is(.input, .textarea, select):hover:not(:disabled) { border-color: var(--text-faint); }
+:is(.input, .textarea, select):focus-visible {
   border-color: var(--accent);
-  background: var(--surface-active);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-  outline: none;
+  background-color: var(--surface-active);
 }
-
-.input.is-invalid {
+:is(.input, .textarea, select).is-invalid {
   border-color: var(--danger-line);
+  --control-focus-color: var(--danger);
 }
 
-.input.is-invalid:focus {
-  box-shadow: 0 0 0 3px var(--danger-soft);
+/* One focus treatment for fields, buttons, native choices and radio tiles. */
+:is(button, [role="button"], [role="radio"], a.button, input, select, textarea):focus-visible {
+  outline: var(--control-focus-width) solid var(--control-focus-color, var(--focus));
+  outline-offset: var(--control-focus-offset);
+  box-shadow: none;
+}
+:where(input, select, textarea, button, [role="button"]):is(:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+/* Native choices retain platform checkmarks and accessibility semantics. */
+input:where([type="checkbox"], [type="radio"], [type="range"]) { accent-color: var(--accent); }
+input:where([type="checkbox"], [type="radio"]) {
+  width: var(--control-choice-size);
+  height: var(--control-choice-size);
+  flex: none;
 }
 
 .field__error {
@@ -222,7 +234,7 @@
 }
 
 .field__input-action-button {
-  height: 2.5rem;
+  height: var(--control-field-height);
 }
 
 .backup-file-picker {
@@ -260,73 +272,27 @@
   text-align: right;
 }
 
-.select {
+/* A .select wrapper is layout only; all native selects share the skin. */
+.select:not(select) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
-
-.select select {
-  height: 1.875rem;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--text);
-}
-
-.select select:hover {
-  border-color: var(--line-strong);
-}
-
-/* Most forms put the class on the native control itself. Give those selects
-   the same height, focus ring and surface language as text fields instead of
-   falling back to the browser/OS default. */
-select.select {
-  display: block;
-  width: 100%;
-  min-width: 10rem;
-  height: 2.5rem;
-  padding: 0 2.25rem 0 var(--space-4);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
+select:not([multiple]) {
   appearance: none;
-  background-color: var(--surface-hover);
+  padding-right: 2.25rem;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
     linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 1rem) 50%,
-    calc(100% - 0.7rem) 50%;
+  background-position: calc(100% - 1rem) 50%, calc(100% - .7rem) 50%;
   background-repeat: no-repeat;
-  background-size: 0.35rem 0.35rem;
-  color: var(--text);
+  background-size: .35rem .35rem;
   cursor: pointer;
-  font: inherit;
-  transition:
-    border-color var(--duration-fast) var(--ease),
-    box-shadow var(--duration-fast) var(--ease),
-    background-color var(--duration-fast) var(--ease);
 }
-
-select.select:hover:not(:disabled) {
-  border-color: var(--text-faint);
-  background-color: var(--surface-active);
-}
-
-select.select:focus-visible {
-  border-color: var(--accent);
-  background-color: var(--surface-active);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-  outline: none;
-}
-
-select.select:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
+.select select { width: auto; height: var(--control-compact-height); }
+select.select { display: block; }
 
 .segmented {
   display: inline-flex;
@@ -386,10 +352,10 @@ select.select:disabled {
 .checkbox__box {
   display: grid;
   place-items: center;
-  width: 1.125rem;
-  height: 1.125rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  width: var(--control-choice-size);
+  height: var(--control-choice-size);
+  border: var(--control-field-border-width) solid var(--control-field-line);
+  border-radius: var(--control-choice-radius);
   color: transparent;
   transition:
     background-color var(--duration-fast) var(--ease),
@@ -403,9 +369,12 @@ select.select:disabled {
 }
 
 .checkbox input:focus-visible + .checkbox__box {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline: var(--control-focus-width) solid var(--focus);
+  outline-offset: var(--control-focus-offset);
 }
+
+.checkbox input:disabled + .checkbox__box { opacity: var(--control-disabled-opacity); }
+.checkbox:has(input:disabled) { cursor: not-allowed; }
 
 .credential-choice {
   display: flex;
