@@ -91,19 +91,84 @@ pub fn body(state: &State) -> Result<String, String> {
             continue;
         }
         text.push_str(&format!("\n### {title}\n"));
-        let mut entries = store.entries.iter().collect::<Vec<_>>();
+        let mut entries = store
+            .entries
+            .iter()
+            .filter(|entry| !entry.archived)
+            .collect::<Vec<_>>();
         entries.sort_by_key(|entry| (!entry.pinned, entry.created_at, &entry.id));
+        let mut topics: Vec<(String, Vec<&Entry>)> = Vec::new();
         for entry in entries {
-            let content = entry.content.replace("\r\n", "\n").replace('\r', "\n");
-            let mut lines = content.lines();
-            text.push_str(&format!(
-                "\n- **{}{}**：{}\n",
-                if entry.pinned { "釘選・" } else { "" },
-                kind_label(entry.kind),
-                lines.next().unwrap_or_default()
-            ));
-            for line in lines {
-                text.push_str(&format!("  {line}\n"));
+            let first = entry.content.lines().next().unwrap_or_default();
+            let topic = first
+                .split_once([':', '：'])
+                .map(|(head, _)| head.trim())
+                .filter(|head| !head.is_empty() && head.chars().count() <= 24)
+                .map(str::to_string)
+                .unwrap_or_else(|| entry.id.clone());
+            if let Some((_, group)) = topics.iter_mut().find(|(key, _)| key == &topic) {
+                group.push(entry);
+            } else {
+                topics.push((topic, vec![entry]));
+            }
+        }
+        for (topic, group) in topics {
+            let grouped = group.len() > 1;
+            if grouped {
+                text.push_str(&format!("\n#### {topic}\n"));
+            }
+            for entry in group {
+                let content = if grouped {
+                    let (first, rest) = entry
+                        .content
+                        .split_once('\n')
+                        .unwrap_or((&entry.content, ""));
+                    let value = first
+                        .split_once([':', '：'])
+                        .map_or(first, |(_, value)| value)
+                        .trim();
+                    format!("{value}\n{rest}")
+                } else {
+                    entry.content.clone()
+                };
+                let content = content.replace("\r\n", "\n").replace('\r', "\n");
+                let mut lines = content.lines();
+                text.push_str(&format!(
+                    "\n- **{}{}**：{}\n",
+                    if entry.pinned { "釘選・" } else { "" },
+                    kind_label(entry.kind),
+                    lines.next().unwrap_or_default()
+                ));
+                for line in lines {
+                    text.push_str(&format!("  {line}\n"));
+                }
+            }
+        }
+        let archived = store
+            .entries
+            .iter()
+            .filter(|e| e.archived)
+            .collect::<Vec<_>>();
+        if !archived.is_empty() {
+            text.push_str("\n#### 封存索引（完整原文可於 LatticeTerm 記憶庫還原）\n");
+            for entry in archived.iter().take(4) {
+                text.push_str(&format!(
+                    "- {}\n",
+                    entry
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .take(32)
+                        .collect::<String>()
+                ));
+            }
+            if archived.len() > 4 {
+                text.push_str(&format!(
+                    "- 另有 {} 條，請在記憶庫展開封存條目。\n",
+                    archived.len() - 4
+                ));
             }
         }
     }
@@ -144,20 +209,8 @@ fn plan(state: &State) -> Result<Vec<(String, Option<String>)>, String> {
         return Err("memory.format".into());
     }
     let agents = update(original, &body)?;
-    let output = if body.is_empty() {
-        0
-    } else {
-        START.len()
-            + END.len()
-            + body.len()
-            + 3
-            + if original.is_some_and(|text| text.contains("\r\n")) {
-                body.bytes().filter(|byte| *byte == b'\n').count() + 3
-            } else {
-                0
-            }
-    };
-    if output > MAX_OUTPUT {
+    let output = output_bytes(state, &body);
+    if output > state.output_limit || body.lines().count() + 3 > 200 {
         return Err("memory.outputLimit".into());
     }
     if agents
@@ -186,6 +239,34 @@ fn plan(state: &State) -> Result<Vec<(String, Option<String>)>, String> {
     }
     Ok(targets)
 }
+pub(super) fn output_bytes(state: &State, body: &str) -> usize {
+    if body.is_empty() {
+        return 0;
+    }
+    let crlf = text(state, "AGENTS.md")
+        .ok()
+        .flatten()
+        .is_some_and(|old| old.contains("\r\n"));
+    body.len()
+        + START.len()
+        + END.len()
+        + 3
+        + if crlf {
+            body.bytes().filter(|byte| *byte == b'\n').count() + 3
+        } else {
+            0
+        }
+}
+pub(super) fn available_budget(state: &State) -> usize {
+    let outside_bytes = text(state, "AGENTS.md")
+        .ok()
+        .flatten()
+        .and_then(|old| outside(old).ok())
+        .map_or(0, |outside| outside.len());
+    crate::shared_agent_rules::MAX_SHARED_RULES_BYTES
+        .saturating_sub(outside_bytes + 4)
+        .min(MAX_OUTPUT)
+}
 pub(super) fn codex_override(state: &State) -> bool {
     match text(state, "AGENTS.override.md") {
         Ok(Some(text)) => !text.trim().is_empty(),
@@ -195,25 +276,7 @@ pub(super) fn codex_override(state: &State) -> bool {
 }
 pub fn status(state: &State, has_project: bool) -> (Vec<SyncStatus>, usize, Vec<String>) {
     let body = body(state);
-    let crlf = text(state, "AGENTS.md")
-        .ok()
-        .flatten()
-        .is_some_and(|text| text.contains("\r\n"));
-    let bytes = body.as_ref().map_or(0, |body| {
-        if body.is_empty() {
-            0
-        } else {
-            body.len()
-                + START.len()
-                + END.len()
-                + 3
-                + if crlf {
-                    body.bytes().filter(|byte| *byte == b'\n').count() + 3
-                } else {
-                    0
-                }
-        }
-    });
+    let bytes = body.as_ref().map_or(0, |body| output_bytes(state, body));
     if !has_project {
         return (Vec::new(), bytes, Vec::new());
     }

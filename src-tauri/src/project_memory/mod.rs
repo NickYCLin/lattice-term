@@ -1,4 +1,6 @@
 //! User-confirmed, vendor-neutral memory. Native CLI memories are import-only.
+pub mod compaction;
+pub mod context;
 mod imports;
 mod render;
 mod storage;
@@ -64,6 +66,8 @@ pub struct Entry {
     pub updated_at: u64,
     pub last_used_at: u64,
     pub pinned: bool,
+    #[serde(default)]
+    pub archived: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -121,6 +125,7 @@ pub struct Snapshot {
     pub files: Vec<SyncStatus>,
     pub warnings: Vec<String>,
     pub ignore_revision: String,
+    pub history: Vec<compaction::Version>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -151,6 +156,11 @@ pub enum Action {
         location: Location,
     },
     Sync,
+    Compact,
+    Restore {
+        scope: Scope,
+        id: String,
+    },
     Ignore {
         confirmed: bool,
     },
@@ -168,8 +178,11 @@ struct Context {
     prefix: PathBuf,
 }
 type InstructionSnapshot = (String, Result<Option<Vec<u8>>, String>);
+#[derive(Clone)]
 struct State {
     settings: Settings,
+    compaction_warnings: Vec<String>,
+    output_limit: usize,
     user: Store,
     project: Store,
     revision: String,
@@ -250,6 +263,7 @@ impl Context {
             .unwrap_or(Ok(None));
         let revision = digest(
             &serde_json::to_vec(&(
+                storage::read(&self.data, Path::new("project-memory/compaction.json"))?,
                 &settings_raw,
                 &user_raw,
                 &project_raw,
@@ -258,8 +272,10 @@ impl Context {
             ))
             .map_err(|_| "memory.format")?,
         );
-        Ok(State {
+        let mut state = State {
             settings,
+            compaction_warnings: Vec::new(),
+            output_limit: compaction::preferences(&self.data)?.limit(),
             user,
             project,
             revision,
@@ -268,7 +284,9 @@ impl Context {
             settings_raw,
             instructions,
             ignore,
-        })
+        };
+        state.output_limit = state.output_limit.min(render::available_budget(&state));
+        Ok(state)
     }
     fn view(&self, state: &State) -> Snapshot {
         let mut entries = Vec::new();
@@ -302,10 +320,11 @@ impl Context {
             revision: state.revision.clone(),
             entries,
             output_bytes,
-            max_output_bytes: MAX_OUTPUT,
+            max_output_bytes: state.output_limit,
             files,
             warnings,
             ignore_revision,
+            history: compaction::versions(self, state),
         }
     }
 }
@@ -412,6 +431,7 @@ fn insert(store: &mut Store, draft: &Draft) -> Result<(), String> {
         entry.source = draft.source.clone();
         entry.updated_at = time;
         entry.pinned = draft.pinned;
+        entry.archived = false;
     } else {
         if store.entries.len() >= 256 {
             return Err("memory.capacity".into());
@@ -425,6 +445,7 @@ fn insert(store: &mut Store, draft: &Draft) -> Result<(), String> {
             updated_at: time,
             last_used_at: 0,
             pinned: draft.pinned,
+            archived: false,
         });
     }
     Ok(())
@@ -449,6 +470,13 @@ pub fn mutate(
     let mut settings_changed = false;
     let mut user_changed = false;
     let mut project_changed = false;
+    let compact = matches!(
+        &action,
+        Action::Upsert { .. } | Action::Import { .. } | Action::Compact
+    );
+    let mut prefs = compaction::preferences(&ctx.data)?;
+    prefs.limit_bytes = prefs.limit_bytes.min(state.output_limit);
+    let mut archive_changes = Vec::new();
     match action {
         Action::Upsert { draft } => {
             if draft.scope == Scope::User {
@@ -496,7 +524,15 @@ pub fn mutate(
                 settings_changed = true;
             }
         }
-        Action::Sync => {}
+        Action::Sync | Action::Compact => {}
+        Action::Restore { scope, id } => {
+            archive_changes.push(compaction::restore(&ctx, &mut state, scope, &id)?);
+            if scope == Scope::User {
+                user_changed = true;
+            } else {
+                project_changed = true;
+            }
+        }
         Action::Ignore { confirmed } => {
             if !confirmed {
                 return Err("memory.confirmIgnore".into());
@@ -569,7 +605,16 @@ pub fn mutate(
             }
         }
     }
-    let mut changes = Vec::new();
+    if compact {
+        archive_changes.extend(compaction::apply(&ctx, &mut state, &prefs)?);
+        user_changed |= state.user_raw.as_deref() != Some(encode(&state.user)?.as_slice())
+            && !state.user.entries.is_empty();
+        project_changed |= ctx.project.is_some()
+            && state.project_raw.as_deref() != Some(encode(&state.project)?.as_slice())
+            && !state.project.entries.is_empty();
+    }
+    let compact_warnings = state.compaction_warnings.clone();
+    let mut changes = archive_changes;
     if user_changed {
         if state.user.entries.iter().any(entry_secret) {
             return Err("memory.secret".into());
@@ -602,12 +647,14 @@ pub fn mutate(
         ));
     }
     storage::commit(changes)?;
+    compaction::prune(&ctx, &state, &prefs);
     let current = ctx.read()?;
     let sync_error = render::sync(&ctx, &current).err();
     let mut view = ctx.view(&ctx.read()?);
     if let Some(error) = sync_error {
         view.warnings.push(error);
     }
+    view.warnings.extend(compact_warnings);
     Ok(view)
 }
 pub use imports::{Candidate, ImportPreview};
@@ -637,6 +684,32 @@ pub fn prepare(data: &Path, project: &Path, cli: &str) -> Result<(), String> {
     if !active {
         return Ok(());
     }
+    let mut prefs = compaction::preferences(&ctx.data)?;
+    prefs.limit_bytes = prefs.limit_bytes.min(state.output_limit);
+    let mut archives = compaction::apply(&ctx, &mut state, &prefs)?;
+    // Persist compaction before publishing a newly bounded output.
+    if !archives.is_empty() {
+        if !state.user.entries.is_empty() {
+            archives.push(Change::new(
+                &ctx.data,
+                USER_STORE,
+                state.user_raw.clone(),
+                encode(&state.user)?,
+            ));
+        }
+        if !state.project.entries.is_empty() {
+            let (root, path) = ctx.store_path(state.settings.storage)?;
+            archives.push(Change::new(
+                root,
+                path,
+                state.project_raw.clone(),
+                encode(&state.project)?,
+            ));
+        }
+        storage::commit(archives)?;
+        compaction::prune(&ctx, &state, &prefs);
+        state = ctx.read()?;
+    }
     render::sync(&ctx, &state)?;
     if cli == "grok" {
         return Ok(());
@@ -650,6 +723,7 @@ pub fn prepare(data: &Path, project: &Path, cli: &str) -> Result<(), String> {
         .entries
         .iter_mut()
         .chain(state.project.entries.iter_mut())
+        .filter(|entry| !entry.archived)
     {
         entry.last_used_at = time;
     }

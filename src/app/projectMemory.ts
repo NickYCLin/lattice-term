@@ -21,6 +21,7 @@ export interface MemoryEntry extends MemoryDraft {
   updatedAt: number;
   lastUsedAt: number;
   blocked: boolean;
+  archived?: boolean;
 }
 export interface MemorySnapshot {
   projectDirectory: string | null;
@@ -36,6 +37,7 @@ export interface MemorySnapshot {
     reason: string | null;
   }[];
   warnings: string[];
+  history?: import("./memoryCompaction").MemoryVersion[];
 }
 export interface MemoryCandidate {
   id: string;
@@ -54,6 +56,8 @@ export type MemoryAction =
   | { kind: "delete"; id: string; scope: MemoryScope }
   | { kind: "storage"; location: "project" | "app" }
   | { kind: "sync" }
+  | { kind: "compact" }
+  | { kind: "restore"; scope: MemoryScope; id: string }
   | { kind: "ignore"; confirmed: boolean }
   | {
       kind: "import";
@@ -100,12 +104,14 @@ export async function mutateMemory(
   revision: string,
   action: MemoryAction,
 ) {
+  const startedAt=Date.now();
   const value = await invoke<MemorySnapshot>("project_memory_mutate", {
     projectDirectory: directory || null,
     expectedRevision: revision,
     action,
   });
-  window.dispatchEvent(new Event(MEMORY_CHANGED));
+  const version=value.history?.find(version=>version.reason==="auto"&&version.createdAt>=startedAt);
+  window.dispatchEvent(new CustomEvent(MEMORY_CHANGED,{detail:version ? {directory,version}:null}));
   return value;
 }
 export const memoryBytes = (content: string) =>

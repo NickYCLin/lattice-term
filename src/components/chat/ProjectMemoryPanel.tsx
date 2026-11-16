@@ -1,3 +1,4 @@
+import { MemoryArchiveHistory } from "./MemoryArchiveHistory";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
@@ -23,6 +24,7 @@ export function memoryError(reason: unknown): MessageKey {
   return (memoryErrors.has(key) ? key : "memory.error") as MessageKey;
 }
 const memoryErrors = new Set([
+  "memory.compactSettings", "memory.aiUnavailable", "memory.aiFailed", "memory.backgroundSelection",
   "memory.conflict",
   "memory.secret",
   "memory.outputLimit",
@@ -261,6 +263,8 @@ export function ProjectMemoryPanel({
               >
                 {t("chat.instructions.reload")}
               </button>
+              <button className="button button--sm" type="button" disabled={busy} onClick={()=>void run({kind:"compact"})}>{t("memory.compactNow")}</button>
+              <MemoryArchiveHistory history={snapshot.history??[]} directory={directory} busy={busy} onRestore={version=>{void run({kind:"restore",scope:version.scope,id:version.id});}}/>
               {snapshot.entries.length === 0 && <p>{t("memory.empty")}</p>}
               <ul className="memory-entries">
                 {snapshot.entries.map((entry) => (
@@ -274,6 +278,7 @@ export function ProjectMemoryPanel({
                       · {t(`memory.kind.${entry.kind}`)}
                       {entry.pinned ? ` · ${t("memory.pinned")}` : ""}
                     </strong>
+                    {entry.archived&&<strong>{t("memory.archived")}</strong>}
                     <p className="memory-content">{entry.content}</p>
                     <small>
                       {t("memory.source")}:{" "}

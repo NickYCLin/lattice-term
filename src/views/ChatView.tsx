@@ -1,3 +1,5 @@
+import { BackgroundHistoryPicker } from "../components/chat/BackgroundHistoryPicker";
+import { CompactionNotice } from "../components/chat/CompactionNotice";
 import { MemorySaveButton } from "../components/chat/MemorySaveButton";
 import { NativeRecordView, NativeHistoryAccess } from "../components/chat/NativeRecordView";
 import { ComposerPermissionMenu } from "../components/chat/ComposerPermissionMenu";
@@ -635,6 +637,7 @@ export function ChatView({
       </aside>
 
       <div className="chat-main">
+        <CompactionNotice />
         {(chat.removal?.error || chat.archivedReceipt) && <div className="chat-archive-status--mobile">{archiveStatus}</div>}
         {mode === "automations" && agents.mode !== "unavailable" ? (
           composingAutomation || shownAutomationId ? (
@@ -1435,6 +1438,7 @@ export function ThreadPane({
               rows={2}
             />
             <div className="session-composer__toolbar">
+              <BackgroundHistoryPicker disabled={steering} onAttach={report=>{chat.createThread({definitionId:thread.definitionId,workingDirectory:thread.workingDirectory,permission:thread.permission,model:thread.model,accountProfileId:thread.accountProfileId,provider:thread.provider,proxyId:thread.proxyId,browserEnabled:thread.browserEnabled,title:t("memory.backgroundThread"),handoff:{sourceDefinitionId:"background",transcript:report.text}});}}/>
               <ComposerAttachments disabled={steering || pastingImage} onChoose={kind => { void chooseAttachments(kind); }}>
                 <ChatSkillPicker
                   definitionId={thread.definitionId}

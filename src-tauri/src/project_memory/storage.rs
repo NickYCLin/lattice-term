@@ -82,14 +82,22 @@ pub fn read(root: &Path, relative: &Path) -> Result<Option<Vec<u8>>, String> {
         Ok(_) => {}
     }
     let file = crate::local_files::open_regular(&target).map_err(|_| "memory.read")?;
-    if file.metadata().map_err(|_| "memory.read")?.len() > LIMIT as u64 {
+    let limit = if relative
+        .components()
+        .any(|part| part.as_os_str() == "archive")
+    {
+        4 * LIMIT
+    } else {
+        LIMIT
+    };
+    if file.metadata().map_err(|_| "memory.read")?.len() > limit as u64 {
         return Err("memory.capacity".into());
     }
     let mut bytes = Vec::new();
-    file.take(LIMIT as u64 + 1)
+    file.take(limit as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "memory.read")?;
-    if bytes.len() > LIMIT {
+    if bytes.len() > limit {
         return Err("memory.capacity".into());
     }
     Ok(Some(bytes))
@@ -149,7 +157,16 @@ pub fn commit(changes: Vec<Change>) -> Result<(), String> {
         .collect::<Vec<_>>();
     let mut prepared = Vec::new();
     for change in changes {
-        if change.after.len() > LIMIT {
+        let limit = if change
+            .relative
+            .components()
+            .any(|part| part.as_os_str() == "archive")
+        {
+            4 * LIMIT
+        } else {
+            LIMIT
+        };
+        if change.after.len() > limit {
             return Err("memory.capacity".into());
         }
         if read(&change.root, &change.relative)? != change.before {
@@ -193,7 +210,7 @@ pub fn commit(changes: Vec<Change>) -> Result<(), String> {
                 rollback(&applied);
                 return Err("memory.write".into());
             }
-            if crate::local_files::read_text(&backup, LIMIT as u64)
+            if crate::local_files::read_text(&backup, (4 * LIMIT) as u64)
                 .ok()
                 .map(String::into_bytes)
                 != change.before

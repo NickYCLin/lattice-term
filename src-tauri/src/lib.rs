@@ -2732,6 +2732,7 @@ async fn agent_session_images_snapshot(
 
 #[tauri::command]
 async fn agent_export_transcript(
+    app: AppHandle,
     session_id: String,
     for_file: Option<bool>,
     registry: State<'_, Arc<AgentRegistry>>,
@@ -2741,7 +2742,9 @@ async fn agent_export_transcript(
     // read by the next CLI itself, so it can keep much more of the history.
     const MAX_PASTED_HANDOFF_CHARS: usize = 12_000;
     const MAX_FILE_HANDOFF_CHARS: usize = 60_000;
-    let max_chars = if for_file.unwrap_or(false) {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    let structured = for_file.unwrap_or(false);
+    let max_chars = if structured {
         MAX_FILE_HANDOFF_CHARS
     } else {
         MAX_PASTED_HANDOFF_CHARS
@@ -2765,18 +2768,28 @@ async fn agent_export_transcript(
     let captured_session_id = summary.captured_session_id;
     let profile_config_path = summary.profile_config_path;
     tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::export(
-            kind,
-            &working_directory,
-            captured_session_id.as_deref(),
-            profile_config_path.as_deref().map(std::path::Path::new),
-            max_chars,
-        )
+        if structured {
+            crate::transcript::export_structured(
+                &data,
+                kind,
+                &working_directory,
+                captured_session_id.as_deref(),
+                profile_config_path.as_deref().map(std::path::Path::new),
+            )
+        } else {
+            crate::transcript::export(
+                kind,
+                &working_directory,
+                captured_session_id.as_deref(),
+                profile_config_path.as_deref().map(std::path::Path::new),
+                max_chars,
+            )
+            .map_err(str::to_string)
+        }
     })
     .await
     .map_err(|error| format!("Transcript export task did not complete: {error}"))?
     .map(Some)
-    .map_err(str::to_string)
 }
 
 /// Persists an opt-in handoff only when the target CLI has a documented,
@@ -2813,16 +2826,34 @@ async fn agent_write_handoff_file(
     source_label: String,
     transcript: String,
 ) -> Result<String, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Cannot locate the application data directory: {error}"))?;
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::transcript::write_handoff_file(&data_dir, &source_label, &transcript)
-            .map(|path| crate::agent::plain_win32_path(path).display().to_string())
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    let (path, report) = blocking(move || {
+        let report = if transcript.starts_with("# 結構化交接摘要") {
+            crate::project_memory::context::history(&data)?
+                .into_iter()
+                .find(|report| report.text == transcript)
+        } else {
+            Some(crate::project_memory::context::create(
+                &data,
+                &source_label,
+                crate::project_memory::context::from_text(&transcript),
+                Vec::new(),
+            )?)
+        };
+        let text = report
+            .as_ref()
+            .map_or(transcript.as_str(), |report| report.text.as_str());
+        let path = crate::transcript::write_handoff_file(&data, &source_label, text)?;
+        Ok((
+            crate::agent::plain_win32_path(path).display().to_string(),
+            report,
+        ))
     })
-    .await
-    .map_err(|error| format!("Handoff file task did not complete: {error}"))?
+    .await?;
+    if let Some(report) = report.filter(|report| report.compacted) {
+        let _ = app.emit("memory-auto-compacted", report);
+    }
+    Ok(path)
 }
 
 #[tauri::command]
@@ -3867,6 +3898,83 @@ async fn agent_instruction_files(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn memory_compaction_settings(
+    app: AppHandle,
+    preferences: Option<crate::project_memory::compaction::Preferences>,
+    expected_revision: Option<String>,
+) -> Result<crate::project_memory::compaction::ConfigView, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || {
+        crate::project_memory::compaction::settings(
+            &data,
+            preferences,
+            expected_revision.as_deref(),
+        )
+    })
+    .await
+}
+#[tauri::command]
+async fn project_memory_archive(
+    app: AppHandle,
+    project_directory: Option<String>,
+    scope: crate::project_memory::Scope,
+    id: String,
+) -> Result<crate::project_memory::compaction::Archive, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || {
+        crate::project_memory::compaction::detail(&data, project_directory.as_deref(), scope, &id)
+    })
+    .await
+}
+#[tauri::command]
+async fn memory_structure_context(
+    app: AppHandle,
+    label: String,
+    text: String,
+    source_items: Option<Vec<crate::project_memory::context::ContextItem>>,
+) -> Result<crate::project_memory::context::ContextReport, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    let report = blocking(move || {
+        crate::project_memory::context::create(
+            &data,
+            &label,
+            source_items
+                .filter(|items| !items.is_empty())
+                .unwrap_or_else(|| crate::project_memory::context::from_text(&text)),
+            Vec::new(),
+        )
+    })
+    .await?;
+    if report.compacted {
+        let _ = app.emit("memory-auto-compacted", &report);
+    }
+    Ok(report)
+}
+#[tauri::command]
+async fn memory_background_context(
+    app: AppHandle,
+    selections: Vec<crate::transcript::BackgroundSelection>,
+    profiles: Vec<crate::transcript::HistoryProfile>,
+) -> Result<crate::project_memory::context::ContextReport, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || crate::transcript::background_context(&data, &selections, &profiles)).await
+}
+#[tauri::command]
+async fn memory_context_history(
+    app: AppHandle,
+) -> Result<Vec<crate::project_memory::context::ContextReport>, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || crate::project_memory::context::history(&data)).await
+}
+#[tauri::command]
+async fn memory_context_original(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<crate::project_memory::context::ContextItem>, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || crate::project_memory::context::original(&data, &id)).await
+}
 #[tauri::command]
 async fn project_memory_inspect(
     app: AppHandle,
@@ -6506,6 +6614,12 @@ pub fn run() {
             agent_automations_sync,
             agent_automations_state,
             agent_automations_take_runs,
+            memory_compaction_settings,
+            project_memory_archive,
+            memory_structure_context,
+            memory_background_context,
+            memory_context_history,
+            memory_context_original,
             project_memory_inspect,
             project_memory_mutate,
             project_memory_import,

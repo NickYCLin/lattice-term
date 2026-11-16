@@ -287,7 +287,7 @@ export type ChatItem =
 /** A bounded, explicitly selected transcript passed to a different CLI. */
 export interface ChatHandoff {
   /** The CLI that produced the source messages; never a native session id. */
-  sourceDefinitionId: ChatDefinitionId | "qwen" | "copilot" | "grok" | "kimi" | "opencode";
+  sourceDefinitionId: ChatDefinitionId | "qwen" | "copilot" | "grok" | "kimi" | "opencode" | "background";
   /** User and final-text messages only: no tool input/output or reasoning. */
   transcript: string;
 }
@@ -487,6 +487,16 @@ function labelForTranscript(definitionId: ChatDefinitionId): string {
       : definitionId === "antigravity"
         ? "Antigravity"
         : "Gemini";
+}
+
+/** Complete readable source for the backend archive; tool text is summarized only after redaction. */
+export function handoffSourceItems(items: readonly ChatItem[]): import("./memoryCompaction").ContextItem[] {
+  return items.map(item => {
+    if (item.type === "user" || item.type === "text") return {role:item.type === "user" ? "user" : "assistant",text:item.text,kind:"",name:""};
+    if (item.type === "native") return {role:item.record.kind === "user" ? "user" : "assistant",text:item.record.kind === "tool" ? JSON.stringify(item.record) : item.record.text,kind:item.record.kind,name:item.record.name??""};
+    if (item.type === "tool") return {role:"assistant",text:JSON.stringify(item),kind:"tool",name:item.name};
+    return {role:"assistant",text:JSON.stringify(item),kind:item.type === "reasoning" ? "reasoning" : "system",name:item.type};
+  });
 }
 
 /**
@@ -720,7 +730,7 @@ export function createThread(
     effort: settings.effort ?? null,
     nativeSessionId: null,
     reportedModel: null,
-    handoff: settings.handoff ? {sourceDefinitionId:settings.handoff.sourceDefinitionId, transcript:Array.from(maskNativeText(settings.handoff.transcript)).slice(-12_000).join("")} : null,
+    handoff: settings.handoff ? {sourceDefinitionId:settings.handoff.sourceDefinitionId, transcript:Array.from(maskNativeText(settings.handoff.transcript)).slice(-48_000).join("")} : null,
     items: [],
     createdAt: now,
     updatedAt: now,
@@ -1195,7 +1205,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
           thread.handoff.sourceDefinitionId === "codex" ||
           thread.handoff.sourceDefinitionId === "gemini" ||
           thread.handoff.sourceDefinitionId === "antigravity" ||
-          thread.handoff.sourceDefinitionId === "qwen" || thread.handoff.sourceDefinitionId === "copilot" || thread.handoff.sourceDefinitionId === "grok" || thread.handoff.sourceDefinitionId === "kimi" || thread.handoff.sourceDefinitionId === "opencode") &&
+          thread.handoff.sourceDefinitionId === "qwen" || thread.handoff.sourceDefinitionId === "copilot" || thread.handoff.sourceDefinitionId === "grok" || thread.handoff.sourceDefinitionId === "kimi" || thread.handoff.sourceDefinitionId === "opencode" || thread.handoff.sourceDefinitionId === "background") &&
         typeof thread.handoff.transcript === "string"
           ? {
               sourceDefinitionId: thread.handoff.sourceDefinitionId,

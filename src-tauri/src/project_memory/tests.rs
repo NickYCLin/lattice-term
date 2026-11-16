@@ -251,9 +251,10 @@ fn output_limit_never_drops_canonical_entries() {
     }
     let view = inspect_work(data.path(), work.path());
     assert_eq!(view.entries.len(), 5);
-    assert!(view.output_bytes > MAX_OUTPUT);
-    assert!(view.warnings.contains(&"memory.outputLimit".into()));
-    assert!(prepare(data.path(), work.path(), "codex").is_err());
+    assert!(view.output_bytes <= compaction::Preferences::default().limit());
+    assert!(view.entries.iter().any(|entry| entry.entry.archived));
+    assert!(!view.history.is_empty());
+    assert!(prepare(data.path(), work.path(), "codex").is_ok());
 }
 #[test]
 fn imports_are_readonly_masked_deduplicated_and_selected_explicitly() {
@@ -457,6 +458,7 @@ fn external_secret_store_is_masked_and_never_exported() {
         updated_at: 1,
         last_used_at: 0,
         pinned: false,
+        archived: false,
     };
     fs::write(
         work.path().join(PROJECT_STORE),

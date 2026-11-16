@@ -2907,3 +2907,12 @@ button.chat-diff__line.is-commentable:focus-visible {
 .memory-editor textarea { width: 100%; box-sizing: border-box; }
 .memory-candidate { display: flex; align-items: flex-start; gap: .6rem; margin-block: .5rem; }
 .memory-dialog { width: min(42rem, 92vw); max-height: 85dvh; overflow: auto; padding: 1.3rem; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-solid); color: var(--text); }
+
+.memory-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); min-width: 0; }
+.memory-comparison > *, .memory-history, .memory-background-list { min-width: 0; overflow-wrap: anywhere; }
+.memory-background-list { max-height: 40dvh; overflow: auto; display: grid; gap: var(--space-2); }
+.memory-background-list label { display: flex; gap: var(--space-2); align-items: flex-start; }
+.memory-background-list small { display: block; }
+@media (max-width: 760px) { .memory-comparison { grid-template-columns: minmax(0, 1fr); } }
+.memory-compaction-notice { flex: none; max-height: 35dvh; overflow: auto; }
+.memory-compaction-settings { border: 0; padding: 0; margin: 0; min-width: 0; }

@@ -1,3 +1,4 @@
+import { structureContext } from "./memoryCompaction";
 import { loadChatAccountProfiles } from "./chatAccountProfiles";
 import { runtimeIdentity } from "./chatRuntimeStatus";
 import type { NativeChatAction } from "./chatNativeActions";
@@ -32,6 +33,7 @@ import {
   defaultPermission,
   permissionsFor,
   handoffTranscript,
+  handoffSourceItems,
   supportsBrowser,
   completionNotificationText,
   effortForTurn,
@@ -868,6 +870,9 @@ export function useAgentChat(
         }
       }
       if (threadsRef.current.find(entry => entry.id === id)?.runningTurnId !== turnId) return;
+      const context=thread.handoff&&!nativeAction&&!thread.handoff.transcript.startsWith("# 結構化交接摘要") ? await structureContext(thread.handoff.sourceDefinitionId,thread.handoff.transcript,handoffSourceItems(thread.items)) : null;
+      if (threadsRef.current.find(entry => entry.id === id)?.runningTurnId !== turnId) return;
+      const sendThread=context&&thread.handoff ? {...thread,handoff:{...thread.handoff,transcript:context.text}} : thread;
       await invoke(directProxy ? "agent_chat_proxy_send" : "agent_chat_send", {
         ...(directProxy ? { history: proxyChatHistory(thread.items) } : {}),
         request: {
@@ -876,7 +881,7 @@ export function useAgentChat(
           definitionId: thread.definitionId,
           workingDirectory: thread.workingDirectory,
           browserEnabled: !directProxy && supportsBrowser(thread.definitionId) && thread.browserEnabled === true,
-          prompt: nativeAction ? "" : promptForTurn(thread, visiblePrompt),
+          prompt: nativeAction ? "" : promptForTurn(sendThread, visiblePrompt),
           ...(nativeAction ? { nativeAction } : {}),
           ...(typeof thread.planMode === "boolean" ? { planMode: thread.planMode } : {}),
           permission: thread.permission,

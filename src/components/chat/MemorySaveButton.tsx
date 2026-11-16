@@ -36,7 +36,7 @@ function SaveDialog({
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [saved, setSaved] = useState(false);
+    [saved, setSaved] = useState(false), [pendingSync,setPendingSync]=useState(true);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus({
     dialogRef,
@@ -86,6 +86,7 @@ function SaveDialog({
             })
               .then((next) => {
                 if (next.warnings.length) {
+                  setPendingSync(next.warnings.some(warning=>warning!=="memory.aiFailed"&&warning!=="memory.aiUnavailable"));
                   setSaved(true);
                   setError(next.warnings[0]);
                   setBusy(false);
@@ -103,7 +104,7 @@ function SaveDialog({
             onChange={setDraft}
             disabled={busy || saved}
           />
-          {saved && <p role="status">{t("memory.savedPending")}</p>}
+          {saved && <p role="status">{t(pendingSync ? "memory.savedPending" : "memory.savedWithFallback")}</p>}
           {error && <p role="alert">{t(memoryError(error))}</p>}
           <button
             className="button button--primary"

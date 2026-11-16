@@ -84,7 +84,7 @@ fn home() -> Option<PathBuf> {
 
 /// Largest handoff brief written to disk. The exporter already caps what it
 /// produces; this only bounds what a caller can hand in.
-const MAX_HANDOFF_FILE_BYTES: usize = 256 * 1024;
+const MAX_HANDOFF_FILE_BYTES: usize = 3 * 1024 * 1024;
 /// A brief is for the CLI that starts next, not an archive; anything older
 /// than this is swept on the next write.
 const HANDOFF_FILE_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -109,16 +109,26 @@ pub fn write_handoff_file(
     if transcript.len() > MAX_HANDOFF_FILE_BYTES {
         return Err("The handoff is too large to write.".to_string());
     }
-    let transcript = redact::text(transcript);
+    let transcript = if transcript.starts_with("# 結構化交接摘要")
+        && transcript.len() <= crate::project_memory::compaction::preferences(data_dir)?.limit()
+    {
+        redact::text(transcript)
+    } else {
+        crate::project_memory::context::create(
+            data_dir,
+            source_label,
+            crate::project_memory::context::from_text(transcript),
+            Vec::new(),
+        )?
+        .text
+    };
     let safe_label = redact::text(source_label);
     let label: String = safe_label
         .chars()
         .filter(|c| !c.is_control())
         .take(64)
         .collect();
-    let dir = data_dir.join("handoffs");
-    fs::create_dir_all(&dir)
-        .map_err(|error| format!("Cannot create the handoff directory: {error}"))?;
+    let dir = crate::project_memory::context::handoff_directory(data_dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1903,6 +1913,22 @@ fn read_local_conversation_snapshot_with_tools(
     profiles: &[HistoryProfile],
     include_tools: bool,
 ) -> Result<LocalConversationSnapshot, String> {
+    local_snapshot_and_path(
+        definition_id,
+        session_id,
+        profile_id,
+        profiles,
+        include_tools,
+    )
+    .map(|(snapshot, _)| snapshot)
+}
+fn local_snapshot_and_path(
+    definition_id: &str,
+    session_id: &str,
+    profile_id: Option<&str>,
+    profiles: &[HistoryProfile],
+    include_tools: bool,
+) -> Result<(LocalConversationSnapshot, PathBuf), String> {
     // Resolve the exact identity inside the selected account. The latest-100
     // preview is not an authorization list and must not hide older records.
     if profiles.len() > HISTORY_MAX_PROFILES
@@ -1959,7 +1985,124 @@ fn read_local_conversation_snapshot_with_tools(
             && history_root_with_archive(kind, profile, true)
                 .is_some_and(|archive| path.starts_with(archive)),
     );
-    Ok(snapshot)
+    Ok((snapshot, path))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BackgroundSelection {
+    pub definition_id: String,
+    pub native_session_id: String,
+    pub profile_id: Option<String>,
+}
+pub fn background_context(
+    data: &Path,
+    selections: &[BackgroundSelection],
+    profiles: &[HistoryProfile],
+) -> Result<crate::project_memory::context::ContextReport, String> {
+    if selections.is_empty() || selections.len() > 5 {
+        return Err("memory.backgroundSelection".into());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut items = Vec::new();
+    let mut sources = Vec::new();
+    for (index, selection) in selections.iter().enumerate() {
+        if !seen.insert((
+            &selection.definition_id,
+            &selection.profile_id,
+            &selection.native_session_id,
+        )) {
+            return Err("memory.backgroundSelection".into());
+        }
+        let (snapshot, path) = local_snapshot_and_path(
+            &selection.definition_id,
+            &selection.native_session_id,
+            selection.profile_id.as_deref(),
+            profiles,
+            true,
+        )?;
+        sources.push(format!(
+            "{} · cli={} profile={} session={}",
+            path.display(),
+            selection.definition_id,
+            selection.profile_id.as_deref().unwrap_or("default"),
+            selection.native_session_id
+        ));
+        for message in snapshot.messages {
+            let kind = message
+                .record
+                .as_ref()
+                .map(|r| match r.kind {
+                    normalized::ItemKind::Tool => "tool",
+                    normalized::ItemKind::FileChange => "fileChange",
+                    normalized::ItemKind::Reasoning => "reasoning",
+                    _ => "",
+                })
+                .unwrap_or(if message.tool.is_some() { "tool" } else { "" });
+            items.push(crate::project_memory::context::ContextItem {
+                role: format!("{}@{}:{}", message.role, index + 1, selection.definition_id),
+                text: if kind == "tool" {
+                    message
+                        .record
+                        .as_ref()
+                        .and_then(|record| serde_json::to_string(record).ok())
+                        .unwrap_or(message.text)
+                } else {
+                    message.text
+                },
+                kind: kind.into(),
+                name: message
+                    .record
+                    .as_ref()
+                    .and_then(|r| r.name.clone())
+                    .or_else(|| message.tool.and_then(|t| t.name))
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    crate::project_memory::context::create(data, "歷史背景", items, sources)
+}
+
+pub fn export_structured(
+    data: &Path,
+    kind: TranscriptKind,
+    cwd: &str,
+    id: Option<&str>,
+    profile: Option<&Path>,
+) -> Result<String, String> {
+    // Preserve the existing exact-session and working-directory authorization check.
+    export(kind, cwd, id, profile, 4096).map_err(str::to_string)?;
+    let definition = match kind {
+        TranscriptKind::Codex => "codex",
+        TranscriptKind::Claude => "claude",
+        TranscriptKind::Gemini => "gemini",
+        TranscriptKind::Antigravity => "antigravity",
+        TranscriptKind::Cursor => "cursor",
+        TranscriptKind::Qwen => "qwen",
+        TranscriptKind::Copilot => "copilot",
+        TranscriptKind::Grok => "grok",
+        TranscriptKind::Kimi => "kimi",
+        TranscriptKind::OpenCode => "opencode",
+    };
+    let profiles = profile
+        .map(|path| {
+            vec![HistoryProfile {
+                profile_id: "selected".into(),
+                definition_id: definition.into(),
+                config_directory: path.display().to_string(),
+            }]
+        })
+        .unwrap_or_default();
+    background_context(
+        data,
+        &[BackgroundSelection {
+            definition_id: definition.into(),
+            native_session_id: id.ok_or("handoff.waitingForIdentity")?.into(),
+            profile_id: profile.map(|_| "selected".into()),
+        }],
+        &profiles,
+    )
+    .map(|report| report.text)
 }
 
 /// Reads only the exact native conversation owned by this running session.
@@ -3078,7 +3221,8 @@ mod tests {
             .starts_with("handoff-"));
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.starts_with("# 交接自 OpenAI Codex\n"));
-        assert!(body.contains("assistant: hello"));
+        assert!(body.contains("## 最後數輪原文"));
+        assert!(body.contains("<assistant>\n hello"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -4741,6 +4885,90 @@ mod tests {
             locate_claude_in(&projects_root, cwd.to_str().unwrap(), Some("different")),
             None
         );
+    }
+    #[test]
+    fn background_combines_exact_native_identities_and_keeps_sources_readonly() {
+        let data = tempfile::tempdir().unwrap();
+        let native = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let claude = native.path().join("claude");
+        let codex = native.path().join("codex");
+        let cfile = claude.join("projects/synthetic/claude-session.jsonl");
+        write_claude_session(&cfile, "claude-session", work.path(), false, 100);
+        let xfile = codex.join("sessions/2026/01/01/rollout-codex-session.jsonl");
+        write_codex_rollout(
+            &xfile,
+            "codex-session",
+            work.path(),
+            serde_json::json!("cli"),
+            "codex_cli_rs",
+            100,
+        );
+        let mut text = fs::read_to_string(&xfile).unwrap();
+        text.push('\n');
+        text.push_str(&serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"決定保留資料；token=FAKE_BACKGROUND_SECRET"}]}}).to_string());
+        fs::write(&xfile, text).unwrap();
+        let before = (fs::read(&cfile).unwrap(), fs::read(&xfile).unwrap());
+        let profiles = vec![
+            HistoryProfile {
+                definition_id: "claude".into(),
+                profile_id: "c".into(),
+                config_directory: claude.display().to_string(),
+            },
+            HistoryProfile {
+                definition_id: "codex".into(),
+                profile_id: "x".into(),
+                config_directory: codex.display().to_string(),
+            },
+        ];
+        let selections = vec![
+            BackgroundSelection {
+                definition_id: "claude".into(),
+                native_session_id: "claude-session".into(),
+                profile_id: Some("c".into()),
+            },
+            BackgroundSelection {
+                definition_id: "codex".into(),
+                native_session_id: "codex-session".into(),
+                profile_id: Some("x".into()),
+            },
+        ];
+        let report = background_context(data.path(), &selections, &profiles).unwrap();
+        assert!(report.text.contains("## 目標"));
+        assert!(report
+            .sources
+            .iter()
+            .any(|source| source.contains("session=codex-session")));
+        assert!(report
+            .sources
+            .iter()
+            .any(|source| source.contains("profile=c")));
+        assert!(!report.text.contains("FAKE_BACKGROUND_SECRET"));
+        assert_eq!(
+            before,
+            (fs::read(&cfile).unwrap(), fs::read(&xfile).unwrap())
+        );
+        let original = crate::project_memory::context::original(data.path(), &report.id).unwrap();
+        assert!(original.iter().any(|item| item.text.contains("[REDACTED]")));
+        assert!(background_context(data.path(), &[], &profiles).is_err());
+        assert!(background_context(
+            data.path(),
+            &[BackgroundSelection {
+                definition_id: "codex".into(),
+                native_session_id: "codex-session".into(),
+                profile_id: Some("c".into())
+            }],
+            &profiles
+        )
+        .is_err());
+        let too_many = (0..6)
+            .map(|i| BackgroundSelection {
+                definition_id: "claude".into(),
+                native_session_id: format!("fake-{i}"),
+                profile_id: Some("c".into()),
+            })
+            .collect::<Vec<_>>();
+        assert!(background_context(data.path(), &too_many, &profiles).is_err());
     }
 }
 
