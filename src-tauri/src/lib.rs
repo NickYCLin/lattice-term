@@ -1984,7 +1984,7 @@ fn agent_session_validate_fork_source(
     working_directory: String,
     profile_config_path: Option<String>,
     registry: State<'_, Arc<AgentRegistry>>,
-) -> Result<(), String> {
+) -> Result<crate::agent_chat::ChatPermission, String> {
     registry.validate_session_fork_source(
         &session_id,
         &native_id,

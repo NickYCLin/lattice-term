@@ -290,6 +290,7 @@ export function ChatView({
   const activeLiveSession = active ? liveSessionForThread(active, agents.sessions, accountProfiles) : undefined;
   const shownSession = selectedSession ?? activeLiveSession;
   async function forkSession(session: AgentSessionSummary, messages: readonly SessionConversationMessage[], throughIndex?: number, editedText?: string) {
+    if (session.sandboxed) throw new Error("這個來源使用外層沙盒，尚無法完整沿用其限制，沒有建立分支。");
     if (!session.capturedSessionId || !["codex", "claude"].includes(session.definitionId) || session.state === "working" || session.queuedPrompts || session.closedReason) throw new Error("請先等來源工作階段完成目前回合。");
     const profile = session.profileConfigPath ? accountProfiles.find(profile => profile.definitionId === session.definitionId && profile.configDirectory === session.profileConfigPath) : null;
     if (session.profileConfigPath && !profile) throw new Error("找不到來源帳號設定，沒有改用其他帳號建立分支。");

@@ -3144,7 +3144,7 @@ impl AgentRegistry {
         definition: &str,
         directory: &str,
         profile: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<crate::agent_chat::ChatPermission, String> {
         self.refresh_native_command(session_id);
         let entry = self.get(session_id)?;
         let input = entry.input.lock().map_err(|error| error.to_string())?;
@@ -3179,7 +3179,11 @@ impl AgentRegistry {
         {
             return Err("請等來源回合結束、清空待送訊息並處理目前的確認事項，再建立分支。".into());
         }
-        Ok(())
+        session_fork_permission(
+            &summary.definition_id,
+            summary.sandboxed,
+            &summary.launch_arguments,
+        )
     }
 
     fn foreground_terminal_blocker(
@@ -8779,6 +8783,69 @@ pub(crate) fn launch_with_replay_and_tools(
     });
 
     Ok(summary)
+}
+
+fn session_fork_permission(
+    definition: &str,
+    sandboxed: bool,
+    arguments: &[String],
+) -> Result<crate::agent_chat::ChatPermission, String> {
+    if sandboxed {
+        return Err("這個來源使用外層沙盒，尚無法完整沿用其限制，沒有建立分支。".into());
+    }
+    if definition == "claude"
+        && (claude_customizations_disabled(arguments)
+            || arguments
+                .iter()
+                .any(|arg| arg == "--mcp-config" || arg.starts_with("--mcp-config=")))
+    {
+        return Err("來源的安全模式或自訂 MCP 設定尚無法完整沿用，沒有建立分支。".into());
+    }
+    let bypass = match definition {
+        "codex" => "--dangerously-bypass-approvals-and-sandbox",
+        "claude" => "--dangerously-skip-permissions",
+        _ => return Err("這個來源尚未支援原生分支。".into()),
+    };
+    // Only an explicit, unambiguous launch policy can authorize full access.
+    // Account/workspace defaults are not permission evidence for a new writer.
+    let explicit_policy = arguments.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-s" | "-a"
+                | "-p"
+                | "--sandbox"
+                | "--ask-for-approval"
+                | "--profile"
+                | "--permission-mode"
+                | "--settings"
+                | "--full-auto"
+        ) || [
+            "--sandbox=",
+            "--ask-for-approval=",
+            "--profile=",
+            "--permission-mode=",
+            "--settings=",
+        ]
+        .iter()
+        .any(|flag| arg.starts_with(flag))
+    }) || arguments.windows(2).any(|pair| {
+        matches!(pair[0].as_str(), "-c" | "--config")
+            && ["sandbox", "approval", "permissions", "profiles"]
+                .iter()
+                .any(|key| pair[1].contains(key))
+    }) || arguments.iter().any(|arg| {
+        arg.starts_with("--config=")
+            && ["sandbox", "approval", "permissions", "profiles"]
+                .iter()
+                .any(|key| arg.contains(key))
+    });
+    Ok(
+        if arguments.iter().any(|arg| arg == bypass) && !explicit_policy {
+            crate::agent_chat::ChatPermission::Full
+        } else {
+            crate::agent_chat::ChatPermission::ReadOnly
+        },
+    )
 }
 
 /// Prepare a native slash command in the existing terminal without submitting it.
@@ -15532,6 +15599,59 @@ notify = ["notify.exe", "turn-ended"]"#,
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn session_forks_never_widen_an_unknown_or_sandboxed_source_policy() {
+        use crate::agent_chat::ChatPermission;
+        for (definition, full) in [
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+            ("claude", "--dangerously-skip-permissions"),
+        ] {
+            assert!(matches!(
+                session_fork_permission(definition, false, &[]).unwrap(),
+                ChatPermission::ReadOnly
+            ));
+            assert!(matches!(
+                session_fork_permission(definition, false, &[full.into()]).unwrap(),
+                ChatPermission::Full
+            ));
+            assert!(session_fork_permission(definition, true, &[full.into()]).is_err());
+            for policy in [
+                "--sandbox=read-only",
+                "--permission-mode=plan",
+                "--settings=custom.json",
+                "--full-auto",
+            ] {
+                assert!(matches!(
+                    session_fork_permission(definition, false, &[full.into(), policy.into()])
+                        .unwrap(),
+                    ChatPermission::ReadOnly
+                ));
+            }
+        }
+        assert!(matches!(
+            session_fork_permission(
+                "codex",
+                false,
+                &[
+                    "--dangerously-bypass-approvals-and-sandbox".into(),
+                    "-c".into(),
+                    "sandbox_mode=read-only".into()
+                ]
+            )
+            .unwrap(),
+            ChatPermission::ReadOnly
+        ));
+        for special in ["--bare", "--safe-mode", "--mcp-config=custom.json"] {
+            assert!(session_fork_permission(
+                "claude",
+                false,
+                &["--dangerously-skip-permissions".into(), special.into()]
+            )
+            .is_err());
+        }
+        assert!(session_fork_permission("unknown", false, &[]).is_err());
     }
 
     #[cfg(unix)]
