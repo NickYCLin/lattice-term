@@ -22,9 +22,6 @@ describe("connection inspector tabs", () => {
           profile={profile}
           metrics={initialMetricsState}
           onClose={vi.fn()}
-          onEdit={vi.fn()}
-          onDuplicate={vi.fn()}
-          onDelete={vi.fn()}
         />
       </I18nProvider>,
     );
@@ -39,4 +36,15 @@ describe("connection inspector tabs", () => {
     expect(markup).toContain('role="tabpanel"');
     expect(markup).toMatch(/aria-labelledby="[^"]+-info-tab"/);
   });
+});
+
+it("keeps connection management on the card while the inspector shows structured details", () => {
+  const profile = createConnectionProfile({ ...emptyDraft("ssh"), name: "Example", hostname: "host.example.com", username: "operator" }, "example");
+  const markup = renderToStaticMarkup(<I18nProvider locale="zh-TW"><ConnectionInspector
+    profile={profile} metrics={initialMetricsState} onClose={vi.fn()} /></I18nProvider>);
+  expect(markup).not.toContain('inspector__footer');
+  expect(markup).not.toContain('inspector__target');
+  for (const action of ["編輯", "複製", "刪除", "新增連線方式"]) expect(markup).not.toContain(`>${action}</button>`);
+  expect(markup).toContain("host.example.com");
+  expect(markup).toContain("operator");
 });

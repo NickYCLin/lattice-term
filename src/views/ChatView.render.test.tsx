@@ -251,7 +251,8 @@ describe("ChatView", () => {
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
     expect(markup).not.toContain("使用帳號");
-    expect(markup).toContain("me@example.com · OpenAI Codex · 預設");
+    expect(markup).not.toContain("me@example.com · OpenAI Codex · 預設");
+    expect(markup).toContain('class="session-composer__model"');
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
     const visibleText = markup.replace(/<[^>]+>/g, " ");
@@ -347,7 +348,7 @@ describe("ChatView", () => {
     const thread = fakeThread({ accountProfileId: "work" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
-    expect(markup).toContain("公司帳號 · OpenAI Codex");
+    expect(markup).toContain("帳號: 公司帳號");
     expect(markup).not.toContain('class="account-model-field"');
     expect(markup).not.toContain("使用帳號");
   });
@@ -358,4 +359,19 @@ describe("ChatView", () => {
     expect(markup).toContain("原帳號已移除，請重新選擇模型");
     expect(markup).toContain('role="status">原帳號已移除，請重新選擇模型');
   });
+});
+
+it("keeps one advanced settings trigger, composer metadata and sidebar management", () => {
+  const thread = fakeThread({ title: "設定入口檢查", model: "synthetic-model" });
+  const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+  const header = markup.match(/<header class="chat-header">[\s\S]*?<\/header>/)![0];
+  expect(header.match(/aria-controls="chat-settings-t1"/g)).toHaveLength(1);
+  expect(header).not.toContain("synthetic-model");
+  expect(header).not.toContain('title="/work"');
+  expect(header).not.toContain('aria-label="刪除對話"');
+  expect(header).not.toContain('aria-label="封存"');
+  expect(markup).toContain('aria-label="刪除對話：設定入口檢查"');
+  expect(markup).toContain('aria-label="封存：設定入口檢查"');
+  expect(markup).toContain('class="session-composer__model"');
+  expect(markup).toContain('aria-label="權限"');
 });

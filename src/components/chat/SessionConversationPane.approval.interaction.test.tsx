@@ -18,9 +18,14 @@ it.each([true, false])("keeps terminal approval buttons and shortcuts consistent
   const host = installHostDom();
   const root = createRoot(host as unknown as Element);
   conversation.approval.canAllowSession = canAllowSession;
+  const openTerminal = vi.fn();
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><SessionConversationPane session={fakeSession({ state: "needsAttention" })}
-      agents={fakeAgentApi()} onOpenTerminal={() => {}} onSessionReplaced={() => {}} /></I18nProvider>));
+      agents={fakeAgentApi()} onOpenTerminal={openTerminal} onSessionReplaced={() => {}} /></I18nProvider>));
+    const terminals = allNodes(host).filter(node => props(node)?.["aria-label"] === "終端機");
+    expect(terminals).toHaveLength(1);
+    await act(async () => props(terminals[0]).onClick());
+    expect(openTerminal).toHaveBeenCalledOnce();
     const card = allNodes(host).find(node => String(props(node)?.className).includes("chat-card--approval"))!;
     const buttons = allNodes(host).filter(node => node.tagName === "BUTTON" && ["允許", "本工作階段都允許", "拒絕"].includes(node.textContent));
     expect(buttons.map(node => node.textContent)).toEqual(canAllowSession ? ["允許", "本工作階段都允許", "拒絕"] : ["允許", "拒絕"]);

@@ -807,7 +807,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     selected,
     setSelectedId,
     saveProfileRecord,
-    duplicateProfile,
     removeProfile,
     loadSamples,
   } = workspace;
@@ -1351,9 +1350,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
               profile={selected}
               metrics={inspectorMetrics}
               onClose={() => setSelectedId(null)}
-              onEdit={() => openEdit(selected.id)}
-              onDuplicate={() => duplicateProfile(selected.id)}
-              onDelete={() => requestDelete(selected.id)}
               machine={{
                 peers: profiles.filter(
                   (entry) =>
@@ -1369,7 +1365,6 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
                 onShow: setSelectedId,
                 onLink: (id) => workspace.linkProfiles([selected.id, id]),
                 onUnlink: () => workspace.unlinkProfile(selected.id),
-                onAdd: () => openRoute(selected.id),
               }}
             />
           )}

@@ -29,7 +29,7 @@ const storage: StorageState = {
   refresh: vi.fn(),
 };
 
-function renderSettings(platform: string): string {
+function renderSettings(platform: string, update: Partial<AppUpdater> = {}): string {
   const runtime: RuntimeState = {
     host: "tauri",
     summary: {
@@ -49,7 +49,7 @@ function renderSettings(platform: string): string {
         storage={storage}
         vaultUnlocked={false}
         onBackupRestored={vi.fn(() => Promise.resolve())}
-        updater={updater}
+        updater={{ ...updater, ...update }}
       />
     </I18nProvider>,
   );
@@ -142,4 +142,18 @@ describe("Settings updater platform boundary", () => {
     expect(markup).not.toContain('value="clear"');
   });
 
+});
+
+it.each([
+  { status: "available" as const, stateText: "發現新版本 99.1.0", action: "下載並安裝更新", patch: { availableVersion: "99.1.0", releaseNotes: "Synthetic notes" } },
+  { status: "downloaded" as const, stateText: "更新已安裝，請手動重新啟動完成套用", action: "重新啟動套用更新", patch: {} },
+  { status: "checking" as const, stateText: "正在檢查更新...", action: "正在檢查更新...", patch: {} },
+])("keeps a single update status and its action for $status", ({ status, stateText, action, patch }) => {
+  const markup = renderSettings("linux", { status, ...patch });
+  const section = markup.slice(markup.indexOf('>軟體更新</h2>'));
+  // Count visible text only, excluding accessibility attributes and tooltips.
+  const visible = section.replace(/<[^>]+>/g, " ");
+  expect(visible.split(stateText)).toHaveLength(2);
+  expect(section.split(`>${action}</button>`)).toHaveLength(2);
+  if (status === "available") expect(section).toContain("Synthetic notes");
 });

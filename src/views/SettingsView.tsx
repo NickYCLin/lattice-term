@@ -612,6 +612,7 @@ export function SettingsView({
           )}
         </header>
 
+        {!(inAppUpdaterAvailable && updater.status === "checking") && (
         <dl className="field-list">
           <div className="field-row">
             <dt className="field-row__label">{t("settings.updater.status")}</dt>
@@ -623,9 +624,6 @@ export function SettingsView({
                 <Chip tone="planned">
                   {t(usesAppleUpdates ? "settings.updater.iosChannel" : "settings.updater.desktopOnly")}
                 </Chip>
-              )}
-              {inAppUpdaterAvailable && updater.status === "checking" && (
-                <Chip tone="info">{t("settings.updater.checking")}</Chip>
               )}
               {inAppUpdaterAvailable && updater.status === "up-to-date" && (
                 <Chip tone="ok">{t("settings.updater.upToDate")}</Chip>
@@ -661,6 +659,7 @@ export function SettingsView({
             </dd>
           </div>
         </dl>
+        )}
 
         {inAppUpdaterAvailable && (
           <SegmentedSetting
@@ -679,19 +678,9 @@ export function SettingsView({
 
         {inAppUpdaterAvailable && updater.status === "available" && (
           <div className="stack" style={{ gap: "var(--space-3)", marginTop: "var(--space-4)" }}>
-            <Callout
-              tone="info"
-              title={t("settings.updater.available", {
-                version: updater.availableVersion ?? "",
-              })}
-            >
-              {updater.releaseNotes ? (
-                <div>
-                  <strong>{t("settings.updater.releaseNotes")}：</strong>
-                  <ReleaseNotes body={updater.releaseNotes} />
-                </div>
-              ) : null}
-            </Callout>
+            {updater.releaseNotes && <Callout tone="info" title={t("settings.updater.releaseNotes")}>
+              <ReleaseNotes body={updater.releaseNotes} />
+            </Callout>}
 
             <button
               type="button"
@@ -708,16 +697,9 @@ export function SettingsView({
 
         {inAppUpdaterAvailable && updater.status === "downloaded" && (
           <div className="stack" style={{ gap: "var(--space-3)", marginTop: "var(--space-4)" }}>
-            <Callout tone="info" title={t("settings.updater.downloaded")}>
-              <p>{t("settings.updater.relaunch")}</p>
-              {updater.error && (
-                <p>
-                  {t("settings.updater.relaunchError", {
-                    error: updater.error,
-                  })}
-                </p>
-              )}
-            </Callout>
+            {updater.error && <Callout tone="warn">
+              {t("settings.updater.relaunchError", { error: updater.error })}
+            </Callout>}
 
             <button
               type="button"

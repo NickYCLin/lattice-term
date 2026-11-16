@@ -4,7 +4,7 @@ import { useCliProxySettings } from "../../app/useCliProxyApi";
 import { useI18n } from "../../i18n/context";
 import { ChatImageStrip } from "./ChatImagePreviews";
 interface Frame { notice?: string | null; image: string | null; width: number; height: number; fingerprint?: string; url?: string; title?: string }
-export function ChatTools({ threadId, directory, busy, assistantTools, browserEnabled, onBrowserEnabled, onClose }: { threadId: string; directory: string; busy: boolean; assistantTools: boolean; browserEnabled: boolean; onBrowserEnabled: (enabled: boolean) => void; onClose: () => void }) {
+export function ChatTools({ threadId, directory, busy, assistantTools, browserEnabled, onBrowserEnabled, onClose }: { threadId: string; directory: string; busy: boolean; assistantTools: boolean; browserEnabled: boolean; onBrowserEnabled?: (enabled: boolean) => void; onClose: () => void }) {
   const { t } = useI18n(); const { proxies } = useCliProxySettings();
   const [tab, setTab] = useState<"browser" | "computer" | "images">("browser");
   const [frames, setFrames] = useState<Partial<Record<"browser" | "computer", Frame>>>({});
@@ -35,7 +35,7 @@ export function ChatTools({ threadId, directory, busy, assistantTools, browserEn
   return <section className="chat-tools" aria-label={t("chat.tools.title")}>
     <header><div role="tablist">{(["browser", "computer", "images"] as const).map(id => <button type="button" key={id} role="tab" aria-selected={tab === id} className="button button--ghost button--sm" onClick={() => { setTab(id); setError(""); }}>{t(`chat.tools.${id}`)}</button>)}</div><button type="button" className="button button--ghost button--sm" onClick={onClose}>{t("chat.tools.close")}</button></header>
     {!assistantTools && <p className="chat-settings__hint">{t("chat.tools.nativeOnly")}</p>}
-    {tab === "browser" && assistantTools && <label className="chat-tools__permission"><input type="checkbox" checked={browserEnabled} disabled={busy || working} onChange={event => onBrowserEnabled(event.target.checked)} />{t("chat.tools.browserGrant")}</label>}
+    {tab === "browser" && assistantTools && onBrowserEnabled && <label className="chat-tools__permission"><input type="checkbox" checked={browserEnabled} disabled={busy || working} onChange={event => onBrowserEnabled(event.target.checked)} />{t("chat.tools.browserGrant")}</label>}
     {error && <p role="alert" className="field__error">{error}</p>}{notice && <p role="status">{notice}</p>}
     {tab === "browser" && <form className="chat-tools__toolbar" onSubmit={event => { event.preventDefault(); if (!busy) void act(async () => { await command("browser", "navigate", { url }); setStarted(true); }); }}>
       <button type="button" className="button button--ghost button--sm" disabled={unavailable} aria-label={t("chat.tools.back")} onClick={() => void act(() => command("browser", "back"))}>←</button>

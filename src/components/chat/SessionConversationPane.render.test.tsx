@@ -33,7 +33,8 @@ describe("SessionConversationPane composer", () => {
     expect(html).not.toContain('<h2>Claude Code</h2>');
     expect(html).toContain('class="chat-header__identity"');
     expect(html).not.toContain('class="chat-avatar"');
-    expect(html).toContain('OpenAI Codex · gpt-6.1-sol');
+    expect(html).not.toContain('OpenAI Codex · gpt-6.1-sol');
+    expect(html).toContain('class="session-composer__model-label">gpt-6.1-sol');
     expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
     expect(html).not.toContain("與工作階段頁共用同一個助理");
     expect(html).toContain('aria-label="終端機"');
@@ -43,14 +44,15 @@ describe("SessionConversationPane composer", () => {
   it("keeps a real Claude session labeled as Claude", () => {
     const html = render({ definitionId: "claude", label: "Claude Code", groupLabel: "Project" });
     expect(html).toContain('<h2>Claude Code</h2>');
-    expect(html).toContain('class="chat-chip">Claude Code</span>');
+    expect(html).not.toContain('class="chat-chip">Claude Code</span>');
     expect(html).not.toContain('OpenAI Codex');
   });
 
   it("lets the backend check initial readiness and offers the terminal for pending user input", () => {
     expect(render({ state: "idle", stateSource: "integration" })).not.toContain("開啟這個工作階段的終端機");
     expect(render({ state: "idle", stateSource: "heuristic" })).not.toContain("開啟這個工作階段的終端機");
-    expect(render({ state: "needsAttention" })).toContain("開啟這個工作階段的終端機");
+    expect(render({ state: "needsAttention" })).not.toContain("開啟這個工作階段的終端機");
+    expect(render({ state: "needsAttention" }).match(/aria-label="終端機"/g)).toHaveLength(1);
   });
 
   it("does not label a restored heuristic completion as ready to receive messages", () => {
@@ -89,4 +91,16 @@ describe("SessionConversationPane composer", () => {
     expect(html).toContain("沙箱保護");
     expect(html).toContain('class="session-composer__model-label">預設</span>');
   });
+});
+
+it.each(["working", "needsAttention", "idle"] as const)("uses one terminal action and keeps context in the composer while %s", state => {
+  const markup = render({ state, workingDirectory: "/synthetic/project", model: "synthetic-model" });
+  const header = markup.match(/<header class="chat-header">[\s\S]*?<\/header>/)![0];
+  expect(header).not.toContain("synthetic-model");
+  expect(header).not.toContain("/synthetic/project");
+  expect(header).not.toContain("完整檔案存取");
+  expect(markup.match(/aria-label="終端機"/g)).toHaveLength(1);
+  expect(markup.match(/title="\/synthetic\/project"/g)).toHaveLength(1);
+  expect(markup.match(/session-composer__model-label">synthetic-model/g)).toHaveLength(1);
+  if (state !== "idle") expect(header).not.toContain('session-chat__state');
 });

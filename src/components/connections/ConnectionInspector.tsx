@@ -20,9 +20,9 @@ import {
 } from "../../domain/connection";
 import type { MetricsState } from "../../domain/metrics";
 import { useI18n } from "../../i18n/context";
-import { Chip, EnvironmentBadge, ProtocolTile, TagChip } from "../common/Badge";
+import { Chip, ProtocolTile, TagChip } from "../common/Badge";
 import { Callout } from "../common/Callout";
-import { CloseIcon, DuplicateIcon, EditIcon, TrashIcon } from "../icons";
+import { CloseIcon } from "../icons";
 import { HostMetricsPanel } from "./HostMetricsPanel";
 import { moveTabGroupFocus } from "../overlays/tabNavigation";
 
@@ -41,17 +41,11 @@ export function ConnectionInspector({
   profile,
   metrics,
   onClose,
-  onEdit,
-  onDuplicate,
-  onDelete,
   machine,
 }: {
   profile: ConnectionProfile;
   metrics: MetricsState;
   onClose: () => void;
-  onEdit: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
   /** Linking entries that reach the same computer by different routes. */
   machine?: {
     peers: ConnectionProfile[];
@@ -59,7 +53,6 @@ export function ConnectionInspector({
     onShow: (id: string) => void;
     onLink: (id: string) => Promise<string | null>;
     onUnlink: () => Promise<string | null>;
-    onAdd?: () => void;
   };
 }) {
   const { t } = useI18n();
@@ -91,7 +84,6 @@ export function ConnectionInspector({
   }
   const [tab, setTab] = useState<(typeof inspectorTabs)[number]>("info");
   const tabsId = useId();
-  const protocol = findProtocol(profile.protocol);
 
   return (
     <aside className="inspector glass glass--sheen" aria-label={profile.name}>
@@ -99,9 +91,6 @@ export function ConnectionInspector({
         <ProtocolTile protocol={profile.protocol} size="lg" />
         <div className="inspector__identity">
           <h2 className="inspector__name truncate">{profile.name}</h2>
-          <p className="inspector__target mono truncate">
-            {connectionTarget(profile)}
-          </p>
         </div>
         <button
           type="button"
@@ -159,14 +148,6 @@ export function ConnectionInspector({
       >
         {tab === "info" ? (
           <>
-            <div className="inspector__badges">
-              <EnvironmentBadge environment={profile.environment} />
-              <Chip tone="neutral">{protocol.acronym}</Chip>
-              {profile.favorite && (
-                <Chip tone="accent">{t("connections.favorites")}</Chip>
-              )}
-            </div>
-
             <section className="inspector__section">
               <h3 className="eyebrow">{t("inspector.section.target")}</h3>
               <dl className="field-list">
@@ -230,8 +211,6 @@ export function ConnectionInspector({
             {machine && (
               <section className="inspector__section">
                 <h3 className="eyebrow">{t("inspector.machine.title")}</h3>
-                {machine.onAdd && <button type="button" className="button button--secondary button--sm"
-                  disabled={machineBusy} onClick={machine.onAdd}>{t("form.route.add")}</button>}
                 {machine.peers.length > 0 ? (
                   <ul className="inspector__machine-list">
                     {machine.peers.map((peer) => (
@@ -332,33 +311,6 @@ export function ConnectionInspector({
         ) : (
           <HostMetricsPanel state={metrics} />
         )}
-      </div>
-
-      <div className="inspector__footer">
-        <button
-          type="button"
-          className="button button--secondary button--sm"
-          onClick={onEdit}
-        >
-          <EditIcon size={14} />
-          {t("common.edit")}
-        </button>
-        <button
-          type="button"
-          className="button button--ghost button--sm"
-          onClick={onDuplicate}
-        >
-          <DuplicateIcon size={14} />
-          {t("common.duplicate")}
-        </button>
-        <button
-          type="button"
-          className="button button--ghost button--danger button--sm"
-          onClick={onDelete}
-        >
-          <TrashIcon size={14} />
-          {t("common.delete")}
-        </button>
       </div>
     </aside>
   );

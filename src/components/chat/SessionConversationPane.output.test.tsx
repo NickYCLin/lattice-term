@@ -31,7 +31,7 @@ describe("session chat output disclosure", () => {
   it("shows a pending native receipt without claiming completion or discarding the editable draft", () => {
     conversation.nativeCommandPending = true; conversation.queued = 0;
     const html = render("done", "codex", { stateSource: "integration" });
-    expect(html).toContain("原生指令待確認");
+    expect(html).not.toContain("原生指令待確認</span>");
     expect(html).toContain("原生指令仍待確認完成");
     expect(html).toContain("session-chat__spinner");
     expect(html).not.toContain("訊息已送出");
@@ -43,7 +43,7 @@ describe("session chat output disclosure", () => {
     conversation.sendError = "session-prompt-not-ready";
     const html = render("done", "codex", { stateSource: "heuristic" });
     expect(html).toContain("這裡的草稿會保留，訊息尚未送出或加入佇列");
-    expect(html).toContain("開啟這個工作階段的終端機");
+    expect(html.match(/aria-label="終端機"/g)).toHaveLength(1);
     expect(html).not.toContain("session-prompt-not-ready</");
     expect(html).not.toMatch(/<textarea[^>]*disabled/);
   });

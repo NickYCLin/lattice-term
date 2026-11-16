@@ -126,7 +126,6 @@ import {
   AgentIcon,
   AlertIcon,
   ShieldIcon,
-  ArchiveFileIcon,
   ChatIcon,
   ChevronDownIcon,
   CodeFileIcon,
@@ -138,9 +137,7 @@ import {
   FolderIcon,
   ImageFileIcon,
   PlusIcon,
-  SettingsIcon,
   StopIcon,
-  TrashIcon,
 } from "../components/icons";
 
 const permissionLabelKey: Record<ChatPermission, MessageKey> = {
@@ -717,7 +714,6 @@ export function ChatView({
             tag={tag}
             accountProfiles={accountProfiles}
             theme={theme}
-            onDelete={() => setPendingDelete(active)}
             onSideChat={() => { const side = chat.createThread({ definitionId: active.definitionId, workingDirectory: active.workingDirectory, model: active.model, permission: active.permission, accountProfileId: active.accountProfileId, provider: active.provider, proxyId: active.proxyId, activate: false }); setSideThreadId(side.id); }}
             continueInSession={sessionLaunchForThread(active, active.workingDirectory || "general",
               agents.catalog, accountProfiles, proxies) && !active.archived
@@ -738,7 +734,7 @@ export function ChatView({
       </aside>}
       {sideThread && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
         <button type="button" className="button button--ghost button--sm" onClick={() => setSideThreadId(null)}>{t("chat.nav.closeSide")}</button>
-        {!shownSession && sideThread.id === active?.id ? <p className="chat-notice">{t("chat.nav.selectMain")}</p> : <ThreadPane key={sideThread.id} thread={sideThread} chat={chat} installed={installed} definitions={agents.catalog.filter(definition => chat.supported.some(id => id === definition.id) && definition.installed)} cliLabel={cliLabel} tag={tag} accountProfiles={accountProfiles} theme={theme} onDelete={() => setPendingDelete(sideThread)} />}
+        {!shownSession && sideThread.id === active?.id ? <p className="chat-notice">{t("chat.nav.selectMain")}</p> : <ThreadPane key={sideThread.id} thread={sideThread} chat={chat} installed={installed} definitions={agents.catalog.filter(definition => chat.supported.some(id => id === definition.id) && definition.installed)} cliLabel={cliLabel} tag={tag} accountProfiles={accountProfiles} theme={theme} />}
       </aside>}
       {pendingDelete && (
         <ConfirmDialog
@@ -773,7 +769,6 @@ export function ThreadPane({
   tag,
   accountProfiles,
   theme,
-  onDelete,
   onSideChat,
   continueInSession,
   handoffProblem,
@@ -788,7 +783,6 @@ export function ThreadPane({
   tag: string;
   accountProfiles: readonly ChatAccountProfile[];
   theme: ThemeId;
-  onDelete: () => void;
   onSideChat?: () => void;
   /** Present when the conversation can go on in a terminal session. */
   continueInSession?: () => void;
@@ -1105,7 +1099,6 @@ export function ThreadPane({
     }
   }
 
-  const modelLabel = selectedOption?.label ?? (activeProfileMissing ? t("accountModel.missing") : thread.model || t("chat.model.default"));
   const composerModelLabel = activeProfileMissing ? t("accountModel.missing")
     : thread.model || thread.reportedModel || selectedOption?.modelLabel || t("chat.model.default");
   const latestReply = [...thread.items].reverse().find((item): item is Extract<ChatItem, { type: "text" }> => item.type === "text");
@@ -1115,23 +1108,7 @@ export function ThreadPane({
       <header className="chat-header">
         <div className="chat-header__title">
           <ConversationIdentity assistant={assistant} title={thread.title || t("chat.untitled")}>
-                {!thread.archived && <button
-                  type="button"
-                  className="chat-chip"
-                  onClick={() => setSettingsOpen((current) => !current)}
-                  aria-expanded={settingsOpen}
-                  aria-controls={`chat-settings-${thread.id}`}
-                >
-                  <SettingsIcon />
-                  {modelLabel}
-                </button>}
-                {!thread.archived && <span className="chat-chip" title={displayPath(thread.workingDirectory)}>
-                  <FolderIcon />
-                  {thread.workingDirectory
-                    ? directoryName(thread.workingDirectory)
-                    : t("chat.directory.none")}
-                </span>}
-                {thread.archived ? <span className="chat-chip">{t("history.archive")}</span> : !directProxy && <span className="chat-chip">{t(permissionLabelKey[thread.permission])}</span>}
+                {thread.archived && <span className="chat-chip">{t("history.archive")}</span>}
           </ConversationIdentity>
           <div className="chat-composer__actions">
             <details className="chat-header__menu" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.currentTarget.open = false; } }}>
@@ -1148,10 +1125,11 @@ export function ThreadPane({
             {thread.handoff && <ConversationInfo key={thread.id} label={t("chat.handoff.info")}>
               {t("chat.handoff.pending", { assistant })}
             </ConversationInfo>}
-            {!thread.archived && <button
+            {!thread.archived && !directProxy && <button
               type="button"
               className="button button--ghost button--sm"
               onClick={() => setSettingsOpen((current) => !current)}
+              aria-controls={`chat-settings-${thread.id}`}
               aria-expanded={settingsOpen}
             >
               {settingsOpen ? t("chat.settings.hide") : t("chat.settings")}
@@ -1203,24 +1181,6 @@ export function ThreadPane({
                 {t("chat.continueInSession")}
               </button>
             )}
-            <button
-              type="button"
-              className="button button--ghost button--sm"
-              onClick={() => chat.shelveThread(thread.id, !thread.shelvedAt)}
-              aria-label={t(thread.shelvedAt ? "chat.unshelve" : "chat.shelve")}
-              title={t(thread.shelvedAt ? "chat.unshelve" : "chat.shelve")}
-            >
-              <ArchiveFileIcon />
-            </button>
-            <button
-              type="button"
-              className="button button--ghost button--danger button--sm"
-              onClick={onDelete}
-              aria-label={t("chat.delete")}
-              title={t("chat.delete")}
-            >
-              <TrashIcon />
-            </button>
           </div>
         </div>
         {searchOpen && <form className="chat-search" onSubmit={event => { event.preventDefault(); setSearchIndex(index => index + 1); }}>
@@ -1235,7 +1195,7 @@ export function ThreadPane({
           if (handoff && thread.items.length) { const next = chat.branchThread(thread.id, thread.items[thread.items.length - 1].id, t("chat.worktree.suffix")); if (next) chat.updateThread(next.id, { workingDirectory: directory }); }
           else chat.createThread({ definitionId: thread.definitionId, model: thread.model, permission: thread.permission, accountProfileId: thread.accountProfileId, provider: thread.provider, proxyId: thread.proxyId, browserEnabled: thread.browserEnabled, workingDirectory: directory });
         }} />}
-        {settingsOpen && !thread.archived && (
+        {settingsOpen && !thread.archived && !directProxy && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
             {!directProxy && supportsBrowser(thread.definitionId) && (
               <label className="checkbox chat-settings__browser">
@@ -1354,7 +1314,7 @@ export function ThreadPane({
           onInsert={(text) => setDraft((current) => (current ? `${current}\n\n${text}` : text))}
         />
       )}
-      {toolsOpen && <ChatTools key={thread.id} threadId={thread.id} directory={thread.workingDirectory} busy={running || Boolean(thread.pendingOperation)} assistantTools={!directProxy && ["codex", "claude"].includes(thread.definitionId)} browserEnabled={thread.browserEnabled === true} onBrowserEnabled={enabled => chat.updateThread(thread.id, { browserEnabled: enabled })} onClose={() => setToolsOpen(false)} />}
+      {toolsOpen && <ChatTools key={thread.id} threadId={thread.id} directory={thread.workingDirectory} busy={running || Boolean(thread.pendingOperation)} assistantTools={!directProxy && ["codex", "claude"].includes(thread.definitionId)} browserEnabled={thread.browserEnabled === true} onClose={() => setToolsOpen(false)} />}
       {changesOpen && !thread.archived && thread.workingDirectory && (
         <ChatChangesPanel
           workingDirectory={thread.workingDirectory}
