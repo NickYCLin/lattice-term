@@ -220,7 +220,14 @@ export function parseAndValidateImport(jsonContent: string): ImportResult {
     const { id: _id, ...profile } = createConnectionProfile(draft, "");
     const id = typeof record.id === "string" && record.id.trim().length <= 256
       && !/[\x00-\x1f\x7f]/.test(record.id) ? record.id.trim() : "";
-    validProfiles.push({ ...profile, ...(id ? { id } : {}) });
+    const imported: ImportedProfile = { ...profile, ...(id ? { id } : {}) };
+    // Presence is significant: old exports preserve local routes; null/empty explicitly clears.
+    for (const field of ["jumpProfileId", "retiredTo"] as const) {
+      if (Object.prototype.hasOwnProperty.call(record, field) && (record[field] === null || typeof record[field] === "string")) {
+        imported[field] = typeof record[field] === "string" ? record[field].trim() || undefined : undefined;
+      }
+    }
+    validProfiles.push(imported);
   });
 
   return { validProfiles, issues, skippedCount };
@@ -234,6 +241,8 @@ export interface ConnectionImportPlan {
   addedCount: number;
   overwrittenCount: number;
   conflicts: string[];
+  routeChanges: { profileId: string; name: string; field: "jumpProfileId" | "retiredTo"; before: string | undefined; after: string | undefined }[];
+  routeWarnings: { profileId: string; name: string; field: "jumpProfileId" | "retiredTo"; reference: string }[];
 }
 
 function targetKey(profile: ImportedProfile): string {
@@ -266,21 +275,33 @@ export function planProfileImport(existing: readonly ConnectionProfile[], import
     const byId = source.id ? local.get(source.id) ?? aliases.get(source.id) : undefined;
     const index = byId ?? originalTargets.get(key) ?? next.findIndex(profile => targetKey(profile) === key);
     if (index >= 0) {
-      next[index] = createConnectionProfile(clean, next[index].id);
+      const previous = next[index];
+      next[index] = createConnectionProfile(clean, previous.id);
+      for (const field of ["jumpProfileId", "retiredTo"] as const) {
+        const value = Object.prototype.hasOwnProperty.call(source, field) ? source[field] : previous[field];
+        if (value) next[index][field] = value; else delete next[index][field];
+      }
       changed.add(index);
       if (source.id) aliases.set(source.id, index);
     } else {
       const profile = createConnectionProfile(clean);
+      for (const field of ["jumpProfileId", "retiredTo"] as const) if (source[field]) profile[field] = source[field];
       next.push(profile); changed.add(next.length - 1);
       if (source.id) aliases.set(source.id, next.length - 1);
     }
   }
+  const routeWarnings: ConnectionImportPlan["routeWarnings"] = [];
   // References in a foreign export follow the newly allocated local IDs.
   for (const index of changed) {
     for (const field of ["jumpProfileId", "retiredTo"] as const) {
       const reference = next[index][field];
-      const mapped = reference ? local.get(reference) ?? aliases.get(reference) : undefined;
-      if (mapped !== undefined) next[index] = { ...next[index], [field]: next[mapped].id };
+      const mapped = reference ? local.get(reference) ?? aliases.get(reference) ?? next.findIndex(profile => profile.id === reference) : undefined;
+      if (mapped !== undefined && mapped >= 0 && next[mapped].id !== next[index].id) {
+        next[index] = { ...next[index], [field]: next[mapped].id };
+      } else if (reference) {
+        routeWarnings.push({ profileId: next[index].id, name: next[index].name, field, reference });
+        delete next[index][field];
+      }
     }
   }
   // Id priority may deliberately change an endpoint. If that would create a
@@ -293,7 +314,14 @@ export function planProfileImport(existing: readonly ConnectionProfile[], import
     && profiles.some(profile => originalKeys.get(profile.id) !== key)
     ? profiles.map(profile => profile.name) : []);
   const changes = [...changed].map(index => ({ kind: index < original.length ? "overwritten" as const : "added" as const, profile: next[index] }));
-  return { original, next, changes, addedCount: changes.filter(change => change.kind === "added").length,
+  const routeChanges: ConnectionImportPlan["routeChanges"] = [];
+  for (const { profile } of changes) {
+    const before = original.find(entry => entry.id === profile.id);
+    for (const field of ["jumpProfileId", "retiredTo"] as const) {
+      if (before?.[field] !== profile[field]) routeChanges.push({ profileId: profile.id, name: profile.name, field, before: before?.[field], after: profile[field] });
+    }
+  }
+  return { original, next, changes, routeChanges, routeWarnings, addedCount: changes.filter(change => change.kind === "added").length,
     overwrittenCount: changes.filter(change => change.kind === "overwritten").length, conflicts };
 }
 

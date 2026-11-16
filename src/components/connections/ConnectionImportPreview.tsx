@@ -39,6 +39,23 @@ export function ConnectionImportPreview({ plan, issues, onConfirm, onClose, onSa
     <ul className="connection-import__changes">{plan.changes.map(({ kind, profile }) => <li key={profile.id}>
       <strong>{t(kind === "added" ? "transfer.import.added" : "transfer.import.overwritten")}</strong> · {profile.name}
     </li>)}</ul>
+    {plan.routeChanges.length > 0 && <section aria-label={t("transfer.import.routeChanges")}>
+      <h3>{t("transfer.import.routeChanges")}</h3>
+      <ul className="connection-import__changes">{plan.routeChanges.map(change => {
+        const action = change.field === "jumpProfileId"
+          ? !change.after ? "transfer.import.jumpCleared" : !change.before ? "transfer.import.jumpSet" : "transfer.import.jumpChanged"
+          : !change.after ? "transfer.import.retireCleared" : !change.before ? "transfer.import.retireSet" : "transfer.import.retireChanged";
+        const before = plan.original.find(profile => profile.id === change.before)?.name ?? change.before ?? t("transfer.import.routeNone");
+        const after = plan.next.find(profile => profile.id === change.after)?.name ?? change.after ?? t("transfer.import.routeNone");
+        return <li key={`${change.profileId}:${change.field}`}><strong>{change.name} · {t(action)}</strong>：{before} → {after}</li>;
+      })}</ul>
+    </section>}
+    {plan.routeWarnings.length > 0 && <section role="alert" aria-label={t("transfer.import.routeWarnings")}>
+      <h3>{t("transfer.import.routeWarnings")}</h3><p>{t("transfer.import.routeWarningsHint")}</p>
+      <ul>{plan.routeWarnings.map(warning => <li key={`${warning.profileId}:${warning.field}`}>
+        {warning.name} · {t(warning.field === "jumpProfileId" ? "transfer.import.jumpCleared" : "transfer.import.retireCleared")} ({warning.reference})
+      </li>)}</ul>
+    </section>}
     {error && <p role="alert" className="field__error">{error}</p>}
   </ConfirmDialog>;
 }

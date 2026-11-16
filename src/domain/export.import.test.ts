@@ -85,3 +85,39 @@ describe("connection import planning", () => {
     expect(plan.next.map(p => p.id)).toEqual([ssh.id, second.id]);
   });
 });
+
+it("keeps local jump and retained-card references when importing pre-route exports", () => {
+  const gateway = { ...ssh, id: "gateway", hostname: "192.0.2.20", name: "Synthetic Gateway" };
+  const target = { ...ssh, jumpProfileId: gateway.id };
+  const legacy = { ...ssh, id: "legacy", hostname: "127.0.0.1", port: 14422, retiredTo: target.id };
+  const plan = planProfileImport([target, legacy, gateway], parse([{ ...ssh }, { ...legacy, retiredTo: undefined }, gateway]));
+  expect(plan.next).toEqual([target, legacy, gateway]);
+  expect(plan.routeChanges).toEqual([]); expect(plan.routeWarnings).toEqual([]);
+});
+it.each([null, ""])("clears local routes only when the file explicitly supplies %s", clear => {
+  const gateway = { ...ssh, id: "gateway", hostname: "192.0.2.20" };
+  const target = { ...ssh, jumpProfileId: gateway.id };
+  const legacy = { ...ssh, id: "legacy", hostname: "127.0.0.1", port: 14422, retiredTo: target.id };
+  const plan = planProfileImport([target, legacy, gateway], parse([{ ...target, jumpProfileId: clear }, { ...legacy, retiredTo: clear }]));
+  expect(plan.next[0].jumpProfileId).toBeUndefined(); expect(plan.next[1].retiredTo).toBeUndefined();
+  expect(plan.routeChanges).toEqual([
+    { profileId: target.id, name: target.name, field: "jumpProfileId", before: gateway.id, after: undefined },
+    { profileId: legacy.id, name: legacy.name, field: "retiredTo", before: target.id, after: undefined },
+  ]);
+});
+it("previews changed references and clears dangling imported references with named warnings", () => {
+  const gateway = { ...ssh, id: "gateway", hostname: "192.0.2.20" }, other = { ...gateway, id: "other", hostname: "192.0.2.21" };
+  const target = { ...ssh, jumpProfileId: gateway.id };
+  const changed = planProfileImport([target, gateway, other], parse([{ ...target, jumpProfileId: other.id }]));
+  expect(target.jumpProfileId).toBe(gateway.id);
+  expect(changed.routeChanges[0]).toMatchObject({ field: "jumpProfileId", before: gateway.id, after: other.id });
+  expect(changed.next[0].jumpProfileId).toBe(other.id);
+  const dangling = planProfileImport([target, gateway], parse([{ ...target, jumpProfileId: "missing-gateway", retiredTo: "missing-target" }]));
+  expect(dangling.next[0].jumpProfileId).toBeUndefined(); expect(dangling.next[0].retiredTo).toBeUndefined();
+  expect(dangling.routeWarnings.map(warning => [warning.name, warning.reference])).toEqual([[target.name, "missing-gateway"], [target.name, "missing-target"]]);
+});
+it("keeps the latest explicit route setting when later duplicate rows omit route fields", () => {
+  const gateway = { ...ssh, id: "gateway", hostname: "192.0.2.20" };
+  const plan = planProfileImport([ssh, gateway], parse([{ ...ssh, jumpProfileId: gateway.id }, { ...ssh, name: "Final synthetic name" }]));
+  expect(plan.next[0].jumpProfileId).toBe(gateway.id); expect(plan.routeChanges).toHaveLength(1); expect(plan.changes).toHaveLength(1);
+});

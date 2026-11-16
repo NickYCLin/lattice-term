@@ -88,3 +88,21 @@ it("blocks confirmation when ID priority would create a duplicate local endpoint
   expect(props(confirm).disabled).toBe(true);
   await act(async () => props(confirm).onClick()); expect(save).not.toHaveBeenCalled();
 });
+
+it("hides route changes for old exports and requires confirmation to apply explicit route changes", async () => {
+  const gateway = { ...existing, id: "gateway", hostname: "192.0.2.20", name: "Synthetic Gateway" };
+  const other = { ...gateway, id: "other", hostname: "192.0.2.21", name: "Synthetic Other Gateway" };
+  const local = { ...existing, jumpProfileId: gateway.id };
+  read.mockResolvedValue(JSON.stringify([existing])); await render([local, gateway, other]); await selectFile();
+  expect(host.textContent).not.toContain("路線變更"); await click("取消"); expect(save).not.toHaveBeenCalled();
+  read.mockResolvedValue(JSON.stringify([{ ...existing, jumpProfileId: other.id }])); await selectFile();
+  expect(host.textContent).toContain("路線變更"); expect(host.textContent).toContain("更換跳板");
+  expect(host.textContent).toContain("Synthetic Gateway → Synthetic Other Gateway"); expect(save).not.toHaveBeenCalled();
+  await click("確認匯入"); expect(save.mock.calls[0][0].next[0].jumpProfileId).toBe(other.id);
+});
+it("lists unresolved references in the preview and does not write when cancelled", async () => {
+  read.mockResolvedValue(JSON.stringify([{ ...existing, jumpProfileId: "missing-gateway", retiredTo: "missing-target" }]));
+  await render(); await selectFile(); expect(host.textContent).toContain("無法對應的路線參照將清除");
+  expect(host.textContent).toContain("Existing"); expect(host.textContent).toContain("missing-gateway"); expect(host.textContent).toContain("還原舊卡到列表");
+  expect(save).not.toHaveBeenCalled(); await click("取消"); expect(save).not.toHaveBeenCalled();
+});
