@@ -949,7 +949,7 @@ export const en: Messages = {
   "theme.dusk.hint": "Muted navy and warm sand for evening reading",
   "theme.clarity": "Clarity",
   "theme.linen": "Linen",
-  "theme.storybook": "Winter Storybook",
+  "theme.storybook": "Cream Storybook",
   "nav.automations.desc": "Create and manage schedules for recurring work",
   "automation.navUnread": "Schedules, {count} unread results",
   "theme.storybook.hint": "Cream paper, pastels and ink outlines inspired by an illustrated travel journal",
