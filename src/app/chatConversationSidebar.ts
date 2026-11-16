@@ -1,8 +1,9 @@
+import { projectDirectoryKey, disambiguateProjectLabels, type ProjectDirectoryKey } from "./projectDirectory";
 import type { ChatThread } from "./agentChat";
 import { presentAgentSessionGroup } from "./agentSessionPresentation";
 import type { ChatAccountProfile } from "./chatAccountProfiles";
 import type { CliProxyEndpoint } from "./cliProxyApi";
-import { chatProjectDirectory, projectName } from "./chatProjects";
+import { projectName } from "./chatProjects";
 import { chatSidebarLayout, chatThreadNodeId } from "./chatThreadLayout";
 import type { SessionSidebarLayout } from "./sessionSidebarLayout";
 import { agentWorkspaceProjectNodeId, chatWorkspaceProjection } from "./chatWorkspaceNodes";
@@ -10,7 +11,7 @@ import { displayPath } from "./displayPath";
 import { conversationLabels } from "./conversationLabels";
 import type { LocalConversation } from "./localConversationSessions";
 import { nativeConversationKey } from "./nativeConversationDismissals";
-import { conversationPathKey as pathKey, nativeConversationIdentity } from "./nativeConversationIdentity";
+import { nativeConversationIdentity } from "./nativeConversationIdentity";
 import type { AgentDefinition, AgentSessionSummary } from "./useAgentSessions";
 
 export function nativeConversationNodeId(entry: { definitionId: string; profileId: string | null; nativeSessionId: string }) {
@@ -25,7 +26,7 @@ export function reconcileProjectChatLayout(layout: SessionSidebarLayout, threads
   return chatSidebarLayout(layout, threads, workspace.nodes);
 }
 
-export function chatConversationSidebar({ sessions, definitions, threads, history, profiles, proxies = [], generalProjectLabel, projectFilter }: {
+export function chatConversationSidebar({ sessions, definitions, threads, history, profiles, proxies = [], generalProjectLabel, projectFilter, directoryKey = projectDirectoryKey }: {
   sessions: readonly AgentSessionSummary[];
   definitions: readonly Pick<AgentDefinition, "id" | "label">[];
   threads: readonly ChatThread[];
@@ -34,6 +35,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   proxies?: readonly CliProxyEndpoint[];
   generalProjectLabel: string;
   projectFilter: string | null;
+  directoryKey?: ProjectDirectoryKey;
 }) {
   const { conversation: conversationIdentity, session: sessionIdentity } = nativeConversationIdentity(profiles);
   const references = threads.flatMap(thread => !thread.remote && thread.nativeSessionId ? [{
@@ -44,7 +46,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   const known = new Set(references.map(nativeConversationKey));
   const visibleHistory = history.filter(entry => !entry.archived);
   const knownSessions = new Set([...references, ...visibleHistory].map(conversationIdentity).filter(identity => identity !== null));
-  const matchesFilter = (directory: string) => projectFilter === null || pathKey(directory) === pathKey(projectFilter);
+  const matchesFilter = (directory: string) => projectFilter === null || directoryKey(directory) === directoryKey(projectFilter);
   const visibleSessions = sessions.filter(session => matchesFilter(session.workingDirectory) &&
     (!session.closedReason || !knownSessions.has(sessionIdentity(session) ?? "")));
   const sessionsByIdentity = new Map<string, AgentSessionSummary>();
@@ -57,22 +59,18 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
     members.push(session);
     groupMembers.set(groupId, members);
   }
-  const workspace = chatWorkspaceProjection(visibleSessions, definitions, generalProjectLabel, proxies);
+  const workspace = chatWorkspaceProjection(visibleSessions, definitions, generalProjectLabel, proxies, directoryKey);
   const leavesBySession = new Map([...workspace.sessions.values()].map(leaf => [leaf.sessionId, leaf]));
   const projectIds = new Map<string, string>();
   for (const members of groupMembers.values()) {
     const directory = members[0].workingDirectory;
-    projectIds.set(pathKey(directory), agentWorkspaceProjectNodeId(directory));
+    projectIds.set(directoryKey(directory), agentWorkspaceProjectNodeId(directory, directoryKey));
   }
   const projectFor = (directory: string) => {
-    const key = pathKey(directory);
+    const key = directoryKey(directory);
     const existing = projectIds.get(key);
     if (existing) return existing;
-    let nodeId = /^[a-z]:\//i.test(key) || key.startsWith("//")
-      ? agentWorkspaceProjectNodeId(chatProjectDirectory(directory)) : "project:local:" + key;
-    const plain = displayPath(directory.trim());
-    if (/^[a-z]:[\\/]+$/i.test(plain)) nodeId = "project:local:" + plain.slice(0, 2);
-    if (workspace.projects.has(nodeId)) nodeId = "project:native:" + key;
+    const nodeId = agentWorkspaceProjectNodeId(directory, directoryKey);
     projectIds.set(key, nodeId);
     workspace.projects.set(nodeId, projectName(displayPath(directory)) || generalProjectLabel);
     workspace.nodes.push({ id: nodeId, defaultParentId: null });
@@ -111,5 +109,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   for (const thread of listedThreads) {
     if (thread.workingDirectory) workspace.nodes.push({ id: chatThreadNodeId(thread.id), defaultParentId: projectFor(thread.workingDirectory) });
   }
+  const labels = disambiguateProjectLabels([...projectIds].map(([directory, id]) => ({id, label:workspace.projects.get(id) ?? "", workingDirectory:directory})));
+  for (const project of labels) workspace.projects.set(project.id, project.label);
   return { workspace: { ...workspace, nativeConversations }, listedThreads };
 }

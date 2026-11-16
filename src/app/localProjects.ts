@@ -1,13 +1,10 @@
+import { projectDirectoryKey } from "./projectDirectory";
 import { useEffect, useSyncExternalStore } from "react";
 import type { StorageReaderWriter } from "./workspaceSessionPersistence";
 
 export const LOCAL_PROJECTS_KEY = "latticeterm.localProjects.v1";
 
-export function projectDirectoryKey(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//")
-    ? normalized.toLowerCase() : normalized;
-}
+export { projectDirectoryKey } from "./projectDirectory";
 
 export function parseLocalProjects(raw: string | null): string[] {
   if (raw === null) return [];

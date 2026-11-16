@@ -43,6 +43,7 @@ pub mod mcp_inventory;
 pub mod mcp_screen;
 pub mod metrics;
 pub mod notification_sound;
+mod project_directories;
 pub mod rdp;
 pub mod remote;
 pub mod remote_chat_host;
@@ -159,6 +160,17 @@ struct McpSavedConnectionSession {
     backend: mcp_desktop::Backend,
     fleet: bool,
     screen: bool,
+}
+
+#[tauri::command]
+async fn project_directory_identities(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<project_directories::ProjectDirectoryIdentity>, String> {
+    let home = app.path().home_dir().ok();
+    tauri::async_runtime::spawn_blocking(move || project_directories::identities(paths, home))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -6079,6 +6091,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            project_directory_identities,
             herdr::herdr_agents,
             herdr::herdr_read,
             herdr::herdr_prompt,

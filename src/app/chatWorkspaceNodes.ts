@@ -1,3 +1,4 @@
+import { localProjectId, projectDirectoryKey, type ProjectDirectoryKey } from "./projectDirectory";
 /** Live Agent sessions projected as leaves of the conversation sidebar tree. */
 
 import { displayPath } from "./displayPath";
@@ -30,8 +31,8 @@ export interface ChatWorkspaceProjection {
   sessions: Map<string, ChatWorkspaceSession>;
 }
 
-export function agentWorkspaceProjectNodeId(workingDirectory: string): string {
-  return `project:local:${displayPath(workingDirectory).toLocaleLowerCase()}`;
+export function agentWorkspaceProjectNodeId(workingDirectory: string, key: ProjectDirectoryKey = projectDirectoryKey): string {
+  return `project:${localProjectId(workingDirectory, key)}`;
 }
 
 function directoryName(path: string, fallback: string): string {
@@ -50,6 +51,7 @@ export function chatWorkspaceProjection(
   definitions: readonly Pick<AgentDefinition, "id" | "label">[],
   generalProjectLabel: string,
   proxies: readonly CliProxyEndpoint[] = [],
+  directoryKey: ProjectDirectoryKey = projectDirectoryKey,
 ): ChatWorkspaceProjection {
   const groups: { groupId: string; members: AgentSessionSummary[] }[] = [];
   const groupIndex = new Map<string, number>();
@@ -69,7 +71,7 @@ export function chatWorkspaceProjection(
   const sessionLeaves = new Map<string, ChatWorkspaceSession>();
   for (const group of groups) {
     const workingDirectory = group.members[0]?.workingDirectory ?? "";
-    const projectNodeId = agentWorkspaceProjectNodeId(workingDirectory);
+    const projectNodeId = agentWorkspaceProjectNodeId(workingDirectory, directoryKey);
     if (!projects.has(projectNodeId)) {
       projects.set(projectNodeId, directoryName(workingDirectory, generalProjectLabel));
       projectMembers.set(projectNodeId, []);

@@ -257,7 +257,7 @@ export function ChatThreadTree({
                         if (editable) setRenaming({ id: row.nodeId, name: row.name });
                       }}
                       aria-expanded={!row.collapsed}
-                      title={row.collapsed ? t("chat.folder.expand") : t("chat.folder.collapse")}
+                      title={row.kind === "project" ? row.nodeId.replace(/^project:(?:local|native):/, "") : row.collapsed ? t("chat.folder.expand") : t("chat.folder.collapse")}
                     >
                       <ChevronRightIcon
                         className={`chat-folder__chevron${row.collapsed ? "" : " is-open"}`}

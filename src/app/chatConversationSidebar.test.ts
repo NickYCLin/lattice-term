@@ -39,11 +39,11 @@ describe("conversation sidebar identity", () => {
       threads: [fakeThread({ nativeSessionId: "native-1", reportedProvider: "work-adapter" })] });
     expect([...result.workspace.sessions.values()][0].metadata?.provider).toBe("work-adapter");
   });
-  it("retains the legacy drive-root sidebar ID while filtering absolute paths", () => {
+  it("uses the shared absolute drive-root identity while filtering paths", () => {
     const result = sidebar({ history: [conversation({ workingDirectory: "C:\\" })], projectFilter: "c:/" });
-    expect([...result.workspace.projects.keys()]).toEqual(["project:local:C:"]);
+    expect([...result.workspace.projects.keys()]).toEqual(["project:local:c:/"]);
     expect(result.workspace.nodes.find(node => node.id === nativeConversationNodeId(conversation()))?.defaultParentId)
-      .toBe("project:local:C:");
+      .toBe("project:local:c:/");
   });
   it("shows a running native conversation once under one project", () => {
     const result = sidebar({ sessions: [fakeSession({ capturedSessionId: "native-1" })],
@@ -258,4 +258,21 @@ describe("conversation sidebar placement", () => {
     expect(chatSidebarRows(collapsed, result.listedThreads, result.workspace).map(row => row.kind)).toEqual(["project"]);
     expect(chatSidebarRows(toggleSessionSidebarFolder(collapsed, projectId), result.listedThreads, result.workspace)).toHaveLength(4);
   });
+});
+
+it("groups path variants across live sessions, native history and chat leaves with the same shared id", () => {
+  const result = sidebar({ sessions: [fakeSession({ sessionId: "live", groupId: "live", workingDirectory: "C:\\Work\\rust\\" })],
+    history: [conversation({ workingDirectory: "\\\\?\\C:\\work\\RUST", nativeSessionId: "native-other" })],
+    threads: [fakeThread({ id: "chat-other", workingDirectory: "c:/work/rust/" })] });
+  expect([...result.workspace.projects.keys()]).toEqual(["project:local:c:/work/rust"]);
+  const projectRows = rows(result).filter(row => row.kind === "project");
+  expect(projectRows).toHaveLength(1);
+  expect(rows(result).filter(row => ["thread", "native", "session"].includes(row.kind))).toHaveLength(3);
+});
+it("uses verified canonical aliases but keeps unrelated same-name projects distinguishable", () => {
+  const result = sidebar({ sessions: [fakeSession({ workingDirectory: "/home/test/rust" })],
+    threads: [fakeThread({ id: "alias", workingDirectory: "/data/test/home/rust/" }), fakeThread({ id: "other", workingDirectory: "/elsewhere/rust" })],
+    directoryKey: path => path.replace("/home/test/", "/data/test/home/").replace(/\/$/, "") });
+  expect(result.workspace.projects.size).toBe(2);
+  expect([...result.workspace.projects.values()]).toEqual(["rust · …/home", "rust · /elsewhere"]);
 });

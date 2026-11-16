@@ -1,3 +1,6 @@
+import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
+import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
+import { projectDirectoryKey, localProjectId as directoryProjectId, disambiguateProjectLabels, type ProjectDirectoryKey } from "../app/projectDirectory";
 import { PathDropZone } from "../components/files/PathDropZone";
 import { useSessionClose } from "../app/useSessionClose";
 import { localFileError, readSelectedText, type UploadFile } from "../app/localFiles";
@@ -7,7 +10,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   useSharedSidebarLayout,
-  reconcileSharedSessionLayout as reconcileSessionSidebarLayout,
+  reconcileSharedSessionLayout as baseReconcileSessionSidebarLayout,
 } from "../app/sharedSidebarLayout";
 import { open } from "@tauri-apps/plugin-dialog";
 import { downloadDir, homeDir, join } from "@tauri-apps/api/path";
@@ -202,16 +205,7 @@ interface SessionProject {
   sessions: SessionRef[];
 }
 
-function localProjectId(workingDirectory: string): string {
-  return `local:${displayPath(workingDirectory).toLocaleLowerCase()}`;
-}
-
-/** Comparable form for "is this the same folder" checks across separators. */
-function normalizeDirectory(path: string): string {
-  return displayPath(path)
-    .replace(/[\\/]+$/, "")
-    .toLocaleLowerCase();
-}
+const normalizeDirectory = projectDirectoryKey;
 
 function localProjectLabel(workingDirectory: string): string {
   const plain = displayPath(workingDirectory).replace(/[\\/]+$/, "");
@@ -219,9 +213,9 @@ function localProjectLabel(workingDirectory: string): string {
   return segments[segments.length - 1] ?? plain;
 }
 
-function projectIdForSession(session: SessionRef): string {
+function projectIdForSession(session: SessionRef, key: ProjectDirectoryKey): string {
   return session.kind === "agent"
-    ? localProjectId(session.members[0]?.workingDirectory ?? session.groupId)
+    ? directoryProjectId(session.members[0]?.workingDirectory ?? session.groupId, key)
     : "remote-connections";
 }
 
@@ -290,6 +284,16 @@ export function SessionsView({
   // "general chats" project, so asking a CLI something never requires
   // picking a project directory first.
   const [homeDirectory, setHomeDirectory] = useState<string | null>(null);
+  const projectIdentity = useProjectDirectoryIdentity([
+    ...agents.sessions.map(session => session.workingDirectory), ...(recovery.localProjectDirectories ?? []),
+    ...savedAgentWorkingDirectories([...restoredWorkspaceSessions, ...unrestoredWorkspaceSessions]), ...(homeDirectory ? [homeDirectory] : []),
+  ]);
+  const localProjectId = (directory: string) => directoryProjectId(directory, projectIdentity.key);
+  const reconcileSessionSidebarLayout = (...args: Parameters<typeof baseReconcileSessionSidebarLayout>) => baseReconcileSessionSidebarLayout(
+    mergeDirectoryProjectLayout(args[0], [...args[1], ...(args[2] ?? [])], projectIdentity.key, [
+      ...agents.sessions.map(session => session.workingDirectory), ...(recovery.localProjectDirectories ?? []),
+      ...savedAgentWorkingDirectories([...restoredWorkspaceSessions, ...unrestoredWorkspaceSessions]),
+    ]), args[1], args[2]);
   useEffect(() => {
     homeDir()
       .then(setHomeDirectory)
@@ -1264,7 +1268,7 @@ export function SessionsView({
     const id = localProjectId(workingDirectory);
     const isGeneralChat =
       !!homeDirectory &&
-      normalizeDirectory(workingDirectory) === normalizeDirectory(homeDirectory);
+      projectIdentity.key(workingDirectory) === projectIdentity.key(homeDirectory);
     projectMap.set(id, {
       id,
       label: isGeneralChat
@@ -1275,7 +1279,7 @@ export function SessionsView({
     });
   }
   for (const session of sessions) {
-    const id = projectIdForSession(session);
+    const id = projectIdForSession(session, projectIdentity.key);
     const existing = projectMap.get(id);
     if (existing) {
       existing.sessions.push(session);
@@ -1288,7 +1292,7 @@ export function SessionsView({
     const isGeneralChat =
       !!workingDirectory &&
       !!homeDirectory &&
-      normalizeDirectory(workingDirectory) === normalizeDirectory(homeDirectory);
+      projectIdentity.key(workingDirectory) === projectIdentity.key(homeDirectory);
     projectMap.set(id, {
       id,
       label: workingDirectory
@@ -1300,8 +1304,8 @@ export function SessionsView({
       sessions: [session],
     });
   }
-  const projects = [...projectMap.values()];
-  const activeProjectId = active ? projectIdForSession(active) : null;
+  const projects = disambiguateProjectLabels([...projectMap.values()], projectIdentity.key);
+  const activeProjectId = active ? projectIdForSession(active, projectIdentity.key) : null;
   const activeProject =
     projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null;
   const { byProject: savedSidebarItems, byId: savedAgentSessionById } =
@@ -1404,7 +1408,7 @@ export function SessionsView({
       });
     }
     return [...nodes.values()];
-  }, [restoredWorkspaceSessions]);
+  }, [restoredWorkspaceSessions, projectIdentity]);
   const liveSidebarNodes: LiveSessionSidebarNode[] = sidebarProjects.flatMap(
     (project) => [
       { id: project.nodeId, defaultParentId: null },

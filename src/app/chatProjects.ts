@@ -1,3 +1,4 @@
+import { projectDirectoryKey as chatProjectKey } from "./projectDirectory";
 import { displayPath } from "./displayPath";
 import { nativeConversationKey } from "./nativeConversationDismissals";
 
@@ -14,11 +15,7 @@ export interface ChatProject {
  * One key per folder: "/work/a/" and "/work/a" match, and so does a path
  * that Windows reported with its internal verbatim prefix.
  */
-export function chatProjectKey(directory: string): string {
-  const plain = chatProjectDirectory(directory);
-  return /^[a-z]:[\\/]/i.test(plain) || plain.startsWith("\\\\") || plain.startsWith("//")
-    ? plain.replace(/\\/g, "/").toLowerCase() : plain;
-}
+export { projectDirectoryKey as chatProjectKey } from "./projectDirectory";
 
 export function chatProjectDirectory(directory: string): string {
   const plain = displayPath(directory.trim());

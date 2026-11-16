@@ -1,3 +1,5 @@
+import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
+import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
 import { ApprovalActions } from "../components/chat/ApprovalActions";
 import { cliProxyIdFromArguments } from "../app/cliProxyApi";
 import type { SessionConversationMessage } from "../app/useSessionConversation";
@@ -86,7 +88,7 @@ import { useChatAccountProfiles } from "../app/useChatAccountProfiles";
 import { useI18n } from "../i18n/context";
 import { ChatQueueError } from "../app/chatInputQueue";
 import { chatConversationSidebar } from "../app/chatConversationSidebar";
-import { chatSidebarLayout } from "../app/chatThreadLayout";
+import { chatSidebarLayout as baseChatSidebarLayout } from "../app/chatThreadLayout";
 import { moveSessionSidebarNode } from "../app/sessionSidebarLayout";
 import { useSharedSidebarLayout } from "../app/sharedSidebarLayout";
 import type { MessageKey } from "../i18n/messages/zh-TW";
@@ -224,6 +226,15 @@ export function ChatView({
   // Conversations and running sessions share one tree, so a folder holds the
   // work rather than one kind of row.
   const nativeHistory = useNativeHistory();
+  const projectIdentity = useProjectDirectoryIdentity([
+    ...agents.sessions.map(session => session.workingDirectory), ...chat.threads.filter(thread => !thread.remote).map(thread => thread.workingDirectory),
+    ...(nativeHistory?.entries ?? []).map(entry => entry.workingDirectory),
+  ]);
+  const chatSidebarLayout = (...args: Parameters<typeof baseChatSidebarLayout>) => baseChatSidebarLayout(
+    mergeDirectoryProjectLayout(args[0], args[2] ?? [], projectIdentity.key, [
+      ...agents.sessions.map(session => session.workingDirectory), ...chat.threads.filter(thread => !thread.remote).map(thread => thread.workingDirectory),
+      ...(nativeHistory?.entries ?? []).map(entry => entry.workingDirectory),
+    ]), args[1], args[2]);
   const names = useConversationNames();
   const dialogs = useAppDialogs();
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -242,7 +253,7 @@ export function ChatView({
   }
   const { workspace, listedThreads } = useMemo(
     () => {
-      const projection = chatConversationSidebar({ sessions: agents.sessions, definitions: agents.catalog, threads: namedThreads,
+      const projection = chatConversationSidebar({ directoryKey: projectIdentity.key, sessions: agents.sessions, definitions: agents.catalog, threads: namedThreads,
         history: namedHistory, profiles: nativeHistory?.profiles ?? accountProfiles,
         proxies, generalProjectLabel: t("terminal.projects.generalChat"), projectFilter: null });
       const sessions = new Map(agents.sessions.map(session => [session.sessionId, session]));
@@ -252,7 +263,7 @@ export function ChatView({
       }
       return projection;
     },
-    [agents.catalog, agents.sessions, namedThreads, namedHistory, nativeHistory?.profiles, accountProfiles, proxies, t, names.names, nameTargets],
+    [agents.catalog, agents.sessions, namedThreads, namedHistory, nativeHistory?.profiles, accountProfiles, proxies, t, names.names, nameTargets, projectIdentity],
   );
   const nativeConversations = useNativeConversationList({ chat, projectFilter: null,
     onBeforeOpen: () => setSharedLayout(current => chatSidebarLayout(current, chat.threads, workspace.nodes)),
