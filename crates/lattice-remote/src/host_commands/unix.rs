@@ -141,12 +141,14 @@ pub(super) async fn run(
     request: CommandRequest,
     mut cancel: watch::Receiver<bool>,
     outgoing: mpsc::Sender<RemoteMessage>,
+    slot: RunningSlot,
 ) -> bool {
     let id = request.id();
     let (reason, exit_code, detail) = match execute(request, &mut cancel, &outgoing).await {
         Ok((reason, code)) => (reason, code, String::new()),
         Err(detail) => (CommandEnd::Failed, None, detail),
     };
+    drop(slot);
     send(
         &outgoing,
         CommandEvent::Finished {
@@ -302,5 +304,40 @@ mod tests {
             assert!(!temp.path().join("escaped").exists());
             commands.shutdown().await;
         }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_and_timed_out_commands_release_the_host_slot_before_finished() {
+        let root = tempfile::tempdir().unwrap();
+        let permits = Arc::new(Semaphore::new(1));
+        let (tx_a, mut rx_a) = mpsc::channel(8);
+        let (tx_b, mut rx_b) = mpsc::channel(8);
+        let mut a = Commands::new(true, tx_a, permits.clone());
+        let mut b = Commands::new(true, tx_b, permits.clone());
+        a.handle(request(1, "sleep 30", root.path(), 60)).await;
+        assert!(matches!(
+            rx_a.recv().await,
+            Some(RemoteMessage::CommandEvent(CommandEvent::Started { .. }))
+        ));
+        b.handle(request(2, "printf blocked", root.path(), 5)).await;
+        assert_eq!(result(&mut rx_b).await.0, CommandEnd::Failed);
+        a.handle(CommandRequest::Cancel { id: 1 }).await;
+        assert_eq!(result(&mut rx_a).await.0, CommandEnd::Cancelled);
+        assert_eq!(permits.available_permits(), 1);
+        b.handle(request(3, "printf recovered", root.path(), 5))
+            .await;
+        let (reason, code, output, _) = result(&mut rx_b).await;
+        assert_eq!(
+            (reason, code, output.as_slice()),
+            (CommandEnd::Exited, Some(0), b"recovered".as_slice())
+        );
+        // Same connection: a completed response is permission to start the next job.
+        b.handle(request(4, "sleep 30", root.path(), 1)).await;
+        assert_eq!(result(&mut rx_b).await.0, CommandEnd::TimedOut);
+        assert_eq!(permits.available_permits(), 1);
+        a.handle(request(5, "printf after_timeout", root.path(), 5))
+            .await;
+        assert_eq!(result(&mut rx_a).await.2, b"after_timeout");
+        a.shutdown().await;
+        b.shutdown().await;
     }
 }

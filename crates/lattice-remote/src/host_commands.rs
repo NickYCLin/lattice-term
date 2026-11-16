@@ -2,9 +2,12 @@
 use crate::command_protocol::{CommandEnd, CommandEvent, CommandRequest};
 use crate::RemoteMessage;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 
 pub fn supported_shells(allowed: bool) -> u8 {
     if !allowed {
@@ -18,10 +21,29 @@ pub fn supported_shells(allowed: bool) -> u8 {
     }
 }
 
+/// Publish completion only after both the process and its execution slot end.
+struct RunningSlot {
+    permit: Option<OwnedSemaphorePermit>,
+    complete: Arc<AtomicBool>,
+}
+impl Drop for RunningSlot {
+    fn drop(&mut self) {
+        drop(self.permit.take());
+        self.complete.store(true, Ordering::Release);
+    }
+}
+
+struct ActiveCommand {
+    id: u32,
+    cancel: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<()>,
+    complete: Arc<AtomicBool>,
+}
+
 pub struct Commands {
     allowed: bool,
     seen: HashSet<u32>,
-    active: Option<(u32, watch::Sender<bool>, tokio::task::JoinHandle<()>)>,
+    active: Option<ActiveCommand>,
     outgoing: mpsc::Sender<RemoteMessage>,
     permits: Arc<Semaphore>,
     failed: watch::Sender<bool>,
@@ -67,9 +89,9 @@ impl Commands {
                 .await;
         }
         if matches!(request, CommandRequest::Cancel { .. }) {
-            if let Some((active, cancel, _)) = &self.active {
-                if *active == id {
-                    let _ = cancel.send(true);
+            if let Some(active) = &self.active {
+                if active.id == id {
+                    let _ = active.cancel.send(true);
                 }
             }
             return true;
@@ -91,7 +113,7 @@ impl Commands {
         if self
             .active
             .as_ref()
-            .is_some_and(|(_, _, task)| !task.is_finished())
+            .is_some_and(|active| !active.complete.load(Ordering::Acquire))
         {
             return self.reject(id, "Another command is still running.").await;
         }
@@ -103,26 +125,38 @@ impl Commands {
         let (cancel, receiver) = watch::channel(false);
         let outgoing = self.outgoing.clone();
         let failed = self.failed.clone();
+        let complete = Arc::new(AtomicBool::new(false));
+        let slot = RunningSlot {
+            permit: Some(permit),
+            complete: complete.clone(),
+        };
         let task = tokio::spawn(async move {
-            let _permit = permit;
             #[cfg(windows)]
-            let sent = windows::run(request, receiver, outgoing).await;
+            let sent = windows::run(request, receiver, outgoing, slot).await;
             #[cfg(unix)]
-            let sent = unix::run(request, receiver, outgoing).await;
+            let sent = unix::run(request, receiver, outgoing, slot).await;
             #[cfg(not(any(windows, unix)))]
             let sent = {
-                let _ = (request, receiver, outgoing);
+                let _ = (request, receiver, outgoing, slot);
                 true
             };
             if !sent {
                 let _ = failed.send(true);
             }
         });
-        self.active = Some((id, cancel, task));
+        self.active = Some(ActiveCommand {
+            id,
+            cancel,
+            task,
+            complete,
+        });
         true
     }
     pub async fn shutdown(&mut self) {
-        if let Some((_, cancel, mut task)) = self.active.take() {
+        if let Some(ActiveCommand {
+            cancel, mut task, ..
+        }) = self.active.take()
+        {
             let _ = cancel.send(true);
             if tokio::time::timeout(Duration::from_secs(6), &mut task)
                 .await
@@ -136,7 +170,7 @@ impl Commands {
 }
 impl Drop for Commands {
     fn drop(&mut self) {
-        if let Some((_, cancel, task)) = self.active.take() {
+        if let Some(ActiveCommand { cancel, task, .. }) = self.active.take() {
             let _ = cancel.send(true);
             task.abort(); // Dropping the owned job/process group cleans up its children.
         }
