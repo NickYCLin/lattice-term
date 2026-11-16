@@ -17,6 +17,9 @@ vi.mock("./SqlWorkbench", () => ({ SqlWorkbench: () => <section aria-label="測�
 type Host = Record<string, unknown> & { childNodes?: Host[] };
 type Props = {
   hidden?: boolean;
+  name?: string;
+  open?: boolean;
+  "data-database-tls"?: boolean;
   rows?: number;
   autoComplete?: string;
   maxLength?: number;
@@ -149,13 +152,13 @@ it("does not carry a password or MCP grant across database engine changes", asyn
   await change((props) => props.type === "password", { value: "test-only-password" });
   await change((props) => props.value === "postgres" && Array.isArray(props.children), { value: "mysql" });
   expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
-  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+  expect(hostProps(container).find((props) => props.type === "checkbox" && props.name === "allowMcpRead")!.checked).toBe(false);
   expect(hostProps(container).find((props) => props.type === "number")!.value).toBe(3306);
   await change((props) => props.value === "mysql" && Array.isArray(props.children), { value: "sqlite" });
   expect(hostProps(container).some((props) => props.type === "password")).toBe(false);
   await change((props) => props.value === "sqlite" && Array.isArray(props.children), { value: "postgres" });
   expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
-  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+  expect(hostProps(container).find((props) => props.type === "checkbox" && props.name === "allowMcpRead")!.checked).toBe(false);
 });
 
 it.each(["save", "delete", "read"])("serializes same-turn database %s requests and unlocks after failure", async (operation) => {
@@ -184,7 +187,7 @@ it.each(["save", "delete", "read"])("serializes same-turn database %s requests a
 it("keeps metadata separate from passwords and saves explicit MCP permission", async () => {
   await render(); await click("測試資料庫");
   expect(hostProps(container).find((props) => props.type === "password")!.value).toBe("");
-  await change((props) => props.type === "checkbox", { checked: true });
+  await change((props) => props.type === "checkbox" && props.name === "allowMcpRead", { checked: true });
   await submit();
   expect(invoke).toHaveBeenCalledWith("database_save", { profile: { ...database, allowMcpRead: true }, revision: "original", password: null });
   expect(invoke).not.toHaveBeenCalledWith("database_read", expect.anything());
@@ -194,7 +197,7 @@ it("revokes the previous database grant when the endpoint changes", async () => 
   snapshot.profiles[0] = { ...database, allowMcpRead: true };
   await render(); await click("測試資料庫");
   await change((props) => props.value === "db.invalid", { value: "new.invalid" });
-  expect(hostProps(container).find((props) => props.type === "checkbox")!.checked).toBe(false);
+  expect(hostProps(container).find((props) => props.type === "checkbox" && props.name === "allowMcpRead")!.checked).toBe(false);
   const testButton = hostProps(container).find((props) => props.children === "測試連線／讀取版本")!;
   expect(testButton.disabled).toBe(true);
 });
@@ -208,10 +211,10 @@ it("requires a specific delete confirmation and leaves the other version alone",
   expect(hostProps(container).some((props) => Array.isArray(props.children) && props.children.includes("另一個版本"))).toBe(true);
 });
 
-it("preserves saved credentials without offering CA settings", async () => {
+it("preserves saved credentials while TLS settings stay in the advanced section", async () => {
   snapshot.profiles[0] = { ...database, tlsCaPem: "old CA", allowMcpRead: true };
   await render(); await click("測試資料庫");
-  expect(hostProps(container).some((props) => props.rows === 5)).toBe(false);
+  expect(hostProps(container).some((props) => props.rows === 5 && props.value === "old CA")).toBe(true);
   await click("測試連線／讀取版本");
   expect(invoke).toHaveBeenLastCalledWith("database_read", { action: { kind: "version", profileId: "first" } });
 });
@@ -220,7 +223,7 @@ it("saves an SSH route separately from card grouping and revokes MCP", async () 
   snapshot.profiles[0] = { ...database, allowMcpRead: true };
   await render(); await click("測試資料庫");
   await change(props => props.value === "direct", { value: "ssh:host" });
-  expect(hostProps(container).find(props => props.type === "checkbox")!.checked).toBe(false);
+  expect(hostProps(container).find(props => props.type === "checkbox" && props.name === "allowMcpRead")!.checked).toBe(false);
   await submit();
   expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({ profile: expect.objectContaining({
     route: { kind: "ssh", profileId: "host" }, hostKey: "host", allowMcpRead: false,
@@ -354,3 +357,40 @@ it.each((["zh-TW", "en"] as const).flatMap(locale =>
     expect(hostProps(container).some(props => props.children === code)).toBe(false);
     expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
   });
+
+it("keeps TLS controls collapsed and defaults to direct unverified connections", async () => {
+  await render();
+  const advanced = hostProps(container).find(props => props["data-database-tls"]);
+  expect(advanced).toBeDefined();
+  expect(advanced!.open).not.toBe(true);
+  const trust = hostProps(container).find(props => props.name === "tlsTrustServerCertificate")!;
+  expect(trust.checked).toBe(true);
+  expect(trust.disabled).toBe(false);
+  expect(hostProps(container).some(props => props.children === "未驗證伺服器憑證")).toBe(true);
+});
+
+it("saves the supplied public CA and prevents the trust toggle from bypassing it", async () => {
+  snapshot.profiles[0] = { ...database, allowMcpRead: true };
+  await render(); await click("測試資料庫");
+  await change(props => props.rows === 5, { value: "PUBLIC_CA_TEST_SENTINEL" });
+  const trust = hostProps(container).find(props => props.name === "tlsTrustServerCertificate")!;
+  expect(trust.checked).toBe(false);
+  expect(trust.disabled).toBe(true);
+  expect(hostProps(container).find(props => props.name === "allowMcpRead")!.checked).toBe(false);
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({ profile: expect.objectContaining({
+    tlsCaPem: "PUBLIC_CA_TEST_SENTINEL", allowMcpRead: false,
+  }) }));
+});
+
+it("saves explicit verification without a CA and clears TLS settings for SQLite", async () => {
+  snapshot.profiles[0] = { ...database, allowMcpRead: true };
+  await render(); await click("測試資料庫");
+  await change(props => props.name === "tlsTrustServerCertificate", { checked: false });
+  await submit();
+  expect(invoke).toHaveBeenCalledWith("database_save", expect.objectContaining({ profile: expect.objectContaining({
+    tlsTrustServerCertificate: false, allowMcpRead: false,
+  }) }));
+  await change(props => props.value === "postgres" && Array.isArray(props.children), { value: "sqlite" });
+  expect(hostProps(container).some(props => props["data-database-tls"])).toBe(false);
+});

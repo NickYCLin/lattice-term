@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeDatabaseEngine, databaseEngines, emptyDatabase } from "./database";
+import { changeDatabaseEngine, databaseEngines, emptyDatabase, verifiesDatabaseCertificate } from "./database";
 
 describe("database profiles", () => {
   it("creates independent identities on the same host with MCP off until explicitly enabled", () => {
@@ -18,4 +18,15 @@ describe("database profiles", () => {
     expect(sqlite.tlsCaPem).toBe("");
     expect(changeDatabaseEngine({ ...sqlite, sqlitePath: "C:/sample.sqlite" }, "sqlServer")).toMatchObject({ port: 1433, sqlitePath: "", allowMcpRead: false });
   });
+});
+
+it("treats absent trust settings as legacy bypass while a CA always verifies", () => {
+  const profile = emptyDatabase();
+  expect(profile.tlsTrustServerCertificate).toBe(true);
+  expect(verifiesDatabaseCertificate({ ...profile, tlsTrustServerCertificate: undefined })).toBe(false);
+  expect(verifiesDatabaseCertificate({ ...profile, tlsTrustServerCertificate: false })).toBe(true);
+  expect(verifiesDatabaseCertificate({ ...profile, tlsCaPem: "PUBLIC_CA", tlsTrustServerCertificate: true })).toBe(true);
+  const sqlite = changeDatabaseEngine({ ...profile, tlsCaPem: "PUBLIC_CA", tlsTrustServerCertificate: false }, "sqlite");
+  expect(sqlite.tlsCaPem).toBe("");
+  expect(sqlite.tlsTrustServerCertificate).toBe(true);
 });

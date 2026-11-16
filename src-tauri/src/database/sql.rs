@@ -228,6 +228,7 @@ impl Client {
     }
 }
 
+#[cfg(test)]
 pub(in crate::database) async fn execute_sql(
     profile: &DatabaseProfile,
     password: &str,
@@ -235,11 +236,30 @@ pub(in crate::database) async fn execute_sql(
     confirmed: bool,
     before_commit: impl Fn() -> Result<(), String> + Send + Sync,
 ) -> Result<Value, String> {
+    execute_sql_with_server_name(
+        profile,
+        password,
+        text,
+        confirmed,
+        before_commit,
+        &profile.hostname,
+    )
+    .await
+}
+
+pub(in crate::database) async fn execute_sql_with_server_name(
+    profile: &DatabaseProfile,
+    password: &str,
+    text: &str,
+    confirmed: bool,
+    before_commit: impl Fn() -> Result<(), String> + Send + Sync,
+    server_name: &str,
+) -> Result<Value, String> {
     let (statement, write) = classify_sql(profile.engine, text)?;
     if write && !confirmed {
         return Err("增刪修需要使用者確認這份 SQL 後執行。".into());
     }
-    let mut client = Client::connect_mode(profile, password, write).await?;
+    let mut client = Client::connect_mode(profile, password, write, server_name).await?;
     if !write {
         return client.sql_rows(&statement).await;
     }
@@ -318,6 +338,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            tls_trust_server_certificate: true,
             route: None,
             allow_mcp_read: false,
         };

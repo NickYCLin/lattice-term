@@ -7,7 +7,9 @@ type TextRows = Vec<Vec<Option<String>>>;
 
 #[path = "sql.rs"]
 mod sql;
+#[cfg(test)]
 pub(super) use sql::execute_sql;
+pub(super) use sql::execute_sql_with_server_name;
 
 enum Client {
     Postgres(sqlx::PgConnection),
@@ -30,25 +32,20 @@ fn mysql_text(value: Option<Vec<u8>>) -> Result<Option<String>, String> {
 }
 
 impl Client {
+    #[cfg(test)]
     async fn connect(profile: &DatabaseProfile, password: &str) -> Result<Self, String> {
-        Self::connect_mode(profile, password, false).await
+        Self::connect_mode(profile, password, false, &profile.hostname).await
     }
 
     async fn connect_mode(
         profile: &DatabaseProfile,
         password: &str,
         writable: bool,
+        server_name: &str,
     ) -> Result<Self, String> {
         match profile.engine {
             Engine::Postgres => {
-                let options = sqlx::postgres::PgConnectOptions::new()
-                    .host(&profile.hostname)
-                    .port(profile.port)
-                    .username(&profile.username)
-                    .password(password)
-                    .database(&profile.database)
-                    .ssl_mode(sqlx::postgres::PgSslMode::Prefer)
-                    .disable_statement_logging();
+                let options = super::tls::postgres(profile, password, server_name);
                 let mut connection = sqlx::PgConnection::connect_with(&options)
                     .await
                     .map_err(driver_failed)?;
@@ -63,14 +60,7 @@ impl Client {
                 Ok(Self::Postgres(connection))
             }
             Engine::Mysql | Engine::Mariadb => {
-                let options = sqlx::mysql::MySqlConnectOptions::new()
-                    .host(&profile.hostname)
-                    .port(profile.port)
-                    .username(&profile.username)
-                    .password(password)
-                    .database(&profile.database)
-                    .ssl_mode(sqlx::mysql::MySqlSslMode::Preferred)
-                    .disable_statement_logging();
+                let options = super::tls::mysql(profile, password, server_name);
                 let mut connection = sqlx::MySqlConnection::connect_with(&options)
                     .await
                     .map_err(driver_failed)?;
@@ -120,18 +110,7 @@ impl Client {
                 Ok(Self::Sqlite(connection))
             }
             Engine::SqlServer => {
-                let mut config = tiberius::Config::new();
-                config.host(&profile.hostname);
-                config.port(profile.port);
-                config.database(&profile.database);
-                config.authentication(tiberius::AuthMethod::sql_server(
-                    &profile.username,
-                    password,
-                ));
-                // Let the server negotiate encryption without requiring a CA
-                // or hostname validation for these explicitly direct profiles.
-                config.encryption(tiberius::EncryptionLevel::Off);
-                config.trust_cert();
+                let config = super::tls::sql_server(profile, password, server_name);
                 let socket =
                     tokio::net::TcpStream::connect((profile.hostname.as_str(), profile.port))
                         .await
@@ -287,12 +266,22 @@ fn bounded(rows: TextRows, columns: Vec<String>, max_rows: usize) -> Value {
     json!({"columns":columns,"rows":result,"truncated":truncated,"readOnly":true,"cellCharacterLimit":CELL_CHARS,"stableOrder":false})
 }
 
+#[cfg(test)]
 pub(super) async fn read(
     profile: &DatabaseProfile,
     password: &str,
     action: &DatabaseAction,
 ) -> Result<Value, String> {
-    let mut client = Client::connect(profile, password).await?;
+    read_with_server_name(profile, password, action, &profile.hostname).await
+}
+
+pub(super) async fn read_with_server_name(
+    profile: &DatabaseProfile,
+    password: &str,
+    action: &DatabaseAction,
+    server_name: &str,
+) -> Result<Value, String> {
+    let mut client = Client::connect_mode(profile, password, false, server_name).await?;
     let engine = profile.engine;
     match action {
         DatabaseAction::Workbenches { .. }
@@ -436,6 +425,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            tls_trust_server_certificate: true,
             route: None,
             allow_mcp_read: false,
         };

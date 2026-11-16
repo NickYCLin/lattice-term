@@ -16,6 +16,7 @@ fn profile(directory: &Path, id: &str) -> DatabaseProfile {
         database: String::new(),
         sqlite_path: path.to_string_lossy().into_owned(),
         tls_ca_pem: String::new(),
+        tls_trust_server_certificate: true,
         route: None,
         allow_mcp_read: false,
     }

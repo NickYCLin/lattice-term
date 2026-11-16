@@ -26,11 +26,13 @@ struct Fixture {
     profile: DatabaseProfile,
     password: String,
     writer_password: Option<String>,
+    wrong_ca_pem: Option<String>,
 }
 
 #[tokio::test]
 #[ignore = "Run node scripts/test-databases.mjs for isolated TLS database containers"]
 async fn isolated_network_databases_verify_sql_workbench_crud() {
+    crate::install_rustls_crypto_provider();
     let path = std::env::var_os("LATTICETERM_TEST_DATABASES_JSON").expect("isolated fixture path");
     let fixture: Fixture = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let mut profile = fixture.profile;
@@ -129,6 +131,7 @@ async fn isolated_network_databases_verify_sql_workbench_crud() {
 #[tokio::test]
 #[ignore = "Run node scripts/test-databases.mjs for isolated TLS database containers"]
 async fn isolated_network_databases_accept_self_signed_servers_and_readonly_queries() {
+    crate::install_rustls_crypto_provider();
     let path = std::env::var_os("LATTICETERM_TEST_DATABASES_JSON").expect("isolated fixture path");
     let fixture: Fixture = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let profile = fixture.profile;
@@ -152,6 +155,33 @@ async fn isolated_network_databases_accept_self_signed_servers_and_readonly_quer
         .await
         .unwrap();
     assert!(!result["rows"][0][0].as_str().unwrap().is_empty());
+    let mut strict_without_ca = without_ca.clone();
+    strict_without_ca.tls_trust_server_certificate = false;
+    assert_eq!(
+        drivers::read(&strict_without_ca, &fixture.password, &version)
+            .await
+            .unwrap_err(),
+        "database.error.tls"
+    );
+    let mut wrong_name = profile.clone();
+    wrong_name.hostname = "127.0.0.1".into();
+    assert_eq!(
+        drivers::read(&wrong_name, &fixture.password, &version)
+            .await
+            .unwrap_err(),
+        "database.error.tls"
+    );
+    drivers::read_with_server_name(&wrong_name, &fixture.password, &version, "localhost")
+        .await
+        .expect("a forwarded socket must verify its CA and use the original SQL Server name");
+    let mut wrong_ca = profile.clone();
+    wrong_ca.tls_ca_pem = fixture.wrong_ca_pem.expect("isolated unrelated CA");
+    assert_eq!(
+        drivers::read(&wrong_ca, &fixture.password, &version)
+            .await
+            .unwrap_err(),
+        "database.error.tls"
+    );
     let directory = tempfile::tempdir().unwrap();
     let registry = DatabaseRegistry::new(directory.path().into());
     let snapshot = registry.snapshot().unwrap();

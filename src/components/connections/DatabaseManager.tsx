@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { mergeMachineCards, type ConnectionProfile } from "../../domain/connection";
 import {
-  databaseEngines, emptyDatabase, changeDatabaseEngine,
+  databaseEngines, emptyDatabase, changeDatabaseEngine, verifiesDatabaseCertificate,
   type DatabaseAction, type DatabaseProfile, type DatabaseResult, type DatabaseSnapshot,
 } from "../../domain/database";
 import { useModalFocus } from "../overlays/modalFocus";
@@ -119,7 +119,7 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
 
   function update<Key extends keyof DatabaseProfile>(key: Key, value: DatabaseProfile[Key]) {
     setTouched(true);
-    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem", "route"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
+    setDraft((current) => ({ ...current, [key]: value, allowMcpRead: ["hostname", "port", "username", "database", "sqlitePath", "tlsCaPem", "tlsTrustServerCertificate", "route"].includes(key) ? false : key === "allowMcpRead" ? Boolean(value) : current.allowMcpRead })); setResult(null);
   }
 
   function save(event: FormEvent) {
@@ -251,8 +251,23 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
                     <label className="database-manager__span">{t("database.username")}<input className="input" placeholder={t("database.usernamePlaceholder")} autoCapitalize="none" autoCorrect="off" spellCheck={false} required autoComplete="off" maxLength={128} value={draft.username} onChange={(event) => update("username", event.target.value)} /></label>
                     <div className="database-manager__password database-manager__span"><label>{t("database.password")}<input className="input" type={showPassword ? "text" : "password"} autoComplete="new-password" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={saved ? t("database.keepPassword") : t("database.enterPassword")} value={password} onChange={(event) => { setTouched(true); setPassword(event.target.value); }} /></label><button type="button" className="button button--secondary" aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? t("database.hidePassword") : t("database.showPassword")}</button><small>{t("database.passwordEndpointHint")}</small></div>
                   </>}
+                  {draft.engine !== "sqlite" && <>
+                    <details className="database-manager__advanced database-manager__span" data-database-tls>
+                      <summary>{t("database.tls.advanced")}</summary>
+                      <label>{t("database.tls.ca")}<textarea className="textarea" rows={5} maxLength={16384} spellCheck={false}
+                        autoComplete="off" value={draft.tlsCaPem ?? ""} onChange={event => update("tlsCaPem", event.target.value)} /></label>
+                      <p className="database-manager__hint">{t("database.tls.caHint")}</p>
+                      <label className="database-manager__permission"><input type="checkbox" name="tlsTrustServerCertificate"
+                        checked={!draft.tlsCaPem?.trim() && (draft.tlsTrustServerCertificate ?? true)}
+                        disabled={Boolean(draft.tlsCaPem?.trim())}
+                        onChange={event => update("tlsTrustServerCertificate", event.target.checked)} />{t("database.tls.trust")}</label>
+                      <p className="database-manager__hint">{t(draft.tlsCaPem?.trim() ? "database.tls.caOverrides" : "database.tls.defaultHint")}</p>
+                      {draft.route && verifiesDatabaseCertificate(draft) && <p className="database-manager__hint">{t("database.tls.routeHint")}</p>}
+                    </details>
+                    {settingsOnly && <p className="database-manager__hint database-manager__span" role="status">{t(verifiesDatabaseCertificate(draft) ? "database.tls.verifying" : "database.tls.unverified")}</p>}
+                  </>}
                   <div className="database-manager__form-section database-manager__span"><span>03</span><span>{t("database.aiAccess")}<small>{t("database.aiAccessHint")}</small></span></div>
-                  <label className="database-manager__permission database-manager__span"><input type="checkbox" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />{t("database.allowRead")}</label>
+                  <label className="database-manager__permission database-manager__span"><input type="checkbox" name="allowMcpRead" checked={draft.allowMcpRead} onChange={(event) => update("allowMcpRead", event.target.checked)} />{t("database.allowRead")}</label>
                   <p className="database-manager__hint database-manager__span">{t("database.credentialHint")}</p>
                 </div>
               </section>
@@ -302,7 +317,7 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
 
               {saved && !settingsOnly && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={JSON.stringify(saved)} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">{t("database.saveOrCancel")}</p>}</div>}
             </div>
-            <footer className="database-manager__footer"><span>{sqlState.dirty ? t("database.syncBeforeSwitch") : touched && dirty ? t("database.settingsUnsaved") : settingsOnly ? t("database.settingsLocal") : t("database.queryAndWrite")}</span><span>{draft.engine === "sqlite" ? t("database.sqliteLocal") : t("database.noCa")}</span></footer>
+            <footer className="database-manager__footer"><span>{sqlState.dirty ? t("database.syncBeforeSwitch") : touched && dirty ? t("database.settingsUnsaved") : settingsOnly ? t("database.settingsLocal") : t("database.queryAndWrite")}</span><span>{draft.engine === "sqlite" ? t("database.sqliteLocal") : t(verifiesDatabaseCertificate(draft) ? "database.tls.verifying" : "database.tls.unverified")}</span></footer>
           </section>
         </div>
       </div>

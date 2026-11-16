@@ -397,7 +397,14 @@ impl DatabaseRegistry {
         let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            drivers::execute_sql(&route.profile, &password, &panel.sql, confirmed, revalidate),
+            drivers::execute_sql_with_server_name(
+                &route.profile,
+                &password,
+                &panel.sql,
+                confirmed,
+                revalidate,
+                &route.server_name,
+            ),
         )
         .await
         .map_err(|_| "SQL 超過 20 秒；寫入結果可能無法確認，請先查詢資料，不要直接重送。")??;
@@ -520,6 +527,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            tls_trust_server_certificate: true,
             route: None,
             allow_mcp_read: true,
         };
@@ -696,6 +704,7 @@ mod tests {
             database: String::new(),
             sqlite_path: path.to_string_lossy().into_owned(),
             tls_ca_pem: String::new(),
+            tls_trust_server_certificate: true,
             route: None,
             allow_mcp_read: true,
         };

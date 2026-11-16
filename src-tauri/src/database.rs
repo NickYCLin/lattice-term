@@ -8,6 +8,7 @@ mod route_tests;
 mod sqlite;
 #[cfg(test)]
 mod tests;
+mod tls;
 mod transport;
 pub mod workbench;
 
@@ -66,9 +67,18 @@ pub struct DatabaseProfile {
     pub sqlite_path: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tls_ca_pem: String,
+    #[serde(default = "default_trust", skip_serializing_if = "is_true")]
+    pub tls_trust_server_certificate: bool,
     pub allow_mcp_read: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<DatabaseRoute>,
+}
+
+fn default_trust() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl DatabaseProfile {
@@ -91,6 +101,7 @@ impl DatabaseProfile {
                 || !self.username.is_empty()
                 || !self.database.is_empty()
                 || !self.tls_ca_pem.is_empty()
+                || !self.tls_trust_server_certificate
             {
                 return Err("SQLite 請只設定本機檔案，不要填入伺服器欄位。".into());
             }
@@ -126,6 +137,9 @@ impl DatabaseProfile {
         .unwrap_or_default();
         if !self.tls_ca_pem.is_empty() {
             binding.extend_from_slice(self.tls_ca_pem.as_bytes());
+        }
+        if !self.tls_trust_server_certificate {
+            binding.extend_from_slice(b"verify-server-certificate");
         }
         if let Some(route) = &self.route {
             binding.extend_from_slice(&serde_json::to_vec(route).unwrap_or_default());
@@ -163,6 +177,7 @@ impl DatabaseProfile {
             && self.database == other.database
             && self.sqlite_path == other.sqlite_path
             && self.tls_ca_pem == other.tls_ca_pem
+            && self.tls_trust_server_certificate == other.tls_trust_server_certificate
             && self.route == other.route
     }
 }
@@ -553,7 +568,7 @@ impl DatabaseRegistry {
         let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            drivers::read(&route.profile, &password, &action),
+            drivers::read_with_server_name(&route.profile, &password, &action, &route.server_name),
         )
         .await
         .map_err(|_| errors::Failure::Connection.code().to_owned())??;
@@ -717,12 +732,13 @@ impl DatabaseRegistry {
         let route = self.connection_route(&profile).await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
-            drivers::read(
+            drivers::read_with_server_name(
                 &route.profile,
                 &password,
                 &DatabaseAction::Version {
                     profile_id: profile.id.clone(),
                 },
+                &route.server_name,
             ),
         )
         .await

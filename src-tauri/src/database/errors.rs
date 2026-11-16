@@ -76,7 +76,8 @@ pub(super) fn driver_failed(error: impl SafeFailure) -> String {
 impl SafeFailure for sqlx::Error {
     fn category(&self) -> Failure {
         match self {
-            Self::Io(_) | Self::PoolTimedOut => Failure::Connection,
+            Self::Io(error) => error.category(),
+            Self::PoolTimedOut => Failure::Connection,
             Self::Tls(_) => Failure::Tls,
             Self::Database(error) => {
                 if let Some(error) = error.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>() {
@@ -110,6 +111,20 @@ impl SafeFailure for tiberius::error::Error {
 
 impl SafeFailure for std::io::Error {
     fn category(&self) -> Failure {
+        // SQLx rustls handshakes can surface as Io(InvalidData), retaining the
+        // typed rustls error. Inspect types only; never parse Display strings.
+        let mut source = self.get_ref().map(|error| error as &dyn std::error::Error);
+        for _ in 0..8 {
+            let Some(error) = source else { break };
+            if error.is::<rustls::Error>() {
+                return Failure::Tls;
+            }
+            source = if let Some(io) = error.downcast_ref::<std::io::Error>() {
+                io.get_ref().map(|inner| inner as &dyn std::error::Error)
+            } else {
+                error.source()
+            };
+        }
         Failure::Connection
     }
 }
@@ -256,6 +271,15 @@ mod tests {
             Failure::Other.code()
         );
         assert_eq!(failed(), Failure::Other.code());
+    }
+
+    #[test]
+    fn rustls_certificate_errors_wrapped_in_io_still_report_tls() {
+        let io = std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
+        );
+        assert_eq!(driver_failed(sqlx::Error::Io(io)), Failure::Tls.code());
     }
 
     #[cfg(not(target_os = "ios"))]

@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 
 pub(super) struct ConnectionRoute {
     pub profile: DatabaseProfile,
+    pub server_name: String,
     worker: Option<JoinHandle<()>>,
     ssh: Option<(Arc<crate::tunnel::TunnelRegistry>, String)>,
 }
@@ -34,6 +35,7 @@ impl DatabaseRegistry {
     ) -> Result<ConnectionRoute, String> {
         let mut result = ConnectionRoute {
             profile: profile.clone(),
+            server_name: profile.hostname.clone(),
             worker: None,
             ssh: None,
         };

@@ -30,6 +30,7 @@ try {
   checked("docker", ["info", "--format", "{{.ServerVersion}}"]);
   checked(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--no-run"], { stdio: "inherit", timeout: 600000 });
   checked(openssl, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=LatticeTerm isolated QA CA", "-keyout", join(directory, "ca.key"), "-out", join(directory, "ca.crt")]);
+  checked(openssl, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=Unrelated isolated QA CA", "-keyout", join(directory, "wrong-ca.key"), "-out", join(directory, "wrong-ca.crt")]);
   checked(openssl, ["req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", join(directory, "server.key"), "-out", join(directory, "server.csr")]);
   writeFileSync(join(directory, "extensions"), "subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\n");
   checked(openssl, ["x509", "-req", "-days", "1", "-in", join(directory, "server.csr"), "-CA", join(directory, "ca.crt"), "-CAkey", join(directory, "ca.key"), "-CAcreateserial", "-extfile", join(directory, "extensions"), "-out", join(directory, "server.crt")]);
@@ -82,7 +83,7 @@ try {
     checked("docker", exec, { input: workbenchSeed });
     const { readFileSync } = await import("node:fs");
     const fixture = join(directory, "fixture.json");
-    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password, writerPassword }), { mode: 0o600 });
+    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password, writerPassword, wrongCaPem: readFileSync(join(directory, "wrong-ca.crt"), "utf8") }), { mode: 0o600 });
     console.log(`Testing ${engine} (${image}) with verified TLS, read-only access and isolated SQL CRUD`);
     const result = run(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--", "--ignored", "--nocapture"], { env: { ...process.env, LATTICETERM_TEST_DATABASES_JSON: fixture }, stdio: "inherit", timeout: 600000 });
     if (result.status !== 0) throw new Error(`${engine} acceptance failed`);

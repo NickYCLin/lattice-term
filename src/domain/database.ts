@@ -19,6 +19,7 @@ export interface DatabaseProfile {
   database: string;
   sqlitePath: string;
   tlsCaPem?: string;
+  tlsTrustServerCertificate?: boolean;
   route?: { kind: "ssh" | "remote"; profileId: string } | null;
   allowMcpRead: boolean;
 }
@@ -42,10 +43,14 @@ export type DatabaseAction =
   | { kind: "columns"; profileId: string; schema: string; table: string }
   | { kind: "rows"; profileId: string; schema: string; table: string; limit: number; offset: number };
 
+export function verifiesDatabaseCertificate(profile: DatabaseProfile): boolean {
+  return Boolean(profile.tlsCaPem?.trim()) || profile.tlsTrustServerCertificate === false;
+}
+
 export function emptyDatabase(hostKey = "local", hostname = ""): DatabaseProfile {
   return {
     id: crypto.randomUUID(), hostKey, name: "", engine: "postgres", hostname,
-    port: 5432, username: "", database: "", sqlitePath: "", allowMcpRead: false,
+    port: 5432, username: "", database: "", sqlitePath: "", tlsTrustServerCertificate: true, allowMcpRead: false,
   };
 }
 
@@ -55,6 +60,6 @@ export function changeDatabaseEngine(profile: DatabaseProfile, engine: DatabaseE
     hostname: engine === "sqlite" ? "" : profile.hostname,
     username: engine === "sqlite" ? "" : profile.username,
     database: engine === "sqlite" ? "" : profile.database,
-    sqlitePath: "", tlsCaPem: "", route: engine === "sqlite" ? null : profile.route, allowMcpRead: false,
+    sqlitePath: "", tlsCaPem: "", tlsTrustServerCertificate: true, route: engine === "sqlite" ? null : profile.route, allowMcpRead: false,
   };
 }
