@@ -36,9 +36,13 @@ it("uses shared theme tokens for session-tree insert lines and the order menu", 
   expect(rule(".session-tree__order-menu")).toContain("position: fixed");
   expect(rule(".session-tree__order-menu")).toContain("background: var(--surface-solid)");
 });
-it("reserves folder action space and does not reveal actions just because the name has focus", () => {
-  expect(rule(".session-tree__folder-actions")).toContain("position: static");
-  expect(rule(".session-tree__folder-actions")).toContain("flex: 0 0 auto");
-  expect(css).not.toContain(".session-tree__folder-row:focus-within .session-tree__folder-actions");
-  expect(css).toContain(".session-tree__folder-actions:focus-within");
+it("collapses idle folder tools and exposes a compact menu on hover, focus, menu-open and touch", () => {
+  const rules = rule(".session-tree__folder-actions");
+  expect(rules).toContain("display: none");
+  expect(rules).not.toContain("position: absolute");
+  expect(css).toContain(".session-tree__folder-row:hover .session-tree__folder-actions");
+  expect(css).toContain(".session-tree__folder-row:focus-within .session-tree__folder-actions");
+  expect(css).toContain(".session-tree__folder-row.is-menu-open .session-tree__folder-actions");
+  expect(css).toContain("@media (hover: none)");
+  expect(rule(".app--mobile .session-tree__folder-actions")).toContain("display: flex");
 });

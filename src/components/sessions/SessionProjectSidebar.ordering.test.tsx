@@ -74,7 +74,7 @@ it("retains middle-into-folder for sessions and treats remote-connections as an 
   expect(actions.onRenameFolder).not.toHaveBeenCalled(); expect(actions.onDeleteFolder).not.toHaveBeenCalled(); expect(actions.onRemoveProject).not.toHaveBeenCalled();
 });
 it("offers keyboard menu movement, disabled endpoints, Escape and outside dismissal", async () => {
-  const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "調整「桃源水情」的順序" && node.tagName === "BUTTON")!;
+  const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "「桃源水情」的資料夾操作" && node.tagName === "BUTTON")!;
   await act(async () => props(toggle()).onClick());
   expect(props(toggle()).title).toBeUndefined();
   expect(props(allNodes(row("folder:b")).find(node => props(node)?.className === "session-tree__folder-select")!).title).toBeUndefined();
@@ -88,7 +88,7 @@ it("offers keyboard menu movement, disabled endpoints, Escape and outside dismis
   const event = (key: string) => ({ key, currentTarget: menu(), preventDefault: vi.fn(), stopPropagation: vi.fn() });
   await act(async () => props(menu()).onKeyDown(event("ArrowDown"))); expect(document.activeElement).toBe(items()[1]);
   await act(async () => props(menu()).onKeyDown(event("ArrowUp"))); expect(document.activeElement).toBe(items()[0]);
-  await act(async () => props(menu()).onKeyDown(event("End"))); expect(document.activeElement).toBe(items()[1]);
+  await act(async () => props(menu()).onKeyDown(event("End"))); expect(document.activeElement).toBe(items()[items().length - 1]);
   await act(async () => props(menu()).onKeyDown(event("Home"))); expect(document.activeElement).toBe(items()[0]);
   await act(async () => props(menu()).onKeyDown(event("Escape"))); expect(menu()).toBeUndefined(); expect(document.activeElement).toBe(toggle());
   await act(async () => props(toggle()).onClick()); await dispatch("pointerdown", { target: host }); expect(menu()).toBeUndefined();
@@ -102,7 +102,7 @@ it("offers keyboard menu movement, disabled endpoints, Escape and outside dismis
 it("moves nested folders outward with the menu or root blank area and persists the new parent", async () => {
   layout = createSessionSidebarFolder(layout, { id: "folder:child", name: "Synthetic Child" }, "folder:a");
   await act(async () => render());
-  const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "調整「Synthetic Child」的順序" && node.tagName === "BUTTON")!;
+  const toggle = () => allNodes(host).find(node => props(node)?.["aria-label"] === "「Synthetic Child」的資料夾操作" && node.tagName === "BUTTON")!;
   await act(async () => props(toggle()).onClick());
   const parent = allNodes(host).find(node => props(node)?.role === "menuitem" && node.textContent.includes("移到上一層"))!;
   expect(props(parent).disabled).toBe(false);
@@ -120,4 +120,28 @@ it("moves nested folders outward with the menu or root blank area and persists t
     expect(actions.onMove).toHaveBeenLastCalledWith("folder:child", null);
     expect(JSON.parse(localStorage.getItem(SHARED_SIDEBAR_LAYOUT_KEY)!).placements["folder:child"].parentId).toBeNull();
   }
+});
+
+it.each([
+  ["新增子資料夾", "onCreateFolder"],
+  ["重新命名資料夾", "onRenameFolder"],
+  ["刪除資料夾", "onDeleteFolder"],
+] as const)("keeps the row compact and exposes %s through the keyboard menu", async (label, action) => {
+  const folder = layout.folders.find(entry => entry.id === "folder:b")!;
+  const toolbar = allNodes(row(folder.id)).find(node => props(node)?.className === "session-tree__folder-actions")!;
+  expect(allNodes(toolbar).filter(node => node.tagName === "BUTTON")).toHaveLength(1);
+  const toggle = allNodes(toolbar).find(node => node.tagName === "BUTTON")!;
+  await act(async () => props(toggle).onKeyDown({ key: "ArrowDown", preventDefault() {} }));
+  expect(props(row(folder.id)).className).toContain("is-menu-open");
+  expect(props(toggle).title).toBeUndefined();
+  const menu = allNodes(host).find(node => props(node)?.role === "menu")!;
+  const pointer = { stopPropagation: vi.fn() };
+  props(menu).onPointerDown(pointer); expect(pointer.stopPropagation).toHaveBeenCalledOnce();
+  const item = allNodes(host).find(node => props(node)?.role === "menuitem" && node.textContent === label)!;
+  expect(item).toBeDefined();
+  await act(async () => props(item).onClick());
+  expect(actions[action]).toHaveBeenCalledWith(action === "onCreateFolder" ? folder.id : folder);
+  expect(allNodes(host).some(node => props(node)?.role === "menu")).toBe(false);
+  expect(props(row(folder.id)).className).not.toContain("is-menu-open");
+  expect(actions.onMove).not.toHaveBeenCalled();
 });

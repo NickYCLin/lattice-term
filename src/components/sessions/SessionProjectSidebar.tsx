@@ -33,7 +33,6 @@ import {
   AgentIcon,
   ChevronDownIcon,
   CloseIcon,
-  EditIcon,
   ExportIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -778,7 +777,7 @@ export function SessionProjectSidebar({
         <div
           className={`session-tree__folder-row${
             dropClass(folder.id)
-          }${draggedNodeId === folder.id ? " is-dragging" : ""}`}
+          }${draggedNodeId === folder.id ? " is-dragging" : ""}${menuFolderId === folder.id ? " is-menu-open" : ""}`}
           style={treeStyle(depth)}
           data-tree-node={folder.id}
           aria-grabbed={draggedNodeId === folder.id}
@@ -807,37 +806,9 @@ export function SessionProjectSidebar({
             <ChevronDownIcon size={12} className={collapsed ? "is-collapsed" : undefined} />
           </button>
           <div className="session-tree__folder-actions">
-            <SessionFolderOrderMenu folder={folder} layout={layout} onMove={onMove} onMoved={() => setFocusFolderId(folder.id)} onOpenChange={open => setMenuFolderId(open ? folder.id : null)} />
-            <button
-              type="button"
-              className="icon-button icon-button--sm"
-              onClick={() => onCreateFolder(folder.id)}
-              aria-label={t("terminal.projects.addSubfolder")}
-              title={t("terminal.projects.addSubfolder")}
-              data-tree-action="true"
-            >
-              <PlusIcon size={11} />
-            </button>
-            <button
-              type="button"
-              className="icon-button icon-button--sm"
-              onClick={() => onRenameFolder(folder)}
-              aria-label={t("terminal.projects.folderRename")}
-              title={t("terminal.projects.folderRename")}
-              data-tree-action="true"
-            >
-              <EditIcon size={11} />
-            </button>
-            <button
-              type="button"
-              className="icon-button icon-button--sm icon-button--danger"
-              onClick={() => onDeleteFolder(folder)}
-              aria-label={t("terminal.projects.folderDelete")}
-              title={t("terminal.projects.folderDelete")}
-              data-tree-action="true"
-            >
-              <TrashIcon size={11} />
-            </button>
+            <SessionFolderOrderMenu folder={folder} layout={layout} onMove={onMove}
+              onCreate={() => onCreateFolder(folder.id)} onRename={() => onRenameFolder(folder)} onDelete={() => onDeleteFolder(folder)}
+              onMoved={() => setFocusFolderId(folder.id)} onOpenChange={open => setMenuFolderId(current => open ? folder.id : current === folder.id ? null : current)} />
           </div>
         </div>
         {expanded && (

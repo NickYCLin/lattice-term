@@ -1114,6 +1114,7 @@ export const zhTW = {
   "terminal.projects.folderDelete": "刪除資料夾",
   "terminal.projects.folderDeleteTitle": "刪除「{name}」？",
   "terminal.projects.moveToParent": "將「{name}」移到上一層",
+  "terminal.projects.folderActions": "「{name}」的資料夾操作",
   "terminal.projects.folderOrder": "調整「{name}」的順序",
   "terminal.projects.folderDeleteBody": "此資料夾會從對話與工作階段兩邊移除；內容會移到上一層，不會刪除對話或停止工作階段。",
   "terminal.projects.folderDeleteAction": "刪除資料夾",

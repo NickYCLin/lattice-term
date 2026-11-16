@@ -5,8 +5,11 @@ import { useI18n } from "../../i18n/context";
 import { MoreIcon } from "../icons";
 import { handleMenuNavigation } from "../overlays/menuNavigation";
 
-export function SessionFolderOrderMenu({ folder, layout, onMove, onMoved, onOpenChange }: {
+export function SessionFolderOrderMenu({ folder, layout, onMove, onMoved, onOpenChange, onCreate, onRename, onDelete }: {
   folder: SessionSidebarFolder; layout: SessionSidebarLayout;
+  onCreate?: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
   onMoved?: () => void;
   onOpenChange?: (open: boolean) => void;
   onMove: (nodeId: string, parentId: string | null, beforeNodeId?: string | null) => void;
@@ -21,7 +24,7 @@ export function SessionFolderOrderMenu({ folder, layout, onMove, onMoved, onOpen
   function show() { setOpen(true); onOpenChange?.(true); }
   function place() {
     const bounds = anchor.current?.getBoundingClientRect();
-    if (bounds) setPosition({ left: Math.max(8, Math.min(bounds.left, window.innerWidth - 248)), top: Math.max(8, Math.min(bounds.bottom + 4, window.innerHeight - 128)) });
+    if (bounds) setPosition({ left: Math.max(8, Math.min(bounds.left, window.innerWidth - 248)), top: Math.max(8, Math.min(bounds.bottom + 4, window.innerHeight - (menu.current?.getBoundingClientRect().height ?? 256) - 8)) });
   }
   useLayoutEffect(() => {
     if (!open) return;
@@ -41,13 +44,13 @@ export function SessionFolderOrderMenu({ folder, layout, onMove, onMoved, onOpen
     return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
   }, [open]);
   return <><button type="button" className="icon-button icon-button--sm" data-tree-action="true"
-    ref={anchor} aria-label={t("terminal.projects.folderOrder", { name: folder.name })}
+    ref={anchor} aria-label={t("terminal.projects.folderActions", { name: folder.name })}
     aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
     onClick={() => { if (open) close(); else show(); }} onKeyDown={event => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); show(); }
     }}><MoreIcon size={11} /></button>
-    {open && createPortal(<div id={id} ref={menu} role="menu" tabIndex={-1} aria-label={t("terminal.projects.folderOrder", { name: folder.name })}
-      className="session-tree__order-menu" style={position} onKeyDown={event => handleMenuNavigation(event, () => close())}>
+    {open && createPortal(<div id={id} ref={menu} role="menu" tabIndex={-1} aria-label={t("terminal.projects.folderActions", { name: folder.name })}
+      className="session-tree__order-menu" data-tree-action="true" onPointerDown={event => event.stopPropagation()} style={position} onKeyDown={event => handleMenuNavigation(event, () => close())}>
       {(["up", "down", "parent"] as const).map(direction => {
         const placement = direction === "parent" ? sessionSidebarParentPlacement(layout, folder.id) : sessionSidebarStepPlacement(layout, folder.id, direction);
         return <button type="button" role="menuitem" className="button button--ghost button--sm" key={direction} disabled={!placement}
@@ -55,6 +58,9 @@ export function SessionFolderOrderMenu({ folder, layout, onMove, onMoved, onOpen
           {t(direction === "parent" ? "terminal.projects.moveToParent" : direction === "up" ? "agents.workspace.moveUp" : "agents.workspace.moveDown", { name: folder.name })}
         </button>;
       })}
+      {([{ key: "terminal.projects.addSubfolder", action: onCreate }, { key: "terminal.projects.folderRename", action: onRename }, { key: "terminal.projects.folderDelete", action: onDelete }] as const).map(({ key, action }) => action && <button
+        key={key} type="button" role="menuitem" className={`button button--ghost button--sm${key === "terminal.projects.folderDelete" ? " button--danger" : ""}`}
+        onClick={() => { close(false); action(); }}>{t(key)}</button>)}
     </div>, document.body)}
   </>;
 }

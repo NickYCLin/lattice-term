@@ -2065,23 +2065,22 @@
 }
 
 .session-tree__folder-actions {
-  position: static;
+  display: none;
   flex: 0 0 auto;
   order: 1;
-  display: flex;
-  padding: 0.1rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease);
+  align-items: center;
 }
 .session-tree__folder-row > .session-tree__branch-toggle { order: 2; }
 .session-tree__folder-row:hover .session-tree__folder-actions,
-.session-tree__folder-actions:focus-within {
-  opacity: 1;
-  pointer-events: auto;
+.session-tree__folder-row:focus-within .session-tree__folder-actions,
+.session-tree__folder-row.is-menu-open .session-tree__folder-actions {
+  display: flex;
 }
+/* No hover on touch screens: keep one compact menu button, rather than four tools. */
+@media (hover: none) {
+  .session-tree__folder-actions { display: flex; }
+}
+.app--mobile .session-tree__folder-actions { display: flex; }
 
 .session-tree__project-actions {
   display: flex;
@@ -3379,5 +3378,5 @@
 .session-tree :is(.is-drop-before, .is-drop-after)::after { content: ""; position: absolute; inset-inline: var(--space-1); height: 2px; background: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); pointer-events: none; z-index: 1; }
 .session-tree .is-drop-before::after { top: -1px; }
 .session-tree .is-drop-after::after { bottom: -1px; }
-.session-tree__order-menu { position: fixed; z-index: var(--z-menu, 1000); display: grid; gap: var(--space-1); width: 15rem; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-solid); box-shadow: var(--shadow-2); }
+.session-tree__order-menu { max-height: calc(100dvh - 16px); overflow-y: auto; position: fixed; z-index: var(--z-menu, 1000); display: grid; gap: var(--space-1); width: 15rem; padding: var(--space-2); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-solid); box-shadow: var(--shadow-2); }
 .session-tree__order-menu .button { width: 100%; text-align: start; }

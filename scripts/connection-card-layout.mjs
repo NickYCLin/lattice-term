@@ -59,8 +59,8 @@ try {
     });
   });
   markup = renderToStaticMarkup(createElement(I18nProvider, { locale: "zh-TW" }, createElement("ul", { className: "connection-grid" }, cards)));
-  // Shared sidebar CSS fixture: action buttons must reserve space even while hidden.
-  markup += `<div class="session-tree" style="width:min(18rem,100%)">${[0, 2].map(depth => `<div class="session-tree__folder-row" style="--session-tree-depth:${depth}"><button class="session-tree__folder-select"><span class="truncate">Synthetic long folder name for overlap verification</span></button><button class="session-tree__branch-toggle icon-button icon-button--sm" aria-label="Toggle">⌄</button><div class="session-tree__folder-actions">${["Order", "Add", "Rename", "Delete"].map(label => `<button class="icon-button icon-button--sm" aria-label="${label}">⋯</button>`).join("")}</div></div>`).join("")}</div>`;
+  // Shared sidebar CSS fixture: one compact action button is revealed by name focus.
+  markup += `<div class="session-tree" style="width:min(18rem,100%)">${[0, 2].map(depth => `<div class="session-tree__folder-row" style="--session-tree-depth:${depth}"><button class="session-tree__folder-select"><span class="truncate">Synthetic long folder name for overlap verification</span></button><button class="session-tree__branch-toggle icon-button icon-button--sm" aria-label="Toggle">⌄</button><div class="session-tree__folder-actions">${["Actions"].map(label => `<button class="icon-button icon-button--sm" aria-label="${label}">⋯</button>`).join("")}</div></div>`).join("")}</div>`;
   await server.listen();
   browser = spawn(chrome, [...(process.env.CHROMIUM_NO_SANDBOX === "1" ? ["--no-sandbox"] : []), "--disable-background-networking", "--disable-extensions", "--headless", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", `--user-data-dir=${work}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   const endpoint = await new Promise((resolve, reject) => {
@@ -94,7 +94,8 @@ try {
       const folderRows = [...document.querySelectorAll('.session-tree__folder-row')].map(row => {
         const name = row.querySelector('.session-tree__folder-select').getBoundingClientRect();
         const actions = row.querySelector('.session-tree__folder-actions');
-        return { overlap:name.right > actions.getBoundingClientRect().left + 0.75, reserved:getComputedStyle(actions).position === 'static', hiddenWithNameFocus:Number(getComputedStyle(actions).opacity) === 0 };
+        const shown = getComputedStyle(actions).display !== 'none';
+        return { overlap:shown && name.right > actions.getBoundingClientRect().left + 0.75, compact:actions.querySelectorAll('button').length === 1, collapsedOrVisible:shown || actions.getBoundingClientRect().width === 0 };
       });
       const boxes = [...document.querySelectorAll('.connection-card')].map(card => {
         const rect = card.getBoundingClientRect(), action = card.querySelector('.connection-card__primary').getBoundingClientRect(), footer = card.querySelector('.connection-card__footer').getBoundingClientRect();
@@ -113,7 +114,7 @@ try {
     })()`);
     const groups = Map.groupBy(result.boxes, box => Math.round(box.top));
     const near = values => Math.max(...values) - Math.min(...values) <= 0.75;
-    if (result.folderRows.some(row => row.overlap || !row.reserved || !row.hiddenWithNameFocus) || result.overflow || result.boxes.some(box => box.overflow || !box.jumpAligned) || [...groups.values()].some(row =>
+    if (result.folderRows.some(row => row.overlap || !row.compact || !row.collapsedOrVisible) || result.overflow || result.boxes.some(box => box.overflow || !box.jumpAligned) || [...groups.values()].some(row =>
       ["height", "action", "footer", "first", "start", "favoriteRight"].some(key => !near(row.map(box => box[key])))
         || !near(row.flatMap(box => box.buttonHeights)))) {
       throw new Error(`Misalignment: ${JSON.stringify({ mobile, theme, density, width, scale, result })}`);
