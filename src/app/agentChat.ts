@@ -1,4 +1,4 @@
-import { maskNativeValue, type NativeRecord } from "./nativeRecords";
+import { maskNativeText, maskNativeValue, type NativeRecord } from "./nativeRecords";
 import { currentRuntimeStatus, runtimeIdentity, validGoal, validPlanSteps, type ContextUsage, type GoalState, type PlanStep, type RateLimitWindow, type RuntimeStatus } from "./chatRuntimeStatus";
 /**
  * Chat threads with an agent CLI: the data model, the rule that folds the
@@ -287,7 +287,7 @@ export type ChatItem =
 /** A bounded, explicitly selected transcript passed to a different CLI. */
 export interface ChatHandoff {
   /** The CLI that produced the source messages; never a native session id. */
-  sourceDefinitionId: ChatDefinitionId;
+  sourceDefinitionId: ChatDefinitionId | "qwen" | "copilot" | "grok" | "kimi" | "opencode";
   /** User and final-text messages only: no tool input/output or reasoning. */
   transcript: string;
 }
@@ -699,7 +699,7 @@ export function createThread(
     ChatThread,
     "definitionId" | "workingDirectory" | "permission" | "model"
   > &
-    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId" | "effort" | "planMode">>,
+    Partial<Pick<ChatThread, "title" | "automationId" | "browserEnabled" | "provider" | "proxyId" | "accountProfileId" | "effort" | "planMode" | "handoff">>,
   id: string = crypto.randomUUID(),
   now: number = Date.now(),
 ): ChatThread {
@@ -720,7 +720,7 @@ export function createThread(
     effort: settings.effort ?? null,
     nativeSessionId: null,
     reportedModel: null,
-    handoff: null,
+    handoff: settings.handoff ? {sourceDefinitionId:settings.handoff.sourceDefinitionId, transcript:Array.from(maskNativeText(settings.handoff.transcript)).slice(-12_000).join("")} : null,
     items: [],
     createdAt: now,
     updatedAt: now,
@@ -1194,11 +1194,12 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
         (thread.handoff.sourceDefinitionId === "claude" ||
           thread.handoff.sourceDefinitionId === "codex" ||
           thread.handoff.sourceDefinitionId === "gemini" ||
-          thread.handoff.sourceDefinitionId === "antigravity") &&
+          thread.handoff.sourceDefinitionId === "antigravity" ||
+          thread.handoff.sourceDefinitionId === "qwen" || thread.handoff.sourceDefinitionId === "copilot" || thread.handoff.sourceDefinitionId === "grok" || thread.handoff.sourceDefinitionId === "kimi" || thread.handoff.sourceDefinitionId === "opencode") &&
         typeof thread.handoff.transcript === "string"
           ? {
               sourceDefinitionId: thread.handoff.sourceDefinitionId,
-              transcript: thread.handoff.transcript,
+              transcript: maskNativeText(thread.handoff.transcript),
             }
           : null,
       nativeForkSource: thread.definitionId === "claude" && thread.nativeForkSource && /^[a-zA-Z0-9_-]{1,256}$/.test(thread.nativeForkSource.sessionId)

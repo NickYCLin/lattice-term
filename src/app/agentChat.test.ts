@@ -512,3 +512,16 @@ describe("helpers", () => {
     expect(formatTokens(2_500_000)).toBe("2.5M");
   });
 });
+
+it("keeps additional CLI references masked and bounded when creating and restoring a new handoff",()=>{
+  for(const sourceDefinitionId of ["qwen","copilot","grok","kimi","opencode"] as const){
+    const reference=createThread({definitionId:"codex",workingDirectory:"/synthetic",permission:defaultPermission("codex"),model:"",handoff:{sourceDefinitionId,transcript:"ordinary reference ".repeat(3000)+" token=FAKE_TOKEN"}});
+    expect(reference.nativeSessionId).toBeNull();expect(reference.items).toEqual([]);
+    expect(reference.handoff?.sourceDefinitionId).toBe(sourceDefinitionId);
+    expect(reference.handoff?.transcript).toContain("REDACTED");expect(reference.handoff?.transcript).not.toContain("FAKE_TOKEN");
+    expect(new TextEncoder().encode(reference.handoff!.transcript).length).toBeLessThanOrEqual(48*1024);
+    const [restored]=loadStoredThreads({getItem:()=>JSON.stringify([reference])});
+    expect(restored.handoff).toEqual(reference.handoff);
+    expect(promptForTurn(restored,"current request")).toContain("untrusted reference");
+  }
+});

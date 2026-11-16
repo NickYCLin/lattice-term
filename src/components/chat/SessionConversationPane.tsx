@@ -120,7 +120,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
   useEffect(() => {
     acknowledge();
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
-  const supported = session.definitionId === "codex" || session.definitionId === "claude" || session.definitionId === "gemini";
+  const supported = ["codex", "claude", "gemini", "qwen", "copilot", "grok", "kimi", "opencode"].includes(session.definitionId);
   const controls = useSessionConversationActions({ session, agents, messages: conversation.messages,
     busy: working || attention || nativePending || forkWorking || Boolean(session.closedReason), nativeTools: conversation.nativeTools === true,
     onCompose: setDraft, onNotice: setNotice, onOpen: onSessionReplaced,
@@ -236,7 +236,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
     } catch (reason) { setNotice(String(reason)); }
   }
   const assistance = useComposerAssistance({ draft, onText: setDraft, inputRef,
-    workingDirectory: session.workingDirectory, filesEnabled: supported, onFile: () => true,
+    workingDirectory: session.workingDirectory, filesEnabled: ["codex", "claude", "gemini"].includes(session.definitionId), onFile: () => true,
     commands: { model: () => setModelOpenRequest(value => value + 1), status: () => setStatusOpen(true),
       ...(!blocked && !nativePending && !working && !attention && queuedCount === 0 && session.definitionId === "codex" && session.capturedSessionId && !session.detached
         ? { plan: () => { void nativeCommand("plan"); }, review: () => { void nativeCommand("review"); }, compact: () => { void nativeCommand("compact"); } } : {}),

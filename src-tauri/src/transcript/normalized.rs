@@ -642,11 +642,13 @@ impl Parser<'_> {
                     self.plain(id, role, text.into());
                 }
             }
+            kind if super::additional::supported(kind) => {}
             TranscriptKind::Cursor => {
                 if let Some((role, text)) = super::cursor_turn(row) {
                     self.plain(id, role, text);
                 }
             }
+            _ => {}
         }
     }
 }
@@ -765,7 +767,10 @@ pub fn recent(
     kind: TranscriptKind,
 ) -> Result<super::LocalConversationSnapshot, String> {
     let mut parser = parser(path, None, u64::MAX, false);
-    if kind != TranscriptKind::Gemini && !path.extension().is_some_and(|ext| ext == "zst") {
+    if !super::additional::supported(kind)
+        && kind != TranscriptKind::Gemini
+        && !path.extension().is_some_and(|ext| ext == "zst")
+    {
         let length = fingerprint(path)?.0;
         if length > super::MAX_TRANSCRIPT_FILE_BYTES {
             parser
@@ -773,7 +778,11 @@ pub fn recent(
                 .prime_prefix(path, length - super::MAX_TRANSCRIPT_TAIL_BYTES)?;
         }
     }
-    let skipped = if kind == TranscriptKind::Gemini {
+    let skipped = if super::additional::supported(kind) {
+        super::additional::rows(path, kind, |row, index| {
+            parser.row(row, TranscriptKind::Claude, index)
+        })?
+    } else if kind == TranscriptKind::Gemini {
         gemini_rows(path, |row, index| parser.row(row, kind, index))?
     } else {
         stream_mode(path, true, |row, index| parser.row(row, kind, index))?
@@ -978,7 +987,8 @@ fn gemini_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, 
     Ok(false)
 }
 fn fingerprint(path: &Path) -> Result<(u64, String), String> {
-    let file = open_regular_transcript_handle(path).ok_or("Transcript unavailable.")?;
+    let file = open_regular_transcript_handle(super::additional::physical(path))
+        .ok_or("Transcript unavailable.")?;
     let meta = file.metadata().map_err(|_| "Transcript unavailable.")?;
     Ok((
         meta.len(),
@@ -1017,7 +1027,11 @@ pub fn page(
         request: image_request,
         image: None,
     };
-    let skipped = if kind == TranscriptKind::Gemini {
+    let skipped = if super::additional::supported(kind) {
+        super::additional::rows(path, kind, |row, index| {
+            parser.row(row, TranscriptKind::Claude, index)
+        })?
+    } else if kind == TranscriptKind::Gemini {
         gemini_rows(path, |row, index| parser.row(row, kind, index))?
     } else {
         stream_rows(path, |row, index| parser.row(row, kind, index))?

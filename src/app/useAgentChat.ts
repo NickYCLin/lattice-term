@@ -116,6 +116,7 @@ export interface ChatThreadSettings {
 }
 
 export interface ChatThreadCreation extends ChatThreadSettings {
+  handoff?: ChatThread["handoff"];
   title?: string;
   automationId?: string;
   /** False keeps the current thread in front, for runs started by a schedule. */

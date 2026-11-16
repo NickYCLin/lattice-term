@@ -1,3 +1,8 @@
+import { agentDisplayName } from "../../app/agentNames";
+import type { ChatDefinitionId } from "../../app/agentChat";
+import { createPortal } from "react-dom";
+import { useModalFocus } from "../overlays/modalFocus";
+import { CloseIcon } from "../icons";
 import {
   useContext,
   useEffect,
@@ -260,7 +265,13 @@ export function NativeHistoryReader({
       setPages((old) => (before ? [page, ...old] : [page]).slice(0, 6));
     } catch (reason) {
       if (ticket === generation.current)
-        setError(maskNativeText(String(reason)));
+        setError(
+          String(reason) === "native.unsupportedFormat"
+            ? t("native.unsupportedFormat")
+            : String(reason) === "native.databaseBusy"
+              ? t("native.databaseBusy")
+              : maskNativeText(String(reason)),
+        );
     } finally {
       if (ticket === generation.current) {
         setBusy(false);
@@ -379,5 +390,74 @@ export function NativeHistoryAccess({
         <NativeHistoryReader threadId={threadId} directory={directory} />
       )}
     </details>
+  );
+}
+
+/** Read-only sources use a full-size surface, without offering a composer. */
+export function NativeHistoryDialog({
+  title,
+  threadId,
+  directory,
+  onClose,
+  targets = [],
+  onHandoff,
+}: {
+  targets?: readonly ChatDefinitionId[];
+  onHandoff?: (definitionId: ChatDefinitionId) => void;
+  title: string;
+  threadId: string;
+  directory: string;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus({ dialogRef, onEscape: onClose });
+  return createPortal(
+    <div
+      className="scrim scrim--center native-history-dialog"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        className="native-history-dialog__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+      >
+        <header>
+          <div>
+            <h2>{title}</h2>
+            <p>{t("native.readOnly")}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t("common.close")}
+            onClick={onClose}
+          >
+            <CloseIcon />
+          </button>
+        </header>
+        {onHandoff && (
+          <div className="native-history-dialog__handoff">
+            {targets.map((target) => (
+              <button
+                className="button button--ghost button--sm"
+                key={target}
+                type="button"
+                onClick={() => onHandoff(target)}
+              >
+                {t("native.handoff", { assistant: agentDisplayName(target) })}
+              </button>
+            ))}
+          </div>
+        )}
+        <NativeHistoryReader threadId={threadId} directory={directory} />
+      </div>
+    </div>,
+    document.body,
   );
 }

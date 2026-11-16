@@ -370,3 +370,38 @@ it("revalidates a cached thumbnail on lightbox open and distinguishes deleted fr
     expect(container.textContent).toContain("這張圖片不屬於此對話可預覽的附件。");
   } finally { await act(async () => root.unmount()); }
 });
+
+it.each(["qwen", "copilot", "grok", "kimi", "opencode"] as const)("opens %s as normalized read-only history without resuming a CLI", async definitionId => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const entry: LocalConversation = { definitionId, profileId: null, nativeSessionId: "synthetic-native", title: `${definitionId} fixture`, workingDirectory: "/synthetic/project", resumable: false, updatedAt: 1 };
+  const history = { entries: [entry], profiles: [], profileKey: "[]" } as unknown as NativeHistory;
+  invoke.mockImplementation(command => command === "agent_chat_local_history_snapshot"
+    ? Promise.resolve({ messages: [{ role: "user", text: "synthetic question" }], truncated: false })
+    : Promise.resolve({ turns: [{ id: "turn", items: [{ id: "record-1", turnId: "turn", kind: "assistant", text: "normalized answer", isError: false, unreadable: false }] }], previousCursor: null, truncated: false, warnings: [] }));
+  const chat = fakeChatApi();
+  try {
+    await act(async () => root.render(<NativeHistoryContext.Provider value={history}><I18nProvider locale="zh-TW"><NativeConversationRows chat={chat} projectFilter={null} onOpened={() => {}} /></I18nProvider></NativeHistoryContext.Provider>));
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(chat.importNativeConversation).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("唯讀原生紀錄");
+    expect(container.textContent).toContain("normalized answer");
+    expect(invoke).toHaveBeenCalledWith("native_conversation_page", expect.objectContaining({ conversation: { definitionId, nativeSessionId: entry.nativeSessionId, profileConfigPath: null } }));
+    await act(async()=>onClick(allNodes(container).find(node=>node.tagName==="BUTTON"&&node.textContent.includes("交接到"))!)());
+    expect(chat.createThread).toHaveBeenCalledWith(expect.objectContaining({definitionId:"claude",handoff:{sourceDefinitionId:definitionId,transcript:"user: synthetic question"}}));
+    expect(chat.send).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("explains unsupported journal versions instead of guessing a conversation", async () => {
+  const container = installHostDom(); const root = createRoot(container as unknown as Element);
+  const entry: LocalConversation = { definitionId: "qwen", profileId: null, nativeSessionId: "future", title: "Future format", workingDirectory: "/synthetic", resumable: false, updatedAt: 1 };
+  const history = { entries: [entry], profiles: [], profileKey: "[]" } as unknown as NativeHistory;
+  invoke.mockRejectedValue("native.unsupportedFormat"); const chat = fakeChatApi();
+  try {
+    await act(async () => root.render(<NativeHistoryContext.Provider value={history}><I18nProvider locale="zh-TW"><NativeConversationRows chat={chat} projectFilter={null} onOpened={() => {}} /></I18nProvider></NativeHistoryContext.Provider>));
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(container.textContent).toContain("此版本格式尚未支援");
+    expect(chat.importNativeConversation).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});

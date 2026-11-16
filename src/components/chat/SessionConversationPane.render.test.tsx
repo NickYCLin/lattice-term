@@ -18,6 +18,12 @@ function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
 }
 
 describe("SessionConversationPane composer", () => {
+  it.each(["qwen", "copilot", "grok", "kimi", "opencode"])("recognizes %s journal reading without claiming resume support", definitionId => {
+    const html=render({definitionId,capturedSessionId:"synthetic-native"});
+    expect(html).not.toContain("此助理尚未支援顯示對話紀錄");
+    expect(html).toContain("完整紀錄／載入更早內容");
+  });
+
   it("shows a custom display name without replacing the actual model or CLI metadata", () => {
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><SessionConversationPane
       session={fakeSession({ label: "Codex", model: "gpt-6-mini" })} displayName="每日工作摘要" accountLabel="測試帳號"

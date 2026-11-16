@@ -50,7 +50,9 @@ appServer 來源須由讀取端明確納入。共用目錄不代表每個 Deskto
 
 目前讀取 Codex、Claude Code、Gemini CLI 與 Google Antigravity CLI 的
 本機紀錄；Cursor 另提供唯讀歷史預覽，不支援從該預覽直接續聊。
-Copilot、Qwen、OpenCode、Grok 等 CLI 尚未解析，不會出現在清單中；
+Qwen Code、Copilot CLI、xAI Grok Build、Kimi CLI 與 OpenCode 已加入唯讀
+清單、預覽與交接；尚未驗證 resume，因此不自動續聊。Hermes 等其他來源
+仍未解析；
 雲端上的 ChatGPT、Claude 網頁對話也不在本機紀錄內。
 
 歷史同步不是原生介面重播：三種主要來源共用正規化紀錄模型，
@@ -89,6 +91,11 @@ Codex 與 Claude 的對話身分以紀錄開頭的有限資料核對，不因整
 | Codex | 支援 | function/custom call，依 ID 配對 | 僅公開 summary，密文不送出 | 保存的 image/data URL 或安全路徑 | apply_patch、turn_diff | JSONL／JSONL.zst 往前分頁 |
 | Claude Code | 支援 | tool_use/tool_result 配對，受限讀取 persisted output | thinking 預設收合；redacted/signature-only 顯示不可讀 | user/tool_result 的 base64 或安全路徑 | Edit／Write／MultiEdit 的紀錄前後內容 | JSONL 往前分頁，子代理獨立展開 |
 | Gemini CLI | 支援 JSON／JSONL | toolCalls 與 functionCall/Response；保留錯誤 | thoughts／thought parts 預設收合 | inlineData 或安全路徑 | replace／write_file 等紀錄內容 | JSON messages 串流／JSONL 事件重播後分頁；子代理獨立展開 |
+| Qwen Code | 支援 | functionCall／functionResponse 配對 | thought parts | 未擴充專屬圖片格式 | replace／write_file 等紀錄內容 | JSONL 向前分頁，唯讀 |
+| GitHub Copilot CLI | 支援 | tool.execution_start／complete 配對 | assistant.reasoning／reasoningText | 未擴充專屬圖片格式 | edit 的 old_str／new_str | events.jsonl 向前分頁，唯讀 |
+| xAI Grok Build | 支援 | OpenAI 格式 tool_calls／tool 回傳 | reasoning_content | 僅共用模型可辨識的圖片 block | 已知檔案工具參數 | chat_history.jsonl 向前分頁，唯讀 |
+| Kimi CLI／Kimi Code | 支援 | ToolCall＋參數片段＋ToolResult；新 context message | think parts | 未擴充專屬圖片格式 | StrReplaceFile／WriteFile 已記錄的參數 | wire.jsonl 向前分頁，唯讀 |
+| OpenCode | 支援 | v1／v2 tool part 與 state 配對 | reasoning part | 未讀取 blob 或專屬媒體儲存 | 已知檔案工具參數 | SQLite 串流列／向前分頁，唯讀 |
 | Antigravity | 支援 | 尚無 | 尚無 | 尚無 | 尚無 | 共用文字分頁 |
 | Cursor | 支援，唯讀 | 尚無 | 尚無 | 尚無 | 尚無 | 共用文字分頁 |
 
@@ -152,6 +159,84 @@ commit `4ed06ed0ddc523a6d356a4ad35ddfea331041888`（套件版本
 - [Gemini 記錄服務](https://github.com/google-gemini/gemini-cli/blob/4ed06ed0ddc523a6d356a4ad35ddfea331041888/packages/core/src/services/chatRecordingService.ts)
   與 [project registry](https://github.com/google-gemini/gemini-cli/blob/4ed06ed0ddc523a6d356a4ad35ddfea331041888/packages/core/src/config/projectRegistry.ts)：完整 parent ID 子目錄、projects.json 映射。
 - [Codex 0.169 協定](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/protocol/src/protocol.rs)：response item、工具與公開 reasoning summary。
+
+## 新增唯讀來源（任務 33）
+
+新增來源使用同一套 `NormalizedTurn`／`NormalizedItem`，沒有第二套前端
+訊息格式。對話清單沿用「CLI 類型＋帳號設定 ID／目錄＋原生 session ID」
+身分，不以標題合併；同 ID 出現在同一帳號不同位置而無法唯一對應時，
+拒絕猜選另一份紀錄。專案依來源的 cwd／workDir 分組，資料夾消失仍可閱讀。
+
+點擊新增來源會開啟有焦點鎖定的唯讀對話框，沒有發送或 resume 控制；
+Esc、關閉按鈕或遮罩可關閉並返回觸發點。工具、推理、diff 與「載入更早
+內容」共用任務 32 元件及容量上限。預覽內可按「交接到其他助理（新對話）」；使用開啟時的近期純文字
+快照建立有界、遮罩後的參考，等使用者輸入需求才送出。原生工作階段
+換 CLI 的交接匯出也已接上；不重播工具、不還原審批，不啟動來源 CLI。
+新增來源均未以實際 CLI 驗證 resume，因此 `resumable` 固定為 false。
+
+| 來源 | 允許的歷史範圍 | 身分／版本核對 |
+| --- | --- | --- |
+| Qwen | `$QWEN_RUNTIME_DIR` → `$QWEN_HOME` → `~/.qwen` 下的 `projects/*/chats/*.jsonl`；也檢查舊 `tmp/*/chats` | sessionId、cwd、0.14／0.22／0.27 版本家族及已知 message.parts；不讀 `.runtime.json` |
+| Copilot | `$COPILOT_HOME` 或 `~/.copilot` 下 `session-state/<id>/events.jsonl` | session.start 的 sessionId 須等於目錄名、context.cwd、journal schema version 1；不讀 session-store.db |
+| xAI Grok Build | `$GROK_HOME` 或 `~/.grok` 下 `sessions/<group>/<id>/chat_history.jsonl`，同層 summary.json 只取 info.cwd | 固定路徑與 OpenAI role/content/tool_calls 結構；不把目錄解碼結果猜成 cwd |
+| Kimi | `$KIMI_CODE_HOME`，否則優先 `~/.kimi-code`、不存在再用 `~/.kimi`；固定 `sessions/<bucket>/<id>/agents/main/wire.jsonl` 或 Python 舊版 `<id>/wire.jsonl` | state.json 的 workDir／cwd，或 session_index.jsonl 的 workDir；Python kimi.json 僅讀 work_dirs 索引並核對 bucket 的 MD5；wire 1.1～1.10 已知事件結構 |
+| OpenCode | `$OPENCODE_DB`，否則 `$XDG_DATA_HOME/opencode/opencode.db` 或 `~/.local/share/opencode/opencode.db` | v1 的 session/message/part；v2 的 session_v2/session_message/session_part；固定查詢與結構檢查，不執行 migration |
+
+帳號設定明確提供的絕對目錄優先於預設環境位置；不借用另一個帳號或
+預設來源補讀。若兩份 Kimi 預設目錄都存在，預設只選新版 `.kimi-code`；
+可用明確設定目錄或 KIMI_CODE_HOME 選舊版，避免把兩個帳號暗中合併。
+掃描僅進入上述已知歷史子目錄，不遞迴設定根目錄的其他插件／快取。
+子代理不列成主對話：Qwen sidechain 與 Copilot agentId 事件略過，Kimi
+只讀 main（不跟隨 SubagentEvent），OpenCode 清單排除 parent_id 非空項目。
+這批沒有新增子代理的獨立瀏覽入口。
+
+未知版本／結構顯示「此版本格式尚未支援」。Qwen 的 managed journal
+包裝及 rewind、新 Kimi 尚未辨識的 context mutation 會拒絕這次快照，
+不把已回退內容猜成目前主線。超大或不完整 JSONL 行會提示截斷；
+空 session 不列出。SQLite 的單個 JSON 欄位在 SQL 投影前限 24 MiB，
+超限跳過並提示；資料庫檔案上限 2 GiB，不載入整個資料庫或 blob 到記憶體。
+
+### SQLite 與產品界線
+
+OpenCode 以 `mode=ro&immutable=1`、`SQLITE_OPEN_READ_ONLY` 開啟，查詢
+設為 query_only；不執行 CLI、不載入 migration、不取得寫鎖、不建立
+資料庫、journal 或 SHM。讀取前後沿用來源 fingerprint，變更時拒絕舊
+游標。若存在非空 `-wal`，拒絕讀取並提示先正常關閉原 CLI，使其完成
+checkpoint；不自行 checkpoint、改寫 WAL、取得控制權或假裝最新資料
+已在主檔。這表示正在使用 WAL 的 OpenCode 暫不能從此入口預覽。
+
+這裡的 Grok 是 **xAI Grok Build**。專案既有安裝命令指向
+`superagent-ai/grok-cli`，官方該專案 1.1.7 用 `~/.grok/grok.db`，
+與 xAI 的 chat_history.jsonl 是不同產品。本次沒有更換安裝來源，也
+不把 grok.db 猜成 xAI 歷史；該產品的資料庫仍未解析。
+
+### 官方依據與實機界線
+
+2026-11-16 本機未安裝 Qwen、Grok、Kimi、OpenCode；Copilot 的版本
+查詢沒有取得可辨識版本輸出。沒有執行登入、生成對話或讀取真實帳號
+紀錄，版本相容性以以下官方固定來源及合成 fixtures 驗證：
+
+- Qwen Code **0.27.4**，commit `27681123f719a241fc3c1f36db97a1ab928f8be7`：
+  [ChatRecord 與紀錄服務](https://github.com/QwenLM/qwen-code/blob/27681123f719a241fc3c1f36db97a1ab928f8be7/packages/core/src/services/chatRecordingService.ts)、
+  [storage](https://github.com/QwenLM/qwen-code/blob/27681123f719a241fc3c1f36db97a1ab928f8be7/packages/core/src/config/storage.ts)；
+  另核對官方 [v0.14.3](https://github.com/QwenLM/qwen-code/blob/v0.14.3/packages/core/src/services/chatRecordingService.ts)
+  與 [v0.22.3](https://github.com/QwenLM/qwen-code/blob/v0.22.3/packages/core/src/services/chatRecordingService.ts) 的相同核心欄位。
+- GitHub [設定目錄文件](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)
+  與 [SDK event 型別](https://github.com/github/copilot-sdk/blob/cf045793958ce674259c557f7769788f94ee20c9/nodejs/src/generated/session-events.ts)，
+  SDK commit `cf045793958ce674259c557f7769788f94ee20c9`；未宣稱已驗證本機 Copilot CLI 版本。
+- xAI Grok Build commit `2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8` 的
+  [session 文件](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-pager/docs/user-guide/17-sessions.md)。
+  產品差異另核對 [superagent-ai 儲存實作](https://github.com/superagent-ai/grok-cli/blob/fb97af83f06dca873281d60168430f06c8de6324/src/storage/transcript.ts)。
+- Python Kimi CLI **1.52.0**，commit `9ab1286b8fe4e6bcd116949a27ce5e0ac3389c82`：
+  [wire file](https://github.com/MoonshotAI/kimi-cli/blob/9ab1286b8fe4e6bcd116949a27ce5e0ac3389c82/src/kimi_cli/wire/file.py)、
+  [事件型別](https://github.com/MoonshotAI/kimi-cli/blob/9ab1286b8fe4e6bcd116949a27ce5e0ac3389c82/src/kimi_cli/wire/types.py)。
+  新 Kimi Code commit `fec742878d73678082b304c887e4fb1564088c54`：
+  [session 目錄核對](https://github.com/MoonshotAI/kimi-code/blob/fec742878d73678082b304c887e4fb1564088c54/apps/vis/server/src/lib/session-store.ts)、
+  [持久化轉換](https://github.com/MoonshotAI/kimi-code/blob/fec742878d73678082b304c887e4fb1564088c54/packages/agent-core-v2/src/wire/wireService.ts)。
+- OpenCode 官方 [v1.2.0 schema](https://github.com/anomalyco/opencode/blob/v1.2.0/packages/opencode/src/session/session.sql.ts)，
+  及 core **2.3.0** commit `07965844a5f507f7b1010dbf9cab68daf2550fb2` 的
+  [v2 schema](https://github.com/anomalyco/opencode/blob/07965844a5f507f7b1010dbf9cab68daf2550fb2/packages/core/src/session/sql.ts)
+  與 [訊息模型](https://github.com/anomalyco/opencode/blob/07965844a5f507f7b1010dbf9cab68daf2550fb2/packages/schema/src/session-message.ts)。
 
 ## 開機還原與訊息就緒
 

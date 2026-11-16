@@ -51,6 +51,11 @@ pub enum TranscriptKind {
     Cursor,
     /// `~/.gemini/tmp/<project-hash>/chats/session-*.jsonl`
     Gemini,
+    Qwen,
+    Copilot,
+    Grok,
+    Kimi,
+    OpenCode,
 }
 
 impl TranscriptKind {
@@ -61,6 +66,11 @@ impl TranscriptKind {
             "codex" => Some(Self::Codex),
             "cursor" => Some(Self::Cursor),
             "gemini" => Some(Self::Gemini),
+            "qwen" => Some(Self::Qwen),
+            "copilot" => Some(Self::Copilot),
+            "grok" => Some(Self::Grok),
+            "kimi" => Some(Self::Kimi),
+            "opencode" => Some(Self::OpenCode),
             _ => None,
         }
     }
@@ -1026,6 +1036,7 @@ const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 #[path = "transcript/sync_tests.rs"]
 mod sync_tests;
 
+mod additional;
 mod images;
 pub(crate) mod normalized;
 pub(crate) mod redact;
@@ -1061,6 +1072,11 @@ fn history_root_with_archive(
     profile: Option<&Path>,
     archived: bool,
 ) -> Option<PathBuf> {
+    if additional::supported(kind) {
+        return (!archived)
+            .then(|| additional::root(kind, profile))
+            .flatten();
+    }
     if kind == TranscriptKind::Cursor {
         // Cursor has no account profiles and no archive folder.
         if profile.is_some() || archived {
@@ -1103,6 +1119,9 @@ fn history_root_with_archive(
 }
 
 fn history_preview(path: &Path, kind: TranscriptKind) -> Option<String> {
+    if additional::supported(kind) {
+        return additional::preview(path, kind);
+    }
     if kind == TranscriptKind::Cursor {
         return first_line_preview(visible_user_text(&cursor_first_user_text(path)?));
     }
@@ -1305,9 +1324,13 @@ fn scan_local_conversations(
                 TranscriptKind::Gemini if is_gemini_session(&path) => {
                     read_gemini_session_meta(&path)
                 }
+                kind if additional::supported(kind) => additional::metadata(&path, kind),
                 _ => None,
             };
             let Some((id, cwd)) = candidate else { continue };
+            if additional::supported(kind) && !additional::rows_have_user(&path, kind) {
+                continue;
+            }
             if kind == TranscriptKind::Codex && !codex_history_may_have_user_input(&path) {
                 continue;
             }
@@ -1345,7 +1368,10 @@ fn push_history_entry(
     let canonical = fs::canonicalize(&cwd).ok().filter(|path| path.is_dir());
     // Cursor's agent transcripts are written by the editor; its CLI keeps
     // separate chats, so these can be read here but not resumed.
-    let resumable = canonical.is_some() && !options.archived && kind != TranscriptKind::Cursor;
+    let resumable = canonical.is_some()
+        && !options.archived
+        && kind != TranscriptKind::Cursor
+        && !additional::supported(kind);
     let cwd = canonical.unwrap_or_else(|| PathBuf::from(cwd.trim_start_matches(r"\\?\")));
     let Ok(metadata) = fs::symlink_metadata(&path) else {
         return Ok(());
@@ -1361,6 +1387,7 @@ fn push_history_entry(
         TranscriptKind::Codex => "codex",
         TranscriptKind::Cursor => "cursor",
         TranscriptKind::Gemini => "gemini",
+        kind => additional::id(kind),
     };
     result.push((
         LocalConversation {
@@ -1640,7 +1667,29 @@ fn collect_local_conversations(
             TranscriptKind::Gemini,
             TranscriptKind::Antigravity,
             TranscriptKind::Cursor,
+            TranscriptKind::Qwen,
+            TranscriptKind::Copilot,
+            TranscriptKind::Grok,
+            TranscriptKind::Kimi,
+            TranscriptKind::OpenCode,
         ] {
+            if additional::supported(kind) {
+                if let Some(root) = history_root(kind, None) {
+                    additional::scan(
+                        kind,
+                        &root,
+                        None,
+                        &mut entries,
+                        HistoryScanOptions {
+                            all,
+                            archived: false,
+                            retained,
+                        },
+                        &mut incomplete,
+                    )?;
+                }
+                continue;
+            }
             if kind == TranscriptKind::Cursor {
                 if let Some(root) = history_root(kind, None) {
                     scan_cursor_conversations(
@@ -1706,7 +1755,10 @@ fn collect_local_conversations(
     }
     for profile in profiles {
         let kind = TranscriptKind::from_definition(&profile.definition_id)
-            .filter(|kind| matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude))
+            .filter(|kind| {
+                matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude)
+                    || additional::supported(*kind)
+            })
             .ok_or("Unknown account profile type.")?;
         if profile.profile_id.is_empty() || profile.profile_id.len() > 64 {
             return Err("Invalid account profile ID.".into());
@@ -1714,6 +1766,23 @@ fn collect_local_conversations(
         let path = Path::new(&profile.config_directory);
         if !path.is_absolute() {
             return Err("Account profile directory must be absolute.".into());
+        }
+        if additional::supported(kind) {
+            if let Some(root) = history_root(kind, Some(path)) {
+                additional::scan(
+                    kind,
+                    &root,
+                    Some(&profile.profile_id),
+                    &mut entries,
+                    HistoryScanOptions {
+                        all,
+                        archived: false,
+                        retained,
+                    },
+                    &mut incomplete,
+                )?;
+            }
+            continue;
         }
         if let Some(root) = history_root(kind, Some(path)) {
             scan_local_conversations(
@@ -1865,6 +1934,7 @@ fn read_local_conversation_snapshot_with_tools(
                 .flatten()
         })
         .ok_or("The local conversation is no longer available.")?;
+    additional::validate_root(&root, kind)?;
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, "", Some(session_id))
             .or_else(|| {
@@ -1880,6 +1950,7 @@ fn read_local_conversation_snapshot_with_tools(
         }),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
+        kind => additional::locate(&root, kind, "", session_id),
     }
     .ok_or("The local conversation is no longer available.")?;
     let mut snapshot = read_conversation_snapshot_with_tools(&path, kind, include_tools)?;
@@ -2012,6 +2083,7 @@ fn session_transcript_path(
     else {
         return Ok(None);
     };
+    additional::validate_root(&root, kind)?;
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
             .or_else(|| {
@@ -2023,6 +2095,7 @@ fn session_transcript_path(
         TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
+        kind => additional::locate(&root, kind, working_directory, session_id),
     };
     Ok(path.map(|path| (kind, path)))
 }
@@ -2142,7 +2215,7 @@ fn read_conversation_snapshot_with_tools(
     kind: TranscriptKind,
     include_tools: bool,
 ) -> Result<LocalConversationSnapshot, String> {
-    if include_tools {
+    if include_tools || additional::supported(kind) {
         return normalized::recent(path, kind);
     }
     let mut messages = Vec::new();
@@ -2349,6 +2422,7 @@ fn read_conversation_snapshot_with_tools(
                 return;
             }
             TranscriptKind::Gemini => return,
+            _ => return,
         };
         let role = match role {
             Some("user") => "user",
@@ -2922,6 +2996,7 @@ pub fn export(
     }
     if profile_directory.is_some()
         && !matches!(kind, TranscriptKind::Codex | TranscriptKind::Claude)
+        && !additional::supported(kind)
     {
         return Err("handoff.accountUnavailable");
     }
@@ -2942,6 +3017,7 @@ pub fn export(
         TranscriptKind::Gemini => locate_gemini_in(&root, working_directory, Some(session_id)),
         TranscriptKind::Antigravity => antigravity_transcript(&root, session_id),
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
+        kind => additional::locate(&root, kind, working_directory, session_id),
     }
     .ok_or("handoff.waitingForTranscript")?;
     let text = match kind {
@@ -2950,6 +3026,24 @@ pub fn export(
         TranscriptKind::Gemini => parse_gemini(&path, max_chars),
         TranscriptKind::Antigravity => parse_antigravity(&path, max_chars),
         TranscriptKind::Cursor => parse_cursor(&path, max_chars),
+        kind => normalized::recent(&path, kind).ok().and_then(|snapshot| {
+            let mut truncated = snapshot.truncated;
+            let mut out = String::new();
+            for message in snapshot.messages {
+                if message.tool.is_none()
+                    && message.record.as_ref().is_none_or(|record| {
+                        matches!(
+                            record.kind,
+                            normalized::ItemKind::User | normalized::ItemKind::Assistant
+                        )
+                    })
+                {
+                    push_turn(&mut out, message.role, &message.text);
+                    truncated |= trim_tail(&mut out, max_chars);
+                }
+            }
+            finish_transcript(out, truncated)
+        }),
     };
     text.ok_or("handoff.noReadableMessages")
 }
@@ -4767,7 +4861,14 @@ pub fn session_usage(
         TranscriptKind::Codex => {
             codex_usage(&locate_codex(working_directory, Some(captured_session_id))?)
         }
-        TranscriptKind::Gemini | TranscriptKind::Antigravity | TranscriptKind::Cursor => None,
+        TranscriptKind::Gemini
+        | TranscriptKind::Antigravity
+        | TranscriptKind::Cursor
+        | TranscriptKind::Qwen
+        | TranscriptKind::Copilot
+        | TranscriptKind::Grok
+        | TranscriptKind::Kimi
+        | TranscriptKind::OpenCode => None,
     }
 }
 
