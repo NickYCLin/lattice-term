@@ -21,6 +21,9 @@ pub(super) fn read(path: &Path, kind: TranscriptKind) -> SessionProgress {
     let mut progress = SessionProgress::default();
     let mut pending: HashMap<String, Vec<PlanStep>> = HashMap::new();
     let _ = visit_transcript_rows(path, |row| {
+        let mut masked = row.clone();
+        redact::value(&mut masked);
+        let row = &masked;
         let payload = &row["payload"];
         if kind == TranscriptKind::Codex
             && row["type"] == "event_msg"
@@ -251,7 +254,7 @@ mod tests {
             snapshot.messages[1].tool.as_ref().unwrap().call_id,
             "tool-1"
         );
-        assert_eq!(snapshot.messages[2].text, "answer");
-        assert_eq!(snapshot.messages[3].text, "result");
+        assert_eq!(snapshot.messages[2].text, "result");
+        assert_eq!(snapshot.messages[3].text, "answer");
     }
 }

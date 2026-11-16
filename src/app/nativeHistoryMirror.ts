@@ -21,7 +21,7 @@ function sameMessage(left: NativeHistoryMessage, right: NativeHistoryMessage) {
 }
 
 export function nativeMessageTail(items: readonly ChatItem[], messages: readonly NativeHistoryMessage[]): number | null {
-  const positions = messages.flatMap((message, index) => message.tool ? [] : [index]);
+  const positions = messages.flatMap((message, index) => message.tool || (message.record && !["user", "assistant"].includes(message.record.kind)) ? [] : [index]);
   const tail = textMessageTail(items, positions.map(index => messages[index]));
   return tail === null ? null : positions[tail - 1] + 1;
 }
@@ -67,7 +67,7 @@ export function refreshNativeHistoryMirror(thread: ChatThread, entry: LocalConve
   if (!isNativeHistoryMirror(thread) || thread.runningTurnId || thread.pendingInputs?.length ||
     thread.definitionId !== entry.definitionId || thread.nativeSessionId !== entry.nativeSessionId ||
     thread.accountProfileId !== entry.profileId) return thread;
-  const imported = thread.items.every(item => item.id.startsWith("history:") && (item.type === "user" || item.type === "text" || item.type === "tool"));
+  const imported = thread.items.every(item => item.id.startsWith("history:") && (item.type === "user" || item.type === "text" || item.type === "tool" || item.type === "native"));
   const tail = imported ? 0 : nativeMessageTail(thread.items, snapshot.messages);
   if (!imported && tail === null) return thread.nativeSyncPending ? thread : { ...thread, nativeSyncPending: true };
   const added = tail === null ? [] : nativeHistoryItems(snapshot.messages.slice(tail), thread.createdAt,

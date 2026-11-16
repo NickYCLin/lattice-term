@@ -14,7 +14,7 @@
 雙向續聊使用同一份原生紀錄與 session ID，不另外複製對話檔，也不把
 登入資料搬到另一個帳號。LatticeTerm 發送訊息時由原生 CLI 保存；
 原生工具續聊後，LatticeTerm 讀回新增的使用者訊息與助理文字。
-Codex 另讀回工具呼叫與輸出，依呼叫 ID 合為歷史卡片，不重新執行工具、
+Codex、Claude Code 與 Gemini CLI 另讀回工具呼叫與輸出，依呼叫 ID 合為歷史卡片，不重新執行工具、
 要求批准或讀取工具參數裡的檔案。沒有保存像素的 `view_image` 紀錄不顯示
 路徑與佔位卡片；圖片仍須經既有安全預覽流程才能顯示。
 
@@ -53,8 +53,9 @@ appServer 來源須由讀取端明確納入。共用目錄不代表每個 Deskto
 Copilot、Qwen、OpenCode、Grok 等 CLI 尚未解析，不會出現在清單中；
 雲端上的 ChatGPT、Claude 網頁對話也不在本機紀錄內。
 
-歷史同步不是完整的原生介面重播：Codex 支援文字與工具紀錄，其他來源
-目前以文字為主；推理、原生圖片及過去審批尚未完整匯入。同步不會把
+歷史同步不是原生介面重播：三種主要來源共用正規化紀錄模型，
+文字、工具、公開推理、圖片及紀錄中的檔案變更見下方矩陣；
+過去審批只作紀錄，不匯入可操作的核准。同步不會把
 歷史審批轉成待批准請求，也不會沿用原生工具的未確認權限。
 
 對話頁直接把尚未開啟過的本機對話列在對話清單下方，跟著專案篩選，
@@ -67,12 +68,90 @@ Copilot、Qwen、OpenCode、Grok 等 CLI 尚未解析，不會出現在清單中
 ## 大型紀錄與記憶交接
 
 Codex 與 Claude 的對話身分以紀錄開頭的有限資料核對，不因整份檔案
-超過 128 MiB 就判定紀錄不存在。大型 JSONL 紀錄只讀取末尾 16 MiB，
+超過 128 MiB 就判定紀錄不存在。預設近期快照對超過 128 MiB 的 JSONL 讀取末尾 16 MiB，
 保留其中可解析的近期訊息，並顯示更早內容已略過；不整份載入記憶體。
 
 讀取仍限制單行大小、跳過不完整行，且維持原帳號與確切對話 ID 核對。
 找不到指定 ID 時不改讀同專案的其他紀錄，也不修改原始對話檔。
-這項處理同時適用於記憶交接與工作階段的對話預覽；它不是完整歷史匯出。
+此近期快照同時用於記憶交接與工作階段預覽；完整閱讀入口另見下節，
+不會把完整歷史塞進交接檔。
+
+## 正規化紀錄與完整閱讀（任務 32）
+
+`NormalizedTurn` 包含 `NormalizedItem`，種類為使用者、助理、推理、
+工具、檔案變更、圖片、系統／壓縮與子代理。工具用 call ID 配對，
+保留失敗狀態；來源不明或找不到呼叫的結果仍可獨立閱讀。舊快照 API
+保留 call/result 投影以相容既有同步，兩頁共用既有工具摘要卡與 diff 樣式。
+工具參數只解析 JSON，不執行 JavaScript 或 shell，也不讀取 diff 的目標檔。
+
+| CLI | 文字 | 工具與結果 | 推理摘要 | 圖片 | diff | 完整歷史入口 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | 支援 | function/custom call，依 ID 配對 | 僅公開 summary，密文不送出 | 保存的 image/data URL 或安全路徑 | apply_patch、turn_diff | JSONL／JSONL.zst 往前分頁 |
+| Claude Code | 支援 | tool_use/tool_result 配對，受限讀取 persisted output | thinking 預設收合；redacted/signature-only 顯示不可讀 | user/tool_result 的 base64 或安全路徑 | Edit／Write／MultiEdit 的紀錄前後內容 | JSONL 往前分頁，子代理獨立展開 |
+| Gemini CLI | 支援 JSON／JSONL | toolCalls 與 functionCall/Response；保留錯誤 | thoughts／thought parts 預設收合 | inlineData 或安全路徑 | replace／write_file 等紀錄內容 | JSON messages 串流／JSONL 事件重播後分頁；子代理獨立展開 |
+| Antigravity | 支援 | 尚無 | 尚無 | 尚無 | 尚無 | 共用文字分頁 |
+| Cursor | 支援，唯讀 | 尚無 | 尚無 | 尚無 | 尚無 | 共用文字分頁 |
+
+檔案工具 diff 由**紀錄中的**舊／新文字建立，僅代表工具當時提出的變更，
+不保證成功套用或等於目前磁碟內容。無法辨識的內容不會被猜成 diff。
+簽章與加密推理本體不會傳給前端；只有公開摘要可閱讀。
+
+近期快照保留 300 個來源項目／256 KiB 的上限，再配對工具；相容 API
+將配對工具拆回 call/result。大型檔案丟棄的前綴會串流檢查 PEM 邊界，
+但不保留前綴內容。對話內的「完整紀錄」是
+獨立、凍結的閱讀區，可按「載入更早內容」往前到開頭；它不更動發送、
+執行或近期訊息的捲動跟隨狀態。「返回最近紀錄」重新取得磁碟快照。
+閱讀區最多保留六頁，繼續往前時卸載較新頁並提示，避免無限累積 DOM。
+來源長度或修改時間改變時拒絕舊 cursor，需重新讀取，避免混用不同版本。
+
+讀取以串流重新掃描來源，再取 cursor 之前的有界尾頁，並非把整份 JSONL
+留在記憶體；每次往前可能需要再次掃描，因此很長的紀錄會較慢。
+單行上限 24 MiB；無效、過大或未寫完的 JSONL 行會略過並提示。
+單項超大文字截至約 64 KiB，不能宣稱可無損閱讀這類超限內容。
+一般 JSONL 不設總檔案長度上限；zstd 限壓縮 128 MiB、解壓 512 MiB、
+解碼視窗 128 MiB，超限或損毀會停止並顯示錯誤，不靜默假裝讀到開頭。
+Gemini 舊 JSON 限 128 MiB，以 serde 串流逐訊息解析；JSONL 的 `$set`、
+`$patch`、`$rewindTo` 需重播，累計事件上限 64 MiB／50,000 個訊息。
+不完整 mutation 或超限會拒絕顯示這次結果，避免讓已回退的內容重新出現。
+
+Claude 子代理只接受同 session 固定的 `<session>/subagents/agent-<id>.jsonl`；
+Gemini 只接受 `chats/<完整 parent ID>/<child ID>.jsonl`，且 metadata 必須
+標為 subagent、ID 與檔名一致。子代理最多列 128 個，獨立展開而不混進主線。
+Codex 的 spawn_agent 結果必須有父對話的 agent_id 參照，再核對原帳號、
+工作目錄和原生 ID；不跟隨紀錄內任意檔案路徑。Claude persisted output
+僅讀同 session 的 `tool-results/<安全檔名>.txt|json`，上限 16 MiB，
+其他指向只保留遮罩後的文字，絕不跟隨。
+
+### 遮罩與圖片安全界線
+
+所有正規化文字、參數、輸出與標籤在 Rust 回傳前套用同一份遮罩規則；
+記憶交接與歷史標題也遮罩，前端載入舊原生鏡像與分頁再做一次防護。
+涵蓋 OpenAI／Anthropic／Google／GitHub／AWS／Slack 常見金鑰格式、
+Authorization／Bearer、PEM 私鑰（含跨紀錄分段）、URL 帳密、password/token
+等鍵值與長 base64。替代字串為 `[REDACTED]`，沒有還原按鈕或暗藏原值。
+遮罩可能保守誤判長編碼內容，無法保證辨識所有自訂秘密格式。
+
+認證檔如 auth.json、credentials、.env、keychain、OAuth/token cache
+在統一開檔入口拒絕，原始紀錄始終唯讀、不搬移、不刪除。
+預覽 API 只接收對話身分與項目 ID，重新從該紀錄找到圖片；base64
+不進入正規化 JSON，而經既有像素驗證及大小限制存入 App 自有預覽目錄。
+路徑圖片只允許既有專案預覽邊界，或該對話 user 引用的受管附件；
+認證檔名、非圖片副檔名、其他對話未引用附件與符號連結逃逸均拒絕。
+不會讀取工具參數中任意路徑。已刪除圖片仍顯示既有錯誤狀態。
+
+### 格式核對版本與依據
+
+2026-11-16 本機只執行版本查詢：Codex CLI **0.169.0**、Claude Code
+**2.1.325**。Gemini CLI 本機未安裝，未宣稱實機紀錄驗收；採官方原始碼
+commit `4ed06ed0ddc523a6d356a4ad35ddfea331041888`（套件版本
+`0.70.0-nightly.20261110.g1603e9bab`）確認格式。沒有讀取真實帳號紀錄作 fixture。
+
+- [Claude Code 目錄說明](https://code.claude.com/docs/en/claude-directory)：projects JSONL、子代理與大型輸出目錄。
+- [Gemini session management](https://geminicli.com/docs/cli/session-management/) 與
+  [固定版本紀錄型別](https://github.com/google-gemini/gemini-cli/blob/4ed06ed0ddc523a6d356a4ad35ddfea331041888/packages/core/src/services/chatRecordingTypes.ts)：JSONL mutation、toolCalls、thoughts。
+- [Gemini 記錄服務](https://github.com/google-gemini/gemini-cli/blob/4ed06ed0ddc523a6d356a4ad35ddfea331041888/packages/core/src/services/chatRecordingService.ts)
+  與 [project registry](https://github.com/google-gemini/gemini-cli/blob/4ed06ed0ddc523a6d356a4ad35ddfea331041888/packages/core/src/config/projectRegistry.ts)：完整 parent ID 子目錄、projects.json 映射。
+- [Codex 0.169 協定](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/protocol/src/protocol.rs)：response item、工具與公開 reasoning summary。
 
 ## 開機還原與訊息就緒
 
@@ -98,23 +177,16 @@ CLI 的正式就緒回報，閒置時才恢復傳送；忙碌時仍可排隊，�
 關閉或重新載入視窗後不保留。切到其他頁面也不會解除未送出草稿的外部
 傳送限制，避免其他工具在使用者還有草稿時接管對話。
 
-內建對話與終端工作階段在對話頁共用標題身分區、訊息頭像、使用者氣泡、
-助理名稱與工具卡片樣式。工作階段的標題沿用側欄助理名稱；群組名稱另列
-為標籤，不拿群組名稱判斷助理種類。模型、專案、實際存取權限與執行狀態
-各自顯示，避免把同一群組中的 Codex 誤認為 Claude Code。
-
-側欄的工作階段、內建對話與原生歷史共用列元件、
-圖示、間距與選取樣式；已知的助理、模型及專案列在同一行，執行中的
-工作階段另外保留狀態點。原生歷史沒有模型資訊時不猜測或補上模型名稱。
-外觀共用不會改變訊息的傳送方式。內建對話仍由對話 API 執行，終端工作
-階段仍送到原本的 PTY，保留原生工具的呼叫／回傳紀錄、終端輸出與權限
-確認。兩者功能不同的操作不會硬加上去，也不會因切換畫面建立新對話。
+內建對話與終端工作階段共用標題、使用者氣泡與工具卡片；標題優先
+使用對話名稱，再以 CLI、帳號和模型作次要資訊。側欄第二行顯示相對
+活動時間與精簡模型／CLI，完整供應商資訊保留於提示中。外觀共用
+不改變傳送方式：內建對話仍由對話 API 執行，工作階段仍送到原 PTY。
 
 | 項目 | 行為 |
 | --- | --- |
 | 身分 | 以 CLI 類型、帳號設定 ID、原生 session ID 識別，不以名稱或專案路徑合併 |
 | 清單 | 每次讀取結束後 10 秒更新，可手動重新整理；兩頁共用資料來源 |
-| 訊息 | 選取中的預覽與已匯入鏡像，每次讀取結束後 2 秒更新；Codex 包含工具歷史 |
+| 訊息 | 選取中的預覽與已匯入鏡像，每次讀取結束後 2 秒更新；Codex、Claude Code、Gemini 包含正規化工具與其他豐富紀錄 |
 | 已匯入對話 | 保留原 thread ID；更新訊息、來源名稱、封存標記與截斷狀態 |
 | 本機續接內容 | 執行中或排隊的 thread 不合併；閒置時對齊原生紀錄，只附加新訊息，不覆蓋本機工具與回覆 |
 | 舊紀錄 | 每次多載入 100 筆，最多 50,000 筆；已封存的原生對話不列出，已開啟過的封存對話仍保留在清單 |
@@ -143,6 +215,9 @@ LatticeTerm 不再保留這些捷徑，但不刪除或封存原始對話；它�
 - `nativeConversationDismissals.ts`：記住在對話頁刪除的原生對話，同步時略過。
 - `nativeHistoryMirror.ts`：更新已匯入文字與 Codex 工具卡片，保護本機續接內容。
 - `transcript.rs`：原生來源的有界掃描、帳號區分、封存、名稱索引與訊息快照。
+- `transcript/normalized.rs`：來源轉接器、正規化回合／項目、分頁、壓縮與子代理。
+- `transcript/redact.rs` 與 `security/transcriptRedaction.json`：共用不可逆遮罩規則。
+- `NativeRecordView.tsx`：兩種對話共用的推理、diff、圖片與完整閱讀入口。
 - Tauri 命令 `agent_chat_local_history_page` 與
   `agent_chat_local_history_snapshot` 提供唯讀資料；舊命令仍保留相容性。
 
@@ -154,8 +229,8 @@ STATUS_ENTRYPOINT_NOT_FOUND；不更改系統 DLL、登錄或全域 PATH。
 
 - 歷史掃描是唯讀；明確發送時由原生 CLI 寫入同一段對話。尚未加入
   雙向改名、封存或刪除，也不能宣稱所有 Desktop 帳號或雲端對話一致。
-- Codex 可同步文字與工具呼叫／輸出；其他來源目前以文字為主。
-  尚未完整匯入推理、原生圖片與歷史審批互動；唯讀工具卡片不能重播操作。
+- 支援矩陣描述可辨識的已保存內容；沒有公開推理、圖片像素或舊版欄位時
+  不推測補回。唯讀工具卡片、提議 diff 不能重播操作，歷史審批不會變成核准。
 - Gemini 與 Antigravity 續接時會啟動對應 CLI，再以工作階段顯示在對話頁；
   不會直接轉成 LatticeTerm 內建聊天 thread。
 - 只有目前選取且閒置的本機 thread 持續更新；背景 thread 不會批次改寫。

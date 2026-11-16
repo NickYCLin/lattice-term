@@ -99,7 +99,9 @@ pub fn write_handoff_file(
     if transcript.len() > MAX_HANDOFF_FILE_BYTES {
         return Err("The handoff is too large to write.".to_string());
     }
-    let label: String = source_label
+    let transcript = redact::text(transcript);
+    let safe_label = redact::text(source_label);
+    let label: String = safe_label
         .chars()
         .filter(|c| !c.is_control())
         .take(64)
@@ -255,6 +257,14 @@ fn open_regular_transcript(path: &Path) -> Option<fs::File> {
 }
 
 fn open_regular_transcript_handle(path: &Path) -> Option<fs::File> {
+    if redact::forbidden(path)
+        || path
+            .canonicalize()
+            .ok()
+            .is_some_and(|path| redact::forbidden(&path))
+    {
+        return None;
+    }
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -369,6 +379,18 @@ fn visit_transcript_rows_with_limit(
     line_limit: usize,
     mut visit: impl FnMut(&Value),
 ) -> Option<bool> {
+    if path.extension().is_some_and(|ext| ext == "zst") {
+        let mut oversized = false;
+        return normalized::stream_rows(path, |row, _| {
+            if serde_json::to_vec(row).is_ok_and(|bytes| bytes.len() <= line_limit) {
+                visit(row);
+            } else {
+                oversized = true;
+            }
+        })
+        .ok()
+        .map(|skipped| skipped || oversized);
+    }
     let mut file = open_regular_transcript_handle(path)?;
     let bytes = file.metadata().ok()?.len();
     let tail_offset = if bytes > MAX_TRANSCRIPT_FILE_BYTES {
@@ -415,6 +437,7 @@ fn visit_transcript_rows_with_limit(
 }
 
 fn finish_transcript(out: String, truncated: bool) -> Option<String> {
+    let out = redact::text(&out);
     let trimmed = out.trim();
     if trimmed.is_empty() {
         return None;
@@ -430,9 +453,13 @@ fn parse_claude(path: &Path, max_chars: usize) -> Option<String> {
     if max_chars == 0 {
         return None;
     }
+    let mut masker = redact::recent_masker(path)?;
     let mut out = String::new();
     let mut truncated = false;
     let skipped_oversized = visit_transcript_rows(path, |value| {
+        if value["isSidechain"] == true {
+            return;
+        }
         let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
         if kind != "user" && kind != "assistant" {
             return;
@@ -446,7 +473,7 @@ fn parse_claude(path: &Path, max_chars: usize) -> Option<String> {
             .and_then(|m| m.get("content"))
             .map(content_text)
             .unwrap_or_default();
-        push_turn(&mut out, role, &text);
+        push_turn(&mut out, role, &masker.text(&text));
         truncated |= trim_tail(&mut out, max_chars);
     })?;
     finish_transcript(out, truncated || skipped_oversized)
@@ -456,6 +483,7 @@ fn parse_codex(path: &Path, max_chars: usize) -> Option<String> {
     if max_chars == 0 {
         return None;
     }
+    let mut masker = redact::recent_masker(path)?;
     let mut out = String::new();
     let mut truncated = false;
     let skipped_oversized = visit_transcript_rows(path, |value| {
@@ -471,7 +499,7 @@ fn parse_codex(path: &Path, max_chars: usize) -> Option<String> {
             return;
         }
         let text = payload.get("content").map(content_text).unwrap_or_default();
-        push_turn(&mut out, role, &text);
+        push_turn(&mut out, role, &masker.text(&text));
         truncated |= trim_tail(&mut out, max_chars);
     })?;
     finish_transcript(out, truncated || skipped_oversized)
@@ -602,6 +630,27 @@ fn rewind_gemini_messages(
 /// Replays Gemini's append-only chat log into the visible turns. Returns
 /// `None` when an oversized or invalid row could have rewritten the history.
 fn gemini_turns(path: &Path) -> Option<Vec<(&'static str, String)>> {
+    if path.extension().is_some_and(|ext| ext == "json") {
+        return normalized::recent(path, TranscriptKind::Gemini)
+            .ok()
+            .map(|snapshot| {
+                snapshot
+                    .messages
+                    .into_iter()
+                    .filter(|message| {
+                        message.tool.is_none()
+                            && message.record.as_ref().is_none_or(|record| {
+                                matches!(
+                                    record.kind,
+                                    normalized::ItemKind::User | normalized::ItemKind::Assistant
+                                )
+                            })
+                    })
+                    .map(|message| (message.role, message.text))
+                    .collect()
+            });
+    }
+
     let mut records = Vec::new();
     let mut positions = HashMap::new();
     let mut text_bytes = 0usize;
@@ -644,10 +693,11 @@ fn parse_gemini(path: &Path, max_chars: usize) -> Option<String> {
     if max_chars == 0 {
         return None;
     }
+    let mut masker = redact::recent_masker(path)?;
     let mut out = String::new();
     let mut truncated = false;
     for (role, text) in gemini_turns(path)? {
-        push_turn(&mut out, role, &text);
+        push_turn(&mut out, role, &masker.text(&text));
         truncated |= trim_tail(&mut out, max_chars);
     }
     finish_transcript(out, truncated)
@@ -674,11 +724,12 @@ fn parse_antigravity(path: &Path, max_chars: usize) -> Option<String> {
     if max_chars == 0 {
         return None;
     }
+    let mut masker = redact::recent_masker(path)?;
     let mut out = String::new();
     let mut truncated = false;
     let skipped_oversized = visit_transcript_rows(path, |value| {
         if let Some((role, text)) = antigravity_turn(value) {
-            push_turn(&mut out, role, text);
+            push_turn(&mut out, role, &masker.text(text));
             truncated |= trim_tail(&mut out, max_chars);
         }
     })?;
@@ -811,7 +862,7 @@ struct CodexSessionMeta {
 /// bounded prefix so a malformed history cannot allocate an unbounded buffer
 /// merely while LatticeTerm is deciding which transcript belongs to a pane.
 fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
-    let file = open_regular_transcript_handle(path)?;
+    let file = normalized::decoded_reader(path)?;
     let mut reader = BufReader::new(file).take((MAX_CODEX_SESSION_META_BYTES + 2) as u64);
     let mut line = Vec::with_capacity(MAX_CODEX_SESSION_META_BYTES.min(8 * 1024));
     reader.read_until(b'\n', &mut line).ok()?;
@@ -861,8 +912,10 @@ fn read_codex_session_meta(path: &Path) -> Option<CodexSessionMeta> {
 fn is_codex_rollout(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("rollout-"))
-        && path.extension().is_some_and(|ext| ext == "jsonl")
+        .is_some_and(|name| {
+            name.starts_with("rollout-")
+                && (name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+        })
 }
 
 fn locate_codex_in(
@@ -951,6 +1004,8 @@ pub struct LocalConversationMessage {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<ConversationTool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record: Option<normalized::NormalizedItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -972,6 +1027,8 @@ const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 mod sync_tests;
 
 mod images;
+pub(crate) mod normalized;
+pub(crate) mod redact;
 mod session_progress;
 pub use images::{
     preview_conversation_attachment, read_session_images, ImageConversation, SessionImagesSnapshot,
@@ -1341,42 +1398,70 @@ fn push_history_entry(
 /// Gemini writes a metadata row first and the project root beside the chat
 /// directory. Subagent records and chats without any visible user turn stay
 /// out of the list, matching what Gemini itself offers to resume.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiMetadata {
+    session_id: String,
+    kind: Option<String>,
+}
+fn gemini_metadata(path: &Path) -> Option<GeminiMetadata> {
+    let file = open_regular_transcript(path)?;
+    if path.extension().is_some_and(|ext| ext == "json") {
+        serde_json::from_reader(BufReader::new(file.take(MAX_TRANSCRIPT_FILE_BYTES + 1))).ok()
+    } else {
+        let mut reader = BufReader::new(file);
+        let mut line = Vec::new();
+        if !read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES).ok()?? {
+            return None;
+        }
+        serde_json::from_slice(&line).ok()
+    }
+}
+fn gemini_cwd(path: &Path) -> Option<String> {
+    let project = path.parent()?.parent()?;
+    if let Some(file) = open_regular_transcript(&project.join(".project_root")) {
+        let mut cwd = String::new();
+        file.take((MAX_GEMINI_PROJECT_ROOT_BYTES + 1) as u64)
+            .read_to_string(&mut cwd)
+            .ok()?;
+        let cwd = cwd.trim();
+        if !cwd.is_empty() && cwd.len() <= MAX_GEMINI_PROJECT_ROOT_BYTES && !cwd.contains('\0') {
+            return Some(cwd.into());
+        }
+    }
+    let slug = project.file_name()?.to_str()?;
+    let registry = project.parent()?.parent()?.join("projects.json");
+    let file = open_regular_transcript(&registry)?;
+    if file.metadata().ok()?.len() > 8 * 1024 * 1024 {
+        return None;
+    }
+    let value: Value =
+        serde_json::from_reader(BufReader::new(file.take(8 * 1024 * 1024 + 1))).ok()?;
+    let matches = value["projects"]
+        .as_object()?
+        .iter()
+        .filter(|(root, name)| {
+            name.as_str() == Some(slug)
+                && Path::new(root).is_absolute()
+                && root.len() <= 4096
+                && !root.chars().any(char::is_control)
+        })
+        .map(|(root, _)| root.clone())
+        .collect::<Vec<_>>();
+    (matches.len() == 1).then(|| matches[0].clone())
+}
 fn read_gemini_session_meta(path: &Path) -> Option<(String, String)> {
     if path.parent()?.file_name()? != "chats" {
         return None;
     }
-    let file = open_regular_transcript(path)?;
-    let mut reader = BufReader::new(file);
-    let mut line = Vec::new();
-    if !read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES)
-        .ok()?
-        .unwrap_or(false)
-    {
+    let meta = gemini_metadata(path)?;
+    if meta.kind.as_deref().is_some_and(|kind| kind != "main") {
         return None;
     }
-    let meta = serde_json::from_slice::<Value>(&line).ok()?;
-    if meta
-        .get("kind")
-        .and_then(Value::as_str)
-        .is_some_and(|kind| kind != "main")
-    {
-        return None;
-    }
-    let id = meta.get("sessionId").and_then(Value::as_str)?.to_string();
-    let root_file = open_regular_transcript(&path.parent()?.parent()?.join(".project_root"))?;
-    let mut cwd = String::new();
-    root_file
-        .take((MAX_GEMINI_PROJECT_ROOT_BYTES + 1) as u64)
-        .read_to_string(&mut cwd)
-        .ok()?;
-    let cwd = cwd.trim();
-    if cwd.is_empty() || cwd.len() > MAX_GEMINI_PROJECT_ROOT_BYTES || cwd.contains('\0') {
-        return None;
-    }
-    gemini_turns(path)?
-        .iter()
-        .any(|(role, text)| *role == "user" && !visible_user_text(text).is_empty())
-        .then(|| (id, cwd.to_string()))
+    let id = meta.session_id;
+    let cwd = gemini_cwd(path)?;
+    let visible = normalized::has_user(path);
+    visible.then(|| (id, cwd.to_string()))
 }
 
 const MAX_ANTIGRAVITY_HISTORY_LINE_BYTES: usize = 64 * 1024;
@@ -1700,6 +1785,9 @@ fn collect_local_conversations(
                 }
             }
         }
+        conversation.title = redact::text(&conversation.title);
+        conversation.working_directory = redact::text(&conversation.working_directory);
+        conversation.model_provider = conversation.model_provider.map(|text| redact::text(&text));
         selected.push(conversation);
         if !all && selected.len() == retained {
             break;
@@ -2054,9 +2142,13 @@ fn read_conversation_snapshot_with_tools(
     kind: TranscriptKind,
     include_tools: bool,
 ) -> Result<LocalConversationSnapshot, String> {
+    if include_tools {
+        return normalized::recent(path, kind);
+    }
     let mut messages = Vec::new();
     let mut bytes = 0;
     let mut truncated = false;
+    let mut masker = redact::recent_masker(path).ok_or("Transcript unavailable.")?;
     let mut push = |role: &'static str,
                     text: String,
                     tool: Option<ConversationTool>,
@@ -2070,6 +2162,7 @@ fn read_conversation_snapshot_with_tools(
         if text.is_empty() && tool.is_none() {
             return;
         }
+        let text = masker.text(&text);
         let tool_bytes = tool.as_ref().map_or(0, |tool| {
             tool.call_id.len() + tool.name.as_ref().map_or(0, String::len)
         });
@@ -2079,6 +2172,7 @@ fn read_conversation_snapshot_with_tools(
             + native_message_id.as_ref().map_or(0, String::len);
         messages.push(LocalConversationMessage {
             role,
+            record: None,
             text,
             tool,
             native_turn_id,
@@ -2334,38 +2428,11 @@ fn is_gemini_session(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("session-"))
         && path
             .extension()
-            .is_some_and(|extension| extension == "jsonl")
-}
-
-/// Gemini records the project root beside each hashed chat directory. Read a
-/// small, regular file only, then canonicalize it before matching a session.
-fn read_gemini_project_root(path: &Path) -> Option<PathBuf> {
-    let file = open_regular_transcript(path)?;
-    let mut contents = String::new();
-    file.take((MAX_GEMINI_PROJECT_ROOT_BYTES + 1) as u64)
-        .read_to_string(&mut contents)
-        .ok()?;
-    if contents.len() > MAX_GEMINI_PROJECT_ROOT_BYTES || contents.contains('\0') {
-        return None;
-    }
-    fs::canonicalize(contents.trim()).ok()
+            .is_some_and(|extension| extension == "jsonl" || extension == "json")
 }
 
 fn read_gemini_session_id(path: &Path) -> Option<String> {
-    let file = open_regular_transcript(path)?;
-    let mut reader = BufReader::new(file);
-    let mut line = Vec::new();
-    if !read_bounded_line(&mut reader, &mut line, MAX_TRANSCRIPT_LINE_BYTES)
-        .ok()?
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    serde_json::from_slice::<Value>(&line)
-        .ok()?
-        .get("sessionId")
-        .and_then(Value::as_str)
-        .map(str::to_string)
+    gemini_metadata(path).map(|meta| meta.session_id)
 }
 
 fn gemini_project_root(working_directory: &str) -> Option<PathBuf> {
@@ -2380,14 +2447,9 @@ fn gemini_session_matches(path: &Path, expected_root: &Path, captured: Option<&s
     if captured.is_some_and(|id| read_gemini_session_id(path).as_deref() != Some(id)) {
         return false;
     }
-    let Some(project_root_file) = path
-        .parent()
-        .and_then(Path::parent)
-        .map(|directory| directory.join(".project_root"))
-    else {
-        return false;
-    };
-    read_gemini_project_root(&project_root_file).is_some_and(|root| root == expected_root)
+    gemini_cwd(path)
+        .and_then(|cwd| fs::canonicalize(cwd).ok())
+        .is_some_and(|root| root == expected_root)
 }
 
 fn locate_gemini_in(
@@ -2587,11 +2649,12 @@ fn parse_cursor(path: &Path, max_chars: usize) -> Option<String> {
     if max_chars == 0 {
         return None;
     }
+    let mut masker = redact::recent_masker(path)?;
     let mut out = String::new();
     let mut truncated = false;
     let skipped_oversized = visit_transcript_rows(path, |value| {
         if let Some((role, text)) = cursor_turn(value) {
-            push_turn(&mut out, role, &text);
+            push_turn(&mut out, role, &masker.text(&text));
             truncated |= trim_tail(&mut out, max_chars);
         }
     })?;

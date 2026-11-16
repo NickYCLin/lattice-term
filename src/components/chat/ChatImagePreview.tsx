@@ -7,15 +7,17 @@ import { useI18n } from "../../i18n/context";
 import { useModalFocus } from "../overlays/modalFocus";
 import { CloseIcon } from "../icons";
 
-export function ChatImagePreview({ path, name, workingDirectory, threadId, initialUrl, navigation, onClose }: {
+export function ChatImagePreview({ path, name, workingDirectory, threadId, initialUrl, navigation, onClose, readImage }: {
   path: string;
   name: string;
   workingDirectory: string;
   threadId?: string;
   initialUrl?: string;
+  readImage?: () => Promise<string | null>;
   onClose: () => void;
   navigation?: { index: number; total: number; onPrevious: () => void; onNext: () => void };
 }) {
+  const reader = useRef(readImage); reader.current=readImage;
   const { t } = useI18n();
   const conversationKey = JSON.stringify(useContext(ChatImageConversationContext));
   const [problem, setProblem] = useState<ImageProblem>("chat.images.unavailable");
@@ -49,10 +51,10 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
     setLoading(!initialUrl);
     setProblem("chat.images.unavailable");
     if (!hasDesktopBackend()) { setLoading(false); return; }
-    void import("@tauri-apps/api/core").then(({ invoke }) => invoke<string | null>("chat_image_preview", {
+    void (reader.current ? reader.current() : import("@tauri-apps/api/core").then(({ invoke }) => invoke<string | null>("chat_image_preview", {
       path, workingDirectory, threadId: threadId ?? null,
       ...(conversationKey !== "null" ? { nativeConversation: JSON.parse(conversationKey) } : {}),
-    })).catch(error => { if (!cancelled) setProblem(imagePreviewProblem(error)); return null; }).then(next => {
+    }))).catch(error => { if (!cancelled) setProblem(imagePreviewProblem(error)); return null; }).then(next => {
       if (!cancelled) { setUrl(next); setLoading(false); }
     });
     return () => { cancelled = true; };

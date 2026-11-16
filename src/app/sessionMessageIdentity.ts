@@ -1,3 +1,4 @@
+import { maskNativeValue } from "./nativeRecords";
 import type { SessionConversationMessage } from "./useSessionConversation";
 
 export interface SessionMessageState {
@@ -8,6 +9,7 @@ export interface SessionMessageState {
 export const initialSessionMessages: SessionMessageState = { messages: [], nextId: 0 };
 
 function identity(message: SessionConversationMessage): string {
+  if (message.record) return message.record.id;
   if (message.tool) return JSON.stringify(["tool", message.tool.callId, message.tool.kind]);
   if (message.nativeMessageId) return JSON.stringify([message.role, message.nativeMessageId]);
   return JSON.stringify([message.role, message.nativeTurnId ?? null, message.text]);
@@ -21,11 +23,11 @@ export function sessionMessageReducer(state: SessionMessageState, action:
   if (action.kind === "reset") return { messages: [], nextId: state.nextId };
   const previous = state.messages;
   const retain = (old: SessionConversationMessage, next: SessionConversationMessage) =>
-    old.role === next.role && old.text === next.text && old.nativeMessageId === next.nativeMessageId
+    JSON.stringify(old.record) === JSON.stringify(next.record) && old.role === next.role && old.text === next.text && old.nativeMessageId === next.nativeMessageId
       && old.nativeTurnId === next.nativeTurnId && old.tool?.kind === next.tool?.kind
       && old.tool?.callId === next.tool?.callId && (old.tool?.name ?? null) === (next.tool?.name ?? null)
       ? old : { ...next, renderId: old.renderId };
-  const incoming = action.messages;
+  const incoming = maskNativeValue(action.messages);
   const oldKeys = previous.map(identity);
   const newKeys = incoming.map(identity);
   const rows: (SessionConversationMessage | undefined)[] = Array(incoming.length);

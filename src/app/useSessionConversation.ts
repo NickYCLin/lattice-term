@@ -6,6 +6,7 @@ import { renderTerminalPreview } from "./terminalPreview";
 import { initialSessionMessages, sessionMessageReducer } from "./sessionMessageIdentity";
 
 export interface SessionConversationMessage {
+  record?:import("./nativeRecords").NativeRecord;
   nativeTurnId?: string;
   nativeMessageId?: string;
   role: "user" | "assistant";

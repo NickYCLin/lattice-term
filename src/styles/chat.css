@@ -2881,3 +2881,9 @@ button.chat-diff__line.is-commentable:focus-visible {
 .session-composer__directory-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-composer__context > .path-drop-zone { min-width: 0; max-width: 100%; }
 .session-composer__access--editable span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.native-history-reader { min-width: 0; max-width: 100%; }
+.native-history-reader > header { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.native-history-reader__messages { display: grid; gap: var(--space-3); max-height: 65vh; overflow: auto; overflow-wrap: anywhere; }
+.native-history-access > summary { cursor: pointer; color: var(--text-muted); padding: var(--space-2); }
+.native-record-image { max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.native-record-image img { display: block; max-width: 100%; max-height: 14rem; object-fit: contain; }

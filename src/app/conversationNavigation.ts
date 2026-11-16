@@ -12,7 +12,7 @@ export function useConversationPins() {
 export function searchConversation(items: readonly ChatItem[], query: string): string[] {
   const needle = query.trim().toLocaleLowerCase(); if (!needle) return [];
   return items.filter(item => {
-    const text = "text" in item ? item.text : item.type === "tool" ? `${item.name}\n${item.summary}\n${item.output ?? ""}` : item.type === "plan" ? item.steps.map(step => step.text).join("\n") : item.type === "goal" ? item.goal?.objective ?? "" : "";
+    const text = item.type === "native" ? `${item.record.text}\n${item.record.input??""}\n${item.record.output??""}` : "text" in item ? item.text : item.type === "tool" ? `${item.name}\n${item.summary}\n${item.output ?? ""}` : item.type === "plan" ? item.steps.map(step => step.text).join("\n") : item.type === "goal" ? item.goal?.objective ?? "" : "";
     return text.toLocaleLowerCase().includes(needle);
   }).map(item => item.id);
 }

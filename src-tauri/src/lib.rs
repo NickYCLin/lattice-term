@@ -1815,6 +1815,101 @@ async fn agent_chat_local_history_snapshot(
     .map_err(|error| error.to_string())?
 }
 
+async fn native_history_context(
+    thread_id: &str,
+    context: Option<crate::transcript::ImageConversation>,
+    directory: String,
+    registry: &AgentRegistry,
+    daemon: &AppDaemon,
+) -> Result<(crate::transcript::ImageConversation, String), String> {
+    let summary = if crate::agent_daemon::owns(thread_id) {
+        daemon.session_summary(thread_id).await
+    } else {
+        registry.session_summary(thread_id)
+    };
+    if let Some(summary) = summary {
+        Ok((
+            crate::transcript::ImageConversation {
+                definition_id: summary.definition_id,
+                native_session_id: summary
+                    .captured_session_id
+                    .ok_or("Native identity is not available yet.")?,
+                profile_config_path: summary.profile_config_path,
+            },
+            summary.working_directory,
+        ))
+    } else {
+        Ok((
+            context.ok_or("Native identity is not available.")?,
+            directory,
+        ))
+    }
+}
+#[tauri::command]
+async fn native_conversation_page(
+    thread_id: String,
+    conversation: Option<crate::transcript::ImageConversation>,
+    working_directory: String,
+    cursor: Option<crate::transcript::normalized::HistoryCursor>,
+    agent_id: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<crate::transcript::normalized::NormalizedPage, String> {
+    let (context, directory) = native_history_context(
+        &thread_id,
+        conversation,
+        working_directory,
+        &registry,
+        &daemon,
+    )
+    .await?;
+    blocking(move || {
+        let (kind, path) = crate::transcript::normalized::conversation_path(
+            &context,
+            &directory,
+            agent_id.as_deref(),
+        )?;
+        crate::transcript::normalized::page(&path, kind, cursor.as_ref(), None)
+            .map(|(page, _)| page)
+    })
+    .await
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects the app and two backend states.
+async fn native_conversation_image(
+    app: AppHandle,
+    thread_id: String,
+    conversation: Option<crate::transcript::ImageConversation>,
+    working_directory: String,
+    image_id: String,
+    agent_id: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Option<String>, String> {
+    let (context, directory) = native_history_context(
+        &thread_id,
+        conversation,
+        working_directory,
+        &registry,
+        &daemon,
+    )
+    .await?;
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "chat.images.denied")?;
+    blocking(move || {
+        crate::transcript::normalized::image_preview(
+            &context,
+            &directory,
+            &data,
+            &image_id,
+            agent_id.as_deref(),
+        )
+    })
+    .await
+}
+
 /// Runs one chat turn. Returns once the CLI is running; its reply arrives
 /// as `agent-chat://event` events carrying the same thread and turn ids.
 #[tauri::command]
@@ -6311,6 +6406,8 @@ pub fn run() {
             agent_chat_local_history,
             agent_chat_local_history_page,
             agent_chat_local_history_snapshot,
+            native_conversation_page,
+            native_conversation_image,
             agent_chat_local_history_read,
             agent_account_profile_directory,
             agent_account_native_directory,

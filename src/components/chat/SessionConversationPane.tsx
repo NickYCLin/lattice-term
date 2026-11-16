@@ -1,3 +1,4 @@
+import { NativeRecordView, NativeHistoryAccess } from "./NativeRecordView";
 import { presentAgentSessionGroup } from "../../app/agentSessionPresentation";
 import { ApprovalActions } from "./ApprovalActions";
 import { invoke } from "@tauri-apps/api/core";
@@ -119,7 +120,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
   useEffect(() => {
     acknowledge();
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
-  const supported = session.definitionId === "codex" || session.definitionId === "claude";
+  const supported = session.definitionId === "codex" || session.definitionId === "claude" || session.definitionId === "gemini";
   const controls = useSessionConversationActions({ session, agents, messages: conversation.messages,
     busy: working || attention || nativePending || forkWorking || Boolean(session.closedReason), nativeTools: conversation.nativeTools === true,
     onCompose: setDraft, onNotice: setNotice, onOpen: onSessionReplaced,
@@ -316,12 +317,14 @@ export function SessionConversationPane({ session, agents, displayName, conversa
         {supported && session.definitionId === "codex" && !conversation.loading && !conversation.readError
           && conversation.availability === "waitingForIdentity" && <p>{t("sessionChat.codexIdentityHint")}</p>}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
+        {session.capturedSessionId && <NativeHistoryAccess threadId={session.sessionId} directory={session.workingDirectory} />}
         <ConversationTimeline collapseDefault={readStoredPreferences().chatCollapseCompletedTurns}
           latestFinished={!working && !attention && !nativePending && !conversation.approval && session.state === "done" && session.stateSource === "integration"} match={match === undefined ? undefined : String(match)}
           rows={toolRows.map(row => {
           const message = row.value, index = conversation.messages.indexOf(message);
           const hit = match !== undefined && row.aliases.includes(String(match));
-          const node = message.tool
+          const node = message.record && !["user","assistant","tool"].includes(message.record.kind)
+            ? <div data-session-message={hit ? match : index} className={hit ? "chat-search__match" : undefined}><NativeRecordView item={message.record} threadId={session.sessionId} directory={session.workingDirectory} forceOpen={hit} /></div> : message.tool
             ? <div data-session-message={hit ? match : index} className={hit ? "chat-search__match" : undefined}>
               {row.tool ? <ReadableToolCard tool={row.tool} forceOpen={hit} directory={session.workingDirectory} threadId={session.sessionId} />
                 : <SessionToolCard message={message} forceOpen={hit} onOpenFile={setArtifact} />}</div>

@@ -246,10 +246,10 @@ export function sessionToolRows(messages: readonly SessionConversationMessage[])
     const results = pairs.get(index) ?? [], aliases = [index, ...results].map(String);
     return [{ id: String(message.renderId ?? index), aliases, value: message,
       ...(message.tool && message.tool.kind !== "reasoning" ? { tool: presentTool({ id: String(index), aliases, name: message.tool.name ?? "text", input: message.tool.kind === "call" ? message.text : "",
-        output: message.tool.kind === "result" ? message.text : results.length ? results.map(index => messages[index].text).join("\n\n") : null,
-        done: message.tool.kind === "result" || results.length > 0, isError: false }) } : {}) }];
+        output: message.tool.kind === "result" ? message.text : results.length ? results.map(index => messages[index].text).join("\n\n") : message.record?.output ?? null,
+        done: message.tool.kind === "result" || results.length > 0 || message.record?.output !== undefined, isError: Boolean(message.record?.isError || results.some(index=>messages[index].record?.isError)) }) } : {}) }];
   });
-  return markCommentary(mergeCells(rows, message => !message.tool && message.role === "user"), message => message.tool ? "other" : message.role === "user" ? "user" : "text", message => message.text);
+  return markCommentary(mergeCells(rows, message => !message.tool && message.role === "user"), message => message.tool || (message.record && !["user", "assistant"].includes(message.record.kind)) ? "other" : message.role === "user" ? "user" : "text", message => message.text);
 }
 export function toolHasProtectedContent(tool: ToolPresentation): boolean {
   return (!tool.commands.length && !tool.exploration) || tool.isError || !tool.done || Boolean(tool.images?.length) || /(?:^|\n)(?:@@ |\+\+\+ |--- )|<image\b|data:image\/|\.(?:png|jpe?g|webp|gif)\b|(?:apply_patch|request_approval|user_input|elicitation|question)/i.test(`${tool.name}\n${tool.input}\n${tool.output ?? ""}\n${tool.raw.map(raw => raw.output === null ? "" : readableToolOutput(raw.output)).join("\n")}`);

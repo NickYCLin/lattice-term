@@ -71,7 +71,17 @@ fn session_tools_follow_exact_identity_without_changing_history_or_handoff() {
     let snapshot =
         read_local_conversation_snapshot("codex", "tools", Some("test"), &profiles(home.path()))
             .unwrap();
-    assert_eq!(snapshot.messages.len(), 5);
+    assert_eq!(
+        snapshot
+            .messages
+            .iter()
+            .filter(|message| !message
+                .record
+                .as_ref()
+                .is_some_and(|item| item.kind == normalized::ItemKind::FileChange))
+            .count(),
+        5
+    );
     assert_eq!(
         snapshot.messages[1].tool.as_ref().unwrap().call_id,
         "exec-1"
@@ -86,7 +96,16 @@ fn session_tools_follow_exact_identity_without_changing_history_or_handoff() {
     assert_eq!(fs::read(&path).unwrap(), before);
     let messages =
         read_session_conversation("codex", "", Some("tools"), Some(home.path())).unwrap();
-    assert_eq!(messages.len(), 5);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| !message
+                .record
+                .as_ref()
+                .is_some_and(|item| item.kind == normalized::ItemKind::FileChange))
+            .count(),
+        5
+    );
     assert_eq!(
         messages[1].tool.as_ref().unwrap().name.as_deref(),
         Some("exec_command")
@@ -166,7 +185,15 @@ fn session_tool_snapshots_keep_existing_count_and_text_limits() {
     let snapshot =
         read_conversation_snapshot_with_tools(&path, TranscriptKind::Codex, true).unwrap();
     assert!(snapshot.truncated);
-    assert!(snapshot.messages.is_empty());
+    assert!(snapshot.messages.len() <= HISTORY_MAX_MESSAGES);
+    assert!(
+        snapshot
+            .messages
+            .iter()
+            .map(|message| message.text.len())
+            .sum::<usize>()
+            <= HISTORY_MAX_TEXT_BYTES
+    );
 }
 
 fn fixture(home: &Path, id: &str, count: usize) -> PathBuf {

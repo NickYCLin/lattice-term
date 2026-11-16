@@ -40,7 +40,7 @@ export function filterRemoteThreads(threads: readonly RemoteChatThread[], query:
   return threads.filter(thread => (activity === "all" || remoteThreadActivity(thread) === activity) && (!search || [thread.title, thread.agent, agentDisplayName(thread.agent), thread.directory,
     thread.model, thread.proxy ? CLI_PROXY_NAME : ""].some(value => value?.toLocaleLowerCase().includes(search))));
 }
-export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation" | "plan" | "goal">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
+export interface RemoteChatItem { id: string; type: Exclude<ChatItem["type"], "delegation" | "plan" | "goal" | "native">; text: string; requestId?: string; pending?: boolean; truncated: boolean }
 export interface RemoteChatPage { thread: RemoteChatThread; items: RemoteChatItem[]; before: string | null }
 const encoder = new TextEncoder();
 function clip(text: string, bytes: number) {
@@ -73,12 +73,13 @@ function remoteItem(item: ChatItem): RemoteChatItem {
   else if (item.type === "turnEnd") text = item.error ?? "";
   else if (item.type === "plan") text = [item.explanation, ...item.steps.map(step => `${step.status === "completed" ? "✓" : step.status === "inProgress" ? "→" : "○"} ${step.text}`)].filter(Boolean).join("\n");
   else if (item.type === "goal") text = item.goal ? `${item.goal.objective} (${item.goal.status})` : "";
+  else if(item.type === "native") text = item.record.text;
   else text = item.text;
   let bounded = clip(text, 8000);
   // JSON escapes control bytes as six characters. Keep even those messages
   // small enough that a single item can always advance the page cursor.
   if (encoder.encode(JSON.stringify(bounded)).length > 32 * 1024) bounded = clip(text, 4000);
-  return { id: item.id, type: item.type === "plan" || item.type === "goal" ? "notice" : item.type, text: bounded, truncated: bounded !== text, ...(item.type === "approval" ? { requestId: item.requestId, pending: item.decision === "pending" } : {}) };
+  return { id: item.id, type: item.type === "plan" || item.type === "goal" || item.type === "native" ? "notice" : item.type, text: bounded, truncated: bounded !== text, ...(item.type === "approval" ? { requestId: item.requestId, pending: item.decision === "pending" } : {}) };
 }
 export function remotePage(thread: ChatThread, before: string | null): RemoteChatPage {
   const end = before === null ? thread.items.length : thread.items.findIndex(item => item.id === before);

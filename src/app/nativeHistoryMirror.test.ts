@@ -171,3 +171,12 @@ it("keeps one stable tool card for repeated or reordered historical rows", () =>
   expect(result.items).toHaveLength(1);
   expect(result.items[0]).toMatchObject({ type: "tool", name: "shell", summary: "args", output: "result" });
 });
+
+it("refreshes imported rich native records without losing images or freezing the mirror",()=>{
+  const record={id:"record-1",turnId:"turn",kind:"image" as const,text:"",isError:false,unreadable:false};
+  const first=refreshNativeHistoryMirror(mirror(),entry,{messages:[{role:"user",text:"image request"},{role:"assistant",text:"",record}],truncated:false});
+  expect(first.items.some(item=>item.type==="native")).toBe(true);
+  const second=refreshNativeHistoryMirror(first,entry,{messages:[{role:"user",text:"image request"},{role:"assistant",text:"",record},{role:"assistant",text:"new final answer"}],truncated:false});
+  expect(second.nativeSyncPending).toBe(false);expect(second.items).toHaveLength(3);
+  expect(refreshNativeHistoryMirror(second,entry,{messages:[{role:"user",text:"image request"},{role:"assistant",text:"",record},{role:"assistant",text:"new final answer"}],truncated:false})).toBe(second);
+});

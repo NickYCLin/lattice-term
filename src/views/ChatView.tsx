@@ -1,3 +1,4 @@
+import { NativeRecordView, NativeHistoryAccess } from "../components/chat/NativeRecordView";
 import { ComposerPermissionMenu } from "../components/chat/ComposerPermissionMenu";
 import { recordRecentProject } from "../app/recentProjects";
 import { chatToolRows, presentTool, toolHasProtectedContent, type ToolPresentation } from "../app/toolPresentation";
@@ -1262,8 +1263,9 @@ export function ThreadPane({
         <div className="chat-messages__inner">
           {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
           {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} onRetry={sessionRead.refresh} />}
-          {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("history.textOnly")} · {t("history.stateUnknown")}</p>}
+          {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("native.readOnly")} · {t("history.stateUnknown")}</p>}
           {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
+          {thread.nativeSessionId && <NativeHistoryAccess threadId={thread.id} directory={thread.workingDirectory} />}
           {thread.historyTruncated && <p role="status">{t("history.truncated")}</p>}
           {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
           {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && (
@@ -1553,6 +1555,7 @@ function ChatItemView({
     <button type="button" className="chat-msg__branch" onClick={onBranch} aria-label={t("chat.branch")} title={t("chat.branch")}><DuplicateIcon size={13} /></button>
   )}</span>;
   switch (item.type) {
+    case "native": return <NativeRecordView item={item.record} threadId={threadId ?? ""} directory={workingDirectory} forceOpen={forceOpen} />;
     case "user": {
       const sent = splitSessionAttachments(item.text);
       const files = item.attachments?.length ? item.attachments : mergeAttachmentPaths([], sent.paths) ?? [];

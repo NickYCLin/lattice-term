@@ -1,3 +1,4 @@
+import { maskNativeValue, type NativeRecord } from "./nativeRecords";
 import { currentRuntimeStatus, runtimeIdentity, validGoal, validPlanSteps, type ContextUsage, type GoalState, type PlanStep, type RateLimitWindow, type RuntimeStatus } from "./chatRuntimeStatus";
 /**
  * Chat threads with an agent CLI: the data model, the rule that folds the
@@ -239,6 +240,7 @@ export interface ChatAttachment {
 }
 
 export type ChatItem =
+  | { type:"native"; id:string; record:NativeRecord; assistantDefinitionId?:ChatDefinitionId }
   | { type: "user"; id: string; text: string; at: number; nativeTurnId?: string; attachments?: ChatAttachment[] }
   | { type: "text"; id: string; text: string; nativeTurnId?: string; nativeMessageId?: string; assistantDefinitionId?: ChatDefinitionId }
   | { type: "reasoning"; id: string; text: string; assistantDefinitionId?: ChatDefinitionId; parts?: Record<string, string> }
@@ -360,6 +362,7 @@ export interface ChatThread {
 }
 
 export interface NativeHistoryMessage {
+  record?:NativeRecord;
   role: "user" | "assistant";
   text: string;
   nativeTurnId?: string;
@@ -368,6 +371,7 @@ export interface NativeHistoryMessage {
 }
 
 export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at: number, offset = 0): ChatItem[] {
+  messages = maskNativeValue(messages);
   const items: ChatItem[] = [];
   const calls = new Map<string, Extract<ChatItem, { type: "tool" }>>();
   const identities = new Map<string, number>();
@@ -380,12 +384,13 @@ export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at
       const key = `history:native:${message.nativeTurnId ?? message.nativeMessageId}:${message.role}:${hash >>> 0}`;
       const count = identities.get(key) ?? 0; identities.set(key, count + 1); id = `${key}:${count}`;
     }
+    if(message.record && !["user","assistant","tool"].includes(message.record.kind)){items.push({type:"native",id:`history:record:${message.record.id}`,record:message.record});return;}
     const tool = message.tool;
     if (tool) {
       if (imageCalls.has(tool.callId)) return;
       const call = calls.get(tool.callId);
       if (call) {
-        if (tool.kind === "result") call.output = message.text;
+        if (tool.kind === "result") {call.output = message.text;call.isError ||= message.record?.isError === true;}
         else {
           call.name = tool.name ?? call.name;
           call.summary = message.text;
@@ -395,7 +400,7 @@ export function nativeHistoryItems(messages: readonly NativeHistoryMessage[], at
       const item: Extract<ChatItem, { type: "tool" }> = {
         type: "tool", id: `history:tool:${encodeURIComponent(tool.callId)}`, name: tool.name ?? tool.callId,
         summary: tool.kind === "call" ? message.text : "",
-        output: tool.kind === "result" ? message.text : null, done: true, isError: false,
+        output: tool.kind === "result" ? message.text : null, done: true, isError: message.record?.isError === true,
       };
       items.push(item);
       calls.set(tool.callId, item);
@@ -1135,7 +1140,7 @@ export function loadStoredThreads(storage: Pick<Storage, "getItem">): ChatThread
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isThread).map((thread) => ({
+    return parsed.filter(isThread).map(thread=>thread.nativeSessionId?maskNativeValue(thread):thread).map((thread) => ({
       ...thread,
       runtimeStatus: undefined,
       activeOperation: undefined,
