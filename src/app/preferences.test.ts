@@ -129,3 +129,8 @@ describe("sanitizePreferences", () => {
     },
   );
 });
+
+it("preserves the completed-turn collapse preference and keeps older profiles expanded", () => {
+  expect(sanitizePreferences({}).chatCollapseCompletedTurns).toBe(false);
+  expect(sanitizePreferences({ chatCollapseCompletedTurns: true }).chatCollapseCompletedTurns).toBe(true);
+});

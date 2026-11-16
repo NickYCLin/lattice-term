@@ -4,8 +4,9 @@ import type { SessionConversationMessage } from "../../app/useSessionConversatio
 import { ChatMarkdown } from "./ChatMarkdown";
 
 /** Native call/result pair; updates keep the same details element and scroll position. */
-export function SessionToolCard({ message, result, onOpenFile }: {
+export function SessionToolCard({ message, result, onOpenFile, forceOpen = false }: {
   message: SessionConversationMessage;
+  forceOpen?: boolean;
   result?: SessionConversationMessage;
   onOpenFile?: (path: string) => void;
 }) {
@@ -13,12 +14,12 @@ export function SessionToolCard({ message, result, onOpenFile }: {
   const [expanded, setExpanded] = useState(false);
   if (!message.tool) return null;
   const reasoning = message.tool.kind === "reasoning";
-  return <details className={`chat-card ${reasoning ? "chat-card--reasoning" : "chat-card--tool"}`} onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open); }}>
+  return <details open={forceOpen || expanded} className={`chat-card ${reasoning ? "chat-card--reasoning" : "chat-card--tool"}`} onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open); }}>
     <summary className="chat-card__head">
       <span className="chat-card__label">{reasoning ? t("chat.reasoning") : message.tool.name || t("chat.tools.title")}</span>
       {!reasoning && <span className="chat-card__summary">{message.text.split("\n")[0]?.slice(0, 160)}</span>}
     </summary>
-    {expanded && <div className="chat-card__body"><ChatMarkdown source={message.text} onOpenFile={onOpenFile} />
+    {(forceOpen || expanded) && <div className="chat-card__body"><ChatMarkdown source={message.text} onOpenFile={onOpenFile} />
       {result && <ChatMarkdown source={result.text} onOpenFile={onOpenFile} />}
     </div>}
   </details>;

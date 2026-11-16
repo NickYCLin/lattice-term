@@ -41,7 +41,7 @@ it("commits each incoming output delta before any timer, later delta or completi
       bridge.listener!({ payload: { threadId: id, turnId: chat.getThread(id)!.runningTurnId!, event } });
     });
     await emit({ kind: "toolStarted", itemId: "cmd", name: "command", summary: "five lines" });
-    const card = allNodes(host).find(node => node.tagName === "DETAILS" && String(props(node)?.className).includes("chat-card--tool"))!;
+    const card = allNodes(host).find(node => node.tagName === "SECTION" && String(props(node)?.className).includes("chat-card--tool"))!;
     const scroll = allNodes(host).find(node => props(node)?.className === "chat-messages")!;
     let height = 1000;
     let top = 0;
@@ -57,9 +57,9 @@ it("commits each incoming output delta before any timer, later delta or completi
       // No advancing timers: one event must render without waiting for a
       // debounce, a subsequent event, toolFinished or a storage flush.
       await emit({ kind: "toolOutputDelta", itemId: "cmd", delta: `${line}\n` });
-      const cards = allNodes(host).filter(node => node.tagName === "DETAILS" && String(props(node)?.className).includes("chat-card--tool"));
+      const cards = allNodes(host).filter(node => node.tagName === "SECTION" && String(props(node)?.className).includes("chat-card--tool"));
       expect(cards).toEqual([card]);
-      expect(props(card).open).toBe(true);
+      expect(String(props(card).className)).toContain("is-running");
       const output = allNodes(card).find(node => node.tagName === "PRE")!;
       expect(output.textContent).toBe(Array.from({ length: line }, (_, i) => `${i + 1}\n`).join(""));
       expect(chat.getThread(id)!.runningTurnId).not.toBeNull();
@@ -72,6 +72,9 @@ it("commits each incoming output delta before any timer, later delta or completi
     }
     await emit({ kind: "toolFinished", itemId: "cmd", name: "command", summary: null,
       output: "1\n2\n3\n4\n5\n", isError: false });
+    expect(allNodes(card).find(node => node.tagName === "PRE")!.textContent).toBe("1\n2\n3");
+    const expandOutput = allNodes(card).find(node => node.tagName === "BUTTON" && node.textContent === "展開完整輸出")!;
+    await act(async () => props(expandOutput).onClick());
     expect(allNodes(card).find(node => node.tagName === "PRE")!.textContent).toBe("1\n2\n3\n4\n5\n");
     expect(host.textContent).not.toContain("1\n2\n3\n4\n5\n1\n");
   } finally { await act(async () => root.unmount()); cleanup(); }

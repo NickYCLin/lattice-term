@@ -124,7 +124,7 @@ describe("session chat output disclosure", () => {
     }
   });
 
-  it.each(["codex", "claude"])("pairs native tool records while preserving messages and escaping unexpanded output (%s)", definitionId => {
+  it.each(["codex", "claude"])("pairs native tool records while preserving messages and showing escaped error output (%s)", definitionId => {
     conversation.messages = [
       { role: "user", text: "請幫我檢查檔案" },
       { role: "assistant", text: '{"command":"npm test"}', tool: { callId: "call-1", name: "exec_command", kind: "call" } },
@@ -135,9 +135,11 @@ describe("session chat output disclosure", () => {
     expect(html).toContain("請幫我檢查檔案");
     expect(html).toContain("檢查已完成");
     expect(html.match(/chat-card--tool/g)).toHaveLength(1);
-    expect(html).toContain("exec_command");
+    expect(html).toContain("指令細節與原始呼叫");
     expect(html).toContain("npm test");
-    expect(html).not.toMatch(/<script|alert\(|Exit code|call-1/);
+    expect(html).not.toMatch(/<script|call-1/);
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("結束碼 1");
     expect(html).toContain("session-chat__activity");
   });
 
@@ -150,7 +152,8 @@ describe("session chat output disclosure", () => {
     const html = render("done");
     expect(html.match(/chat-card--tool/g)).toHaveLength(2);
     expect(html).toContain("apply_patch");
-    expect(html).not.toMatch(/early output|call-2|call-3/);
+    expect(html).not.toMatch(/call-2|call-3/);
+    expect(html).toContain("early output");
     expect(html).not.toContain('class="session-chat__output" open=""');
   });
 

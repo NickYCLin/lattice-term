@@ -1,3 +1,7 @@
+import { chatToolRows, presentTool, toolHasProtectedContent, type ToolPresentation } from "../app/toolPresentation";
+import { ConversationTimeline } from "../components/chat/ConversationTimeline";
+import { ReadableToolCard } from "../components/chat/ReadableToolCard";
+import { readStoredPreferences } from "../app/preferences";
 import { ChatImageConversationContext } from "../app/chatImagePreview";
 import { accountModelTargetKey } from "../app/accountModels";
 import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
@@ -58,10 +62,8 @@ import { keepChatAttachmentPreviews } from "../app/chatAttachmentPreviews";
 import {
   defaultPermission,
   effortChoices,
-  toolOutputCount,
   delegationResult,
   supportsBrowser,
-  looksLikeDiff,
   formatTokens,
   permissionsFor,
   threadIsFresh,
@@ -107,11 +109,10 @@ import { AccountModelField } from "../components/agents/AccountModelField";
 import { findCliProxy } from "../app/cliProxyApi";
 import { useCliProxyModelLists, useCliProxySettings } from "../app/useCliProxyApi";
 import { ChatThreadTree } from "../components/chat/ChatThreadTree";
-import { ChatWebSources } from "../components/chat/ChatWebSources";
 import { ChatInstructions } from "../components/chat/ChatInstructions";
 import { ChatMcpServers } from "../components/chat/ChatMcpServers";
 import { ChatSkillPicker } from "../components/chat/ChatSkillPicker";
-import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImagePreviews";
+import { ChatImagePreviews } from "../components/chat/ChatImagePreviews";
 import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
 import { chatProjectKey } from "../app/chatProjects";
@@ -120,8 +121,6 @@ import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
 import { McpElicitation, parseElicitation } from "../components/chat/McpElicitation";
-import { webSources } from "../app/chatWebSources";
-import { diffLineKind } from "../app/gitChanges";
 import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotice";
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
@@ -829,6 +828,7 @@ export function ThreadPane({
   const searchInput = useRef<HTMLInputElement>(null);
   const searchMatches = useMemo(() => searchConversation(thread.items, search), [thread.items, search]);
   const matchedItem = searchMatches[searchIndex % Math.max(1, searchMatches.length)];
+  const toolRows = useMemo(() => chatToolRows(thread.items), [thread.items]);
   const [worktreeOpen, setWorktreeOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -1269,10 +1269,18 @@ export function ThreadPane({
               </p>
             </div>
           )}
-          {thread.items.map((item, index) => (
-            <div key={item.id} data-chat-item={item.id} className={item.id === matchedItem ? "chat-search__match" : undefined}><ChatItemView
+          <ConversationTimeline collapseDefault={readStoredPreferences().chatCollapseCompletedTurns} latestFinished={false} match={matchedItem}
+            rows={toolRows.map(row => {
+              const item = row.value, index = thread.items.indexOf(item);
+              return { id: row.id, aliases: row.aliases, user: item.type === "user",
+                process: row.tool ? !toolHasProtectedContent(row.tool) : row.commentary || item.type === "reasoning" || item.type === "plan" || item.type === "goal",
+                exploration: row.tool && !toolHasProtectedContent(row.tool) ? row.tool.exploration : undefined,
+                steps: row.tool?.commands.length || 1, endsTurn: item.type === "turnEnd" && !running,
+                durationMs: item.type === "turnEnd" ? item.durationMs : undefined,
+                node: <div key={item.id} data-chat-item={row.aliases.includes(matchedItem ?? "") ? matchedItem : item.id} className={row.aliases.includes(matchedItem ?? "") ? "chat-search__match" : undefined}><ChatItemView
               key={item.id}
               item={item}
+              presentation={row.tool} forceOpen={row.aliases.includes(matchedItem ?? "")}
               assistant={cliLabel(item.type !== "user" && item.type !== "notice" && item.type !== "turnEnd" && item.type !== "delegation"
                 ? item.assistantDefinitionId ?? thread.definitionId
                 : thread.definitionId)}
@@ -1301,8 +1309,8 @@ export function ThreadPane({
                   const fork = await chat.nativeFork(thread.id, t("chat.branch.suffix"), item.id, true);
                   if (fork) await chat.send(fork.id, text, item.attachments ?? [], activeProfile?.configDirectory ?? null);
                 } : undefined}
-            /></div>
-          ))}
+            /></div> };
+          })} />
           {running && thread.items[thread.items.length - 1]?.type === "user" && (
             <div className="chat-msg chat-msg--assistant">
               <div className="chat-msg__body">
@@ -1504,6 +1512,8 @@ export function ThreadPane({
 
 function ChatItemView({
   item,
+  presentation,
+  forceOpen,
   assistant,
   streaming,
   tag,
@@ -1515,6 +1525,8 @@ function ChatItemView({
   subtask,
 }: {
   item: ChatItem;
+  presentation?: ToolPresentation;
+  forceOpen?: boolean;
   assistant: string;
   streaming: boolean;
   tag: string;
@@ -1573,70 +1585,15 @@ function ChatItemView({
     case "goal": return item.goal ? <GoalProgress goal={item.goal} /> : null;
     case "reasoning":
       return (
-        <details className="chat-card chat-card--reasoning" open={streaming || undefined}>
+        <details className="chat-card chat-card--reasoning" open={forceOpen || streaming || undefined}>
           <summary>
             <span className="chat-card__label">{t("chat.reasoning")}</span>
           </summary>
           <p className="chat-card__text">{item.text}</p>
         </details>
       );
-    case "tool":
-      return (
-        <>
-          <details
-            className={`chat-card chat-card--tool${item.isError ? " is-error" : ""}${!item.done ? " is-running" : ""}`}
-            open={item.isError || !item.done || undefined}
-          >
-            <summary>
-              <span className="chat-card__label">{item.name}</span>
-              <code className="chat-card__summary" title={item.summary}>
-                {item.summary}
-              </code>
-              {(() => {
-                const counted = item.done && !item.isError ? toolOutputCount(item.name, item.output) : null;
-                return counted ? (
-                  <span className="chat-chip">
-                    {t(counted.kind === "lines" ? "chat.tool.lines" : "chat.tool.results", { count: counted.count })}
-                  </span>
-                ) : null;
-              })()}
-              {item.meta?.exitCode !== undefined && (
-                <span className={`chat-chip chat-chip--${item.meta.exitCode === 0 ? "ok" : "danger"}`}>
-                  {t("chat.tool.exitCode", { code: item.meta.exitCode })}
-                </span>
-              )}
-              {item.meta?.durationMs !== undefined && (
-                <span className="chat-chip">
-                  {t("chat.turn.duration", {
-                    seconds: new Intl.NumberFormat(tag, { maximumFractionDigits: 1 }).format(item.meta.durationMs / 1000),
-                  })}
-                </span>
-              )}
-              <span className="chat-card__state">
-                {!item.done ? t("chat.tool.running") : item.isError ? t("chat.tool.failed") : ""}
-              </span>
-            </summary>
-            {item.output && looksLikeDiff(item.output) ? (
-              <pre className="chat-card__output chat-card__output--diff">
-                {item.output.split("\n").map((line, index) => (
-                  <span key={index} className={`chat-diff__line is-${diffLineKind(line)}`}>
-                    {line}
-                    {"\n"}
-                  </span>
-                ))}
-              </pre>
-            ) : (
-              item.output && <pre className="chat-card__output">{item.output}</pre>
-            )}
-          </details>
-          {item.images && item.images.length > 0 && (
-            <ChatImageStrip paths={item.images} workingDirectory={workingDirectory} threadId={threadId} captions={false} />
-          )}
-          {item.done && !item.isError && (
-            <ChatWebSources sources={webSources(item.name, item.output)} />
-          )}
-        </>
-      );
+    case "tool": return <ReadableToolCard tool={presentation ?? presentTool({ ...item, input: item.summary, aliases: [item.id] })}
+      forceOpen={forceOpen} directory={workingDirectory} threadId={threadId} />;
     case "approval": {
       const elicitation =
         item.name === "mcp_form" || item.name === "mcp_url" ? parseElicitation(item.input) : null;

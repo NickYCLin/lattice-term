@@ -47,6 +47,7 @@ export interface Preferences {
   notificationVolume: number;
   chatSubmitShortcut: "enter" | "modifier-enter";
   chatWorkingSubmit: "queue" | "steer";
+  chatCollapseCompletedTurns: boolean;
 }
 
 export const defaultPreferences: Preferences = {
@@ -68,6 +69,7 @@ export const defaultPreferences: Preferences = {
   notificationVolume: 60,
   chatSubmitShortcut: "enter",
   chatWorkingSubmit: "queue",
+  chatCollapseCompletedTurns: false,
 };
 
 const STORAGE_KEY = "latticeterm.preferences.v2";
@@ -123,6 +125,7 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     notificationVolume: normalizeNotificationVolume(stored.notificationVolume),
     chatSubmitShortcut: stored.chatSubmitShortcut === "modifier-enter" ? "modifier-enter" : "enter",
     chatWorkingSubmit: stored.chatWorkingSubmit === "steer" ? "steer" : "queue",
+    chatCollapseCompletedTurns: stored.chatCollapseCompletedTurns === true,
   };
 }
 

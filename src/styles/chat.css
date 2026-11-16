@@ -2820,3 +2820,32 @@ button.chat-diff__line.is-commentable:focus-visible {
 
 .chat-editor-action { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); max-width: 100%; }
 .chat-editor-action small { max-width: 24rem; overflow-wrap: anywhere; font-size: var(--text-xs); }
+
+/* Shared native/app-server process summaries. Keep raw payloads reachable. */
+.chat-process-turn,
+.chat-process-turn > div,
+.chat-readable-tool { min-width: 0; max-width: 100%; }
+.chat-process-turn [hidden] { display: none; }
+.chat-process-turn > div + div { margin-top: var(--space-3); }
+.chat-process-toggle,
+.chat-exploration__toggle { margin-bottom: var(--space-2); white-space: normal; text-align: start; }
+.chat-exploration__toggle {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.chat-exploration__toggle:disabled { opacity: 1; color: var(--text-muted); }
+.chat-readable-tool .chat-card__head { flex-wrap: wrap; }
+.chat-readable-tool__command {
+  flex: 1 1 12rem;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+.chat-readable-tool__result,
+.chat-tool-raw { overflow-wrap: anywhere; }
+.chat-tool-raw > summary { padding: var(--space-2) var(--space-3); color: var(--text-muted); cursor: pointer; }
+.chat-tool-raw p { padding-inline: var(--space-3); }

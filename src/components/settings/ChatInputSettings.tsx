@@ -21,6 +21,10 @@ export function ChatInputSettings({ preferences, onChange }: {
         </select>
         <span className="field__optional">{t("settings.chatInput.hint")}</span>
       </label>
+      <label className="field"><span><input type="checkbox" checked={preferences.chatCollapseCompletedTurns}
+        onChange={event => onChange({ chatCollapseCompletedTurns: event.target.checked })} />{t("chat.process.setting")}</span>
+        <span className="field__optional">{t("chat.process.settingHint")}</span>
+      </label>
     </div>
   </section>;
 }

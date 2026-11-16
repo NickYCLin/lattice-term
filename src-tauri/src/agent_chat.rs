@@ -3034,7 +3034,14 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
             }
         }
         Some("commandExecution") => {
-            let summary = str_field(item, "command").unwrap_or_default().to_string();
+            // Preserve the received command and cwd for expandable details; the
+            // frontend builds a short label without destroying the original.
+            let command = str_field(item, "command").unwrap_or_default();
+            let summary = if let Some(cwd) = str_field(item, "cwd") {
+                serde_json::json!({ "command": command, "cwd": cwd }).to_string()
+            } else {
+                command.to_string()
+            };
             if completed {
                 let failed = matches!(str_field(item, "status"), Some("failed" | "declined"))
                     || item
@@ -3046,7 +3053,7 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                 events.push(ChatEvent::ToolFinished {
                     item_id,
                     name: Some("command".to_string()),
-                    summary: Some(truncate(&summary, 200)),
+                    summary: Some(bounded_output(&summary)),
                     output: bounded_output(str_field(item, "aggregatedOutput").unwrap_or_default()),
                     is_error: failed,
                     meta: (exit_code.is_some() || duration_ms.is_some()).then_some(ToolMeta {
@@ -3055,7 +3062,11 @@ fn codex_v2_item_events(item: &Value, completed: bool) -> Vec<ChatEvent> {
                     }),
                 });
             } else {
-                events.push(started("command", summary));
+                events.push(ChatEvent::ToolStarted {
+                    item_id,
+                    name: "command".to_string(),
+                    summary: bounded_output(&summary),
+                });
             }
         }
         Some("fileChange") => {
@@ -3714,6 +3725,26 @@ pub(crate) async fn read_session_goal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_cards_keep_full_received_command_and_directory() {
+        let command = format!("printf '%s' {}", "synthetic-long-argument".repeat(20));
+        let item = serde_json::json!({"type":"commandExecution","id":"synthetic-command", "command":command,"cwd":"/synthetic/project", "aggregatedOutput":"done","exitCode":0});
+        for completed in [false, true] {
+            let events = codex_v2_item_events(&item, completed);
+            let summary = match &events[0] {
+                ChatEvent::ToolStarted { summary, .. } => summary,
+                ChatEvent::ToolFinished {
+                    summary: Some(summary),
+                    ..
+                } => summary,
+                _ => panic!("expected command event"),
+            };
+            let payload: Value = serde_json::from_str(summary).unwrap();
+            assert_eq!(payload["command"], command);
+            assert_eq!(payload["cwd"], "/synthetic/project");
+        }
+    }
 
     #[test]
     fn mentions_accept_real_skill_files_and_plain_plugin_links_only() {

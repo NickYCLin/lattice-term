@@ -4,10 +4,13 @@ import type { SessionConversationMessage } from "../../app/useSessionConversatio
 import { SessionMessage } from "./SessionMessage";
 import { useSessionConversationActions } from "./SessionConversationActions";
 import { SessionToolCard } from "./SessionToolCard";
+import { sessionToolRows, toolHasProtectedContent } from "../../app/toolPresentation";
+import { ReadableToolCard } from "./ReadableToolCard";
+import { ConversationTimeline } from "./ConversationTimeline";
 import { PlanProgress, GoalProgress } from "./PlanProgress";
 import { ChatArtifact } from "./ChatArtifact";
 import { approvalShortcut } from "../../app/approvalShortcut";
-import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
 import {
   CHAT_ATTACHMENT_LIMIT, mergeAttachmentPaths,
@@ -125,14 +128,11 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     try { await onFork(conversation.messages, index, edited); }
     finally { forkLock.current = false; setForkWorking(false); }
   }
-  const matches = search.trim() ? conversation.messages.flatMap((message, index) => {
-    if (!message.text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) return [];
-    if (message.tool?.kind === "result") {
-      const call = conversation.messages.findIndex(row => row.tool?.kind === "call" && row.tool.callId === message.tool?.callId);
-      return [call < 0 ? index : call];
-    }
-    return [index];
-  }).filter((value, index, values) => values.indexOf(value) === index) : [];
+  const toolRows = useMemo(() => sessionToolRows(conversation.messages), [conversation.messages]);
+  const matches = search.trim() ? toolRows.flatMap(row => {
+    const alias = row.aliases.find(index => conversation.messages[Number(index)]?.text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+    return alias === undefined ? [] : [Number(alias)];
+  }) : [];
   const match = matches[searchIndex % Math.max(1, matches.length)];
   useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
   useEffect(() => {
@@ -307,12 +307,16 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
         {supported && session.definitionId === "codex" && !conversation.loading && !conversation.readError
           && conversation.availability === "waitingForIdentity" && <p>{t("sessionChat.codexIdentityHint")}</p>}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
-        {conversation.messages.map((message, index) => {
-          if (message.tool) {
-            if (message.tool.kind === "result" && conversation.messages.some(row => row.tool?.kind === "call" && row.tool.callId === message.tool?.callId)) return null;
-            const result = message.tool.kind === "call" ? conversation.messages.find(row => row.tool?.kind === "result" && row.tool.callId === message.tool?.callId) : undefined;
-            return <div key={message.renderId ?? index} data-session-message={index} className={index === match ? "chat-search__match" : undefined}><SessionToolCard message={message} result={result} onOpenFile={setArtifact} /></div>;
-          }
+        <ConversationTimeline collapseDefault={readStoredPreferences().chatCollapseCompletedTurns}
+          latestFinished={!working && !attention && !nativePending && !conversation.approval && session.state === "done" && session.stateSource === "integration"} match={match === undefined ? undefined : String(match)}
+          rows={toolRows.map(row => {
+          const message = row.value, index = conversation.messages.indexOf(message);
+          const hit = match !== undefined && row.aliases.includes(String(match));
+          const node = message.tool
+            ? <div data-session-message={hit ? match : index} className={hit ? "chat-search__match" : undefined}>
+              {row.tool ? <ReadableToolCard tool={row.tool} forceOpen={hit} directory={session.workingDirectory} threadId={session.sessionId} />
+                : <SessionToolCard message={message} forceOpen={hit} onOpenFile={setArtifact} />}</div>
+            : (() => {
           const canFork = onFork && !working && !attention && !blocked && !nativePending && queuedCount === 0;
           const hasBoundary = session.definitionId === "codex" ? Boolean(message.nativeTurnId) : Boolean(message.nativeMessageId);
           const canEdit = canFork && message.role === "user" && (session.definitionId === "codex" ? hasBoundary
@@ -322,7 +326,12 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
             onEdit={canEdit ? text => fork(index, text) : undefined}
             onBranch={canFork && hasBoundary && message.role === "assistant" ? () => { void fork(index).catch(reason => setNotice(String(reason))); } : undefined} />
           </div>;
-        })}
+          })();
+          return { id: row.id, aliases: row.aliases, user: !message.tool && message.role === "user",
+            process: row.tool ? !toolHasProtectedContent(row.tool) : Boolean(row.commentary || message.tool?.kind === "reasoning"),
+            exploration: row.tool && !toolHasProtectedContent(row.tool) ? row.tool.exploration : undefined,
+            steps: row.tool?.commands.length || 1, node };
+        })} />
         {sessionSubmissionsNotQueued(conversation.submitted ?? [], queue.prompts).map(prompt => {
           const sent = splitSessionAttachments(prompt.text);
           const files = mergeAttachmentPaths([], sent.paths) ?? [];
