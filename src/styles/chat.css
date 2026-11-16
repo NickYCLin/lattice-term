@@ -2807,3 +2807,9 @@ button.chat-diff__line.is-commentable:focus-visible {
 .chat-goal[open] .chat-goal__objective { white-space: normal; }
 .chat-goal.is-compact { padding: 8px 16px; border-radius: 0; }
 @media (hover: none) { .chat-msg__actionGroup { opacity: 0.6; } }
+
+/* Editable workspace context; the PTY composer's read-only context is unchanged. */
+.session-composer__context > .path-drop-zone { min-width: 0; }
+.session-composer__directory-button { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.session-composer__directory-clear { display: grid; place-items: center; flex: none; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+:is(.session-composer__directory-button, .session-composer__directory-clear):disabled { cursor: not-allowed; }

@@ -9,7 +9,10 @@ import { ChatView } from "./ChatView";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(null) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("../app/nativeRuntime", () => ({ hasDesktopBackend: () => false }));
-vi.mock("../app/fileDrop", () => ({ useFileDrop: () => ({ dragging: false }) }));
+vi.mock("../app/fileDrop", async importOriginal => ({
+  ...await importOriginal<typeof import("../app/fileDrop")>(),
+  useFileDrop: () => ({ dragging: false }),
+}));
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it("does not reset the reading position for an unchanged-size refresh before the scroll event arrives", async () => {

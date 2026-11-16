@@ -853,6 +853,20 @@ export function useAgentChat(
         const revision = await invoke<string>("git_changes_checkpoint", { workingDirectory: thread.workingDirectory }).catch(() => undefined);
         changeThreads(current => current.map(entry => entry.id === id && entry.runningTurnId === turnId ? { ...entry, lastTurnCheckpoint: revision } : entry));
       }
+      // The composer discovers models per account. Validate its effort against
+      // that same config root instead of the default account's cached catalog.
+      let turnModels: ChatModelList | undefined = modelsRef.current[thread.definitionId];
+      if (!thread.provider && thread.definitionId === "codex") {
+        try {
+          const models = await invoke<ChatModelChoice[]>("agent_chat_models", { definitionId: thread.definitionId, profileConfigPath });
+          if (Array.isArray(models)) turnModels = { state: "ready", models };
+          else turnModels = undefined;
+        } catch (reason) {
+          if (thread.effort) throw reason;
+          turnModels = undefined;
+        }
+      }
+      if (threadsRef.current.find(entry => entry.id === id)?.runningTurnId !== turnId) return;
       await invoke(directProxy ? "agent_chat_proxy_send" : "agent_chat_send", {
         ...(directProxy ? { history: proxyChatHistory(thread.items) } : {}),
         request: {
@@ -866,7 +880,7 @@ export function useAgentChat(
           ...(typeof thread.planMode === "boolean" ? { planMode: thread.planMode } : {}),
           permission: thread.permission,
           model: thread.model.trim() || null,
-          effort: effortForTurn(thread, modelsRef.current[thread.definitionId]),
+          effort: effortForTurn(thread, turnModels),
           profileConfigPath,
           cliProxyBaseUrl: proxy?.baseUrl ?? null,
           cliProxyId: proxy?.id ?? null,

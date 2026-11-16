@@ -13,6 +13,9 @@ import { QueuedPromptEditor } from "./QueuedPromptEditor";
 import { findRunningCodexResumeSession, markAgentSessionClosed, type AgentSessionSummary } from "../../app/useAgentSessions";
 import { CLI_PROXY_SETTINGS_KEY, cliProxyLaunchArguments } from "../../app/cliProxyApi";
 
+const directoryDialog = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => directoryDialog);
+
 const clipboard = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: clipboard.invoke, convertFileSrc: (path: string) => path }));
 const sessionConversation = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn(),
@@ -160,6 +163,7 @@ it("does not clear a newer queue draft when an earlier save finishes after leavi
 
 beforeEach(() => {
   vi.useFakeTimers();
+  directoryDialog.open.mockReset();
   clipboard.invoke.mockReset().mockResolvedValue(null);
   sessionConversation.send.mockReset().mockResolvedValue(true);
   sessionConversation.messages = [];
@@ -583,5 +587,76 @@ it("preserves IME, Shift+Enter and busy-turn queueing on the native textarea", a
     await act(async () => inputProps().onKeyDown({ key: "Enter", shiftKey: false, nativeEvent: { key: "Enter", isComposing: false }, preventDefault }));
     expect(chat.enqueue).toHaveBeenCalledWith(thread.id, "下一則", [], null, []);
     expect(chat.send).toHaveBeenCalledOnce();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("keeps only advanced settings above a fresh conversation and moves reasoning into the model menu", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ definitionId: "claude", model: "", effort: "high", workingDirectory: "" });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={fakeAgentApi({ catalog: [fakeDefinition({ id: "claude", label: "Claude Code" })] })} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
+    const settings = allNodes(container).find(node => node.attributes.class === "chat-settings")!;
+    expect(settings).toBeDefined();
+    expect(allNodes(settings).filter(node => node.tagName === "SELECT")).toHaveLength(0);
+    expect(settings.textContent).toContain("允許使用瀏覽器");
+    expect(settings.textContent).toContain("MCP");
+    expect(settings.textContent).toContain("指示");
+    expect(allNodes(container).filter(node => node.tagName === "SELECT")).toHaveLength(1); // permission only
+    await act(async () => onClick(allNodes(container).find(node => node.attributes.class === "session-composer__model")!)());
+    const menu = allNodes(container).find(node => node.attributes.role === "dialog")!;
+    expect(menu).toBeDefined();
+    expect(menu.textContent).toContain("來源");
+    expect(menu.textContent).toContain("模型");
+    const effort = allNodes(menu).find(node => node.tagName === "SELECT" && node.attributes["aria-label"] === "推理深度")!;
+    expect(effort).toBeDefined();
+    const key = Object.keys(effort).find(name => name.startsWith("__reactProps$"))!;
+    const control = (effort as unknown as Record<string, { value: string; onChange: (event: { target: { value: string } }) => void }>)[key];
+    expect(control.value).toBe("high");
+    await act(async () => control.onChange({ target: { value: "max" } }));
+    expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { effort: "max" });
+    await act(async () => control.onChange({ target: { value: "" } }));
+    expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { effort: null });
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("chooses and clears the working folder from the bottom context of a fresh conversation", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ workingDirectory: "" });
+  const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
+  const render = () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={fakeAgentApi()} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>);
+  try {
+    await act(async () => render());
+    directoryDialog.open.mockResolvedValue("/synthetic/project");
+    const choose = allNodes(container).find(node => node.attributes.class?.includes("session-composer__directory-button"))!;
+    expect(choose.textContent).toBe("一般對話");
+    await act(async () => onClick(choose)());
+    expect(directoryDialog.open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
+    expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { workingDirectory: "/synthetic/project" });
+    thread.workingDirectory = "/synthetic/project";
+    await act(async () => render());
+    const clear = allNodes(container).find(node => node.attributes.class === "session-composer__directory-clear")!;
+    await act(async () => onClick(clear)());
+    expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { workingDirectory: "" });
+    expect(allNodes(container).filter(node => node.attributes["aria-label"] === "專案資料夾（選填）")).toHaveLength(1);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each(["running", "queued"] as const)("locks the bottom folder controls while %s", async mode => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const thread = fakeThread({ runningTurnId: mode === "running" ? "turn" : null,
+    pendingInputs: mode === "queued" ? [{ id: "q", prompt: "Later", attachments: [], profileConfigPath: null, createdAt: 1 }] : [] });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={fakeAgentApi()} chat={fakeChatApi({ threads: [thread], activeThreadId: thread.id })} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
+    const controls = allNodes(container).filter(node => node.attributes.class?.includes("session-composer__directory-"));
+    expect(controls).toHaveLength(2);
+    for (const node of controls) {
+      const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
+      expect((node as unknown as Record<string, { disabled: boolean }>)[key].disabled).toBe(true);
+    }
+    expect(directoryDialog.open).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); }
 });

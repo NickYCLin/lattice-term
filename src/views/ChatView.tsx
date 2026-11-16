@@ -1,3 +1,4 @@
+import { accountModelTargetKey } from "../app/accountModels";
 import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
 import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
 import { ApprovalActions } from "../components/chat/ApprovalActions";
@@ -19,7 +20,6 @@ import { desktopChatAccess } from "../app/desktopChat";
 import { useNativeConversationList } from "../components/chat/NativeConversationRows";
 import { ConversationReadProgress } from "../components/chat/ConversationReadProgress";
 import { useNativeHistory } from "../app/useNativeConversations";
-import { PathDropZone } from "../components/files/PathDropZone";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
 import { QueuedPromptEditor } from "../components/chat/QueuedPromptEditor";
@@ -77,7 +77,6 @@ import type { AgentApi, AgentDefinition, AgentSessionSummary } from "../app/useA
 import { displayPath } from "../app/displayPath";
 import { imageFileName } from "../app/chatImages";
 import {
-  profileCapable,
   profilesFor,
   type ChatAccountProfile,
 } from "../app/chatAccountProfiles";
@@ -1238,86 +1237,6 @@ export function ThreadPane({
         }} />}
         {settingsOpen && !thread.archived && (
           <div className="chat-settings" id={`chat-settings-${thread.id}`}>
-            <AccountModelField
-              options={modelOptions}
-              value={pickerValue}
-              disabled={settingsLocked}
-              allowCliProxyApi
-              proxyModels={cliProxyModels}
-              onReloadProxyModels={reloadCliProxyModels}
-              onChange={changeModel}
-            />
-            {(activeProfileSignedOut || activeProfileMissing) && (
-              <p className="field__hint chat-settings__warning" role="status">
-                {t(activeProfileMissing ? "accountModel.missing" : "chat.accountProfile.notSignedIn")}
-              </p>
-            )}
-            {(() => {
-              if (thread.provider) return null;
-              const efforts = effortChoices(thread.definitionId, thread.model, chat.models[thread.definitionId]);
-              if (efforts.length === 0) return null;
-              return (
-                <label className="field">
-                  <span className="field__label">{t("chat.effort")}</span>
-                  <select
-                    className="select"
-                    value={thread.effort ?? ""}
-                    disabled={settingsLocked}
-                    onChange={(event) => chat.updateThread(thread.id, { effort: event.target.value || null })}
-                  >
-                    <option value="">{t("chat.effort.default")}</option>
-                    {efforts.map((effort) => (
-                      <option key={effort.value} value={effort.value} title={effort.description ?? undefined}>
-                        {effort.value}
-                        {effort.description ? ` — ${effort.description}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            })()}
-            <div className="field field--grow">
-              <span className="field__label">{t("chat.directory")}</span>
-              <PathDropZone kind="directory" disabled={settingsLocked} onSelect={path => chat.updateThread(thread.id, { workingDirectory: path })}>
-              <div className="chat-directory">
-                <button
-                  type="button"
-                  className="button button--secondary button--sm"
-                  onClick={chooseDirectory}
-                  disabled={settingsLocked}
-                >
-                  <FolderIcon />
-                  {t("chat.directory.choose")}
-                </button>
-                {thread.workingDirectory && (
-                  <button type="button" className="button button--ghost button--sm" disabled={settingsLocked}
-                    onClick={() => chat.updateThread(thread.id, { workingDirectory: "" })}>
-                    {t("chat.directory.clear")}
-                  </button>
-                )}
-                <span className="chat-directory__path" title={displayPath(thread.workingDirectory)}>
-                  {thread.workingDirectory
-                    ? displayPath(thread.workingDirectory)
-                    : t("chat.directory.none")}
-                </span>
-              </div>
-              </PathDropZone>
-            </div>
-            <label className="field">
-              <span className="field__label">{t("chat.permission")}</span>
-              <select
-                className="select"
-                value={thread.permission}
-                disabled={settingsLocked || directProxy}
-                onChange={(event) => changePermission(event.target.value as ChatPermission)}
-              >
-                {permissionsFor(thread.definitionId).map((permission) => (
-                  <option key={permission} value={permission}>
-                    {t(permissionLabelKey[permission])}
-                  </option>
-                ))}
-              </select>
-            </label>
             {!directProxy && supportsBrowser(thread.definitionId) && (
               <label className="checkbox chat-settings__browser">
                 <input type="checkbox" checked={thread.browserEnabled === true} disabled={settingsLocked}
@@ -1326,10 +1245,6 @@ export function ThreadPane({
                 <span><strong>{t("chat.browser")}</strong><small>{t("chat.browser.hint")}</small></span>
               </label>
             )}
-            <p className="chat-settings__hint">
-              {t(permissionHintKey[thread.permission])}
-              {profileCapable(thread.definitionId) ? ` ${t("chat.accountProfile.hint")}` : ""}
-            </p>
             {!directProxy && <ChatMcpAccess thread={thread} />}
             {!directProxy && (thread.definitionId === "claude" ||
               thread.definitionId === "codex" ||
@@ -1460,9 +1375,15 @@ export function ThreadPane({
       )}
 
       {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer session-composer" onSubmit={submit}>
-        <ConversationComposerFrame workingDirectory={thread.workingDirectory}>
+        <ConversationComposerFrame workingDirectory={thread.workingDirectory} directoryControls={{
+          disabled: settingsLocked, onChoose: () => { void chooseDirectory(); },
+          onChange: workingDirectory => { if (!settingsLocked) chat.updateThread(thread.id, { workingDirectory }); },
+        }}>
           <div ref={composerDropRef} className={`chat-composer__box session-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
             {assistance.menu}
+            {(activeProfileSignedOut || activeProfileMissing) && <p className="field__hint chat-settings__warning" role="status">
+              {t(activeProfileMissing ? "accountModel.missing" : "chat.accountProfile.notSignedIn")}
+            </p>}
             {attachments.length > 0 && (
               <div className="chat-attachments" aria-label={t("chat.attachment.selected")}>
                 {attachments.map((attachment) => (
@@ -1551,6 +1472,33 @@ export function ThreadPane({
                 <AccountModelField options={modelOptions} value={pickerValue} disabled={settingsLocked}
                   allowCliProxyApi proxyModels={cliProxyModels} onReloadProxyModels={reloadCliProxyModels}
                   onChange={changeModel} />
+                {(() => {
+                  if (thread.provider) return null;
+                  const efforts = effortChoices(thread.definitionId, thread.model,
+                    accountModels[accountModelTargetKey({ definitionId: thread.definitionId, configDirectory: activeProfile?.configDirectory ?? null })]
+                      ?? (thread.accountProfileId === null ? chat.models[thread.definitionId] : undefined));
+                  if (efforts.length === 0) return null;
+                  return (
+                    <label className="field">
+                      <span className="field__label">{t("chat.effort")}</span>
+                      <select
+                        className="select"
+                        aria-label={t("chat.effort")}
+                        value={thread.effort ?? ""}
+                        disabled={settingsLocked}
+                        onChange={(event) => chat.updateThread(thread.id, { effort: event.target.value || null })}
+                      >
+                        <option value="">{t("chat.effort.default")}</option>
+                        {efforts.map((effort) => (
+                          <option key={effort.value} value={effort.value} title={effort.description ?? undefined}>
+                            {effort.value}
+                            {effort.description ? ` — ${effort.description}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })()}
               </ComposerPopover>
               {running && !directProxy && thread.definitionId === "codex" && (
                 <button type="button" className="button button--secondary button--sm"

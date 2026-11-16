@@ -264,8 +264,9 @@ describe("ChatView", () => {
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), fakeAgentApi({
       catalog: [{ ...definition, account: { ...definition.account, state: "signedOut" } }],
     }));
-    expect(markup).toContain("CLIProxyAPI 模型 ID");
-    expect(markup).toContain('value="proxy-model"');
+    expect(markup).not.toContain("CLIProxyAPI 模型 ID");
+    expect(markup).toContain('class="session-composer__model"');
+    expect(markup).toContain("proxy-model");
     expect(markup).not.toContain('chat-settings__warning');
   });
 
@@ -278,7 +279,8 @@ describe("ChatView", () => {
     expect(empty).toContain("新對話");
     const thread = fakeThread({ provider: "cliproxyapi", proxyId: "default", model: "proxy-model", nativeSessionId: null });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }), agents);
-    expect(markup).toContain('value="proxy-model"');
+    expect(markup).toContain('class="session-composer__model"');
+    expect(markup).toContain("proxy-model");
     expect(markup).toContain('placeholder="想做什麼都可以"');
     expect(markup).not.toContain('chat-settings__warning');
     const composer = markup.match(/<textarea[^>]*placeholder="想做什麼都可以"[^>]*>/)?.[0];
@@ -346,7 +348,7 @@ describe("ChatView", () => {
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
 
     expect(markup).toContain("公司帳號 · OpenAI Codex");
-    expect(markup).toContain('value="[&quot;codex&quot;,&quot;work&quot;,null,null,&quot;&quot;]" selected');
+    expect(markup).not.toContain('class="account-model-field"');
     expect(markup).not.toContain("使用帳號");
   });
 
@@ -354,6 +356,6 @@ describe("ChatView", () => {
     const thread = fakeThread({ accountProfileId: "removed" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
     expect(markup).toContain("原帳號已移除，請重新選擇模型");
-    expect(markup).toContain('disabled="" selected=""');
+    expect(markup).toContain('role="status">原帳號已移除，請重新選擇模型');
   });
 });
