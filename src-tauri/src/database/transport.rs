@@ -43,6 +43,24 @@ impl DatabaseRegistry {
             return Ok(result);
         };
         let app = self.app.as_ref().ok_or("此環境未提供資料庫遠端通道。")?;
+        if matches!(route, DatabaseRoute::Ssh { .. }) {
+            let registry = app
+                .state::<Arc<crate::tunnel::TunnelRegistry>>()
+                .inner()
+                .clone();
+            return open_ssh_route(profile, registry, |request, listener| async move {
+                crate::tunnel_start_internal(
+                    request,
+                    app.state(),
+                    app.state(),
+                    app.state(),
+                    Some(listener),
+                )
+                .await
+                .map(|_| ())
+            })
+            .await;
+        }
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|_| "無法建立本機資料庫通道。")?;
@@ -51,42 +69,7 @@ impl DatabaseRegistry {
             .map_err(|_| "無法取得資料庫通道連接埠。")?
             .port();
         match route {
-            DatabaseRoute::Ssh { profile_id } => {
-                let mut nonce = [0u8; 16];
-                getrandom::fill(&mut nonce).map_err(|_| "無法建立資料庫通道識別碼。")?;
-                let id = format!(
-                    "database-{}",
-                    nonce
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>()
-                );
-                let request = crate::tunnel::StartTunnelRequest {
-                    tunnel_id: id.clone(),
-                    tunnel_type: crate::tunnel::TunnelType::Local,
-                    profile_id: profile_id.clone(),
-                    local_host: "127.0.0.1".into(),
-                    local_port: port,
-                    remote_host: profile.hostname.clone(),
-                    remote_port: profile.port,
-                    ssh_hostname: String::new(),
-                    ssh_port: 0,
-                    ssh_username: String::new(),
-                };
-                let registry = app
-                    .state::<Arc<crate::tunnel::TunnelRegistry>>()
-                    .inner()
-                    .clone();
-                result.ssh = Some((registry, id));
-                crate::tunnel_start_internal(
-                    request,
-                    app.state(),
-                    app.state(),
-                    app.state(),
-                    Some(listener),
-                )
-                .await?;
-            }
+            DatabaseRoute::Ssh { .. } => unreachable!(),
             DatabaseRoute::Remote { profile_id } => {
                 let gateway = {
                     let storage = app.state::<crate::AppStorage>();
@@ -126,4 +109,58 @@ impl DatabaseRegistry {
         result.profile.port = port;
         Ok(result)
     }
+}
+
+// Resolve the database route once; production loads the gateway credential from
+// the application stores, while isolated tests supply only temporary fixtures.
+pub(super) async fn open_ssh_route<F, Fut>(
+    profile: &DatabaseProfile,
+    registry: Arc<crate::tunnel::TunnelRegistry>,
+    start: F,
+) -> Result<ConnectionRoute, String>
+where
+    F: FnOnce(crate::tunnel::StartTunnelRequest, TcpListener) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let Some(DatabaseRoute::Ssh { profile_id }) = &profile.route else {
+        return Err("指定的資料庫路線不是 SSH 通道。".into());
+    };
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|_| "無法建立本機資料庫通道。")?;
+    let port = listener
+        .local_addr()
+        .map_err(|_| "無法取得資料庫通道連接埠。")?
+        .port();
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).map_err(|_| "無法建立資料庫通道識別碼。")?;
+    let id = format!(
+        "database-{}",
+        nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    let request = crate::tunnel::StartTunnelRequest {
+        tunnel_id: id.clone(),
+        tunnel_type: crate::tunnel::TunnelType::Local,
+        profile_id: profile_id.clone(),
+        local_host: "127.0.0.1".into(),
+        local_port: port,
+        remote_host: profile.hostname.clone(),
+        remote_port: profile.port,
+        ssh_hostname: String::new(),
+        ssh_port: 0,
+        ssh_username: String::new(),
+    };
+    let mut result = ConnectionRoute {
+        profile: profile.clone(),
+        server_name: profile.hostname.clone(),
+        worker: None,
+        ssh: Some((registry, id)),
+    };
+    start(request, listener).await?;
+    result.profile.hostname = "127.0.0.1".into();
+    result.profile.port = port;
+    Ok(result)
 }

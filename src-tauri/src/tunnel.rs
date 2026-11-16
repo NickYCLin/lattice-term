@@ -1292,9 +1292,17 @@ async fn request_remote_forward(
 }
 
 /// Connects and authenticates the tunnel's own SSH session.
+// Production callers retain password authentication. Isolated database tests
+// inject an ephemeral key into the same admission/transport/forwarding path.
+pub(crate) enum TunnelCredential<'a> {
+    Password(&'a str),
+    #[cfg(test)]
+    PrivateKey(Arc<russh::keys::ssh_key::PrivateKey>),
+}
+
 async fn open_session(
     request: &StartTunnelRequest,
-    password: &str,
+    credential: TunnelCredential<'_>,
     known: Option<HostKeyRecord>,
     counters: Counters,
     tunnel_admission: Arc<TunnelAdmission>,
@@ -1392,10 +1400,25 @@ async fn open_session(
             SSH_AUTH_TIMEOUT.as_secs()
         ),
         async {
-            session
-                .handle
-                .authenticate_password(&request.ssh_username, password)
-                .await
+            let result = match credential {
+                TunnelCredential::Password(password) => {
+                    session
+                        .handle
+                        .authenticate_password(&request.ssh_username, password)
+                        .await
+                }
+                #[cfg(test)]
+                TunnelCredential::PrivateKey(key) => {
+                    session
+                        .handle
+                        .authenticate_publickey(
+                            &request.ssh_username,
+                            russh::keys::PrivateKeyWithHashAlg::new(key, None),
+                        )
+                        .await
+                }
+            };
+            result
                 .map(|result| result.success())
                 .map_err(|error| format!("auth:{error}"))
         },
@@ -1439,9 +1462,26 @@ pub(crate) async fn start_reserved_tunnel(
 }
 
 pub(crate) async fn start_reserved_tunnel_prebound(
-    mut reservation: TunnelStartReservation,
+    reservation: TunnelStartReservation,
     request: StartTunnelRequest,
     password: &str,
+    known: Option<HostKeyRecord>,
+    prebound: Option<TcpListener>,
+) -> Result<TunnelStatusSummary, String> {
+    start_reserved_tunnel_with_credential(
+        reservation,
+        request,
+        TunnelCredential::Password(password),
+        known,
+        prebound,
+    )
+    .await
+}
+
+pub(crate) async fn start_reserved_tunnel_with_credential(
+    mut reservation: TunnelStartReservation,
+    request: StartTunnelRequest,
+    credential: TunnelCredential<'_>,
     known: Option<HostKeyRecord>,
     prebound: Option<TcpListener>,
 ) -> Result<TunnelStatusSummary, String> {
@@ -1502,7 +1542,7 @@ pub(crate) async fn start_reserved_tunnel_prebound(
     );
     let session = open_session(
         &request,
-        password,
+        credential,
         known,
         counters.clone(),
         Arc::clone(&tunnel_admission),

@@ -9,6 +9,8 @@ mod sqlite;
 #[cfg(test)]
 mod tests;
 mod tls;
+#[cfg(test)]
+mod tool_free_tests;
 mod transport;
 pub mod workbench;
 

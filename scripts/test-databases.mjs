@@ -10,6 +10,7 @@ const directory = mkdtempSync(join(temporaryRoot, "latticeterm-db-"));
 const openssl = process.env.OPENSSL ?? (process.platform === "win32" ? "C:/Program Files/Git/usr/bin/openssl.exe" : "openssl");
 const cargo = process.platform === "win32" ? join(homedir(), ".cargo/bin/cargo.exe") : "cargo";
 const containers = new Set();
+let network;
 function run(command, args, options = {}) {
   return spawnSync(command, args, { encoding: "utf8", timeout: 120000, ...options });
 }
@@ -26,13 +27,35 @@ const matrix = [
   ["sqlServer", "mcr.microsoft.com/mssql/server:2022-latest", 1433],
 ];
 if (selected && !matrix.some(([engine]) => engine === selected)) throw new Error("Choose postgres, mysql, mariadb or sqlServer");
+if (run("docker", ["info", "--format", "{{.ServerVersion}}"], { timeout: 15000 }).status !== 0) {
+  console.log("SKIP: Docker is unavailable; isolated database and SSH acceptance did not run.");
+  rmSync(directory, { recursive: true, force: true });
+  process.exit(0);
+}
 try {
-  checked("docker", ["info", "--format", "{{.ServerVersion}}"]);
-  checked(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--no-run"], { stdio: "inherit", timeout: 600000 });
+  const build = checked(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--no-run", "--message-format=json"], { timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  const artifacts = build.split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const testBinary = artifacts.find(item => item.reason === "compiler-artifact" && item.target.name === "latticeterm_lib" && item.profile.test && item.executable)?.executable;
+  if (!testBinary) throw new Error("Database test executable was not emitted");
+  network = `latticeterm-db-qa-${randomBytes(6).toString("hex")}`;
+  checked("docker", ["network", "create", network]);
+  writeFileSync(join(directory, "sshd_config"), "Port 2222\nListenAddress 0.0.0.0\nHostKey /tmp/host\nAuthorizedKeysFile /tmp/client.pub\nStrictModes no\nPermitRootLogin yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nAllowTcpForwarding yes\nUsePAM no\nPidFile /tmp/sshd.pid\nLogLevel ERROR\n");
+  const sshName = `${network}-ssh`;
+  const sshId = checked("docker", ["run", "-d", "--name", sshName, "--network", network, "--user", "root", "-e", `LATTICETERM_TEST_SSH_PASSWORD=${randomBytes(32).toString("hex")}`, "--tmpfs", "/tmp", "-p", "127.0.0.1::2222", "--mount", `type=bind,source=${directory},target=/qa,readonly`, "--entrypoint", "sh", "linuxserver/openssh-server:latest", "-c", "mkdir -p /run/sshd; ssh-keygen -q -t ed25519 -N '' -f /tmp/host; ssh-keygen -q -t ed25519 -N '' -f /tmp/client; echo root:$LATTICETERM_TEST_SSH_PASSWORD | chpasswd; unset LATTICETERM_TEST_SSH_PASSWORD; exec /usr/sbin/sshd.pam -D -e -f /qa/sshd_config"]);
+  containers.add(sshId);
+  let sshReady = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (run("docker", ["exec", sshId, "sh", "-c", "test -s /tmp/sshd.pid"]).status === 0) { sshReady = true; break; }
+    await setTimeout(500);
+  }
+  if (!sshReady) throw new Error("Isolated sshd did not become ready");
+  writeFileSync(join(directory, "ssh-client"), checked("docker", ["exec", sshId, "cat", "/tmp/client"]), { mode: 0o600 });
+  writeFileSync(join(directory, "ssh-host.pub"), checked("docker", ["exec", sshId, "cat", "/tmp/host.pub"]), { mode: 0o600 });
+  const sshPort = Number(checked("docker", ["port", sshId, "2222/tcp"]).split(":").at(-1));
   checked(openssl, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=LatticeTerm isolated QA CA", "-keyout", join(directory, "ca.key"), "-out", join(directory, "ca.crt")]);
   checked(openssl, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=Unrelated isolated QA CA", "-keyout", join(directory, "wrong-ca.key"), "-out", join(directory, "wrong-ca.crt")]);
   checked(openssl, ["req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout", join(directory, "server.key"), "-out", join(directory, "server.csr")]);
-  writeFileSync(join(directory, "extensions"), "subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\n");
+  writeFileSync(join(directory, "extensions"), "subjectAltName=DNS:localhost,DNS:database\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\n");
   checked(openssl, ["x509", "-req", "-days", "1", "-in", join(directory, "server.csr"), "-CA", join(directory, "ca.crt"), "-CAkey", join(directory, "ca.key"), "-CAcreateserial", "-extfile", join(directory, "extensions"), "-out", join(directory, "server.crt")]);
   writeFileSync(join(directory, "mssql.conf"), "[network]\ntlscert = /tmp/server.crt\ntlskey = /tmp/server.key\nforceencryption = 1\ntlsprotocols = 1.2\n");
   for (const [engine, image, internalPort] of matrix.filter(([engine]) => !selected || engine === selected)) {
@@ -54,7 +77,7 @@ try {
         : ["-e", `MYSQL_ROOT_PASSWORD=${adminPassword}`, "-e", "MYSQL_DATABASE=sample"];
     const dataDirectory = postgres ? "/var/lib/postgresql/data" : sqlServer ? "/var/opt/mssql" : "/var/lib/mysql";
     const temporaryData = ["--tmpfs", `${dataDirectory}:rw,size=${sqlServer ? "2g" : "1g"}`];
-    const containerId = checked("docker", ["run", "-d", "--name", name, "--user", "root", "-p", `127.0.0.1::${internalPort}`, "--mount", `type=bind,source=${directory},target=/qa,readonly`, ...temporaryData, ...environment, "--entrypoint", "sh", image, "-c", command]);
+    const containerId = checked("docker", ["run", "-d", "--name", name, "--network", network, "--network-alias", "database", "--user", "root", "-p", `127.0.0.1::${internalPort}`, "--mount", `type=bind,source=${directory},target=/qa,readonly`, ...temporaryData, ...environment, "--entrypoint", "sh", image, "-c", command]);
     containers.add(containerId);
     const port = Number(checked("docker", ["port", name, `${internalPort}/tcp`]).split(":").at(-1));
     const longText = "長".repeat(700);
@@ -83,15 +106,22 @@ try {
     checked("docker", exec, { input: workbenchSeed });
     const { readFileSync } = await import("node:fs");
     const fixture = join(directory, "fixture.json");
-    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password, writerPassword, wrongCaPem: readFileSync(join(directory, "wrong-ca.crt"), "utf8") }), { mode: 0o600 });
+    writeFileSync(fixture, JSON.stringify({ profile: { id: "isolated", hostKey: "isolated", name: "隔離測試", engine, hostname: "localhost", port, username: "reader", database: "sample", sqlitePath: "", tlsCaPem: readFileSync(join(directory, "ca.crt"), "utf8"), allowMcpRead: false }, password, writerPassword, ssh: { port: sshPort, privateKey: join(directory, "ssh-client"), hostPublicKey: join(directory, "ssh-host.pub"), databasePort: internalPort }, wrongCaPem: readFileSync(join(directory, "wrong-ca.crt"), "utf8") }), { mode: 0o600 });
     console.log(`Testing ${engine} (${image}) with verified TLS, read-only access and isolated SQL CRUD`);
-    const result = run(cargo, ["test", "--manifest-path", resolve("src-tauri/Cargo.toml"), "--lib", "isolated_network_databases_", "--", "--ignored", "--nocapture"], { env: { ...process.env, LATTICETERM_TEST_DATABASES_JSON: fixture }, stdio: "inherit", timeout: 600000 });
-    if (result.status !== 0) throw new Error(`${engine} acceptance failed`);
+    const env = { ...process.env, LATTICETERM_TEST_DATABASES_JSON: fixture };
+    const result = run(testBinary, ["database::network_tests::isolated_network_databases_", "--ignored", "--nocapture"], { env, stdio: "inherit", timeout: 600000 });
+    if (result.status !== 0) throw new Error(`${engine} TLS acceptance failed`);
+    console.log(`Testing ${engine} direct and DatabaseRoute::Ssh with no external tools in PATH`);
+    const isolated = run(testBinary, ["database::tool_free_tests::isolated_network_databases_without_external_tools_direct_and_ssh", "--exact", "--ignored", "--nocapture"], {
+      env: { ...env, PATH: join(directory, "unavailable-path") }, stdio: "inherit", timeout: 120000,
+    });
+    if (isolated.status !== 0) throw new Error(`${engine} tool-free direct/SSH acceptance failed`);
     checked("docker", ["rm", "-f", "-v", containerId]);
     containers.delete(containerId);
   }
 } finally {
   for (const containerId of containers) run("docker", ["rm", "-f", "-v", containerId]);
+  if (network) run("docker", ["network", "rm", network]);
   if (existsSync(directory)) {
     const cleanupPath = realpathSync(directory);
     if (cleanupPath !== directory || dirname(cleanupPath) !== temporaryRoot) throw new Error("Refusing cleanup outside the isolated temporary directory");
