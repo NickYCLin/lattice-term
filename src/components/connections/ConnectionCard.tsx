@@ -169,22 +169,25 @@ export function ConnectionCard({
           </span>
         ))}
         {databaseCount > 0 && <span className="badge tone-neutral">SQL{databaseCount > 1 ? ` · ${databaseCount}` : ""}</span>}
-        {databaseNames.length > 0 && <span className="connection-card__database-names" title={databaseNames.join(t("database.nameSeparator"))}>{t("database.cardNames", { names: databaseNames.join(t("database.nameSeparator")) })}</span>}
       </div>
 
-      {tags.length > 0 && (
-        <div className="connection-card__tags">
-          {tags.map((tag) => (
-            <TagChip key={tag} label={tag} />
-          ))}
-        </div>
-      )}
+      <div className="connection-card__description">
+        {databaseNames.length > 0 && <p className="connection-card__database-names" title={databaseNames.join(t("database.nameSeparator"))}>{t("database.cardNames", { names: databaseNames.join(t("database.nameSeparator")) })}</p>}
+        {tags.length > 0 && (
+          <div className="connection-card__tags">
+            {tags.map((tag) => (
+              <TagChip key={tag} label={tag} />
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="connection-card__primary">
         {connectable.length > 0 ? (
           <button
             type="button"
             className="button button--primary button--sm connection-card__go"
+            title={databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
             onClick={routes.length > 1 ? onChooseRoute : onConnect}
             aria-haspopup={routes.length > 1 ? "dialog" : undefined}
           >
@@ -212,7 +215,7 @@ export function ConnectionCard({
             )}
           </span>
         )}
-        {onOpenSql && <button type="button" className="button button--secondary button--sm" onClick={onOpenSql}>{databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")}</button>}
+        {onOpenSql && <button type="button" className="button button--secondary button--sm" title={databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")} onClick={onOpenSql}>{databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")}</button>}
         <button
           type="button"
           className="icon-button icon-button--sm connection-card__favorite"
@@ -230,6 +233,8 @@ export function ConnectionCard({
             className={profile.favorite ? "is-favorite" : undefined}
           />
         </button>
+      </div>
+      <div className="connection-card__footer" aria-hidden={linked.length === 0 ? true : undefined}>
         {linked.length > 0 && <span className="connection-card__route-count">{t("row.routeCount", { count: routes.length })}</span>}
       </div>
 

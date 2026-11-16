@@ -20,7 +20,7 @@ const profile = createConnectionProfile(
 function renderCard(
   options: Pick<
     Parameters<typeof ConnectionCard>[0],
-    "onConnect" | "unavailableReason" | "linked" | "onAddRoute"
+    "onConnect" | "unavailableReason" | "linked" | "onAddRoute" | "onOpenSql" | "databaseCount" | "databaseNames"
   > & Partial<Pick<Parameters<typeof ConnectionCard>[0], "profile">>,
 ) {
   return renderToStaticMarkup(
@@ -130,5 +130,30 @@ describe("same-computer card", () => {
     expect(markup).not.toContain("connection-card__target truncate");
     expect(markup).toContain("2 個連線方式");
     expect(markup.match(/>連線<\/button>/g)).toHaveLength(1);
+  });
+});
+
+describe("fixed card sections", () => {
+  it.each([false, true])("reserves the footer outside the action row with linked routes=%s", linked => {
+    const markup = renderCard({ onConnect: vi.fn(), onOpenSql: vi.fn(), databaseCount: 1,
+      databaseNames: ["synthetic database"], linked: linked ? [{ profile: { ...profile, id: "other" } }] : [] });
+    const sections = ["head", "meta", "description", "primary", "footer"];
+    const positions = sections.map(section => markup.indexOf(`class="connection-card__${section}"`));
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    const actions = markup.match(/class="connection-card__primary">([\s\S]*?)<\/div>/)![1];
+    expect(actions).toContain("connection-card__favorite");
+    expect(actions).not.toContain("connection-card__route-count");
+    const meta = markup.slice(positions[1], positions[2]);
+    expect(meta).not.toContain("connection-card__database-names");
+    expect(markup.slice(positions[2], positions[3])).toContain("synthetic database");
+    if (!linked) expect(markup).toContain('class="connection-card__footer" aria-hidden="true"></div>');
+    else expect(markup.slice(positions[4])).toContain("2 個連線方式");
+  });
+  it("keeps an empty flexible description and footer for plain single-button cards", () => {
+    const markup = renderCard({ onConnect: vi.fn(), profile: { ...profile, tags: [] } });
+    expect(markup).toContain('class="connection-card__description"></div>');
+    expect(markup).toContain('class="connection-card__footer" aria-hidden="true"></div>');
+    expect(markup).toContain('title="operator@desktop.example.com:3389"');
   });
 });

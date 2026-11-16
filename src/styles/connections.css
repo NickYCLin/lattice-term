@@ -122,6 +122,7 @@
 
 .connection-grid {
   display: grid;
+  align-items: stretch;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
   gap: var(--space-4);
 }
@@ -130,8 +131,9 @@
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "head" "meta" "tags" "primary";
-  grid-template-rows: auto auto 1fr auto;
+  --connection-card-action-height: max(var(--control-height), calc(2.5rem * var(--interface-text-scale)));
+  grid-template-areas: "head" "meta" "description" "primary" "footer";
+  grid-template-rows: auto auto 1fr auto calc(var(--text-xs) * 1.5);
   align-content: stretch;
   align-items: center;
   min-width: 0;
@@ -141,6 +143,10 @@
   transition:
     border-color var(--duration-fast) var(--ease),
     box-shadow var(--duration-fast) var(--ease);
+}
+
+.app--mobile .connection-card {
+  --connection-card-action-height: max(2.75rem, var(--control-height), calc(2.5rem * var(--interface-text-scale)));
 }
 
 .connection-card:hover {
@@ -171,7 +177,8 @@
 .connection-card__head,
 .connection-card__meta,
 .connection-card__primary,
-.connection-card__tags {
+.connection-card__description,
+.connection-card__footer {
   position: relative;
   z-index: 1;
   pointer-events: none;
@@ -195,14 +202,18 @@
 }
 
 .connection-card__name {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-sm);
   font-weight: 650;
   color: var(--text);
 }
 
 .connection-card__target {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
@@ -221,10 +232,18 @@
   flex: none;
 }
 
+.connection-card__description {
+  grid-area: description;
+  align-self: stretch;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .connection-card__tags {
   display: flex;
   flex-wrap: wrap;
-  grid-area: tags;
   align-content: start;
   min-width: 0;
   gap: var(--space-1);
@@ -245,9 +264,8 @@
 }
 
 .connection-card__primary {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--connection-card-action-height);
   align-items: center;
   gap: var(--space-3);
   grid-area: primary;
@@ -257,26 +275,50 @@
   min-width: 0;
 }
 
-.connection-card__primary > .button {
-  flex: 0 1 auto;
-  height: auto;
-  min-height: calc(1.875rem * var(--interface-text-scale));
-  white-space: normal;
+.connection-card__primary > .button,
+.connection-card__primary > .connection-card__connect {
+  display: block;
+  min-width: 0;
+  height: var(--connection-card-action-height);
+  min-height: var(--connection-card-action-height);
+  max-height: var(--connection-card-action-height);
+  line-height: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-4);
+  padding: 0 var(--space-2);
   box-shadow: none;
   pointer-events: auto;
 }
-
-.connection-card__favorite {
-  margin-left: auto;
+.connection-card__primary > .connection-card__connect { line-height: var(--connection-card-action-height); }
+.connection-card__primary > :first-child { grid-column: 1; }
+.connection-card__primary > .button--secondary { grid-column: 2; }
+.connection-card__primary > .button svg { vertical-align: middle; margin-inline-end: var(--space-1); }
+.connection-card__primary > .connection-card__favorite {
+  grid-column: 3;
+  justify-self: end;
+  margin-left: 0;
+  width: var(--connection-card-action-height);
+  height: var(--connection-card-action-height);
+  min-height: var(--connection-card-action-height);
   pointer-events: auto;
 }
-
-.connection-card__route-count {
-  flex-basis: 100%;
-  color: var(--text-faint);
+.connection-card__footer {
+  grid-area: footer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: calc(var(--text-xs) * 1.5);
+  line-height: 1.5;
   font-size: var(--text-xs);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.connection-card__route-count {
+  color: var(--text-muted);
+  font-size: inherit;
 }
 
 .connection-card__management {
@@ -3195,15 +3237,6 @@
   top: var(--latticeterm-ime-top) !important;
 }
 
-.connection-card__go {
-  height: auto;
-  pointer-events: auto;
-  flex: 1;
-  min-height: 2.75rem;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .connection-route-picker__list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -3228,12 +3261,6 @@
   max-height: 30vh;
   overflow-y: auto;
   padding-inline-start: var(--space-5);
-}
-
-.connection-card__route-count {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  text-align: center;
 }
 
 .connection-card__route {

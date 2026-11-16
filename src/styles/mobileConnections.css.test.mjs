@@ -38,7 +38,7 @@ describe("mobile connection layout", () => {
   });
   it("separates card details, connection routes and management without shrinking touch targets", () => {
     expect(connectionStyles).toMatch(
-      /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "tags" "primary";/s,
+      /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "description" "primary" "footer";/s,
     );
     expect(connectionStyles).toMatch(/\.connection-card__menu > button\s*\{[^}]*min-height: max\(2\.75rem, var\(--control-height\)\);/s);
     expect(mobileStyles).toMatch(
@@ -46,18 +46,18 @@ describe("mobile connection layout", () => {
     );
   });
 
-  it("keeps desktop connection and SQL buttons content-sized", () => {
+  it("keeps connection and SQL buttons in fixed-height slots", () => {
     expect(connectionStyles).toMatch(/\.connection-card__head\s*\{[^}]*padding-right: max\(2rem, var\(--control-height\)\);/s);
-    expect(connectionStyles).toMatch(/\.connection-card__primary > \.button\s*\{[^}]*flex: 0 1 auto;[^}]*min-height: calc\(1\.875rem/s);
+    expect(connectionStyles).toMatch(/\.connection-card__primary > \.button,[^}]*min-height: var\(--connection-card-action-height\);/s);
     expect(databaseStyles).not.toMatch(/\.connection-card--database \.connection-card__primary > \.button\s*\{[^}]*min-height: 2\.75rem/s);
     expect(connectionStyles).toMatch(/\.connection-card__menu\s*\{[^}]*position: fixed;[^}]*overflow-y: auto;[^}]*background: var\(--surface-solid\);/s);
     expect(connectionStyles).not.toContain(".connection-card__management[open]");
   });
 
-  it("allows routes and metadata to wrap without squeezing the host heading", () => {
+  it("allows routes and metadata to wrap while truncating the host heading", () => {
     expect(connectionStyles).toMatch(/\.connection-card__meta\s*\{[^}]*flex-wrap:\s*wrap;/s);
     expect(connectionStyles).toMatch(/\.connection-route-picker__list\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
-    expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
     expect(connectionStyles).not.toMatch(/\.connection-card__primary\s*\{[^}]*max-width:/s);
   });
 
