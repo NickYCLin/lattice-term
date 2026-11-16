@@ -1,3 +1,4 @@
+import { ApprovalActions } from "../components/chat/ApprovalActions";
 import { cliProxyIdFromArguments } from "../app/cliProxyApi";
 import type { SessionConversationMessage } from "../app/useSessionConversation";
 import { EditIcon } from "../components/icons";
@@ -1709,16 +1710,20 @@ function ChatItemView({
     case "approval": {
       const elicitation =
         item.name === "mcp_form" || item.name === "mcp_url" ? parseElicitation(item.input) : null;
+      const unsupportedReason = t(item.name === "mcp_tool" ? "chat.approval.sessionUnsupportedMcp"
+        : ["user_input", "unsupported_input", "mcp_form", "mcp_url"].includes(item.name)
+          ? "chat.approval.sessionUnsupportedForm" : "chat.approval.sessionUnsupported");
       return (
         <div
           className={`chat-card chat-card--approval chat-approval--${item.decision}`}
           role="group"
           aria-label={t("chat.approval.title")}
+          title={item.canAllowSession ? undefined : unsupportedReason}
           tabIndex={item.decision === "pending" && !["user_input", "unsupported_input", "mcp_form", "mcp_url"].includes(item.name) ? 0 : undefined}
           onKeyDown={event => {
             if (item.decision !== "pending" || ["user_input", "unsupported_input", "mcp_form", "mcp_url"].includes(item.name)) return;
-            const decision = approvalShortcut(event, event.target === event.currentTarget);
-            if (decision) { event.preventDefault(); event.stopPropagation(); void onAnswer(item.requestId, decision === "allow"); }
+            const decision = approvalShortcut(event, event.target === event.currentTarget, item.canAllowSession);
+            if (decision) { event.preventDefault(); event.stopPropagation(); void onAnswer(item.requestId, decision !== "deny", undefined, decision === "session" ? true : undefined); }
           }}
         >
           <div className="chat-card__head">
@@ -1759,27 +1764,10 @@ function ChatItemView({
           )}
           {item.decision === "pending" && item.name !== "user_input" && !elicitation && (
             <div className="chat-card__actions">
-              {item.name !== "unsupported_input" &&
-                item.name !== "mcp_form" &&
-                item.name !== "mcp_url" && (
-                <button
-                  type="button"
-                  className="button button--primary button--sm"
-                  onClick={() => onAnswer(item.requestId, true)}
-                >
-                  {t("chat.approval.allow")}
-                </button>
-              )}
-              {item.canAllowSession && <button type="button" className="button button--secondary button--sm"
-                title={t("chat.approval.sessionHint")}
-                onClick={() => void onAnswer(item.requestId, true, undefined, true)}>{t("chat.approval.allowSession")}</button>}
-              <button
-                type="button"
-                className="button button--secondary button--sm"
-                onClick={() => onAnswer(item.requestId, false)}
-              >
-                {t("chat.approval.deny")}
-              </button>
+              <ApprovalActions canAllowSession={item.canAllowSession}
+                allowOnce={!["unsupported_input", "mcp_form", "mcp_url"].includes(item.name)}
+                unsupportedReason={unsupportedReason}
+                onAnswer={(allow, forSession) => void onAnswer(item.requestId, allow, undefined, forSession)} />
             </div>
           )}
         </div>

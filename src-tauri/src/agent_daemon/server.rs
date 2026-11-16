@@ -1483,11 +1483,13 @@ pub fn dispatch(context: &Context, body: Request) -> Result<Value, String> {
             session_id,
             request_id,
             allow,
-        } => Ok(json!(registry.answer_approval(
+            allow_for_session,
+        } => to_value(&registry.answer_approval_scoped(
             &session_id,
             &request_id,
-            allow
-        ))),
+            allow,
+            allow_for_session,
+        )?),
         Request::StageImage { session_id, png } => {
             if registry.session_summary(&session_id).is_none() {
                 return Err("Agent session no longer exists.".to_string());
@@ -2602,6 +2604,7 @@ mod observer_transport_tests {
             session_id: "agent-bg-missing".into(),
             request_id: "r1".into(),
             allow: true,
+            allow_for_session: false,
         };
         assert_eq!(
             dispatch_as(&context, ClientRole::Desktop, "desktop", pending).unwrap(),

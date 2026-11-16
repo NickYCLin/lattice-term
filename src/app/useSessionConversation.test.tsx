@@ -401,3 +401,21 @@ it("updates native command receipts without retrying or sending a draft", async 
     expect(agents.send).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
 });
+
+it.each([true, false])("sends session approval only when the terminal channel reports support (%s)", async canAllowSession => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const prompt = { requestId: "session-r", toolName: "Bash", summary: "mkdir build", canAllowSession };
+  invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_approval" ? prompt : command === "agent_answer_approval" ? true : snapshot()));
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", fakeAgentApi()); return null; }
+  try {
+    await act(async () => root.render(<Probe />));
+    await act(async () => { await api.answer(true, true); });
+    if (canAllowSession) expect(invoke).toHaveBeenCalledWith("agent_answer_approval", { sessionId: "selected", requestId: "session-r", allow: true, allowForSession: true });
+    else {
+      expect(invoke.mock.calls.some(([command]) => command === "agent_answer_approval")).toBe(false);
+      expect(api.approval?.requestId).toBe("session-r");
+    }
+  } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
+});

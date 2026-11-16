@@ -1,3 +1,4 @@
+import { ApprovalActions } from "./ApprovalActions";
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionConversationMessage } from "../../app/useSessionConversation";
 import { SessionMessage } from "./SessionMessage";
@@ -349,10 +350,10 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
         )}
         {conversation.approval ? (
           <div className="chat-card chat-card--approval chat-approval--pending" role="group" tabIndex={0}
-            aria-label={t("chat.approval.title")} onKeyDown={event => {
+            aria-label={t("chat.approval.title")} title={conversation.approval.canAllowSession ? undefined : t("sessionChat.permission.sessionUnsupported")} onKeyDown={event => {
               if (conversation.answering) return;
-              const decision = approvalShortcut(event, event.target === event.currentTarget);
-              if (decision) { event.preventDefault(); event.stopPropagation(); void conversation.answer(decision === "allow"); }
+              const decision = approvalShortcut(event, event.target === event.currentTarget, conversation.approval?.canAllowSession);
+              if (decision) { event.preventDefault(); event.stopPropagation(); void conversation.answer(decision !== "deny", decision === "session"); }
             }}>
             <div className="chat-card__head">
               <span className="chat-card__label">{conversation.approval.toolName}</span>
@@ -363,14 +364,9 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
             </div>
             <p className="chat-notice">{t("sessionChat.permission.hint")}</p>
             <div className="chat-card__actions">
-              <button type="button" className="button button--primary button--sm"
-                disabled={conversation.answering} onClick={() => void conversation.answer(true)}>
-                {t("chat.approval.allow")}
-              </button>
-              <button type="button" className="button button--secondary button--sm"
-                disabled={conversation.answering} onClick={() => void conversation.answer(false)}>
-                {t("chat.approval.deny")}
-              </button>
+              <ApprovalActions canAllowSession={conversation.approval.canAllowSession} disabled={conversation.answering}
+                unsupportedReason={t("sessionChat.permission.sessionUnsupported")}
+                onAnswer={(allow, forSession) => void conversation.answer(allow, forSession)} />
               <button type="button" className="button button--ghost button--sm" onClick={onOpenTerminal}>
                 {t("sessionChat.terminal")}
               </button>

@@ -337,19 +337,44 @@ impl DaemonClient {
         serde_json::from_value(value).ok().flatten()
     }
 
-    pub async fn answer_approval(&self, session_id: &str, request_id: &str, allow: bool) -> bool {
-        self.request(
-            false,
-            Request::AnswerApproval {
-                session_id: session_id.to_string(),
-                request_id: request_id.to_string(),
-                allow,
-            },
-        )
-        .await
-        .ok()
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
+    pub async fn answer_approval(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        allow: bool,
+        allow_for_session: bool,
+    ) -> Result<bool, String> {
+        if allow_for_session
+            && !self
+                .pending_approval(session_id)
+                .await
+                .is_some_and(|request| {
+                    request.request_id == request_id && request.can_allow_session
+                })
+        {
+            return Err(
+                "This daemon approval does not report session support. No answer was sent.".into(),
+            );
+        }
+        let result = self
+            .request(
+                false,
+                Request::AnswerApproval {
+                    session_id: session_id.to_string(),
+                    request_id: request_id.to_string(),
+                    allow,
+                    allow_for_session,
+                },
+            )
+            .await;
+        if allow_for_session {
+            result.map(|value| value.as_bool().unwrap_or(false))
+        } else {
+            Ok(result
+                .ok()
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false))
+        }
     }
 
     pub async fn is_running(&self) -> bool {

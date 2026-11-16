@@ -2802,6 +2802,26 @@ impl AgentRegistry {
 
     /// Answers the named prompt. `false` when it was already answered,
     /// withdrawn or replaced.
+    pub fn answer_approval_scoped(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        allow: bool,
+        allow_for_session: bool,
+    ) -> Result<bool, String> {
+        if !allow_for_session {
+            return Ok(self.answer_approval(session_id, request_id, allow));
+        }
+        if !allow {
+            return Err("Session scope requires an allow decision.".into());
+        }
+        let Some(pending) = self.approvals.take_for_session(session_id, request_id)? else {
+            return Ok(false);
+        };
+        pending.settle(approval::ApprovalDecision::AllowSession);
+        Ok(true)
+    }
+
     pub fn answer_approval(&self, session_id: &str, request_id: &str, allow: bool) -> bool {
         let Some(pending) = self.approvals.take(session_id, request_id) else {
             return false;
@@ -4750,9 +4770,10 @@ fn report_claude_hook_from_stdin() -> Result<(), String> {
     if let Some(ask) = claude_approval_ask(&payload) {
         // The terminal dialog is already open; this only offers the chat page
         // the same choice. No answer leaves the dialog to decide.
+        let tool_name = ask.tool_name.clone();
         let decision =
             ask_approval_from_environment(ask).unwrap_or(approval::ApprovalDecision::Withdrawn);
-        if let Some(output) = decision.claude_hook_output() {
+        if let Some(output) = decision.claude_hook_output(&tool_name) {
             println!("{output}");
         }
     }
@@ -14787,6 +14808,25 @@ notify = ["notify.exe", "turn-ended"]"#,
         );
         assert!(!registry.answer_approval(&id, &request.request_id, false));
 
+        // Session scope follows the same authenticated reporter round-trip.
+        let asking = {
+            let (id, token) = (id.clone(), token.clone());
+            std::thread::spawn(move || ask_approval(address, id, token, ask()))
+        };
+        let request = wait_for_question(&registry);
+        assert!(request.can_allow_session);
+        assert!(registry
+            .answer_approval_scoped(&id, &request.request_id, false, true)
+            .is_err());
+        assert!(registry.pending_approval(&id).is_some());
+        assert!(registry
+            .answer_approval_scoped(&id, &request.request_id, true, true)
+            .unwrap());
+        assert_eq!(
+            asking.join().unwrap().unwrap(),
+            approval::ApprovalDecision::AllowSession
+        );
+
         // Answered in the terminal: Enter withdraws the chat page's question.
         let asking = {
             let (id, token) = (id.clone(), token.clone());
@@ -14818,6 +14858,10 @@ notify = ["notify.exe", "turn-ended"]"#,
             .approvals
             .open_keyed(&id, ask(), "keyed".into(), approval::CODEX_KEYS));
         assert_eq!(registry.pending_approval(&id).unwrap().request_id, "keyed");
+        assert!(registry
+            .answer_approval_scoped(&id, "keyed", true, true)
+            .is_err());
+        assert!(registry.pending_approval(&id).is_some());
         assert!(registry.answer_approval(&id, "keyed", true));
         assert!(registry.pending_approval(&id).is_none());
         assert!(!registry.answer_approval(&id, "keyed", true));

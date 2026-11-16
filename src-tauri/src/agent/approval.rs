@@ -38,11 +38,14 @@ pub struct AgentApprovalRequest {
     pub request_id: String,
     pub tool_name: String,
     pub summary: String,
+    #[serde(default)]
+    pub can_allow_session: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalDecision {
     Allow,
+    AllowSession,
     Deny,
     /// Answered elsewhere, superseded or timed out: the hook stays silent.
     Withdrawn,
@@ -52,6 +55,7 @@ impl ApprovalDecision {
     pub(super) fn response_line(self) -> &'static [u8] {
         match self {
             Self::Allow => b"allow\n",
+            Self::AllowSession => b"allow_session\n",
             Self::Deny => b"deny\n",
             Self::Withdrawn => b"none\n",
         }
@@ -60,15 +64,24 @@ impl ApprovalDecision {
     pub(super) fn from_response(response: &str) -> Self {
         match response.trim() {
             "allow" => Self::Allow,
+            "allow_session" => Self::AllowSession,
             "deny" => Self::Deny,
             _ => Self::Withdrawn,
         }
     }
 
     /// The hook's stdout for Claude Code; `None` leaves the dialog to decide.
-    pub(super) fn claude_hook_output(self) -> Option<String> {
+    pub(super) fn claude_hook_output(self, tool_name: &str) -> Option<String> {
         let decision = match self {
             Self::Allow => serde_json::json!({ "behavior": "allow" }),
+            Self::AllowSession => {
+                if !crate::agent_chat::claude_session_tool(tool_name) {
+                    return None;
+                }
+                serde_json::json!({"behavior":"allow","updatedPermissions":[{
+                    "type":"addRules","rules":[{"toolName":tool_name}],"behavior":"allow","destination":"session"
+                }]})
+            }
             Self::Deny => serde_json::json!({
                 "behavior": "deny",
                 "message": "The user declined this on the LatticeTerm chat page.",
@@ -187,6 +200,8 @@ impl Approvals {
                 request_id,
                 tool_name: bounded(&ask.tool_name, MAX_TOOL_NAME_CHARS),
                 summary: bounded(&ask.summary, MAX_SUMMARY_CHARS),
+                can_allow_session: keys.is_none()
+                    && crate::agent_chat::claude_session_tool(&ask.tool_name),
             },
             keys,
             decision: Mutex::new(None),
@@ -203,6 +218,26 @@ impl Approvals {
             return None;
         }
         pending.remove(session_id)
+    }
+
+    /// Check session scope and consume the same pending question atomically.
+    /// A replaced question must never inherit the earlier one's capability.
+    pub(super) fn take_for_session(
+        &self,
+        session_id: &str,
+        request_id: &str,
+    ) -> Result<Option<Arc<PendingApproval>>, String> {
+        let mut pending = self.pending.lock().map_err(|error| error.to_string())?;
+        let Some(entry) = pending
+            .get(session_id)
+            .filter(|entry| entry.request.request_id == request_id)
+        else {
+            return Ok(None);
+        };
+        if !entry.request.can_allow_session {
+            return Err("This approval channel does not support session scope.".into());
+        }
+        Ok(pending.remove(session_id))
     }
 
     pub(super) fn current(&self, session_id: &str) -> Option<AgentApprovalRequest> {
@@ -490,18 +525,23 @@ mod tests {
     #[test]
     fn hook_output_follows_the_documented_decision_shape() {
         let allow: serde_json::Value =
-            serde_json::from_str(&ApprovalDecision::Allow.claude_hook_output().unwrap()).unwrap();
+            serde_json::from_str(&ApprovalDecision::Allow.claude_hook_output("Bash").unwrap())
+                .unwrap();
         assert_eq!(
             allow["hookSpecificOutput"]["hookEventName"],
             "PermissionRequest"
         );
         assert_eq!(allow["hookSpecificOutput"]["decision"]["behavior"], "allow");
         let deny: serde_json::Value =
-            serde_json::from_str(&ApprovalDecision::Deny.claude_hook_output().unwrap()).unwrap();
+            serde_json::from_str(&ApprovalDecision::Deny.claude_hook_output("Bash").unwrap())
+                .unwrap();
         assert_eq!(deny["hookSpecificOutput"]["decision"]["behavior"], "deny");
-        assert!(ApprovalDecision::Withdrawn.claude_hook_output().is_none());
+        assert!(ApprovalDecision::Withdrawn
+            .claude_hook_output("Bash")
+            .is_none());
         for decision in [
             ApprovalDecision::Allow,
+            ApprovalDecision::AllowSession,
             ApprovalDecision::Deny,
             ApprovalDecision::Withdrawn,
         ] {
@@ -620,5 +660,68 @@ mod tests {
         assert!(!answers_terminal_prompt(b"\x1b[I"));
         assert!(!answers_terminal_prompt(b"\x1b[B"));
         assert!(!answers_terminal_prompt(b"ab"));
+    }
+    #[test]
+    fn hook_session_capability_and_output_never_apply_to_terminal_keys_or_forms() {
+        let approvals = Approvals::default();
+        for tool in ["Bash", "Write", "mcp__test_server__read_item"] {
+            let pending = approvals
+                .open(
+                    "hook",
+                    ApprovalAsk {
+                        tool_name: tool.into(),
+                        summary: "test".into(),
+                    },
+                    "r".into(),
+                )
+                .unwrap();
+            assert!(approvals.current("hook").unwrap().can_allow_session);
+            let output: serde_json::Value = serde_json::from_str(
+                &ApprovalDecision::AllowSession
+                    .claude_hook_output(tool)
+                    .unwrap(),
+            )
+            .unwrap();
+            let rule = &output["hookSpecificOutput"]["decision"]["updatedPermissions"][0];
+            assert_eq!(rule["destination"], "session");
+            assert_eq!(rule["rules"][0]["toolName"], tool);
+            pending.settle(ApprovalDecision::AllowSession);
+            assert_eq!(pending.wait(Duration::ZERO), ApprovalDecision::AllowSession);
+        }
+        assert!(approvals.open_keyed("terminal", ask("test"), "r".into(), CODEX_KEYS));
+        assert!(!approvals.current("terminal").unwrap().can_allow_session);
+        for tool in [
+            "AskUserQuestion",
+            "ExitPlanMode",
+            "mcp__server__*",
+            "unknown",
+        ] {
+            assert!(ApprovalDecision::AllowSession
+                .claude_hook_output(tool)
+                .is_none());
+        }
+        let old: AgentApprovalRequest =
+            serde_json::from_str(r#"{"requestId":"old","toolName":"Bash","summary":"test"}"#)
+                .unwrap();
+        assert!(!old.can_allow_session);
+        // Reusing an id for an unsupported replacement cannot inherit scope.
+        approvals
+            .open("replace", ask("first"), "same-id".into())
+            .unwrap();
+        approvals
+            .open(
+                "replace",
+                ApprovalAsk {
+                    tool_name: "AskUserQuestion".into(),
+                    summary: "new".into(),
+                },
+                "same-id".into(),
+            )
+            .unwrap();
+        assert!(approvals.take_for_session("replace", "same-id").is_err());
+        assert_eq!(
+            approvals.current("replace").unwrap().tool_name,
+            "AskUserQuestion"
+        );
     }
 }

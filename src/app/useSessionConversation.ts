@@ -29,6 +29,7 @@ export interface SessionApprovalRequest {
   requestId: string;
   toolName: string;
   summary: string;
+  canAllowSession?: boolean;
 }
 
 /** One reader and the existing prompt queue, both addressed to the same PTY. */
@@ -90,8 +91,9 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
     return () => { disposed = true; clearTimeout(timer); };
   }, [sessionId]);
 
-  async function answer(allow: boolean): Promise<void> {
+  async function answer(allow: boolean, allowForSession = false): Promise<void> {
     if (!approval || answeringRef.current || approvalRef.current?.requestId !== approval.requestId) return;
+    if (allowForSession && (!allow || !approval.canAllowSession)) { setAnswerError("This approval does not expose session scope."); return; }
     answeringRef.current = true;
     setAnswering(true);
     setAnswerError(null);
@@ -99,7 +101,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
       && approvalRef.current?.requestId === approval.requestId;
     try {
       const accepted = await invoke<boolean>("agent_answer_approval", {
-        sessionId, requestId: approval.requestId, allow,
+        sessionId, requestId: approval.requestId, allow, ...(allowForSession ? { allowForSession: true } : {}),
       });
       if (isCurrent()) {
         approvalRevision.current += 1;

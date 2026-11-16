@@ -2452,15 +2452,26 @@ async fn agent_answer_approval(
     session_id: String,
     request_id: String,
     allow: bool,
+    allow_for_session: Option<bool>,
     registry: State<'_, Arc<AgentRegistry>>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<bool, String> {
     if crate::agent_daemon::owns(&session_id) {
-        return Ok(daemon
-            .answer_approval(&session_id, &request_id, allow)
-            .await);
+        return daemon
+            .answer_approval(
+                &session_id,
+                &request_id,
+                allow,
+                allow_for_session.unwrap_or(false),
+            )
+            .await;
     }
-    Ok(registry.answer_approval(&session_id, &request_id, allow))
+    registry.answer_approval_scoped(
+        &session_id,
+        &request_id,
+        allow,
+        allow_for_session.unwrap_or(false),
+    )
 }
 
 /// Reads structured messages from this session's exact native conversation.

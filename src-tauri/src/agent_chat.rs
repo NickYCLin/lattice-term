@@ -2240,7 +2240,22 @@ fn claude_tool_response_line(
 const CLAUDE_TOOL_INPUT_MARKER: &str = "latticeterm_tool_input";
 const CLAUDE_TOOL_NAME_MARKER: &str = "latticeterm_tool_name";
 
-fn claude_session_tool(name: &str) -> bool {
+fn valid_mcp_rule_part(part: &str) -> bool {
+    !part.is_empty()
+        && part
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+pub(crate) fn claude_session_tool(name: &str) -> bool {
+    if name.len() > 120 {
+        return false;
+    }
+    let mut parts = name.splitn(3, "__");
+    if parts.next() == Some("mcp") {
+        return parts.next().is_some_and(valid_mcp_rule_part)
+            && parts.next().is_some_and(valid_mcp_rule_part);
+    }
     matches!(
         name,
         "Bash"
@@ -5361,5 +5376,41 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
             &serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}})
         )
         .is_empty());
+    }
+    #[test]
+    fn claude_session_rules_allow_exact_mcp_tools_but_never_wildcards_or_forms() {
+        for tool in [
+            "Bash",
+            "Read",
+            "Write",
+            "Edit",
+            "mcp__test_server__read_item",
+            "mcp__test-server__get.item",
+        ] {
+            assert!(claude_session_tool(tool));
+            let pending = serde_json::json!({CLAUDE_TOOL_INPUT_MARKER:{"path":"test"},CLAUDE_TOOL_NAME_MARKER:tool});
+            let reply: Value = serde_json::from_str(
+                &claude_tool_response_line("r", &pending, true, None, true).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                reply["response"]["response"]["updatedPermissions"][0]["destination"],
+                "session"
+            );
+            assert_eq!(
+                reply["response"]["response"]["updatedPermissions"][0]["rules"],
+                serde_json::json!([{"toolName":tool}])
+            );
+        }
+        for tool in [
+            "AskUserQuestion",
+            "ExitPlanMode",
+            "mcp__server__*",
+            "mcp__server__",
+            "mcp____tool",
+            "mcp__server__tool(extra)",
+        ] {
+            assert!(!claude_session_tool(tool), "{tool}");
+        }
     }
 }

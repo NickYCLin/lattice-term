@@ -2862,4 +2862,36 @@ mod tests {
             }
         }
     }
+    #[tokio::test]
+    async fn file_and_permission_approvals_offer_only_their_native_session_scope() {
+        for method in [
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+        ] {
+            let server = server_with(fresh_state("turn-1"));
+            let params = serde_json::json!({"itemId":"item","permissions":{"network":{"enabled":true}},"reason":"test"});
+            let out = handle_line(
+                &server,
+                &serde_json::json!({"id":1,"method":method,"params":params}),
+            );
+            assert!(out.events.iter().any(|(_, event)| matches!(
+                event,
+                ChatEvent::ApprovalRequested {
+                    can_allow_session: true,
+                    ..
+                }
+            )));
+            let pending =
+                serde_json::json!({"latticeterm_rpc_id":1,"method":method,"params":params});
+            let reply: Value =
+                serde_json::from_str(&response_line_scoped(&pending, true, None, true).unwrap())
+                    .unwrap();
+            if method == "item/fileChange/requestApproval" {
+                assert_eq!(reply["result"]["decision"], "acceptForSession");
+            } else {
+                assert_eq!(reply["result"]["scope"], "session");
+                assert_eq!(reply["result"]["permissions"], params["permissions"]);
+            }
+        }
+    }
 }

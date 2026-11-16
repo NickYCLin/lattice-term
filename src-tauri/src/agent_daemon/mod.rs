@@ -499,6 +499,8 @@ pub enum Request {
         session_id: String,
         request_id: String,
         allow: bool,
+        #[serde(default)]
+        allow_for_session: bool,
     },
     /// A pasted image, already encoded as PNG; the daemon owns the temp file
     /// so it lives and dies with the PTY like a desktop-staged one.
@@ -725,6 +727,34 @@ pub(crate) fn event_channel(name: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod wire_tests {
     use super::*;
+
+    #[test]
+    fn approval_scope_defaults_to_once_and_round_trips_session_choice() {
+        let old = serde_json::json!({"type":"answerApproval","sessionId":"test","requestId":"r","allow":true});
+        let request: Request = serde_json::from_value(old).unwrap();
+        assert!(matches!(
+            request,
+            Request::AnswerApproval {
+                allow_for_session: false,
+                ..
+            }
+        ));
+        let request = Request::AnswerApproval {
+            session_id: "test".into(),
+            request_id: "r".into(),
+            allow: true,
+            allow_for_session: true,
+        };
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["allowForSession"], true);
+        assert!(matches!(
+            serde_json::from_value::<Request>(value).unwrap(),
+            Request::AnswerApproval {
+                allow_for_session: true,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn every_refusal_a_client_sees_carries_a_code_to_branch_on() {
