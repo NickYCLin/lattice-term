@@ -164,6 +164,8 @@ export const zhTW = {
   "sessionChat.queuedWaiting": "這些訊息正在等助理回報就緒，不會因畫面顯示完成就自動送出。",
   "sessionChat.input": "傳送訊息到這個工作階段",
   "sessionChat.approval": "Claude Code 或 Codex 要求權限時可以直接在這裡允許或拒絕；其他互動請開啟終端機處理。",
+  "sessionChat.nativeState": "原生指令待確認",
+  "sessionChat.nativePending": "原生指令仍待確認完成，可回終端查看；這裡的草稿會保留。",
   "sessionChat.working": "正在處理…",
   "sessionChat.workingQueued": "正在處理…（還有 {count} 則訊息排隊）",
   "sessionChat.attention": "助理可能在等你確認或輸入，請到終端機處理。",

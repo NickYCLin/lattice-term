@@ -1113,6 +1113,12 @@ struct AgentSessionEntry {
 #[derive(Default)]
 struct AgentInputControl {
     desktop_editing: bool,
+    prepared_native_command: bool,
+    native_command_mode_only: bool,
+    native_command_plan: bool,
+    native_compact_before: Option<Option<String>>,
+    native_compact_poll: Option<Instant>,
+    native_command_after: Option<Instant>,
     desktop_paste: bool,
     desktop_escape: Vec<u8>,
     startup_seed_pending: bool,
@@ -1122,7 +1128,10 @@ struct AgentInputControl {
 
 impl AgentInputControl {
     fn desktop_busy(&self) -> bool {
-        self.desktop_editing || self.desktop_paste || !self.desktop_escape.is_empty()
+        self.desktop_editing
+            || self.desktop_paste
+            || !self.desktop_escape.is_empty()
+            || self.native_command_after.is_some()
     }
 }
 
@@ -2494,9 +2503,16 @@ impl AgentRegistry {
             AgentStateSource::Heuristic => entry.input.try_lock().ok(),
             AgentStateSource::Integration => entry.input.lock().ok(),
         };
-        let Some(_input) = input else {
+        let Some(input) = input else {
             return false;
         };
+        if source == AgentStateSource::Heuristic
+            && input.native_command_after.is_some()
+            && input.native_command_mode_only
+            && next == AgentLifecycle::Working
+        {
+            return false;
+        }
         let Ok(mut summary) = entry.summary.lock() else {
             return false;
         };
@@ -2527,9 +2543,12 @@ impl AgentRegistry {
         let Ok(entry) = self.get(session_id) else {
             return false;
         };
-        let Some(_input) = entry.input.try_lock().ok() else {
+        let Some(input) = entry.input.try_lock().ok() else {
             return false;
         };
+        if input.native_command_after.is_some() && input.native_command_mode_only {
+            return false;
+        }
         let Ok(mut summary) = entry.summary.lock() else {
             return false;
         };
@@ -3042,6 +3061,82 @@ impl AgentRegistry {
         Ok(reasons)
     }
 
+    pub(crate) fn native_command_pending(&self, session_id: &str) -> bool {
+        self.get(session_id).is_ok_and(|entry| {
+            entry.input.lock().is_ok_and(|input| {
+                input.prepared_native_command || input.native_command_after.is_some()
+            })
+        })
+    }
+
+    /// A native mode command is not a model turn. Keep its dialog owned until
+    /// a new native idle receipt and the known empty composer both confirm it.
+    fn refresh_native_command(&self, session_id: &str) -> bool {
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        let Ok(mut input) = entry.input.lock() else {
+            return false;
+        };
+        let Some(after) = input.native_command_after else {
+            return false;
+        };
+        let Ok(summary) = entry.summary.lock() else {
+            return false;
+        };
+        if summary.definition_id != "codex"
+            || summary.state_source == AgentStateSource::Integration
+                && !releases_queued_prompt(summary.state, summary.state_source)
+            || self.approvals.current(session_id).is_some()
+        {
+            return false;
+        }
+        if !input.native_command_mode_only
+            && !releases_queued_prompt(summary.state, summary.state_source)
+        {
+            return false;
+        }
+        if let Some(before) = input.native_compact_before.clone() {
+            let ready = entry
+                .prompt_screen
+                .lock()
+                .is_ok_and(|screen| screen.codex_compact_screen_ready_after(after, Instant::now()));
+            if !ready
+                || input
+                    .native_compact_poll
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+            {
+                return false;
+            }
+            input.native_compact_poll = Some(Instant::now());
+            let Some(native_id) = summary.captured_session_id.as_deref() else {
+                return false;
+            };
+            if crate::transcript::session_compaction_receipt(
+                &summary.working_directory,
+                native_id,
+                summary.profile_config_path.as_deref().map(Path::new),
+            )
+            .is_ok_and(|current| current.is_some() && current != before)
+            {
+                input.native_command_after = None;
+                input.native_compact_before = None;
+                return true;
+            }
+            return false;
+        }
+        if entry.prompt_screen.lock().is_ok_and(|screen| {
+            screen.codex_ready_after(after, Instant::now())
+                || !input.native_command_mode_only
+                    && screen.codex_review_ready_after(after, Instant::now())
+                || input.native_command_plan && screen.codex_plan_ready_after(after, Instant::now())
+        }) {
+            input.native_command_after = None;
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn validate_session_fork_source(
         &self,
         session_id: &str,
@@ -3050,6 +3145,7 @@ impl AgentRegistry {
         directory: &str,
         profile: Option<&str>,
     ) -> Result<(), String> {
+        self.refresh_native_command(session_id);
         let entry = self.get(session_id)?;
         let input = entry.input.lock().map_err(|error| error.to_string())?;
         let summary = entry.summary.lock().map_err(|error| error.to_string())?;
@@ -8701,10 +8797,11 @@ pub(crate) fn prepare_native_command(
         "compact" => b"/compact",
         _ => return Err("不支援這個原生指令。".into()),
     };
+    registry.refresh_native_command(session_id);
     let entry = registry.get(session_id)?;
     let mut input = entry.input.lock().map_err(|e| e.to_string())?;
     let summary = entry.summary.lock().map_err(|e| e.to_string())?;
-    if !matches!(summary.definition_id.as_str(), "codex" | "claude")
+    if summary.definition_id != "codex"
         || summary.captured_session_id.as_deref() != Some(expected_native_id)
         || !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done)
         || input.desktop_busy()
@@ -8727,11 +8824,64 @@ pub(crate) fn prepare_native_command(
     {
         return Err("請在原終端確認輸入框已清空且沒有待處理事項；沒有寫入或送出指令。".into());
     }
+    if command == "review" && !releases_queued_prompt(summary.state, summary.state_source) {
+        return Err("這個工作階段尚未確認原生完成回報，請在原終端執行審查。".into());
+    }
+    if command == "plan"
+        && entry
+            .prompt_screen
+            .lock()
+            .is_ok_and(|screen| screen.codex_plan_mode())
+    {
+        return Err("目前已在計畫模式，可在原終端切換模式。".into());
+    }
     require_mcp_input_profile(&entry, &summary.definition_id)?;
+    input.native_compact_before = if command == "compact" {
+        Some(crate::transcript::session_compaction_receipt(
+            &summary.working_directory,
+            expected_native_id,
+            summary.profile_config_path.as_deref().map(Path::new),
+        )?)
+    } else {
+        None
+    };
+    input.native_compact_poll = None;
     drop(summary);
     // Retain ownership even if a partial write fails; never retry automatically.
     observe_desktop_input(&mut input, bytes);
+    input.prepared_native_command = true;
+    input.native_command_mode_only = command != "review";
+    input.native_command_plan = command == "plan";
     send_bytes_locked(sink, registry, session_id, bytes)
+}
+
+pub(crate) fn watch_prepared_native_command(
+    sink: Arc<dyn AgentSink>,
+    registry: Arc<AgentRegistry>,
+    session_id: String,
+) {
+    let registry = Arc::downgrade(&registry);
+    std::thread::spawn(move || loop {
+        let Some(registry) = registry.upgrade() else {
+            return;
+        };
+        if registry.refresh_native_command(&session_id) {
+            deliver_next_queued(sink.as_ref(), &registry, &session_id);
+            return;
+        }
+        let Ok(entry) = registry.get(&session_id) else {
+            return;
+        };
+        let pending = entry.input.lock().is_ok_and(|input| {
+            input.prepared_native_command || input.native_command_after.is_some()
+        });
+        if !pending {
+            return;
+        }
+        drop(entry);
+        drop(registry);
+        std::thread::sleep(Duration::from_millis(200));
+    });
 }
 
 pub fn send(
@@ -8820,6 +8970,16 @@ fn send_bytes(
     }
     discard_profile_invalidated_queue(sink, registry, session_id, &entry);
     let was_busy = input.desktop_busy();
+    let native_enter = input.prepared_native_command && matches!(bytes, b"\r" | b"\n");
+    if native_enter {
+        input.prepared_native_command = false;
+        input.native_command_after = Some(Instant::now());
+    } else if !is_terminal_status_reply(bytes)
+        && (prompt_input_shape(bytes).0 || bytes.contains(&0x7f) || bytes.contains(&8))
+    {
+        input.prepared_native_command = false;
+        input.native_command_after = None;
+    }
     let desktop_input = observe_desktop_input(&mut input, bytes);
     if desktop_input && input.startup_seed_pending {
         let choosing_trust = entry
@@ -8832,7 +8992,21 @@ fn send_bytes(
             input.startup_seed_pending = false;
         }
     }
-    send_bytes_locked(sink, registry, session_id, bytes)?;
+    if native_enter {
+        // No model submission: /plan and /compact may never emit a turn-stop
+        // hook. A fresh native receipt releases the maintenance gate instead.
+        if let Ok(mut completion) = entry.completion_gate.lock() {
+            completion.cancel();
+        }
+        entry.startup_gate.observe_input(bytes);
+        let mut writer = entry.writer.lock().map_err(|e| e.to_string())?;
+        writer
+            .write_all(bytes)
+            .and_then(|_| writer.flush())
+            .map_err(|e| e.to_string())?;
+    } else {
+        send_bytes_locked(sink, registry, session_id, bytes)?;
+    }
     if approval::answers_terminal_prompt(bytes) {
         // Answered in the terminal: the chat page's question is gone.
         registry
@@ -9615,6 +9789,7 @@ pub fn enqueue(
     if bytes.is_empty() {
         return Err("A queued prompt is required.".to_string());
     }
+    registry.refresh_native_command(session_id);
     let entry = registry.get(session_id)?;
     let ticket = next_desktop_input_ticket(&entry, &bytes)?;
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
@@ -10093,6 +10268,7 @@ fn mcp_prompt_inner(
     after_grant_snapshot: impl FnOnce(),
 ) -> Result<usize, String> {
     let bytes = mcp_prompt_payload(text)?;
+    registry.refresh_native_command(session_id);
     let entry = registry.get(session_id)?;
     // Remember the grant when this call enters, not after it waits behind a
     // split write. Re-granting cannot revive an already-waiting MCP request.
@@ -15442,6 +15618,71 @@ notify = ["notify.exe", "turn-ended"]"#,
             .is_err());
         assert_eq!(entry.summary.lock().unwrap().state, AgentLifecycle::Done);
         assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+        send_bytes(sink.as_ref(), &registry, id, b"\r").unwrap();
+        assert_eq!(entry.summary.lock().unwrap().state, AgentLifecycle::Done);
+        assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+        assert!(entry.input.lock().unwrap().native_command_after.is_some());
+        assert!(!registry.refresh_native_command(id)); // The pre-command screen is stale.
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                id,
+                &encode(b"after native mode\r")
+            )
+            .unwrap(),
+            1
+        );
+        entry
+            .prompt_screen
+            .lock()
+            .unwrap()
+            .feed(b"\x1b]7501;state=idle:app=codex\x1b\\", Instant::now());
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Integration);
+        assert!(!registry.refresh_native_command(id)); // A real model turn still owns completion.
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        assert!(registry.refresh_native_command(id));
+        assert!(!entry.input.lock().unwrap().desktop_busy());
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        assert_eq!(*writes.lock().unwrap(), b"/review\rafter native mode\r");
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "plan").unwrap();
+        watch_prepared_native_command(sink.clone(), registry.clone(), id.clone());
+        send_bytes(sink.as_ref(), &registry, id, b"\r").unwrap();
+        assert!(!registry.update_codex_working_from_output(id));
+        assert!(!registry.update_state_with_origin(
+            id,
+            AgentLifecycle::Working,
+            AgentStateSource::Heuristic,
+            true
+        ));
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                id,
+                &encode(b"automatic release\r")
+            )
+            .unwrap(),
+            1
+        );
+        entry
+            .prompt_screen
+            .lock()
+            .unwrap()
+            .feed(b"\x1b]7501;state=idle:app=codex\x1b\\", Instant::now());
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !entry.queued_prompts.lock().unwrap().is_empty() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        assert!(writes
+            .lock()
+            .unwrap()
+            .ends_with(b"/plan\rautomatic release\r"));
         registry.stop_all();
     }
 

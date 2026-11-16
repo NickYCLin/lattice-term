@@ -1964,13 +1964,16 @@ fn agent_session_prepare_command(
     command: String,
     registry: State<'_, Arc<AgentRegistry>>,
 ) -> Result<(), String> {
+    let sink: Arc<dyn crate::agent::AgentSink> = Arc::new(crate::agent::EventSink(app));
     crate::agent::prepare_native_command(
-        &crate::agent::EventSink(app),
+        sink.as_ref(),
         registry.inner(),
         &session_id,
         &expected_native_id,
         &command,
-    )
+    )?;
+    crate::agent::watch_prepared_native_command(sink, Arc::clone(registry.inner()), session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -2503,6 +2506,7 @@ async fn agent_session_conversation_snapshot(
     .await
     .map_err(|error| format!("Conversation read did not complete: {error}"))??;
     snapshot.native_tools = native_tools;
+    snapshot.native_command_pending = registry.native_command_pending(&session_id);
     Ok(snapshot)
 }
 

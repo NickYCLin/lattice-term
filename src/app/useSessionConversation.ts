@@ -16,6 +16,7 @@ export interface SessionConversationMessage {
 }
 
 export interface SessionConversationSnapshot {
+  nativeCommandPending?: boolean;
   nativeTools?: boolean;
   progress?: { contextUsage: import("./chatRuntimeStatus").ContextUsage | null; rateLimits: import("./chatRuntimeStatus").RateLimitWindow[]; plan: import("./chatRuntimeStatus").PlanStep[]; goal: import("./chatRuntimeStatus").GoalState | null };
   availability: "waitingForIdentity" | "waitingForTranscript" | "ready";
@@ -43,6 +44,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
   const [availability, setAvailability] = useState<SessionConversationSnapshot["availability"]>("waitingForIdentity");
   const [goal, setGoal] = useState<import("./chatRuntimeStatus").GoalState | null>(null);
   const [nativeTools, setNativeTools] = useState(false);
+  const [nativeCommandPending, setNativeCommandPending] = useState(false);
   const [progress, setProgress] = useState<SessionConversationSnapshot["progress"]>();
   const [truncated, setTruncated] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -154,6 +156,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
     setTruncated(false);
     setProgress(undefined);
     setNativeTools(false);
+    setNativeCommandPending(false);
     setReadError(null);
     setLoading(true);
     setSlow(false);
@@ -175,6 +178,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
           setTruncated(next.truncated);
           setProgress(next.progress);
           setNativeTools(next.nativeTools === true);
+          setNativeCommandPending(next.nativeCommandPending === true);
           setReadError(null);
         }
       } catch (reason) {
@@ -226,7 +230,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi, read
   }
   const acknowledge = useCallback(() => setQueued(null), []);
   return {
-    messages, submitted, availability, nativeTools, progress: progress ? { ...progress, goal } : goal ? { contextUsage: null, rateLimits: [], plan: [], goal } : undefined, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
+    messages, submitted, availability, nativeTools, nativeCommandPending, progress: progress ? { ...progress, goal } : goal ? { contextUsage: null, rateLimits: [], plan: [], goal } : undefined, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
     approval, answering, answerError, answer,
   };
 }

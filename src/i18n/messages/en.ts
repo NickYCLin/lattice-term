@@ -172,6 +172,8 @@ export const en: Messages = {
   "sessionChat.queuedWaiting": "These messages are waiting for the assistant to report readiness. Showing done does not release them automatically.",
   "sessionChat.input": "Send a message to this session",
   "sessionChat.approval": "Claude Code and Codex permission prompts can be allowed or denied right here; open Terminal for other CLI interactions.",
+  "sessionChat.nativeState": "Native command pending",
+  "sessionChat.nativePending": "Waiting for the native command receipt. Check the terminal; your draft is preserved.",
   "sessionChat.working": "Working…",
   "sessionChat.workingQueued": "Working… ({count} more queued)",
   "sessionChat.attention": "The assistant may be waiting for your confirmation or input. Open the terminal to continue.",

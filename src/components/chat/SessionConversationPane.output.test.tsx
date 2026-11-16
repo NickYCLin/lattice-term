@@ -10,7 +10,7 @@ const { conversation } = vi.hoisted(() => ({
   conversation: {
     messages: [] as SessionConversationMessage[],
     availability: "ready" as "waitingForIdentity" | "waitingForTranscript" | "ready", truncated: false,
-    readError: null, loading: false, slow: false, output: "Working", outputError: null,
+    nativeCommandPending: false, readError: null, loading: false, slow: false, output: "Working", outputError: null,
     sendError: null as string | null, sending: false, queued: null as number | null, send: vi.fn(), acknowledge: vi.fn(),
     approval: null, answering: false, answerError: null, answer: vi.fn(),
   },
@@ -26,7 +26,18 @@ function render(state: "working" | "needsAttention" | "done", definitionId = "co
 }
 
 describe("session chat output disclosure", () => {
-  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; conversation.sendError = null; });
+  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; conversation.sendError = null; conversation.nativeCommandPending = false; });
+
+  it("shows a pending native receipt without claiming completion or discarding the editable draft", () => {
+    conversation.nativeCommandPending = true; conversation.queued = 0;
+    const html = render("done", "codex", { stateSource: "integration" });
+    expect(html).toContain("原生指令待確認");
+    expect(html).toContain("原生指令仍待確認完成");
+    expect(html).toContain("session-chat__spinner");
+    expect(html).not.toContain("訊息已送出");
+    expect(html).not.toContain("任務完成");
+    expect(html).not.toMatch(/<textarea[^>]*disabled/);
+  });
 
   it("keeps an initial readiness rejection actionable without claiming the draft was queued", () => {
     conversation.sendError = "session-prompt-not-ready";

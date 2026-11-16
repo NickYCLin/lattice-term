@@ -198,6 +198,34 @@ mod tests {
         assert!(saved.context_usage.unwrap().context_window.is_none());
     }
     #[test]
+    fn compaction_receipts_require_new_complete_native_records() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("history.jsonl");
+        fs::write(&path, "").unwrap();
+        assert!(super::super::compaction_receipt(&path).unwrap().is_none());
+        fs::write(&path, format!("{}\n", json!({"type":"event_msg","payload":{"type":"agent_message","message":"Context compacted"}}))).unwrap();
+        assert!(super::super::compaction_receipt(&path).unwrap().is_none());
+        let first = json!({"timestamp":"2026-11-16T01:00:00Z","type":"compacted","payload":{"message":"","replacement_history":[]}});
+        fs::write(&path, format!("{first}\n")).unwrap();
+        let baseline = super::super::compaction_receipt(&path).unwrap().unwrap();
+        fs::write(
+            &path,
+            format!("{first}\n{{\"type\":\"compacted\",\"payload\":"),
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::compaction_receipt(&path).unwrap().as_deref(),
+            Some(baseline.as_str())
+        );
+        let second = json!({"timestamp":"2026-11-16T01:01:00Z","type":"compacted","payload":{"message":"","replacement_history":[]}});
+        fs::write(&path, format!("{first}\n{second}\n")).unwrap();
+        assert_ne!(
+            super::super::compaction_receipt(&path).unwrap().as_deref(),
+            Some(baseline.as_str())
+        );
+    }
+
+    #[test]
     fn transcript_exposes_tools_and_only_public_reasoning_summaries() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("history.jsonl");

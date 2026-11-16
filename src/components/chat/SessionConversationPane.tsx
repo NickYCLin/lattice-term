@@ -101,6 +101,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { ref: messagesRef, onScroll, onWheel } = useChatScroll();
+  const nativePending = conversation.nativeCommandPending === true;
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
@@ -113,12 +114,12 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
   const controls = useSessionConversationActions({ session, agents, messages: conversation.messages,
-    busy: working || attention || forkWorking || Boolean(session.closedReason), nativeTools: conversation.nativeTools === true,
+    busy: working || attention || nativePending || forkWorking || Boolean(session.closedReason), nativeTools: conversation.nativeTools === true,
     onCompose: setDraft, onNotice: setNotice, onOpen: onSessionReplaced,
     onSearch: () => setSearchOpen(value => !value), onSideChat });
   const blocked = Boolean(session.closedReason) || conversation.sending || controls.working || forkWorking;
   async function fork(index?: number, edited?: string) {
-    if (!onFork || forkLock.current || blocked || working || attention || queuedCount > 0) throw new Error(t("chat.nativeOperation.running"));
+    if (!onFork || forkLock.current || blocked || working || attention || queuedCount > 0 || nativePending) throw new Error(t("chat.nativeOperation.running"));
     forkLock.current = true; setForkWorking(true);
     try { await onFork(conversation.messages, index, edited); }
     finally { forkLock.current = false; setForkWorking(false); }
@@ -138,7 +139,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     // Follow explicit searches; ordinary transcript polling must not move the reader.
   }, [search, searchIndex, searchOpen]);
   const hasContent = Boolean(draft.trim()) || attachments.length > 0;
-  const canSend = hasContent && !blocked;
+  const canSend = hasContent && !blocked && !nativePending;
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend || pastingRef.current) return;
@@ -223,7 +224,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     onError: reason => setNotice(t("chat.attachment.failed", { detail: errorText(reason) })),
   });
   async function nativeCommand(command: "plan" | "review" | "compact") {
-    if (blocked || working || attention || queuedCount > 0 || !session.capturedSessionId) return;
+    if (blocked || working || attention || queuedCount > 0 || nativePending || !session.capturedSessionId) return;
     try {
       await invoke("agent_session_prepare_command", { sessionId: session.sessionId, expectedNativeId: session.capturedSessionId, command });
       onOpenTerminal();
@@ -232,9 +233,9 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const assistance = useComposerAssistance({ draft, onText: setDraft, inputRef,
     workingDirectory: session.workingDirectory, filesEnabled: supported, onFile: () => true,
     commands: { model: () => setModelOpenRequest(value => value + 1), status: () => setStatusOpen(true),
-      ...(!blocked && !working && !attention && queuedCount === 0 && session.capturedSessionId && !session.detached
+      ...(!blocked && !nativePending && !working && !attention && queuedCount === 0 && session.definitionId === "codex" && session.capturedSessionId && !session.detached
         ? { plan: () => { void nativeCommand("plan"); }, review: () => { void nativeCommand("review"); }, compact: () => { void nativeCommand("compact"); } } : {}),
-      ...(onFork && !working && !attention && !blocked && queuedCount === 0 ? { fork: () => { void fork().catch(reason => setNotice(String(reason))); } } : {}) },
+      ...(onFork && !working && !attention && !blocked && !nativePending && queuedCount === 0 ? { fork: () => { void fork().catch(reason => setNotice(String(reason))); } } : {}) },
   });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     clipboard.onKeyDown(event.nativeEvent);
@@ -268,8 +269,8 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           {session.groupLabel && session.groupLabel !== session.label && <span className="chat-chip">
             {t("form.group")} · {session.groupLabel}
           </span>}
-          {live && <span className={`session-chat__state is-${session.state}`}>
-            {t(unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
+          {live && <span className={`session-chat__state is-${nativePending ? "needsAttention" : session.state}`}>
+            {t(nativePending ? "sessionChat.nativeState" : unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}
         </ConversationIdentity>
         <div className="chat-composer__actions">
@@ -318,7 +319,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
             const result = message.tool.kind === "call" ? conversation.messages.find(row => row.tool?.kind === "result" && row.tool.callId === message.tool?.callId) : undefined;
             return <div key={message.renderId ?? index} data-session-message={index} className={index === match ? "chat-search__match" : undefined}><SessionToolCard message={message} result={result} onOpenFile={setArtifact} /></div>;
           }
-          const canFork = onFork && !working && !attention && !blocked && queuedCount === 0;
+          const canFork = onFork && !working && !attention && !blocked && !nativePending && queuedCount === 0;
           const hasBoundary = session.definitionId === "codex" ? Boolean(message.nativeTurnId) : Boolean(message.nativeMessageId);
           const canEdit = canFork && message.role === "user" && (session.definitionId === "codex" ? hasBoundary
             : !conversation.messages.slice(0, index).some(row => !row.tool && row.role === "user") || conversation.messages.slice(0, index).some(row => !row.tool && row.role === "assistant" && row.nativeMessageId));
@@ -338,10 +339,10 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           </ConversationMessage>;
         })}
         <SessionPromptQueue sessionId={session.sessionId} queue={queue} />
-        {working && (
+        {(working || nativePending) && (
           <p className="session-chat__activity" role="status">
             <span className="session-chat__spinner" aria-hidden="true" />
-            {session.queuedPrompts > 0
+            {nativePending ? t("sessionChat.nativePending") : session.queuedPrompts > 0
               ? t("sessionChat.workingQueued", { count: session.queuedPrompts })
               : t("sessionChat.working")}
           </p>
@@ -401,7 +402,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           <p>{t("sessionChat.queued", { count: queuedCount })}</p>
           {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
         </div>}
-        {conversation.queued === 0 && queuedCount === 0 && !working && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
+        {conversation.queued === 0 && queuedCount === 0 && !working && !nativePending && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
         {notice && <p role="status">{notice}</p>}
       </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
@@ -432,7 +433,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
             <SessionModelPicker session={session} agents={agents} openRequest={modelOpenRequest}
-              disabled={unconfirmed || (working && !switchesModelInPlace(session))}
+              disabled={nativePending || unconfirmed || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
               blocked={blocked || pasting} working={working} sending={conversation.sending} canSend={canSend}

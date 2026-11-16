@@ -382,3 +382,22 @@ it("does not process CLI repaint events when the conversation does not show term
     expect(invoke).toHaveBeenCalledWith("agent_session_conversation_snapshot", { sessionId: "selected" });
   } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
 });
+
+it("updates native command receipts without retrying or sending a draft", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let pending = true;
+  const agents = fakeAgentApi();
+  invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_conversation_snapshot" ? { ...snapshot(), nativeCommandPending: pending } : null));
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", agents, false); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    expect(api.nativeCommandPending).toBe(true);
+    pending = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(api.nativeCommandPending).toBe(false);
+    expect(agents.enqueue).not.toHaveBeenCalled();
+    expect(agents.send).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
+});

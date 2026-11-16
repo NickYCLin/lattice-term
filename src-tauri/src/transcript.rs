@@ -1832,6 +1832,7 @@ pub enum SessionConversationAvailability {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConversationSnapshot {
+    pub native_command_pending: bool,
     pub native_tools: bool,
     pub progress: session_progress::SessionProgress,
     pub availability: SessionConversationAvailability,
@@ -1846,6 +1847,7 @@ pub fn read_session_conversation_snapshot(
     profile_directory: Option<&Path>,
 ) -> Result<SessionConversationSnapshot, String> {
     let waiting = |availability| SessionConversationSnapshot {
+        native_command_pending: false,
         native_tools: false,
         progress: session_progress::SessionProgress::default(),
         availability,
@@ -1868,12 +1870,40 @@ pub fn read_session_conversation_snapshot(
     };
     let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
     Ok(SessionConversationSnapshot {
+        native_command_pending: false,
         availability: SessionConversationAvailability::Ready,
         native_tools: false,
         progress: session_progress::read(&path, kind),
         messages: snapshot.messages,
         truncated: snapshot.truncated,
     })
+}
+
+/// A sealed native compaction record, not a UI spinner or an inferred token drop.
+pub(crate) fn session_compaction_receipt(
+    directory: &str,
+    native_id: &str,
+    profile: Option<&Path>,
+) -> Result<Option<String>, String> {
+    let (_, path) = session_transcript_path("codex", directory, native_id, profile)?
+        .ok_or("尚未能讀取這段原生對話的壓縮紀錄。")?;
+    compaction_receipt(&path)
+}
+fn compaction_receipt(path: &Path) -> Result<Option<String>, String> {
+    use sha2::{Digest, Sha256};
+    let mut receipt = None;
+    visit_transcript_rows(path, |row| {
+        if row["type"] == "compacted" && row["payload"].is_object() {
+            receipt = Some(
+                Sha256::digest(row.to_string().as_bytes())
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect(),
+            );
+        }
+    })
+    .ok_or("無法安全讀取原生壓縮紀錄。")?;
+    Ok(receipt)
 }
 
 fn session_transcript_path(
