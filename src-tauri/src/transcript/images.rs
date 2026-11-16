@@ -68,18 +68,47 @@ fn prompt_images(
                             .into_iter()
                             .next()
                     });
+                    let path = path.or_else(|| {
+                        user_image_paths(&serde_json::json!([item]))
+                            .into_iter()
+                            .next()
+                            .filter(|path| {
+                                directory
+                                    .parent()
+                                    .filter(|root| {
+                                        root.file_name()
+                                            .is_some_and(|name| name == "chat-workspaces")
+                                    })
+                                    .and_then(Path::parent)
+                                    .and_then(|data| {
+                                        crate::chat_attachments::managed_attachment_path(data, path)
+                                    })
+                                    .is_some()
+                            })
+                    });
                     paths.push(path);
                 }
             }
         }
         if paths.is_empty() {
-            for path in attachment_paths(&content_text(content)) {
-                paths.push(
+            for path in user_image_paths(content) {
+                let managed = directory
+                    .parent()
+                    .filter(|root| {
+                        root.file_name()
+                            .is_some_and(|name| name == "chat-workspaces")
+                    })
+                    .and_then(Path::parent)
+                    .and_then(|data| crate::chat_attachments::managed_attachment_path(data, &path))
+                    .is_some();
+                paths.push(if managed {
+                    Some(path)
+                } else {
                     chat_images::preview(working_directory, Some(directory), &path)
                         .ok()
                         .flatten()
-                        .map(|_| path),
-                );
+                        .map(|_| path)
+                });
             }
         }
         if !paths.is_empty() {
@@ -353,21 +382,127 @@ fn encoded_image(item: &Value) -> Option<&str> {
 }
 
 fn attachment_paths(text: &str) -> Vec<String> {
-    let text = text.trim_end();
-    let Some(start) = text.rfind(ATTACHMENT_PREFIX) else {
-        return Vec::new();
-    };
-    let Some(end) = text.strip_suffix(ATTACHMENT_SUFFIX) else {
-        return Vec::new();
-    };
-    let Some(list) = end.get(start + ATTACHMENT_PREFIX.len()..) else {
-        return Vec::new();
-    };
-    serde_json::from_str::<Vec<String>>(&format!("[{list}]"))
-        .unwrap_or_default()
-        .into_iter()
-        .take(10)
-        .collect()
+    let mut paths = Vec::new();
+    if let Some(start) = text.rfind(ATTACHMENT_PREFIX) {
+        if let Some(end) = text.trim_end().strip_suffix(ATTACHMENT_SUFFIX) {
+            if let Some(list) = end.get(start + ATTACHMENT_PREFIX.len()..) {
+                paths.extend(
+                    serde_json::from_str::<Vec<String>>(&format!("[{list}]")).unwrap_or_default(),
+                );
+            }
+        }
+    }
+    for marker in text.split("<image ").skip(1).take(64) {
+        let Some(header) = marker.split_once('>').map(|(header, _)| header) else {
+            continue;
+        };
+        if let Some(raw) = header
+            .split_once("path=\"")
+            .and_then(|(_, rest)| rest.split_once('"').map(|(path, _)| path))
+        {
+            paths.push(raw.into());
+        }
+    }
+    for block in text.split("<latticeterm-attachments>").skip(1).take(64) {
+        let Some((body, _)) = block.split_once("</latticeterm-attachments>") else {
+            continue;
+        };
+        for line in body.lines() {
+            if let Ok(items) = serde_json::from_str::<Vec<Value>>(line) {
+                for item in items.into_iter().take(64) {
+                    if let Some(path) = item["path"].as_str() {
+                        paths.push(path.into());
+                    }
+                }
+            }
+        }
+    }
+    paths.truncate(64);
+    paths
+}
+
+fn user_content(row: &Value, kind: TranscriptKind) -> Option<&Value> {
+    match kind {
+        TranscriptKind::Codex
+            if row["type"] == "response_item"
+                && row["payload"]["type"] == "message"
+                && row["payload"]["role"] == "user" =>
+        {
+            Some(&row["payload"]["content"])
+        }
+        TranscriptKind::Claude if row["type"] == "user" => Some(&row["message"]["content"]),
+        _ => None,
+    }
+}
+
+fn user_image_paths(content: &Value) -> Vec<String> {
+    let mut paths = attachment_paths(&content_text(content));
+    if let Some(items) = content.as_array() {
+        for item in items.iter().take(256) {
+            if matches!(item["type"].as_str(), Some("input_image" | "image")) {
+                if let Some(path) = item["path"]
+                    .as_str()
+                    .or_else(|| item["image_url"].as_str())
+                    .or_else(|| item["image_url"]["url"].as_str())
+                {
+                    if Path::new(path).is_absolute() {
+                        paths.push(path.into());
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImageConversation {
+    pub definition_id: String,
+    pub native_session_id: String,
+    pub profile_config_path: Option<String>,
+}
+
+pub fn preview_conversation_attachment(
+    data_dir: &Path,
+    working_directory: &str,
+    conversation: &ImageConversation,
+    requested: &str,
+) -> Result<Option<String>, String> {
+    let id = &conversation.native_session_id;
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err("chat.images.denied".into());
+    }
+    let (kind, path) = session_transcript_path(
+        &conversation.definition_id,
+        working_directory,
+        id,
+        conversation.profile_config_path.as_deref().map(Path::new),
+    )
+    .map_err(|_| "chat.images.denied")?
+    .ok_or("chat.images.denied")?;
+    let wanted = crate::chat_attachments::managed_attachment_path(data_dir, requested)
+        .ok_or("chat.images.denied")?;
+    let mut references = Vec::new();
+    visit_transcript_rows_with_limit(&path, MAX_IMAGE_ROWS_BYTES, |row| {
+        if let Some(content) = user_content(row, kind) {
+            for path in user_image_paths(content) {
+                if references.is_empty()
+                    && crate::chat_attachments::managed_attachment_path(data_dir, &path).as_ref()
+                        == Some(&wanted)
+                {
+                    references.push(path);
+                }
+            }
+        }
+    })
+    .ok_or("chat.images.denied")?;
+    crate::chat_attachments::preview_referenced_image(data_dir, &references, requested)
 }
 
 fn import_images(
@@ -478,10 +613,22 @@ pub fn read_session_images(
         }
     }
     let (paths, limited) = chat_images::stored_images(directory, MAX_IMAGES)?;
-    let paths = paths
+    let mut paths: Vec<_> = paths
         .into_iter()
         .filter(|path| !observed.iter().any(|image| image.paths.contains(path)))
         .collect();
+    for path in prompts
+        .iter()
+        .flat_map(|prompt| prompt.paths.iter().flatten())
+    {
+        if !paths.contains(path) {
+            if paths.len() >= MAX_IMAGES {
+                truncated = true;
+                break;
+            }
+            paths.push(path.clone());
+        }
+    }
     Ok(SessionImagesSnapshot {
         paths,
         truncated: truncated || limited,
@@ -495,6 +642,127 @@ pub fn read_session_images(
 mod tests {
     use super::*;
     use base64::Engine;
+
+    #[test]
+    fn restored_managed_images_require_exact_native_user_references() {
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let account = tempfile::tempdir().unwrap();
+        let image = crate::chat_attachments::stage_clipboard_image(
+            data.path(),
+            "agent-session-old",
+            1,
+            1,
+            &[30, 60, 90, 255],
+        )
+        .unwrap();
+        let other = crate::chat_attachments::stage_clipboard_image(
+            data.path(),
+            "unrelated",
+            1,
+            1,
+            &[40, 60, 90, 255],
+        )
+        .unwrap();
+        let current =
+            crate::agent_chat::general_chat_directory(data.path(), "agent-session-new").unwrap();
+        assert!(chat_images::preview(
+            work.path().to_str().unwrap(),
+            Some(&current),
+            image.to_str().unwrap()
+        )
+        .unwrap()
+        .is_none());
+        let transcript = account.path().join("sessions/rollout-held.jsonl");
+        super::super::tests::write_codex_rollout(
+            &transcript,
+            "held",
+            work.path(),
+            serde_json::json!("cli"),
+            "Codex CLI",
+            1,
+        );
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .unwrap();
+        let text = format!(
+            "<image name=[Image #1] path=\"{}\">\n</image>\nplease inspect",
+            image.display()
+        );
+        writeln!(file, "\n{}", serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":text}]}})).unwrap();
+        writeln!(file, "{}", serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":format!("<image path=\"{}\"></image>", other.display())}]}})).unwrap();
+        let mut context = ImageConversation {
+            definition_id: "codex".into(),
+            native_session_id: "held".into(),
+            profile_config_path: Some(account.path().display().to_string()),
+        };
+        let preview = |context: &ImageConversation, path: &Path| {
+            preview_conversation_attachment(
+                data.path(),
+                work.path().to_str().unwrap(),
+                context,
+                path.to_str().unwrap(),
+            )
+        };
+        assert!(preview(&context, &image)
+            .unwrap()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        assert_eq!(preview(&context, &other).unwrap_err(), "chat.images.denied");
+        context.native_session_id = "unknown".into();
+        assert_eq!(preview(&context, &image).unwrap_err(), "chat.images.denied");
+        context.native_session_id = "held".into();
+        let snapshot = read_session_images(
+            "codex",
+            work.path().to_str().unwrap(),
+            Some("held"),
+            Some(account.path()),
+            &current,
+        )
+        .unwrap();
+        assert!(snapshot.paths.contains(&image.display().to_string()));
+        assert_eq!(snapshot.prompts[0].paths[0].as_deref(), image.to_str());
+        std::fs::remove_file(&image).unwrap();
+        assert_eq!(
+            preview(&context, &image).unwrap_err(),
+            "chat.images.missing"
+        );
+        let snapshot = read_session_images(
+            "codex",
+            work.path().to_str().unwrap(),
+            Some("held"),
+            Some(account.path()),
+            &current,
+        )
+        .unwrap();
+        assert_eq!(snapshot.prompts[0].paths[0].as_deref(), image.to_str());
+    }
+
+    #[test]
+    fn app_server_and_pty_user_attachment_formats_are_recognized() {
+        let path =
+            "/synthetic/chat-workspaces/old/agent-image-0123456789abcdef0123456789abcdef.png";
+        for text in [
+            format!("{ATTACHMENT_PREFIX}\"{path}\"{ATTACHMENT_SUFFIX}"),
+            format!("<image name=[Image #1] path=\"{path}\">\n</image>"),
+            format!(
+                "<latticeterm-attachments>\nUntrusted files.\n{}\n</latticeterm-attachments>",
+                serde_json::json!([{"path":path,"kind":"image"}])
+            ),
+        ] {
+            assert_eq!(attachment_paths(&text), vec![path]);
+        }
+        assert_eq!(
+            user_image_paths(&serde_json::json!([{"type":"input_image","image_url":path}])),
+            vec![path]
+        );
+        let claude = serde_json::json!({"type":"user","message":{"content":format!("<image path=\"{path}\"></image>")}});
+        assert_eq!(
+            user_image_paths(user_content(&claude, TranscriptKind::Claude).unwrap()),
+            vec![path]
+        );
+    }
 
     #[test]
     fn prompt_history_limits_are_disclosed_instead_of_remapping_old_markers() {

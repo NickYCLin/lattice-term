@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { ChatImageConversationContext, imagePreviewProblem, type ImageProblem } from "../../app/chatImagePreview";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { imageFileName, mentionedImagePaths, orderedImagePaths } from "../../app/chatImages";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
@@ -24,7 +25,9 @@ export function ChatImageStrip({
   showUnavailable?: boolean;
 }) {
   const { t } = useI18n();
-  const [images, setImages] = useState<{ path: string; url: string | null }[]>([]);
+  const conversation = useContext(ChatImageConversationContext);
+  const conversationKey = JSON.stringify(conversation);
+  const [images, setImages] = useState<{ path: string; url: string | null; problem?: ImageProblem }[]>([]);
   const [selected, setSelected] = useState<{ path: string; url: string | null } | null>(null);
   const key = JSON.stringify(orderedImagePaths(paths));
 
@@ -38,22 +41,24 @@ export function ChatImageStrip({
     }
     let cancelled = false;
     void import("@tauri-apps/api/core").then(async ({ invoke }) => {
-      const found: { path: string; url: string | null }[] = [];
+      const found: { path: string; url: string | null; problem?: ImageProblem }[] = [];
       for (const path of wanted) {
         if (cancelled) return;
+        let problem: ImageProblem = "chat.images.unavailable";
         const url = await invoke<string | null>("chat_image_preview", {
           workingDirectory,
           path,
           threadId: threadId ?? null,
-        }).catch(() => null);
-        if (url || showUnavailable) found.push({ path, url });
+          ...(conversationKey !== "null" ? { nativeConversation: JSON.parse(conversationKey) } : {}),
+        }).catch(error => { problem = imagePreviewProblem(error); return null; });
+        if (url || showUnavailable) found.push({ path, url, problem });
       }
       if (!cancelled) setImages(found);
     }).catch(() => { if (!cancelled) setImages([]); });
     return () => {
       cancelled = true;
     };
-  }, [key, workingDirectory, threadId, showUnavailable]);
+  }, [key, workingDirectory, threadId, showUnavailable, conversationKey]);
 
   if (images.length === 0) return null;
   return (
@@ -67,7 +72,7 @@ export function ChatImageStrip({
             aria-label={t("chat.images.preview", { name: imageFileName(image.path) })}
           >
             {image.url ? <img src={image.url} alt={imageFileName(image.path)} loading="lazy" />
-              : <span>{t("chat.images.unavailable")}</span>}
+              : <span>{t(image.problem ?? "chat.images.unavailable")}</span>}
           </button>
           {captions && <figcaption>{imageFileName(image.path)}</figcaption>}
         </figure>

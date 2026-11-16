@@ -1893,6 +1893,8 @@ export const zhTW = {
   "chat.images.title": "圖片預覽",
   "chat.images.enlarge": "放大",
   "chat.images.preview": "查看圖片：{name}",
+  "chat.images.missing": "圖片檔案已移動或刪除。",
+  "chat.images.denied": "這張圖片不屬於此對話可預覽的附件。",
   "chat.images.unavailable": "無法載入圖片。檔案可能已移動或刪除，或不在這個對話可預覽的資料夾內。",
   "chat.images.shrink": "縮小",
   "chat.skills": "Skills",

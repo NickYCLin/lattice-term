@@ -71,16 +71,24 @@ pub fn preview(
     {
         return Ok(None);
     }
-    let Ok(metadata) = std::fs::metadata(&resolved) else {
+    let Ok(file) = crate::local_files::open_regular(&resolved) else {
         return Ok(None);
     };
+    preview_file(file)
+}
+
+pub(crate) fn preview_file(file: std::fs::File) -> Result<Option<String>, String> {
+    let metadata = file.metadata().map_err(|_| "chat.images.denied")?;
     if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES {
         return Ok(None);
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    std::fs::File::open(&resolved)
-        .and_then(|file| file.take(MAX_IMAGE_BYTES).read_to_end(&mut bytes))
-        .map_err(|error| error.to_string())?;
+    file.take(MAX_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "chat.images.denied")?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Ok(None);
+    }
     let Some(mime) = mime(&bytes) else {
         return Ok(None);
     };

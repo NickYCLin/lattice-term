@@ -1959,6 +1959,8 @@ export const en: Messages = {
   "chat.images.title": "Image preview",
   "chat.images.enlarge": "Enlarge",
   "chat.images.preview": "View image: {name}",
+  "chat.images.missing": "The image file has been moved or deleted.",
+  "chat.images.denied": "This image is not an attachment this conversation is allowed to preview.",
   "chat.images.unavailable": "Cannot load this image. The file may have been moved or deleted, or is outside this conversation’s preview folders.",
   "chat.images.shrink": "Shrink",
   "chat.skills": "Skills",

@@ -973,7 +973,9 @@ mod sync_tests;
 
 mod images;
 mod session_progress;
-pub use images::{read_session_images, SessionImagesSnapshot};
+pub use images::{
+    preview_conversation_attachment, read_session_images, ImageConversation, SessionImagesSnapshot,
+};
 
 // A unit test runs on a machine that already has `~/.codex` and `~/.claude`.
 // Scanning those pushes the test's own fixtures past the result cap, so the

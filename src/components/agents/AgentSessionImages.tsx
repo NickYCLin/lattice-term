@@ -1,3 +1,4 @@
+import { imagePreviewProblem, type ImageProblem } from "../../app/chatImagePreview";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../i18n/context";
@@ -44,6 +45,7 @@ function SessionImageTile({ path, sessionId, number, current, onSelect }: {
 }) {
   const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
+  const [problem, setProblem] = useState<ImageProblem>("chat.images.unavailable");
   const [loading, setLoading] = useState(true);
   const tileRef = useRef<HTMLButtonElement>(null);
   const name = imageFileName(path);
@@ -54,7 +56,7 @@ function SessionImageTile({ path, sessionId, number, current, onSelect }: {
     let cancelled = false;
     const load = () => {
       void invoke<string | null>("chat_image_preview", { path, workingDirectory: "", threadId: sessionId })
-        .catch(() => null).then(next => { if (!cancelled) { setUrl(next); setLoading(false); } });
+        .catch(error => { if (!cancelled) setProblem(imagePreviewProblem(error)); return null; }).then(next => { if (!cancelled) { setUrl(next); setLoading(false); } });
     };
     let observer: IntersectionObserver | undefined;
     if (typeof IntersectionObserver === "undefined") load();
@@ -73,7 +75,7 @@ function SessionImageTile({ path, sessionId, number, current, onSelect }: {
     <span className="agent-session-images__number">#{number}</span>
     {loading ? <span role="status">{t("common.loading")}</span>
       : url ? <img src={url} alt={name} onError={() => setUrl(null)} />
-        : <span>{t("chat.images.unavailable")}</span>}
+        : <span>{t(problem)}</span>}
   </button>;
 }
 

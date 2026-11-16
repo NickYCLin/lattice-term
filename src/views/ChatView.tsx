@@ -1,3 +1,4 @@
+import { ChatImageConversationContext } from "../app/chatImagePreview";
 import { accountModelTargetKey } from "../app/accountModels";
 import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
 import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
@@ -1108,6 +1109,10 @@ export function ThreadPane({
   const latestReply = [...thread.items].reverse().find((item): item is Extract<ChatItem, { type: "text" }> => item.type === "text");
 
   return (
+    <ChatImageConversationContext.Provider value={thread.nativeSessionId && !activeProfileMissing ? {
+      definitionId: thread.definitionId, nativeSessionId: thread.nativeSessionId,
+      profileConfigPath: activeProfile?.configDirectory ?? null,
+    } : null}>
     <div className="chat-thread-pane" onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && !event.nativeEvent.isComposing) { event.preventDefault(); setSearchOpen(true); } }}>
       <header className="chat-header">
         <div className="chat-header__title">
@@ -1493,6 +1498,7 @@ export function ThreadPane({
         </ConversationComposerFrame>
       </form>}
     </div>
+    </ChatImageConversationContext.Provider>
   );
 }
 

@@ -304,3 +304,25 @@ it("returns focus after the close button or backdrop and keeps the single-image 
     expect(dialog(host)).toBeUndefined(); expect(host.ownerDocument.activeElement).toBe(trigger);
   } finally { await act(async () => root.unmount()); }
 });
+
+it("loads old-folder attachments after a PTY session is restored with a new runtime id", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  const path = "/synthetic/chat-workspaces/agent-session-old/agent-image-0123456789abcdef0123456789abcdef.png";
+  fixture({ paths: [path] });
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="new-runtime" active revision={0} /></I18nProvider>));
+    expect(tiles(host)).toHaveLength(1);
+    expect(allNodes(host).find(node => node.tagName === "IMG")?.attributes.src).toContain("data:image/png");
+    await clickTile(tiles(host)[0]);
+    expect(dialog(host)).toBeDefined();
+    expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path, workingDirectory: "", threadId: "new-runtime" });
+    invoke.mockImplementation(async command => {
+      if (command === "agent_session_images_snapshot") return { paths: [path], truncated: false, historyAvailable: true };
+      throw "chat.images.missing";
+    });
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="next-runtime" active revision={0} /></I18nProvider>));
+    expect(host.textContent).toContain("圖片檔案已移動或刪除。");
+    await clickTile(tiles(host)[0]);
+    expect(dialog(host)?.textContent).toContain("圖片檔案已移動或刪除。");
+  } finally { await act(async () => root.unmount()); }
+});

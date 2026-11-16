@@ -1,3 +1,4 @@
+import { ChatImageConversationContext } from "../../app/chatImagePreview";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
@@ -324,4 +325,47 @@ it("shows a Cursor conversation in place without turning it into a thread", asyn
   expect(String(button().attributes["aria-expanded"])).toBe("false");
   expect(invoke).toHaveBeenCalledTimes(1);
   await act(async () => root.unmount());
+});
+
+it("restores sent images and their lightbox with the exact native conversation after remount", async () => {
+  const container = installHostDom();
+  const path = "/synthetic/chat-workspaces/agent-session-old/agent-image-0123456789abcdef0123456789abcdef.png";
+  const nativeConversation = { definitionId: "codex", nativeSessionId: "held", profileConfigPath: "/synthetic/account" };
+  const pixels = "data:image/png;base64,fixture";
+  invoke.mockResolvedValue(pixels);
+  const render = (id: string) => <I18nProvider locale="zh-TW"><ChatImageConversationContext.Provider value={nativeConversation}>
+    <SentAttachments attachments={[{ isImage: true, name: "pasted.png", path }]} workingDirectory="/synthetic/project" threadId={id} />
+  </ChatImageConversationContext.Provider></I18nProvider>;
+  let root = createRoot(container as unknown as Element);
+  try {
+    await act(async () => root.render(render("old-runtime")));
+    await act(async () => root.unmount());
+    root = createRoot(container as unknown as Element);
+    await act(async () => root.render(render("new-runtime")));
+    expect(allNodes(container).find(node => node.tagName === "IMG")?.attributes.src).toBe(pixels);
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(true);
+    expect(invoke).toHaveBeenLastCalledWith("chat_image_preview", {
+      path, workingDirectory: "/synthetic/project", threadId: "new-runtime", nativeConversation,
+    });
+    expect(allNodes(container).filter(node => node.tagName === "IMG")).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("revalidates a cached thumbnail on lightbox open and distinguishes deleted from denied images", async () => {
+  const container = installHostDom(); const root = createRoot(container as unknown as Element);
+  const render = (id: string) => <I18nProvider locale="zh-TW"><ChatImageStrip
+    paths={["/synthetic/old.png"]} workingDirectory="/synthetic" threadId={id} showUnavailable /></I18nProvider>;
+  invoke.mockResolvedValue("data:image/png;base64,fixture");
+  try {
+    await act(async () => root.render(render("restored")));
+    invoke.mockRejectedValue("chat.images.missing");
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(allNodes(container).find(node => node.attributes.role === "alert")?.textContent).toBe("圖片檔案已移動或刪除。");
+    await act(async () => root.render(render("reload")));
+    expect(container.textContent).toContain("圖片檔案已移動或刪除。");
+    invoke.mockRejectedValue("chat.images.denied");
+    await act(async () => root.render(render("unrelated")));
+    expect(container.textContent).toContain("這張圖片不屬於此對話可預覽的附件。");
+  } finally { await act(async () => root.unmount()); }
 });

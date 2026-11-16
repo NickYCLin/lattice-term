@@ -2152,18 +2152,43 @@ async fn chat_image_preview(
     working_directory: String,
     mut path: String,
     thread_id: Option<String>,
+    native_conversation: Option<crate::transcript::ImageConversation>,
     registry: State<'_, Arc<AgentRegistry>>,
     daemon: State<'_, AppDaemon>,
 ) -> Result<Option<String>, String> {
-    let chat_directory = match thread_id.as_deref() {
-        Some(thread_id) => {
-            let data_dir = app.path().app_data_dir().map_err(|error| {
-                format!("Cannot locate the application data directory: {error}")
-            })?;
-            Some(crate::agent_chat::general_chat_directory(
-                &data_dir, thread_id,
-            )?)
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "chat.images.denied")?;
+    let summary = if let Some(id) = thread_id.as_deref() {
+        if crate::agent_daemon::owns(id) {
+            daemon.session_summary(id).await
+        } else {
+            registry.session_summary(id)
         }
+    } else {
+        None
+    };
+    let conversation = if let Some(summary) = &summary {
+        summary
+            .captured_session_id
+            .as_ref()
+            .map(|id| crate::transcript::ImageConversation {
+                definition_id: summary.definition_id.clone(),
+                native_session_id: id.clone(),
+                profile_config_path: summary.profile_config_path.clone(),
+            })
+    } else {
+        native_conversation
+    };
+    let working_directory = summary
+        .as_ref()
+        .map(|summary| summary.working_directory.clone())
+        .unwrap_or(working_directory);
+    let chat_directory = match thread_id.as_deref() {
+        Some(thread_id) => Some(crate::agent_chat::general_chat_directory(
+            &data_dir, thread_id,
+        )?),
         None => None,
     };
     // Older terminal pastes referred to a session-owned temp file. Migrate
@@ -2225,6 +2250,16 @@ async fn chat_image_preview(
         _ => working_directory,
     };
     blocking(move || {
+        if crate::chat_attachments::is_other_workspace(&data_dir, chat_directory.as_deref(), &path)
+        {
+            let conversation = conversation.ok_or("chat.images.denied")?;
+            return crate::transcript::preview_conversation_attachment(
+                &data_dir,
+                &working_directory,
+                &conversation,
+                &path,
+            );
+        }
         crate::chat_images::preview(&working_directory, chat_directory.as_deref(), &path)
     })
     .await

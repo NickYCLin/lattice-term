@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { ChatImageConversationContext, imagePreviewProblem, type ImageProblem } from "../../app/chatImagePreview";
+import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { imageFileName } from "../../app/chatImages";
@@ -16,6 +17,8 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
   navigation?: { index: number; total: number; onPrevious: () => void; onNext: () => void };
 }) {
   const { t } = useI18n();
+  const conversationKey = JSON.stringify(useContext(ChatImageConversationContext));
+  const [problem, setProblem] = useState<ImageProblem>("chat.images.unavailable");
   const imageName = imageFileName(name);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [url, setUrl] = useState(initialUrl ?? null);
@@ -44,15 +47,16 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
     let cancelled = false;
     setUrl(initialUrl ?? null);
     setLoading(!initialUrl);
-    if (initialUrl) return;
+    setProblem("chat.images.unavailable");
     if (!hasDesktopBackend()) { setLoading(false); return; }
     void import("@tauri-apps/api/core").then(({ invoke }) => invoke<string | null>("chat_image_preview", {
       path, workingDirectory, threadId: threadId ?? null,
-    })).catch(() => null).then(next => {
+      ...(conversationKey !== "null" ? { nativeConversation: JSON.parse(conversationKey) } : {}),
+    })).catch(error => { if (!cancelled) setProblem(imagePreviewProblem(error)); return null; }).then(next => {
       if (!cancelled) { setUrl(next); setLoading(false); }
     });
     return () => { cancelled = true; };
-  }, [path, workingDirectory, threadId, initialUrl]);
+  }, [path, workingDirectory, threadId, initialUrl, conversationKey]);
   return createPortal(<div className="scrim scrim--center chat-image-preview" onMouseDown={event => {
     if (event.target === event.currentTarget) onClose();
   }}>
@@ -71,7 +75,7 @@ export function ChatImagePreview({ path, name, workingDirectory, threadId, initi
       <div className="chat-image-preview__content">
         {loading ? <p role="status">{t("common.loading")}</p>
           : url ? <img src={url} alt={imageName} onError={() => setUrl(null)} />
-            : <p role="alert">{t("chat.images.unavailable")}</p>}
+            : <p role="alert">{t(problem)}</p>}
       </div>
     </div>
   </div>, document.body);
