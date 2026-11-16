@@ -141,7 +141,7 @@ describe("ChatView", () => {
     expect(markup).not.toContain("從剪貼簿貼上");
     const composer = markup.slice(markup.lastIndexOf('<form'));
     expect(composer).toContain("唯讀");
-    expect(composer).toContain('value="readOnly" selected=""');
+    expect(composer).toContain('aria-label="權限：唯讀"');
   });
 
   it("locks the composer model while a turn is running", () => {
@@ -239,7 +239,7 @@ describe("ChatView", () => {
     const thread = fakeThread({ workingDirectory: "" });
     const markup = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
     expect(markup).toContain("一般對話");
-    expect(markup).toContain("專案資料夾（選填）");
+    expect(markup).toContain("選擇專案資料夾");
     expect(markup).toContain('placeholder="想做什麼都可以"');
     expect(markup).not.toContain("先在上方選一個工作目錄");
   });
@@ -267,7 +267,9 @@ describe("ChatView", () => {
     expect(markup).toContain("每次詢問");
     expect(markup).toContain("跟 OpenAI Codex 開始對話");
     const visibleText = markup.replace(/<[^>]+>/g, " ");
-    expect(visibleText).toContain("供應商: 由 Codex CLI 管理 · Codex CLI · 模型: 未知 · 專案: work");
+    expect(visibleText).toContain("Codex CLI");
+    expect(visibleText).not.toContain("供應商:");
+    expect(markup).toContain("供應商: 由 Codex CLI 管理");
   });
 
   it("shows the proxy model field even when native Codex is signed out", () => {
@@ -384,5 +386,5 @@ it("keeps one advanced settings trigger, composer metadata and sidebar managemen
   expect(markup).toContain('aria-label="刪除對話：設定入口檢查"');
   expect(markup).toContain('aria-label="封存：設定入口檢查"');
   expect(markup).toContain('class="session-composer__model"');
-  expect(markup).toContain('aria-label="權限"');
+  expect(markup).toContain('aria-label="權限：');
 });

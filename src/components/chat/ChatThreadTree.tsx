@@ -360,7 +360,7 @@ export function ChatThreadTree({
                 }}
               >
                 <ConversationListIdentity title={row.session.label}>
-                  {row.session.metadata ? <ConversationMetadata labels={row.session.metadata} /> : row.session.detail ?? t("terminal.title")}
+                  {row.session.metadata ? <ConversationMetadata compact at={row.session.updatedAt} labels={row.session.metadata} /> : row.session.detail ?? t("terminal.title")}
                 </ConversationListIdentity>
                 <span className="chat-session__status" aria-hidden="true" />
               </div>

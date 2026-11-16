@@ -1,3 +1,5 @@
+import { ComposerPermissionMenu } from "../components/chat/ComposerPermissionMenu";
+import { recordRecentProject } from "../app/recentProjects";
 import { chatToolRows, presentTool, toolHasProtectedContent, type ToolPresentation } from "../app/toolPresentation";
 import { ConversationTimeline } from "../components/chat/ConversationTimeline";
 import { ReadableToolCard } from "../components/chat/ReadableToolCard";
@@ -125,10 +127,7 @@ import { SidebarStorageNotice } from "../components/sessions/SidebarStorageNotic
 import { ChatQuestions } from "../components/chat/ChatQuestions";
 import {
   AgentIcon,
-  AlertIcon,
-  ShieldIcon,
   ChatIcon,
-  ChevronDownIcon,
   CodeFileIcon,
   TerminalIcon,
   CloseIcon,
@@ -559,7 +558,7 @@ export function ChatView({
                 >
                   <ConversationListIdentity title={thread.title || t("chat.untitled")}>
                       {thread.automationId ? `${t("automation.badge")} · ` : ""}
-                      <ConversationMetadata labels={conversationLabels({ definitionId: thread.definitionId,
+                      <ConversationMetadata compact at={thread.updatedAt} labels={conversationLabels({ definitionId: thread.definitionId,
                         provider: thread.reportedProvider,
                         directApi: thread.provider === "cliproxyapi" && !thread.nativeSessionId,
                         model: thread.reportedModel ?? thread.model, workingDirectory: thread.workingDirectory,
@@ -677,7 +676,9 @@ export function ChatView({
           </div>
         ) : shownSession ? (
           <SessionConversationPane key={shownSession.sessionId} session={shownSession}
-            displayName={conversationDisplayName(names.names, nameTargets.session(shownSession), shownSession.label)}
+            displayName={conversationDisplayName(names.names, nameTargets.session(shownSession), "") || undefined}
+            conversationTitle={[...workspace.sessions.values()].find(leaf => leaf.sessionId === shownSession.sessionId)?.label}
+            accountLabel={accountProfiles.find(profile => profile.definitionId === shownSession.definitionId && profile.configDirectory === shownSession.profileConfigPath)?.name}
             agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)}
             onSessionReplaced={setSelectedSessionId} onSideChat={() => { setSideThreadId(null); setSideSessionId(shownSession.sessionId); }}
             onFork={(messages, index, edited) => forkSession(shownSession, messages, index, edited)} />
@@ -732,7 +733,9 @@ export function ChatView({
       {sideSession && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
         <button type="button" className="button button--ghost button--sm" onClick={() => setSideSessionId(null)}>{t("chat.nav.closeSide")}</button>
         {sideSession.sessionId === shownSession?.sessionId ? <p className="chat-notice">{t("chat.nav.selectMain")}</p> : <SessionConversationPane key={sideSession.sessionId} session={sideSession} agents={agents}
-          displayName={conversationDisplayName(names.names, nameTargets.session(sideSession), sideSession.label)}
+          displayName={conversationDisplayName(names.names, nameTargets.session(sideSession), "") || undefined}
+            conversationTitle={[...workspace.sessions.values()].find(leaf => leaf.sessionId === sideSession.sessionId)?.label}
+            accountLabel={accountProfiles.find(profile => profile.definitionId === sideSession.definitionId && profile.configDirectory === sideSession.profileConfigPath)?.name}
           onOpenTerminal={() => onOpenSession(sideSession.sessionId)} onSessionReplaced={setSideSessionId}
           onFork={(messages, index, edited) => forkSession(sideSession, messages, index, edited)} />}
       </aside>}
@@ -795,6 +798,10 @@ export function ThreadPane({
   sessionRead?: { loading: boolean; error: string | null; refresh: () => void } | null;
 }) {
   const { t } = useI18n();
+  const projectHistory = useNativeHistory();
+  const recentProjects = useMemo(() => [...chat.threads.filter(thread => !thread.remote).map(thread => ({ path:thread.workingDirectory, at:thread.updatedAt })),
+    ...(projectHistory?.entries ?? []).map(entry => ({ path:entry.workingDirectory, at:entry.updatedAt*1000 }))], [chat.threads, projectHistory?.entries]);
+  function changeDirectory(path: string) { if (settingsLocked) return; recordRecentProject(path); chat.updateThread(thread.id, { workingDirectory:path }); }
   const { draft, setDraft, attachments, setAttachments, picks, setPicks,
     pasting: pastingImage, setPasting: setPastingImage, steering, setSteering,
     addAttachmentPaths, readDraft } = useConversationDraft("thread", thread.id);
@@ -955,7 +962,7 @@ export function ThreadPane({
         title: t("chat.directory.choose"),
       });
       if (typeof selected === "string") {
-        chat.updateThread(thread.id, { workingDirectory: selected });
+        changeDirectory(selected);
       }
     } catch (reason) {
       setNotice(
@@ -1354,8 +1361,8 @@ export function ThreadPane({
 
       {thread.archived ? <p className="chat-composer dialog__body">{t("history.archiveHint")}</p> : <form className="chat-composer session-composer" onSubmit={submit}>
         <ConversationComposerFrame workingDirectory={thread.workingDirectory} directoryControls={{
-          disabled: settingsLocked, onChoose: () => { void chooseDirectory(); },
-          onChange: workingDirectory => { if (!settingsLocked) chat.updateThread(thread.id, { workingDirectory }); },
+          disabled: settingsLocked, onChoose: () => { void chooseDirectory(); }, candidates:recentProjects,
+          onChange: changeDirectory,
         }}>
           <div ref={composerDropRef} className={`chat-composer__box session-composer__box${running ? " is-busy" : ""}${draggingFiles ? " is-file-dragging" : ""}`}>
             {assistance.menu}
@@ -1437,14 +1444,8 @@ export function ThreadPane({
                   }}
                 />
               </ComposerAttachments>
-              {!directProxy && <label className={`session-composer__access session-composer__access--editable${thread.permission === "full" ? " is-full" : " is-sandboxed"}`} title={t(permissionHintKey[thread.permission])}>
-                {thread.permission === "full" ? <AlertIcon size={14} /> : <ShieldIcon size={14} />}
-                <select aria-label={t("chat.permission")} value={thread.permission} disabled={settingsLocked}
-                  onChange={event => changePermission(event.target.value as ChatPermission)}>
-                  {permissionsFor(thread.definitionId).map(permission => <option key={permission} value={permission}>{t(permissionLabelKey[permission])}</option>)}
-                </select>
-                <ChevronDownIcon className="session-composer__access-chevron" size={12} />
-              </label>}
+              {!directProxy && <ComposerPermissionMenu value={thread.permission} disabled={settingsLocked} onChange={changePermission}
+                options={permissionsFor(thread.definitionId).map(value => ({ value, label:t(permissionLabelKey[value]), description:t(permissionHintKey[value]) }))} />}
               <ComposerPopover model label={composerModelLabel} disabled={settingsLocked}
                 open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
                 <AccountModelField options={modelOptions} value={pickerValue} disabled={settingsLocked}

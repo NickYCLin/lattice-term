@@ -95,7 +95,7 @@ export function useNativeConversationList({ chat, projectFilter, onBeforeOpen, o
         aria-expanded={entry.definitionId === "cursor" ? reading?.key === key : undefined}
         title={displayPath(entry.workingDirectory)} onClick={() => void open(entry)}>
         <ConversationListIdentity title={entry.title || t("chat.untitled")}>
-            <ConversationMetadata labels={conversationLabels({ definitionId: entry.definitionId,
+            <ConversationMetadata compact at={entry.updatedAt*1000} labels={conversationLabels({ definitionId: entry.definitionId,
               provider: entry.modelProvider,
               workingDirectory: entry.workingDirectory,
               account: entry.profileId ? history.profiles.find(profile => profile.id === entry.profileId)?.name ?? entry.profileId : null,

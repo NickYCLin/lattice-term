@@ -20,22 +20,23 @@ function render(overrides: Parameters<typeof fakeSession>[0] = {}) {
 describe("SessionConversationPane composer", () => {
   it("shows a custom display name without replacing the actual model or CLI metadata", () => {
     const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><SessionConversationPane
-      session={fakeSession({ label: "Codex", model: "gpt-6-mini" })} displayName="每日工作摘要"
+      session={fakeSession({ label: "Codex", model: "gpt-6-mini" })} displayName="每日工作摘要" accountLabel="測試帳號"
       agents={fakeAgentApi()} onOpenTerminal={() => {}} onSessionReplaced={() => {}} /></I18nProvider>);
-    expect(html).toContain("<h2>每日工作摘要</h2>");
+    expect(html).toContain('<h2 title="每日工作摘要" aria-label="每日工作摘要">每日工作摘要</h2>');
     expect(html).toContain("gpt-6-mini");
+    expect(html).toContain('class="chat-chip">測試帳號</span>');
     expect(html).toContain("OpenAI Codex");
   });
-  it("uses the sidebar assistant name as the title instead of the group name", () => {
+  it("uses a custom group name as the title and retains the CLI as secondary metadata", () => {
     const html = render({ definitionId: "codex", label: "OpenAI Codex", groupLabel: "Claude Code",
       workingDirectory: "D:/project/LatticeTerm", model: "gpt-6.1-sol" });
-    expect(html).toContain('<h2>OpenAI Codex</h2>');
-    expect(html).not.toContain('<h2>Claude Code</h2>');
+    expect(html).toContain('<h2 title="Claude Code" aria-label="Claude Code">Claude Code</h2>');
+    expect(html).not.toContain('<h2 title="OpenAI Codex" aria-label="OpenAI Codex">OpenAI Codex</h2>');
     expect(html).toContain('class="chat-header__identity"');
     expect(html).not.toContain('class="chat-avatar"');
     expect(html).not.toContain('OpenAI Codex · gpt-6.1-sol');
     expect(html).toContain('class="session-composer__model-label">gpt-6.1-sol');
-    expect(html).toContain('class="chat-chip">群組 · Claude Code</span>');
+    expect(html).not.toContain("群組 ·");
     expect(html).not.toContain("與工作階段頁共用同一個助理");
     expect(html).toContain('aria-label="終端機"');
     expect(html).not.toContain('session-chat__title');
@@ -43,8 +44,8 @@ describe("SessionConversationPane composer", () => {
 
   it("keeps a real Claude session labeled as Claude", () => {
     const html = render({ definitionId: "claude", label: "Claude Code", groupLabel: "Project" });
-    expect(html).toContain('<h2>Claude Code</h2>');
-    expect(html).not.toContain('class="chat-chip">Claude Code</span>');
+    expect(html).toContain('<h2 title="Project" aria-label="Project">Project</h2>');
+    expect(html).toContain('class="chat-chip">Claude Code</span>');
     expect(html).not.toContain('OpenAI Codex');
   });
 
@@ -96,7 +97,7 @@ describe("SessionConversationPane composer", () => {
 it.each(["working", "needsAttention", "idle"] as const)("uses one terminal action and keeps context in the composer while %s", state => {
   const markup = render({ state, workingDirectory: "/synthetic/project", model: "synthetic-model" });
   const header = markup.match(/<header class="chat-header">[\s\S]*?<\/header>/)![0];
-  expect(header).not.toContain("synthetic-model");
+  expect(header).toContain("synthetic-model");
   expect(header).not.toContain("/synthetic/project");
   expect(header).not.toContain("完整檔案存取");
   expect(markup.match(/aria-label="終端機"/g)).toHaveLength(1);

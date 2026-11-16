@@ -29,7 +29,8 @@ it.each(["C:\\Work\\LatticeTerm", "c:/work/latticeterm"])("filters retained nati
       <NativeConversationRows chat={chat} projectFilter={projectFilter} onOpened={() => {}} />
     </NativeHistoryContext.Provider></I18nProvider>));
     expect(container.textContent).toContain(entry.title);
-    expect(container.textContent).toContain("供應商: OpenAI");
+    expect(container.textContent).not.toContain("供應商:");
+    expect(allNodes(container).some(node=>node.attributes.title?.includes("供應商: OpenAI"))).toBe(true);
     const button = allNodes(container).find(node => node.tagName === "BUTTON")!;
     await act(async () => onClick(button)());
     expect(chat.importNativeConversation).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory: entry.workingDirectory }));

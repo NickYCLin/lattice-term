@@ -2849,3 +2849,35 @@ button.chat-diff__line.is-commentable:focus-visible {
 .chat-tool-raw { overflow-wrap: anywhere; }
 .chat-tool-raw > summary { padding: var(--space-2) var(--space-3); color: var(--text-muted); cursor: pointer; }
 .chat-tool-raw p { padding-inline: var(--space-3); }
+
+/* Composer choices use the same theme surfaces across desktop and mobile. */
+.composer-menu {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  display: grid;
+  gap: var(--space-2);
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.composer-menu__item {
+  width: 100%; min-width: 0; display: grid; gap: var(--space-1);
+  text-align: start; white-space: normal; overflow-wrap: anywhere;
+  padding: var(--space-2) var(--space-3); border: 1px solid transparent;
+  border-radius: var(--radius-sm); background: transparent; color: var(--text);
+}
+.composer-menu__item small { color: var(--text-muted); }
+.composer-menu__item:hover:not(:disabled),
+.composer-menu__item:focus-visible,
+.composer-menu__item[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.composer-menu__item:disabled { opacity: .55; cursor: not-allowed; }
+.composer-menu > .input { width: 100%; min-width: 0; }
+.session-composer__directory-button { max-width: 100%; min-width: 0; }
+.session-composer__directory-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-composer__context > .path-drop-zone { min-width: 0; max-width: 100%; }
+.session-composer__access--editable span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

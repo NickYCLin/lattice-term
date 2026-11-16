@@ -204,3 +204,16 @@ describe("session chat output disclosure", () => {
     expect(builtin).toContain(bubble);
     expect(render("done")).not.toContain('<script>');
   });
+
+it("prioritizes explicit names, custom group titles and native titles before the first prompt or CLI", () => {
+  conversation.messages=[{role:"user",text:"Synthetic first prompt"}];
+  const title=(props: {displayName?:string;conversationTitle?:string},groupLabel="Codex")=>renderToStaticMarkup(<I18nProvider locale="zh-TW"><SessionConversationPane
+    session={fakeSession({label:"Codex",groupLabel})} agents={fakeAgentApi()} {...props} onOpenTerminal={()=>{}} onSessionReplaced={()=>{}}/></I18nProvider>);
+  expect(title({displayName:"My renamed chat",conversationTitle:"Native title"},"Group title")).toContain('aria-label="My renamed chat"');
+  expect(title({displayName:"Codex"},"Group title")).toContain('<h2 title="Codex" aria-label="Codex">');
+  expect(title({conversationTitle:"Native title"},"Group title")).toContain('<h2 title="Group title"');
+  expect(title({conversationTitle:"Native title"})).toContain('<h2 title="Native title"');
+  expect(title({})).toContain('<h2 title="Synthetic first prompt"');
+  conversation.messages=[];
+  expect(title({})).toContain('<h2 title="Codex"');
+});

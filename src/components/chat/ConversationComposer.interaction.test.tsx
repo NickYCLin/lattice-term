@@ -65,7 +65,12 @@ class HostNode {
   removeAttribute(name: string) { delete this.attributes[name]; }
   addEventListener() {}
   removeEventListener() {}
-  focus() {}
+  getBoundingClientRect() { return { left:20, top:300, bottom:330, height:200 }; }
+  contains(node: HostNode) { return allNodes(this).includes(node); }
+  querySelectorAll(selector: string): HostNode[] { return allNodes(this).filter(node => selector.startsWith("input,") ? node.tagName === "INPUT" || node.attributes["aria-checked"] === "true" : node.tagName === "BUTTON" && String(node.attributes.role).startsWith("menuitem") && !node.attributes.disabled); }
+  querySelector(selector: string) { return this.querySelectorAll(selector)[0] ?? null; }
+  focus() { this.ownerDocument.activeElement = this; }
+
 }
 
 function allNodes(node: HostNode): HostNode[] {
@@ -518,20 +523,15 @@ it.each(["codex", "claude", "gemini"] as const)("changes composer permissions on
   const agents = fakeAgentApi({ catalog: [fakeDefinition({ id: definitionId })] });
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={agents} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
-    const select = allNodes(container).find(node => node.tagName === "SELECT" && node.parentNode?.attributes.class?.includes("session-composer__access--editable"))!;
-    expect(select).toBeDefined();
-    const key = Object.keys(select).find(name => name.startsWith("__reactProps$"))!;
-    const control = (select as unknown as Record<string, { disabled: boolean; onChange: (event: { target: { value: string } }) => void }>)[key];
-    expect(control.disabled).toBe(false);
-    await act(async () => control.onChange({ target: { value: "workspaceWrite" } }));
-    expect(chat.updateThread).toHaveBeenCalledExactlyOnceWith(thread.id, { permission: "workspaceWrite" });
-    vi.mocked(chat.updateThread).mockClear();
-    await act(async () => control.onChange({ target: { value: "unsupported" } }));
-    if (definitionId === "gemini") {
-      expect(allNodes(select).some(node => node.attributes.value === "ask")).toBe(false);
-      await act(async () => control.onChange({ target: { value: "ask" } }));
-    }
-    expect(chat.updateThread).not.toHaveBeenCalled();
+    const trigger = allNodes(container).find(node => node.tagName === "BUTTON" && node.attributes.class?.includes("session-composer__access--editable"))!;
+    expect(trigger).toBeDefined();
+    await act(async () => onClick(trigger)());
+    const choices = allNodes(container).filter(node => node.attributes.role === "menuitemradio");
+    const workspace = choices.find(node => node.textContent.startsWith("可修改工作目錄")) ?? choices.find(node => node.textContent.startsWith("工作區"));
+    expect(workspace).toBeDefined();
+    if (definitionId === "gemini") expect(choices.some(node=>node.textContent.startsWith("每次詢問"))).toBe(false);
+    await act(async () => onClick(workspace!)());
+    expect(chat.updateThread).toHaveBeenCalledExactlyOnceWith(thread.id, { permission:"workspaceWrite" });
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -544,14 +544,9 @@ it.each(["running", "queued", "proxy"] as const)("keeps composer permission chan
   const chat = fakeChatApi({ threads: [thread], activeThreadId: thread.id });
   try {
     await act(async () => root.render(<I18nProvider locale="zh-TW"><ChatView agents={fakeAgentApi()} chat={chat} automations={fakeAutomationsApi()} onOpenSession={() => {}} /></I18nProvider>));
-    const select = allNodes(container).find(node => node.tagName === "SELECT" && node.parentNode?.attributes.class?.includes("session-composer__access--editable"));
-    if (mode === "proxy") expect(select).toBeUndefined();
-    else {
-      const key = Object.keys(select!).find(name => name.startsWith("__reactProps$"))!;
-      const control = (select as unknown as Record<string, { disabled: boolean; onChange: (event: { target: { value: string } }) => void }>)[key];
-      expect(control.disabled).toBe(true);
-      await act(async () => control.onChange({ target: { value: "full" } }));
-    }
+    const trigger = allNodes(container).find(node=>node.tagName === "BUTTON" && node.attributes.class?.includes("session-composer__access--editable"));
+    if (mode === "proxy") expect(trigger).toBeUndefined();
+    else expect(trigger?.attributes.disabled).toBeDefined();
     expect(chat.updateThread).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); }
 });
@@ -603,7 +598,7 @@ it("keeps only advanced settings above a fresh conversation and moves reasoning 
     expect(settings.textContent).toContain("允許使用瀏覽器");
     expect(settings.textContent).toContain("MCP");
     expect(settings.textContent).toContain("指示");
-    expect(allNodes(container).filter(node => node.tagName === "SELECT")).toHaveLength(1); // permission only
+    expect(allNodes(container).filter(node => node.tagName === "SELECT")).toHaveLength(0); // Permission is a themed menu.
     await act(async () => onClick(allNodes(container).find(node => node.attributes.class === "session-composer__model")!)());
     const menu = allNodes(container).find(node => node.attributes.role === "dialog")!;
     expect(menu).toBeDefined();
@@ -633,6 +628,9 @@ it("chooses and clears the working folder from the bottom context of a fresh con
     const choose = allNodes(container).find(node => node.attributes.class?.includes("session-composer__directory-button"))!;
     expect(choose.textContent).toBe("一般對話");
     await act(async () => onClick(choose)());
+    expect(directoryDialog.open).not.toHaveBeenCalled();
+    const other = allNodes(container).find(node => node.attributes.role === "menuitem" && node.textContent === "選擇其他資料夾…")!;
+    await act(async () => onClick(other)());
     expect(directoryDialog.open).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }));
     expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { workingDirectory: "/synthetic/project" });
     thread.workingDirectory = "/synthetic/project";
@@ -640,7 +638,7 @@ it("chooses and clears the working folder from the bottom context of a fresh con
     const clear = allNodes(container).find(node => node.attributes.class === "session-composer__directory-clear")!;
     await act(async () => onClick(clear)());
     expect(chat.updateThread).toHaveBeenCalledWith(thread.id, { workingDirectory: "" });
-    expect(allNodes(container).filter(node => node.attributes["aria-label"] === "專案資料夾（選填）")).toHaveLength(1);
+    expect(allNodes(container).filter(node => node.attributes["aria-label"] === "選擇專案資料夾")).toHaveLength(1);
   } finally { await act(async () => root.unmount()); }
 });
 

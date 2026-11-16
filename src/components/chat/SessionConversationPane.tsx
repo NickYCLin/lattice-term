@@ -1,3 +1,4 @@
+import { presentAgentSessionGroup } from "../../app/agentSessionPresentation";
 import { ApprovalActions } from "./ApprovalActions";
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionConversationMessage } from "../../app/useSessionConversation";
@@ -73,10 +74,12 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   </span>;
 }
 
-export function SessionConversationPane({ session, agents, displayName, onOpenTerminal, onSessionReplaced, onSideChat, onFork }: {
+export function SessionConversationPane({ session, agents, displayName, conversationTitle, accountLabel, onOpenTerminal, onSessionReplaced, onSideChat, onFork }: {
   session: AgentSessionSummary;
   agents: AgentApi;
   displayName?: string;
+  conversationTitle?: string;
+  accountLabel?: string;
   onOpenTerminal: () => void;
   /** The session was resumed under a new id, e.g. on another model. */
   onSessionReplaced: (sessionId: string) => void;
@@ -255,14 +258,20 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   }
   const accessHint = `${t(session.sandboxed ? "agents.sandbox.hint" : "sessionChat.access.fullHint")}\n${t("sessionChat.approval")}`;
   const assistant = agents.catalog.find(definition => definition.id === session.definitionId)?.label || session.label;
+  const group = presentAgentSessionGroup(agents.sessions.filter(member => (member.groupId || member.sessionId) === (session.groupId || session.sessionId)).length
+    ? agents.sessions.filter(member => (member.groupId || member.sessionId) === (session.groupId || session.sessionId)) : [session], agents.catalog, session.sessionId);
+  const explicitTitle = displayName?.trim();
+  const firstPrompt = conversation.messages.find(message => message.role === "user" && !message.tool);
+  const title = explicitTitle || (group.hasCustomGroupLabel ? group.groupLabel : null)
+    || (conversationTitle && conversationTitle !== session.label && conversationTitle !== assistant ? conversationTitle : null)
+    || (firstPrompt ? splitSessionAttachments(firstPrompt.text).text.trim().split("\n")[0] : "") || session.label || assistant;
   return <>
     <header className="chat-header">
       <div className="chat-header__title">
-        <ConversationIdentity assistant={assistant} title={displayName || session.label || assistant}>
-          {(displayName || session.label || assistant) !== assistant && <span className="chat-chip">{assistant}</span>}
-          {session.groupLabel && session.groupLabel !== session.label && <span className="chat-chip">
-            {t("form.group")} · {session.groupLabel}
-          </span>}
+        <ConversationIdentity assistant={assistant} title={title}>
+          {title !== assistant && <span className="chat-chip">{assistant}</span>}
+          {accountLabel && <span className="chat-chip">{accountLabel}</span>}
+          {session.model && <span className="chat-chip">{session.model}</span>}
           {live && !working && !nativePending && !attention && <span className={`session-chat__state is-${session.state}`}>
             {t(unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}

@@ -21,6 +21,7 @@ export interface ChatWorkspaceSession {
   label: string;
   detail: string | null;
   metadata?: ConversationLabels;
+  updatedAt?: number;
   status: SessionSidebarStatus;
 }
 

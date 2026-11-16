@@ -41,7 +41,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
   const references = threads.flatMap(thread => !thread.remote && thread.nativeSessionId ? [{
     definitionId: thread.definitionId, profileId: thread.accountProfileId ?? null,
     nativeSessionId: thread.nativeSessionId, title: thread.title,
-    modelProvider: thread.reportedProvider,
+    modelProvider: thread.reportedProvider, updatedAt: thread.updatedAt/1000,
   }] : []);
   const known = new Set(references.map(nativeConversationKey));
   const visibleHistory = history.filter(entry => !entry.archived);
@@ -81,6 +81,7 @@ export function chatConversationSidebar({ sessions, definitions, threads, histor
     const held = sessionsByIdentity.get(conversationIdentity(entry) ?? "");
     if (!held) continue;
     const leaf = leavesBySession.get(held.sessionId);
+    if (leaf && entry.updatedAt > 0) leaf.updatedAt = Math.max(leaf.updatedAt ?? 0, entry.updatedAt*1000);
     if (leaf?.metadata && !leaf.metadata.provider && entry.modelProvider) {
       leaf.metadata = { ...leaf.metadata, provider: conversationLabels({ definitionId: held.definitionId,
         provider: entry.modelProvider, endpoint: leaf.metadata.endpoint }).provider };

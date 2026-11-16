@@ -1,9 +1,10 @@
+import { RelativeActivity } from "../../app/relativeActivity";
 import type { ReactNode } from "react";
 import { AgentIcon } from "../icons";
 import { useI18n } from "../../i18n/context";
 import type { ConversationLabels } from "../../app/conversationLabels";
 
-export function ConversationMetadata({ labels }: { labels: ConversationLabels }) {
+export function ConversationMetadata({ labels, compact = false, at }: { labels: ConversationLabels; compact?: boolean; at?: number }) {
   const { t } = useI18n();
   const provider = labels.provider ?? labels.endpoint ?? t("conversation.meta.managedBy", { source: labels.source });
   const text = [`${t("conversation.meta.provider")}: ${provider}`,
@@ -11,14 +12,14 @@ export function ConversationMetadata({ labels }: { labels: ConversationLabels })
     labels.endpoint && `${t("conversation.meta.connection")}: ${labels.endpoint}`,
     labels.account && `${t("conversation.meta.account")}: ${labels.account}`,
     labels.project && `${t("conversation.meta.project")}: ${labels.project}`].filter(Boolean).join(" · ");
-  return <span title={text}>{text}</span>;
+  return <span title={text}>{compact ? <>{at && at > 0 ? <><RelativeActivity at={at} /> · </> : null}{labels.model ?? labels.source}</> : text}</span>;
 }
 
 export function ConversationListIdentity({ title, children }: { title: string; children: ReactNode }) {
   return <span className="chat-thread__identity">
     <AgentIcon size={13} />
     <span className="chat-thread__details">
-      <span className="chat-thread__title">{title}</span>
+      <span className="chat-thread__title" title={title} aria-label={title}>{title}</span>
       <span className="chat-thread__meta">{children}</span>
     </span>
   </span>;
@@ -31,7 +32,7 @@ export function ConversationIdentity({ title, children }: {
 }) {
   return <div className="chat-header__identity">
     <div className="chat-header__details">
-      <h2>{title}</h2>
+      <h2 title={title} aria-label={title}>{title}</h2>
       <div className="chat-chips">{children}</div>
     </div>
   </div>;
