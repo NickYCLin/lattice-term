@@ -4,6 +4,67 @@
 
 ---
 
+## [2026.11.17](https://github.com/NickYCLin/lattice-term/compare/v2026.11.16...v2026.11.17) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* 記憶條目新增 archived 欄位，舊版讀取器需更新。
+
+### 🚀 新增功能
+
+* 加入可讀工具摘要與回合過程收合 ([d2bfb15](https://github.com/NickYCLin/lattice-term/commit/d2bfb15a2624b0b9b6b18320a476c090a47ed70b))
+* 在同一張連線卡片整合直連與跳板路線 ([0930a34](https://github.com/NickYCLin/lattice-term/commit/0930a34f32ad0b060ad01d2c7fa8c23a998e53e2))
+* 將工作階段圖片改為縮圖列與燈箱 ([f9c0bfe](https://github.com/NickYCLin/lattice-term/commit/f9c0bfe83d064a7014add5699e7d39a363766f2a))
+* 從對話開啟本機 VS Code 工作資料夾 ([2b3a2b9](https://github.com/NickYCLin/lattice-term/commit/2b3a2b9983599206258680affeeb0d5065a370ce))
+* 新增五種 CLI 的唯讀對話紀錄與交接 ([f4b1106](https://github.com/NickYCLin/lattice-term/commit/f4b1106cf5262cbbf332e095b2c21229fecdd25a))
+* 新增可還原的記憶壓縮與歷史背景 ([b83426d](https://github.com/NickYCLin/lattice-term/commit/b83426d569d3a98258ec558ef67c5beb5de5a076))
+* 新增跨工具專案記憶庫與指示同步 ([b82c6e6](https://github.com/NickYCLin/lattice-term/commit/b82c6e6b66e9cd9de1f239168d42a03f3b7be000))
+* 統一各類核准卡的工作階段允許 ([6e0b8bb](https://github.com/NickYCLin/lattice-term/commit/6e0b8bba4e636fea0973f0cc0edd6374c34cdc0f))
+* 統一撰寫區選單與對話資訊 ([137bc5f](https://github.com/NickYCLin/lattice-term/commit/137bc5ff2461862d7ed96a01f511e8b52001fa37))
+* 補齊 CLI 工作階段對話的操作入口 ([17597a7](https://github.com/NickYCLin/lattice-term/commit/17597a78a2a233976f51733e2b3a08fcbc9ce25a))
+* 補齊原生對話紀錄與安全分頁閱讀 ([ddf14f8](https://github.com/NickYCLin/lattice-term/commit/ddf14f8a0623f9fa7ada430fcf480b2910afaf5d))
+* 開放共享工作階段的 MCP 提示排隊 ([c0f5c56](https://github.com/NickYCLin/lattice-term/commit/c0f5c56cb4c4806d89bb2921b2d5da6630e07601))
+
+
+### 🛠️ 問題修正
+
+* 依原生指令回執解除對話輸入保留 ([9562bab](https://github.com/NickYCLin/lattice-term/commit/9562babf12ce9bbad6618614340d3905b5954195))
+* 修正 Codex 對話誤判尚未就緒 ([5baa4e1](https://github.com/NickYCLin/lattice-term/commit/5baa4e18ba15b965898ffc21911de15584986c23))
+* 修正 Codex 對話誤判尚未就緒 ([7cdc42d](https://github.com/NickYCLin/lattice-term/commit/7cdc42d37d31f34bcc43730362224ea7aab737db))
+* 修正工作階段側欄資料夾排序 ([5007321](https://github.com/NickYCLin/lattice-term/commit/5007321dd1ede7ca063ab0eab0456c68e1083d82))
+* 修正排程備份說明與表單時間呈現 ([aa93558](https://github.com/NickYCLin/lattice-term/commit/aa935581432e58a14b8a17d260e1bef7ad10f220))
+* 修正跳板卡片標籤並辨識跨協定舊卡 ([6fb3ed6](https://github.com/NickYCLin/lattice-term/commit/6fb3ed602743e55cfccfa9dbfc988a24655bfcb9))
+* 修正重開對話後舊圖片附件無法預覽 ([b3a767a](https://github.com/NickYCLin/lattice-term/commit/b3a767aadcdf6b0af1c27d039fec07f34557ea3b))
+* 允許資料夾跨層移動並修正工具列遮擋 ([eb0287e](https://github.com/NickYCLin/lattice-term/commit/eb0287e75cf52a42a008bf97147965f7a11e5dd6))
+* 先釋放遠端指令名額再回報完成 ([4bcff33](https://github.com/NickYCLin/lattice-term/commit/4bcff3341bab146e16a91d1ad134a72ce25409e1))
+* 分支對話保留來源的權限限制 ([53e1ab3](https://github.com/NickYCLin/lattice-term/commit/53e1ab32564488585d2ed25cdaa571d6b61d752e))
+* 匯入時保留舊檔未提供的路線設定 ([ec071c1](https://github.com/NickYCLin/lattice-term/commit/ec071c15062b920f60bfa4e62e333389c0da4c0e))
+* 匯入連線時預覽並覆蓋重複設定 ([ab2c8ab](https://github.com/NickYCLin/lattice-term/commit/ab2c8ab92ba2c97bb1b09005271a7730b8950697))
+* 區分資料庫連線錯誤並顯示安全文案 ([785027d](https://github.com/NickYCLin/lattice-term/commit/785027d88aa061cc29365a5b87662fdc72795a9b))
+* 合併同一資料夾的對話與工作階段 ([e071671](https://github.com/NickYCLin/lattice-term/commit/e07167174bf36b7698058cc20e4584d4cd51c7e6))
+* 回執刷新保留輸入鎖前的授權順序 ([3e888ff](https://github.com/NickYCLin/lattice-term/commit/3e888ff852470a75a19c0049eba7e8c3f2134d34))
+* 將新增與編輯連線改為置中對話框 ([36b3526](https://github.com/NickYCLin/lattice-term/commit/36b35269a7d92e9be4e5763799bca9e949680f0d))
+* 將繪本主題改名為奶油繪本 ([97b782d](https://github.com/NickYCLin/lattice-term/commit/97b782dca4cfa6d3782e18711ef15465b24ed70d))
+* 將連線卡片管理改為浮動下拉選單 ([eaeb1e8](https://github.com/NickYCLin/lattice-term/commit/eaeb1e8a9021180fa8e469ccef0508a8f810736c))
+* 移除代理對話的說明區塊 ([58c6c2c](https://github.com/NickYCLin/lattice-term/commit/58c6c2c87b7d765cba477e50a29839d45d61944c))
+* 移除代理對話的說明區塊 ([e996264](https://github.com/NickYCLin/lattice-term/commit/e9962641d6be33909e1d66d45f68f99b9ed4777a))
+* 統一奶油繪本的導覽與選取底色 ([9e8740f](https://github.com/NickYCLin/lattice-term/commit/9e8740fb2adf2d2320f8ba197c5b75a0572b686c))
+* 統一連線卡片按鈕列與底部資訊對齊 ([24e554a](https://github.com/NickYCLin/lattice-term/commit/24e554ab1eead273014c40436c3468177661a7b2))
+* 統一連線排序選單與工具列外觀 ([0e7065e](https://github.com/NickYCLin/lattice-term/commit/0e7065ef561f6c94399be97ad3ad334c1e2d43c6))
+* 補齊 Codex 工作階段指令核准 ([055625d](https://github.com/NickYCLin/lattice-term/commit/055625d4bb0b37c277b606776637a8c7760ebf70))
+* 讓側欄資料夾閒置時保留完整名稱寬度 ([6229494](https://github.com/NickYCLin/lattice-term/commit/62294949edd9b83d612189bbd2180ccc30731e24))
+* 讓資料庫 TLS 憑證設定實際生效 ([76cf08c](https://github.com/NickYCLin/lattice-term/commit/76cf08c996c4083aa8168085a0729137df7d812a))
+* 避免舊執行紀錄阻擋已就緒的對話 ([528ab5e](https://github.com/NickYCLin/lattice-term/commit/528ab5e97a940138b7abf763361b41cc0a2c9806))
+* 點擊終端圖片編號時聚焦對應附件 ([f53a62c](https://github.com/NickYCLin/lattice-term/commit/f53a62c0a7745e247a7409889475cb1c40782214))
+
+
+### 🧹 架構優化
+
+* 整理各頁重複的操作與狀態資訊 ([e206834](https://github.com/NickYCLin/lattice-term/commit/e206834683e132de00a75843c975606acef272f3))
+* 統一全站控制項的樣式與互動狀態 ([f862735](https://github.com/NickYCLin/lattice-term/commit/f8627357d70906a1edc57568a301cffe482c2ca0))
+* 集中對話設定到輸入列 ([cd2129b](https://github.com/NickYCLin/lattice-term/commit/cd2129ba63df2119cb3578cc8f9da4a383890eb4))
+
 ## [2026.11.16](https://github.com/NickYCLin/lattice-term/compare/v2026.11.15...v2026.11.16) (2026-11-15)
 
 
