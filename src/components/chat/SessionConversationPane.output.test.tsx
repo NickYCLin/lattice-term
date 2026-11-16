@@ -10,7 +10,7 @@ const { conversation } = vi.hoisted(() => ({
   conversation: {
     messages: [] as SessionConversationMessage[],
     availability: "ready" as "waitingForIdentity" | "waitingForTranscript" | "ready", truncated: false,
-    nativeCommandPending: false, readError: null, loading: false, slow: false, output: "Working", outputError: null,
+    nativeCommandPending: false, readError: null as string | null, refresh: vi.fn(), loading: false, slow: false, output: "Working", outputError: null,
     sendError: null as string | null, sending: false, queued: null as number | null, send: vi.fn(), acknowledge: vi.fn(),
     approval: null, answering: false, answerError: null, answer: vi.fn(),
   },
@@ -26,7 +26,7 @@ function render(state: "working" | "needsAttention" | "done", definitionId = "co
 }
 
 describe("session chat output disclosure", () => {
-  beforeEach(() => { conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; conversation.sendError = null; conversation.nativeCommandPending = false; });
+  beforeEach(() => { conversation.readError = null; conversation.messages = []; conversation.availability = "ready"; conversation.truncated = false; conversation.queued = null; conversation.sendError = null; conversation.nativeCommandPending = false; });
 
   it("shows a pending native receipt without claiming completion or discarding the editable draft", () => {
     conversation.nativeCommandPending = true; conversation.queued = 0;
@@ -216,4 +216,14 @@ it("prioritizes explicit names, custom group titles and native titles before the
   expect(title({})).toContain('<h2 title="Synthetic first prompt"');
   conversation.messages=[];
   expect(title({})).toContain('<h2 title="Codex"');
+});
+
+it("keeps a native session read failure visible with CLI, file, reason and retry", () => {
+  conversation.readError = `native.read:${JSON.stringify({ cli: "Gemini CLI", file: "session-synthetic.jsonl", reason: "unsupported_version" })}`;
+  const html = render("done", "gemini");
+  expect(html).toContain("Gemini CLI · session-synthetic.jsonl");
+  expect(html).toContain("此版本或格式尚未支援");
+  expect(html).toContain("重新讀取");
+  expect(html).toContain('role="alert"');
+  conversation.readError = null;
 });

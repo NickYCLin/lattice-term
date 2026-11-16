@@ -351,7 +351,7 @@ it("keeps the last readable snapshot and truncation notice when a retry fails", 
     if (command === "agent_session_approval" || command === "agent_session_goal") return Promise.resolve(null);
     reads += 1;
     return reads === 1
-      ? Promise.resolve({ ...snapshot([{ role: "assistant", text: "retained" }]), truncated: true })
+      ? Promise.resolve({ ...snapshot([{ role: "assistant", text: "retained" }]), truncated: true, diagnostics: { skippedRows: 2, reasons: { malformed: 2 }, partial: true } })
       : Promise.reject(new Error("read failed"));
   });
   let api!: ReturnType<typeof useSessionConversation>;
@@ -363,6 +363,12 @@ it("keeps the last readable snapshot and truncation notice when a retry fails", 
     expect(api.messages[0].text).toBe("retained");
     expect(api.availability).toBe("ready");
     expect(api.truncated).toBe(true);
+    expect(api.readError).toBe("read failed");
+    await act(async () => api.refresh());
+    expect(reads).toBe(3);
+    expect(api.messages[0].text).toBe("retained");
+    expect(api.truncated).toBe(true);
+    expect(api.diagnostics?.skippedRows).toBe(2);
     expect(api.readError).toBe("read failed");
     await act(async () => { root.unmount(); });
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }

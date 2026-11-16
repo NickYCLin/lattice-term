@@ -1,3 +1,4 @@
+import { nativeReadError } from "../../app/nativeReadDiagnostics";
 import { defaultPermission } from "../../app/agentChat";
 import { maskNativeText } from "../../app/nativeRecords";
 import { NativeHistoryDialog } from "./NativeRecordView";
@@ -223,6 +224,7 @@ export function useNativeConversationList({
               )}
             </p>
             <ConversationReadProgress
+              diagnostics={reading.snapshot?.diagnostics}
               loading={opening === key}
               error={failed?.key === key ? failed.detail : null}
               onRetry={() => void open(entry, true)}
@@ -297,6 +299,7 @@ export function useNativeConversationList({
 
   const footer = history && (
     <>
+      {history.failures?.map((error, index) => <p className="chat-threads__hint" role="alert" key={index}>{nativeReadError(error, t)}</p>)}
       {history.error && (
         <p className="chat-threads__hint" role="alert">
           {t("history.stale")}{" "}

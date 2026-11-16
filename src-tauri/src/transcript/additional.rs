@@ -1,4 +1,5 @@
 //! Read-only adapters for CLI journals. Only fixed history/metadata names are opened.
+use super::diagnostics::ReadDiagnostics;
 use super::*;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::json;
@@ -321,7 +322,13 @@ pub fn scan(
             *incomplete = true;
             break;
         }
-        let (id, cwd) = row.map_err(|_| UNSUPPORTED)?;
+        let (id, cwd) = match row {
+            Ok(value) => value,
+            Err(_) => {
+                *incomplete = true;
+                continue;
+            }
+        };
         if !normalized::valid_id(&id) {
             continue;
         }
@@ -417,7 +424,7 @@ fn db_layout(connection: &Connection) -> Result<&'static str, String> {
     }
     Err(UNSUPPORTED.into())
 }
-fn db_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, String> {
+fn db_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<ReadDiagnostics, String> {
     let id = path
         .file_name()
         .and_then(|id| id.to_str())
@@ -448,17 +455,34 @@ fn db_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, Stri
     let mut statement = connection.prepare(&query).map_err(|_| UNSUPPORTED)?;
     let mut rows = statement.query([id]).map_err(|_| UNSUPPORTED)?;
     let mut index = 0;
-    let mut skipped = false;
+    let mut skipped = ReadDiagnostics::default();
     while let Some(row) = rows.next().map_err(|_| UNSUPPORTED)? {
         if row.get::<_, u64>(4).unwrap_or(0) > 24 * 1024 * 1024
             || row.get::<_, u64>(5).unwrap_or(0) > 24 * 1024 * 1024
         {
-            skipped = true;
+            skipped.skip("oversized");
             continue;
         }
-        let message: String = row.get(0).map_err(|_| UNSUPPORTED)?;
-        let message: Value = serde_json::from_str(&message).map_err(|_| UNSUPPORTED)?;
-        let part: Option<String> = row.get(1).map_err(|_| UNSUPPORTED)?;
+        let message = match row.get::<_, String>(0) {
+            Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                Ok(value) if value.is_object() => value,
+                _ => {
+                    skipped.skip("malformed");
+                    continue;
+                }
+            },
+            Err(_) => {
+                skipped.skip("decode");
+                continue;
+            }
+        };
+        let part = match row.get::<_, Option<String>>(1) {
+            Ok(raw) => raw,
+            Err(_) => {
+                skipped.skip("decode");
+                continue;
+            }
+        };
         let role: String = row
             .get::<_, Option<String>>(2)
             .ok()
@@ -467,7 +491,13 @@ fn db_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, Stri
             .unwrap_or_default();
         let mut parts = Vec::new();
         if let Some(part) = part {
-            let mut part: Value = serde_json::from_str(&part).map_err(|_| UNSUPPORTED)?;
+            let mut part: Value = match serde_json::from_str::<Value>(&part) {
+                Ok(value) if value.is_object() => value,
+                _ => {
+                    skipped.skip("malformed");
+                    continue;
+                }
+            };
             if let Some(kind) = row.get::<_, Option<String>>(3).ok().flatten() {
                 part["type"] = json!(kind);
             }
@@ -818,11 +848,11 @@ pub fn rows(
     path: &Path,
     kind: TranscriptKind,
     mut visit: impl FnMut(&Value, u64),
-) -> Result<bool, String> {
+) -> Result<ReadDiagnostics, String> {
     if kind == TranscriptKind::OpenCode {
         return db_rows(path, visit);
     }
-    let header = first(path).ok_or(UNSUPPORTED)?;
+    let header = first(path).ok_or_else(|| diagnostics::unrecognized(path).to_string())?;
     let recognized = match kind {
         TranscriptKind::Qwen => {
             header["sessionId"].is_string()
@@ -841,8 +871,11 @@ pub fn rows(
         return Err(UNSUPPORTED.into());
     }
     let mut adapter = Adapter::default();
+    // Reject an unsupported header version before attempting record recovery.
+    Adapter::default().row(&header, kind, &mut |_| {})?;
     let mut failure = None;
-    let skipped = normalized::stream_rows(path, |row, offset| {
+    let mut invalid_rows = 0;
+    let mut skipped = normalized::stream_rows(path, |row, offset| {
         if failure.is_some() {
             return;
         }
@@ -865,7 +898,7 @@ pub fn rows(
             }
         });
         if invalid {
-            failure = Some(UNSUPPORTED.into());
+            invalid_rows += 1;
         }
         if let Err(error) = status {
             failure = Some(error);
@@ -873,6 +906,9 @@ pub fn rows(
     })?;
     if let Some(error) = failure {
         return Err(error);
+    }
+    for _ in 0..invalid_rows {
+        skipped.skip("invalid_record");
     }
     for (index, (id, (name, args))) in adapter.calls.into_iter().enumerate() {
         visit(&tool(&id, &name, &json!(args)), u64::MAX - index as u64);
@@ -896,6 +932,30 @@ pub fn preview(path: &Path, kind: TranscriptKind) -> Option<String> {
         .into_iter()
         .find(|row| row.role == "user" && !row.text.is_empty())
         .map(|row| row.text)
+}
+
+#[cfg(test)]
+pub(super) fn audit_database_sessions(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let path = database_path(root);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let read = || {
+        let connection = open_database(&path)?;
+        let table = db_layout(&connection)?;
+        let mut query = connection
+            .prepare(&format!("SELECT id FROM {table}"))
+            .map_err(|_| UNSUPPORTED)?;
+        let rows = query
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|_| UNSUPPORTED)?;
+        Ok(rows
+            .filter_map(Result::ok)
+            .filter(|id| normalized::valid_id(id))
+            .map(|id| path.join(id))
+            .collect())
+    };
+    read().map_err(|error: String| diagnostics::failure(TranscriptKind::OpenCode, &path, &error))
 }
 
 #[cfg(test)]
@@ -1048,10 +1108,9 @@ mod tests {
             assert!(page.truncated);
             assert!(!page.warnings.is_empty());
             fs::write(&path, "{\"format\":\"future-unsupported\"}\n").unwrap();
-            assert_eq!(
-                normalized::page(&path, kind, None, None).unwrap_err(),
-                UNSUPPORTED
-            );
+            assert!(normalized::page(&path, kind, None, None)
+                .unwrap_err()
+                .contains("unsupported_version"));
         }
     }
     #[test]
@@ -1299,10 +1358,9 @@ mod tests {
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         writeln!(file, "{}", json!({"type":"context.future_mutation"})).unwrap();
         drop(file);
-        assert_eq!(
-            normalized::page(&path, TranscriptKind::Kimi, None, None).unwrap_err(),
-            UNSUPPORTED
-        );
+        assert!(normalized::page(&path, TranscriptKind::Kimi, None, None)
+            .unwrap_err()
+            .contains("unsupported_version"));
     }
     #[cfg(unix)]
     #[test]

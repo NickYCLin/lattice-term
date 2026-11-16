@@ -1,3 +1,4 @@
+import { nativeReadError } from "../../app/nativeReadDiagnostics";
 import { MemorySaveButton } from "./MemorySaveButton";
 import { agentDisplayName } from "../../app/agentNames";
 import type { ChatDefinitionId } from "../../app/agentChat";
@@ -346,7 +347,8 @@ export function NativeHistoryReader({
         </button>
       </header>
       {busy && <p role="status">{t("common.loading")}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{nativeReadError(error, t)}</p>}
+      {!!pages[0]?.diagnostics?.skippedRows && <p role="status">{t("history.skippedRows", { count: pages[0].diagnostics.skippedRows })}</p>}
       {(discarded || pages.some((page) => page.warnings.length)) && (
         <p role="status">{t("native.bounded")}</p>
       )}

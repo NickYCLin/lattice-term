@@ -277,13 +277,16 @@ fn open_regular_transcript(path: &Path) -> Option<fs::File> {
 }
 
 fn open_regular_transcript_handle(path: &Path) -> Option<fs::File> {
+    open_regular_transcript_handle_result(path).ok()
+}
+fn open_regular_transcript_handle_result(path: &Path) -> std::io::Result<fs::File> {
     if redact::forbidden(path)
         || path
             .canonicalize()
             .ok()
             .is_some_and(|path| redact::forbidden(&path))
     {
-        return None;
+        return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
     }
     let mut options = fs::OpenOptions::new();
     options.read(true);
@@ -291,9 +294,13 @@ fn open_regular_transcript_handle(path: &Path) -> Option<fs::File> {
     options.custom_flags(libc::O_NOFOLLOW);
     #[cfg(windows)]
     options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
-    let file = options.open(path).ok()?;
-    let metadata = file.metadata().ok()?;
-    metadata.is_file().then_some(file)
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if metadata.is_file() {
+        Ok(file)
+    } else {
+        Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
+    }
 }
 
 /// Keeps only the last `max_chars` characters without allowing the assembled
@@ -409,7 +416,7 @@ fn visit_transcript_rows_with_limit(
             }
         })
         .ok()
-        .map(|skipped| skipped || oversized);
+        .map(|skipped| skipped.partial || oversized);
     }
     let mut file = open_regular_transcript_handle(path)?;
     let bytes = file.metadata().ok()?.len();
@@ -1043,10 +1050,14 @@ const HISTORY_MAX_MESSAGES: usize = 300;
 const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 
 #[cfg(test)]
+#[path = "transcript/robust_tests.rs"]
+mod robust_tests;
+#[cfg(test)]
 #[path = "transcript/sync_tests.rs"]
 mod sync_tests;
 
 mod additional;
+pub(crate) mod diagnostics;
 mod images;
 pub(crate) mod normalized;
 pub(crate) mod redact;
@@ -1580,6 +1591,7 @@ pub fn list_local_conversations_with_limit(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConversationPage {
+    pub failures: Vec<String>,
     pub entries: Vec<LocalConversation>,
     pub has_more: bool,
     pub incomplete: bool,
@@ -1648,11 +1660,12 @@ pub fn local_conversation_page(
     include_archived: bool,
 ) -> Result<LocalConversationPage, String> {
     let limit = limit.clamp(1, HISTORY_MAX_ENTRIES);
-    let (mut entries, incomplete) =
+    let (mut entries, incomplete, failures) =
         collect_local_conversations(profiles, false, include_archived, limit + 1)?;
     let has_more = entries.len() > limit;
     entries.truncate(limit);
     Ok(LocalConversationPage {
+        failures,
         entries,
         has_more,
         incomplete: incomplete || (has_more && limit == HISTORY_MAX_ENTRIES),
@@ -1664,10 +1677,11 @@ fn collect_local_conversations(
     all: bool,
     include_archived: bool,
     retained: usize,
-) -> Result<(Vec<LocalConversation>, bool), String> {
+) -> Result<(Vec<LocalConversation>, bool, Vec<String>), String> {
     if profiles.len() > HISTORY_MAX_PROFILES {
         return Err("Too many account profiles.".into());
     }
+    let mut failures = Vec::new();
     let mut entries = Vec::new();
     let mut incomplete = false;
     if scan_default_history_roots() {
@@ -1685,7 +1699,7 @@ fn collect_local_conversations(
         ] {
             if additional::supported(kind) {
                 if let Some(root) = history_root(kind, None) {
-                    additional::scan(
+                    if let Err(error) = additional::scan(
                         kind,
                         &root,
                         None,
@@ -1696,7 +1710,22 @@ fn collect_local_conversations(
                             retained,
                         },
                         &mut incomplete,
-                    )?;
+                    ) {
+                        incomplete = true;
+                        failures.push(diagnostics::failure(
+                            kind,
+                            &if kind == TranscriptKind::OpenCode {
+                                if root.is_file() {
+                                    root.clone()
+                                } else {
+                                    root.join("opencode.db")
+                                }
+                            } else {
+                                root.join("history")
+                            },
+                            &error,
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1779,7 +1808,7 @@ fn collect_local_conversations(
         }
         if additional::supported(kind) {
             if let Some(root) = history_root(kind, Some(path)) {
-                additional::scan(
+                if let Err(error) = additional::scan(
                     kind,
                     &root,
                     Some(&profile.profile_id),
@@ -1790,7 +1819,22 @@ fn collect_local_conversations(
                         retained,
                     },
                     &mut incomplete,
-                )?;
+                ) {
+                    incomplete = true;
+                    failures.push(diagnostics::failure(
+                        kind,
+                        &if kind == TranscriptKind::OpenCode {
+                            if root.is_file() {
+                                root.clone()
+                            } else {
+                                root.join("opencode.db")
+                            }
+                        } else {
+                            root.join("history")
+                        },
+                        &error,
+                    ));
+                }
             }
             continue;
         }
@@ -1872,7 +1916,7 @@ fn collect_local_conversations(
             break;
         }
     }
-    Ok((selected, incomplete))
+    Ok((selected, incomplete, failures))
 }
 
 pub fn read_local_conversation(
@@ -1921,6 +1965,21 @@ fn read_local_conversation_snapshot_with_tools(
         include_tools,
     )
     .map(|(snapshot, _)| snapshot)
+    .map_err(|error| {
+        TranscriptKind::from_definition(definition_id).map_or_else(
+            || "Unknown assistant.".into(),
+            |kind| {
+                diagnostics::failure(
+                    kind,
+                    Path::new(session_id)
+                        .file_name()
+                        .map(Path::new)
+                        .unwrap_or(Path::new("session")),
+                    &error,
+                )
+            },
+        )
+    })
 }
 fn local_snapshot_and_path(
     definition_id: &str,
@@ -1960,7 +2019,17 @@ fn local_snapshot_and_path(
                 .flatten()
         })
         .ok_or("The local conversation is no longer available.")?;
-    additional::validate_root(&root, kind)?;
+    additional::validate_root(&root, kind).map_err(|error| {
+        diagnostics::failure(
+            kind,
+            &if root.is_file() {
+                root.clone()
+            } else {
+                root.join("opencode.db")
+            },
+            &error,
+        )
+    })?;
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, "", Some(session_id))
             .or_else(|| {
@@ -2136,6 +2205,7 @@ pub enum SessionConversationAvailability {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConversationSnapshot {
+    pub diagnostics: diagnostics::ReadDiagnostics,
     pub native_command_pending: bool,
     pub native_tools: bool,
     pub progress: session_progress::SessionProgress,
@@ -2150,7 +2220,27 @@ pub fn read_session_conversation_snapshot(
     session_id: Option<&str>,
     profile_directory: Option<&Path>,
 ) -> Result<SessionConversationSnapshot, String> {
+    read_session_conversation_snapshot_inner(
+        definition_id,
+        working_directory,
+        session_id,
+        profile_directory,
+    )
+    .map_err(|error| {
+        TranscriptKind::from_definition(definition_id).map_or_else(
+            || "Unknown assistant.".into(),
+            |kind| diagnostics::failure(kind, Path::new(session_id.unwrap_or("session")), &error),
+        )
+    })
+}
+fn read_session_conversation_snapshot_inner(
+    definition_id: &str,
+    working_directory: &str,
+    session_id: Option<&str>,
+    profile_directory: Option<&Path>,
+) -> Result<SessionConversationSnapshot, String> {
     let waiting = |availability| SessionConversationSnapshot {
+        diagnostics: diagnostics::ReadDiagnostics::default(),
         native_command_pending: false,
         native_tools: false,
         progress: session_progress::SessionProgress::default(),
@@ -2174,6 +2264,7 @@ pub fn read_session_conversation_snapshot(
     };
     let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
     Ok(SessionConversationSnapshot {
+        diagnostics: snapshot.diagnostics,
         native_command_pending: false,
         availability: SessionConversationAvailability::Ready,
         native_tools: false,
@@ -2226,7 +2317,17 @@ fn session_transcript_path(
     else {
         return Ok(None);
     };
-    additional::validate_root(&root, kind)?;
+    additional::validate_root(&root, kind).map_err(|error| {
+        diagnostics::failure(
+            kind,
+            &if root.is_file() {
+                root.clone()
+            } else {
+                root.join("opencode.db")
+            },
+            &error,
+        )
+    })?;
     let path = match kind {
         TranscriptKind::Codex => locate_codex_in(&root, working_directory, Some(session_id))
             .or_else(|| {
@@ -2240,7 +2341,64 @@ fn session_transcript_path(
         TranscriptKind::Cursor => cursor_transcript(&root, session_id),
         kind => additional::locate(&root, kind, working_directory, session_id),
     };
+    if path.is_none() {
+        if let Some(file) = unresolved_native_file(&root, kind, session_id) {
+            return Err(diagnostics::failure(
+                kind,
+                &file,
+                diagnostics::unrecognized(&file),
+            ));
+        }
+    }
     Ok(path.map(|path| (kind, path)))
+}
+
+// Only identify an unreadable file for diagnostics; never use a filename to
+// authorize loading content when native identity/cwd validation did not succeed.
+fn unresolved_native_file(root: &Path, kind: TranscriptKind, id: &str) -> Option<PathBuf> {
+    if !normalized::valid_id(id) {
+        return None;
+    }
+    newest_matching(root, |path| {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return false;
+        };
+        match kind {
+            TranscriptKind::Codex => name
+                .strip_suffix(".jsonl")
+                .or_else(|| name.strip_suffix(".jsonl.zst"))
+                .is_some_and(|stem| {
+                    stem.starts_with("rollout-") && stem.ends_with(&format!("-{id}"))
+                }),
+            TranscriptKind::Claude => name == format!("{id}.jsonl"),
+            TranscriptKind::Qwen => {
+                name == format!("{id}.jsonl")
+                    && path
+                        .parent()
+                        .is_some_and(|p| p.file_name().is_some_and(|name| name == "chats"))
+            }
+            TranscriptKind::Copilot | TranscriptKind::Grok => {
+                name == if kind == TranscriptKind::Copilot {
+                    "events.jsonl"
+                } else {
+                    "chat_history.jsonl"
+                } && path
+                    .parent()
+                    .is_some_and(|p| p.file_name().is_some_and(|name| name == id))
+            }
+            TranscriptKind::Kimi => {
+                name == "wire.jsonl"
+                    && (path
+                        .parent()
+                        .is_some_and(|p| p.file_name().is_some_and(|name| name == id))
+                        || path
+                            .ancestors()
+                            .nth(3)
+                            .is_some_and(|p| p.file_name().is_some_and(|name| name == id)))
+            }
+            _ => false,
+        }
+    })
 }
 
 /// The provider comes only from the exact native record in this account,
@@ -2339,6 +2497,7 @@ fn latest_codex_thread_in(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalConversationSnapshot {
+    pub diagnostics: diagnostics::ReadDiagnostics,
     pub messages: Vec<LocalConversationMessage>,
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2412,6 +2571,7 @@ fn read_conversation_snapshot_with_tools(
             push(role, text, None, None, None);
         }
         return Ok(LocalConversationSnapshot {
+            diagnostics: diagnostics::ReadDiagnostics::default(),
             messages,
             truncated,
             archived: None,
@@ -2589,6 +2749,7 @@ fn read_conversation_snapshot_with_tools(
     })
     .ok_or("The local conversation could not be read safely.")?;
     Ok(LocalConversationSnapshot {
+        diagnostics: diagnostics::ReadDiagnostics::default(),
         messages,
         truncated: truncated || incomplete,
         archived: None,

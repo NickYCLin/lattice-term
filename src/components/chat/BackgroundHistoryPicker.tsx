@@ -1,3 +1,4 @@
+import { nativeReadError } from "../../app/nativeReadDiagnostics";
 import { ArchiveFileIcon } from "../icons";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -81,6 +82,7 @@ function Picker({
       >
         <h2>{t("memory.attachHistory")}</h2>
         <p>{t("memory.backgroundHint")}</p>
+        {history?.failures?.map((error, index) => <p role="alert" key={index}>{nativeReadError(error, t)}</p>)}
         {error && <p role="alert">{t("memory.backgroundFailed")}</p>}
         {!preview ? (
           <>

@@ -114,6 +114,17 @@ describe("ChatView", () => {
     expect(markup.includes("載入較舊的對話")).toBe(visible);
   });
 
+  it("shows native read diagnostics and retry instead of a blank conversation", () => {
+    const thread = fakeThread({ nativeSessionId: "synthetic", nativeHistorySource: true });
+    const error = `native.read:${JSON.stringify({ cli: "Claude Code", file: "synthetic.jsonl", reason: "permission" })}`;
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,
+      nativeRead: { threadId: thread.id, ready: false, loading: false, error, refresh: () => {} } }));
+    expect(html).toContain("Claude Code · synthetic.jsonl");
+    expect(html).toContain("沒有讀取紀錄的權限");
+    expect(html).toContain("重新讀取");
+    expect(html).toContain('role="alert"');
+  });
+
   it("shows native history progress inside the opened thread instead of a new-chat welcome", () => {
     const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
     const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,

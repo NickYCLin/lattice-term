@@ -800,7 +800,7 @@ export function ThreadPane({
   continueInSession?: () => void;
   handoffProblem?: string | null;
   handoffPending?: boolean;
-  sessionRead?: { loading: boolean; error: string | null; refresh: () => void } | null;
+  sessionRead?: { diagnostics?: import("../app/nativeReadDiagnostics").NativeReadDiagnostics; loading: boolean; error: string | null; refresh: () => void } | null;
 }) {
   const { t } = useI18n();
   const projectHistory = useNativeHistory();
@@ -1265,8 +1265,8 @@ export function ThreadPane({
         state={t(running ? "agents.state.working" : "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
-          {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} onRetry={nativeRead.refresh} />}
-          {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} onRetry={sessionRead.refresh} />}
+          {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} diagnostics={nativeRead.diagnostics} onRetry={nativeRead.refresh} />}
+          {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} diagnostics={sessionRead.diagnostics} onRetry={sessionRead.refresh} />}
           {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("native.readOnly")} · {t("history.stateUnknown")}</p>}
           {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
           {thread.nativeSessionId && <NativeHistoryAccess threadId={thread.id} directory={thread.workingDirectory} />}

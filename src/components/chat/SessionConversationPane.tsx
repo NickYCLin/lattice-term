@@ -302,10 +302,9 @@ export function SessionConversationPane({ session, agents, displayName, conversa
     {artifact && <ChatArtifact path={artifact} directory={session.workingDirectory} threadId={session.sessionId} onClose={() => setArtifact(null)} />}
     <div ref={messagesRef} className="chat-messages" onScroll={onScroll} onWheel={onWheel}>
       <div className="chat-messages__inner">
-        {supported && <ConversationReadProgress loading={conversation.loading} />}
+        {supported && <ConversationReadProgress loading={conversation.loading} error={conversation.readError} diagnostics={conversation.diagnostics} onRetry={conversation.refresh} />}
         {!supported ? <p>{t("sessionChat.unsupported")}</p>
-          : conversation.readError ? <div role="status"><p>{t("sessionChat.readError")}</p><p className="session-chat__diagnostic">{conversation.readError}</p></div>
-          : conversation.messages.length === 0 ? <p role="status">{t(
+          : !conversation.readError && conversation.messages.length === 0 ? <p role="status">{t(
             session.closedReason ? "sessionChat.closed"
               : conversation.slow ? "sessionChat.slow"
               : conversation.loading ? "common.loading"

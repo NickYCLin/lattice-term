@@ -28,6 +28,7 @@ export interface NativeHistoryCursor {
   modified: string;
 }
 export interface NativeRecordPage {
+  diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics;
   turns: { id: string; items: NativeRecord[] }[];
   previousCursor: NativeHistoryCursor | null;
   truncated: boolean;

@@ -7,7 +7,7 @@ import { appendSessionTurns } from "./chatSessionHandoff";
 
 export function useContinuedSessionRead(thread: ChatThread | null, live: boolean,
   profiles: readonly ChatAccountProfile[], update: AgentChatApi["updateThreadFromSession"], notice: string, missingSession: string) {
-  const [read, setRead] = useState<{ key: string; loading: boolean; error: string | null } | null>(null);
+  const [read, setRead] = useState<{ diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics; key: string; loading: boolean; error: string | null } | null>(null);
   const [retry, setRetry] = useState(0);
   const latest = useRef({ thread, profiles, update });
   latest.current = { thread, profiles, update };
@@ -34,7 +34,7 @@ export function useContinuedSessionRead(thread: ChatThread | null, live: boolean
         });
         if (cancelled) return;
         latest.current.update(selected.id, current => appendSessionTurns(current, snapshot, notice));
-        setRead({ key, loading: false, error: null });
+        setRead({ key, loading: false, error: null, diagnostics: snapshot.diagnostics });
       } catch (reason) {
         if (!cancelled) setRead({ key, loading: false, error: String(reason) });
       }
@@ -42,5 +42,5 @@ export function useContinuedSessionRead(thread: ChatThread | null, live: boolean
     return () => { cancelled = true; };
   }, [key, retry, notice, missingSession]);
   const refresh = useCallback(() => setRetry(value => value + 1), []);
-  return key ? { loading: read?.key === key ? read.loading : true, error: read?.key === key ? read.error : null, refresh } : null;
+  return key ? { diagnostics: read?.key === key ? read.diagnostics : undefined, loading: read?.key === key ? read.loading : true, error: read?.key === key ? read.error : null, refresh } : null;
 }

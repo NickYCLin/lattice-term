@@ -57,8 +57,8 @@ export function useSerialNativeRead<T>(key: string, enabled: boolean, interval: 
     busy: enabled && (!current || busy), updatedAt: current ? updatedAt : null, refresh };
 }
 
-export interface NativeHistoryPage { entries: LocalConversation[]; hasMore: boolean; incomplete: boolean }
-export interface NativeMessageSnapshot { messages: NativeHistoryMessage[]; truncated: boolean; archived?: boolean }
+export interface NativeHistoryPage { failures?: string[]; entries: LocalConversation[]; hasMore: boolean; incomplete: boolean }
+export interface NativeMessageSnapshot { diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics; messages: NativeHistoryMessage[]; truncated: boolean; archived?: boolean }
 
 export function useNativeConversations(enabled: boolean) {
   const profiles = useChatAccountProfiles();
@@ -86,6 +86,7 @@ export function useNativeConversations(enabled: boolean) {
     hasMore: !result.busy && !result.error && entries.length > 0 &&
       value?.hasMore === true && value.requestedLimit === limit &&
       value.entries.length >= limit && limit < NATIVE_HISTORY_MAX,
+    failures: result.value?.failures ?? [],
     incomplete: result.value?.incomplete === true,
     loadMore: () => setOptions(current => ({ ...current, limit: Math.min(NATIVE_HISTORY_MAX, current.limit + NATIVE_HISTORY_PAGE_SIZE) })),
   };

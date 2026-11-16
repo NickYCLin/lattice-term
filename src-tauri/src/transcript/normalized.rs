@@ -1,4 +1,5 @@
 //! Source-independent, masked records. Native files are never modified.
+use super::diagnostics::{self, ReadDiagnostics};
 use super::{
     content_text, open_regular_transcript_handle, read_bounded_line, redact, TranscriptKind,
 };
@@ -54,6 +55,7 @@ pub struct NormalizedTurn {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NormalizedPage {
+    pub diagnostics: ReadDiagnostics,
     pub turns: Vec<NormalizedTurn>,
     pub previous_cursor: Option<HistoryCursor>,
     pub truncated: bool,
@@ -666,10 +668,17 @@ pub(super) fn decoded_reader(path: &Path) -> Option<Box<dyn Read>> {
         Some(Box::new(file))
     }
 }
-pub(super) fn stream_rows(path: &Path, visit: impl FnMut(&Value, u64)) -> Result<bool, String> {
+pub(super) fn stream_rows(
+    path: &Path,
+    visit: impl FnMut(&Value, u64),
+) -> Result<ReadDiagnostics, String> {
     stream_mode(path, false, visit)
 }
-fn stream_mode(path: &Path, tail: bool, visit: impl FnMut(&Value, u64)) -> Result<bool, String> {
+fn stream_mode(
+    path: &Path,
+    tail: bool,
+    visit: impl FnMut(&Value, u64),
+) -> Result<ReadDiagnostics, String> {
     stream_mode_limit(path, tail, SCAN_LIMIT, visit)
 }
 fn stream_mode_limit(
@@ -677,7 +686,7 @@ fn stream_mode_limit(
     tail: bool,
     scan_limit: u64,
     mut visit: impl FnMut(&Value, u64),
-) -> Result<bool, String> {
+) -> Result<ReadDiagnostics, String> {
     let mut offset = 0;
     let mut partial = false;
     let mut file = open_regular_transcript_handle(path).ok_or("The transcript is unavailable.")?;
@@ -697,6 +706,10 @@ fn stream_mode_limit(
             .map_err(|_| "Cannot seek transcript.")?;
         partial = previous[0] != b'\n';
     }
+    if path.extension().is_some_and(|ext| ext == "zst") && length > super::MAX_TRANSCRIPT_FILE_BYTES
+    {
+        return Err("Compressed transcript exceeds the size limit.".into());
+    }
     let reader: Box<dyn Read> = if path.extension().is_some_and(|ext| ext == "zst") {
         decoded_reader(path).ok_or("Invalid compressed transcript.")?
     } else {
@@ -710,7 +723,10 @@ fn stream_mode_limit(
         length
     };
     let mut reader = BufReader::new(reader.take(budget + 1));
-    let mut skipped = offset > 0;
+    let mut skipped = ReadDiagnostics {
+        partial: offset > 0,
+        ..Default::default()
+    };
     let mut line = Vec::new();
     if partial {
         let before = reader.get_ref().limit() + reader.buffer().len() as u64;
@@ -723,12 +739,22 @@ fn stream_mode_limit(
             .map_err(|_| "Cannot read transcript.")?;
         match read {
             None => break,
-            Some(false) => skipped = true,
+            Some(false) => skipped.skip("oversized"),
             Some(true) => {
                 if let Ok(row) = serde_json::from_slice::<Value>(&line) {
-                    visit(&row, offset);
+                    if row.is_object() {
+                        visit(&row, offset);
+                    } else {
+                        skipped.skip("invalid_record");
+                    }
                 } else if !line.iter().all(u8::is_ascii_whitespace) {
-                    skipped = true;
+                    skipped.skip(if std::str::from_utf8(&line).is_err() {
+                        "decode"
+                    } else if serde_json::from_slice::<Value>(&line).is_err_and(|e| e.is_eof()) {
+                        "truncated_jsonl"
+                    } else {
+                        "malformed"
+                    });
                 }
             }
         }
@@ -766,6 +792,15 @@ pub fn recent(
     path: &Path,
     kind: TranscriptKind,
 ) -> Result<super::LocalConversationSnapshot, String> {
+    recent_inner(path, kind).map_err(|error| diagnostics::failure(kind, path, &error))
+}
+fn recent_inner(
+    path: &Path,
+    kind: TranscriptKind,
+) -> Result<super::LocalConversationSnapshot, String> {
+    if fingerprint(path)?.0 == 0 {
+        return Err("empty".into());
+    }
     let mut parser = parser(path, None, u64::MAX, false);
     if !super::additional::supported(kind)
         && kind != TranscriptKind::Gemini
@@ -788,6 +823,14 @@ pub fn recent(
         stream_mode(path, true, |row, index| parser.row(row, kind, index))?
     };
     append_children(&mut parser, path, kind);
+    if parser.count == 0 && parser.items.is_empty() {
+        return Err(if skipped.reasons.contains_key("decode") {
+            "decode"
+        } else {
+            "no_readable_records"
+        }
+        .into());
+    }
     let dropped = parser.items.front().is_some_and(|(index, _)| *index > 0);
     let turns = vec![NormalizedTurn {
         id: "recent".into(),
@@ -796,8 +839,13 @@ pub fn recent(
     Ok(legacy(NormalizedPage {
         turns,
         previous_cursor: None,
-        truncated: skipped || parser.count > PAGE_ITEMS as u64 || parser.clipped || dropped,
-        warnings: Vec::new(),
+        diagnostics: skipped.clone(),
+        truncated: skipped.partial || parser.count > PAGE_ITEMS as u64 || parser.clipped || dropped,
+        warnings: if skipped.partial {
+            vec!["native.partial".into()]
+        } else {
+            Vec::new()
+        },
     }))
 }
 
@@ -880,10 +928,21 @@ fn json_messages(path: &Path, visit: &mut dyn FnMut(&Value, u64)) -> Result<(), 
     serde::de::Deserializer::deserialize_map(&mut de, Root(visit))
         .map_err(|_| "Cannot decode JSON conversation.".to_string())
 }
-fn gemini_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, String> {
+fn gemini_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<ReadDiagnostics, String> {
     if path.extension().is_some_and(|ext| ext == "json") {
-        json_messages(path, &mut visit)?;
-        return Ok(false);
+        let mut count = 0;
+        let result = json_messages(path, &mut |row, index| {
+            count += 1;
+            visit(row, index);
+        });
+        let mut report = ReadDiagnostics::default();
+        if let Err(error) = result {
+            if count == 0 {
+                return Err(error);
+            }
+            report.skip("malformed_json");
+        }
+        return Ok(report);
     }
     let mut records = BTreeMap::<String, Value>::new();
     let mut order = Vec::<String>::new();
@@ -976,7 +1035,7 @@ fn gemini_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, 
         }
         overflow |= records.len() > 50_000;
     })?;
-    if overflow || skipped {
+    if overflow {
         return Err("Gemini event history exceeds limits or contains an incomplete mutation; refresh after the CLI finishes writing.".into());
     }
     for (index, id) in order.iter().enumerate() {
@@ -984,7 +1043,7 @@ fn gemini_rows(path: &Path, mut visit: impl FnMut(&Value, u64)) -> Result<bool, 
             visit(row, index as u64);
         }
     }
-    Ok(false)
+    Ok(skipped)
 }
 fn fingerprint(path: &Path) -> Result<(u64, String), String> {
     let file = open_regular_transcript_handle(super::additional::physical(path))
@@ -1005,7 +1064,19 @@ pub fn page(
     cursor: Option<&HistoryCursor>,
     image_request: Option<&str>,
 ) -> Result<(NormalizedPage, Option<ImageSource>), String> {
+    page_inner(path, kind, cursor, image_request)
+        .map_err(|error| diagnostics::failure(kind, path, &error))
+}
+fn page_inner(
+    path: &Path,
+    kind: TranscriptKind,
+    cursor: Option<&HistoryCursor>,
+    image_request: Option<&str>,
+) -> Result<(NormalizedPage, Option<ImageSource>), String> {
     let (length, modified) = fingerprint(path)?;
+    if length == 0 {
+        return Err("empty".into());
+    }
     if cursor.is_some_and(|cursor| cursor.length != length || cursor.modified != modified) {
         return Err("The native history changed; reload before reading older records.".into());
     }
@@ -1037,6 +1108,14 @@ pub fn page(
         stream_rows(path, |row, index| parser.row(row, kind, index))?
     };
     append_children(&mut parser, path, kind);
+    if parser.count == 0 && parser.items.is_empty() {
+        return Err(if skipped.reasons.contains_key("decode") {
+            "decode"
+        } else {
+            "no_readable_records"
+        }
+        .into());
+    }
     if fingerprint(path)? != (length, modified.clone()) {
         return Err("The native history changed while reading; retry.".into());
     }
@@ -1063,8 +1142,9 @@ pub fn page(
                 length,
                 modified,
             }),
-            truncated: skipped || first > 0 || parser.clipped,
-            warnings: if skipped || parser.clipped {
+            diagnostics: skipped.clone(),
+            truncated: skipped.partial || first > 0 || parser.clipped,
+            warnings: if skipped.partial || parser.clipped {
                 vec!["Malformed, oversized or incomplete rows were skipped.".into()]
             } else {
                 Vec::new()
@@ -1185,6 +1265,7 @@ pub fn legacy(page: NormalizedPage) -> super::LocalConversationSnapshot {
         }
     }
     super::LocalConversationSnapshot {
+        diagnostics: page.diagnostics,
         messages,
         truncated: page.truncated,
         archived: None,
@@ -1784,7 +1865,13 @@ mod tests {
             "{\"id\":\"u\",\"type\":\"user\",\"content\":\"hello\"}\n{\"$patch\":",
         )
         .unwrap();
-        assert!(page(&path, TranscriptKind::Gemini, None, None).is_err());
+        let loaded = page(&path, TranscriptKind::Gemini, None, None).unwrap().0;
+        assert_eq!(loaded.diagnostics.skipped_rows, 1);
+        assert!(loaded
+            .turns
+            .iter()
+            .flat_map(|turn| &turn.items)
+            .any(|item| item.text == "hello"));
     }
     #[test]
     fn image_endpoint_is_exact_scoped_and_rejects_unrecorded_or_credential_paths() {

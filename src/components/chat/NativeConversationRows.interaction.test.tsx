@@ -427,3 +427,23 @@ it("loads the next native history page and removes the control after the final p
     expect(container.textContent).not.toContain("載入較舊的對話");
   } finally { await act(async () => root.unmount()); }
 });
+
+it("shows a sanitized CLI/file/reason with retry and a nonblocking skipped-row count", async () => {
+  const container = installHostDom(); const root = createRoot(container as unknown as Element);
+  const retry = vi.fn();
+  const error = `native.read:${JSON.stringify({ cli: "Codex", file: "/synthetic/private/rollout-fixture.jsonl", reason: "decode" })}`;
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConversationReadProgress loading={false}
+      error={error} onRetry={retry} diagnostics={{ skippedRows: 3, reasons: { decode: 3 }, partial: true }} /></I18nProvider>));
+    expect(container.textContent).toContain("Codex · rollout-fixture.jsonl");
+    expect(container.textContent).toContain("無法解碼");
+    expect(container.textContent).toContain("已略過 3 筆");
+    expect(container.textContent).not.toContain("/synthetic/private");
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    expect(retry).toHaveBeenCalledOnce();
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConversationReadProgress loading={false}
+      diagnostics={{ skippedRows: 3, reasons: { decode: 3 }, partial: true }} /></I18nProvider>));
+    expect(container.textContent).toContain("其餘內容仍可閱讀");
+    expect(allNodes(container).some(node => node.attributes.role === "alert")).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});

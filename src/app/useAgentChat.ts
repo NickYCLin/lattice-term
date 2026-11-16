@@ -129,7 +129,7 @@ export interface AgentChatApi {
   removal: { id: string; pending: boolean; error: string | null } | null;
   archivedReceipt: { title: string; pending: boolean; error: string | null } | null;
   undoArchive: () => Promise<void>;
-  nativeRead: { threadId: string; ready: boolean; loading: boolean; error: string | null; refresh: () => void } | null;
+  nativeRead: { diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics; threadId: string; ready: boolean; loading: boolean; error: string | null; refresh: () => void } | null;
   threads: ChatThread[];
   getThread: (id: string) => ChatThread | undefined;
   activeThreadId: string | null;
@@ -1219,7 +1219,7 @@ export function useAgentChat(
       archivedReceipt,
       undoArchive,
       threads,
-      nativeRead: mirror ? { threadId: mirror.id, ready: nativeMessages.value !== null,
+      nativeRead: mirror ? { diagnostics: nativeMessages.value?.diagnostics, threadId: mirror.id, ready: nativeMessages.value !== null,
         loading: !nativeMessages.value && (nativeMessages.busy || !nativeMessages.error),
         error: nativeMessages.error, refresh: nativeMessages.refresh } : null,
       getThread: (id: string) => threadsRef.current.find(thread => thread.id === id),
