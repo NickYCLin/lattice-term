@@ -1,3 +1,4 @@
+import { databaseErrorMessage } from "../../app/databaseErrors";
 import { useI18n } from "../../i18n/context";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
@@ -189,7 +190,7 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
             <div className="database-manager__connection-head"><div><h3>{saved?.name || t("database.create")}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? t("database.localFile") : `${saved.hostname}:${saved.port} / ${saved.database}`}` : t("database.workspaceHint")}</p></div><span className="database-manager__badge">{saved ? t("database.saved") : t("database.unsaved")}</span></div>
             {!settingsOnly && <nav className="database-manager__tabs" aria-label={t("database.pages")}>{([ ["sql", t("database.workbench")], ["tables", t("database.browse")], ["settings", t("database.settings")] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey) : setView(key)}>{label}</button>)}</nav>}
             <div className="database-manager__content" ref={contentRef}>
-              {error && <p role="alert" className="database-manager__notice database-manager__error">{error}</p>}
+              {error && <p role="alert" className="database-manager__notice database-manager__error">{databaseErrorMessage(error, t)}</p>}
               {!snapshot && !connectionBusy && <button type="button" className="button button--secondary" onClick={() => void perform(async () => {
                 const value = await invoke<DatabaseSnapshot>("database_profiles");
                 setSnapshot(value);

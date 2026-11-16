@@ -92,7 +92,7 @@ impl Client {
             } else {
                 client.rollback_transaction().await
             }
-            .map_err(|_| failed());
+            .map_err(driver_failed);
         }
         self.execute_statement(if commit { "COMMIT" } else { "ROLLBACK" })
             .await
@@ -104,23 +104,23 @@ impl Client {
             Self::Postgres(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
-                .map_err(|_| failed()),
+                .map_err(driver_failed),
             Self::Mysql(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
-                .map_err(|_| failed()),
+                .map_err(driver_failed),
             #[cfg(not(target_os = "ios"))]
             Self::Sqlite(c) => sqlx::Executor::execute(c, AssertSqlSafe(statement))
                 .await
                 .map(|r| r.rows_affected())
-                .map_err(|_| failed()),
+                .map_err(driver_failed),
             #[cfg(target_os = "ios")]
             Self::Sqlite(_) => Err("iOS SQLite 只開放唯讀存取。".into()),
             Self::SqlServer(c) => c
                 .execute(statement, &[])
                 .await
                 .map(|r| r.total())
-                .map_err(|_| failed()),
+                .map_err(driver_failed),
         }
     }
 
@@ -133,15 +133,15 @@ impl Client {
             ($connection:expr) => {{
                 // Simple-query/text protocol preserves arbitrary scalar types
                 // as server-formatted text, rather than decoding them as i64.
-                let description = sqlx::Executor::prepare(&mut *$connection, AssertSqlSafe(statement).into_sql_str()).await.map_err(|_| failed())?;
+                let description = sqlx::Executor::prepare(&mut *$connection, AssertSqlSafe(statement).into_sql_str()).await.map_err(driver_failed)?;
                 names = sqlx::Statement::columns(&description).iter().map(|c| c.name().to_owned()).collect();
                 if names.len() > MAX_COLUMNS { return Err("查詢結果最多支援 64 個欄位。".into()); }
                 let mut stream = sqlx::Executor::fetch($connection, AssertSqlSafe(statement));
-                while let Some(row) = stream.try_next().await.map_err(|_| failed())? {
+                while let Some(row) = stream.try_next().await.map_err(driver_failed)? {
                     if row.len() > MAX_COLUMNS { return Err("查詢結果最多支援 64 個欄位。".into()); }
                     names = row.columns().iter().map(|c| c.name().to_owned()).collect();
                     let cells = (0..row.len()).map(|i| {
-                        if row.try_get_raw(i).map_err(|_| failed())?.is_null() { return Ok(None); }
+                        if row.try_get_raw(i).map_err(driver_failed)?.is_null() { return Ok(None); }
                         row.try_get_unchecked::<Option<String>, _>(i).map_err(|_| "此結果含有無法顯示的型別，請在 SQL 以 CAST 轉成文字。".into())
                     }).collect::<Result<Vec<_>, String>>()?;
                     if !push_result(&mut rows, cells, &mut bytes) { truncated = true; break; }
@@ -156,8 +156,8 @@ impl Client {
             #[cfg(target_os = "ios")]
             Self::Sqlite(_) => return Err("iOS SQLite 請使用既有唯讀資料表瀏覽。".into()),
             Self::SqlServer(c) => {
-                let mut stream = c.simple_query(statement).await.map_err(|_| failed())?;
-                while let Some(item) = stream.try_next().await.map_err(|_| failed())? {
+                let mut stream = c.simple_query(statement).await.map_err(driver_failed)?;
+                while let Some(item) = stream.try_next().await.map_err(driver_failed)? {
                     match item {
                         tiberius::QueryItem::Metadata(m) => {
                             names = m.columns().iter().map(|c| c.name().to_owned()).collect();
@@ -194,21 +194,21 @@ impl Client {
                                         Xml(v) => v.as_ref().map(|v| v.to_string()),
                                         DateTime(_) | SmallDateTime(_) | DateTime2(_) => row
                                             .try_get::<chrono::NaiveDateTime, _>(index)
-                                            .map_err(|_| failed())?
+                                            .map_err(driver_failed)?
                                             .map(|v| v.to_string()),
                                         Date(_) => row
                                             .try_get::<chrono::NaiveDate, _>(index)
-                                            .map_err(|_| failed())?
+                                            .map_err(driver_failed)?
                                             .map(|v| v.to_string()),
                                         Time(_) => row
                                             .try_get::<chrono::NaiveTime, _>(index)
-                                            .map_err(|_| failed())?
+                                            .map_err(driver_failed)?
                                             .map(|v| v.to_string()),
                                         DateTimeOffset(_) => row
                                             .try_get::<chrono::DateTime<chrono::FixedOffset>, _>(
                                                 index,
                                             )
-                                            .map_err(|_| failed())?
+                                            .map_err(driver_failed)?
                                             .map(|v| v.to_string()),
                                     })
                                 })

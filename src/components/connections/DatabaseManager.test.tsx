@@ -1,3 +1,5 @@
+import { zhTW } from "../../i18n/messages/zh-TW";
+import { en } from "../../i18n/messages/en";
 import { I18nProvider } from "../../i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -58,8 +60,8 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
-async function render() {
-  await act(async () => root.render(<I18nProvider locale="zh-TW"><DatabaseManager profiles={[host]} hostKeys={["host"]} onClose={() => {}} /></I18nProvider>));
+async function render(locale: "zh-TW" | "en" = "zh-TW") {
+  await act(async () => root.render(<I18nProvider locale={locale}><DatabaseManager profiles={[host]} hostKeys={["host"]} onClose={() => {}} /></I18nProvider>));
 }
 async function click(label: string) {
   const props = hostProps(container).find((props) => props.onClick && (props.children === label || (Array.isArray(props.children) && props.children.includes(label))));
@@ -339,3 +341,16 @@ it("groups or separates cards without changing the database endpoint, password, 
   await submit();
   expect(snapshot.profiles[0]).toEqual({...database,hostKey:"local",allowMcpRead:true});
 });
+
+it.each((["zh-TW", "en"] as const).flatMap(locale =>
+  (["connection", "authentication", "databaseAccess", "tls", "other"] as const).map(category => ({ locale, category }))))(
+  "shows localized connection-test diagnostics: $locale / $category", async ({ locale, category }) => {
+    await render(locale);
+    const code = `database.error.${category}` as const;
+    invoke.mockRejectedValueOnce(code);
+    await click(locale === "en" ? "Test connection" : "測試連線");
+    const messages = locale === "en" ? en : zhTW;
+    expect(hostProps(container).some(props => props.children === messages[code])).toBe(true);
+    expect(hostProps(container).some(props => props.children === code)).toBe(false);
+    expect(invoke.mock.calls.some(([command]) => command === "database_save")).toBe(false);
+  });

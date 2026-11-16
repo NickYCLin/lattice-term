@@ -1,4 +1,5 @@
 mod drivers;
+mod errors;
 #[cfg(test)]
 mod network_tests;
 #[cfg(test)]
@@ -555,7 +556,7 @@ impl DatabaseRegistry {
             drivers::read(&route.profile, &password, &action),
         )
         .await
-        .map_err(|_| "資料庫連線或查詢超過 20 秒，已中止。")??;
+        .map_err(|_| errors::Failure::Connection.code().to_owned())??;
         let registry = self.clone();
         let current = crate::credential_call(move || registry.snapshot()).await?;
         if current.revision != snapshot.revision {
@@ -725,7 +726,7 @@ impl DatabaseRegistry {
             ),
         )
         .await
-        .map_err(|_| "資料庫連線測試超過 20 秒，已中止。")??;
+        .map_err(|_| errors::Failure::Connection.code().to_owned())??;
         let registry = self.clone();
         if crate::credential_call(move || registry.snapshot())
             .await?

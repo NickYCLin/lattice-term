@@ -1,3 +1,5 @@
+import { zhTW } from "../../i18n/messages/zh-TW";
+import { en } from "../../i18n/messages/en";
 import { I18nProvider } from "../../i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -149,4 +151,21 @@ it("unblocks a preserved local draft when a revoked in-flight query finishes", a
   expect(props(container).find(p => p.children === "同步草稿")!.disabled).toBe(false);
   expect(props(container).find(p => p["aria-label"] === "SQL 語法")!.value).toBe("SELECT 'local draft'");
   expect(panel.shareExecute).toBe(false);
+});
+
+it.each((["zh-TW", "en"] as const).flatMap(locale =>
+  (["connection", "authentication", "databaseAccess", "tls", "other"] as const).map(category => ({ locale, category }))))(
+  "localizes driver errors stored in the workbench: $locale / $category", async ({ locale, category }) => {
+    const code = `database.error.${category}` as const;
+    panel.error = code;
+    await render(locale);
+    const messages = locale === "en" ? en : zhTW;
+    expect(props(container).some(item => item.children === messages[code])).toBe(true);
+    expect(props(container).some(item => item.children === code)).toBe(false);
+  });
+
+it("localizes an IPC rejection as well as a stored workbench error", async () => {
+  invoke.mockRejectedValueOnce(new Error("database.error.tls"));
+  await render("en");
+  expect(props(container).some(item => item.children === en["database.error.tls"])).toBe(true);
 });

@@ -1,3 +1,4 @@
+import { databaseErrorMessage } from "../../app/databaseErrors";
 import { useI18n } from "../../i18n/context";
 import { SqlResultTable } from "./SqlResultTable";
 import { invoke } from "@tauri-apps/api/core";
@@ -172,8 +173,8 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
         await getCurrentWindow().close();
       })}>{t("database.reattach")}</button> : canDetach && <button type="button" className="button button--secondary" disabled={!panel || busy} onClick={() => popout()}>{t("database.detach")}</button>}
     </header>
-    {error && <p className="database-manager__notice database-manager__error" role="alert">{error}</p>}
-    {panel?.error && <p className="database-manager__notice database-manager__error" role="alert">{panel.error}</p>}
+    {error && <p className="database-manager__notice database-manager__error" role="alert">{databaseErrorMessage(error, t)}</p>}
+    {panel?.error && <p className="database-manager__notice database-manager__error" role="alert">{databaseErrorMessage(panel.error, t)}</p>}
     {panel && separate && <p className="sql-workbench__target">{t("database.currentConnection", { target: panel.target ?? panel.name })}</p>}
     <div className={`sql-workbench__body${editorCollapsed ? " is-editor-collapsed" : ""}`}><div className="sql-workbench__query">
     <div className="sql-workbench__editor" hidden={editorCollapsed}><div className="sql-workbench__code"><pre ref={lineNumbers} aria-hidden="true">{sql.split("\n").map((_, i) => i + 1).join("\n")}</pre><textarea aria-label={t("database.sql")} rows={7} wrap="off" spellCheck={false} maxLength={65536} disabled={!panel || busy} value={sql} onScroll={(event) => { if (lineNumbers.current) lineNumbers.current.scrollTop = event.currentTarget.scrollTop; }} onChange={(event) => { setSql(event.target.value); setDirty(true); editing.current = true; }} /></div></div>

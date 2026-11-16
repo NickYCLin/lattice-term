@@ -19,15 +19,14 @@ enum Client {
     SqlServer(Box<tiberius::Client<Compat<tokio::net::TcpStream>>>),
 }
 
-pub(super) fn failed() -> String {
-    "資料庫操作失敗。請檢查服務、連接埠、帳密、資料庫名稱、帳號權限與 TLS 憑證；伺服器原始錯誤不會回傳，以免洩漏敏感資料。".into()
-}
+use super::errors::driver_failed;
+pub(super) use super::errors::failed;
 
 fn mysql_text(value: Option<Vec<u8>>) -> Result<Option<String>, String> {
     value
         .map(String::from_utf8)
         .transpose()
-        .map_err(|_| failed())
+        .map_err(driver_failed)
 }
 
 impl Client {
@@ -52,15 +51,15 @@ impl Client {
                     .disable_statement_logging();
                 let mut connection = sqlx::PgConnection::connect_with(&options)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 sqlx::query(if writable { "BEGIN" } else { "BEGIN READ ONLY" })
                     .execute(&mut connection)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 sqlx::query("SET LOCAL statement_timeout = '15000ms'")
                     .execute(&mut connection)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 Ok(Self::Postgres(connection))
             }
             Engine::Mysql | Engine::Mariadb => {
@@ -74,7 +73,7 @@ impl Client {
                     .disable_statement_logging();
                 let mut connection = sqlx::MySqlConnection::connect_with(&options)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 sqlx::Executor::execute(
                     &mut connection,
                     if writable {
@@ -84,7 +83,7 @@ impl Client {
                     },
                 )
                 .await
-                .map_err(|_| failed())?;
+                .map_err(driver_failed)?;
                 Ok(Self::Mysql(connection))
             }
             #[cfg(target_os = "ios")]
@@ -105,7 +104,7 @@ impl Client {
                 let options = options.disable_statement_logging();
                 let mut connection = sqlx::SqliteConnection::connect_with(&options)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 sqlx::query(if writable {
                     "BEGIN IMMEDIATE"
                 } else {
@@ -113,11 +112,11 @@ impl Client {
                 })
                 .execute(&mut connection)
                 .await
-                .map_err(|_| failed())?;
+                .map_err(driver_failed)?;
                 sqlx::query("PRAGMA trusted_schema = OFF")
                     .execute(&mut connection)
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 Ok(Self::Sqlite(connection))
             }
             Engine::SqlServer => {
@@ -136,27 +135,30 @@ impl Client {
                 let socket =
                     tokio::net::TcpStream::connect((profile.hostname.as_str(), profile.port))
                         .await
-                        .map_err(|_| failed())?;
-                socket.set_nodelay(true).map_err(|_| failed())?;
+                        .map_err(driver_failed)?;
+                socket.set_nodelay(true).map_err(driver_failed)?;
                 let mut connection = tiberius::Client::connect(config, socket.compat_write())
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 connection
                     .simple_query("SET LOCK_TIMEOUT 15000; SET TEXTSIZE 4096")
                     .await
-                    .map_err(|_| failed())?
+                    .map_err(driver_failed)?
                     .into_results()
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 if writable {
                     connection
                         .simple_query("SET XACT_ABORT ON")
                         .await
-                        .map_err(|_| failed())?
+                        .map_err(driver_failed)?
                         .into_results()
                         .await
-                        .map_err(|_| failed())?;
-                    connection.begin_transaction().await.map_err(|_| failed())?;
+                        .map_err(driver_failed)?;
+                    connection
+                        .begin_transaction()
+                        .await
+                        .map_err(driver_failed)?;
                 }
                 Ok(Self::SqlServer(Box::new(connection)))
             }
@@ -173,13 +175,13 @@ impl Client {
                 query
                     .fetch_all($connection)
                     .await
-                    .map_err(|_| failed())?
+                    .map_err(driver_failed)?
                     .into_iter()
                     .map(|row| {
                         (0..row.len())
                             .map(|index| {
                                 row.try_get::<Option<String>, _>(index)
-                                    .map_err(|_| failed())
+                                    .map_err(driver_failed)
                             })
                             .collect()
                     })
@@ -196,11 +198,11 @@ impl Client {
                 query
                     .fetch_all(connection)
                     .await
-                    .map_err(|_| failed())?
+                    .map_err(driver_failed)?
                     .into_iter()
                     .map(|row| {
                         (0..row.len())
-                            .map(|index| mysql_text(row.try_get(index).map_err(|_| failed())?))
+                            .map(|index| mysql_text(row.try_get(index).map_err(driver_failed)?))
                             .collect()
                     })
                     .collect()
@@ -217,17 +219,17 @@ impl Client {
                 let rows = connection
                     .query(statement, &parameters)
                     .await
-                    .map_err(|_| failed())?
+                    .map_err(driver_failed)?
                     .into_first_result()
                     .await
-                    .map_err(|_| failed())?;
+                    .map_err(driver_failed)?;
                 rows.into_iter()
                     .map(|row| {
                         (0..row.len())
                             .map(|index| {
                                 row.try_get::<&str, _>(index)
                                     .map(|value| value.map(str::to_owned))
-                                    .map_err(|_| failed())
+                                    .map_err(driver_failed)
                             })
                             .collect()
                     })

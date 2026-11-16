@@ -1,4 +1,4 @@
-use super::drivers::failed;
+use super::errors::{driver_failed, failed};
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 pub(super) struct ReadOnlyConnection(Option<Connection>);
@@ -7,10 +7,10 @@ impl ReadOnlyConnection {
     pub(super) async fn open(path: String) -> Result<Self, String> {
         tokio::task::spawn_blocking(move || {
             let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|_| failed())?;
+                .map_err(driver_failed)?;
             connection
                 .execute_batch("PRAGMA query_only = ON; PRAGMA trusted_schema = OFF;")
-                .map_err(|_| failed())?;
+                .map_err(driver_failed)?;
             Ok(Self(Some(connection)))
         })
         .await
@@ -39,7 +39,7 @@ impl ReadOnlyConnection {
         .await
         .map_err(|_| failed())?;
         self.0 = Some(connection);
-        result.map_err(|_| failed())
+        result.map_err(driver_failed)
     }
 }
 
