@@ -3075,7 +3075,9 @@ impl AgentRegistry {
         let Ok(entry) = self.get(session_id) else {
             return false;
         };
-        let Ok(mut input) = entry.input.lock() else {
+        // This is a cooperative refresh, never a reason to wait before a
+        // caller captures its control grant or reserves desktop intent.
+        let Ok(mut input) = entry.input.try_lock() else {
             return false;
         };
         let Some(after) = input.native_command_after else {
@@ -9856,9 +9858,9 @@ pub fn enqueue(
     if bytes.is_empty() {
         return Err("A queued prompt is required.".to_string());
     }
-    registry.refresh_native_command(session_id);
     let entry = registry.get(session_id)?;
     let ticket = next_desktop_input_ticket(&entry, &bytes)?;
+    registry.refresh_native_command(session_id);
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if rejects_interrupted_desktop_input(&input, ticket, &bytes) {
         return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
@@ -10335,7 +10337,6 @@ fn mcp_prompt_inner(
     after_grant_snapshot: impl FnOnce(),
 ) -> Result<usize, String> {
     let bytes = mcp_prompt_payload(text)?;
-    registry.refresh_native_command(session_id);
     let entry = registry.get(session_id)?;
     // Remember the grant when this call enters, not after it waits behind a
     // split write. Re-granting cannot revive an already-waiting MCP request.
@@ -10358,6 +10359,7 @@ fn mcp_prompt_inner(
             .definition_id,
     )?;
     after_grant_snapshot();
+    registry.refresh_native_command(session_id);
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if !prompt_grant_matches(&entry, Some(grant_epoch)) {
         return Err(MCP_GRANT_CHANGED.to_string());
