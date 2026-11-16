@@ -54,6 +54,14 @@ assistant for writing, reviewing, or other tasks.
 
 [Explore the features and limitations →](docs/FEATURES.zh-TW.md) (Traditional Chinese)
 
+The built-in database workspace supports SQL Server, PostgreSQL, MySQL, MariaDB, and
+local SQLite. **No SQL clients or ODBC drivers need to be installed.** Server databases
+can use a direct connection, an SSH tunnel, or Lattice Remote forwarding. Custom TLS CA
+verification is optional; default connections do not verify the server certificate.
+SQL Server currently uses SQL username/password authentication, without Windows integrated
+or Azure AD / Microsoft Entra ID login. See the [database connection guide](docs/DATABASES.zh-TW.md)
+(Traditional Chinese) for tested versions, required fields, TLS behavior, and error messages.
+
 ## Download
 
 Choose an installer from **[the latest release](https://github.com/NickYCLin/lattice-term/releases/latest)** under Assets:
