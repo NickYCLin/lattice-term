@@ -14,7 +14,7 @@
 }
 
 :root[data-theme="storybook"] .rail {
-  background: #e8f2f5;
+  background: var(--canvas-deep);
 }
 
 :root[data-theme="storybook"] .rail__brand {
@@ -61,7 +61,7 @@
 }
 
 :root[data-theme="storybook"] .chat-thread.is-active {
-  background: var(--storybook-blue);
+  background: var(--surface-selected);
   color: var(--text);
   border-radius: var(--radius-md);
 }
@@ -108,7 +108,7 @@
 }
 
 .theme-option__preview[data-theme="storybook"] .theme-option__rail {
-  background: #e8f2f5;
+  background: var(--canvas-deep);
   border-right: 2px solid var(--line-strong);
 }
 

@@ -230,7 +230,7 @@
   --surface-raised: #ffffff;
   --text: #3e3a39;
   --text-muted: #625b54;
-  --text-faint: #756d61;
+  --text-faint: #625b54;
   --line: #b0a297;
   --line-strong: #3e3a39;
   --accent: #356176;
@@ -247,6 +247,9 @@
   --storybook-coral: #f2a497;
   --storybook-green: #b9daa5;
   --surface-selected: #fae4b4;
+  /* Cream fills also cover shared selections and informational panels. */
+  --accent-soft: var(--canvas-deep);
+  --info-soft: var(--canvas-deep);
   --focus: #3e3a39;
   --radius-md: 12px;
   --radius-lg: 18px;
