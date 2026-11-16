@@ -23,6 +23,7 @@
 }
 
 .connections__tools {
+  --connection-tool-height: calc(1.875rem * var(--interface-text-scale));
   display: flex;
   flex-wrap: wrap;
   min-width: 0;
@@ -30,6 +31,47 @@
   align-items: center;
   gap: var(--space-3);
   margin-left: auto;
+}
+
+/* A single compact control language for sort, filter and toolbar actions. */
+.connections__tools :is(.button, .select select, .connection-kind-filter) {
+  box-sizing: border-box;
+  height: var(--connection-tool-height);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.connections__tools .select select {
+  padding-inline: var(--space-4);
+  cursor: pointer;
+}
+
+.connections__tools :is(.button, .select select):hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.connections__toolbar .connections__tools :is(button, select):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.connections__tools .connection-kind-filter {
+  padding: 2px;
+  gap: 2px;
+}
+
+.connections__tools .connection-kind-filter button {
+  min-height: 0;
+  height: 100%;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+}
+
+.connections__tools .connection-kind-filter button:hover:not([aria-pressed="true"]) {
+  background: var(--surface-active);
 }
 
 .connections__scroll {
@@ -347,6 +389,7 @@
 }
 
 .app--mobile .connections__tools {
+  --connection-tool-height: max(2.75rem, calc(1.875rem * var(--interface-text-scale)));
   width: 100%;
   min-width: 0;
   margin-left: 0;

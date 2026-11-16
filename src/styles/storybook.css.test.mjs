@@ -45,3 +45,19 @@ describe("storybook cream surfaces", () => {
     }
   });
 });
+
+describe("storybook select control borders", () => {
+  it("targets both native select forms without matching the label wrapper", () => {
+    const borderedRules = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, selector, body]) => selector.includes('data-theme="storybook"') && body.includes("border:"));
+    const fieldRule = borderedRules.find(([ ,selector]) => selector.includes("select.select"));
+    expect(fieldRule).toBeDefined();
+    expect(fieldRule[1]).toContain(".select select");
+    expect(fieldRule[1]).not.toMatch(/(?:\(|,)\s*\.select\s*(?:,|\))/);
+    expect(fieldRule[2]).toContain("border: 2px solid var(--line-strong)");
+    for (const [, selector] of borderedRules) {
+      expect(selector).not.toMatch(/(?:\(|,)\s*\.select\s*(?:,|\))/);
+    }
+    expect(styles).toMatch(/\.connections__tools \.select select\s*\{\s*border: 1px solid var\(--control-line\);/);
+  });
+});

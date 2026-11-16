@@ -52,8 +52,13 @@
   transform: translate(1px, 1px);
 }
 
-:root[data-theme="storybook"] :is(.input, .select, .textarea, .session-composer__box, .chat-composer__box, .session-composer__menu) {
+:root[data-theme="storybook"] :is(.input, select.select, .select select, .textarea, .session-composer__box, .chat-composer__box, .session-composer__menu) {
   border: 2px solid var(--line-strong);
+}
+
+/* Compact connection tools use the same border as their adjacent buttons. */
+:root[data-theme="storybook"] .connections__tools .select select {
+  border: 1px solid var(--control-line);
 }
 
 :root[data-theme="storybook"] :is(.session-composer__box, .chat-composer__box, .session-composer__menu) {
