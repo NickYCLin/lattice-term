@@ -40,6 +40,7 @@ import {
   failTurn,
   handoffThreadAccount,
   importNativeConversation,
+  nativeHistoryItems,
   importArchivedConversation,
   handoffThread,
   changeThreadDirectory,
@@ -140,6 +141,9 @@ export interface AgentChatApi {
     title: string;
     accountProfileId: string | null;
     messages: readonly NativeHistoryMessage[];
+    /** Explicit read-only mirror of a still-running PTY. */
+    sessionSource?: boolean;
+    model?: string;
     provider?: "cliproxyapi";
     proxyId?: string;
   }) => ChatThread;
@@ -180,7 +184,7 @@ export interface AgentChatApi {
    * Starts a new thread from an earlier point of `id`, up to and including
    * `throughItemId`, and opens it. `suffix` marks its title as a branch.
    */
-  nativeFork: (id: string, suffix: string, throughItemId?: string, beforeTurn?: boolean) => Promise<ChatThread | null>;
+  nativeFork: (id: string, suffix: string, throughItemId?: string, beforeTurn?: boolean, sessionSourceId?: string) => Promise<ChatThread | null>;
   branchThread: (id: string, throughItemId: string, suffix: string) => ChatThread | null;
   /**
    * Hands a subtask to an assistant as its own conversation in the same
@@ -429,7 +433,9 @@ export function useAgentChat(
     );
     if (existing) {
       if (settings.messages.length === 0) { setActiveThreadId(existing.id); return existing; }
-      const next = refreshNativeHistoryMirror(existing, {
+      if (settings.sessionSource && (existing.runningTurnId || existing.pendingOperation || existing.pendingInputs?.length)) throw new Error("來源對話仍有待完成的操作。");
+      const next = settings.sessionSource ? { ...existing, continuedInSession: true, model: settings.model ?? existing.model,
+        items: nativeHistoryItems(settings.messages, existing.createdAt), nativeSyncPending: false } : refreshNativeHistoryMirror(existing, {
         definitionId: settings.definitionId, profileId: settings.accountProfileId, nativeSessionId: settings.nativeSessionId,
         workingDirectory: settings.workingDirectory, title: settings.title, updatedAt: 0, resumable: true,
       }, { messages: [...settings.messages], truncated: false });
@@ -707,13 +713,22 @@ export function useAgentChat(
     return thread;
   }, [changeThreads]);
 
-  const nativeFork = useCallback(async (id: string, suffix: string, throughItemId?: string, beforeTurn = false) => {
+  const nativeFork = useCallback(async (id: string, suffix: string, throughItemId?: string, beforeTurn = false, sessionSourceId?: string) => {
     const source = threadsRef.current.find(thread => thread.id === id);
     if (!source || !["codex", "claude"].includes(source.definitionId) || !source.nativeSessionId) throw new Error("This conversation has no supported native fork source.");
-    if (source.runningTurnId || source.pendingInputs?.length || source.pendingOperation || source.continuedInSession || handingOffThreads.current.has(id)) throw new Error("Wait for this conversation to become idle before forking.");
+    if (source.runningTurnId || source.pendingInputs?.length || source.pendingOperation || source.continuedInSession && !sessionSourceId || handingOffThreads.current.has(id)) throw new Error("Wait for this conversation to become idle before forking.");
     const profile = source.accountProfileId ? loadChatAccountProfiles(localStorage).find(profile => profile.id === source.accountProfileId && profile.definitionId === source.definitionId) : null;
     if (source.accountProfileId && !profile) throw new Error("The original account profile is missing. Restore it before forking.");
     const sourceIdentity = runtimeIdentity(source);
+    let forkPermission = source.permission;
+    if (sessionSourceId) {
+      const { invoke } = await core();
+      forkPermission = await invoke<ChatPermission>("agent_session_validate_fork_source", { sessionId: sessionSourceId, nativeId: source.nativeSessionId,
+        definitionId: source.definitionId, workingDirectory: source.workingDirectory, profileConfigPath: profile?.configDirectory ?? null });
+      if (!["ask", "readOnly", "workspaceWrite", "full"].includes(forkPermission)) throw new Error("來源權限尚未確認，沒有建立分支。");
+      const latest = threadsRef.current.find(thread => thread.id === id);
+      if (!latest || runtimeIdentity(latest) !== sourceIdentity || latest.runningTurnId || latest.pendingInputs?.length) throw new Error("The source changed before its native fork could begin.");
+    }
     const through = throughItemId ? source.items.find(item => item.id === throughItemId) : source.items[source.items.length - 1];
     if (!through) throw new Error("There is no completed message to fork.");
     if (source.definitionId === "claude") {
@@ -724,7 +739,7 @@ export function useAgentChat(
       if (throughItemId && !beforeTurn && (through.type !== "text" || !through.nativeMessageId)) throw new Error("Select a native assistant message to fork.");
       const branch = branchThread(source, through.id, suffix);
       if (!branch) return null;
-      const fork = { ...branch, items: source.items.slice(0, beforeTurn ? index : index + 1), handoff: null,
+      const fork = { ...branch, permission: forkPermission, items: source.items.slice(0, beforeTurn ? index : index + 1), handoff: null,
         nativeForkSource: beforeTurn && !hasEarlierMessages ? undefined : { sessionId: source.nativeSessionId, ...(previous?.type === "text" && (throughItemId || beforeTurn) ? { resumeAt: previous.nativeMessageId } : {}) },
         planMode: source.planMode };
       changeThreads(current => [fork, ...current]);
@@ -750,7 +765,7 @@ export function useAgentChat(
       if (!latest || runtimeIdentity(latest) !== sourceIdentity) throw new Error("The native fork was created, but the source changed. Check native history before retrying.");
       const branch = branchThread(source, through.id, suffix);
       if (!branch) return null;
-      const fork = { ...branch, items: branch.items.slice(0, Math.max(0, end + 1)), nativeSessionId: result.nativeSessionId, reportedModel: result.model, reportedProvider: result.provider,
+      const fork = { ...branch, permission: forkPermission, items: branch.items.slice(0, Math.max(0, end + 1)), nativeSessionId: result.nativeSessionId, reportedModel: result.model, reportedProvider: result.provider,
         handoff: null, planMode: source.planMode, pendingOperation: undefined };
       changeThreads(current => [fork, ...current]);
       if (hasDesktopBackend()) desktopChatAccess.requestDefaultShare(fork.id);

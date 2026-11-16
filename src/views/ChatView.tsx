@@ -1,3 +1,5 @@
+import { cliProxyIdFromArguments } from "../app/cliProxyApi";
+import type { SessionConversationMessage } from "../app/useSessionConversation";
 import { EditIcon } from "../components/icons";
 import { ChatTools } from "../components/chat/ChatTools";
 import { ChatArtifact } from "../components/chat/ChatArtifact";
@@ -68,7 +70,7 @@ import {
 import type { AgentChatApi } from "../app/useAgentChat";
 import type { AgentAutomationsApi } from "../app/useAgentAutomations";
 import { AutomationPane, describeSchedule } from "../components/chat/AutomationPane";
-import type { AgentApi, AgentDefinition } from "../app/useAgentSessions";
+import type { AgentApi, AgentDefinition, AgentSessionSummary } from "../app/useAgentSessions";
 import { displayPath } from "../app/displayPath";
 import { imageFileName } from "../app/chatImages";
 import {
@@ -201,17 +203,21 @@ export function ChatView({
   const [sessionSidebarLayout, setSharedLayout] = useSharedSidebarLayout();
   const accountProfiles = useChatAccountProfiles();
   const { pins } = useConversationPins();
+  const [sideSessionId, setSideSessionId] = useState<string | null>(null);
+  const sideSession = agents.sessions.find(session => session.sessionId === sideSessionId && !session.closedReason);
   const [sideThreadId, setSideThreadId] = useState<string | null>(null);
   const sideThread = chat.threads.find(thread => thread.id === sideThreadId);
   useEffect(() => {
     if (mode !== "threads") return;
     const key = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || !/^[1-9]$/.test(event.key)) return;
-      const target = chat.threads.filter(thread => !thread.shelvedAt)[Number(event.key) - 1];
-      if (target) { event.preventDefault(); chat.setActiveThreadId(target.id); setSelectedSessionId(null); }
+      const targets = [...agents.sessions.filter(session => !session.closedReason).map(session => ({ kind: "session" as const, id: session.sessionId })),
+        ...chat.threads.filter(thread => !thread.shelvedAt && !agents.sessions.some(session => session.capturedSessionId && session.capturedSessionId === thread.nativeSessionId)).map(thread => ({ kind: "chat" as const, id: thread.id }))];
+      const target = targets[Number(event.key) - 1];
+      if (target) { event.preventDefault(); if (target.kind === "session") setSelectedSessionId(target.id); else { chat.setActiveThreadId(target.id); setSelectedSessionId(null); } }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
-  }, [chat.threads, mode]);
+  }, [chat.threads, agents.sessions, mode]);
 
   const { proxies } = useCliProxySettings();
   // Conversations and running sessions share one tree, so a folder holds the
@@ -283,6 +289,36 @@ export function ChatView({
   const active = namedThreads.find((thread) => thread.id === chat.activeThreadId) ?? null;
   const activeLiveSession = active ? liveSessionForThread(active, agents.sessions, accountProfiles) : undefined;
   const shownSession = selectedSession ?? activeLiveSession;
+  async function forkSession(session: AgentSessionSummary, messages: readonly SessionConversationMessage[], throughIndex?: number, editedText?: string) {
+    if (session.sandboxed) throw new Error("這個來源使用外層沙盒，尚無法完整沿用其限制，沒有建立分支。");
+    if (!session.capturedSessionId || !["codex", "claude"].includes(session.definitionId) || session.state === "working" || session.queuedPrompts || session.closedReason) throw new Error("請先等來源工作階段完成目前回合。");
+    const profile = session.profileConfigPath ? accountProfiles.find(profile => profile.definitionId === session.definitionId && profile.configDirectory === session.profileConfigPath) : null;
+    if (session.profileConfigPath && !profile) throw new Error("找不到來源帳號設定，沒有改用其他帳號建立分支。");
+    const proxyId = cliProxyIdFromArguments(session.launchArguments);
+    const sourceMessages = messages.filter(message => message.tool?.kind !== "reasoning").map(message => ({
+      role: message.role, text: message.text, nativeTurnId: message.nativeTurnId, nativeMessageId: message.nativeMessageId,
+      tool: message.tool ? { callId: message.tool.callId, name: message.tool.name, kind: message.tool.kind as "call" | "result" } : undefined }));
+    const source = chat.importNativeConversation({ definitionId: session.definitionId as ChatDefinitionId, nativeSessionId: session.capturedSessionId,
+      workingDirectory: session.workingDirectory, title: session.label, accountProfileId: profile?.id ?? null, messages: sourceMessages, sessionSource: true, model: session.model ?? "",
+      ...(proxyId ? { provider: "cliproxyapi" as const, proxyId } : {}) });
+    // A passive mirror stays held by the existing PTY; it cannot start another writer.
+    if (!source.continuedInSession) await chat.continueInSession(source.id);
+    const selected = throughIndex === undefined ? undefined : messages[throughIndex];
+    const textRows = messages.filter(message => !message.tool);
+    const textIndex = selected ? textRows.indexOf(selected) : textRows.length - 1;
+    const sourceRows = source.items.filter(item => item.type === "user" || item.type === "text");
+    const through = sourceRows[textIndex];
+    if (!through) throw new Error("這則訊息尚未取得可核對的原生歷史。");
+    const branch = await chat.nativeFork(source.id, t("chat.branch.suffix"), through.id, editedText !== undefined, session.sessionId);
+    if (!branch) return;
+    if (editedText !== undefined && selected) {
+      const attachmentText = splitSessionAttachments(selected.text);
+      const files = mergeAttachmentPaths([], attachmentText.paths) ?? [];
+      await chat.send(branch.id, editedText, files, profile?.configDirectory ?? null);
+    }
+    setSelectedSessionId(null);
+  }
+
   const [handoffProblem, setHandoffProblem] = useState<string | null>(null);
   const handingOff = useRef(false);
   const [handingOffThreadId, setHandingOffThreadId] = useState<string | null>(null);
@@ -439,8 +475,12 @@ export function ChatView({
             </button>
           </div>
         </div>
-        {mode === "threads" && pins.some(id => namedThreads.some(thread => thread.id === id)) && <nav className="chat-pins" aria-label={t("chat.nav.pinned")}>
-          <h4>{t("chat.nav.pinned")}</h4>{pins.map(id => { const thread = namedThreads.find(thread => thread.id === id); return thread && <button key={id} type="button" className="button button--ghost button--sm" onClick={() => { chat.setActiveThreadId(id); setSelectedSessionId(null); }}>{thread.title || t("chat.untitled")}</button>; })}
+        {mode === "threads" && pins.some(id => namedThreads.some(thread => thread.id === id) || agents.sessions.some(session => `session:${session.sessionId}` === id)) && <nav className="chat-pins" aria-label={t("chat.nav.pinned")}>
+          <h4>{t("chat.nav.pinned")}</h4>{pins.map(id => {
+            const session = agents.sessions.find(session => `session:${session.sessionId}` === id);
+            if (session) return <button key={id} type="button" className="button button--ghost button--sm" onClick={() => setSelectedSessionId(session.sessionId)}>{conversationDisplayName(names.names, nameTargets.session(session), session.label)}</button>;
+            const thread = namedThreads.find(thread => thread.id === id); return thread && <button key={id} type="button" className="button button--ghost button--sm" onClick={() => { chat.setActiveThreadId(id); setSelectedSessionId(null); }}>{thread.title || t("chat.untitled")}</button>;
+          })}
         </nav>}
         {mode === "threads" && newFolderOpen && (
           <form
@@ -627,7 +667,8 @@ export function ChatView({
           <SessionConversationPane key={shownSession.sessionId} session={shownSession}
             displayName={conversationDisplayName(names.names, nameTargets.session(shownSession), shownSession.label)}
             agents={agents} onOpenTerminal={() => onOpenSession(shownSession.sessionId)}
-            onSessionReplaced={setSelectedSessionId} />
+            onSessionReplaced={setSelectedSessionId} onSideChat={() => { setSideThreadId(null); setSideSessionId(shownSession.sessionId); }}
+            onFork={(messages, index, edited) => forkSession(shownSession, messages, index, edited)} />
         ) : selectedSessionId ? (
           <EmptyState icon={<ChatIcon />} title={t("sessionChat.closed")}
             description={t("sessionChat.chooseAnother")} />
@@ -677,9 +718,16 @@ export function ChatView({
         )}
       </div>
 
-      {sideThread && sideThread.id !== active?.id && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
+      {sideSession && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
+        <button type="button" className="button button--ghost button--sm" onClick={() => setSideSessionId(null)}>{t("chat.nav.closeSide")}</button>
+        {sideSession.sessionId === shownSession?.sessionId ? <p className="chat-notice">{t("chat.nav.selectMain")}</p> : <SessionConversationPane key={sideSession.sessionId} session={sideSession} agents={agents}
+          displayName={conversationDisplayName(names.names, nameTargets.session(sideSession), sideSession.label)}
+          onOpenTerminal={() => onOpenSession(sideSession.sessionId)} onSessionReplaced={setSideSessionId}
+          onFork={(messages, index, edited) => forkSession(sideSession, messages, index, edited)} />}
+      </aside>}
+      {sideThread && <aside className="chat-side-pane" aria-label={t("chat.nav.side")}>
         <button type="button" className="button button--ghost button--sm" onClick={() => setSideThreadId(null)}>{t("chat.nav.closeSide")}</button>
-        <ThreadPane key={sideThread.id} thread={sideThread} chat={chat} installed={installed} definitions={agents.catalog.filter(definition => chat.supported.some(id => id === definition.id) && definition.installed)} cliLabel={cliLabel} tag={tag} accountProfiles={accountProfiles} theme={theme} onDelete={() => setPendingDelete(sideThread)} />
+        {!shownSession && sideThread.id === active?.id ? <p className="chat-notice">{t("chat.nav.selectMain")}</p> : <ThreadPane key={sideThread.id} thread={sideThread} chat={chat} installed={installed} definitions={agents.catalog.filter(definition => chat.supported.some(id => id === definition.id) && definition.installed)} cliLabel={cliLabel} tag={tag} accountProfiles={accountProfiles} theme={theme} onDelete={() => setPendingDelete(sideThread)} />}
       </aside>}
       {pendingDelete && (
         <ConfirmDialog

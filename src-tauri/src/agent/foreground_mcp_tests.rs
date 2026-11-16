@@ -355,3 +355,93 @@ async fn desktop_composer_sends_once_from_the_real_codex_0169_resumed_screen() {
     assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
     assert!(entry.queued_prompts.lock().unwrap().is_empty());
 }
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_send_ignores_a_quoted_working_log_only_on_a_verified_resumed_main_composer() {
+    let f = ForegroundFixture::with_resume(true);
+    f.unreported_prompt();
+    let entry = f.registry.get(&f.id).unwrap();
+    *entry.prompt_screen.lock().unwrap() = prompt_screen::PromptScreen::new(30, 120);
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/codex-0169-resumed-idle.json"
+    )).unwrap();
+    let output = format!("{}\x1b[4;1HPrevious log: Working (12s - esc to interrupt)\x1b[K\x1b[22;3H", fixture["output"].as_str().unwrap());
+    f.registry.record_output(&f.id, output.as_bytes()).unwrap();
+    f.registry.update_state_with_origin(&f.id, AgentLifecycle::Working, AgentStateSource::Heuristic, true);
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    assert_eq!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"new desktop prompt\r")).unwrap(), 0);
+    assert!(entry.queued_prompts.lock().unwrap().is_empty());
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+    assert!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"do not infer completion\r")).unwrap() > 0);
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn native_refresh_preserves_nonblocking_control_rejection() {
+    let f = ForegroundFixture::new();
+    let entry = f.registry.get(&f.id).unwrap();
+    let input = entry.input.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let worker = {
+        let (registry, sink, id) = (f.registry.clone(), f.sink.clone(), f.id.clone());
+        std::thread::spawn(move || {
+            let refreshed = registry.refresh_native_command(&id);
+            let rejected = mcp_prompt(sink.as_ref(), &registry, &id, "synthetic unauthorized probe", true);
+            tx.send((refreshed, rejected)).unwrap();
+        })
+    };
+    let observed = rx.recv_timeout(Duration::from_secs(1));
+    // Always release before asserting, so a regression fails rather than hangs.
+    drop(input);
+    worker.join().unwrap();
+    let (refreshed, result) = observed.expect("readiness refresh waited behind terminal input");
+    assert!(!refreshed);
+    assert_eq!(result.unwrap_err(), MCP_NOT_CONTROLLED);
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn native_refresh_preserves_the_original_mcp_grant_before_waiting() {
+    let f = ForegroundFixture::new();
+    set_mcp_control(f.sink.as_ref(), &f.registry, &f.id, true).unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let input = entry.input.lock().unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let worker = {
+        let (registry, sink, id) = (f.registry.clone(), f.sink.clone(), f.id.clone());
+        std::thread::spawn(move || mcp_prompt_with_grant_observer(
+            sink.as_ref(), &registry, &id, "synthetic stale grant probe", true, || {
+                ready_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            },
+        ))
+    };
+    let snapshotted = ready_rx.recv_timeout(Duration::from_secs(1));
+    set_mcp_control(f.sink.as_ref(), &f.registry, &f.id, false).unwrap();
+    set_mcp_control(f.sink.as_ref(), &f.registry, &f.id, true).unwrap();
+    resume_tx.send(()).unwrap();
+    drop(input);
+    let result = worker.join().unwrap();
+    snapshotted.expect("grant was not captured before waiting on terminal input");
+    assert_eq!(result.unwrap_err(), MCP_GRANT_CHANGED);
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn native_refresh_preserves_desktop_input_ticket_before_waiting() {
+    let f = ForegroundFixture::new();
+    let entry = f.registry.get(&f.id).unwrap();
+    let input = entry.input.lock().unwrap();
+    let before = entry.desktop_input_ticket.load(Ordering::Acquire);
+    let worker = {
+        let (registry, sink, id) = (f.registry.clone(), f.sink.clone(), f.id.clone());
+        std::thread::spawn(move || enqueue(sink.as_ref(), &registry, &id, &encode(b"synthetic ticket probe\r")))
+    };
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while entry.desktop_input_ticket.load(Ordering::Acquire) == before && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    let reserved = entry.desktop_input_ticket.load(Ordering::Acquire) > before;
+    drop(input);
+    assert!(worker.join().unwrap().is_ok());
+    assert!(reserved, "desktop intent waited behind readiness refresh before reserving its ticket");
+}

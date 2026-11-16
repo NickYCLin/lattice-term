@@ -239,12 +239,14 @@ pub(super) async fn run(
     request: CommandRequest,
     mut cancel: watch::Receiver<bool>,
     outgoing: mpsc::Sender<RemoteMessage>,
+    slot: RunningSlot,
 ) -> bool {
     let id = request.id();
     let (reason, exit_code, detail) = match execute(request, &mut cancel, &outgoing).await {
         Ok((reason, code)) => (reason, code, String::new()),
         Err(detail) => (CommandEnd::Failed, None, detail),
     };
+    drop(slot);
     send(
         &outgoing,
         CommandEvent::Finished {

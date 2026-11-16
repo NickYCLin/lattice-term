@@ -26,11 +26,11 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
-mod browser;
+pub(crate) mod browser;
 mod codex_catalog;
 mod codex_server;
 mod elicitation;
-mod runtime_events;
+pub(crate) mod runtime_events;
 pub use runtime_events::{GoalState, PlanStep, RateLimitWindow};
 pub mod proxy_chat;
 
@@ -3682,6 +3682,18 @@ pub async fn restore_codex_conversation(
     let executable = crate::agent::catalog_executable("codex")
         .ok_or("Codex is unavailable; archive unchanged.")?;
     codex_catalog::set_archived(&executable, profile.map(Path::new), session_id, false).await
+}
+
+pub(crate) async fn read_session_goal(
+    native_id: &str,
+    directory: &str,
+    profile: Option<&str>,
+) -> Result<Option<GoalState>, String> {
+    validate_native_session_id(native_id)?;
+    let directory = validate_working_directory(directory)?;
+    let profile = profile_config_directory(Dialect::Codex, profile)?;
+    let executable = crate::agent::catalog_executable("codex").ok_or("Codex is not installed.")?;
+    codex_catalog::read_goal(&executable, profile.as_deref(), native_id, &directory).await
 }
 
 #[cfg(test)]

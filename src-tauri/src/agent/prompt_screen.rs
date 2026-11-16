@@ -16,6 +16,8 @@ pub(super) struct PromptScreen {
     synchronized: bool,
     size_supported: bool,
     codex_idle: bool,
+    codex_idle_at: Option<Instant>,
+    review_menu_at: Option<Instant>,
 }
 
 impl PromptScreen {
@@ -34,6 +36,8 @@ impl PromptScreen {
             synchronized: false,
             size_supported: rows <= MAX_ROWS && cols <= MAX_COLS,
             codex_idle: false,
+            codex_idle_at: None,
+            review_menu_at: None,
         }
     }
 
@@ -49,6 +53,7 @@ impl PromptScreen {
             if control.starts_with(b"\x1b]7501;") {
                 self.codex_idle = control == b"\x1b]7501;state=idle:app=codex\x1b\\"
                     || control == b"\x1b]7501;state=idle:app=codex\x07";
+                self.codex_idle_at = self.codex_idle.then_some(now);
             }
             match control {
                 b"\x1b[2J" | b"\x1bc" => self.awaiting_clear = false,
@@ -88,6 +93,19 @@ impl PromptScreen {
             self.invalid = true;
         }
         self.parser.process(&self.pending[..end]);
+        let screen = self.parser.screen();
+        if screen.hide_cursor() {
+            let content = screen.contents();
+            if content
+                .lines()
+                .any(|line| line.trim() == "Select a review preset")
+                && content
+                    .lines()
+                    .any(|line| line.trim() == "enter select · esc back")
+            {
+                self.review_menu_at = Some(now);
+            }
+        }
         self.pending.drain(..end);
         if self.pending.len() > 4096 {
             self.invalid = true;
@@ -108,7 +126,51 @@ impl PromptScreen {
         self.awaiting_clear = true;
     }
 
+    pub(super) fn codex_plan_mode(&self) -> bool {
+        self.parser
+            .screen()
+            .rows(0, self.parser.screen().size().1.get())
+            .any(|line| {
+                let line = line.trim();
+                is_codex_plan_footer(line)
+                    || line
+                        .strip_prefix("← for agents · ? for shortcuts")
+                        .is_some_and(|rest| is_codex_plan_footer(rest.trim()))
+            })
+    }
+    // This proves screen shape only. The caller must also require a NEW sealed
+    // compaction record from this exact thread before releasing input.
+    pub(super) fn codex_compact_screen_ready_after(&self, after: Instant, now: Instant) -> bool {
+        self.last_output > after && self.blocker_with_receipt("codex", now, true).is_none()
+    }
+    pub(super) fn codex_plan_ready_after(&self, after: Instant, now: Instant) -> bool {
+        self.codex_idle
+            && self.last_output > after
+            && self.codex_plan_mode()
+            && self.blocker("codex", now).is_none()
+    }
+
+    pub(super) fn codex_review_ready_after(&self, after: Instant, now: Instant) -> bool {
+        self.codex_idle
+            && self
+                .review_menu_at
+                .is_some_and(|menu| menu > after && self.last_output > menu)
+            && self.blocker("codex", now).is_none()
+    }
+
+    pub(super) fn codex_ready_after(&self, after: Instant, now: Instant) -> bool {
+        self.codex_idle_at.is_some_and(|at| at > after) && self.blocker("codex", now).is_none()
+    }
+
     pub(super) fn blocker(&self, definition: &str, now: Instant) -> Option<&'static str> {
+        self.blocker_with_receipt(definition, now, false)
+    }
+    fn blocker_with_receipt(
+        &self,
+        definition: &str,
+        now: Instant,
+        compaction_receipt_required: bool,
+    ) -> Option<&'static str> {
         if !matches!(definition, "codex" | "claude" | "gemini") {
             return Some("terminal_profile_unsupported");
         }
@@ -176,7 +238,7 @@ impl PromptScreen {
         // and its model/status plus shortcut footer. Idle alone also occurs
         // in selection menus, which must never authorize Enter.
         let native_main_composer = definition == "codex"
-            && self.codex_idle
+            && (self.codex_idle || compaction_receipt_required)
             && placeholder
             && rows
                 .iter()
@@ -187,7 +249,19 @@ impl PromptScreen {
                 .skip(usize::from(row) + 1)
                 .any(|line| !line.trim().starts_with('⚠') && is_codex_status_line(line.trim()));
         let text = text.to_lowercase();
-        if super::has_explicit_working_status(&text)
+        // With a verified idle main composer, old quoted status text higher
+        // in history is not a live activity footer. Still reject a current or
+        // wrapped working banner in the four rows immediately above it.
+        let working = if native_main_composer {
+            rows[..usize::from(row)]
+                .iter()
+                .rev()
+                .take(4)
+                .any(|line| super::has_explicit_working_status(&line.to_lowercase()))
+        } else {
+            super::has_explicit_working_status(&text)
+        };
+        if working
             || (!native_main_composer
                 && (super::has_attention_marker(&text)
                     || super::has_actionable_attention_prompt(&text)
@@ -233,7 +307,9 @@ impl PromptScreen {
                     .strip_suffix("% context left")
                     .is_some_and(|number| number.parse::<u8>().is_ok_and(|number| number <= 100))
                 && !(definition == "codex"
-                    && (is_codex_status_line(line) || is_codex_shortcut_footer(line)))
+                    && (is_codex_status_line(line)
+                        || is_codex_shortcut_footer(line)
+                        || is_codex_plan_footer(line)))
         }) {
             return Some("terminal_screen_unknown");
         }
@@ -268,7 +344,18 @@ fn is_codex_shortcut_footer(line: &str) -> bool {
     line.strip_prefix("← for agents · ? for shortcuts")
         .is_some_and(|rest| {
             rest.trim().is_empty()
+                || is_codex_plan_footer(rest.trim())
                 || (rest.trim().starts_with('⚠') && is_codex_status_line(rest.trim()))
+        })
+}
+
+fn is_codex_plan_footer(line: &str) -> bool {
+    line.strip_prefix("Plan mode (shift+tab to cycle)")
+        .is_some_and(|rest| {
+            rest.is_empty()
+                || rest.strip_prefix(" · ").is_some_and(|warning| {
+                    warning.starts_with('⚠') && is_codex_status_line(warning)
+                })
         })
 }
 
@@ -349,6 +436,89 @@ mod tests {
     }
 
     #[test]
+    fn real_0169_plan_and_review_cancel_have_verified_receipts_without_a_new_idle_event() {
+        for (kind, raw) in [
+            (
+                "plan",
+                include_str!("../../tests/fixtures/codex-0169-plan-mode.json"),
+            ),
+            (
+                "review",
+                include_str!("../../tests/fixtures/codex-0169-review-cancel.json"),
+            ),
+        ] {
+            let fixture: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let now = Instant::now();
+            let mut screen = PromptScreen::new(30, 120);
+            screen.feed(
+                fixture["before"].as_str().unwrap().as_bytes(),
+                now - Duration::from_secs(10),
+            );
+            assert!(!screen.codex_plan_mode());
+            let started = now - Duration::from_secs(5);
+            if kind == "review" {
+                screen.feed(
+                    fixture["menu"].as_str().unwrap().as_bytes(),
+                    now - Duration::from_secs(4),
+                );
+                screen.settle_for_test();
+                assert!(
+                    screen.review_menu_at.is_some(),
+                    "{}",
+                    screen.parser.screen().contents()
+                );
+                assert!(!screen.codex_review_ready_after(started, now));
+            }
+            screen.feed(
+                fixture["after"].as_str().unwrap().as_bytes(),
+                now - Duration::from_secs(3),
+            );
+            assert_eq!(
+                screen.blocker("codex", now),
+                None,
+                "{}: {}",
+                kind,
+                screen.parser.screen().contents()
+            );
+            assert!(!screen.codex_ready_after(started, now));
+            if kind == "plan" {
+                assert!(screen.codex_plan_ready_after(started, now));
+            } else {
+                assert!(screen.codex_review_ready_after(started, now));
+            }
+            screen.feed(b"\x1b]7501;state=working:app=codex\x1b\\", now);
+            screen.settle_for_test();
+            assert!(!screen.codex_plan_ready_after(started, Instant::now()));
+            assert!(!screen.codex_review_ready_after(started, Instant::now()));
+        }
+    }
+
+    #[test]
+    fn real_0169_compaction_returns_to_known_composer_without_emitting_another_idle_event() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-0169-compacted-idle.json"
+        ))
+        .unwrap();
+        let now = Instant::now();
+        let mut screen = PromptScreen::new(30, 120);
+        screen.feed(
+            fixture["before"].as_str().unwrap().as_bytes(),
+            now - Duration::from_secs(10),
+        );
+        let started = now - Duration::from_secs(5);
+        screen.feed(
+            fixture["after"].as_str().unwrap().as_bytes(),
+            now - Duration::from_secs(3),
+        );
+        assert!(
+            screen.codex_compact_screen_ready_after(started, now),
+            "{}",
+            screen.parser.screen().contents()
+        );
+        assert!(!screen.codex_ready_after(started, now));
+    }
+
+    #[test]
     fn native_idle_main_composer_accepts_real_0169_resumed_history() {
         let screen = codex_0169_fixture();
         assert_eq!(screen.blocker("codex", Instant::now()), None);
@@ -363,6 +533,26 @@ mod tests {
             screen.settle_for_test();
             assert!(screen.blocker("codex", Instant::now()).is_some(), "{state}");
         }
+    }
+
+    #[test]
+    fn quoted_working_status_in_old_history_does_not_block_a_verified_idle_composer() {
+        let mut screen = codex_0169_fixture();
+        screen.feed(
+            b"\x1b[4;1HPrevious log: Working (12s - esc to interrupt)\x1b[K\x1b[22;3H",
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        assert_eq!(screen.blocker("codex", Instant::now()), None);
+        screen.feed(
+            b"\x1b[20;1HWorking (12s - esc to interrupt)\x1b[22;3H",
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        assert_eq!(
+            screen.blocker("codex", Instant::now()),
+            Some("terminal_dialog_or_work")
+        );
     }
 
     #[test]

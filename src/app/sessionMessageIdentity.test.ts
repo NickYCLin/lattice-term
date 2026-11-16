@@ -38,3 +38,16 @@ it("does not reuse another conversation's rendering identities after an identity
   expect(cleared.messages).toEqual([]);
   expect(next.messages[0].renderId).not.toBe(first.messages[0].renderId);
 });
+
+it("retains native DOM identities as a message and tool output grow", () => {
+  const messages: SessionConversationMessage[] = [
+    { ...reply("first chunk"), nativeMessageId: "native-1" }, tool(1),
+  ];
+  const first = sessionMessageReducer(initialSessionMessages, { kind: "snapshot", messages });
+  const next = sessionMessageReducer(first, { kind: "snapshot", messages: [
+    { ...messages[0], text: "first chunk and next chunk" }, { ...messages[1], text: "streamed output" },
+  ] });
+  expect(next.messages.map(row => row.renderId)).toEqual(first.messages.map(row => row.renderId));
+  expect(next.messages.map(row => row.text)).toEqual(["first chunk and next chunk", "streamed output"]);
+  expect(next.messages[0]).not.toBe(first.messages[0]);
+});

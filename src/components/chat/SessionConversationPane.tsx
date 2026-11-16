@@ -1,3 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
+import type { SessionConversationMessage } from "../../app/useSessionConversation";
+import { SessionMessage } from "./SessionMessage";
+import { useSessionConversationActions } from "./SessionConversationActions";
+import { SessionToolCard } from "./SessionToolCard";
+import { PlanProgress, GoalProgress } from "./PlanProgress";
+import { ChatArtifact } from "./ChatArtifact";
 import { approvalShortcut } from "../../app/approvalShortcut";
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatAttachment } from "../../app/agentChat";
@@ -28,7 +35,6 @@ import { shouldSubmitChatInput } from "../../app/chatInputPreferences";
 import { ChatStatus } from "./ChatStatus";
 import { useComposerAssistance } from "./ComposerAssistance";
 import { shouldRecallPrompt } from "../../app/composerAssistance";
-import { ChatMarkdown } from "./ChatMarkdown";
 import { displayPath } from "../../app/displayPath";
 import { imageFileName } from "../../app/chatImages";
 import { switchesModelInPlace } from "../../app/sessionModelSwitch";
@@ -63,20 +69,29 @@ function AttachmentChip({ attachment, onRemove, removeLabel }: {
   </span>;
 }
 
-export function SessionConversationPane({ session, agents, displayName, onOpenTerminal, onSessionReplaced }: {
+export function SessionConversationPane({ session, agents, displayName, onOpenTerminal, onSessionReplaced, onSideChat, onFork }: {
   session: AgentSessionSummary;
   agents: AgentApi;
   displayName?: string;
   onOpenTerminal: () => void;
   /** The session was resumed under a new id, e.g. on another model. */
   onSessionReplaced: (sessionId: string) => void;
+  onSideChat?: () => void;
+  onFork?: (messages: readonly SessionConversationMessage[], throughIndex?: number, editedText?: string) => Promise<void>;
 }) {
   const { t } = useI18n();
-  const conversation = useSessionConversation(session.sessionId, agents);
+  const conversation = useSessionConversation(session.sessionId, agents, false);
   const queue = useSessionPromptQueue(session.sessionId, agents, !session.closedReason);
   const { draft, setDraft, attachments, setAttachments, pasting, setPasting,
     addAttachmentPaths, readDraft } = useConversationDraft("session", session.sessionId);
   const [notice, setNotice] = useState<string | null>(null);
+  const [forkWorking, setForkWorking] = useState(false);
+  const forkLock = useRef(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [artifact, setArtifact] = useState<string | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const [modelOpenRequest, setModelOpenRequest] = useState(0);
   const pastingRef = useRef(false);
@@ -86,6 +101,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { ref: messagesRef, onScroll, onWheel } = useChatScroll();
+  const nativePending = conversation.nativeCommandPending === true;
   const live = !session.closedReason;
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
@@ -97,9 +113,33 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     acknowledge();
   }, [session.state, session.stateSource, session.queuedPrompts, acknowledge]);
   const supported = session.definitionId === "codex" || session.definitionId === "claude";
-  const blocked = Boolean(session.closedReason) || conversation.sending;
+  const controls = useSessionConversationActions({ session, agents, messages: conversation.messages,
+    busy: working || attention || nativePending || forkWorking || Boolean(session.closedReason), nativeTools: conversation.nativeTools === true,
+    onCompose: setDraft, onNotice: setNotice, onOpen: onSessionReplaced,
+    onSearch: () => setSearchOpen(value => !value), onSideChat });
+  const blocked = Boolean(session.closedReason) || conversation.sending || controls.working || forkWorking;
+  async function fork(index?: number, edited?: string) {
+    if (!onFork || forkLock.current || blocked || working || attention || queuedCount > 0 || nativePending) throw new Error(t("chat.nativeOperation.running"));
+    forkLock.current = true; setForkWorking(true);
+    try { await onFork(conversation.messages, index, edited); }
+    finally { forkLock.current = false; setForkWorking(false); }
+  }
+  const matches = search.trim() ? conversation.messages.flatMap((message, index) => {
+    if (!message.text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) return [];
+    if (message.tool?.kind === "result") {
+      const call = conversation.messages.findIndex(row => row.tool?.kind === "call" && row.tool.callId === message.tool?.callId);
+      return [call < 0 ? index : call];
+    }
+    return [index];
+  }).filter((value, index, values) => values.indexOf(value) === index) : [];
+  const match = matches[searchIndex % Math.max(1, matches.length)];
+  useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
+  useEffect(() => {
+    if (searchOpen && match !== undefined) messagesRef.current?.querySelector<HTMLElement>(`[data-session-message="${match}"]`)?.scrollIntoView({ block: "center", behavior: "auto" });
+    // Follow explicit searches; ordinary transcript polling must not move the reader.
+  }, [search, searchIndex, searchOpen]);
   const hasContent = Boolean(draft.trim()) || attachments.length > 0;
-  const canSend = hasContent && !blocked;
+  const canSend = hasContent && !blocked && !nativePending;
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canSend || pastingRef.current) return;
@@ -183,9 +223,19 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
     onPaths: paths => { addAttachments(paths); },
     onError: reason => setNotice(t("chat.attachment.failed", { detail: errorText(reason) })),
   });
+  async function nativeCommand(command: "plan" | "review" | "compact") {
+    if (blocked || working || attention || queuedCount > 0 || nativePending || !session.capturedSessionId) return;
+    try {
+      await invoke("agent_session_prepare_command", { sessionId: session.sessionId, expectedNativeId: session.capturedSessionId, command });
+      onOpenTerminal();
+    } catch (reason) { setNotice(String(reason)); }
+  }
   const assistance = useComposerAssistance({ draft, onText: setDraft, inputRef,
     workingDirectory: session.workingDirectory, filesEnabled: supported, onFile: () => true,
-    commands: { model: () => setModelOpenRequest(value => value + 1), status: () => setStatusOpen(true) },
+    commands: { model: () => setModelOpenRequest(value => value + 1), status: () => setStatusOpen(true),
+      ...(!blocked && !nativePending && !working && !attention && queuedCount === 0 && session.definitionId === "codex" && session.capturedSessionId && !session.detached
+        ? { plan: () => { void nativeCommand("plan"); }, review: () => { void nativeCommand("review"); }, compact: () => { void nativeCommand("compact"); } } : {}),
+      ...(onFork && !working && !attention && !blocked && !nativePending && queuedCount === 0 ? { fork: () => { void fork().catch(reason => setNotice(String(reason))); } } : {}) },
   });
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     clipboard.onKeyDown(event.nativeEvent);
@@ -219,11 +269,12 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           {session.groupLabel && session.groupLabel !== session.label && <span className="chat-chip">
             {t("form.group")} · {session.groupLabel}
           </span>}
-          {live && <span className={`session-chat__state is-${session.state}`}>
-            {t(unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
+          {live && <span className={`session-chat__state is-${nativePending ? "needsAttention" : session.state}`}>
+            {t(nativePending ? "sessionChat.nativeState" : unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}
         </ConversationIdentity>
         <div className="chat-composer__actions">
+          {controls.actions}
           <button type="button" className="button button--ghost button--sm" onClick={onOpenTerminal}
             aria-label={t("chat.terminal")} title={t("chat.terminal")}>
             <TerminalIcon />
@@ -231,8 +282,20 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
         </div>
       </div>
     </header>
+    {searchOpen && <form className="chat-search" onSubmit={event => { event.preventDefault(); setSearchIndex(index => index + 1); }}>
+      <input ref={searchRef} className="input" value={search} onChange={event => { setSearch(event.target.value); setSearchIndex(0); }} aria-label={t("chat.nav.search")} onKeyDown={event => { if (event.key === "Escape") { setSearchOpen(false); setSearch(""); } }} />
+      <span role="status">{matches.length ? searchIndex % matches.length + 1 : 0} / {matches.length}</span>
+      <button type="button" className="button button--ghost button--sm" disabled={!matches.length} onClick={() => setSearchIndex(index => (index + matches.length - 1) % matches.length)}>↑</button>
+      <button className="button button--ghost button--sm" disabled={!matches.length}>↓</button>
+      <button type="button" className="button button--ghost button--sm" onClick={() => { setSearchOpen(false); setSearch(""); }}>{t("common.cancel")}</button>
+    </form>}
+    {controls.panels}
     {statusOpen && <ChatStatus model={session.model || ""} directory={session.workingDirectory}
+      context={conversation.progress?.contextUsage} rateLimits={conversation.progress?.rateLimits}
       state={t(stateLabel[session.state] ?? "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
+    {conversation.progress?.plan && <PlanProgress steps={conversation.progress.plan} compact />}
+    {conversation.progress?.goal && <GoalProgress goal={conversation.progress.goal} compact />}
+    {artifact && <ChatArtifact path={artifact} directory={session.workingDirectory} threadId={session.sessionId} onClose={() => setArtifact(null)} />}
     <div ref={messagesRef} className="chat-messages" onScroll={onScroll} onWheel={onWheel}>
       <div className="chat-messages__inner">
         {supported && <ConversationReadProgress loading={conversation.loading} />}
@@ -251,13 +314,20 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           && conversation.availability === "waitingForIdentity" && <p>{t("sessionChat.codexIdentityHint")}</p>}
         {session.closedReason && <p className="session-chat__diagnostic" role="status">{session.closedReason}</p>}
         {conversation.messages.map((message, index) => {
-          if (message.tool) return null;
-          const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
-          const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
-          return <ConversationMessage key={message.renderId ?? index} role={message.role} assistant={assistant}>
-            {sent ? <div>{sent.text}</div> : <ChatMarkdown source={message.text} />}
-            <SentAttachments attachments={files} workingDirectory={session.workingDirectory} threadId={session.sessionId} />
-          </ConversationMessage>;
+          if (message.tool) {
+            if (message.tool.kind === "result" && conversation.messages.some(row => row.tool?.kind === "call" && row.tool.callId === message.tool?.callId)) return null;
+            const result = message.tool.kind === "call" ? conversation.messages.find(row => row.tool?.kind === "result" && row.tool.callId === message.tool?.callId) : undefined;
+            return <div key={message.renderId ?? index} data-session-message={index} className={index === match ? "chat-search__match" : undefined}><SessionToolCard message={message} result={result} onOpenFile={setArtifact} /></div>;
+          }
+          const canFork = onFork && !working && !attention && !blocked && !nativePending && queuedCount === 0;
+          const hasBoundary = session.definitionId === "codex" ? Boolean(message.nativeTurnId) : Boolean(message.nativeMessageId);
+          const canEdit = canFork && message.role === "user" && (session.definitionId === "codex" ? hasBoundary
+            : !conversation.messages.slice(0, index).some(row => !row.tool && row.role === "user") || conversation.messages.slice(0, index).some(row => !row.tool && row.role === "assistant" && row.nativeMessageId));
+          return <div key={message.renderId ?? index} data-session-message={index} className={index === match ? "chat-search__match" : undefined}><SessionMessage
+            message={message} assistant={assistant} directory={session.workingDirectory} sessionId={session.sessionId} onOpenFile={setArtifact}
+            onEdit={canEdit ? text => fork(index, text) : undefined}
+            onBranch={canFork && hasBoundary && message.role === "assistant" ? () => { void fork(index).catch(reason => setNotice(String(reason))); } : undefined} />
+          </div>;
         })}
         {sessionSubmissionsNotQueued(conversation.submitted ?? [], queue.prompts).map(prompt => {
           const sent = splitSessionAttachments(prompt.text);
@@ -269,10 +339,10 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           </ConversationMessage>;
         })}
         <SessionPromptQueue sessionId={session.sessionId} queue={queue} />
-        {working && (
+        {(working || nativePending) && (
           <p className="session-chat__activity" role="status">
             <span className="session-chat__spinner" aria-hidden="true" />
-            {session.queuedPrompts > 0
+            {nativePending ? t("sessionChat.nativePending") : session.queuedPrompts > 0
               ? t("sessionChat.workingQueued", { count: session.queuedPrompts })
               : t("sessionChat.working")}
           </p>
@@ -332,7 +402,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
           <p>{t("sessionChat.queued", { count: queuedCount })}</p>
           {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
         </div>}
-        {conversation.queued === 0 && queuedCount === 0 && !working && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
+        {conversation.queued === 0 && queuedCount === 0 && !working && !nativePending && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
         {notice && <p role="status">{notice}</p>}
       </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>
@@ -363,7 +433,7 @@ export function SessionConversationPane({ session, agents, displayName, onOpenTe
               {t(session.sandboxed ? "sessionChat.access.sandboxed" : "sessionChat.access.full")}
             </span>
             <SessionModelPicker session={session} agents={agents} openRequest={modelOpenRequest}
-              disabled={unconfirmed || (working && !switchesModelInPlace(session))}
+              disabled={nativePending || unconfirmed || (working && !switchesModelInPlace(session))}
               onNotice={setNotice} onReplaced={onSessionReplaced} />
             <ComposerVoiceControls inputRef={inputRef} draft={draft} hasContent={hasContent}
               blocked={blocked || pasting} working={working} sending={conversation.sending} canSend={canSend}

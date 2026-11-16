@@ -1113,6 +1113,12 @@ struct AgentSessionEntry {
 #[derive(Default)]
 struct AgentInputControl {
     desktop_editing: bool,
+    prepared_native_command: bool,
+    native_command_mode_only: bool,
+    native_command_plan: bool,
+    native_compact_before: Option<Option<String>>,
+    native_compact_poll: Option<Instant>,
+    native_command_after: Option<Instant>,
     desktop_paste: bool,
     desktop_escape: Vec<u8>,
     startup_seed_pending: bool,
@@ -1122,7 +1128,10 @@ struct AgentInputControl {
 
 impl AgentInputControl {
     fn desktop_busy(&self) -> bool {
-        self.desktop_editing || self.desktop_paste || !self.desktop_escape.is_empty()
+        self.desktop_editing
+            || self.desktop_paste
+            || !self.desktop_escape.is_empty()
+            || self.native_command_after.is_some()
     }
 }
 
@@ -2416,7 +2425,7 @@ impl AgentRegistry {
         Ok(registry)
     }
 
-    fn next_id(&self) -> Result<String, String> {
+    pub(crate) fn next_id(&self) -> Result<String, String> {
         // A saved group defaults to its original session id and outlives this
         // registry. A counter alone can join a new CLI to that old group after
         // restart. Keep the routing prefix and add entropy for every launch.
@@ -2494,9 +2503,16 @@ impl AgentRegistry {
             AgentStateSource::Heuristic => entry.input.try_lock().ok(),
             AgentStateSource::Integration => entry.input.lock().ok(),
         };
-        let Some(_input) = input else {
+        let Some(input) = input else {
             return false;
         };
+        if source == AgentStateSource::Heuristic
+            && input.native_command_after.is_some()
+            && input.native_command_mode_only
+            && next == AgentLifecycle::Working
+        {
+            return false;
+        }
         let Ok(mut summary) = entry.summary.lock() else {
             return false;
         };
@@ -2527,9 +2543,12 @@ impl AgentRegistry {
         let Ok(entry) = self.get(session_id) else {
             return false;
         };
-        let Some(_input) = entry.input.try_lock().ok() else {
+        let Some(input) = entry.input.try_lock().ok() else {
             return false;
         };
+        if input.native_command_after.is_some() && input.native_command_mode_only {
+            return false;
+        }
         let Ok(mut summary) = entry.summary.lock() else {
             return false;
         };
@@ -3040,6 +3059,133 @@ impl AgentRegistry {
             reasons.push("queued_prompts_pending");
         }
         Ok(reasons)
+    }
+
+    pub(crate) fn native_command_pending(&self, session_id: &str) -> bool {
+        self.get(session_id).is_ok_and(|entry| {
+            entry.input.lock().is_ok_and(|input| {
+                input.prepared_native_command || input.native_command_after.is_some()
+            })
+        })
+    }
+
+    /// A native mode command is not a model turn. Keep its dialog owned until
+    /// a new native idle receipt and the known empty composer both confirm it.
+    fn refresh_native_command(&self, session_id: &str) -> bool {
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        // This is a cooperative refresh, never a reason to wait before a
+        // caller captures its control grant or reserves desktop intent.
+        let Ok(mut input) = entry.input.try_lock() else {
+            return false;
+        };
+        let Some(after) = input.native_command_after else {
+            return false;
+        };
+        let Ok(summary) = entry.summary.lock() else {
+            return false;
+        };
+        if summary.definition_id != "codex"
+            || summary.state_source == AgentStateSource::Integration
+                && !releases_queued_prompt(summary.state, summary.state_source)
+            || self.approvals.current(session_id).is_some()
+        {
+            return false;
+        }
+        if !input.native_command_mode_only
+            && !releases_queued_prompt(summary.state, summary.state_source)
+        {
+            return false;
+        }
+        if let Some(before) = input.native_compact_before.clone() {
+            let ready = entry
+                .prompt_screen
+                .lock()
+                .is_ok_and(|screen| screen.codex_compact_screen_ready_after(after, Instant::now()));
+            if !ready
+                || input
+                    .native_compact_poll
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+            {
+                return false;
+            }
+            input.native_compact_poll = Some(Instant::now());
+            let Some(native_id) = summary.captured_session_id.as_deref() else {
+                return false;
+            };
+            if crate::transcript::session_compaction_receipt(
+                &summary.working_directory,
+                native_id,
+                summary.profile_config_path.as_deref().map(Path::new),
+            )
+            .is_ok_and(|current| current.is_some() && current != before)
+            {
+                input.native_command_after = None;
+                input.native_compact_before = None;
+                return true;
+            }
+            return false;
+        }
+        if entry.prompt_screen.lock().is_ok_and(|screen| {
+            screen.codex_ready_after(after, Instant::now())
+                || !input.native_command_mode_only
+                    && screen.codex_review_ready_after(after, Instant::now())
+                || input.native_command_plan && screen.codex_plan_ready_after(after, Instant::now())
+        }) {
+            input.native_command_after = None;
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn validate_session_fork_source(
+        &self,
+        session_id: &str,
+        native_id: &str,
+        definition: &str,
+        directory: &str,
+        profile: Option<&str>,
+    ) -> Result<crate::agent_chat::ChatPermission, String> {
+        self.refresh_native_command(session_id);
+        let entry = self.get(session_id)?;
+        let input = entry.input.lock().map_err(|error| error.to_string())?;
+        let summary = entry.summary.lock().map_err(|error| error.to_string())?;
+        let same_path = |a: &str, b: &str| {
+            std::fs::canonicalize(a)
+                .ok()
+                .zip(std::fs::canonicalize(b).ok())
+                .is_some_and(|(a, b)| a == b)
+        };
+        if summary.captured_session_id.as_deref() != Some(native_id)
+            || summary.definition_id != definition
+            || !same_path(&summary.working_directory, directory)
+            || match (summary.profile_config_path.as_deref(), profile) {
+                (None, None) => false,
+                (Some(a), Some(b)) => !same_path(a, b),
+                _ => true,
+            }
+        {
+            return Err("來源的帳號、工作目錄或原生對話已改變，沒有建立分支。".into());
+        }
+        if input.desktop_busy()
+            || input.startup_seed_pending
+            || self.approvals.current(session_id).is_some()
+            || !entry
+                .queued_prompts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .is_empty()
+            || !(releases_queued_prompt(summary.state, summary.state_source)
+                || self.foreground_terminal_blocker(&entry, &summary).is_none())
+        {
+            return Err("請等來源回合結束、清空待送訊息並處理目前的確認事項，再建立分支。".into());
+        }
+        session_fork_permission(
+            &summary.definition_id,
+            summary.sandboxed,
+            &summary.launch_arguments,
+        )
     }
 
     fn foreground_terminal_blocker(
@@ -3917,7 +4063,7 @@ fn has_explicit_claude_settings(arguments: &[String]) -> bool {
     })
 }
 
-fn claude_customizations_disabled(arguments: &[String]) -> bool {
+pub(crate) fn claude_customizations_disabled(arguments: &[String]) -> bool {
     arguments
         .iter()
         .any(|argument| matches!(argument.trim(), "--safe-mode" | "--bare"))
@@ -7814,6 +7960,16 @@ pub fn launch_with_replay(
     request: AgentLaunchRequest,
     restored_output: Option<Vec<u8>>,
 ) -> Result<AgentSessionSummary, String> {
+    launch_with_replay_and_tools(sink, registry, request, restored_output, None)
+}
+
+pub(crate) fn launch_with_replay_and_tools(
+    sink: Arc<dyn AgentSink>,
+    registry: Arc<AgentRegistry>,
+    request: AgentLaunchRequest,
+    restored_output: Option<Vec<u8>>,
+    tools: Option<crate::chat_tools::SessionLaunchTools>,
+) -> Result<AgentSessionSummary, String> {
     let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
     request.definition_id = validate_text(&request.definition_id, "Agent type", 64)?;
@@ -7928,7 +8084,10 @@ pub fn launch_with_replay(
             .then(|| configured_agent_model(&definition_id))
             .flatten()
     });
-    let session_id = registry.next_id()?;
+    let session_id = match &tools {
+        Some(tools) => tools.id.clone(),
+        None => registry.next_id()?,
+    };
     let reporter = registry.reporter.clone();
     let report_token = reporter
         .as_ref()
@@ -8134,6 +8293,14 @@ pub fn launch_with_replay(
     configure_node_runtime_for_script(&mut command, &executable);
     for prefix in &prefix_args {
         command.arg(prefix);
+    }
+    if let Some(tools) = &tools {
+        arguments = crate::agent_chat::browser::session_arguments(
+            &definition_id,
+            arguments,
+            &tools.arguments,
+        );
+        command.env(crate::chat_tools::environment(), &tools.url);
     }
     command.args(arguments);
     command.cwd(&working_directory);
@@ -8599,6 +8766,7 @@ pub fn launch_with_replay(
         });
     }
 
+    let tools_cleanup = tools.is_some();
     let wait_id = session_id;
     let wait_registry = Arc::clone(&registry);
     std::thread::spawn(move || {
@@ -8609,9 +8777,180 @@ pub fn launch_with_replay(
         if wait_registry.remove(&wait_id).is_some() {
             sink.closed(&wait_id, &reason);
         }
+        if tools_cleanup {
+            tauri::async_runtime::spawn(async move {
+                crate::chat_tools::close(&wait_id).await;
+            });
+        }
     });
 
     Ok(summary)
+}
+
+fn session_fork_permission(
+    definition: &str,
+    sandboxed: bool,
+    arguments: &[String],
+) -> Result<crate::agent_chat::ChatPermission, String> {
+    if sandboxed {
+        return Err("這個來源使用外層沙盒，尚無法完整沿用其限制，沒有建立分支。".into());
+    }
+    if definition == "claude"
+        && (claude_customizations_disabled(arguments)
+            || arguments
+                .iter()
+                .any(|arg| arg == "--mcp-config" || arg.starts_with("--mcp-config=")))
+    {
+        return Err("來源的安全模式或自訂 MCP 設定尚無法完整沿用，沒有建立分支。".into());
+    }
+    let bypass = match definition {
+        "codex" => "--dangerously-bypass-approvals-and-sandbox",
+        "claude" => "--dangerously-skip-permissions",
+        _ => return Err("這個來源尚未支援原生分支。".into()),
+    };
+    // Only an explicit, unambiguous launch policy can authorize full access.
+    // Account/workspace defaults are not permission evidence for a new writer.
+    let explicit_policy = arguments.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-s" | "-a"
+                | "-p"
+                | "--sandbox"
+                | "--ask-for-approval"
+                | "--profile"
+                | "--permission-mode"
+                | "--settings"
+                | "--full-auto"
+        ) || [
+            "--sandbox=",
+            "--ask-for-approval=",
+            "--profile=",
+            "--permission-mode=",
+            "--settings=",
+        ]
+        .iter()
+        .any(|flag| arg.starts_with(flag))
+    }) || arguments.windows(2).any(|pair| {
+        matches!(pair[0].as_str(), "-c" | "--config")
+            && ["sandbox", "approval", "permissions", "profiles"]
+                .iter()
+                .any(|key| pair[1].contains(key))
+    }) || arguments.iter().any(|arg| {
+        arg.starts_with("--config=")
+            && ["sandbox", "approval", "permissions", "profiles"]
+                .iter()
+                .any(|key| arg.contains(key))
+    });
+    Ok(
+        if arguments.iter().any(|arg| arg == bypass) && !explicit_policy {
+            crate::agent_chat::ChatPermission::Full
+        } else {
+            crate::agent_chat::ChatPermission::ReadOnly
+        },
+    )
+}
+
+/// Prepare a native slash command in the existing terminal without submitting it.
+/// A final Enter belongs to the user, so mode changes and dialogs cannot be
+/// mistaken for a model turn or authorize another writer to this history.
+pub(crate) fn prepare_native_command(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    expected_native_id: &str,
+    command: &str,
+) -> Result<(), String> {
+    let bytes = match command {
+        "plan" => b"/plan".as_slice(),
+        "review" => b"/review",
+        "compact" => b"/compact",
+        _ => return Err("不支援這個原生指令。".into()),
+    };
+    registry.refresh_native_command(session_id);
+    let entry = registry.get(session_id)?;
+    let mut input = entry.input.lock().map_err(|e| e.to_string())?;
+    let summary = entry.summary.lock().map_err(|e| e.to_string())?;
+    if summary.definition_id != "codex"
+        || summary.captured_session_id.as_deref() != Some(expected_native_id)
+        || !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done)
+        || input.desktop_busy()
+        || input.startup_seed_pending
+        || registry.approvals.current(session_id).is_some()
+        || !entry
+            .queued_prompts
+            .lock()
+            .map_err(|e| e.to_string())?
+            .is_empty()
+        || entry
+            .last_output_at
+            .lock()
+            .map_or(true, |at| at.elapsed() < prompt_screen::QUIET)
+        || entry.prompt_screen.lock().map_or(true, |screen| {
+            screen
+                .blocker(&summary.definition_id, Instant::now())
+                .is_some()
+        })
+    {
+        return Err("請在原終端確認輸入框已清空且沒有待處理事項；沒有寫入或送出指令。".into());
+    }
+    if command == "review" && !releases_queued_prompt(summary.state, summary.state_source) {
+        return Err("這個工作階段尚未確認原生完成回報，請在原終端執行審查。".into());
+    }
+    if command == "plan"
+        && entry
+            .prompt_screen
+            .lock()
+            .is_ok_and(|screen| screen.codex_plan_mode())
+    {
+        return Err("目前已在計畫模式，可在原終端切換模式。".into());
+    }
+    require_mcp_input_profile(&entry, &summary.definition_id)?;
+    input.native_compact_before = if command == "compact" {
+        Some(crate::transcript::session_compaction_receipt(
+            &summary.working_directory,
+            expected_native_id,
+            summary.profile_config_path.as_deref().map(Path::new),
+        )?)
+    } else {
+        None
+    };
+    input.native_compact_poll = None;
+    drop(summary);
+    // Retain ownership even if a partial write fails; never retry automatically.
+    observe_desktop_input(&mut input, bytes);
+    input.prepared_native_command = true;
+    input.native_command_mode_only = command != "review";
+    input.native_command_plan = command == "plan";
+    send_bytes_locked(sink, registry, session_id, bytes)
+}
+
+pub(crate) fn watch_prepared_native_command(
+    sink: Arc<dyn AgentSink>,
+    registry: Arc<AgentRegistry>,
+    session_id: String,
+) {
+    let registry = Arc::downgrade(&registry);
+    std::thread::spawn(move || loop {
+        let Some(registry) = registry.upgrade() else {
+            return;
+        };
+        if registry.refresh_native_command(&session_id) {
+            deliver_next_queued(sink.as_ref(), &registry, &session_id);
+            return;
+        }
+        let Ok(entry) = registry.get(&session_id) else {
+            return;
+        };
+        let pending = entry.input.lock().is_ok_and(|input| {
+            input.prepared_native_command || input.native_command_after.is_some()
+        });
+        if !pending {
+            return;
+        }
+        drop(entry);
+        drop(registry);
+        std::thread::sleep(Duration::from_millis(200));
+    });
 }
 
 pub fn send(
@@ -8700,6 +9039,16 @@ fn send_bytes(
     }
     discard_profile_invalidated_queue(sink, registry, session_id, &entry);
     let was_busy = input.desktop_busy();
+    let native_enter = input.prepared_native_command && matches!(bytes, b"\r" | b"\n");
+    if native_enter {
+        input.prepared_native_command = false;
+        input.native_command_after = Some(Instant::now());
+    } else if !is_terminal_status_reply(bytes)
+        && (prompt_input_shape(bytes).0 || bytes.contains(&0x7f) || bytes.contains(&8))
+    {
+        input.prepared_native_command = false;
+        input.native_command_after = None;
+    }
     let desktop_input = observe_desktop_input(&mut input, bytes);
     if desktop_input && input.startup_seed_pending {
         let choosing_trust = entry
@@ -8712,7 +9061,21 @@ fn send_bytes(
             input.startup_seed_pending = false;
         }
     }
-    send_bytes_locked(sink, registry, session_id, bytes)?;
+    if native_enter {
+        // No model submission: /plan and /compact may never emit a turn-stop
+        // hook. A fresh native receipt releases the maintenance gate instead.
+        if let Ok(mut completion) = entry.completion_gate.lock() {
+            completion.cancel();
+        }
+        entry.startup_gate.observe_input(bytes);
+        let mut writer = entry.writer.lock().map_err(|e| e.to_string())?;
+        writer
+            .write_all(bytes)
+            .and_then(|_| writer.flush())
+            .map_err(|e| e.to_string())?;
+    } else {
+        send_bytes_locked(sink, registry, session_id, bytes)?;
+    }
     if approval::answers_terminal_prompt(bytes) {
         // Answered in the terminal: the chat page's question is gone.
         registry
@@ -9497,6 +9860,7 @@ pub fn enqueue(
     }
     let entry = registry.get(session_id)?;
     let ticket = next_desktop_input_ticket(&entry, &bytes)?;
+    registry.refresh_native_command(session_id);
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if rejects_interrupted_desktop_input(&input, ticket, &bytes) {
         return Err(MCP_DRAFT_RECOVERY_ERROR.to_string());
@@ -9995,6 +10359,7 @@ fn mcp_prompt_inner(
             .definition_id,
     )?;
     after_grant_snapshot();
+    registry.refresh_native_command(session_id);
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if !prompt_grant_matches(&entry, Some(grant_epoch)) {
         return Err(MCP_GRANT_CHANGED.to_string());
@@ -15236,6 +15601,211 @@ notify = ["notify.exe", "turn-ended"]"#,
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn session_forks_never_widen_an_unknown_or_sandboxed_source_policy() {
+        use crate::agent_chat::ChatPermission;
+        for (definition, full) in [
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+            ("claude", "--dangerously-skip-permissions"),
+        ] {
+            assert!(matches!(
+                session_fork_permission(definition, false, &[]).unwrap(),
+                ChatPermission::ReadOnly
+            ));
+            assert!(matches!(
+                session_fork_permission(definition, false, &[full.into()]).unwrap(),
+                ChatPermission::Full
+            ));
+            assert!(session_fork_permission(definition, true, &[full.into()]).is_err());
+            for policy in [
+                "--sandbox=read-only",
+                "--permission-mode=plan",
+                "--settings=custom.json",
+                "--full-auto",
+            ] {
+                assert!(matches!(
+                    session_fork_permission(definition, false, &[full.into(), policy.into()])
+                        .unwrap(),
+                    ChatPermission::ReadOnly
+                ));
+            }
+        }
+        assert!(matches!(
+            session_fork_permission(
+                "codex",
+                false,
+                &[
+                    "--dangerously-bypass-approvals-and-sandbox".into(),
+                    "-c".into(),
+                    "sandbox_mode=read-only".into()
+                ]
+            )
+            .unwrap(),
+            ChatPermission::ReadOnly
+        ));
+        for special in ["--bare", "--safe-mode", "--mcp-config=custom.json"] {
+            assert!(session_fork_permission(
+                "claude",
+                false,
+                &["--dangerously-skip-permissions".into(), special.into()]
+            )
+            .is_err());
+        }
+        assert!(session_fork_permission("unknown", false, &[]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_command_preparation_preserves_the_source_and_never_sends_enter() {
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector;
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Native command fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        {
+            let mut summary = entry.summary.lock().unwrap();
+            summary.definition_id = "codex".into();
+            summary.captured_session_id = Some("synthetic-native".into());
+            summary.state = AgentLifecycle::Done;
+            summary.state_source = AgentStateSource::Integration;
+        }
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let _original = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(Capture(writes.clone())),
+        );
+        assert!(
+            prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "review")
+                .is_err()
+        );
+        let past = Instant::now() - Duration::from_secs(5);
+        entry.prompt_screen.lock().unwrap().feed(
+            b"\x1b[2J\x1b[?25h\x1b[?2004h\x1b[1;1H\xe2\x80\xba \x1b[3;1H? for shortcuts\x1b[1;3H",
+            past,
+        );
+        *entry.last_output_at.lock().unwrap() = past;
+        assert!(
+            prepare_native_command(sink.as_ref(), &registry, id, "wrong-native", "review").is_err()
+        );
+        assert!(prepare_native_command(
+            sink.as_ref(),
+            &registry,
+            id,
+            "synthetic-native",
+            "review\rnew prompt"
+        )
+        .is_err());
+        assert!(writes.lock().unwrap().is_empty());
+        registry
+            .validate_session_fork_source(
+                id,
+                "synthetic-native",
+                "codex",
+                &session.working_directory,
+                None,
+            )
+            .unwrap();
+        prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "review").unwrap();
+        assert_eq!(*writes.lock().unwrap(), b"/review");
+        assert!(entry.input.lock().unwrap().desktop_busy());
+        assert!(prepare_native_command(
+            sink.as_ref(),
+            &registry,
+            id,
+            "synthetic-native",
+            "compact"
+        )
+        .is_err());
+        assert!(registry
+            .validate_session_fork_source(
+                id,
+                "synthetic-native",
+                "codex",
+                &session.working_directory,
+                None
+            )
+            .is_err());
+        assert_eq!(entry.summary.lock().unwrap().state, AgentLifecycle::Done);
+        assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+        send_bytes(sink.as_ref(), &registry, id, b"\r").unwrap();
+        assert_eq!(entry.summary.lock().unwrap().state, AgentLifecycle::Done);
+        assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+        assert!(entry.input.lock().unwrap().native_command_after.is_some());
+        assert!(!registry.refresh_native_command(id)); // The pre-command screen is stale.
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                id,
+                &encode(b"after native mode\r")
+            )
+            .unwrap(),
+            1
+        );
+        entry
+            .prompt_screen
+            .lock()
+            .unwrap()
+            .feed(b"\x1b]7501;state=idle:app=codex\x1b\\", Instant::now());
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        registry.update_state(id, AgentLifecycle::Working, AgentStateSource::Integration);
+        assert!(!registry.refresh_native_command(id)); // A real model turn still owns completion.
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        assert!(registry.refresh_native_command(id));
+        assert!(!entry.input.lock().unwrap().desktop_busy());
+        deliver_next_queued(sink.as_ref(), &registry, id);
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        assert_eq!(*writes.lock().unwrap(), b"/review\rafter native mode\r");
+        registry.update_state(id, AgentLifecycle::Done, AgentStateSource::Integration);
+        prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "plan").unwrap();
+        watch_prepared_native_command(sink.clone(), registry.clone(), id.clone());
+        send_bytes(sink.as_ref(), &registry, id, b"\r").unwrap();
+        assert!(!registry.update_codex_working_from_output(id));
+        assert!(!registry.update_state_with_origin(
+            id,
+            AgentLifecycle::Working,
+            AgentStateSource::Heuristic,
+            true
+        ));
+        assert_eq!(
+            enqueue(
+                sink.as_ref(),
+                &registry,
+                id,
+                &encode(b"automatic release\r")
+            )
+            .unwrap(),
+            1
+        );
+        entry
+            .prompt_screen
+            .lock()
+            .unwrap()
+            .feed(b"\x1b]7501;state=idle:app=codex\x1b\\", Instant::now());
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && !entry.queued_prompts.lock().unwrap().is_empty() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(entry.queued_prompts.lock().unwrap().is_empty());
+        assert!(writes
+            .lock()
+            .unwrap()
+            .ends_with(b"/plan\rautomatic release\r"));
+        registry.stop_all();
     }
 
     /// Whether the PTY echoed `needle` back within `within`.

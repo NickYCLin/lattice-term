@@ -426,8 +426,101 @@ fn kind_order(kind: &str) -> u8 {
     }
 }
 
+/// Goal metadata from the exact account's native store; never starts a turn.
+pub(super) async fn read_goal(
+    executable: &Path,
+    profile: Option<&Path>,
+    native_id: &str,
+    directory: &Path,
+) -> Result<Option<super::GoalState>, String> {
+    let mut command = headless_command(executable);
+    command.arg("app-server");
+    apply_profile_environment(&mut command, Dialect::Codex, profile);
+    command.kill_on_drop(true);
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let result = async {
+        let mut stdin = child.stdin.take().ok_or("Codex input unavailable")?;
+        let mut reader = BufReader::new(child.stdout.take().ok_or("Codex output unavailable")?);
+        tauri::async_runtime::spawn(stderr_tail(child.stderr.take()));
+        let mut initialize: Value =
+            serde_json::from_str(&requests(None).remove(0)).map_err(|error| error.to_string())?;
+        initialize["params"]["capabilities"] = serde_json::json!({"experimentalApi":true});
+        stdin
+            .write_all(format!("{initialize}\n").as_bytes())
+            .await
+            .map_err(|error| error.to_string())?;
+        stdin.flush().await.map_err(|error| error.to_string())?;
+        read_rpc_reply(&mut reader, 1).await?;
+        let read = serde_json::json!({"id":2,"method":"thread/read","params":{"threadId":native_id,"includeTurns":false}});
+        stdin
+            .write_all(
+                format!("{{\"method\":\"initialized\",\"params\":{{}}}}\n{read}\n").as_bytes(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        stdin.flush().await.map_err(|error| error.to_string())?;
+        let source = read_rpc_reply(&mut reader, 2).await?;
+        if source["thread"]["id"] != native_id
+            || source["thread"]["cwd"]
+                .as_str()
+                .and_then(|value| std::fs::canonicalize(value).ok())
+                .as_deref()
+                != Some(directory)
+        {
+            return Err("原生對話的工作目錄或識別碼已改變。".into());
+        }
+        let request =
+            serde_json::json!({"id":3,"method":"thread/goal/get","params":{"threadId":native_id}});
+        stdin
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .map_err(|error| error.to_string())?;
+        stdin.flush().await.map_err(|error| error.to_string())?;
+        let response = read_rpc_reply(&mut reader, 3).await?;
+        let goal = &response["goal"];
+        if goal.is_null() {
+            return Ok(None);
+        }
+        if goal["threadId"] != native_id {
+            return Err("原生目標不屬於目前對話。".into());
+        }
+        let goal: super::GoalState =
+            serde_json::from_value(goal.clone()).map_err(|error| error.to_string())?;
+        if goal.objective.len() > 4096
+            || !matches!(
+                goal.status.as_str(),
+                "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete"
+            )
+        {
+            return Err("原生目標資料無效。".into());
+        }
+        Ok(Some(goal))
+    };
+    let result = tokio::time::timeout(Duration::from_secs(6), result)
+        .await
+        .map_err(|_| "讀取原生目標逾時。".to_string());
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    result?
+}
+
 #[cfg(test)]
 mod tests {
+    // Only the isolated child opens this executable for writing. A writable
+    // parent FD can be inherited by another test's fork before close-on-exec,
+    // producing ETXTBSY even after this thread has closed its own handle.
+    #[cfg(unix)]
+    fn executable_fixture(path: &std::path::Path, script: &str) {
+        let mut writer = std::process::Command::new("/bin/sh")
+            .args(["-c", "cat > \"$1\" && chmod 700 \"$1\"", "fixture"])
+            .arg(path)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut writer.stdin.take().unwrap(), script.as_bytes()).unwrap();
+        assert!(writer.wait().unwrap().success());
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -481,6 +574,51 @@ mod tests {
             .await
             .unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn session_goal_reads_metadata_only_and_rejects_another_thread() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().canonicalize().unwrap();
+        let executable = directory.join("goal-fixture");
+        let source = r##"#!/usr/bin/env python3
+import sys,json,os
+assert os.environ['CODEX_HOME'] == __CWD__
+assert sys.argv[1:] == ['app-server']
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request.get('method')
+    if method=='initialize':
+        assert request['params']['capabilities']['experimentalApi']
+        result={}
+    elif method=='initialized': continue
+    elif method=='thread/read':
+        assert request['params']['includeTurns'] == False
+        result={'thread':{'id':request['params']['threadId'],'cwd':__CWD__}}
+    elif method=='thread/goal/get':
+        result={'goal':{'threadId':'synthetic-thread','objective':'檢查原生目標','status':'active','tokensUsed':12,'tokenBudget':1000,'timeUsedSeconds':3}}
+    else: raise Exception('No turn, resume, fork, or goal write is permitted')
+    print(json.dumps({'id':request['id'],'result':result}),flush=True)
+"##.replace("__CWD__", &serde_json::to_string(&directory).unwrap());
+        executable_fixture(&executable, &source);
+        let goal = super::read_goal(
+            &executable,
+            Some(&directory),
+            "synthetic-thread",
+            &directory,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(goal.objective, "檢查原生目標");
+        assert_eq!(goal.tokens_used, 12);
+        assert!(
+            super::read_goal(&executable, Some(&directory), "other-thread", &directory)
+                .await
+                .unwrap_err()
+                .contains("不屬於")
+        );
     }
 
     #[test]
@@ -558,7 +696,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn native_fork_preserves_source_provider_and_uses_the_requested_turn_boundary() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("codex-fork-fixture");
         let source = r##"#!/usr/bin/env python3
@@ -588,8 +725,7 @@ for line in sys.stdin:
         raise Exception('Unexpected method')
     print(json.dumps({'id':request['id'],'result':result}),flush=True)
 "##.replace("__CWD__", &serde_json::to_string(root.path().to_str().unwrap()).unwrap());
-        std::fs::write(&executable, source).unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        executable_fixture(&executable, &source);
         for before in [false, true] {
             let result = super::fork_thread(
                 &executable,

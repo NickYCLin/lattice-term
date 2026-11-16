@@ -48,7 +48,7 @@ it("reads the selected session, rejects stale reads and sends only through that 
   let finish!: (value: SessionConversationSnapshot) => void;
   let conversationReads = 0;
   invoke.mockImplementation((command: string) => {
-    if (command === "agent_session_approval") return Promise.resolve(null);
+    if (command === "agent_session_approval" || command === "agent_session_goal") return Promise.resolve(null);
     conversationReads += 1;
     return conversationReads === 1
       ? new Promise(resolve => { finish = resolve; })
@@ -290,7 +290,7 @@ it("refreshes immediately when the selected session captures its native ID", asy
   const root = createRoot(installFakeDom() as unknown as Element);
   let reads = 0;
   invoke.mockImplementation((command: string) => {
-    if (command === "agent_session_approval") return Promise.resolve(null);
+    if (command === "agent_session_approval" || command === "agent_session_goal") return Promise.resolve(null);
     reads += 1;
     return Promise.resolve(reads === 1
       ? { availability: "waitingForIdentity", messages: [], truncated: false }
@@ -320,7 +320,7 @@ it("serializes reads across ID capture and rejects the old identity's result", a
   let finish!: (value: SessionConversationSnapshot) => void;
   let reads = 0;
   invoke.mockImplementation((command: string) => {
-    if (command === "agent_session_approval") return Promise.resolve(null);
+    if (command === "agent_session_approval" || command === "agent_session_goal") return Promise.resolve(null);
     reads += 1;
     return reads === 1 ? new Promise(resolve => { finish = resolve; })
       : Promise.resolve({ ...snapshot([{ role: "assistant", text: "current" }]), truncated: true });
@@ -348,7 +348,7 @@ it("keeps the last readable snapshot and truncation notice when a retry fails", 
   const root = createRoot(installFakeDom() as unknown as Element);
   let reads = 0;
   invoke.mockImplementation((command: string) => {
-    if (command === "agent_session_approval") return Promise.resolve(null);
+    if (command === "agent_session_approval" || command === "agent_session_goal") return Promise.resolve(null);
     reads += 1;
     return reads === 1
       ? Promise.resolve({ ...snapshot([{ role: "assistant", text: "retained" }]), truncated: true })
@@ -366,4 +366,38 @@ it("keeps the last readable snapshot and truncation notice when a retry fails", 
     expect(api.readError).toBe("read failed");
     await act(async () => { root.unmount(); });
   } finally { vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("does not process CLI repaint events when the conversation does not show terminal output", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const onOutputTail = vi.fn();
+  const agents = fakeAgentApi({ onOutputTail });
+  invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_approval" ? null : snapshot()));
+  function Probe() { useSessionConversation("selected", agents, false); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); await vi.advanceTimersByTimeAsync(3000); });
+    expect(onOutputTail).not.toHaveBeenCalled();
+    expect(renderPreview).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("agent_session_conversation_snapshot", { sessionId: "selected" });
+  } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
+});
+
+it("updates native command receipts without retrying or sending a draft", async () => {
+  vi.useFakeTimers();
+  const root = createRoot(installFakeDom() as unknown as Element);
+  let pending = true;
+  const agents = fakeAgentApi();
+  invoke.mockImplementation((command: string) => Promise.resolve(command === "agent_session_conversation_snapshot" ? { ...snapshot(), nativeCommandPending: pending } : null));
+  let api!: ReturnType<typeof useSessionConversation>;
+  function Probe() { api = useSessionConversation("selected", agents, false); return null; }
+  try {
+    await act(async () => { root.render(<Probe />); });
+    expect(api.nativeCommandPending).toBe(true);
+    pending = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(api.nativeCommandPending).toBe(false);
+    expect(agents.enqueue).not.toHaveBeenCalled();
+    expect(agents.send).not.toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); vi.useRealTimers(); vi.clearAllMocks(); }
 });
