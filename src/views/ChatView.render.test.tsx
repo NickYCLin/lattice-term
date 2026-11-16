@@ -21,6 +21,7 @@ import { NativeHistoryContext, type NativeHistory } from "../app/useNativeConver
 import type { LocalConversation } from "../app/localConversationSessions";
 import { I18nProvider } from "../i18n";
 import { ChatView } from "./ChatView";
+import { createAutomation, emptyAutomationDraft } from "../app/agentAutomations";
 import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
 
 function render(
@@ -47,6 +48,16 @@ function render(
 }
 
 describe("ChatView", () => {
+  it("shows the first existing schedule on entry and reserves the empty state for an empty list", () => {
+    const automation = createAutomation(emptyAutomationDraft({ name: "每日合成巡檢", instructions: "檢查合成資料", workingDirectory: "/synthetic" }), "fixture");
+    const html = renderToStaticMarkup(<I18nProvider locale="zh-TW"><ChatView mode="automations"
+      agents={fakeAgentApi({ catalog: [fakeDefinition()] })} chat={fakeChatApi()}
+      automations={fakeAutomationsApi({ automations: [automation] })} onOpenSession={() => {}} /></I18nProvider>);
+    expect(html).not.toContain("還沒有排程任務");
+    expect(html).toContain("每日合成巡檢</h2>");
+    expect(html).toContain("chat-thread is-active");
+    expect(render(fakeChatApi(), fakeAgentApi({ catalog: [fakeDefinition()] }), "automations")).toContain("還沒有排程任務");
+  });
   it("uses the selected navigation area without an internal view switcher", () => {
     const chatMarkup = render();
     expect(chatMarkup).not.toContain('class="chat-mode');

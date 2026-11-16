@@ -1495,6 +1495,13 @@ button.chat-chip:hover {
   flex: 1;
 }
 
+.automation-form__schedule-summary {
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .automation-form__fields {
   gap: var(--space-4);
 }

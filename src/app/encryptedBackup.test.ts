@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AUTOMATIONS_RESTORED_EVENT, AUTOMATIONS_STORAGE_KEY } from "./agentAutomations";
 import { defaultPreferences } from "./preferences";
 import {
   applyRestoredLocalStorage,
@@ -23,6 +24,22 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe("encrypted backup local storage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("exports schedules, keeps them for older backups and notifies when restored", () => {
+    const original = '[{"id":"synthetic-existing"}]';
+    const restored = '[{"id":"synthetic-restored"}]';
+    const storage = memoryStorage({ [AUTOMATIONS_STORAGE_KEY]: original });
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+    expect(collectBackupLocalStorage(storage.adapter, defaultPreferences)[AUTOMATIONS_STORAGE_KEY]).toBe(original);
+    applyRestoredLocalStorage(storage.adapter, {});
+    expect(storage.adapter.getItem(AUTOMATIONS_STORAGE_KEY)).toBe(original);
+    expect(dispatchEvent).not.toHaveBeenCalled();
+    applyRestoredLocalStorage(storage.adapter, { [AUTOMATIONS_STORAGE_KEY]: restored });
+    expect(storage.adapter.getItem(AUTOMATIONS_STORAGE_KEY)).toBe(restored);
+    expect(dispatchEvent).toHaveBeenCalledOnce();
+    expect(dispatchEvent.mock.calls[0][0].type).toBe(AUTOMATIONS_RESTORED_EVENT);
+  });
   it("includes display names and preserves them when restoring an older backup", () => {
     const key = "latticeterm.conversationNames.v1";
     const names = '[["synthetic-thread","自己的名稱"]]';

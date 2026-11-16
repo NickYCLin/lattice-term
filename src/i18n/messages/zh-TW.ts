@@ -2044,7 +2044,9 @@ export const zhTW = {
   "automation.unit.hours": "小時",
   "automation.permission.hint":
     "無人值守沒有人能回答詢問，所以這裡沒有「每次詢問」；預設唯讀，只有你確定要它改東西時才放寬。",
-  "automation.storage.note": "排程與指示只保存在這台電腦的 LatticeTerm 裡，目前不包含在加密備份中。請另行保存重要的排程指示。",
+  "automation.storage.note": "排程與指示保存在這台電腦的 LatticeTerm，並包含在加密備份中。還原不含排程資料的舊備份時，會保留本機既有排程。",
+  "automation.directory": "專案資料夾（必填）",
+  "automation.schedule.summary": "執行時間：{schedule}",
   "automation.weekday.0": "日",
   "automation.weekday.1": "一",
   "automation.weekday.2": "二",

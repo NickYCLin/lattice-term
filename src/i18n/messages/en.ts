@@ -2111,7 +2111,9 @@ export const en: Messages = {
   "automation.unit.hours": "hours",
   "automation.permission.hint":
     "Nobody is there to answer a prompt in an unattended run, so \"ask each time\" is not offered. Read only by default; widen it only when you want changes made.",
-  "automation.storage.note": "Schedules and instructions are stored locally in LatticeTerm. They are currently excluded from encrypted backups. Keep a separate copy of important instructions.",
+  "automation.storage.note": "Schedules and instructions are stored locally in LatticeTerm and included in encrypted backups. Restoring an older backup without schedule data keeps existing local schedules.",
+  "automation.directory": "Project folder (required)",
+  "automation.schedule.summary": "Run schedule: {schedule}",
   "automation.weekday.0": "Sun",
   "automation.weekday.1": "Mon",
   "automation.weekday.2": "Tue",

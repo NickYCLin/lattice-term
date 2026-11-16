@@ -368,81 +368,6 @@ function AutomationForm({
       </div>
       <div className="chat-messages">
         <div className="chat-messages__inner automation-form__fields">
-          <label className="field">
-            <span className="field__label">{t("automation.name")}</span>
-            <input
-              className={`input${errors.name ? " is-invalid" : ""}`}
-              value={draft.name}
-              maxLength={automationLimits.nameLength}
-              onChange={(event) => patch({ name: event.target.value })}
-            />
-            {message("name") && <span className="field__error">{message("name")}</span>}
-          </label>
-          <label className="field">
-            <span className="field__label">{t("automation.instructions")}</span>
-            <textarea
-              className={`input${errors.instructions ? " is-invalid" : ""}`}
-              rows={5}
-              value={draft.instructions}
-              placeholder={t("automation.instructions.placeholder")}
-              onChange={(event) => patch({ instructions: event.target.value })}
-            />
-            {message("instructions") && (
-              <span className="field__error">{message("instructions")}</span>
-            )}
-          </label>
-          <div className="chat-settings">
-            <ModelField
-              definitionId={draft.definitionId}
-              definitionIds={cliChoices}
-              cliLabel={cliLabel}
-              value={draft.model}
-              models={models}
-              loadModels={loadModels}
-              onChange={({ definitionId, model }) => patch({ definitionId, model })}
-            />
-            <div className="field field--grow">
-              <span className="field__label">{t("chat.directory")}</span>
-              <PathDropZone kind="directory" onSelect={path => patch({ workingDirectory: path })}>
-              <div className="chat-directory">
-                <button
-                  type="button"
-                  className="button button--secondary button--sm"
-                  onClick={chooseDirectory}
-                >
-                  <FolderIcon />
-                  {t("chat.directory.choose")}
-                </button>
-                <span className="chat-directory__path" title={displayPath(draft.workingDirectory)}>
-                  {draft.workingDirectory
-                    ? displayPath(draft.workingDirectory)
-                    : t("chat.directory.none")}
-                </span>
-              </div>
-              </PathDropZone>
-              {message("workingDirectory") && (
-                <span className="field__error">{message("workingDirectory")}</span>
-              )}
-            </div>
-            <label className="field">
-              <span className="field__label">{t("chat.permission")}</span>
-              <select
-                className="select"
-                value={draft.permission}
-                onChange={(event) => patch({ permission: event.target.value as ChatPermission })}
-              >
-                {chatPermissions
-                  .filter((permission) => permission !== "ask")
-                  .map((permission) => (
-                    <option key={permission} value={permission}>
-                      {t(permissionLabelKey[permission])}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
-          <p className="chat-composer__hint">{t("automation.permission.hint")}</p>
-
           <fieldset className="automation-schedule">
             <legend className="field__label">{t("automation.schedule")}</legend>
             <div className="automation-schedule__kind" role="radiogroup">
@@ -621,12 +546,90 @@ function AutomationForm({
             {t("automation.schedule.hint")}{" "}
             {t("automation.concurrency.hint", { count: automationLimits.maxConcurrentRuns })}
           </p>
+          <label className="field">
+            <span className="field__label">{t("automation.name")}</span>
+            <input
+              className={`input${errors.name ? " is-invalid" : ""}`}
+              value={draft.name}
+              maxLength={automationLimits.nameLength}
+              onChange={(event) => patch({ name: event.target.value })}
+            />
+            {message("name") && <span className="field__error">{message("name")}</span>}
+          </label>
+          <label className="field">
+            <span className="field__label">{t("automation.instructions")}</span>
+            <textarea
+              className={`input${errors.instructions ? " is-invalid" : ""}`}
+              rows={5}
+              value={draft.instructions}
+              placeholder={t("automation.instructions.placeholder")}
+              onChange={(event) => patch({ instructions: event.target.value })}
+            />
+            {message("instructions") && (
+              <span className="field__error">{message("instructions")}</span>
+            )}
+          </label>
+          <div className="chat-settings">
+            <ModelField
+              definitionId={draft.definitionId}
+              definitionIds={cliChoices}
+              cliLabel={cliLabel}
+              value={draft.model}
+              models={models}
+              loadModels={loadModels}
+              onChange={({ definitionId, model }) => patch({ definitionId, model })}
+            />
+            <div className="field field--grow">
+              <span className="field__label">{t("automation.directory")}</span>
+              <PathDropZone kind="directory" onSelect={path => patch({ workingDirectory: path })}>
+              <div className="chat-directory">
+                <button
+                  type="button"
+                  className="button button--secondary button--sm"
+                  onClick={chooseDirectory}
+                >
+                  <FolderIcon />
+                  {t("chat.directory.choose")}
+                </button>
+                <span className="chat-directory__path" title={displayPath(draft.workingDirectory)}>
+                  {draft.workingDirectory
+                    ? displayPath(draft.workingDirectory)
+                    : t("chat.directory.none")}
+                </span>
+              </div>
+              </PathDropZone>
+              {message("workingDirectory") && (
+                <span className="field__error">{message("workingDirectory")}</span>
+              )}
+            </div>
+            <label className="field">
+              <span className="field__label">{t("chat.permission")}</span>
+              <select
+                className="select"
+                value={draft.permission}
+                onChange={(event) => patch({ permission: event.target.value as ChatPermission })}
+              >
+                {chatPermissions
+                  .filter((permission) => permission !== "ask")
+                  .map((permission) => (
+                    <option key={permission} value={permission}>
+                      {t(permissionLabelKey[permission])}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+          <p className="chat-composer__hint">{t("automation.permission.hint")}</p>
+
           {message("permission") && <Callout tone="danger">{message("permission")}</Callout>}
           {notice && <Callout tone="danger">{notice}</Callout>}
         </div>
       </div>
       <div className="chat-composer">
         <div className="chat-composer__box">
+          <p className="automation-form__schedule-summary" role="status">
+            {t("automation.schedule.summary", { schedule: describeSchedule(schedule, t, others) })}
+          </p>
           <div className="chat-composer__row">
             <span className="chat-composer__hint">{t("automation.storage.note")}</span>
             <div className="chat-composer__actions">

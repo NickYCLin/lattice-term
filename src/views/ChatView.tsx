@@ -197,6 +197,8 @@ export function ChatView({
   }
   const [projectNotice, setProjectNotice] = useState<string | null>(null);
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
+  const shownAutomationId = automations.automations.find(entry => entry.id === selectedAutomationId)?.id
+    ?? automations.automations[0]?.id ?? null;
   const [composingAutomation, setComposingAutomation] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -606,7 +608,7 @@ export function ChatView({
               <li key={automation.id}>
                 <button
                   type="button"
-                  className={`chat-thread${automation.id === selectedAutomationId && !composingAutomation ? " is-active" : ""}`}
+                  className={`chat-thread${automation.id === shownAutomationId && !composingAutomation ? " is-active" : ""}`}
                   onClick={() => {
                     setComposingAutomation(false);
                     setSelectedAutomationId(automation.id);
@@ -634,10 +636,11 @@ export function ChatView({
       <div className="chat-main">
         {(chat.removal?.error || chat.archivedReceipt) && <div className="chat-archive-status--mobile">{archiveStatus}</div>}
         {mode === "automations" && agents.mode !== "unavailable" ? (
-          composingAutomation || selectedAutomationId ? (
+          composingAutomation || shownAutomationId ? (
             <AutomationPane
+              key={composingAutomation ? "new" : shownAutomationId}
               automations={automations}
-              selectedId={selectedAutomationId}
+              selectedId={composingAutomation ? null : shownAutomationId}
               editing={composingAutomation}
               defaults={automationDefaults}
               installed={installed}
