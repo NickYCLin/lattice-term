@@ -1,0 +1,77 @@
+{
+  "codexVersion": "0.169.0",
+  "source": "Isolated app-server with a local synthetic Responses service; no real account or paid API",
+  "shellRelativeMs": [
+    0,
+    1003,
+    2006,
+    3008,
+    4011
+  ],
+  "deltas": [
+    {
+      "elapsedMs": 1219,
+      "notification": {
+        "method": "item/commandExecution/outputDelta",
+        "params": {
+          "itemId": "stream-command",
+          "delta": "2\n"
+        }
+      }
+    },
+    {
+      "elapsedMs": 2222,
+      "notification": {
+        "method": "item/commandExecution/outputDelta",
+        "params": {
+          "itemId": "stream-command",
+          "delta": "3\n"
+        }
+      }
+    },
+    {
+      "elapsedMs": 3224,
+      "notification": {
+        "method": "item/commandExecution/outputDelta",
+        "params": {
+          "itemId": "stream-command",
+          "delta": "4\n"
+        }
+      }
+    },
+    {
+      "elapsedMs": 4227,
+      "notification": {
+        "method": "item/commandExecution/outputDelta",
+        "params": {
+          "itemId": "stream-command",
+          "delta": "5\n"
+        }
+      }
+    }
+  ],
+  "completedElapsedMs": 5229,
+  "completed": {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "id": "stream-command",
+        "type": "commandExecution",
+        "command": "for i in 1 2 3 4 5; do echo \"$i\"; sleep 1; done",
+        "aggregatedOutput": "1\n2\n3\n4\n5\n",
+        "status": "completed",
+        "exitCode": 0
+      }
+    }
+  },
+  "modelToolResults": [
+    {
+      "elapsedMs": 1374,
+      "output": "1\n2\n"
+    },
+    {
+      "elapsedMs": 5239,
+      "output": "3\n4\n5\n"
+    }
+  ]
+}

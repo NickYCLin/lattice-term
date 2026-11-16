@@ -2894,4 +2894,60 @@ mod tests {
             }
         }
     }
+    #[tokio::test]
+    async fn stdout_delta_is_read_and_dispatched_before_the_next_frame_or_pipe_close() {
+        // A fake app-server leaves stdout open and writes no next frame until
+        // this client has observed the current one. No timing logs in runtime.
+        let (mut stdout, read_end) = tokio::io::duplex(4096);
+        let mut reader = BufReader::new(read_end);
+        let server = server_with(fresh_state("stream-turn"));
+        for index in 1..=5 {
+            let notification = serde_json::json!({"method":"item/commandExecution/outputDelta",
+                "params":{"itemId":"command","delta":format!("{index}\n")}});
+            let frame = format!("{notification}\n");
+            // Include fragmented JSON writes, not merely an in-memory parser.
+            let mid = frame.len() / 2;
+            stdout.write_all(&frame.as_bytes()[..mid]).await.unwrap();
+            stdout.write_all(&frame.as_bytes()[mid..]).await.unwrap();
+            let mut line = Vec::new();
+            assert!(tokio::time::timeout(
+                Duration::from_secs(1),
+                read_bounded_line(&mut reader, &mut line),
+            )
+            .await
+            .expect("reader waited for another frame")
+            .is_ok());
+            let value: Value = serde_json::from_slice(&line).unwrap();
+            let outcome = handle_line(&server, &value);
+            assert!(
+                matches!(outcome.events.as_slice(), [(turn,ChatEvent::ToolOutputDelta {item_id,delta})]
+                if turn == "stream-turn" && item_id == "command" && delta == &format!("{index}\n"))
+            );
+            assert!(!outcome.idle);
+            assert!(outcome.writes.is_empty());
+            // The next iteration (or EOF) has deliberately not happened yet.
+        }
+    }
+    #[tokio::test]
+    async fn recorded_codex_stream_forwards_every_available_delta_and_keeps_final_output_authoritative(
+    ) {
+        let trace: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-0169-output-streaming.json"
+        ))
+        .unwrap();
+        let server = server_with(fresh_state("stream-turn"));
+        for captured in trace["deltas"].as_array().unwrap() {
+            let notification = &captured["notification"];
+            let outcome = handle_line(&server, notification);
+            assert!(
+                matches!(outcome.events.as_slice(), [(_, ChatEvent::ToolOutputDelta {delta,..})]
+                if delta == notification["params"]["delta"].as_str().unwrap())
+            );
+        }
+        let outcome = handle_line(&server, &trace["completed"]);
+        assert!(outcome.events.iter().any(
+            |(_, event)| matches!(event,ChatEvent::ToolFinished{output,..}
+            if output == "1\n2\n3\n4\n5\n")
+        ));
+    }
 }
