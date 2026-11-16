@@ -13,6 +13,7 @@ function renderDrawer(
   options: {
     supportedProtocols?: readonly string[];
     mobile?: boolean;
+    database?: boolean;
   } = {},
 ) {
   return renderToStaticMarkup(
@@ -24,6 +25,8 @@ function renderDrawer(
           options.supportedProtocols ?? ["ssh", "sftp", "rdp", "vnc", "lattice"]
         }
         mobile={options.mobile ?? false}
+        databaseAvailable={options.database}
+        initialMode={options.database ? "database" : "remote"}
         onSave={vi.fn()}
         onClose={vi.fn()}
       />
@@ -167,4 +170,23 @@ describe("connection drawer", () => {
     expect(markup).not.toContain("使用者名稱");
     expect(markup).not.toContain("stale-user");
   });
+});
+
+it.each([
+  { editing: false, mobile: false, database: false },
+  { editing: true, mobile: false, database: false },
+  { editing: false, mobile: true, database: false },
+  { editing: false, mobile: true, database: true },
+])("uses the same centered accessible modal shell for %j", ({ editing, mobile, database }) => {
+  const profile = editing ? createConnectionProfile({ ...emptyDraft(), name: "Synthetic", hostname: "host.invalid" }, "synthetic") : null;
+  const markup = renderDrawer(profile, { mobile, database });
+  expect(markup).toContain('class="scrim scrim--center connection-modal-scrim"');
+  expect(markup).toContain('class="drawer connection-modal' + (database ? ' drawer--connection-database' : '') + '"');
+  expect(markup).toContain('role="dialog" aria-modal="true"');
+  const head = markup.indexOf('class="drawer__head"');
+  const body = markup.indexOf('class="drawer__body"');
+  const foot = markup.indexOf('class="drawer__foot"');
+  expect(head).toBeLessThan(body);
+  expect(body).toBeLessThan(foot);
+  expect(markup).toMatch(/type="submit"[^>]*form="[^"]+"/);
 });

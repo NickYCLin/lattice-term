@@ -119,6 +119,7 @@
   overflow-wrap: anywhere;
 }
 .app--mobile .drawer { height: 100%; margin: 0; min-width: 0; }
+.app--mobile .drawer.connection-modal { width: 100%; height: 100%; max-height: 100%; }
 .app--mobile .drawer__head,
 .app--mobile .drawer__foot { flex: none; }
 .app--mobile .drawer__head,

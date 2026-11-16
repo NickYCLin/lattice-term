@@ -71,7 +71,7 @@ it.each(["cancel", "close", "scrim", "escape"])("can discard edits after a catal
   else await act(async () => {
     if (exit === "escape") useModalFocus.mock.calls.slice().reverse().find(([options]) => options.active !== false)![0].onEscape();
     else {
-      const node = allNodes(container).find(node => exit === "close" ? props(node)?.["aria-label"] === "關閉" : props(node)?.className === "scrim")!;
+      const node = allNodes(container).find(node => exit === "close" ? props(node)?.["aria-label"] === "關閉" : String(props(node)?.className).split(" ").includes("connection-modal-scrim"))!;
       if (exit === "close") props(node).onClick();
       else props(node).onMouseDown();
     }

@@ -81,6 +81,38 @@
   overflow: hidden;
 }
 
+/* Connection editing shares a centered shell; other drawers keep their layout. */
+.drawer.connection-modal {
+  width: min(960px, 90vw);
+  max-width: 100%;
+  height: 85vh;
+  height: 85dvh;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  animation: rise-in var(--duration) var(--ease);
+}
+
+.connection-modal > .drawer__head,
+.connection-modal > .drawer__foot {
+  flex: none;
+}
+
+.connection-modal > .drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.connection-modal > .drawer__foot,
+.connection-modal .drawer__foot-actions {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .drawer__head {
   display: flex;
   align-items: flex-start;

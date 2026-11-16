@@ -1,5 +1,5 @@
 /**
- * Add and edit connection drawer.
+ * Add and edit connections in a centered modal.
  *
  * Keeps the primary task compact: choose a protocol, enter its actual target
  * fields, then save or save-and-connect. Organisation metadata is optional and
@@ -366,9 +366,9 @@ export function ConnectionDrawer({
   };
 
   return (
-    <div className="scrim" role="presentation" onMouseDown={requestClose}>
+    <div className="scrim scrim--center connection-modal-scrim" role="presentation" onMouseDown={requestClose}>
       <div
-        className={`drawer${databaseVisible ? " drawer--connection-database" : ""}`}
+        className={`drawer connection-modal${databaseVisible ? " drawer--connection-database" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

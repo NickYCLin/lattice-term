@@ -230,7 +230,6 @@
 @container (max-width: 38rem) { .database-manager__field-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .connection-drawer__remote-form[hidden], .drawer__foot button[hidden] { display: none; }
-.drawer.drawer--connection-database { width: min(78rem, calc(100vw - var(--space-6))); }
 .connection-setup { display: grid; gap: .75rem; }
 .connection-setup > p { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; }
 .connection-setup__modes { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
@@ -255,7 +254,6 @@
 .database-manager--settings .database-manager__footer { display: none; }
 .database-manager--settings .database-manager__layout { grid-template-columns: minmax(0, 1fr); }
 .database-manager--settings .database-manager__content { padding: 0; overflow: visible; }
-.drawer.drawer--connection-database { width: min(65rem, calc(100vw - var(--space-6))); }
 .connection-drawer__database > .form-section__title { margin-bottom: 1rem; }
 .database-manager--settings .database-manager__form-card { padding: 1.5rem; background: var(--surface-raised); }
 .database-manager--settings .database-manager__form-section { margin-bottom: 1.25rem; }
@@ -293,7 +291,6 @@
   .connection-setup__modes label { flex-direction: column; align-items: center; padding: .5rem; gap: .4rem; text-align: center; }
   .connection-setup__modes small { display: block; font-size: var(--text-2xs); }
   .connection-setup__modes { gap: .4rem; }
-  .drawer.drawer--connection-database { width: calc(100vw - 1rem); }
   .database-manager--settings .database-manager__form-card { padding: 1rem; }
   .drawer--connection-database .drawer__foot-actions { flex-wrap: wrap; }
   .drawer--connection-database .drawer__foot-actions .button { min-height: 2.75rem; flex: 1 1 auto; }
