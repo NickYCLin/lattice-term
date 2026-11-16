@@ -31,7 +31,6 @@
 
 * 依原生指令回執解除對話輸入保留 ([9562bab](https://github.com/NickYCLin/lattice-term/commit/9562babf12ce9bbad6618614340d3905b5954195))
 * 修正 Codex 對話誤判尚未就緒 ([5baa4e1](https://github.com/NickYCLin/lattice-term/commit/5baa4e18ba15b965898ffc21911de15584986c23))
-* 修正 Codex 對話誤判尚未就緒 ([7cdc42d](https://github.com/NickYCLin/lattice-term/commit/7cdc42d37d31f34bcc43730362224ea7aab737db))
 * 修正工作階段側欄資料夾排序 ([5007321](https://github.com/NickYCLin/lattice-term/commit/5007321dd1ede7ca063ab0eab0456c68e1083d82))
 * 修正排程備份說明與表單時間呈現 ([aa93558](https://github.com/NickYCLin/lattice-term/commit/aa935581432e58a14b8a17d260e1bef7ad10f220))
 * 修正跳板卡片標籤並辨識跨協定舊卡 ([6fb3ed6](https://github.com/NickYCLin/lattice-term/commit/6fb3ed602743e55cfccfa9dbfc988a24655bfcb9))
@@ -48,7 +47,6 @@
 * 將繪本主題改名為奶油繪本 ([97b782d](https://github.com/NickYCLin/lattice-term/commit/97b782dca4cfa6d3782e18711ef15465b24ed70d))
 * 將連線卡片管理改為浮動下拉選單 ([eaeb1e8](https://github.com/NickYCLin/lattice-term/commit/eaeb1e8a9021180fa8e469ccef0508a8f810736c))
 * 移除代理對話的說明區塊 ([58c6c2c](https://github.com/NickYCLin/lattice-term/commit/58c6c2c87b7d765cba477e50a29839d45d61944c))
-* 移除代理對話的說明區塊 ([e996264](https://github.com/NickYCLin/lattice-term/commit/e9962641d6be33909e1d66d45f68f99b9ed4777a))
 * 統一奶油繪本的導覽與選取底色 ([9e8740f](https://github.com/NickYCLin/lattice-term/commit/9e8740fb2adf2d2320f8ba197c5b75a0572b686c))
 * 統一連線卡片按鈕列與底部資訊對齊 ([24e554a](https://github.com/NickYCLin/lattice-term/commit/24e554ab1eead273014c40436c3468177661a7b2))
 * 統一連線排序選單與工具列外觀 ([0e7065e](https://github.com/NickYCLin/lattice-term/commit/0e7065ef561f6c94399be97ad3ad334c1e2d43c6))
