@@ -355,3 +355,23 @@ async fn desktop_composer_sends_once_from_the_real_codex_0169_resumed_screen() {
     assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
     assert!(entry.queued_prompts.lock().unwrap().is_empty());
 }
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_send_ignores_a_quoted_working_log_only_on_a_verified_resumed_main_composer() {
+    let f = ForegroundFixture::with_resume(true);
+    f.unreported_prompt();
+    let entry = f.registry.get(&f.id).unwrap();
+    *entry.prompt_screen.lock().unwrap() = prompt_screen::PromptScreen::new(30, 120);
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/codex-0169-resumed-idle.json"
+    )).unwrap();
+    let output = format!("{}\x1b[4;1HPrevious log: Working (12s - esc to interrupt)\x1b[K\x1b[22;3H", fixture["output"].as_str().unwrap());
+    f.registry.record_output(&f.id, output.as_bytes()).unwrap();
+    f.registry.update_state_with_origin(&f.id, AgentLifecycle::Working, AgentStateSource::Heuristic, true);
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    assert_eq!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"new desktop prompt\r")).unwrap(), 0);
+    assert!(entry.queued_prompts.lock().unwrap().is_empty());
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+    assert!(enqueue(f.sink.as_ref(), &f.registry, &f.id, &encode(b"do not infer completion\r")).unwrap() > 0);
+}

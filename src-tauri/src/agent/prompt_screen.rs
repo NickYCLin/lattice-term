@@ -187,7 +187,19 @@ impl PromptScreen {
                 .skip(usize::from(row) + 1)
                 .any(|line| !line.trim().starts_with('⚠') && is_codex_status_line(line.trim()));
         let text = text.to_lowercase();
-        if super::has_explicit_working_status(&text)
+        // With a verified idle main composer, old quoted status text higher
+        // in history is not a live activity footer. Still reject a current or
+        // wrapped working banner in the four rows immediately above it.
+        let working = if native_main_composer {
+            rows[..usize::from(row)]
+                .iter()
+                .rev()
+                .take(4)
+                .any(|line| super::has_explicit_working_status(&line.to_lowercase()))
+        } else {
+            super::has_explicit_working_status(&text)
+        };
+        if working
             || (!native_main_composer
                 && (super::has_attention_marker(&text)
                     || super::has_actionable_attention_prompt(&text)
@@ -363,6 +375,26 @@ mod tests {
             screen.settle_for_test();
             assert!(screen.blocker("codex", Instant::now()).is_some(), "{state}");
         }
+    }
+
+    #[test]
+    fn quoted_working_status_in_old_history_does_not_block_a_verified_idle_composer() {
+        let mut screen = codex_0169_fixture();
+        screen.feed(
+            b"\x1b[4;1HPrevious log: Working (12s - esc to interrupt)\x1b[K\x1b[22;3H",
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        assert_eq!(screen.blocker("codex", Instant::now()), None);
+        screen.feed(
+            b"\x1b[20;1HWorking (12s - esc to interrupt)\x1b[22;3H",
+            Instant::now(),
+        );
+        screen.settle_for_test();
+        assert_eq!(
+            screen.blocker("codex", Instant::now()),
+            Some("terminal_dialog_or_work")
+        );
     }
 
     #[test]
