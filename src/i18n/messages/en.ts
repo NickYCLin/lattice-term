@@ -2565,7 +2565,17 @@ export const en: Messages = {
     "Ask whoever runs the host whether the key really changed.",
 
   // Import and export -----------------------------------------------------
+  "transfer.import.preview": "Review connection import",
+  "transfer.import.summary": "Add {added} / overwrite {overwritten}",
+  "transfer.import.confirm": "Confirm import",
+  "transfer.import.previewHint": "Matching connections overwrite non-secret settings while retaining local IDs and stored credentials. Passwords and keys are never imported. Repeated matches in the file use the last entry.",
+  "transfer.import.added": "Add",
+  "transfer.import.overwritten": "Overwrite",
+  "transfer.import.changed": "The connection list changed after preview. Nothing was written. Close this preview and import the file again.",
+  "transfer.import.busy": "Another import is being saved. Try again shortly.",
+  "transfer.import.conflict": "Matching by ID would duplicate another local endpoint. Nothing was written. Correct the file IDs or endpoints first.",
   "transfer.import.success": "Import complete",
+  "transfer.import.appliedBody": "Import complete: {added} connections added / {overwritten} overwritten.",
   "transfer.import.successBody": "{count} connections were imported.",
   "transfer.import.partial": "Imported, with some entries skipped",
   "transfer.import.partialBody": "{errors} ({skipped} invalid entries skipped)",

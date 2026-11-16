@@ -4081,10 +4081,31 @@ async fn connection_credential_read(app: AppHandle, profile_id: String) -> Resul
 #[tauri::command]
 fn replace_connection_profiles(
     profiles: Vec<ConnectionProfile>,
+    expected_profiles: Option<Vec<ConnectionProfile>>,
     storage: State<'_, AppStorage>,
 ) -> Result<(), String> {
     let mut guard = storage.lock().map_err(|e| e.to_string())?;
-    guard.replace_profiles(profiles).map_err(|e| e.to_string())
+    replace_reviewed_profiles(&mut *guard, profiles, expected_profiles)
+}
+
+// Check and replace under the same application storage lock. Imports may not
+// apply a reviewed preview over a later update from another application window.
+fn replace_reviewed_profiles(
+    storage: &mut dyn Storage,
+    profiles: Vec<ConnectionProfile>,
+    expected: Option<Vec<ConnectionProfile>>,
+) -> Result<(), String> {
+    if let Some(mut expected) = expected {
+        let mut current = storage.list_profiles().map_err(|error| error.to_string())?;
+        current.sort_by(|a, b| a.id.cmp(&b.id));
+        expected.sort_by(|a, b| a.id.cmp(&b.id));
+        if current != expected {
+            return Err("transfer.import.changed".into());
+        }
+    }
+    storage
+        .replace_profiles(profiles)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -7168,5 +7189,46 @@ mod tests {
         assert!(validate_clipboard_image(MAX_CLIPBOARD_IMAGE_EDGE + 1, 1, 4).is_err());
         assert!(validate_clipboard_image(8192, 8192, 8192 * 8192 * 4).is_err());
         assert!(validate_clipboard_image(32, 32, 32 * 32 * 3).is_err());
+    }
+}
+
+#[cfg(test)]
+mod connection_import_preview_tests {
+    use super::*;
+    fn profile(id: &str) -> ConnectionProfile {
+        serde_json::from_value(serde_json::json!({"id":id,"name":id,"protocol":"ssh","hostname":"fixture.invalid","username":"fixture","port":22,"environment":"unassigned","group":"","tags":[],"favorite":false})).unwrap()
+    }
+    #[test]
+    fn import_preview_rejects_changed_metadata_without_writing() {
+        let mut storage = crate::storage::InMemoryStorage::new();
+        storage
+            .replace_profiles(vec![profile("existing"), profile("later")])
+            .unwrap();
+        assert_eq!(
+            replace_reviewed_profiles(
+                &mut storage,
+                vec![profile("replacement")],
+                Some(vec![profile("existing")])
+            ),
+            Err("transfer.import.changed".into())
+        );
+        assert_eq!(storage.list_profiles().unwrap().len(), 2);
+        assert!(storage.get_profile("replacement").unwrap().is_none());
+    }
+    #[test]
+    fn import_preview_compares_by_identity_and_leaves_other_batch_callers_compatible() {
+        let mut storage = crate::storage::InMemoryStorage::new();
+        storage
+            .replace_profiles(vec![profile("a"), profile("b")])
+            .unwrap();
+        replace_reviewed_profiles(
+            &mut storage,
+            vec![profile("updated")],
+            Some(vec![profile("b"), profile("a")]),
+        )
+        .unwrap();
+        assert!(storage.get_profile("updated").unwrap().is_some());
+        replace_reviewed_profiles(&mut storage, vec![], None).unwrap();
+        assert!(storage.list_profiles().unwrap().is_empty());
     }
 }

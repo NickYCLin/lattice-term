@@ -6,7 +6,7 @@
  * back to React in-memory state in browser preview mode.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   appendActivity,
   createActivityEntry,
@@ -29,6 +29,7 @@ import {
   type ConnectionFilter,
   type SortOrder,
 } from "../domain/query";
+import { importPlanMatches, type ConnectionImportPlan } from "../domain/export";
 import { sampleProfiles } from "../domain/samples";
 import { persistConnectionRecord, type ConnectionCredentialDraft } from "./connectionCredentialRecord";
 import { savedRouteProfiles } from "./connectionRoutes";
@@ -62,11 +63,12 @@ async function syncDeleteToBackend(id: string): Promise<void> {
 
 async function syncReplaceBackend(
   profiles: ConnectionProfile[],
+  expectedProfiles?: ConnectionProfile[],
 ): Promise<string | null> {
   if (!("__TAURI_INTERNALS__" in window)) return null;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("replace_connection_profiles", { profiles });
+    await invoke("replace_connection_profiles", { profiles, ...(expectedProfiles ? { expectedProfiles } : {}) });
     return null;
   } catch (reason) {
     return reason instanceof Error ? reason.message : String(reason);
@@ -359,36 +361,34 @@ export function useWorkspace() {
     return { count: loaded.length, error: null };
   }, [record]);
 
-  /** Imported entries are appended; nothing already in the workspace is lost. */
+  const importLock = useRef(false);
+  const currentProfiles = useRef(profiles);
+  currentProfiles.current = profiles;
+  /** Apply exactly the reviewed plan; never write credential records. */
   const importProfiles = useCallback(
-    async (imported: ConnectionProfile[]): Promise<WorkspaceBatchResult> => {
-      if (imported.length === 0) return { count: 0, error: null };
-
-      const next = [...profiles, ...imported];
-      const failure = await syncReplaceBackend(next);
-      if (failure) {
-        record({
-          kind: "workspace",
-          titleKey: "activity.saveFailed",
-          detail: failure,
-        });
-        return { count: 0, error: failure };
-      }
-
-      setProfiles(next);
-      setSelectedId((current) => current ?? imported[0].id);
-
-      for (const profile of imported) {
-        record({
-          kind: "created",
-          subject: profile.name,
-          detail: describe(profile),
-        });
-      }
-
-      return { count: imported.length, error: null };
-    },
-    [profiles, record],
+    async (plan: ConnectionImportPlan): Promise<WorkspaceBatchResult & { addedCount: number; overwrittenCount: number }> => {
+      const failed = (error: string | null) => ({ count: 0, addedCount: 0, overwrittenCount: 0, error });
+      if (importLock.current) return failed("transfer.import.busy");
+      if (!importPlanMatches(plan, currentProfiles.current)) return failed("transfer.import.changed");
+      if (plan.conflicts.length) return failed("transfer.import.conflict");
+      if (!plan.changes.length) return failed(null);
+      importLock.current = true;
+      try {
+        const failure = await syncReplaceBackend(plan.next, plan.original);
+        if (failure) {
+          record({ kind: "workspace", titleKey: "activity.saveFailed", detail: failure });
+          if (failure === "transfer.import.changed") await refreshProfiles().catch(() => undefined);
+          return failed(failure);
+        }
+        currentProfiles.current = plan.next;
+        setProfiles(plan.next);
+        setSelectedId(current => current ?? plan.changes[0].profile.id);
+        for (const { kind, profile } of plan.changes) {
+          record({ kind: kind === "added" ? "created" : "updated", subject: profile.name, detail: describe(profile) });
+        }
+        return { count: plan.changes.length, addedCount: plan.addedCount, overwrittenCount: plan.overwrittenCount, error: null };
+      } finally { importLock.current = false; }
+    }, [record, refreshProfiles],
   );
 
   const resetFilter = useCallback((): void => setFilter(emptyFilter), []);

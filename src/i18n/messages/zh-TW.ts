@@ -2481,7 +2481,17 @@ export const zhTW = {
   "security.changed.checklist": "請先向主機管理者確認金鑰是否真的變更過。",
 
   // 匯入匯出 --------------------------------------------------------------
+  "transfer.import.preview": "確認匯入連線",
+  "transfer.import.summary": "新增 {added} 筆／覆蓋 {overwritten} 筆",
+  "transfer.import.confirm": "確認匯入",
+  "transfer.import.previewHint": "相同連線會以檔案內容覆蓋非機密設定，保留本機識別碼及已存憑證；不會匯入密碼或金鑰。同一檔案重複對應時採用最後一筆。",
+  "transfer.import.added": "新增",
+  "transfer.import.overwritten": "覆蓋",
+  "transfer.import.changed": "連線清單在預覽後已變更，尚未寫入。請關閉預覽並重新匯入檔案。",
+  "transfer.import.busy": "另一筆匯入正在寫入，請稍後再試。",
+  "transfer.import.conflict": "依 id 覆蓋會造成不同本機項目的端點重複，尚未寫入。請先修正檔案中的 id 或端點。",
   "transfer.import.success": "匯入完成",
+  "transfer.import.appliedBody": "匯入完成：新增 {added} 筆／覆蓋 {overwritten} 筆連線設定。",
   "transfer.import.successBody": "成功匯入 {count} 筆連線設定。",
   "transfer.import.partial": "匯入完成，但有部分略過",
   "transfer.import.partialBody": "{errors}（略過 {skipped} 筆無效資料）",

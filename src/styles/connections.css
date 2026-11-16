@@ -3368,3 +3368,5 @@
 .sound-system-notification {
   margin: var(--space-3) 0;
 }
+
+.connection-import__changes { max-height: 35vh; overflow: auto; padding-inline-start: var(--space-5); overflow-wrap: anywhere; }

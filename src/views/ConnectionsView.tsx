@@ -23,12 +23,13 @@ import {
   type ConnectionProfile,
 } from "../domain/connection";
 import type { SortOrder } from "../domain/query";
-import { parseAndValidateImport, serializeProfiles } from "../domain/export";
+import { parseAndValidateImport, serializeProfiles, planProfileImport, type ImportResult } from "../domain/export";
 import type { ImportIssue } from "../domain/export";
 import { useI18n } from "../i18n/context";
 import type { MessageKey } from "../i18n/context";
 import { ConnectionCard } from "../components/connections/ConnectionCard";
 import { ConnectionRoutePicker } from "../components/connections/ConnectionRoutePicker";
+import { ConnectionImportPreview } from "../components/connections/ConnectionImportPreview";
 import { ConnectionMergeDialog } from "../components/connections/ConnectionMergeDialog";
 import { DatabaseManager } from "../components/connections/DatabaseManager";
 import { Callout, EmptyState } from "../components/common/Callout";
@@ -145,6 +146,26 @@ export function ConnectionsView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [pendingImport, setPendingImport] = useState<ImportResult | null>(null);
+  const importReadRevision = useRef(0);
+  const importWriting = useRef(false);
+  const importPlan = useMemo(() => pendingImport ? planProfileImport(profiles, pendingImport.validProfiles) : null, [profiles, pendingImport]);
+  const importPreview = pendingImport && importPlan && <ConnectionImportPreview plan={importPlan}
+    issues={pendingImport.issues.map(describeIssue).join(" ")} onConfirm={async plan => {
+      if (importWriting.current) return { count: 0, addedCount: 0, overwrittenCount: 0, error: "transfer.import.busy" };
+      importWriting.current = true;
+      try { return await importProfiles(plan); } finally { importWriting.current = false; }
+    }}
+    onClose={() => setPendingImport(null)} onSaved={imported => {
+      setPendingImport(null);
+      const summary = t("transfer.import.appliedBody", { added: imported.addedCount, overwritten: imported.overwrittenCount });
+      setNotice({ tone: pendingImport.issues.length ? "warn" : "info",
+        title: t(pendingImport.issues.length ? "transfer.import.partial" : "transfer.import.success"),
+        body: pendingImport.issues.length ? `${summary} ${t("transfer.import.partialBody", {
+          errors: pendingImport.issues.map(describeIssue).join(" "), skipped: pendingImport.skippedCount,
+        })}` : summary });
+    }} />;
+
 
   async function handleExport() {
     if (exporting) return;
@@ -208,8 +229,12 @@ export function ConnectionsView({
   }
 
   async function importFile(file: UploadFile) {
+    if (importWriting.current) return;
+    const revision = ++importReadRevision.current;
+    setPendingImport(null);
     try {
       const result = parseAndValidateImport(await readSelectedText(file, 1024 * 1024));
+      if (revision !== importReadRevision.current) return;
 
       if (result.validProfiles.length === 0) {
         setNotice({
@@ -223,37 +248,10 @@ export function ConnectionsView({
         return;
       }
 
-      const imported = await importProfiles(result.validProfiles);
-      if (imported.error) {
-        setNotice({
-          tone: "warn",
-          title: t("transfer.import.failed"),
-          body: t("transfer.import.persistFailedBody", {
-            error: imported.error,
-          }),
-        });
-        return;
-      }
-
-      setNotice(
-        result.issues.length > 0
-          ? {
-              tone: "warn",
-              title: t("transfer.import.partial"),
-              body: t("transfer.import.partialBody", {
-                errors: result.issues.map(describeIssue).join(" "),
-                skipped: result.skippedCount,
-              }),
-            }
-          : {
-              tone: "info",
-              title: t("transfer.import.success"),
-              body: t("transfer.import.successBody", {
-                count: imported.count,
-              }),
-            },
-      );
+      setNotice(null);
+      setPendingImport(result);
     } catch (reason) {
+      if (revision !== importReadRevision.current) return;
       setNotice({ tone: "warn", title: t("transfer.import.failed"), body: localFileError(reason, t) });
     }
   }
@@ -275,6 +273,7 @@ export function ConnectionsView({
   if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
     return (
       <div className="connections connections--empty">
+        {importPreview}
         {databaseManager}
         {filePicker}
         {databases.error && <Callout tone="warn" title={t("database.loadFailed")} actions={<button type="button" className="button button--secondary" onClick={() => void databases.refresh()}>{t("database.reload")}</button>}>{databases.error}</Callout>}
@@ -327,6 +326,7 @@ export function ConnectionsView({
 
   return (
     <div className="connections">
+      {importPreview}
       {routePicker}
       {mergeDialog}
       {databaseManager}
