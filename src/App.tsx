@@ -1,4 +1,4 @@
-import { parseConversationLink } from "./app/conversationNavigation";
+import { parseConversationLocation } from "./app/conversationNavigation";
 /**
  * Application shell.
  *
@@ -344,6 +344,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   // keeps firing while another view is open) but loads lazily, so its code
   // stays out of the entry bundle.
   const [chatRuntime, setChatRuntime] = useState<ChatRuntimeApi | null>(null);
+  const agentsForLink = useRef(agents.sessions);
+  agentsForLink.current = agents.sessions;
   const chatRuntimeRef = useRef(chatRuntime);
   chatRuntimeRef.current = chatRuntime;
   useEffect(() => {
@@ -352,8 +354,13 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     const open = (urls: string[]) => {
       const chat = chatRuntimeRef.current?.chat;
       for (const url of urls) {
-        const id = parseConversationLink(url);
-        if (id && chat?.getThread(id)) { setView("chat"); chat.setActiveThreadId(id); break; }
+        const target = parseConversationLocation(url);
+        if (target?.kind === "session" && agentsForLink.current.some(session => session.sessionId === target.id)) {
+          setView("chat"); setChatWorkspaceSessionId(target.id); break;
+        }
+        if (target?.kind === "chat" && chat?.getThread(target.id)) {
+          setView("chat"); setChatWorkspaceSessionId(null); chat.setActiveThreadId(target.id); break;
+        }
       }
     };
     void import("@tauri-apps/plugin-deep-link").then(async module => {

@@ -2416,7 +2416,7 @@ impl AgentRegistry {
         Ok(registry)
     }
 
-    fn next_id(&self) -> Result<String, String> {
+    pub(crate) fn next_id(&self) -> Result<String, String> {
         // A saved group defaults to its original session id and outlives this
         // registry. A counter alone can join a new CLI to that old group after
         // restart. Keep the routing prefix and add entropy for every launch.
@@ -3040,6 +3040,50 @@ impl AgentRegistry {
             reasons.push("queued_prompts_pending");
         }
         Ok(reasons)
+    }
+
+    pub(crate) fn validate_session_fork_source(
+        &self,
+        session_id: &str,
+        native_id: &str,
+        definition: &str,
+        directory: &str,
+        profile: Option<&str>,
+    ) -> Result<(), String> {
+        let entry = self.get(session_id)?;
+        let input = entry.input.lock().map_err(|error| error.to_string())?;
+        let summary = entry.summary.lock().map_err(|error| error.to_string())?;
+        let same_path = |a: &str, b: &str| {
+            std::fs::canonicalize(a)
+                .ok()
+                .zip(std::fs::canonicalize(b).ok())
+                .is_some_and(|(a, b)| a == b)
+        };
+        if summary.captured_session_id.as_deref() != Some(native_id)
+            || summary.definition_id != definition
+            || !same_path(&summary.working_directory, directory)
+            || match (summary.profile_config_path.as_deref(), profile) {
+                (None, None) => false,
+                (Some(a), Some(b)) => !same_path(a, b),
+                _ => true,
+            }
+        {
+            return Err("來源的帳號、工作目錄或原生對話已改變，沒有建立分支。".into());
+        }
+        if input.desktop_busy()
+            || input.startup_seed_pending
+            || self.approvals.current(session_id).is_some()
+            || !entry
+                .queued_prompts
+                .lock()
+                .map_err(|error| error.to_string())?
+                .is_empty()
+            || !(releases_queued_prompt(summary.state, summary.state_source)
+                || self.foreground_terminal_blocker(&entry, &summary).is_none())
+        {
+            return Err("請等來源回合結束、清空待送訊息並處理目前的確認事項，再建立分支。".into());
+        }
+        Ok(())
     }
 
     fn foreground_terminal_blocker(
@@ -3917,7 +3961,7 @@ fn has_explicit_claude_settings(arguments: &[String]) -> bool {
     })
 }
 
-fn claude_customizations_disabled(arguments: &[String]) -> bool {
+pub(crate) fn claude_customizations_disabled(arguments: &[String]) -> bool {
     arguments
         .iter()
         .any(|argument| matches!(argument.trim(), "--safe-mode" | "--bare"))
@@ -7814,6 +7858,16 @@ pub fn launch_with_replay(
     request: AgentLaunchRequest,
     restored_output: Option<Vec<u8>>,
 ) -> Result<AgentSessionSummary, String> {
+    launch_with_replay_and_tools(sink, registry, request, restored_output, None)
+}
+
+pub(crate) fn launch_with_replay_and_tools(
+    sink: Arc<dyn AgentSink>,
+    registry: Arc<AgentRegistry>,
+    request: AgentLaunchRequest,
+    restored_output: Option<Vec<u8>>,
+    tools: Option<crate::chat_tools::SessionLaunchTools>,
+) -> Result<AgentSessionSummary, String> {
     let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
     request.definition_id = validate_text(&request.definition_id, "Agent type", 64)?;
@@ -7928,7 +7982,10 @@ pub fn launch_with_replay(
             .then(|| configured_agent_model(&definition_id))
             .flatten()
     });
-    let session_id = registry.next_id()?;
+    let session_id = match &tools {
+        Some(tools) => tools.id.clone(),
+        None => registry.next_id()?,
+    };
     let reporter = registry.reporter.clone();
     let report_token = reporter
         .as_ref()
@@ -8134,6 +8191,14 @@ pub fn launch_with_replay(
     configure_node_runtime_for_script(&mut command, &executable);
     for prefix in &prefix_args {
         command.arg(prefix);
+    }
+    if let Some(tools) = &tools {
+        arguments = crate::agent_chat::browser::session_arguments(
+            &definition_id,
+            arguments,
+            &tools.arguments,
+        );
+        command.env(crate::chat_tools::environment(), &tools.url);
     }
     command.args(arguments);
     command.cwd(&working_directory);
@@ -8599,6 +8664,7 @@ pub fn launch_with_replay(
         });
     }
 
+    let tools_cleanup = tools.is_some();
     let wait_id = session_id;
     let wait_registry = Arc::clone(&registry);
     std::thread::spawn(move || {
@@ -8609,9 +8675,63 @@ pub fn launch_with_replay(
         if wait_registry.remove(&wait_id).is_some() {
             sink.closed(&wait_id, &reason);
         }
+        if tools_cleanup {
+            tauri::async_runtime::spawn(async move {
+                crate::chat_tools::close(&wait_id).await;
+            });
+        }
     });
 
     Ok(summary)
+}
+
+/// Prepare a native slash command in the existing terminal without submitting it.
+/// A final Enter belongs to the user, so mode changes and dialogs cannot be
+/// mistaken for a model turn or authorize another writer to this history.
+pub(crate) fn prepare_native_command(
+    sink: &dyn AgentSink,
+    registry: &AgentRegistry,
+    session_id: &str,
+    expected_native_id: &str,
+    command: &str,
+) -> Result<(), String> {
+    let bytes = match command {
+        "plan" => b"/plan".as_slice(),
+        "review" => b"/review",
+        "compact" => b"/compact",
+        _ => return Err("不支援這個原生指令。".into()),
+    };
+    let entry = registry.get(session_id)?;
+    let mut input = entry.input.lock().map_err(|e| e.to_string())?;
+    let summary = entry.summary.lock().map_err(|e| e.to_string())?;
+    if !matches!(summary.definition_id.as_str(), "codex" | "claude")
+        || summary.captured_session_id.as_deref() != Some(expected_native_id)
+        || !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done)
+        || input.desktop_busy()
+        || input.startup_seed_pending
+        || registry.approvals.current(session_id).is_some()
+        || !entry
+            .queued_prompts
+            .lock()
+            .map_err(|e| e.to_string())?
+            .is_empty()
+        || entry
+            .last_output_at
+            .lock()
+            .map_or(true, |at| at.elapsed() < prompt_screen::QUIET)
+        || entry.prompt_screen.lock().map_or(true, |screen| {
+            screen
+                .blocker(&summary.definition_id, Instant::now())
+                .is_some()
+        })
+    {
+        return Err("請在原終端確認輸入框已清空且沒有待處理事項；沒有寫入或送出指令。".into());
+    }
+    require_mcp_input_profile(&entry, &summary.definition_id)?;
+    drop(summary);
+    // Retain ownership even if a partial write fails; never retry automatically.
+    observe_desktop_input(&mut input, bytes);
+    send_bytes_locked(sink, registry, session_id, bytes)
 }
 
 pub fn send(
@@ -15236,6 +15356,93 @@ notify = ["notify.exe", "turn-ended"]"#,
             },
         )
         .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_command_preparation_preserves_the_source_and_never_sends_enter() {
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector;
+        let registry = Arc::new(AgentRegistry::new());
+        let session = launch_cat(&sink, &registry, "Native command fixture");
+        let id = &session.session_id;
+        let entry = registry.get(id).unwrap();
+        {
+            let mut summary = entry.summary.lock().unwrap();
+            summary.definition_id = "codex".into();
+            summary.captured_session_id = Some("synthetic-native".into());
+            summary.state = AgentLifecycle::Done;
+            summary.state_source = AgentStateSource::Integration;
+        }
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let _original = std::mem::replace(
+            &mut *entry.writer.lock().unwrap(),
+            Box::new(Capture(writes.clone())),
+        );
+        assert!(
+            prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "review")
+                .is_err()
+        );
+        let past = Instant::now() - Duration::from_secs(5);
+        entry.prompt_screen.lock().unwrap().feed(
+            b"\x1b[2J\x1b[?25h\x1b[?2004h\x1b[1;1H\xe2\x80\xba \x1b[3;1H? for shortcuts\x1b[1;3H",
+            past,
+        );
+        *entry.last_output_at.lock().unwrap() = past;
+        assert!(
+            prepare_native_command(sink.as_ref(), &registry, id, "wrong-native", "review").is_err()
+        );
+        assert!(prepare_native_command(
+            sink.as_ref(),
+            &registry,
+            id,
+            "synthetic-native",
+            "review\rnew prompt"
+        )
+        .is_err());
+        assert!(writes.lock().unwrap().is_empty());
+        registry
+            .validate_session_fork_source(
+                id,
+                "synthetic-native",
+                "codex",
+                &session.working_directory,
+                None,
+            )
+            .unwrap();
+        prepare_native_command(sink.as_ref(), &registry, id, "synthetic-native", "review").unwrap();
+        assert_eq!(*writes.lock().unwrap(), b"/review");
+        assert!(entry.input.lock().unwrap().desktop_busy());
+        assert!(prepare_native_command(
+            sink.as_ref(),
+            &registry,
+            id,
+            "synthetic-native",
+            "compact"
+        )
+        .is_err());
+        assert!(registry
+            .validate_session_fork_source(
+                id,
+                "synthetic-native",
+                "codex",
+                &session.working_directory,
+                None
+            )
+            .is_err());
+        assert_eq!(entry.summary.lock().unwrap().state, AgentLifecycle::Done);
+        assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+        registry.stop_all();
     }
 
     /// Whether the PTY echoed `needle` back within `within`.

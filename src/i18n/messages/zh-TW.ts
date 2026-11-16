@@ -2911,6 +2911,7 @@ export const zhTW = {
   "chat.nav.unpin": "取消置頂",
   "chat.nav.search": "搜尋對話",
   "chat.nav.side": "側聊",
+  "chat.nav.selectMain": "已固定這段側聊。從左側選擇另一段主對話，即可並排查看。",
   "chat.nav.closeSide": "關閉側聊",
   "chat.nav.link": "複製連結",
   "chat.nav.copied": "已複製對話連結",

@@ -282,6 +282,9 @@ async fn serve_discovery(
     stream.write_all(&body).await.map_err(|e| e.to_string())?;
     Ok(())
 }
+pub async fn close_window(id: &str) {
+    registry().lock().await.remove(id);
+}
 pub async fn close(id: &str) {
     if let Some(endpoint) = cdp_endpoints().lock().await.remove(id) {
         endpoint.task.abort();

@@ -90,3 +90,33 @@ it("uses Claude's native fork and resume-message flags instead of a synthetic su
     expect(runtime.chat.getThread("source")?.items).toEqual(history);
   } finally { await act(async () => runtime.root.unmount()); }
 });
+
+it("validates an explicit PTY source, refreshes its passive mirror and keeps the original writer held", async () => {
+  const runtime = await setup(null, "codex", history.slice(0, 2));
+  const usual = invoke.getMockImplementation()!;
+  invoke.mockImplementation((command, args) => command === "agent_chat_fork" ? Promise.resolve({ nativeSessionId: "session-branch", model: null, provider: "source" }) : usual(command, args));
+  try {
+    await act(async () => { runtime.chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "native-source", workingDirectory: "/synthetic", title: "source", accountProfileId: null,
+      sessionSource: true, model: "source-model", messages: history.map(row => ({ role: row.type === "user" ? "user" : "assistant", text: "text" in row ? row.text : "", nativeTurnId: "nativeTurnId" in row ? row.nativeTurnId : undefined })) }); });
+    expect(runtime.chat.getThread("source")?.continuedInSession).toBe(true);
+    expect(runtime.chat.getThread("source")?.items).toHaveLength(4);
+    await expect(runtime.chat.nativeFork("source", "分支")).rejects.toThrow("idle");
+    const boundary = runtime.chat.getThread("source")!.items[3].id;
+    await act(async () => { await runtime.chat.nativeFork("source", "分支", boundary, false, "foreground-source"); });
+    expect(invoke.mock.calls.find(([command]) => command === "agent_session_validate_fork_source")?.[1]).toMatchObject({ sessionId: "foreground-source", nativeId: "native-source", definitionId: "codex", workingDirectory: "/synthetic", profileConfigPath: null });
+    expect(invoke.mock.calls.find(([command]) => command === "agent_chat_fork")?.[1]).toMatchObject({ throughTurnId: "native-second" });
+    expect(runtime.chat.getThread("source")?.continuedInSession).toBe(true);
+    expect(invoke.mock.calls.some(([command]) => ["agent_close", "agent_launch", "agent_chat_send"].includes(command))).toBe(false);
+  } finally { await act(async () => runtime.root.unmount()); }
+});
+
+it("does not fork or replay when the foreground source validation fails", async () => {
+  const runtime = await setup(null, "codex", history);
+  const usual = invoke.getMockImplementation()!;
+  invoke.mockImplementation((command, args) => command === "agent_session_validate_fork_source" ? Promise.reject(new Error("source busy")) : usual(command, args));
+  try {
+    await expect(runtime.chat.nativeFork("source", "分支", "second-reply", false, "foreground-source")).rejects.toThrow("source busy");
+    expect(invoke.mock.calls.some(([command]) => ["agent_chat_fork", "agent_chat_send", "agent_launch"].includes(command))).toBe(false);
+    expect(runtime.chat.threads).toHaveLength(1);
+  } finally { await act(async () => runtime.root.unmount()); }
+});

@@ -972,6 +972,7 @@ const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 mod sync_tests;
 
 mod images;
+mod session_progress;
 pub use images::{read_session_images, SessionImagesSnapshot};
 
 // A unit test runs on a machine that already has `~/.codex` and `~/.claude`.
@@ -1831,6 +1832,8 @@ pub enum SessionConversationAvailability {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionConversationSnapshot {
+    pub native_tools: bool,
+    pub progress: session_progress::SessionProgress,
     pub availability: SessionConversationAvailability,
     pub messages: Vec<LocalConversationMessage>,
     pub truncated: bool,
@@ -1843,6 +1846,8 @@ pub fn read_session_conversation_snapshot(
     profile_directory: Option<&Path>,
 ) -> Result<SessionConversationSnapshot, String> {
     let waiting = |availability| SessionConversationSnapshot {
+        native_tools: false,
+        progress: session_progress::SessionProgress::default(),
         availability,
         messages: Vec::new(),
         truncated: false,
@@ -1864,6 +1869,8 @@ pub fn read_session_conversation_snapshot(
     let snapshot = read_conversation_snapshot_with_tools(&path, kind, true)?;
     Ok(SessionConversationSnapshot {
         availability: SessionConversationAvailability::Ready,
+        native_tools: false,
+        progress: session_progress::read(&path, kind),
         messages: snapshot.messages,
         truncated: snapshot.truncated,
     })
@@ -2069,7 +2076,9 @@ fn read_conversation_snapshot_with_tools(
         });
     }
     let mut current_turn: Option<String> = None;
+    let mut row_index = 0u64;
     let incomplete = visit_transcript_rows(path, |value| {
+        row_index += 1;
         if kind == TranscriptKind::Codex {
             let native_id = if value["type"].as_str() == Some("turn_context") {
                 Some(&value["payload"]["turn_id"])
@@ -2101,6 +2110,32 @@ fn read_conversation_snapshot_with_tools(
         let (role, content) = match kind {
             TranscriptKind::Codex => {
                 if include_tools {
+                    if value["type"] == "response_item" && value["payload"]["type"] == "reasoning" {
+                        // Only the public summary belongs in the UI. Never display
+                        // encrypted_content or attempt to decode hidden reasoning.
+                        let summary = value["payload"]["summary"].as_array().map(|parts| {
+                            parts
+                                .iter()
+                                .filter(|part| part["type"] == "summary_text")
+                                .filter_map(|part| part["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        });
+                        if let Some(text) = summary.filter(|text| !text.is_empty()) {
+                            push(
+                                "assistant",
+                                text,
+                                Some(ConversationTool {
+                                    call_id: format!("codex-reasoning:{row_index}"),
+                                    name: None,
+                                    kind: "reasoning",
+                                }),
+                                current_turn.clone(),
+                                None,
+                            );
+                        }
+                        return;
+                    }
                     if let Some((text, tool)) = codex_conversation_tool(value) {
                         push("assistant", text, Some(tool), current_turn.clone(), None);
                         return;
@@ -2119,6 +2154,60 @@ fn read_conversation_snapshot_with_tools(
             }
             TranscriptKind::Claude => {
                 let role = value.get("type").and_then(Value::as_str);
+                if include_tools && matches!(role, Some("user" | "assistant")) {
+                    if let Some(blocks) = value["message"]["content"].as_array() {
+                        for (index, block) in blocks.iter().enumerate() {
+                            let native_id = value["uuid"]
+                                .as_str()
+                                .filter(|id| !id.is_empty() && id.len() <= 256);
+                            let item = match block["type"].as_str() {
+                                Some("tool_use") => block["id"].as_str().map(|id| {
+                                    (
+                                        id.to_string(),
+                                        block["name"].as_str().map(str::to_string),
+                                        "call",
+                                        block["input"].to_string(),
+                                    )
+                                }),
+                                Some("tool_result") => block["tool_use_id"].as_str().map(|id| {
+                                    (
+                                        id.to_string(),
+                                        None,
+                                        "result",
+                                        content_text(&block["content"]),
+                                    )
+                                }),
+                                Some("thinking") => native_id.map(|id| {
+                                    (
+                                        format!("{id}:thinking:{index}"),
+                                        Some("Reasoning".into()),
+                                        "reasoning",
+                                        block["thinking"].as_str().unwrap_or_default().to_string(),
+                                    )
+                                }),
+                                _ => None,
+                            };
+                            if let Some((id, name, tool_kind, text)) = item {
+                                if !id.is_empty()
+                                    && id.len() <= 300
+                                    && !id.chars().any(char::is_control)
+                                {
+                                    push(
+                                        "assistant",
+                                        text,
+                                        Some(ConversationTool {
+                                            call_id: id,
+                                            name,
+                                            kind: tool_kind,
+                                        }),
+                                        None,
+                                        native_id.map(str::to_string),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 (role, value.get("message").and_then(|m| m.get("content")))
             }
             TranscriptKind::Antigravity => {

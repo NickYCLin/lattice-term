@@ -1330,12 +1330,45 @@ async fn agent_launch(
         serde_json::from_value(value)
             .map_err(|error| format!("The background service answered oddly: {error}"))?
     } else {
-        crate::agent::launch_with_replay(
+        let tools = if matches!(request.definition_id.as_str(), "codex" | "claude")
+            && !(request.definition_id == "claude"
+                && (crate::agent::claude_customizations_disabled(&request.arguments)
+                    || request
+                        .arguments
+                        .iter()
+                        .any(|arg| arg == "--mcp-config" || arg.starts_with("--mcp-config="))))
+        {
+            let id = registry.next_id()?;
+            match crate::chat_tools::prepare_session(
+                id.clone(),
+                &request.definition_id,
+                std::path::PathBuf::from(&request.working_directory),
+            )
+            .await
+            {
+                Ok(tools) => Some(tools),
+                Err(_) => {
+                    crate::chat_tools::close(&id).await;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let tools_id = tools.as_ref().map(|tools| tools.id.clone());
+        let result = crate::agent::launch_with_replay_and_tools(
             Arc::new(crate::agent::EventSink(app)),
             Arc::clone(registry.inner()),
             request,
             restored_output,
-        )?
+            tools,
+        );
+        if result.is_err() {
+            if let Some(id) = tools_id {
+                crate::chat_tools::close(&id).await;
+            }
+        }
+        result?
     };
     if let Some((group_id, definition_id)) = replay_key {
         if let Ok(mut store) = history.lock() {
@@ -1416,12 +1449,19 @@ async fn agent_enqueue(
             .await?;
         serde_json::from_value(value).map_err(|error| error.to_string())
     } else {
-        crate::agent::enqueue(
-            &crate::agent::EventSink(app),
+        let result = crate::agent::enqueue(
+            &crate::agent::EventSink(app.clone()),
             registry.inner(),
             &session_id,
             &data,
-        )
+        );
+        if result.as_ref().is_ok_and(|count| *count == 0)
+            && crate::chat_tools::computer::enabled(&session_id).await
+            && minimize_for_computer(&app).is_err()
+        {
+            let _ = crate::chat_tools::computer::enable(&session_id, false).await;
+        }
+        result
     }
 }
 
@@ -1914,6 +1954,41 @@ async fn agent_chat_respond(
         allow_for_session.unwrap_or(false),
     )
     .await
+}
+
+#[tauri::command]
+fn agent_session_prepare_command(
+    app: AppHandle,
+    session_id: String,
+    expected_native_id: String,
+    command: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<(), String> {
+    crate::agent::prepare_native_command(
+        &crate::agent::EventSink(app),
+        registry.inner(),
+        &session_id,
+        &expected_native_id,
+        &command,
+    )
+}
+
+#[tauri::command]
+fn agent_session_validate_fork_source(
+    session_id: String,
+    native_id: String,
+    definition_id: String,
+    working_directory: String,
+    profile_config_path: Option<String>,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<(), String> {
+    registry.validate_session_fork_source(
+        &session_id,
+        &native_id,
+        &definition_id,
+        &working_directory,
+        profile_config_path.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -2413,7 +2488,8 @@ async fn agent_session_conversation_snapshot(
         registry.session_summary(&session_id)
     }
     .ok_or("The session is no longer available.")?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let native_tools = crate::chat_tools::registered(&session_id).await;
+    let mut snapshot = tauri::async_runtime::spawn_blocking(move || {
         crate::transcript::read_session_conversation_snapshot(
             &summary.definition_id,
             &summary.working_directory,
@@ -2425,7 +2501,35 @@ async fn agent_session_conversation_snapshot(
         )
     })
     .await
-    .map_err(|error| format!("Conversation read did not complete: {error}"))?
+    .map_err(|error| format!("Conversation read did not complete: {error}"))??;
+    snapshot.native_tools = native_tools;
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn agent_session_goal(
+    session_id: String,
+    expected_native_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+    daemon: State<'_, AppDaemon>,
+) -> Result<Option<crate::agent_chat::GoalState>, String> {
+    let summary = if crate::agent_daemon::owns(&session_id) {
+        daemon.session_summary(&session_id).await
+    } else {
+        registry.session_summary(&session_id)
+    }
+    .ok_or("工作階段已結束。")?;
+    if summary.definition_id != "codex"
+        || summary.captured_session_id.as_deref() != Some(&expected_native_id)
+    {
+        return Err("原生對話已改變，沒有讀取其他紀錄。".into());
+    }
+    crate::agent_chat::read_session_goal(
+        &expected_native_id,
+        &summary.working_directory,
+        summary.profile_config_path.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3434,6 +3538,10 @@ async fn chat_artifact_read(
 }
 
 #[tauri::command]
+async fn chat_session_browser_enabled(thread_id: String, enabled: bool) -> Result<(), String> {
+    crate::chat_tools::set_browser_enabled(&thread_id, enabled).await
+}
+#[tauri::command]
 async fn chat_browser_action(
     thread_id: String,
     action: String,
@@ -3444,7 +3552,7 @@ async fn chat_browser_action(
     if action == "close" {
         // The next turn resumes native history with the new CDP endpoint.
         registry.close(&thread_id)?;
-        crate::chat_tools::browser::close(&thread_id).await;
+        crate::chat_tools::browser::close_window(&thread_id).await;
         return Ok(serde_json::json!({}));
     }
     crate::chat_tools::browser::action(&thread_id, &action, args).await
@@ -6041,6 +6149,8 @@ pub fn run() {
             agent_chat_respond,
             agent_chat_models,
             agent_chat_fork,
+            agent_session_validate_fork_source,
+            agent_session_prepare_command,
             chat_project_files,
             agent_chat_skills,
             agent_paste_clipboard_image,
@@ -6052,6 +6162,7 @@ pub fn run() {
             agent_session_conversation,
             agent_session_conversation_snapshot,
             agent_session_images_snapshot,
+            agent_session_goal,
             agent_session_approval,
             agent_answer_approval,
             agent_import_memory_handoff,
@@ -6081,6 +6192,7 @@ pub fn run() {
             local_terminal_resize,
             local_terminal_close,
             chat_browser_action,
+            chat_session_browser_enabled,
             chat_computer_enable,
             chat_computer_action,
             chat_image_configure,

@@ -18,3 +18,9 @@ export function searchConversation(items: readonly ChatItem[], query: string): s
 }
 export function conversationLink(id: string): string { return `latticeterm://chat/${encodeURIComponent(id)}`; }
 export function parseConversationLink(value: string): string | null { return /^latticeterm:\/\/chat\/([a-zA-Z0-9_-]{1,256})$/.exec(value)?.[1] ?? null; }
+
+export function sessionConversationLink(id: string): string { return `latticeterm://session/${encodeURIComponent(id)}`; }
+export function parseConversationLocation(value: string): { kind: "chat" | "session"; id: string } | null {
+  const match = /^latticeterm:\/\/(chat|session)\/([a-zA-Z0-9_-]{1,256})$/.exec(value);
+  return match ? { kind: match[1] as "chat" | "session", id: match[2] } : null;
+}

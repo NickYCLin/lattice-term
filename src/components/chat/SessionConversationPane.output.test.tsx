@@ -113,7 +113,7 @@ describe("session chat output disclosure", () => {
     }
   });
 
-  it.each(["codex", "claude"])("hides tool records while preserving user and assistant messages (%s)", definitionId => {
+  it.each(["codex", "claude"])("pairs native tool records while preserving messages and escaping unexpanded output (%s)", definitionId => {
     conversation.messages = [
       { role: "user", text: "請幫我檢查檔案" },
       { role: "assistant", text: '{"command":"npm test"}', tool: { callId: "call-1", name: "exec_command", kind: "call" } },
@@ -123,22 +123,27 @@ describe("session chat output disclosure", () => {
     const html = render("working", definitionId);
     expect(html).toContain("請幫我檢查檔案");
     expect(html).toContain("檢查已完成");
-    expect(html).not.toMatch(/chat-card--tool|exec_command|呼叫內容|回傳內容|npm test|call-1|alert\(|Exit code/);
+    expect(html.match(/chat-card--tool/g)).toHaveLength(1);
+    expect(html).toContain("exec_command");
+    expect(html).toContain("npm test");
+    expect(html).not.toMatch(/<script|alert\(|Exit code|call-1/);
     expect(html).toContain("session-chat__activity");
   });
 
-  it("hides unnamed results and non-exec tool records without expanding terminal output", () => {
+  it("shows paired and orphan native tool cards without terminal output", () => {
     conversation.messages = [
       { role: "assistant", text: "early output", tool: { callId: "call-2", name: null, kind: "result" } },
       { role: "assistant", text: "input", tool: { callId: "call-2", name: "apply_patch", kind: "call" } },
       { role: "assistant", text: "other output", tool: { callId: "call-3", name: null, kind: "result" } },
     ];
     const html = render("done");
-    expect(html).not.toMatch(/apply_patch|early output|other output|call-2|call-3|chat-card--tool/);
+    expect(html.match(/chat-card--tool/g)).toHaveLength(2);
+    expect(html).toContain("apply_patch");
+    expect(html).not.toMatch(/early output|call-2|call-3/);
     expect(html).not.toContain('class="session-chat__output" open=""');
   });
 
-  it("hides historical image paths and unavailable-pixel tool placeholders", () => {
+  it("shows tool metadata without loading historical image resources", () => {
     conversation.messages = [
       { role: "assistant", text: '{"path":"/private/photo.png"}', tool: { callId: "image-1", name: "view_image", kind: "call" } },
       { role: "assistant", text: "pixels unavailable", tool: { callId: "image-1", name: null, kind: "result" } },
@@ -146,7 +151,8 @@ describe("session chat output disclosure", () => {
     ];
     const html = render("done");
     expect(html).toContain("可讀回覆");
-    expect(html).not.toMatch(/private|photo.png|view_image|pixels unavailable|image-1/);
+    expect(html).toContain("view_image");
+    expect(html).not.toMatch(/<img|pixels unavailable|image-1/);
   });
 });
   it("renders replies without avatars or assistant labels in both conversation views", () => {

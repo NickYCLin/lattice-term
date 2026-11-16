@@ -18,7 +18,7 @@ fn playwright(endpoint: &str) -> (String, Vec<String>) {
     args.extend(["--cdp-endpoint".into(), endpoint.into()]);
     (if cfg!(windows) { "cmd" } else { "npx" }.into(), args)
 }
-pub(super) fn claude_arguments(endpoint: Option<&str>) -> Vec<String> {
+pub(crate) fn claude_arguments(endpoint: Option<&str>) -> Vec<String> {
     let mut servers = serde_json::json!({"latticeterm_chat_tools":{"command":command(),"args":["--mcp-chat-tools"],"env":{"LATTICETERM_CHAT_TOOLS_URL":"${LATTICETERM_CHAT_TOOLS_URL}"}}});
     if let Some(endpoint) = endpoint {
         let (command, args) = playwright(endpoint);
@@ -29,7 +29,7 @@ pub(super) fn claude_arguments(endpoint: Option<&str>) -> Vec<String> {
         serde_json::json!({"mcpServers":servers}).to_string(),
     ]
 }
-pub(super) fn codex_arguments() -> Vec<String> {
+pub(crate) fn codex_arguments() -> Vec<String> {
     [
         format!(
             "mcp_servers.latticeterm_chat_tools.command={}",
@@ -45,7 +45,7 @@ pub(super) fn codex_arguments() -> Vec<String> {
     .flat_map(|value| ["-c".to_string(), value])
     .collect()
 }
-pub(super) fn playwright_codex_arguments(endpoint: &str) -> Vec<String> {
+pub(crate) fn playwright_codex_arguments(endpoint: &str) -> Vec<String> {
     let (command, args) = playwright(endpoint);
     [
         format!(
@@ -64,8 +64,42 @@ pub(super) fn playwright_codex_arguments(endpoint: &str) -> Vec<String> {
     .flat_map(|value| ["-c".to_string(), value])
     .collect()
 }
+/// Claude accepts multiple config values after a single --mcp-config flag.
+/// Preserve the Fleet server when adding the per-conversation tool bridge.
+pub(crate) fn session_arguments(
+    definition: &str,
+    mut original: Vec<String>,
+    tools: &[String],
+) -> Vec<String> {
+    if definition == "claude" {
+        if let Some(index) = original.iter().rposition(|arg| arg == "--mcp-config") {
+            if tools.len() == 2 && tools[0] == "--mcp-config" {
+                original.insert(index + 1, tools[1].clone());
+                return original;
+            }
+        }
+    }
+    tools.iter().cloned().chain(original).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn foreground_claude_keeps_fleet_configuration_and_original_resume_arguments() {
+        let original = vec!["--mcp-config", "fleet.json", "--resume", "native-id"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let tools = super::claude_arguments(None);
+        let result = super::session_arguments("claude", original, &tools);
+        assert_eq!(
+            result.iter().filter(|arg| *arg == "--mcp-config").count(),
+            1
+        );
+        assert!(result[1].contains("latticeterm_chat_tools"));
+        assert_eq!(&result[2..], &["fleet.json", "--resume", "native-id"]);
+    }
+
     #[test]
     fn native_tools_use_the_scoped_bridge_and_playwright_shares_the_embedded_browser() {
         let args = super::codex_arguments();

@@ -8,8 +8,9 @@ export interface SessionMessageState {
 export const initialSessionMessages: SessionMessageState = { messages: [], nextId: 0 };
 
 function identity(message: SessionConversationMessage): string {
-  return JSON.stringify([message.role, message.text, message.tool
-    ? [message.tool.callId, message.tool.name ?? null, message.tool.kind] : null]);
+  if (message.tool) return JSON.stringify(["tool", message.tool.callId, message.tool.kind]);
+  if (message.nativeMessageId) return JSON.stringify([message.role, message.nativeMessageId]);
+  return JSON.stringify([message.role, message.nativeTurnId ?? null, message.text]);
 }
 
 /** Preserve DOM identity as the CLI's bounded history window moves forward. */
@@ -19,21 +20,27 @@ export function sessionMessageReducer(state: SessionMessageState, action:
 ): SessionMessageState {
   if (action.kind === "reset") return { messages: [], nextId: state.nextId };
   const previous = state.messages;
+  const retain = (old: SessionConversationMessage, next: SessionConversationMessage) =>
+    old.role === next.role && old.text === next.text && old.nativeMessageId === next.nativeMessageId
+      && old.nativeTurnId === next.nativeTurnId && old.tool?.kind === next.tool?.kind
+      && old.tool?.callId === next.tool?.callId && (old.tool?.name ?? null) === (next.tool?.name ?? null)
+      ? old : { ...next, renderId: old.renderId };
   const incoming = action.messages;
   const oldKeys = previous.map(identity);
   const newKeys = incoming.map(identity);
   const rows: (SessionConversationMessage | undefined)[] = Array(incoming.length);
   let start = 0;
   while (start < previous.length && start < incoming.length && oldKeys[start] === newKeys[start]) {
-    rows[start] = previous[start];
+    rows[start] = retain(previous[start], incoming[start]);
     start += 1;
   }
-  if (start === previous.length && start === incoming.length) return state;
+  if (start === previous.length && start === incoming.length && rows.every((row, index) => row === previous[index])) return state;
 
   let oldEnd = previous.length;
   let newEnd = incoming.length;
   while (oldEnd > start && newEnd > start && oldKeys[oldEnd - 1] === newKeys[newEnd - 1]) {
-    rows[--newEnd] = previous[--oldEnd];
+    --newEnd; --oldEnd;
+    rows[newEnd] = retain(previous[oldEnd], incoming[newEnd]);
   }
 
   // At most 300 transcript rows arrive from the backend. Matching the common
@@ -51,7 +58,7 @@ export function sessionMessageReducer(state: SessionMessageState, action:
   }
   for (let i = 0, j = 0; i < oldCount && j < newCount;) {
     if (oldKeys[start + i] === newKeys[start + j]) {
-      rows[start + j] = previous[start + i];
+      rows[start + j] = retain(previous[start + i], incoming[start + j]);
       i += 1;
       j += 1;
     } else if (lengths[(i + 1) * width + j] >= lengths[i * width + j + 1]) i += 1;

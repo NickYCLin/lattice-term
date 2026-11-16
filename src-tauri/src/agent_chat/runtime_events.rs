@@ -28,7 +28,7 @@ pub struct RateLimitWindow {
     pub resets_at: Option<i64>,
 }
 
-pub(super) fn plan_steps(value: &Value, claude: bool) -> Option<Vec<PlanStep>> {
+pub(crate) fn plan_steps(value: &Value, claude: bool) -> Option<Vec<PlanStep>> {
     let entries = value.as_array()?;
     if entries.len() > 64 {
         return None;

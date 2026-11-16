@@ -2998,6 +2998,7 @@ export const en: Messages = {
   "chat.nav.unpin": "Unpin",
   "chat.nav.search": "Search conversation",
   "chat.nav.side": "Side chat",
+  "chat.nav.selectMain": "This side chat is pinned. Select another conversation in the sidebar to view them together.",
   "chat.nav.closeSide": "Close side chat",
   "chat.nav.link": "Copy link",
   "chat.nav.copied": "Conversation link copied",

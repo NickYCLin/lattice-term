@@ -6,14 +6,18 @@ import { renderTerminalPreview } from "./terminalPreview";
 import { initialSessionMessages, sessionMessageReducer } from "./sessionMessageIdentity";
 
 export interface SessionConversationMessage {
+  nativeTurnId?: string;
+  nativeMessageId?: string;
   role: "user" | "assistant";
   text: string;
   /** Local rendering identity; never sent to the CLI or persisted in its history. */
   renderId?: number;
-  tool?: { callId: string; name: string | null; kind: "call" | "result" };
+  tool?: { callId: string; name: string | null; kind: "call" | "result" | "reasoning" };
 }
 
 export interface SessionConversationSnapshot {
+  nativeTools?: boolean;
+  progress?: { contextUsage: import("./chatRuntimeStatus").ContextUsage | null; rateLimits: import("./chatRuntimeStatus").RateLimitWindow[]; plan: import("./chatRuntimeStatus").PlanStep[]; goal: import("./chatRuntimeStatus").GoalState | null };
   availability: "waitingForIdentity" | "waitingForTranscript" | "ready";
   messages: SessionConversationMessage[];
   truncated: boolean;
@@ -27,7 +31,7 @@ export interface SessionApprovalRequest {
 }
 
 /** One reader and the existing prompt queue, both addressed to the same PTY. */
-export function useSessionConversation(sessionId: string, agents: AgentApi) {
+export function useSessionConversation(sessionId: string, agents: AgentApi, readTerminalOutput = true) {
   const selectedSession = useRef(sessionId);
   selectedSession.current = sessionId;
   const submitted = useSyncExternalStore(subscribeSessionSubmissions,
@@ -37,6 +41,9 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   const [history, dispatchMessages] = useReducer(sessionMessageReducer, initialSessionMessages);
   const messages = history.messages;
   const [availability, setAvailability] = useState<SessionConversationSnapshot["availability"]>("waitingForIdentity");
+  const [goal, setGoal] = useState<import("./chatRuntimeStatus").GoalState | null>(null);
+  const [nativeTools, setNativeTools] = useState(false);
+  const [progress, setProgress] = useState<SessionConversationSnapshot["progress"]>();
   const [truncated, setTruncated] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +121,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     let disposed = false;
     setOutput("");
     setOutputError(null);
+    if (!readTerminalOutput) return;
     const unsubscribe = onOutputTail(sessionId, text => {
       latest = text;
       revision += 1;
@@ -136,7 +144,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
       }, 100);
     });
     return () => { disposed = true; unsubscribe(); clearTimeout(timer); };
-  }, [sessionId, onOutputTail]);
+  }, [sessionId, onOutputTail, readTerminalOutput]);
 
   useEffect(() => {
     let disposed = false;
@@ -144,6 +152,8 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     dispatchMessages({ kind: "reset" });
     setAvailability(nativeSessionId ? "waitingForTranscript" : "waitingForIdentity");
     setTruncated(false);
+    setProgress(undefined);
+    setNativeTools(false);
     setReadError(null);
     setLoading(true);
     setSlow(false);
@@ -163,6 +173,8 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
           reconcileSessionSubmissions(sessionId, next.messages);
           setAvailability(next.availability);
           setTruncated(next.truncated);
+          setProgress(next.progress);
+          setNativeTools(next.nativeTools === true);
           setReadError(null);
         }
       } catch (reason) {
@@ -176,6 +188,22 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
     void read();
     return () => { disposed = true; clearTimeout(timer); clearTimeout(slowTimer); };
   }, [sessionId, nativeSessionId]);
+
+  const definitionId = agents.sessions.find(session => session.sessionId === sessionId)?.definitionId;
+  useEffect(() => {
+    let disposed = false; let timer: ReturnType<typeof setTimeout> | undefined;
+    setGoal(null);
+    if (!nativeSessionId || definitionId !== "codex") return;
+    async function readGoal() {
+      try {
+        const next = await invoke<import("./chatRuntimeStatus").GoalState | null>("agent_session_goal", { sessionId, expectedNativeId: nativeSessionId });
+        if (!disposed) setGoal(next);
+      } catch { if (!disposed) setGoal(null); }
+      finally { if (!disposed) timer = setTimeout(() => { void readGoal(); }, 30000); }
+    }
+    void readGoal();
+    return () => { disposed = true; if (timer) clearTimeout(timer); };
+  }, [sessionId, nativeSessionId, definitionId]);
 
   async function send(text: string): Promise<boolean> {
     if (!text.trim() || sendingRef.current) return false;
@@ -198,7 +226,7 @@ export function useSessionConversation(sessionId: string, agents: AgentApi) {
   }
   const acknowledge = useCallback(() => setQueued(null), []);
   return {
-    messages, submitted, availability, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
+    messages, submitted, availability, nativeTools, progress: progress ? { ...progress, goal } : goal ? { contextUsage: null, rateLimits: [], plan: [], goal } : undefined, truncated, readError, loading, slow, output, outputError, sendError, sending, queued, send, acknowledge,
     approval, answering, answerError, answer,
   };
 }

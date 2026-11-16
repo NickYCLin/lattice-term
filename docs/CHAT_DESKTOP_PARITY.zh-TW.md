@@ -2,7 +2,9 @@
 
 2026-11-16 更新：使用者指定的 1–13 項已補上對話操作與原生資料流。
 各 CLI 支援範圍、本機驗證與安裝版界線，見
-[完整補齊紀錄](CHAT_PARITY_IMPLEMENTATION.zh-TW.md)。以下保留既有功能紀錄。
+[獨立對話實作紀錄](CHAT_PARITY_IMPLEMENTATION.zh-TW.md)。CLI 工作階段
+另見[工作階段補齊及限制](qa/2026-11-16-session-chat-parity.zh-TW.md)，
+不可將兩個入口的原生控制能力視為完全相同。以下保留既有功能紀錄。
 
 ## Codex 工作階段對話的就緒辨識
 

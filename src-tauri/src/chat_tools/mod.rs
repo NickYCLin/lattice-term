@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, OnceLock,
+    },
     time::Duration,
 };
 use tokio::{
@@ -24,7 +27,9 @@ const MAX_REQUEST: usize = 64 * 1024;
 struct Endpoint {
     url: String,
     directory: PathBuf,
-    browser: bool,
+    browser: Arc<AtomicBool>,
+    active: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     task: tokio::task::AbortHandle,
 }
 static ENDPOINTS: OnceLock<Mutex<HashMap<String, Endpoint>>> = OnceLock::new();
@@ -47,11 +52,13 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
     checked_id(id)?;
     let mut endpoints = endpoints().lock().await;
     if let Some(endpoint) = endpoints.get(id) {
-        if endpoint.directory == directory && endpoint.browser == browser_enabled {
+        if endpoint.directory == directory {
+            endpoint.browser.store(browser_enabled, Ordering::SeqCst);
             return Ok(endpoint.url.clone());
         }
     }
     if let Some(old) = endpoints.remove(id) {
+        old.active.store(false, Ordering::SeqCst);
         old.task.abort();
     }
     if endpoints.len() >= 32 {
@@ -71,6 +78,11 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
     let thread = id.to_string();
     let root = directory.clone();
     let capability = token.clone();
+    let browser = Arc::new(AtomicBool::new(browser_enabled));
+    let active = Arc::new(AtomicBool::new(true));
+    let ready = Arc::new(AtomicBool::new(false));
+    let browser_state = browser.clone();
+    let active_state = active.clone();
     let task = tokio::spawn(async move {
         let slots = Arc::new(Semaphore::new(4));
         loop {
@@ -86,11 +98,13 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
             let id = thread.clone();
             let root = root.clone();
             let token = capability.clone();
+            let browser = browser_state.clone();
+            let active = active_state.clone();
             tokio::spawn(async move {
                 let _permit = permit;
                 let _ = tokio::time::timeout(
                     Duration::from_secs(195),
-                    connection(stream, &id, &root, browser_enabled, &token),
+                    connection(stream, &id, &root, &browser, &active, &token),
                 )
                 .await;
             });
@@ -101,7 +115,9 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
         Endpoint {
             url: url.clone(),
             directory,
-            browser: browser_enabled,
+            browser,
+            active,
+            ready,
             task: task.abort_handle(),
         },
     );
@@ -109,6 +125,7 @@ pub async fn ensure(id: &str, directory: PathBuf, browser_enabled: bool) -> Resu
 }
 pub async fn close(id: &str) {
     if let Some(endpoint) = endpoints().lock().await.remove(id) {
+        endpoint.active.store(false, Ordering::SeqCst);
         endpoint.task.abort();
     }
     let _ = computer::enable(id, false).await;
@@ -118,6 +135,7 @@ pub async fn close(id: &str) {
 pub async fn close_all() {
     computer::shutdown().await;
     for (_, endpoint) in endpoints().lock().await.drain() {
+        endpoint.active.store(false, Ordering::SeqCst);
         endpoint.task.abort();
     }
     browser::close_all().await;
@@ -126,7 +144,8 @@ async fn connection(
     stream: TcpStream,
     id: &str,
     root: &std::path::Path,
-    browser_enabled: bool,
+    browser_enabled: &AtomicBool,
+    active: &AtomicBool,
     token: &str,
 ) -> Result<(), String> {
     let mut reader = BufReader::new(stream);
@@ -182,7 +201,18 @@ async fn connection(
     {
         return Err("revoked".into());
     }
-    let result = dispatch(id, root, browser_enabled, request).await;
+    if !active.load(Ordering::SeqCst) {
+        return Err("Tool access was revoked.".into());
+    }
+    let discovery = request["method"] == "tools/list";
+    let result = dispatch(id, root, browser_enabled.load(Ordering::SeqCst), request).await;
+    if discovery && result.is_ok() {
+        if let Some(endpoint) = endpoints().lock().await.get(id) {
+            if endpoint.active.load(Ordering::SeqCst) && endpoint.url.ends_with(token) {
+                endpoint.ready.store(true, Ordering::SeqCst);
+            }
+        }
+    }
     let value = match result {
         Ok(value) => json!({"result":value}),
         Err(error) => json!({"error":error}),
@@ -203,7 +233,7 @@ async fn dispatch(
 ) -> Result<Value, String> {
     if request["method"] == "tools/list" {
         let mut tools = Vec::new();
-        if browser_enabled {
+        {
             for (name, description, properties, required) in [
                 (
                     "browser_navigate",
@@ -424,6 +454,45 @@ pub fn environment() -> &'static str {
     ENV
 }
 
+/// Prepared asynchronously by the desktop before a foreground PTY is launched.
+/// Only argv configuration and an environment capability are passed to the child.
+pub(crate) struct SessionLaunchTools {
+    pub id: String,
+    pub url: String,
+    pub arguments: Vec<String>,
+}
+pub(crate) async fn prepare_session(
+    id: String,
+    definition: &str,
+    directory: PathBuf,
+) -> Result<SessionLaunchTools, String> {
+    let directory = directory.canonicalize().map_err(|e| e.to_string())?;
+    let url = ensure(&id, directory, true).await?;
+    // The built-in bridge has no Node/download prerequisite. Foreground CLIs
+    // must not wait for an optional Playwright server during normal startup.
+    let arguments = match definition {
+        "codex" => crate::agent_chat::browser::codex_arguments(),
+        "claude" => crate::agent_chat::browser::claude_arguments(None),
+        _ => return Err("這個助理不支援對話工具。".into()),
+    };
+    Ok(SessionLaunchTools { id, url, arguments })
+}
+pub(crate) async fn registered(id: &str) -> bool {
+    endpoints()
+        .lock()
+        .await
+        .get(id)
+        .is_some_and(|endpoint| endpoint.ready.load(Ordering::SeqCst))
+}
+
+pub(crate) async fn set_browser_enabled(id: &str, enabled: bool) -> Result<(), String> {
+    checked_id(id)?;
+    let guard = endpoints().lock().await;
+    let endpoint = guard.get(id).ok_or("這個工作階段尚未載入助理工具。")?;
+    endpoint.browser.store(enabled, Ordering::SeqCst);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +502,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let id = "test-scoped-tools-transport";
         let url = ensure(id, root.path().into(), true).await.unwrap();
+        assert!(!registered(id).await);
         let client = reqwest::Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(2))
@@ -462,27 +532,20 @@ mod tests {
             .await
             .is_err());
         let replacement = ensure(id, root.path().into(), false).await.unwrap();
-        assert_ne!(url, replacement);
-        assert!(client
+        assert_eq!(url, replacement); // Live CLI children retain their original capability.
+        let denied: Value = client
             .post(&url)
-            .json(&json!({"method":"tools/list"}))
-            .send()
-            .await
-            .is_err());
-        let list: Value = client
-            .post(&replacement)
-            .json(&json!({"method":"tools/list"}))
+            .json(
+                &json!({"method":"tools/call","params":{"name":"browser_snapshot","arguments":{}}}),
+            )
             .send()
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        assert!(!list["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|tool| tool["name"] == "browser_navigate"));
+        assert!(denied["error"].as_str().unwrap().contains("瀏覽器"));
+        assert!(registered(id).await);
         computer::enable(id, true).await.unwrap();
         assert!(computer::enabled(id).await); // Armed while the composer is still visible.
         computer::focus_changed(false);

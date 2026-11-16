@@ -415,6 +415,9 @@ export function importNativeConversation(
     title: string;
     accountProfileId: string | null;
     messages: readonly NativeHistoryMessage[];
+    /** Explicit read-only mirror of a still-running PTY. */
+    sessionSource?: boolean;
+    model?: string;
     provider?: "cliproxyapi";
     proxyId?: string;
   },
@@ -424,7 +427,7 @@ export function importNativeConversation(
     definitionId: settings.definitionId,
     workingDirectory: settings.workingDirectory,
     permission: defaultPermission(settings.definitionId),
-    model: "",
+    model: settings.model ?? "",
     title: threadTitle(settings.title),
     provider: settings.provider,
     proxyId: settings.proxyId,
