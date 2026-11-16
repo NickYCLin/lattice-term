@@ -2239,8 +2239,7 @@ button.chat-diff__line.is-commentable:focus-visible {
   font-size: var(--text-2xs);
 }
 
-.chat-images,
-.agent-session-images__grid {
+.chat-images {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr));
   gap: var(--space-2);
@@ -2806,3 +2805,8 @@ button.chat-diff__line.is-commentable:focus-visible {
 .session-composer__directory-button { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .session-composer__directory-clear { display: grid; place-items: center; flex: none; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
 :is(.session-composer__directory-button, .session-composer__directory-clear):disabled { cursor: not-allowed; }
+
+@media (max-width: 30rem) {
+  .chat-image-preview__header--gallery { flex-wrap: wrap; }
+  .chat-image-preview__header--gallery > span { flex: 1 0 100%; }
+}

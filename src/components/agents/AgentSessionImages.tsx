@@ -1,12 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useI18n } from "../../i18n/context";
 import { imageFileName, orderedImagePaths } from "../../app/chatImages";
 import { ChatImagePreview } from "../chat/ChatImagePreview";
 import type { TerminalImageReference } from "../terminal/terminalImageLinks";
-import { CloseIcon, ImageFileIcon } from "../icons";
-import { useModalFocus } from "../overlays/modalFocus";
+import { ImageFileIcon } from "../icons";
 
 export interface SessionImagesSnapshot {
   paths: string[];
@@ -37,117 +35,46 @@ export function resolveSessionImageReference(snapshot: SessionImagesSnapshot | n
   return { path, images: prompt.paths.flatMap((path, index) => path ? [{ path, number: index + 1 }] : []) };
 }
 
-const PAGE_SIZE = 9;
-
-function SessionImageTile({ path, sessionId, number, current, focusRevision, onSelect }: {
+function SessionImageTile({ path, sessionId, number, current, onSelect }: {
   path: string;
   sessionId: string;
   number: number;
   current: boolean;
-  focusRevision: number;
-  onSelect: (path: string, url: string | null) => void;
+  onSelect: (url: string | null) => void;
 }) {
   const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const name = imageFileName(path);
   const tileRef = useRef<HTMLButtonElement>(null);
+  const name = imageFileName(path);
   useEffect(() => {
-    if (current) { tileRef.current?.focus({ preventScroll: true }); tileRef.current?.scrollIntoView?.({ block: "nearest" }); }
-  }, [current, focusRevision]);
+    if (current) tileRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [current]);
   useEffect(() => {
     let cancelled = false;
-    void invoke<string | null>("chat_image_preview", { path, workingDirectory: "", threadId: sessionId })
-      .catch(() => null).then(next => {
-        if (!cancelled) { setUrl(next); setLoading(false); }
+    const load = () => {
+      void invoke<string | null>("chat_image_preview", { path, workingDirectory: "", threadId: sessionId })
+        .catch(() => null).then(next => { if (!cancelled) { setUrl(next); setLoading(false); } });
+    };
+    let observer: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver === "undefined") load();
+    else {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer?.disconnect(); load(); }
       });
-    return () => { cancelled = true; };
+      if (tileRef.current) observer.observe(tileRef.current);
+    }
+    return () => { cancelled = true; observer?.disconnect(); };
   }, [path, sessionId]);
   return <button ref={tileRef} type="button" className="agent-session-images__tile"
     aria-current={current ? "true" : undefined}
-    aria-label={t("chat.images.preview", { name })} onClick={() => onSelect(path, url)}>
+    aria-label={t("chat.images.preview", { name })} title={name}
+    onClick={event => { event.currentTarget.focus({ preventScroll: true }); onSelect(url); }}>
     <span className="agent-session-images__number">#{number}</span>
     {loading ? <span role="status">{t("common.loading")}</span>
       : url ? <img src={url} alt={name} onError={() => setUrl(null)} />
         : <span>{t("chat.images.unavailable")}</span>}
-    <span title={name}>{name}</span>
   </button>;
-}
-
-function SessionImageGallery({ sessionId, revision, reference, focusRevision, onClose }: {
-  sessionId: string;
-  revision: number;
-  reference?: TerminalImageReference;
-  focusRevision: number;
-  onClose: () => void;
-}) {
-  const { t } = useI18n();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const [snapshot, setSnapshot] = useState<SessionImagesSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refresh, setRefresh] = useState(0);
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState<{ path: string; url: string | null } | null>(null);
-  useModalFocus({ dialogRef, onEscape: onClose });
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true); setError(null); setSnapshot(null); setPage(0); setSelected(null);
-    void invoke<SessionImagesSnapshot>("agent_session_images_snapshot", { sessionId }).then(next => {
-      if (!cancelled) setSnapshot(next);
-    }).catch(reason => {
-      if (!cancelled) setError(String(reason));
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [sessionId, revision, refresh]);
-  const resolved = resolveSessionImageReference(snapshot, reference);
-  const images = resolved?.images ?? orderedImagePaths([
-    ...(snapshot?.paths ?? []), ...(snapshot?.observed?.flatMap(image => image.paths) ?? []),
-  ]).map((path, index) => ({ path, number: index + 1 }));
-  const target = resolved ? images.findIndex(image => image.number === reference?.index) : -1;
-  useEffect(() => {
-    setPage(target >= 0 ? Math.floor(target / PAGE_SIZE) : 0);
-    setSelected(null);
-  }, [snapshot, reference, focusRevision, target]);
-  const pages = Math.max(1, Math.ceil(images.length / PAGE_SIZE));
-  return createPortal(<div className="scrim scrim--center agent-session-images" onMouseDown={event => {
-    if (event.target === event.currentTarget) onClose();
-  }}>
-    <div ref={dialogRef} className="agent-session-images__dialog" role="dialog" aria-modal="true"
-      aria-label={t("agents.images.title")} tabIndex={-1}>
-      <header><h2>{t("agents.images.title")}</h2>
-        <button type="button" className="button button--quiet" disabled={loading}
-          onClick={() => setRefresh(value => value + 1)}>{t("agents.images.refresh")}</button>
-        <button type="button" className="icon-button" aria-label={t("common.close")} onClick={onClose}><CloseIcon /></button>
-      </header>
-      <div className="agent-session-images__content">
-        <p>{t("agents.images.hint")}</p>
-        {loading ? <p role="status">{t("agents.images.loading")}</p>
-          : error ? <div role="alert"><p>{t("agents.images.failed")}</p><pre>{error}</pre></div>
-            : snapshot && <>
-              {!snapshot.historyAvailable && <p role="status">{t("agents.images.waiting")}</p>}
-              {snapshot.truncated && <p role="status">{t("agents.images.limited")}</p>}
-              {reference?.index && !resolved && <p role="status">{t("agents.images.unmatched")}</p>}
-              {images.length === 0 ? <p>{t("agents.images.empty")}</p>
-                : <div className="agent-session-images__grid">
-                  {images.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(({ path, number }, offset) =>
-                    <SessionImageTile key={`${path}:${number}`} path={path} sessionId={sessionId} number={number}
-                      current={target === page * PAGE_SIZE + offset} focusRevision={focusRevision}
-                      onSelect={(path, url) => setSelected({ path, url })} />)}
-                </div>}
-              {pages > 1 && <nav aria-label={t("agents.images.pages")}>
-                <button type="button" className="button" disabled={page === 0}
-                  onClick={() => setPage(value => value - 1)}>{t("agents.images.previous")}</button>
-                <span>{page + 1} / {pages}</span>
-                <button type="button" className="button" disabled={page + 1 >= pages}
-                  onClick={() => setPage(value => value + 1)}>{t("agents.images.next")}</button>
-              </nav>}
-            </>}
-      </div>
-    </div>
-    {selected && <ChatImagePreview path={selected.path} name={imageFileName(selected.path)}
-      workingDirectory="" threadId={sessionId} initialUrl={selected.url ?? undefined} onClose={() => setSelected(null)} />}
-  </div>, document.body);
 }
 
 export function AgentSessionImages({ sessionId, active, revision, openRevision = 0, reference }: {
@@ -158,18 +85,70 @@ export function AgentSessionImages({ sessionId, active, revision, openRevision =
   reference?: TerminalImageReference;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<SessionImagesSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
   const [requested, setRequested] = useState<TerminalImageReference>();
+  const [current, setCurrent] = useState<number | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [initialUrl, setInitialUrl] = useState<string | undefined>();
   const lastOpenRevision = useRef(openRevision);
   useEffect(() => {
-    if (lastOpenRevision.current !== openRevision && active) { setRequested(reference); setOpen(true); }
-    lastOpenRevision.current = openRevision;
-  }, [openRevision, active, reference]);
-  useEffect(() => { if (!active) setOpen(false); }, [active]);
-  return <div className="agent-session-images__toolbar">
-    <button type="button" className="button button--quiet" title={t("agents.images.marker")} onClick={() => { setRequested(undefined); setOpen(true); }}>
-      <ImageFileIcon size={16} />{t("agents.images.title")}
-    </button>
-    {open && active && <SessionImageGallery key={sessionId} sessionId={sessionId} revision={revision} reference={requested} focusRevision={openRevision} onClose={() => setOpen(false)} />}
-  </div>;
+    if (!active) { setSnapshot(null); setViewerOpen(false); setCurrent(null); setRequested(undefined); return; }
+    let cancelled = false;
+    setLoading(true); setError(null); setViewerOpen(false);
+    void invoke<SessionImagesSnapshot>("agent_session_images_snapshot", { sessionId }).then(next => {
+      if (cancelled) return;
+      setSnapshot(next);
+      const wantsOpen = lastOpenRevision.current !== openRevision;
+      lastOpenRevision.current = openRevision;
+      if (wantsOpen) {
+        setRequested(reference);
+        const resolved = resolveSessionImageReference(next, reference);
+        const index = resolved?.images.findIndex(image => image.number === reference?.index) ?? -1;
+        setCurrent(index >= 0 ? index : null); setInitialUrl(undefined); setViewerOpen(index >= 0);
+      } else { setCurrent(null); }
+    }).catch(reason => { if (!cancelled) setError(String(reason)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+    // A marker request is identified by its revision, not by object identity.
+  }, [sessionId, active, revision, refresh, openRevision]);
+  const resolved = resolveSessionImageReference(snapshot, requested);
+  const images = resolved?.images ?? orderedImagePaths([
+    ...(snapshot?.paths ?? []), ...(snapshot?.observed?.flatMap(image => image.paths) ?? []),
+  ]).map((path, index) => ({ path, number: index + 1 }));
+  const selected = current === null ? undefined : images[current];
+  const move = (offset: number) => {
+    setInitialUrl(undefined);
+    setCurrent(index => index === null ? null : Math.max(0, Math.min(images.length - 1, index + offset)));
+  };
+  if (!active) return null;
+  return <section className="agent-session-images__toolbar" aria-label={t("agents.images.title")}>
+    <header><span><ImageFileIcon size={16} />{t("agents.images.title")} · {images.length}</span>
+      {resolved && <button type="button" className="button button--quiet" onClick={() => {
+        setRequested(undefined); setViewerOpen(false); setCurrent(null);
+      }}>{t("agents.images.all")}</button>}
+      <button type="button" className="button button--quiet" disabled={loading}
+        onClick={() => setRefresh(value => value + 1)}>{t("agents.images.refresh")}</button>
+    </header>
+    {loading && <span role="status">{t("agents.images.loading")}</span>}
+    {error && <div role="alert">{t("agents.images.failed")}<pre>{error}</pre></div>}
+    {snapshot && <>
+      {!snapshot.historyAvailable && <p role="status">{t("agents.images.waiting")}</p>}
+      {snapshot.truncated && <p role="status">{t("agents.images.limited")}</p>}
+      {requested?.index && !resolved && <p role="status">{t("agents.images.unmatched")}</p>}
+      {!images.length && !loading && <p>{t("agents.images.empty")}</p>}
+      {!!images.length && <div className="agent-session-images__strip" aria-label={t("agents.images.title")}>
+        {images.map(({ path, number }, index) => <SessionImageTile key={`${path}:${number}`} path={path}
+          sessionId={sessionId} number={number} current={index === current} onSelect={url => {
+            setCurrent(index); setInitialUrl(url ?? undefined); setViewerOpen(true);
+          }} />)}
+      </div>}
+    </>}
+    {viewerOpen && selected && <ChatImagePreview path={selected.path} name={imageFileName(selected.path)}
+      workingDirectory="" threadId={sessionId} initialUrl={initialUrl}
+      navigation={{ index: current!, total: images.length, onPrevious: () => move(-1), onNext: () => move(1) }}
+      onClose={() => setViewerOpen(false)} />}
+  </section>;
 }

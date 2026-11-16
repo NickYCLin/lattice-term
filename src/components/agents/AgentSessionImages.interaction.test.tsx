@@ -7,7 +7,6 @@ import { AgentSessionImages, resolveSessionImageReference, type SessionImagesSna
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../../app/nativeRuntime", () => ({ hasDesktopBackend: () => true }));
-vi.mock("../overlays/modalFocus", () => ({ useModalFocus: () => {} }));
 
 class HostNode {
   nodeType = 1;
@@ -15,6 +14,12 @@ class HostNode {
   childNodes: HostNode[] = [];
   parentNode: HostNode | null = null;
   style = {};
+  disabled = false;
+  hidden = false;
+  get tabIndex() { return Number(this.attributes.tabindex ?? (this.tagName === "BUTTON" ? 0 : -1)); }
+  get isConnected(): boolean { return this === this.ownerDocument.body || Boolean(this.parentNode?.isConnected); }
+  closest() { return null; }
+  querySelectorAll(selector: string) { return allNodes(this).filter(node => node !== this && (selector.includes("aria-modal") ? node.attributes["aria-modal"] === "true" : node.tagName === "BUTTON" && !node.disabled)); }
   attributes: Record<string, string> = {};
   value = "";
   defaultValue = "";
@@ -32,12 +37,12 @@ class HostNode {
   appendChild(child: HostNode) { this.childNodes.push(child); child.parentNode = this; return child; }
   removeChild(child: HostNode) { this.childNodes = this.childNodes.filter((node) => node !== child); child.parentNode = null; return child; }
   insertBefore(child: HostNode, before: HostNode) { this.childNodes.splice(this.childNodes.indexOf(before), 0, child); child.parentNode = this; return child; }
-  setAttribute(name: string, value: string) { this.attributes[name] = value; }
+  setAttribute(name: string, value: string) { this.attributes[name] = value; if (name === "disabled") this.disabled = true; }
   setAttributeNS(_namespace: string, name: string, value: string) { this.setAttribute(name, value); }
-  removeAttribute(name: string) { delete this.attributes[name]; }
+  removeAttribute(name: string) { delete this.attributes[name]; if (name === "disabled") this.disabled = false; }
   addEventListener() {}
   removeEventListener() {}
-  focus = vi.fn();
+  focus = vi.fn(() => { this.ownerDocument.activeElement = this; });
   scrollIntoView = vi.fn();
 }
 
@@ -51,7 +56,12 @@ function onClick(node: HostNode): () => void {
 }
 
 function installHostDom() {
-  const document: Record<string, unknown> = { nodeType: 9, activeElement: null, addEventListener() {}, removeEventListener() {} };
+  const listeners = new Set<(event: unknown) => void>();
+  const document: Record<string, unknown> = { nodeType: 9, activeElement: null,
+    addEventListener(type: string, handler: (event: unknown) => void) { if (type === "keydown") listeners.add(handler); },
+    removeEventListener(type: string, handler: (event: unknown) => void) { if (type === "keydown") listeners.delete(handler); },
+    dispatchKey(event: unknown) { for (const listener of listeners) listener(event); },
+  };
   document.createElement = (name: string) => new HostNode(name.toUpperCase(), document);
   document.createElementNS = (_namespace: string, name: string) => new HostNode(name.toUpperCase(), document);
   document.createTextNode = (text: string) => {
@@ -63,9 +73,16 @@ function installHostDom() {
   const container = new HostNode("DIV", document);
   document.body = container;
   document.documentElement = container;
+  document.querySelectorAll = (selector: string) => {
+    const nodes = container.querySelectorAll(selector);
+    return Object.assign(nodes, { item: (index: number) => nodes[index] });
+  };
   const window = {
     document, HTMLIFrameElement: class {}, addEventListener() {}, removeEventListener() {},
     setInterval, clearInterval, setTimeout, clearTimeout,
+    requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
+    cancelAnimationFrame: clearTimeout,
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
   };
   document.defaultView = window;
   vi.stubGlobal("window", window);
@@ -81,190 +98,163 @@ const renderImages = (sessionId = "owner", active = true) => <I18nProvider local
   <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} />
 </I18nProvider>;
 
-it("hides tool metadata and empty observed records", async () => {
-  const host = installHostDom();
-  const root = createRoot(host as unknown as Element);
-  invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: true, observed: [
-    { tool: "view_image", at: "synthetic-time", paths: [], localReference: true },
-    { tool: "capture", at: null, paths: [], localReference: false },
-  ] });
-  try {
-    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={0} /></I18nProvider>));
-    await act(async () => root.render(<I18nProvider locale="zh-TW"><AgentSessionImages sessionId="synthetic" active revision={0} openRevision={1} /></I18nProvider>));
-    expect(host.textContent).not.toContain("本機檔案參照");
-    expect(host.textContent).not.toContain("當時靜態圖片");
-    expect(host.textContent).not.toContain("未保存可讀像素");
-    expect(host.textContent).not.toContain("synthetic-time");
-    expect(host.textContent).not.toContain("view_image");
-    expect(host.textContent).toContain("尚未找到可查看的圖片");
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("opens through a terminal marker revision, closes and reopens without reusing a previous session", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
-  invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: false });
-  const render = (sessionId: string, revision: number, active = true) => <I18nProvider locale="zh-TW">
-    <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={0} openRevision={revision} />
-  </I18nProvider>;
-  try {
-    await act(async () => root.render(render("first", 0)));
-    expect(invoke).not.toHaveBeenCalled();
-    await act(async () => root.render(render("first", 1)));
-    expect(invoke).toHaveBeenCalledExactlyOnceWith("agent_session_images_snapshot", { sessionId: "first" });
-    await act(async () => onClick(allNodes(container).find(node => node.attributes["aria-label"] === "關閉")!)());
-    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
-    await act(async () => root.render(render("first", 2)));
-    expect(invoke).toHaveBeenCalledTimes(2);
-    await act(async () => root.render(render("second", 2)));
-    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
-    await act(async () => root.render(render("second", 3)));
-    expect(invoke).toHaveBeenLastCalledWith("agent_session_images_snapshot", { sessionId: "second" });
-    await act(async () => root.render(render("second", 4, false)));
-    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(0);
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("loads only on opening and opens the exact thumbnail without guessing image numbers", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
-  const url = "data:image/png;base64,fixture";
+function props(node: HostNode): Record<string, unknown> {
+  const key = Object.keys(node).find(name => name.startsWith("__reactProps$"))!;
+  return (node as unknown as Record<string, Record<string, unknown>>)[key];
+}
+function tiles(host: HostNode) { return allNodes(host).filter(node => node.attributes.class === "agent-session-images__tile"); }
+function dialog(host: HostNode) { return allNodes(host).find(node => node.attributes.role === "dialog"); }
+async function clickTile(node: HostNode) {
+  await act(async () => (props(node).onClick as (event: unknown) => void)({ currentTarget: node }));
+}
+async function key(host: HostNode, value: string) {
+  const event = { key: value, nativeEvent: { isComposing: false }, preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+  await act(async () => {
+    (host.ownerDocument.dispatchKey as (event: unknown) => void)(event);
+  });
+}
+const paths = ["/cache/a.png", "/cache/b.png", "/cache/c.png"];
+function fixture(extra: Partial<SessionImagesSnapshot> = {}) {
   invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
-    ? { paths: ["/cache/agent-image-fixture.png"], truncated: false, historyAvailable: true } : url);
+    ? { paths, truncated: false, historyAvailable: true, ...extra } : "data:image/png;base64,fixture");
+}
+
+it("defaults to one thumbnail strip with a count and no expanded dialog or pagination", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  fixture({ paths: Array.from({ length: 12 }, (_, i) => `/cache/${i}.png`) });
   try {
     await act(async () => root.render(renderImages()));
-    expect(invoke).not.toHaveBeenCalled();
-    await act(async () => onClick(allNodes(container).find(node => node.textContent === "圖片附件" && node.tagName === "BUTTON")!)());
-    expect(invoke).toHaveBeenCalledWith("agent_session_images_snapshot", { sessionId: "owner" });
-    expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: "/cache/agent-image-fixture.png", workingDirectory: "", threadId: "owner" });
-    await act(async () => onClick(allNodes(container).find(node => node.attributes.class === "agent-session-images__tile")!)());
-    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(2);
-    expect(allNodes(container).filter(node => node.tagName === "IMG").every(node => node.attributes.src === url)).toBe(true);
-    await act(async () => root.render(renderImages("other")));
-    expect(allNodes(container).some(node => node.attributes.role === "dialog")).toBe(false);
-    expect(invoke.mock.calls.filter(([command]) => command === "agent_session_images_snapshot")).toHaveLength(1);
+    expect(tiles(host)).toHaveLength(12);
+    expect(host.textContent).toContain("圖片附件 · 12");
+    expect(dialog(host)).toBeUndefined();
+    expect(host.textContent).not.toContain("下一頁");
+    expect(tiles(host).map(node => node.textContent)).toEqual(Array.from({ length: 12 }, (_, i) => `#${i + 1}`));
   } finally { await act(async () => root.unmount()); }
 });
 
-it("does not show a delayed snapshot after switching away and reloads on re-entry", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
+it("switches by arrows and buttons, updates the highlighted thumbnail, and returns focus on Escape", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture();
+  try {
+    await act(async () => root.render(renderImages()));
+    const trigger = tiles(host)[1];
+    await clickTile(trigger);
+    expect(dialog(host)).toBeDefined();
+    expect(host.textContent).toContain("第 2／共 3 張");
+    expect(tiles(host)[1].attributes["aria-current"]).toBe("true");
+    await key(host, "ArrowRight");
+    expect(host.textContent).toContain("第 3／共 3 張");
+    expect(tiles(host)[2].attributes["aria-current"]).toBe("true");
+    expect(tiles(host)[2].scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    const next = allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "下一張")!;
+    expect(next.disabled).toBe(true);
+    await key(host, "ArrowRight");
+    expect(host.textContent).toContain("第 3／共 3 張");
+    await key(host, "ArrowLeft");
+    expect(host.textContent).toContain("第 2／共 3 張");
+    await act(async () => onClick(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "上一張")!)());
+    expect(host.textContent).toContain("第 1／共 3 張");
+    await key(host, "Escape");
+    expect(dialog(host)).toBeUndefined();
+    expect(host.ownerDocument.activeElement).toBe(trigger);
+    expect(tiles(host)[0].attributes["aria-current"]).toBe("true");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("opens a numbered terminal marker directly in the lightbox using its prompt, not cache order", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  fixture({ paths: [...paths].reverse(), prompts: [{ text: "target prompt", paths }] });
+  const render = (openRevision: number, index: number) => <I18nProvider locale="zh-TW">
+    <AgentSessionImages sessionId="owner" active revision={0} openRevision={openRevision}
+      reference={{ index, context: "target prompt [Image #2]" }} />
+  </I18nProvider>;
+  try {
+    await act(async () => root.render(render(0, 2)));
+    expect(dialog(host)).toBeUndefined();
+    await act(async () => root.render(render(1, 2)));
+    expect(dialog(host)).toBeDefined();
+    expect(host.textContent).toContain("第 2／共 3 張");
+    expect(tiles(host)[1].attributes["aria-label"]).toContain("b.png");
+    expect(tiles(host)[1].attributes["aria-current"]).toBe("true");
+    await key(host, "Escape");
+    await act(async () => root.render(render(2, 1)));
+    expect(host.textContent).toContain("第 1／共 3 張");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("restores a terminal trigger rather than moving keyboard focus to the strip", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  fixture({ prompts: [{ text: "target prompt", paths }] });
+  const render = (openRevision: number) => <I18nProvider locale="zh-TW"><AgentSessionImages sessionId="owner" active revision={0}
+    openRevision={openRevision} reference={{ index: 1, context: "target prompt" }} /></I18nProvider>;
+  try {
+    await act(async () => root.render(render(0)));
+    const trigger = new HostNode("TEXTAREA", host.ownerDocument); host.appendChild(trigger); trigger.focus();
+    await act(async () => root.render(render(1)));
+    await key(host, "ArrowRight");
+    await key(host, "Escape");
+    expect(host.ownerDocument.activeElement).toBe(trigger);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("keeps ambiguous markers in the compact all-image strip with an explanation", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  fixture({ prompts: [{ text: "same prompt", paths: [paths[0]] }, { text: "same prompt", paths: [paths[1]] }] });
+  const render = (openRevision: number) => <I18nProvider locale="zh-TW"><AgentSessionImages sessionId="owner" active revision={0}
+    openRevision={openRevision} reference={{ index: 1, context: "same prompt" }} /></I18nProvider>;
+  try {
+    await act(async () => root.render(render(0)));
+    await act(async () => root.render(render(1)));
+    expect(host.textContent).toContain("無法唯一對應"); expect(tiles(host)).toHaveLength(3);
+    expect(dialog(host)).toBeUndefined();
+    expect(tiles(host).some(node => node.attributes["aria-current"])).toBe(false);
+    await clickTile(tiles(host)[2]); expect(host.textContent).toContain("第 3／共 3 張");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("merges observed pictures without paths or tool metadata and handles unavailable previews", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
+  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
+    ? { paths: [paths[0]], truncated: false, historyAvailable: true, observed: [
+      { tool: "private-tool", stepId: "private-step", at: "private-time", paths: [paths[0], paths[1]], localReference: false },
+    ] } : null);
+  try {
+    await act(async () => root.render(renderImages()));
+    expect(tiles(host)).toHaveLength(2);
+    expect(host.textContent).not.toMatch(/cache|private/);
+    expect(host.textContent).toContain("無法載入圖片");
+    await clickTile(tiles(host)[0]); expect(dialog(host)).toBeDefined();
+    await key(host, "ArrowRight"); expect(host.textContent).toContain("第 2／共 2 張");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("ignores a delayed snapshot when inactive and reloads on re-entry", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
   let resolve!: (snapshot: SessionImagesSnapshot) => void;
   invoke.mockImplementationOnce(() => new Promise<SessionImagesSnapshot>(done => { resolve = done; }));
   try {
     await act(async () => root.render(renderImages()));
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
-    expect(container.textContent).toContain("正在讀取");
     await act(async () => root.render(renderImages("owner", false)));
-    await act(async () => resolve({ paths: ["stale.png"], truncated: false, historyAvailable: true }));
-    expect(container.textContent).not.toContain("stale.png");
-    invoke.mockResolvedValue({ paths: [], truncated: false, historyAvailable: false });
-    await act(async () => root.render(renderImages()));
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
-    expect(container.textContent).toContain("尚未讀到原生對話紀錄");
-    expect(container.textContent).toContain("尚未找到可查看的圖片");
-    expect(invoke.mock.calls.filter(([command]) => command === "agent_session_images_snapshot")).toHaveLength(2);
+    await act(async () => resolve({ paths, truncated: false, historyAvailable: true }));
+    expect(tiles(host)).toHaveLength(0);
+    fixture(); await act(async () => root.render(renderImages()));
+    expect(tiles(host)).toHaveLength(3);
+    await clickTile(tiles(host)[0]);
+    await act(async () => root.render(renderImages("other", false)));
+    expect(dialog(host)).toBeUndefined();
   } finally { await act(async () => root.unmount()); }
 });
 
-it("reports errors and reloads instead of silently showing an empty gallery", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
+it("reports errors and reloads with bounded-history information", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element);
   invoke.mockRejectedValueOnce("read denied");
   try {
     await act(async () => root.render(renderImages()));
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
-    expect(container.textContent).toContain("圖片讀取失敗");
-    expect(container.textContent).toContain("read denied");
-    invoke.mockResolvedValue({ paths: [], truncated: true, historyAvailable: true });
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "重新讀取")!)());
-    expect(container.textContent).toContain("不是完整圖片紀錄");
-    expect(container.textContent).not.toContain("read denied");
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("merges attachments and viewed images in first-seen order without paths or metadata", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
-  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
-    ? { paths: ["C:\\private\\z.png", "/private/a.png"], truncated: false, historyAvailable: true, observed: [
-      { tool: "view_image", stepId: "call-private", at: "synthetic-time", paths: ["/private/a.png", "/private/b.png"], localReference: true },
-      { tool: "capture", at: null, paths: [], localReference: false },
-    ] }
-    : "data:image/png;base64,fixture");
-  try {
-    await act(async () => root.render(renderImages()));
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
-    const tiles = allNodes(container).filter(node => node.attributes.class === "agent-session-images__tile");
-    expect(tiles.map(node => node.textContent)).toEqual(["#1z.png", "#2a.png", "#3b.png"]);
-    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(3);
-    expect(container.textContent).not.toMatch(/private|view_image|call-private|synthetic-time/);
-    expect(allNodes(container).some(node => /private/.test(JSON.stringify(node.attributes)))).toBe(false);
-    await act(async () => onClick(tiles[0])());
-    expect(allNodes(container).filter(node => node.attributes.role === "dialog")).toHaveLength(2);
-    expect(container.textContent).not.toContain("private");
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("loads one page of thumbnails and reports unavailable pictures", async () => {
-  const container = installHostDom();
-  const root = createRoot(container as unknown as Element);
-  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
-    ? { paths: Array.from({ length: 12 }, (_, index) => "/cache/clipboard-" + index + ".png"), truncated: false, historyAvailable: true }
-    : null);
-  try {
-    await act(async () => root.render(renderImages()));
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
-    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(9);
-    expect(container.textContent).toContain("無法載入圖片");
-    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "下一頁")!)());
-    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(12);
-    expect(allNodes(container).filter(node => node.attributes.class === "agent-session-images__tile")).toHaveLength(3);
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("opens the target prompt page, highlights the correct number and focuses it", async () => {
-  const host = installHostDom();
-  const root = createRoot(host as unknown as Element);
-  const paths = Array.from({ length: 12 }, (_, i) => `/cache/image-${i}.png`);
-  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
-    ? { paths: [...paths].reverse(), truncated: false, historyAvailable: true,
-      prompts: [{ text: "first prompt", paths: ["/cache/other.png"] }, { text: "target prompt", paths }] } : null);
-  const render = (openRevision: number, index: number) => <I18nProvider locale="zh-TW">
-    <AgentSessionImages sessionId="owner" active revision={0} openRevision={openRevision}
-      reference={{ index, context: "target prompt [Image #11]" }} />
-  </I18nProvider>;
-  try {
-    await act(async () => root.render(render(0, 11)));
-    await act(async () => root.render(render(1, 11)));
-    const current = allNodes(host).find(node => node.attributes["aria-current"] === "true")!;
-    expect(current.textContent).toContain("#11");
-    expect(current.textContent).toContain("image-10.png");
-    expect(current.focus).toHaveBeenCalled();
-    expect(current.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-    expect(host.textContent).toContain("2 / 2");
-    await act(async () => root.render(render(2, 1)));
-    expect(allNodes(host).find(node => node.attributes["aria-current"] === "true")!.textContent).toContain("image-0.png");
-    expect(host.textContent).toContain("1 / 2");
-  } finally { await act(async () => root.unmount()); }
-});
-
-it("shows all images with an explanation when reset numbering is ambiguous", async () => {
-  const host = installHostDom();
-  const root = createRoot(host as unknown as Element);
-  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
-    ? { paths: ["/cache/a.png", "/cache/b.png"], truncated: false, historyAvailable: true,
-      prompts: [{ text: "same prompt", paths: ["/cache/a.png"] }, { text: "same prompt", paths: ["/cache/b.png"] }] } : null);
-  const render = (openRevision: number) => <I18nProvider locale="zh-TW">
-    <AgentSessionImages sessionId="owner" active revision={0} openRevision={openRevision}
-      reference={{ index: 1, context: "same prompt [Image #1]" }} />
-  </I18nProvider>;
-  try {
-    await act(async () => root.render(render(0)));
-    await act(async () => root.render(render(1)));
-    expect(host.textContent).toContain("無法唯一對應");
-    expect(allNodes(host).filter(node => node.attributes.class === "agent-session-images__tile")).toHaveLength(2);
-    expect(allNodes(host).some(node => node.attributes["aria-current"])).toBe(false);
+    expect(host.textContent).toContain("圖片讀取失敗");
+    fixture({ paths: [], truncated: true, historyAvailable: false });
+    await act(async () => onClick(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === "重新讀取")!)());
+    expect(host.textContent).toContain("不是完整圖片紀錄");
+    expect(host.textContent).toContain("尚未找到可查看的圖片");
+    expect(host.textContent).not.toContain("read denied");
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -275,4 +265,42 @@ it.each([
 ])("does not guess missing slots, out-of-range markers or truncated history: %j", ({ paths, index, truncated }) => {
   expect(resolveSessionImageReference({ paths: [], historyAvailable: true, truncated,
     prompts: [{ text: "prompt", paths }] }, { index, context: "prompt" })).toBeNull();
+});
+
+it("loads thumbnail pixels only when they enter the visible strip", async () => {
+  const observers: { callback: (entries: { isIntersecting: boolean }[]) => void; disconnect: ReturnType<typeof vi.fn> }[] = [];
+  vi.stubGlobal("IntersectionObserver", class {
+    disconnect = vi.fn();
+    constructor(readonly callback: (entries: { isIntersecting: boolean }[]) => void) { observers.push(this); }
+    observe() {}
+  });
+  const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture();
+  try {
+    await act(async () => root.render(renderImages()));
+    expect(tiles(host)).toHaveLength(3);
+    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(0);
+    await act(async () => observers[1].callback([{ isIntersecting: true }]));
+    expect(invoke).toHaveBeenCalledWith("chat_image_preview", { path: paths[1], workingDirectory: "", threadId: "owner" });
+    expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(1);
+    expect(observers[1].disconnect).toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("returns focus after the close button or backdrop and keeps the single-image controls bounded", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element); fixture({ paths: [paths[0]] });
+  try {
+    await act(async () => root.render(renderImages()));
+    const trigger = tiles(host)[0];
+    await clickTile(trigger);
+    expect(host.textContent).toContain("第 1／共 1 張");
+    for (const name of ["上一張", "下一張"]) {
+      expect(allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent === name)!.disabled).toBe(true);
+    }
+    await act(async () => onClick(allNodes(host).find(node => node.attributes["aria-label"] === "關閉")!)());
+    expect(dialog(host)).toBeUndefined(); expect(host.ownerDocument.activeElement).toBe(trigger);
+    await clickTile(trigger);
+    const backdrop = allNodes(host).find(node => node.attributes.class?.includes("chat-image-preview") && node.attributes.class.includes("scrim"))!;
+    await act(async () => (props(backdrop).onMouseDown as (event: unknown) => void)({ target: backdrop, currentTarget: backdrop }));
+    expect(dialog(host)).toBeUndefined(); expect(host.ownerDocument.activeElement).toBe(trigger);
+  } finally { await act(async () => root.unmount()); }
 });
