@@ -49,7 +49,7 @@ describe("connection card runtime capability", () => {
     for (const tag of tags) expect(tagsMarkup).toContain(`>${tag}</span>`);
     expect(tagsMarkup.match(/badge--tag/g)).toHaveLength(3);
     expect(markup).not.toContain("connection-card__tag-count");
-    expect(markup.slice(markup.indexOf('<details'))).not.toContain("badge--tag");
+    expect(markup).not.toContain('role="menuitem"');
   });
 
   it("does not reserve a tag row for a connection without tags", () => {
@@ -72,12 +72,11 @@ describe("connection card runtime capability", () => {
     const markup = renderCard({ onConnect: vi.fn() });
     expect(markup).toContain('class="connection-card__primary"');
     expect(markup).toContain('protocol-tile--sm');
-    const footer = markup.slice(markup.indexOf('class="connection-card__foot"'));
     expect(markup).toContain("加入常用");
-    expect(footer).not.toContain("加入常用");
-    expect(markup).toContain('<details class="connection-card__management">');
+    expect(markup).toContain('class="connection-card__management"');
+    expect(markup).toContain('aria-haspopup="menu" aria-expanded="false"');
+    expect(markup).not.toContain('<details');
     expect(markup).toContain('aria-label="Office PC的更多操作"');
-    expect(footer).not.toContain("connection-card__go");
     expect(markup).toContain('title="Office PC');
     expect(markup).toContain('title="operator@desktop.example.com:3389"');
   });
@@ -110,13 +109,9 @@ describe("connection card runtime capability", () => {
 describe("same-computer card", () => {
   it("offers a separate add-route action even when the current protocol is unavailable", () => {
     const markup = renderCard({ onAddRoute: vi.fn(), unavailableReason: "desktop-only" });
-    expect(markup).toContain("connection-card__add-route");
-    expect(markup).toContain("新增連線方式</button>");
-    const footer = markup.slice(markup.indexOf('class="connection-card__foot"'));
-    expect(footer).toContain("connection-card__add-route");
-    expect(footer.indexOf("connection-card__add-route")).toBeLessThan(footer.indexOf("connection-card__actions"));
+    expect(markup).toContain('aria-haspopup="menu" aria-expanded="false"');
+    expect(markup).not.toContain('role="menuitem"');
     expect(markup).toContain("桌面版限定");
-    expect(renderCard({})).not.toContain("connection-card__add-route");
   });
 
   it("summarizes routes without repeating their names on the card", () => {

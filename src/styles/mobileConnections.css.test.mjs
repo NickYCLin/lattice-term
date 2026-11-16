@@ -40,9 +40,7 @@ describe("mobile connection layout", () => {
     expect(connectionStyles).toMatch(
       /\.connection-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-areas:\s*"head" "meta" "tags" "primary";/s,
     );
-    expect(connectionStyles).toMatch(
-      /\.connection-card__foot\s*\{[^}]*flex-wrap:\s*wrap;/s,
-    );
+    expect(connectionStyles).toMatch(/\.connection-card__menu > button\s*\{[^}]*min-height: max\(2\.75rem, var\(--control-height\)\);/s);
     expect(mobileStyles).toMatch(
       /\.app--mobile \.icon-button--sm\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/s,
     );
@@ -52,11 +50,11 @@ describe("mobile connection layout", () => {
     expect(connectionStyles).toMatch(/\.connection-card__head\s*\{[^}]*padding-right: max\(2rem, var\(--control-height\)\);/s);
     expect(connectionStyles).toMatch(/\.connection-card__primary > \.button\s*\{[^}]*flex: 0 1 auto;[^}]*min-height: calc\(1\.875rem/s);
     expect(databaseStyles).not.toMatch(/\.connection-card--database \.connection-card__primary > \.button\s*\{[^}]*min-height: 2\.75rem/s);
-    expect(connectionStyles).toMatch(/\.connection-card__management\[open\]\s*\{[^}]*position: static;/s);
+    expect(connectionStyles).toMatch(/\.connection-card__menu\s*\{[^}]*position: fixed;[^}]*overflow-y: auto;[^}]*background: var\(--surface-solid\);/s);
+    expect(connectionStyles).not.toContain(".connection-card__management[open]");
   });
 
   it("allows routes and metadata to wrap without squeezing the host heading", () => {
-    expect(connectionStyles).toMatch(/\.connection-card__actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*max-width:\s*100%;/s);
     expect(connectionStyles).toMatch(/\.connection-card__meta\s*\{[^}]*flex-wrap:\s*wrap;/s);
     expect(connectionStyles).toMatch(/\.connection-route-picker__list\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
     expect(connectionStyles).toMatch(/\.connection-card__target\s*\{[^}]*overflow-wrap:\s*anywhere;/s);

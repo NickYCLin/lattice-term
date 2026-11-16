@@ -1,3 +1,4 @@
+import { installMenuDom } from "../components/connections/testFixtures/menuDom";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -19,8 +20,10 @@ const peer = { ...host, id: "rdp-route", protocol: "rdp" as const, port: 3389 };
 let container: HostNode;
 let root: ReturnType<typeof createRoot>;
 
+let restoreMenuDom: () => void;
 beforeEach(() => {
   container = installHostDom();
+  restoreMenuDom = installMenuDom();
   root = createRoot(container as unknown as Element);
   invoke.mockResolvedValue({
     profiles: [
@@ -33,6 +36,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   vi.clearAllMocks();
+  restoreMenuDom();
   vi.unstubAllGlobals();
 });
 
@@ -51,6 +55,10 @@ async function render(profiles: ConnectionProfile[], mobile = false, backendAvai
 }
 
 async function click(label: string) {
+  if (label === "相關資料庫") {
+    const toggle = allNodes(container).find(node => props(node)?.["aria-haspopup"] === "menu")!;
+    await act(async () => props(toggle).onClick());
+  }
   const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === label);
   expect(button, label).toBeDefined();
   await act(async () => props(button!).onClick());

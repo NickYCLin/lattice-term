@@ -67,7 +67,7 @@ describe("ConnectionsView", () => {
   ])("shows an explicit SQL workspace entry for %j", ({ profiles, mobile }) => {
     const markup = render(profiles, { mobile });
     expect(markup).toContain("SQL 工作台</button>");
-    if (profiles.length) expect(markup).toContain("相關資料庫</button>");
+    if (profiles.length) expect(markup).toContain('aria-haspopup="menu"');
   });
 
   it.each([
@@ -93,7 +93,7 @@ describe("ConnectionsView", () => {
     const markup = render([profile]);
     expect(markup).toContain("資料庫跳板");
     expect(markup).toContain("bastion.example.com");
-    expect(markup).toContain("connection-card__add-route");
+    expect(markup).toContain('aria-haspopup="menu"');
     expect(markup).not.toContain("還沒有任何連線");
   });
 

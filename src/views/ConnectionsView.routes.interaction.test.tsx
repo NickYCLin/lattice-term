@@ -1,3 +1,4 @@
+import { installMenuDom } from "../components/connections/testFixtures/menuDom";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -19,14 +20,17 @@ let workspace: Workspace;
 const connect = vi.fn();
 const merge = vi.fn();
 
+let restoreMenuDom: () => void;
 beforeEach(() => {
   container = installHostDom();
+  restoreMenuDom = installMenuDom();
   root = createRoot(container as unknown as Element);
   connect.mockReset();
   merge.mockReset().mockResolvedValue(null);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  restoreMenuDom();
   vi.unstubAllGlobals();
 });
 
@@ -103,6 +107,7 @@ it("keeps unavailable protocols visible and disabled without skipping the route 
 
 it("offers a different-address card for merging, with no inferred tunnel name", async () => {
   await render([primary, internal, workstation]);
+  await click(allNodes(container).find(node => props(node)?.["aria-haspopup"] === "menu")!);
   await click(buttons("合併卡片")[0]);
   const select = allNodes(container).find((node) => node.tagName === "SELECT" && props(node).value === "")!;
   const options = allNodes(select).filter((node) => node.tagName === "OPTION");
@@ -122,6 +127,7 @@ it("shows a whole candidate card once and previews every route before merging", 
   const other = { ...workstation, machineId: "other-machine" };
   const peer = { ...other, id: "other-rdp", protocol: "rdp" as const, port: 3389 };
   await render([primary, internal, other, peer]);
+  await click(allNodes(container).find(node => props(node)?.["aria-haspopup"] === "menu")!);
   await click(buttons("合併卡片")[0]);
   const select = allNodes(container).find((node) => node.tagName === "SELECT" && props(node).value === "")!;
   expect(allNodes(select).filter((node) => node.tagName === "OPTION")).toHaveLength(2);
@@ -134,6 +140,7 @@ it.each(["returned", "thrown"])("keeps failed merges open for retry: %s", async 
   if (failure === "returned") merge.mockResolvedValue("synthetic conflict");
   else merge.mockRejectedValue(new Error("synthetic conflict"));
   await render([primary, workstation]);
+  await click(allNodes(container).find(node => props(node)?.["aria-haspopup"] === "menu")!);
   await click(buttons("合併卡片")[0]);
   const select = allNodes(container).find((node) => node.tagName === "SELECT" && props(node).value === "")!;
   await act(async () => props(select).onChange({ currentTarget: { value: workstation.id } }));
@@ -150,6 +157,7 @@ it("does not submit a merge twice while the first save is pending", async () => 
   let finish!: (failure: string | null) => void;
   merge.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   await render([primary, workstation]);
+  await click(allNodes(container).find(node => props(node)?.["aria-haspopup"] === "menu")!);
   await click(buttons("合併卡片")[0]);
   const select = allNodes(container).find((node) => node.tagName === "SELECT" && props(node).value === "")!;
   await act(async () => props(select).onChange({ currentTarget: { value: workstation.id } }));

@@ -134,8 +134,7 @@
 .connection-card__head,
 .connection-card__meta,
 .connection-card__primary,
-.connection-card__tags,
-.connection-card__foot {
+.connection-card__tags {
   position: relative;
   z-index: 1;
   pointer-events: none;
@@ -249,45 +248,52 @@
   z-index: 2;
 }
 
-.connection-card__management[open] {
-  position: static;
-  grid-column: 1 / -1;
-}
-
-.connection-card__more {
-  position: absolute;
-  top: 0;
-  right: 0;
-  list-style: none;
-}
-
-.connection-card__management[open] > .connection-card__more {
-  top: var(--space-5);
-  right: var(--space-5);
+.connection-card__more[aria-expanded="true"] {
   background: var(--surface-active);
 }
 
-.connection-card__more::-webkit-details-marker {
-  display: none;
+/* Portalled to body: fixed placement escapes card and scroll-area clipping. */
+.connection-card__menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
 }
 
-.connection-card__delete {
+.connection-card__menu > button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(2.75rem, var(--control-height));
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.connection-card__menu > button:is(:hover, :focus-visible) {
+  background: var(--surface-active);
+}
+
+.connection-card__menu > .connection-card__delete {
   color: var(--danger);
 }
 
-.connection-card__foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-  min-width: 0;
-  border-top: 1px solid var(--line);
-  padding-top: var(--space-2);
-}
-
 /* Buttons sit above the card-wide open target. */
-.connection-card__foot .icon-button,
-.connection-card__foot .button,
 .connection-card__head .icon-button,
 .connection-card__connect {
   pointer-events: auto;
@@ -313,37 +319,12 @@
   cursor: default;
 }
 
-.connection-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 2px;
-  width: 100%;
-  opacity: 1;
-  transition: opacity var(--duration-fast) var(--ease);
-}
-
-.connection-card__actions .icon-button {
-  width: 1.75rem;
-  height: 1.75rem;
-}
-
-.connection-card:hover .connection-card__actions,
-.connection-card:focus-within .connection-card__actions,
-.connection-card.is-selected .connection-card__actions {
-  opacity: 1;
-}
-
 :root[data-density="compact"] .connection-card {
   gap: var(--space-1) var(--space-2);
   padding: var(--space-3);
 }
 
-:root[data-density="compact"] .connection-card__management,
-:root[data-density="compact"] .connection-card__management[open] > .connection-card__more {
+:root[data-density="compact"] .connection-card__management {
   top: var(--space-3);
   right: var(--space-3);
 }

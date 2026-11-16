@@ -7,7 +7,9 @@
  * platform boundary instead of offering a button that cannot work.
  */
 
-import { useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
+import { handleMenuNavigation } from "../overlays/menuNavigation";
 import {
   connectionTarget,
   findProtocol,
@@ -79,13 +81,60 @@ export function ConnectionCard({
   const connectable = routes.filter((route) => route.onConnect);
   const protocols = [...new Set(routes.map((route) => route.profile.protocol))];
   const tags = [...new Set(routes.flatMap((route) => route.profile.tags))];
-  const management = useRef<HTMLDetailsElement>(null);
-  const managementToggle = useRef<HTMLElement>(null);
+  const menuId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0, width: 240, maxHeight: 0 });
+  const menuRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const initialFocus = useRef<"first" | "last">("first");
+  function closeMenu(restoreFocus = true) {
+    setMenuOpen(false);
+    if (restoreFocus) toggleRef.current?.focus();
+  }
+  function openMenu(last = false) {
+    initialFocus.current = last ? "last" : "first";
+    setMenuOpen(true);
+  }
   const manage = (action: () => void) => () => {
-    management.current?.removeAttribute("open");
-    managementToggle.current?.focus();
+    // Remove the portal before a callback opens another dialog or deletes us.
+    flushSync(() => closeMenu());
     action();
   };
+  useEffect(() => { setMenuOpen(false); }, [profile.id]);
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    function place() {
+      const anchor = toggleRef.current?.getBoundingClientRect();
+      const menu = menuRef.current;
+      if (!anchor || !menu) return;
+      if (anchor.bottom < 0 || anchor.top > window.innerHeight) { closeMenu(false); return; }
+      const margin = 8;
+      const width = Math.min(240, Math.max(0, window.innerWidth - margin * 2));
+      const below = Math.max(0, window.innerHeight - anchor.bottom - margin - 6);
+      const above = Math.max(0, anchor.top - margin - 6);
+      const flip = menu.scrollHeight > below && above > below;
+      const maxHeight = flip ? above : below;
+      setPosition({ width, maxHeight,
+        left: Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin)),
+        top: flip ? Math.max(margin, anchor.top - Math.min(menu.scrollHeight, maxHeight) - 6) : anchor.bottom + 6,
+      });
+    }
+    place();
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]');
+    items?.[initialFocus.current === "last" ? items.length - 1 : 0]?.focus();
+    function outside(event: MouseEvent) {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !toggleRef.current?.contains(target)) closeMenu();
+    }
+    document.addEventListener("click", outside, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      document.removeEventListener("click", outside, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [menuOpen]);
 
   return (
     <li
@@ -184,58 +233,31 @@ export function ConnectionCard({
         {linked.length > 0 && <span className="connection-card__route-count">{t("row.routeCount", { count: routes.length })}</span>}
       </div>
 
-      <details className="connection-card__management" ref={management}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          management.current?.removeAttribute("open");
-          managementToggle.current?.focus();
-        }}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) management.current?.removeAttribute("open");
+      <div className="connection-card__management">
+        <button type="button" className="icon-button icon-button--sm connection-card__more" ref={toggleRef}
+          aria-label={t("row.actions", { name: profile.name })} title={t("row.actions", { name: profile.name })}
+          aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? menuId : undefined}
+          onClick={() => { if (menuOpen) closeMenu(); else openMenu(); }}
+          onKeyDown={event => {
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+              event.preventDefault(); openMenu(event.key === "ArrowUp" || event.key === "End");
+            }
+          }}><MoreIcon size={16} /></button>
+      </div>
+      {menuOpen && createPortal(<div ref={menuRef} id={menuId} className="connection-card__menu"
+        role="menu" aria-label={t("row.actions", { name: profile.name })} style={position}
+        onKeyDown={event => {
+          if (event.key === "Tab") { closeMenu(false); return; }
+          handleMenuNavigation(event, closeMenu);
         }}>
-        <summary className="icon-button icon-button--sm connection-card__more" ref={managementToggle}
-          aria-label={t("row.actions", { name: profile.name })} title={t("row.actions", { name: profile.name })}>
-          <MoreIcon size={16} />
-        </summary>
-        <div className="connection-card__foot">
-          {onAddRoute && <button type="button" className="button button--ghost button--sm connection-card__add-route" onClick={manage(onAddRoute)}><PlusIcon size={13} />{t("form.route.add")}</button>}
-          {onMerge && <button type="button" className="button button--ghost button--sm connection-card__merge" onClick={manage(onMerge)}>{t("connections.merge.action")}</button>}
-          {onDatabases && <button type="button" className="button button--ghost button--sm" title={t("database.relatedHint")} onClick={manage(onDatabases)}>{t("database.related")}</button>}
-          <div className="connection-card__actions">
-            <button
-              type="button"
-              className="button button--ghost button--sm"
-              onClick={manage(onEdit)}
-              aria-label={t("row.edit", { name: profile.name })}
-              data-tooltip={t("common.edit")}
-            >
-              <EditIcon size={14} />
-              {t("common.edit")}
-            </button>
-            <button
-              type="button"
-              className="button button--ghost button--sm"
-              onClick={manage(onDuplicate)}
-              aria-label={t("row.duplicate", { name: profile.name })}
-              data-tooltip={t("common.duplicate")}
-            >
-              <DuplicateIcon size={14} />
-              {t("common.duplicate")}
-            </button>
-            <button
-              type="button"
-              className="button button--ghost button--sm connection-card__delete"
-              onClick={manage(onDelete)}
-              aria-label={t("row.delete", { name: profile.name }) + (linked.length > 0 ? ` · ${t("confirm.delete.choose")}` : "")}
-              data-tooltip={linked.length > 0 ? t("confirm.delete.choose") : t("common.delete")}
-            >
-              <TrashIcon size={14} />
-              {t("common.delete")}
-            </button>
-          </div>
-        </div>
-      </details>
+        {onAddRoute && <button type="button" role="menuitem" className="connection-card__add-route" onClick={manage(onAddRoute)}><PlusIcon size={14} />{t("form.route.add")}</button>}
+        {onMerge && <button type="button" role="menuitem" className="connection-card__merge" onClick={manage(onMerge)}>{t("connections.merge.action")}</button>}
+        {onDatabases && <button type="button" role="menuitem" title={t("database.relatedHint")} onClick={manage(onDatabases)}>{t("database.related")}</button>}
+        <button type="button" role="menuitem" onClick={manage(onEdit)}><EditIcon size={14} />{t("common.edit")}</button>
+        <button type="button" role="menuitem" onClick={manage(onDuplicate)}><DuplicateIcon size={14} />{t("common.duplicate")}</button>
+        <button type="button" role="menuitem" className="connection-card__delete" onClick={manage(onDelete)}
+          title={linked.length > 0 ? t("confirm.delete.choose") : undefined}><TrashIcon size={14} />{t("common.delete")}</button>
+      </div>, document.body)}
     </li>
   );
 }
