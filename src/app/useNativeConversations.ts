@@ -65,7 +65,10 @@ export function useNativeConversations(enabled: boolean) {
   const profileKey = JSON.stringify(profiles.map(({ id, definitionId, configDirectory }) => ({ profileId: id, definitionId, configDirectory })));
   const [{ limit, includeArchived }, setOptions] = useState({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived: false });
   const result = useSerialNativeRead(`${profileKey}:${includeArchived}`, enabled, NATIVE_HISTORY_REFRESH_MS,
-    () => invoke<NativeHistoryPage>("agent_chat_local_history_page", { profiles: JSON.parse(profileKey), limit, includeArchived }));
+    async () => ({
+      ...await invoke<NativeHistoryPage>("agent_chat_local_history_page", { profiles: JSON.parse(profileKey), limit, includeArchived }),
+      requestedLimit: limit,
+    }));
   const dismissed = useDismissedNativeConversations();
   const value = result.value;
   const entries = useMemo(() => (value?.entries ?? []).filter(entry => !dismissed.has(nativeConversationKey(entry))),
@@ -78,7 +81,11 @@ export function useNativeConversations(enabled: boolean) {
     ...result, profiles, profileKey, limit, includeArchived,
     setIncludeArchived: (includeArchived: boolean) => setOptions({ limit: NATIVE_HISTORY_PAGE_SIZE, includeArchived }),
     entries,
-    hasMore: result.value?.hasMore === true && limit < NATIVE_HISTORY_MAX,
+    // A retained page is useful for reading after a failed refresh, but must
+    // not advertise pagination until the current limit has a successful reply.
+    hasMore: !result.busy && !result.error && entries.length > 0 &&
+      value?.hasMore === true && value.requestedLimit === limit &&
+      value.entries.length >= limit && limit < NATIVE_HISTORY_MAX,
     incomplete: result.value?.incomplete === true,
     loadMore: () => setOptions(current => ({ ...current, limit: Math.min(NATIVE_HISTORY_MAX, current.limit + NATIVE_HISTORY_PAGE_SIZE) })),
   };

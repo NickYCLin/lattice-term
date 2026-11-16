@@ -307,7 +307,7 @@ export function useNativeConversationList({
               : maskNativeText(history.error)}
         </p>
       )}
-      {history.hasMore && (
+      {history.hasMore && !history.busy && !history.error && history.entries.length > 0 && (
         <button
           type="button"
           className="button button--ghost button--sm"

@@ -125,3 +125,49 @@ it("does not publish a stale account response after selection changes", async ()
     expect(api.value).toBe("second");
   } finally { await act(async () => { root.unmount(); }); }
 });
+
+it.each([
+  { count: 0, reported: false, expected: false },
+  { count: 99, reported: false, expected: false },
+  { count: 100, reported: false, expected: false },
+  { count: 100, reported: true, expected: true },
+  { count: 99, reported: true, expected: false },
+  { count: 0, reported: true, expected: false },
+])("requires a full successful page and explicit remaining entries: %j", async ({ count, reported, expected }) => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  invoke.mockResolvedValue({ entries: Array.from({ length: count }, (_, i) => entry(`synthetic-${i}`)), hasMore: reported, incomplete: false });
+  let api!: ReturnType<typeof useNativeConversations>;
+  function Probe() { api = useNativeConversations(true); return null; }
+  try {
+    await act(async () => root.render(<Probe />));
+    expect(api.hasMore).toBe(expected);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("hides retained pagination during refresh, after errors and after the final larger page", async () => {
+  const root = createRoot(installFakeDom() as unknown as Element);
+  const first = { entries: Array.from({ length: 100 }, (_, i) => entry(`synthetic-${i}`)), hasMore: true, incomplete: false };
+  let rejectRefresh!: (reason: Error) => void;
+  let finishNext!: (value: unknown) => void;
+  invoke.mockResolvedValueOnce(first)
+    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRefresh = reject; }))
+    .mockResolvedValueOnce(first)
+    .mockImplementationOnce(() => new Promise(resolve => { finishNext = resolve; }));
+  let api!: ReturnType<typeof useNativeConversations>;
+  function Probe() { api = useNativeConversations(true); return null; }
+  try {
+    await act(async () => root.render(<Probe />));
+    expect(api.hasMore).toBe(true);
+    await act(async () => api.refresh());
+    expect(api.busy).toBe(true); expect(api.hasMore).toBe(false);
+    await act(async () => rejectRefresh(new Error("Synthetic read failure")));
+    expect(api.entries).toHaveLength(100); expect(api.error).toContain("Synthetic"); expect(api.hasMore).toBe(false);
+    await act(async () => api.refresh());
+    expect(api.hasMore).toBe(true);
+    await act(async () => api.loadMore());
+    expect(api.limit).toBe(200); expect(api.hasMore).toBe(false);
+    expect(invoke).toHaveBeenLastCalledWith("agent_chat_local_history_page", { profiles: [], limit: 200, includeArchived: false });
+    await act(async () => finishNext({ entries: [...first.entries, entry("synthetic-last")], hasMore: false, incomplete: false }));
+    expect(api.entries).toHaveLength(101); expect(api.busy).toBe(false); expect(api.hasMore).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});

@@ -122,7 +122,7 @@ function Picker({
                 );
               })}
             </div>
-            {history?.hasMore && (
+            {history?.hasMore && !history.busy && !history.error && history.entries.length > 0 && (
               <button
                 type="button"
                 className="button"

@@ -24,6 +24,9 @@ const { invoke, history } = vi.hoisted(() => ({
     })),
     profileKey: "[]",
     hasMore: false,
+    busy: false,
+    error: null as string | null,
+    loadMore: vi.fn(),
     incomplete: false,
   },
 }));
@@ -180,6 +183,7 @@ const report: ContextReport = {
   warnings: [],
 };
 afterEach(() => {
+  history.hasMore = false; history.busy = false; history.error = null; history.loadMore.mockReset();
   invoke.mockReset();
   vi.unstubAllGlobals();
 });
@@ -452,4 +456,28 @@ it("refuses a selection that disappeared during history refresh instead of silen
     history.entries = original;
     await act(async () => root.unmount());
   }
+});
+
+it.each([
+  { hasMore: false, busy: false, error: null, empty: false, visible: false },
+  { hasMore: true, busy: false, error: null, empty: false, visible: true },
+  { hasMore: true, busy: true, error: null, empty: false, visible: false },
+  { hasMore: true, busy: false, error: "Synthetic failure", empty: false, visible: false },
+  { hasMore: true, busy: false, error: null, empty: true, visible: false },
+])("keeps background history pagination only when a usable next page exists: %j", async ({ empty, visible, ...state }) => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const originalEntries = history.entries;
+  Object.assign(history, state);
+  if (empty) history.entries = [];
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><BackgroundHistoryPicker onAttach={vi.fn()} /></I18nProvider>));
+    await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
+    const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "載入較舊的對話");
+    expect(Boolean(button)).toBe(visible);
+    if (button) {
+      await act(async () => onClick(button)());
+      expect(history.loadMore).toHaveBeenCalledOnce();
+    }
+  } finally { history.entries = originalEntries; await act(async () => root.unmount()); }
 });

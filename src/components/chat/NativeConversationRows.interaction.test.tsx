@@ -405,3 +405,25 @@ it("explains unsupported journal versions instead of guessing a conversation", a
     expect(chat.importNativeConversation).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); }
 });
+
+it("loads the next native history page and removes the control after the final page", async () => {
+  const container = installHostDom();
+  const root = createRoot(container as unknown as Element);
+  const loadMore = vi.fn();
+  const history = { entries: [{ definitionId: "codex", profileId: null, nativeSessionId: "synthetic-page",
+    title: "Synthetic history", workingDirectory: "/synthetic", resumable: true, updatedAt: 1 }],
+    profiles: [], profileKey: "[]", hasMore: true, busy: false, error: null, loadMore } as unknown as NativeHistory;
+  const render = () => <I18nProvider locale="zh-TW"><NativeHistoryContext.Provider value={{ ...history }}>
+    <NativeConversationRows chat={fakeChatApi()} projectFilter={null} onOpened={() => {}} />
+  </NativeHistoryContext.Provider></I18nProvider>;
+  try {
+    await act(async () => root.render(render()));
+    const button = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "載入較舊的對話")!;
+    expect(button).toBeDefined();
+    await act(async () => onClick(button)());
+    expect(loadMore).toHaveBeenCalledOnce();
+    history.hasMore = false;
+    await act(async () => root.render(render()));
+    expect(container.textContent).not.toContain("載入較舊的對話");
+  } finally { await act(async () => root.unmount()); }
+});

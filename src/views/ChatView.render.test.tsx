@@ -93,9 +93,25 @@ describe("ChatView", () => {
     expect(markup).toContain("尚未開啟的紀錄");
     expect(markup).toContain("獨立對話");
     expect(markup).toContain("磁碟暫時忙碌");
-    expect(markup).toContain("載入較舊的對話");
+    expect(markup).not.toContain("載入較舊的對話");
     expect(markup).not.toContain("chat-native-project");
     expect(markup).toContain('class="chat-folder__count">3</span>');
+  });
+
+  it.each([
+    { hasMore: false, busy: false, error: null, empty: false, visible: false },
+    { hasMore: true, busy: false, error: null, empty: false, visible: true },
+    { hasMore: true, busy: true, error: null, empty: false, visible: false },
+    { hasMore: true, busy: false, error: "Synthetic read failure", empty: false, visible: false },
+    { hasMore: true, busy: false, error: null, empty: true, visible: false },
+  ])("shows native list pagination only for a successful nonempty page with more entries: %j", ({ empty, visible, ...state }) => {
+    const history = { ...state, entries: empty ? [] : [{ definitionId: "codex", profileId: null,
+      nativeSessionId: "synthetic-pagination", title: "Synthetic history", workingDirectory: "/synthetic", resumable: true, updatedAt: 1 }],
+      profiles: [], profileKey: "[]" } as unknown as NativeHistory;
+    const markup = renderToStaticMarkup(<NativeHistoryContext.Provider value={history}><I18nProvider locale="zh-TW">
+      <ChatView agents={fakeAgentApi()} chat={fakeChatApi()} automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+    </I18nProvider></NativeHistoryContext.Provider>);
+    expect(markup.includes("載入較舊的對話")).toBe(visible);
   });
 
   it("shows native history progress inside the opened thread instead of a new-chat welcome", () => {
