@@ -2810,3 +2810,6 @@ button.chat-diff__line.is-commentable:focus-visible {
   .chat-image-preview__header--gallery { flex-wrap: wrap; }
   .chat-image-preview__header--gallery > span { flex: 1 0 100%; }
 }
+
+.chat-editor-action { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); max-width: 100%; }
+.chat-editor-action small { max-width: 24rem; overflow-wrap: anywhere; font-size: var(--text-xs); }

@@ -13,6 +13,7 @@ pub mod app_menu;
 pub mod backup;
 mod chat_artifacts;
 mod chat_attachments;
+mod chat_editor;
 pub mod chat_images;
 mod chat_project_files;
 pub mod chat_tools;
@@ -3447,6 +3448,11 @@ async fn blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
+async fn chat_open_editor(working_directory: String) -> Result<(), String> {
+    blocking(move || crate::chat_editor::open(&working_directory)).await
+}
+
+#[tauri::command]
 async fn chat_project_files(
     working_directory: String,
     query: String,
@@ -6180,6 +6186,7 @@ pub fn run() {
             agent_session_validate_fork_source,
             agent_session_prepare_command,
             chat_project_files,
+            chat_open_editor,
             agent_chat_skills,
             agent_paste_clipboard_image,
             agent_chat_paste_image,

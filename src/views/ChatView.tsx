@@ -114,6 +114,7 @@ import { ChatImagePreviews, ChatImageStrip } from "../components/chat/ChatImageP
 import { SentAttachments } from "../components/chat/SentAttachments";
 import { ChatDelegations } from "../components/chat/ChatDelegations";
 import { chatProjectKey } from "../app/chatProjects";
+import { OpenEditorButton } from "../components/chat/OpenEditorButton";
 import { ChatTerminalPanel } from "../components/chat/ChatTerminalPanel";
 import { ChatChangesPanel } from "../components/chat/ChatChangesPanel";
 import type { ThemeId } from "../app/themes";
@@ -1146,6 +1147,7 @@ export function ThreadPane({
                 <AgentIcon />
               </button>
             )}
+            {!thread.archived && <OpenEditorButton directory={thread.workingDirectory} />}
             {!thread.archived && thread.workingDirectory && (
               <button
                 type="button"

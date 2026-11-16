@@ -7,6 +7,7 @@ import { useConversationPins, sessionConversationLink } from "../../app/conversa
 import { useI18n } from "../../i18n/context";
 import { ChatChangesPanel } from "./ChatChangesPanel";
 import { ChatWorktree } from "./ChatWorktree";
+import { OpenEditorButton } from "./OpenEditorButton";
 import { ChatTools } from "./ChatTools";
 
 /** Same panels as standalone conversations; the source PTY remains running. */
@@ -37,6 +38,7 @@ export function useSessionConversationActions({ session, agents, messages, busy,
     finally { lock.current = false; setWorking(false); }
   }
   const actions = <details className="chat-header__menu" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.currentTarget.open = false; } }}><summary className="button button--ghost button--sm" aria-label={t("chat.nav.more")}>⋯</summary><div onClick={event => { if ((event.target as HTMLElement).closest("button")) { const menu = event.currentTarget.closest("details"); if (menu) menu.open = false; } }}>
+    <OpenEditorButton directory={session.workingDirectory} />
     <button className="button button--ghost button--sm" onClick={onSearch}>{t("chat.nav.search")}</button>
     <button className="button button--ghost button--sm" aria-pressed={pins.includes(pinId)} onClick={() => { try { toggle(pinId); } catch (reason) { onNotice(String(reason)); } }}>{t(pins.includes(pinId) ? "chat.nav.unpin" : "chat.nav.pin")}</button>
     <button className="button button--ghost button--sm" onClick={() => { void navigator.clipboard.writeText(sessionConversationLink(session.sessionId)).then(() => onNotice(t("chat.nav.copied")), reason => onNotice(String(reason))); }}>{t("chat.nav.link")}</button>
