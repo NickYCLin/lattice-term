@@ -21,6 +21,80 @@ pub struct SessionImagesSnapshot {
     pub truncated: bool,
     pub history_available: bool,
     pub observed: Vec<ObservedImage>,
+    pub prompts: Vec<PromptImages>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptImages {
+    pub text: String,
+    // Preserve slots, including unavailable images and repeated pixels.
+    pub paths: Vec<Option<String>>,
+}
+
+fn prompt_images(
+    path: &Path,
+    kind: TranscriptKind,
+    working_directory: &str,
+    directory: &Path,
+) -> Result<(Vec<PromptImages>, bool), String> {
+    let mut prompts = std::collections::VecDeque::new();
+    let mut imported = 0usize;
+    let mut limited = false;
+    let incomplete = visit_transcript_rows_with_limit(path, MAX_IMAGE_ROWS_BYTES, |row| {
+        let content = match kind {
+            TranscriptKind::Codex
+                if row["type"] == "response_item"
+                    && row["payload"]["type"] == "message"
+                    && row["payload"]["role"] == "user" =>
+            {
+                &row["payload"]["content"]
+            }
+            TranscriptKind::Claude if row["type"] == "user" => &row["message"]["content"],
+            _ => return,
+        };
+        let mut paths = Vec::new();
+        if let Some(items) = content.as_array() {
+            limited |= items.len() > 256;
+            for item in items.iter().take(256) {
+                if matches!(item["type"].as_str(), Some("input_image" | "image")) {
+                    let path = encoded_image(item).and_then(|data| {
+                        imported = imported.saturating_add(data.len());
+                        if imported > MAX_IMPORTED_BYTES {
+                            limited = true;
+                            return None;
+                        }
+                        chat_images::store(directory, &[ToolImage::Data(data.into())])
+                            .into_iter()
+                            .next()
+                    });
+                    paths.push(path);
+                }
+            }
+        }
+        if paths.is_empty() {
+            for path in attachment_paths(&content_text(content)) {
+                paths.push(
+                    chat_images::preview(working_directory, Some(directory), &path)
+                        .ok()
+                        .flatten()
+                        .map(|_| path),
+                );
+            }
+        }
+        if !paths.is_empty() {
+            prompts.push_back(PromptImages {
+                text: content_text(content).chars().take(4096).collect(),
+                paths,
+            });
+            if prompts.len() > MAX_IMAGES {
+                prompts.pop_front();
+                limited = true;
+            }
+        }
+    })
+    .ok_or("The session image references could not be read safely.")?;
+    Ok((prompts.into_iter().collect(), limited || incomplete))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -371,6 +445,7 @@ pub fn read_session_images(
 ) -> Result<SessionImagesSnapshot, String> {
     let mut truncated = false;
     let mut history_available = false;
+    let mut prompts = Vec::new();
     let mut observed = cached_observations(directory)?;
     truncated |= observed.len() >= MAX_IMAGES;
     if let Some(session_id) = session_id.filter(|id| !id.is_empty()) {
@@ -382,6 +457,10 @@ pub fn read_session_images(
                 profile_directory,
             )? {
                 truncated = import_images(&path, kind, working_directory, directory)?;
+                let (current_prompts, prompt_limited) =
+                    prompt_images(&path, kind, working_directory, directory)?;
+                prompts = current_prompts;
+                truncated |= prompt_limited;
                 let current = observed_images(&path, kind, working_directory, directory)?;
                 truncated |= current.len() >= MAX_IMAGES;
                 truncated |= cache_observations(directory, &current)?;
@@ -408,6 +487,7 @@ pub fn read_session_images(
         truncated: truncated || limited,
         history_available,
         observed,
+        prompts,
     })
 }
 
@@ -415,6 +495,64 @@ pub fn read_session_images(
 mod tests {
     use super::*;
     use base64::Engine;
+
+    #[test]
+    fn prompt_history_limits_are_disclosed_instead_of_remapping_old_markers() {
+        use base64::Engine as _;
+        let work = tempfile::tempdir().unwrap();
+        let chat = tempfile::tempdir().unwrap();
+        let path = work.path().join("claude-prompts.jsonl");
+        let data = base64::engine::general_purpose::STANDARD.encode(PNG);
+        let rows = (0..65)
+            .map(|index| {
+                serde_json::json!({"type":"user","message":{"content":[
+                    {"type":"text","text":format!("prompt {index}")},
+                    {"type":"image","source":{"type":"base64","data":data}}
+                ]}})
+                .to_string()
+            })
+            .collect::<Vec<_>>();
+        std::fs::write(&path, rows.join("\n")).unwrap();
+        let (prompts, limited) =
+            prompt_images(&path, TranscriptKind::Claude, "", chat.path()).unwrap();
+        assert!(limited);
+        assert_eq!(prompts.len(), MAX_IMAGES);
+        assert_eq!(prompts[0].text, "prompt 1");
+        assert_eq!(prompts[63].text, "prompt 64");
+    }
+
+    #[test]
+    fn prompt_numbering_preserves_slots_duplicates_and_per_prompt_resets() {
+        use base64::Engine as _;
+        let work = tempfile::tempdir().unwrap();
+        let chat = tempfile::tempdir().unwrap();
+        let path = work.path().join("prompt-images.jsonl");
+        let data = base64::engine::general_purpose::STANDARD.encode(PNG);
+        let image = serde_json::json!({"type":"input_image","image_url":format!("data:image/png;base64,{data}")});
+        let rows = [
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first prompt"}, image.clone(), {"type":"input_image","image_url":"https://example.invalid/unavailable.png"}, image.clone()]}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"second prompt"},image]}}),
+        ];
+        std::fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let (prompts, limited) =
+            prompt_images(&path, TranscriptKind::Codex, "", chat.path()).unwrap();
+        assert!(!limited);
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0].text, "first prompt");
+        assert_eq!(prompts[0].paths.len(), 3);
+        assert!(prompts[0].paths[1].is_none());
+        assert!(prompts[0].paths[0].is_some());
+        assert_eq!(prompts[0].paths[0], prompts[0].paths[2]);
+        assert_eq!(prompts[1].paths.len(), 1);
+        assert_eq!(prompts[1].paths[0], prompts[0].paths[0]);
+    }
 
     #[test]
     fn standard_mcp_result_keeps_tool_and_time_with_legacy_image_formats() {

@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { AgentSessionImages, type SessionImagesSnapshot } from "./AgentSessionImages";
+import { AgentSessionImages, resolveSessionImageReference, type SessionImagesSnapshot } from "./AgentSessionImages";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -24,6 +24,8 @@ class HostNode {
     this.ownerDocument = document;
   }
   get nodeName() { return this.tagName; }
+  get nodeValue() { return this.text; }
+  set nodeValue(value: string) { this.text = value; }
   get firstChild() { return this.childNodes[0] ?? null; }
   get textContent(): string { return this.text + this.childNodes.map((child) => child.textContent).join(""); }
   set textContent(value: string) { this.text = value; this.childNodes = []; }
@@ -35,7 +37,8 @@ class HostNode {
   removeAttribute(name: string) { delete this.attributes[name]; }
   addEventListener() {}
   removeEventListener() {}
-  focus() {}
+  focus = vi.fn();
+  scrollIntoView = vi.fn();
 }
 
 function allNodes(node: HostNode): HostNode[] {
@@ -193,7 +196,7 @@ it("merges attachments and viewed images in first-seen order without paths or me
     await act(async () => root.render(renderImages()));
     await act(async () => onClick(allNodes(container).find(node => node.tagName === "BUTTON")!)());
     const tiles = allNodes(container).filter(node => node.attributes.class === "agent-session-images__tile");
-    expect(tiles.map(node => node.textContent)).toEqual(["z.png", "a.png", "b.png"]);
+    expect(tiles.map(node => node.textContent)).toEqual(["#1z.png", "#2a.png", "#3b.png"]);
     expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(3);
     expect(container.textContent).not.toMatch(/private|view_image|call-private|synthetic-time/);
     expect(allNodes(container).some(node => /private/.test(JSON.stringify(node.attributes)))).toBe(false);
@@ -218,4 +221,58 @@ it("loads one page of thumbnails and reports unavailable pictures", async () => 
     expect(invoke.mock.calls.filter(([command]) => command === "chat_image_preview")).toHaveLength(12);
     expect(allNodes(container).filter(node => node.attributes.class === "agent-session-images__tile")).toHaveLength(3);
   } finally { await act(async () => root.unmount()); }
+});
+
+it("opens the target prompt page, highlights the correct number and focuses it", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  const paths = Array.from({ length: 12 }, (_, i) => `/cache/image-${i}.png`);
+  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
+    ? { paths: [...paths].reverse(), truncated: false, historyAvailable: true,
+      prompts: [{ text: "first prompt", paths: ["/cache/other.png"] }, { text: "target prompt", paths }] } : null);
+  const render = (openRevision: number, index: number) => <I18nProvider locale="zh-TW">
+    <AgentSessionImages sessionId="owner" active revision={0} openRevision={openRevision}
+      reference={{ index, context: "target prompt [Image #11]" }} />
+  </I18nProvider>;
+  try {
+    await act(async () => root.render(render(0, 11)));
+    await act(async () => root.render(render(1, 11)));
+    const current = allNodes(host).find(node => node.attributes["aria-current"] === "true")!;
+    expect(current.textContent).toContain("#11");
+    expect(current.textContent).toContain("image-10.png");
+    expect(current.focus).toHaveBeenCalled();
+    expect(current.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(host.textContent).toContain("2 / 2");
+    await act(async () => root.render(render(2, 1)));
+    expect(allNodes(host).find(node => node.attributes["aria-current"] === "true")!.textContent).toContain("image-0.png");
+    expect(host.textContent).toContain("1 / 2");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("shows all images with an explanation when reset numbering is ambiguous", async () => {
+  const host = installHostDom();
+  const root = createRoot(host as unknown as Element);
+  invoke.mockImplementation(async command => command === "agent_session_images_snapshot"
+    ? { paths: ["/cache/a.png", "/cache/b.png"], truncated: false, historyAvailable: true,
+      prompts: [{ text: "same prompt", paths: ["/cache/a.png"] }, { text: "same prompt", paths: ["/cache/b.png"] }] } : null);
+  const render = (openRevision: number) => <I18nProvider locale="zh-TW">
+    <AgentSessionImages sessionId="owner" active revision={0} openRevision={openRevision}
+      reference={{ index: 1, context: "same prompt [Image #1]" }} />
+  </I18nProvider>;
+  try {
+    await act(async () => root.render(render(0)));
+    await act(async () => root.render(render(1)));
+    expect(host.textContent).toContain("無法唯一對應");
+    expect(allNodes(host).filter(node => node.attributes.class === "agent-session-images__tile")).toHaveLength(2);
+    expect(allNodes(host).some(node => node.attributes["aria-current"])).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it.each([
+  { paths: [null, "/cache/b.png"], index: 1, truncated: false },
+  { paths: ["/cache/a.png"], index: 2, truncated: false },
+  { paths: ["/cache/a.png"], index: 1, truncated: true },
+])("does not guess missing slots, out-of-range markers or truncated history: %j", ({ paths, index, truncated }) => {
+  expect(resolveSessionImageReference({ paths: [], historyAvailable: true, truncated,
+    prompts: [{ text: "prompt", paths }] }, { index, context: "prompt" })).toBeNull();
 });

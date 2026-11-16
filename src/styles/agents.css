@@ -1342,3 +1342,18 @@
 .agents-view--mobile .agents-remote-fleet select {
   min-height: 44px;
 }
+
+.agent-session-images__tile[aria-current="true"] {
+  border: 3px solid var(--accent);
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.agent-session-images__number {
+  align-self: flex-start;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-weight: 700;
+}

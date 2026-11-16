@@ -15,7 +15,7 @@ import {
 import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
 import { attachTerminalScrollback } from "./terminalScrollback";
-import { terminalImageLinks } from "./terminalImageLinks";
+import { terminalImageLinks, attachTerminalImageClicks, type TerminalImageReference } from "./terminalImageLinks";
 
 /** The byte stream behind one terminal: an agent PTY or a plain local shell. */
 export interface PtyTerminalIo {
@@ -28,7 +28,7 @@ export interface PtyTerminalIo {
   closedReason?: () => string | null | undefined;
   /** Saves a clipboard image somewhere the program can read, returning its path. */
   pasteImage?: () => Promise<string | null>;
-  openImages?: () => void;
+  openImages?: (reference: TerminalImageReference) => void;
 }
 
 export function PtyTerminal({
@@ -113,8 +113,10 @@ export function PtyTerminal({
     const stopTypography = attachTerminalTypography(terminal, scheduleFit);
     const stopScrollback = attachTerminalScrollback(terminal, scheduleFit, true);
     const imageLinks = ioRef.current.openImages ? terminal.registerLinkProvider(
-      terminalImageLinks(terminal, () => ioRef.current.openImages?.()),
+      terminalImageLinks(terminal, reference => ioRef.current.openImages?.(reference)),
     ) : null;
+
+    const stopImageClicks = ioRef.current.openImages ? attachTerminalImageClicks(terminal, reference => ioRef.current.openImages?.(reference)) : () => {};
 
     attachTerminalClipboard(terminal, {
       ...nativeTerminalClipboard,
@@ -193,6 +195,7 @@ export function PtyTerminal({
       stopTypography();
       stopScrollback();
       imageLinks?.dispose();
+      stopImageClicks();
       terminal.dispose();
       terminalRef.current = null;
     };

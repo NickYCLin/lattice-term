@@ -3,6 +3,7 @@ import type { AgentApi } from "../../app/useAgentSessions";
 import type { ThemeId } from "../../app/themes";
 import { useI18n } from "../../i18n/context";
 import { PtyTerminal, type PtyTerminalIo } from "../terminal/PtyTerminal";
+import type { TerminalImageReference } from "../terminal/terminalImageLinks";
 import { AgentSessionImages } from "./AgentSessionImages";
 
 export function AgentTerminalPane({
@@ -18,6 +19,7 @@ export function AgentTerminalPane({
 }) {
   const { t } = useI18n();
   const [imageRevision, setImageRevision] = useState(0);
+  const [imageReference, setImageReference] = useState<TerminalImageReference>();
   const [openImagesRevision, setOpenImagesRevision] = useState(0);
   const io = useMemo<PtyTerminalIo>(
     () => ({
@@ -36,13 +38,13 @@ export function AgentTerminalPane({
         if (path) setImageRevision(value => value + 1);
         return path;
       },
-      openImages: () => setOpenImagesRevision(value => value + 1),
+      openImages: reference => { setImageReference(reference); setOpenImagesRevision(value => value + 1); },
     }),
     [agents, sessionId],
   );
   return (
     <div className="agent-terminal-pane">
-      <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={imageRevision} openRevision={openImagesRevision} />
+      <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={imageRevision} openRevision={openImagesRevision} reference={imageReference} />
       <PtyTerminal
       ioKey={sessionId}
       io={io}
