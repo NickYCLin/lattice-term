@@ -4,6 +4,7 @@ struct ForegroundFixture {
     service: Arc<DesktopService>,
     registry: Arc<AgentRegistry>,
     sink: Arc<dyn AgentSink>,
+    collector: Arc<TestSink>,
     id: String,
 }
 impl ForegroundFixture {
@@ -11,7 +12,8 @@ impl ForegroundFixture {
         Self::with_resume(false)
     }
     fn with_resume(resumed: bool) -> Self {
-        let sink: Arc<dyn AgentSink> = Arc::new(TestSink::default());
+        let collector = Arc::new(TestSink::default());
+        let sink: Arc<dyn AgentSink> = collector.clone();
         let registry = Arc::new(AgentRegistry::new());
         let session = launch_cat_with_restore(&sink, &registry, "Existing proxy conversation", resumed);
         let entry = registry.get(&session.session_id).unwrap();
@@ -28,7 +30,7 @@ impl ForegroundFixture {
         registry.update_state(&session.session_id, AgentLifecycle::Idle, AgentStateSource::Integration);
         let service = Arc::new(DesktopService::new(Arc::new(crate::ssh::SshRegistry::new()), Arc::new(crate::sftp::SftpRegistry::new()))
             .with_foreground_agents(registry.clone(), sink.clone()));
-        Self { service, registry, sink, id:session.session_id }
+        Self { service, registry, sink, collector, id:session.session_id }
     }
     async fn share(&self, read: bool, control: bool) -> String {
         self.service.share_foreground(&self.id, true, read, control).await.unwrap();
@@ -67,14 +69,14 @@ async fn resumed_history_work_markers_do_not_poison_the_first_ready_prompt() {
     f.registry.update_state_from_output(&f.id, state);
     entry.prompt_screen.lock().unwrap().settle_for_test();
     *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
-    assert!(f.call(&target, Action::Prompt { text:"not during replay".into(), request_id:"replay".into() }).await.is_err());
+    assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"not during replay".into(), request_id:"replay".into() }).await.is_err());
     f.registry.record_output(&f.id, "\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h› ".as_bytes()).unwrap();
     assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], false);
     entry.prompt_screen.lock().unwrap().settle_for_test();
     *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
     assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], true);
     assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["basis"], "stable_empty_resumed_terminal_prompt");
-    let prompt = Action::Prompt { text:"new turn after resume".into(), request_id:"resumed-once".into() };
+    let prompt = Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"new turn after resume".into(), request_id:"resumed-once".into() };
     assert_eq!(f.call(&target, prompt.clone()).await.unwrap()["sentImmediately"], true);
     assert_eq!(f.call(&target, prompt).await.unwrap()["duplicate"], true);
     f.unreported_prompt();
@@ -121,7 +123,7 @@ async fn resumed_first_prompt_still_requires_a_safe_live_screen_and_no_real_turn
         entry.prompt_screen.lock().unwrap().settle_for_test();
         *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
         assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], false, "{case}");
-        assert!(f.call(&target, Action::Prompt { text:"must not send".into(), request_id:format!("resume-blocked-{case}") }).await.is_err(), "{case}");
+        assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"must not send".into(), request_id:format!("resume-blocked-{case}") }).await.is_err(), "{case}");
     }
 }
 
@@ -134,10 +136,10 @@ async fn unreported_idle_desktop_prompt_sends_once_without_releasing_background_
     assert_eq!(state["promptReadiness"]["ready"], true);
     assert_eq!(state["promptReadiness"]["basis"], "stable_empty_terminal_prompt");
     assert!(mcp_prompt(f.sink.as_ref(), &f.registry, &f.id, "background still needs integration", true).is_err());
-    let prompt = Action::Prompt { text:"one foreground prompt".into(), request_id:"unreported-once".into() };
+    let prompt = Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"one foreground prompt".into(), request_id:"unreported-once".into() };
     assert_eq!(f.call(&target, prompt.clone()).await.unwrap()["sentImmediately"], true);
     assert_eq!(f.call(&target, prompt).await.unwrap()["duplicate"], true);
-    assert!(f.call(&target, Action::Prompt { text:"changed".into(), request_id:"unreported-once".into() }).await.is_err());
+    assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"changed".into(), request_id:"unreported-once".into() }).await.is_err());
     // Even if a watchdog later calls this idle, quiet cannot finish a turn.
     f.unreported_prompt();
     assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().contains(&"terminal_turn_unconfirmed"));
@@ -166,7 +168,7 @@ async fn unreported_desktop_rejects_work_approval_drafts_unknown_and_unsettled_s
         }
         let state = f.call(&target, Action::State {}).await.unwrap();
         assert_eq!(state["promptReadiness"]["ready"], false, "{case}");
-        assert!(f.call(&target, Action::Prompt { text:"must not send".into(), request_id:format!("blocked-{case}") }).await.is_err(), "{case}");
+        assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"must not send".into(), request_id:format!("blocked-{case}") }).await.is_err(), "{case}");
     }
 }
 
@@ -177,10 +179,10 @@ async fn desktop_rechecks_terminal_after_state_and_preserves_official_ready_beha
     f.unreported_prompt();
     assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["ready"], true);
     f.registry.record_output(&f.id, b"\r\npermission required").unwrap();
-    assert!(f.call(&target, Action::Prompt { text:"stale snapshot".into(), request_id:"stale-state".into() }).await.is_err());
+    assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"stale snapshot".into(), request_id:"stale-state".into() }).await.is_err());
     f.registry.update_state(&f.id, AgentLifecycle::Done, AgentStateSource::Integration);
     assert_eq!(f.call(&target, Action::State {}).await.unwrap()["promptReadiness"]["basis"], "official_integration");
-    assert_eq!(f.call(&target, Action::Prompt { text:"officially ready".into(), request_id:"official".into() }).await.unwrap()["sentImmediately"], true);
+    assert_eq!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now, text:"officially ready".into(), request_id:"official".into() }).await.unwrap()["sentImmediately"], true);
 }
 
 #[tokio::test(flavor="multi_thread", worker_threads=2)]
@@ -202,7 +204,7 @@ async fn desktop_mcp_shares_original_identity_and_separates_read_from_control() 
     let target = f.share(true, false).await;
     let read = f.call(&target, Action::Read {cursor:0,max_bytes:1024}).await.unwrap();
     assert!(read["text"].as_str().unwrap().contains("existing history 繁中"));
-    assert!(f.call(&target, Action::Prompt {text:"read only cannot send".into(),request_id:"denied".into()}).await.is_err());
+    assert!(f.call(&target, Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"read only cannot send".into(),request_id:"denied".into()}).await.is_err());
     assert_eq!(f.registry.list().len(),1);
     assert_eq!(f.registry.session_summary(&f.id).unwrap().process_id,pid);
 }
@@ -212,19 +214,19 @@ async fn desktop_mcp_prompt_is_ready_checked_and_deduplicated() {
     let f = ForegroundFixture::new();
     let target = f.share(true,true).await;
     f.registry.update_state(&f.id,AgentLifecycle::Working,AgentStateSource::Integration);
-    assert!(f.call(&target,Action::Prompt {text:"busy".into(),request_id:"busy".into()}).await.is_err());
+    assert!(f.call(&target,Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"busy".into(),request_id:"busy".into()}).await.is_err());
     f.registry.update_state(&f.id,AgentLifecycle::Idle,AgentStateSource::Heuristic);
-    assert!(f.call(&target,Action::Prompt {text:"heuristic".into(),request_id:"heuristic".into()}).await.is_err());
+    assert!(f.call(&target,Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"heuristic".into(),request_id:"heuristic".into()}).await.is_err());
     f.registry.update_state(&f.id,AgentLifecycle::Idle,AgentStateSource::Integration);
     f.registry.get(&f.id).unwrap().input.lock().unwrap().desktop_editing = true;
-    assert!(f.call(&target,Action::Prompt {text:"unfinished input".into(),request_id:"editing".into()}).await.is_err());
+    assert!(f.call(&target,Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"unfinished input".into(),request_id:"editing".into()}).await.is_err());
     f.registry.get(&f.id).unwrap().input.lock().unwrap().desktop_editing = false;
-    let action = Action::Prompt {text:"single authorised prompt".into(),request_id:"one-prompt".into()};
+    let action = Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"single authorised prompt".into(),request_id:"one-prompt".into()};
     let sent = f.call(&target,action.clone()).await.unwrap();
     assert_eq!(sent["sentImmediately"],true);
     let replay = f.call(&target,action).await.unwrap();
     assert_eq!(replay["duplicate"],true);
-    assert!(f.call(&target,Action::Prompt {text:"different prompt".into(),request_id:"one-prompt".into()}).await.is_err());
+    assert!(f.call(&target,Action::Prompt { mode: crate::mcp_desktop::DesktopPromptMode::Now,text:"different prompt".into(),request_id:"one-prompt".into()}).await.is_err());
     assert_eq!(f.registry.list().len(),1);
 }
 
@@ -444,4 +446,115 @@ async fn native_refresh_preserves_desktop_input_ticket_before_waiting() {
     drop(input);
     assert!(worker.join().unwrap().is_ok());
     assert!(reserved, "desktop intent waited behind readiness refresh before reserving its ticket");
+}
+
+
+fn queued_action(text: &str, request_id: &str) -> Action {
+    Action::Prompt {
+        text: text.into(), request_id: request_id.into(),
+        mode: crate::mcp_desktop::DesktopPromptMode::Queue,
+    }
+}
+
+#[test]
+fn desktop_mcp_prompt_mode_defaults_to_now_and_rejects_unknown_modes() {
+    let default = serde_json::json!({"kind":"prompt","text":"hello","requestId":"mode-test"});
+    let action: Action = serde_json::from_value(default.clone()).unwrap();
+    assert_eq!(serde_json::to_value(action).unwrap()["mode"], "now");
+    for mode in ["now", "queue"] {
+        let mut value = default.clone(); value["mode"] = mode.into();
+        assert!(serde_json::from_value::<Action>(value).is_ok());
+    }
+    for mode in [serde_json::json!("interrupt"), serde_json::Value::Null] {
+        let mut value = default.clone(); value["mode"] = mode;
+        assert!(serde_json::from_value::<Action>(value).is_err());
+    }
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_mcp_queue_waits_for_official_completion_and_delivers_in_order() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration);
+    let first = queued_action("queued-mcp-first", "queue-first");
+    let accepted = f.call(&target, first.clone()).await.unwrap();
+    assert_eq!(accepted["queued"], 1);
+    assert_eq!(accepted["sentImmediately"], false);
+    assert_eq!(f.call(&target, first).await.unwrap()["duplicate"], true);
+    assert!(f.call(&target, queued_action("changed", "queue-first")).await.is_err());
+    let mut changed_mode = queued_action("queued-mcp-first", "queue-first");
+    if let Action::Prompt { mode, .. } = &mut changed_mode { *mode = crate::mcp_desktop::DesktopPromptMode::Now; }
+    assert!(f.call(&target, changed_mode).await.is_err());
+    assert_eq!(f.call(&target, queued_action("queued-mcp-second", "queue-second")).await.unwrap()["queued"], 2);
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["queuedPrompts"], 2);
+    for state in [AgentLifecycle::Idle, AgentLifecycle::Done] {
+        f.registry.update_state(&f.id, state, AgentStateSource::Heuristic);
+        deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+        assert_eq!(f.registry.session_summary(&f.id).unwrap().queued_prompts, 2);
+    }
+    assert!(!received_within(&f.collector, &f.id, "queued-mcp-first", Duration::from_millis(100)));
+    f.registry.update_state(&f.id, AgentLifecycle::Done, AgentStateSource::Integration);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert!(received_within(&f.collector, &f.id, "queued-mcp-first", Duration::from_secs(3)));
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["queuedPrompts"], 1);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert!(!received_within(&f.collector, &f.id, "queued-mcp-second", Duration::from_millis(100)));
+    f.registry.update_state(&f.id, AgentLifecycle::Idle, AgentStateSource::Integration);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert!(received_within(&f.collector, &f.id, "queued-mcp-second", Duration::from_secs(3)));
+    assert_eq!(f.call(&target, Action::State {}).await.unwrap()["queuedPrompts"], 0);
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_mcp_queue_preserves_human_draft_and_existing_queue() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let entry = f.registry.get(&f.id).unwrap();
+    entry.input.lock().unwrap().desktop_editing = true;
+    assert_eq!(f.call(&target, queued_action("after-human-first", "draft-first")).await.unwrap()["queued"], 1);
+    assert_eq!(f.call(&target, queued_action("after-human-second", "draft-second")).await.unwrap()["queued"], 2);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().queued_prompts, 2);
+    assert!(entry.input.lock().unwrap().desktop_editing);
+    assert!(!received_within(&f.collector, &f.id, "after-human-first", Duration::from_millis(100)));
+    entry.input.lock().unwrap().desktop_editing = false;
+    f.registry.update_state(&f.id, AgentLifecycle::Done, AgentStateSource::Integration);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert!(received_within(&f.collector, &f.id, "after-human-first", Duration::from_secs(3)));
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().queued_prompts, 1);
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_mcp_queue_requires_control_and_revocation_prevents_delivery() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, false).await;
+    for mode in [crate::mcp_desktop::DesktopPromptMode::Now, crate::mcp_desktop::DesktopPromptMode::Queue] {
+        let denied = f.call(&target, Action::Prompt {text:"denied".into(), request_id:"denied-mode".into(),mode}).await.unwrap_err();
+        assert_eq!(denied.code, "not_authorized");
+        assert!(denied.message.contains("已共享，但未開啟控制"));
+        assert!(denied.message.contains("MCP 權限"));
+        assert!(denied.message.contains("完全開放"));
+    }
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().queued_prompts, 0);
+    let target = f.share(true, true).await;
+    f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration);
+    let prompt = queued_action("revoked-must-not-send", "revoke-queued");
+    assert_eq!(f.call(&target, prompt.clone()).await.unwrap()["queued"], 1);
+    f.service.revoke(&target).unwrap();
+    let replacement = f.share(true, true).await;
+    assert!(f.call(&target, prompt).await.is_err());
+    f.registry.update_state(&f.id, AgentLifecycle::Done, AgentStateSource::Integration);
+    deliver_next_queued(f.sink.as_ref(), &f.registry, &f.id);
+    assert_eq!(f.call(&replacement, Action::State {}).await.unwrap()["queuedPrompts"], 0);
+    assert!(!received_within(&f.collector, &f.id, "revoked-must-not-send", Duration::from_millis(200)));
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn desktop_mcp_queue_sends_immediately_only_when_officially_ready() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let result = f.call(&target, queued_action("ready-queue-prompt", "ready-queue")).await.unwrap();
+    assert_eq!(result["sentImmediately"], true);
+    assert_eq!(result["queued"], 0);
+    assert!(received_within(&f.collector, &f.id, "ready-queue-prompt", Duration::from_secs(3)));
 }

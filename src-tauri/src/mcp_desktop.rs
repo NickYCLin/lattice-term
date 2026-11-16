@@ -12,7 +12,7 @@ mod file_queries;
 mod fleet;
 mod foreground;
 pub use chat::{ChatBridge, ChatRequest, DesktopChatAction};
-pub use foreground::DesktopAgentAction;
+pub use foreground::{DesktopAgentAction, DesktopPromptMode};
 #[cfg(test)]
 mod loopback_tests;
 mod operation_tracking;
@@ -1646,6 +1646,20 @@ impl DesktopService {
             }
             return Err(ServiceError::denied());
         };
+        if !*grant.revoked.borrow()
+            && grant.view.backend == Backend::DesktopAgent
+            && !grant.view.scopes.fleet_control
+            && matches!(
+                operation,
+                DesktopOperation::DesktopAgent {
+                    action: DesktopAgentAction::Prompt { .. },
+                    ..
+                }
+            )
+        {
+            return Err(ServiceError::new("not_authorized",
+                "此工作階段已共享，但未開啟控制（fleetControl）。請到「AI Agent Fleet」，將該工作階段的「MCP 權限」設為「完全開放（可看、送指示、停止）」，再重新取得 targetId。"));
+        }
         if *grant.revoked.borrow()
             || operation
                 .required_scope()

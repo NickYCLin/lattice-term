@@ -21,8 +21,18 @@ pub enum DesktopAgentAction {
     Prompt {
         text: String,
         request_id: String,
+        #[serde(default)]
+        mode: DesktopPromptMode,
     },
 }
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DesktopPromptMode {
+    #[default]
+    Now,
+    Queue,
+}
+
 fn read_limit() -> usize {
     16384
 }
@@ -45,7 +55,9 @@ impl DesktopAgentAction {
             Self::Read { max_bytes, .. } if !(1..=65536).contains(max_bytes) => {
                 Err(ServiceError::invalid())
             }
-            Self::Prompt { text, request_id } => {
+            Self::Prompt {
+                text, request_id, ..
+            } => {
                 valid_id(request_id)?;
                 if text.trim().is_empty()
                     || text.chars().count() > 16000
@@ -242,7 +254,8 @@ impl DesktopService {
                     range, true, *max_bytes,
                 ))
             }
-            DesktopAgentAction::Prompt { text, .. } => {
+            DesktopAgentAction::Prompt { text, mode, .. } => {
+                let mode = *mode;
                 let registry = Arc::clone(registry);
                 let sink = Arc::clone(sink);
                 let session_id = grant.session_id.clone();
@@ -250,7 +263,10 @@ impl DesktopService {
                 let revoked = grant.revoked.subscribe();
                 let queued = tokio::task::spawn_blocking(move || {
                     if *revoked.borrow() { return Err(agent::MCP_GRANT_CHANGED.to_owned()); }
-                    agent::mcp_foreground_prompt(sink.as_ref(), &registry, &session_id, &text)
+                    match mode {
+                        DesktopPromptMode::Now => agent::mcp_foreground_prompt(sink.as_ref(), &registry, &session_id, &text),
+                        DesktopPromptMode::Queue => agent::mcp_prompt(sink.as_ref(), &registry, &session_id, &text, false),
+                    }
                 }).await.map_err(|_| ServiceError::new("unknown_outcome", "The prompt worker ended without confirming delivery; inspect output and reuse the same requestId."))?
                         .map_err(|error| {
                             let code = match error.as_str() {

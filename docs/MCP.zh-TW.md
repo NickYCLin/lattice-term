@@ -718,6 +718,19 @@ stdin 傳遞。這些不是所有供應商的付費
 
 ### 前景提示就緒診斷
 
+`desktop_agent` 的 `prompt` 可加 `mode`：省略或使用 `"now"` 時維持立即
+送出的就緒檢查；`"queue"` 則在執行中、有人編輯或已有待送訊息時排隊。
+回覆的 `queued` 為本次受理時的待送數量，`sentImmediately` 表示是否立即
+送出；`state.queuedPrompts` 可查目前數量。佇列只在官方 idle/done 且沒有
+人工草稿時依序派送，一次完成只釋放一筆，不以終端靜默推測完成。
+相同 `requestId` 與相同內容、模式重試不會重複排隊；同 ID 改內容或模式
+會拒絕。重播回覆保留原受理時的數量，最新數量請查 `state`。
+
+兩種模式都需要 `fleetControl`。已共享但未給控制權時，請在「AI Agent
+Fleet」將該工作階段的「MCP 權限」設為「完全開放（可看、送指示、停止）」，
+並重新取得 `targetId`。撤銷控制或中斷桌面分享會取消尚未送出的 MCP 訊息；
+重新授權也不會恢復舊佇列。
+
 `desktop_agent` 的 `state` 回傳 `promptReadiness`，包含 `ready`、`blockers`、`lastInputKind` 與 `snapshotOnly=true`。這是觀察當下的快照，送出時仍重新檢查；不會清除草稿、改變權限或把推測狀態升級為正式就緒。
 
 阻擋原因分為 `control_not_granted`、`input_profile_unsupported`、`desktop_editing`、`desktop_paste_incomplete`、`desktop_escape_incomplete`、`startup_seed_pending`、`integration_not_reported`、`lifecycle_not_ready`、`queued_prompts_pending`。`lastInputKind` 僅回傳輸入種類，不回傳草稿、按鍵內容或回報憑證。遇到 `not_ready` 先讀這些原因，不應反覆要求使用者送相同提示或自動清除輸入。
