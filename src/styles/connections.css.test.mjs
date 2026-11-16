@@ -27,3 +27,12 @@ it("keeps long names and targets on one ellipsized line across themes", () => {
   }
   expect(storybook).not.toMatch(/\.connection-card__(primary|footer)[^{]*\{/);
 });
+it("uses shared theme tokens for session-tree insert lines and the order menu", () => {
+  const insertion = rule(".session-tree :is(.is-drop-before, .is-drop-after)::after");
+  expect(insertion).toContain("background: var(--accent)");
+  expect(insertion).toContain("var(--accent-soft)");
+  expect(rule(".session-tree .is-drop-before::after")).toContain("top: -1px");
+  expect(rule(".session-tree .is-drop-after::after")).toContain("bottom: -1px");
+  expect(rule(".session-tree__order-menu")).toContain("position: fixed");
+  expect(rule(".session-tree__order-menu")).toContain("background: var(--surface-solid)");
+});

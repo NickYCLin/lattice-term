@@ -1,3 +1,4 @@
+import { SessionFolderOrderMenu } from "./SessionFolderOrderMenu";
 import { PathDropZone } from "../files/PathDropZone";
 import { FileDropZone } from "../files/FileDropZone";
 import type { UploadFile } from "../../app/localFiles";
@@ -19,6 +20,8 @@ import { fuzzySearch } from "../../app/fuzzySearch";
 import { displayPath } from "../../app/displayPath";
 import {
   sessionSidebarDropPlacement,
+  sessionSidebarDropIntent,
+  type SessionSidebarDropIntent,
   sessionSidebarChildren,
   type SessionSidebarFolder,
   type SessionSidebarLayout,
@@ -186,6 +189,7 @@ export function SessionProjectSidebar({
   );
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [dropTargetNodeId, setDropTargetNodeId] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<SessionSidebarDropIntent>("into");
   const [launchMenu, setLaunchMenu] = useState<FloatingLaunchMenu | null>(null);
   const [movingSession, setMovingSession] =
     useState<SessionSidebarSessionItem | null>(null);
@@ -385,7 +389,7 @@ export function SessionProjectSidebar({
   layoutRef.current = layout;
   const nodeKindRef = useRef(nodeKind);
   nodeKindRef.current = nodeKind;
-  const dropRef = useRef<{ nodeId: string; after: boolean } | null>(null);
+  const dropRef = useRef<{ nodeId: string; intent: SessionSidebarDropIntent } | null>(null);
   const suppressClickRef = useRef(false);
 
   function pressNode(event: ReactPointerEvent<HTMLElement>, nodeId: string) {
@@ -439,7 +443,7 @@ export function SessionProjectSidebar({
       moveEvent.preventDefault();
       const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
       if (hit?.closest("[data-tree-root-drop]")) {
-        dropRef.current = { nodeId: TREE_ROOT_DROP, after: false };
+        dropRef.current = { nodeId: TREE_ROOT_DROP, intent: "into" };
         setDropTargetNodeId(TREE_ROOT_DROP);
         return;
       }
@@ -451,10 +455,12 @@ export function SessionProjectSidebar({
         return;
       }
       const bounds = row.getBoundingClientRect();
-      dropRef.current = {
-        nodeId: targetNodeId,
-        after: moveEvent.clientY > bounds.top + bounds.height / 2,
-      };
+      const intent = sessionSidebarDropIntent(nodeKindRef.current(press.nodeId), nodeKindRef.current(targetNodeId), (moveEvent.clientY - bounds.top) / Math.max(bounds.height, 1));
+      if (!sessionSidebarDropPlacement(layoutRef.current, press.nodeId, targetNodeId, intent === "into", intent === "after")) {
+        dropRef.current = null; setDropTargetNodeId(null); return;
+      }
+      dropRef.current = { nodeId: targetNodeId, intent };
+      setDropPosition(intent);
       setDropTargetNodeId(targetNodeId);
     };
 
@@ -470,19 +476,12 @@ export function SessionProjectSidebar({
         onMove(press.nodeId, null);
         return;
       }
-      const targetKind = nodeKindRef.current(drop.nodeId);
-      const sourceKind = nodeKindRef.current(press.nodeId);
-      // A folder/project row is an explicit container target. Requiring the
-      // pointer to hit only its lower half made ordinary drops look ignored.
-      const targetIsContainer =
-        targetKind === "folder" ||
-        (targetKind === "project" && sourceKind === "session");
       const placement = sessionSidebarDropPlacement(
         layoutRef.current,
         press.nodeId,
         drop.nodeId,
-        targetIsContainer,
-        drop.after,
+        drop.intent === "into",
+        drop.intent === "after",
       );
       if (!placement) return;
       onMove(press.nodeId, placement.parentId, placement.beforeNodeId);
@@ -577,6 +576,10 @@ export function SessionProjectSidebar({
     }
   }
 
+  function dropClass(nodeId: string) {
+    return dropTargetNodeId === nodeId ? dropPosition === "into" ? " is-drop-target" : ` is-drop-${dropPosition}` : "";
+  }
+
   function renderSession(session: SessionSidebarSessionItem, depth: number) {
     const Glyph = glyphFor(session.kind);
     return (
@@ -584,7 +587,7 @@ export function SessionProjectSidebar({
         role="listitem"
         className={`session-tree__session${
           session.sessionId === activeSessionId ? " is-active" : ""
-        }${dropTargetNodeId === session.nodeId ? " is-drop-target" : ""}${
+        }${dropClass(session.nodeId)}${
           draggedNodeId === session.nodeId ? " is-dragging" : ""
         }${session.status === "connected" ? "" : ` status-${session.status}`}`}
         style={treeStyle(depth)}
@@ -668,7 +671,7 @@ export function SessionProjectSidebar({
       >
         <div
           className={`session-tree__project${selected ? " is-active" : ""}${
-            dropTargetNodeId === project.nodeId ? " is-drop-target" : ""
+            dropClass(project.nodeId)
           }${draggedNodeId === project.nodeId ? " is-dragging" : ""}`}
           style={treeStyle(depth)}
           data-tree-node={project.nodeId}
@@ -762,7 +765,7 @@ export function SessionProjectSidebar({
       >
         <div
           className={`session-tree__folder-row${
-            dropTargetNodeId === folder.id ? " is-drop-target" : ""
+            dropClass(folder.id)
           }${draggedNodeId === folder.id ? " is-dragging" : ""}`}
           style={treeStyle(depth)}
           data-tree-node={folder.id}
@@ -791,6 +794,7 @@ export function SessionProjectSidebar({
             <ChevronDownIcon size={12} className={collapsed ? "is-collapsed" : undefined} />
           </button>
           <div className="session-tree__folder-actions">
+            <SessionFolderOrderMenu folder={folder} layout={layout} onMove={onMove} />
             <button
               type="button"
               className="icon-button icon-button--sm"

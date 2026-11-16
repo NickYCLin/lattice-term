@@ -305,6 +305,24 @@ export interface SessionSidebarDropPlacement {
   beforeNodeId: string | null;
 }
 
+export type SessionSidebarDropIntent = "before" | "after" | "into";
+/** Folders only reorder; sessions/projects may enter a folder through its middle. */
+export function sessionSidebarDropIntent(source: "folder" | "project" | "session" | null, target: "folder" | "project" | "session" | null, ratio: number): SessionSidebarDropIntent {
+  const container = target === "folder" && source !== "folder" || target === "project" && source === "session";
+  if (container && ratio >= 0.25 && ratio <= 0.75) return "into";
+  return ratio < 0.5 ? "before" : "after";
+}
+
+/** Keyboard and menu movement uses exactly the same sibling insertion as drops. */
+export function sessionSidebarStepPlacement(layout: SessionSidebarLayout, nodeId: string, direction: "up" | "down"): SessionSidebarDropPlacement | null {
+  const placement = layout.placements[nodeId];
+  if (!placement) return null;
+  const siblings = sessionSidebarChildren(layout, placement.parentId);
+  const index = siblings.indexOf(nodeId);
+  if (index < 0 || direction === "up" && index === 0 || direction === "down" && index === siblings.length - 1) return null;
+  return { parentId: placement.parentId, beforeNodeId: direction === "up" ? siblings[index - 1] : siblings[index + 2] ?? null };
+}
+
 /**
  * Resolves the layout destination for a pointer drop. Container rows receive
  * the node as a child; ordinary rows use their upper/lower half to insert the
@@ -324,11 +342,15 @@ export function sessionSidebarDropPlacement(
   ) {
     return null;
   }
-  if (targetIsContainer) {
-    return { parentId: targetNodeId, beforeNodeId: null };
+  const sourceIsFolder = layout.folders.some(folder => folder.id === sourceNodeId);
+  if (sourceIsFolder && layout.placements[sourceNodeId].parentId !== layout.placements[targetNodeId].parentId) return null;
+  const folderToFolder = sourceIsFolder && layout.folders.some(folder => folder.id === targetNodeId);
+  if (targetIsContainer && !folderToFolder) {
+    return wouldCreateCycle(layout.placements, sourceNodeId, targetNodeId) ? null : { parentId: targetNodeId, beforeNodeId: null };
   }
 
   const parentId = layout.placements[targetNodeId].parentId;
+  if (wouldCreateCycle(layout.placements, sourceNodeId, parentId)) return null;
   const siblings = sessionSidebarChildren(layout, parentId).filter(
     (id) => id !== sourceNodeId,
   );
