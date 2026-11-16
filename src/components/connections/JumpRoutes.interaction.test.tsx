@@ -68,3 +68,21 @@ it("SQL direct/jump selection changes only the opening request", async () => {
     expect(database.route).toEqual({ kind: "ssh", profileId: "gateway" });
   } finally { await act(async () => root.unmount()); }
 });
+
+it("previews a new protocol route and requires a valid target port before merging", async () => {
+  const host = installHostDom(); const root = createRoot(host as unknown as Element); const merge = vi.fn(async () => null);
+  const target = { ...profile("target", "192.0.2.10", "Synthetic Host"), protocol: "rdp" as const, port: 3389 };
+  const legacy = { ...profile("legacy", "127.0.0.1", "Synthetic HostSSH(via Synthetic Gateway)"), port: 14422 };
+  const gateway = profile("gateway", "192.0.2.20", "Synthetic Gateway");
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><JumpMigrationDialog profiles={[target, legacy, gateway]} onMerge={merge} onClose={() => {}} /></I18nProvider>));
+    expect(host.textContent).toContain("將新增 SSH 路線至 192.0.2.10");
+    expect(merge).not.toHaveBeenCalled();
+    await act(async () => props(allNodes(host).find(node => node.tagName === "SELECT")!).onChange({ target: { value: gateway.id } }));
+    const port = allNodes(host).find(node => props(node)?.type === "number")!;
+    const confirm = () => allNodes(host).find(node => node.tagName === "BUTTON" && node.textContent.includes("確認整合"))!;
+    await act(async () => props(port).onChange({ target: { value: "0" } })); expect(props(confirm()).disabled).toBe(true);
+    await act(async () => props(port).onChange({ target: { value: "2222" } }));
+    await act(async () => props(confirm()).onClick()); expect(merge).toHaveBeenCalledWith(legacy.id, target.id, gateway.id, 2222);
+  } finally { await act(async () => root.unmount()); }
+});

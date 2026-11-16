@@ -204,7 +204,7 @@ export function ConnectionCard({
       <div className="connection-card__primary">
         {connectable.length > 0 ? (
           jumpOptions.length ? <div className="connection-card__launch">{launchButton}
-            <label className="connection-card__jump"><span className="sr-only">{t("jump.route")}</span>
+            <label className="connection-card__jump"><span className="visually-hidden">{t("jump.route")}</span>
               <select className="select" aria-label={t("jump.route")} title={chosenJump?.label} value={chosenJump?.key ?? ""} onChange={event => setJumpChoice(event.target.value)}>
                 {jumpOptions.map(option => <option key={option.key} value={option.key} disabled={!option.connect}>{option.label}</option>)}
               </select>

@@ -54,6 +54,7 @@ try {
     return createElement(ConnectionCard, { key: i, profile, selected: false, onSelect: noop, onEdit: noop, onDelete: noop, onDuplicate: noop, onToggleFavorite: noop,
       onConnect: i === 4 ? undefined : noop, unavailableReason: "runtime-unsupported",
       ...(i % 2 ? { onOpenSql: noop, databaseCount: 2, databaseNames: ["synthetic reporting database"] } : {}),
+      ...(i === 0 || i === 3 ? { jumpOptions: [{ key: "direct", label: "直連", connect: noop }, { key: "jump", label: "經跳板：Synthetic Gateway", connect: noop }] } : {}),
       linked: i === 1 || i === 5 ? [{ profile: { ...profile, id: `linked-${i}` }, onConnect: noop }] : [],
     });
   });
@@ -89,16 +90,22 @@ try {
     const result = await evaluate(`(() => {
       const boxes = [...document.querySelectorAll('.connection-card')].map(card => {
         const rect = card.getBoundingClientRect(), action = card.querySelector('.connection-card__primary').getBoundingClientRect(), footer = card.querySelector('.connection-card__footer').getBoundingClientRect();
-        const buttons = [...card.querySelectorAll('.connection-card__primary > button')].map(button => button.getBoundingClientRect());
+        const buttons = [...card.querySelectorAll('.connection-card__primary button, .connection-card__jump select')].map(button => button.getBoundingClientRect());
         const favorite = card.querySelector('.connection-card__favorite').getBoundingClientRect();
         const first = card.querySelector('.connection-card__primary').firstElementChild.getBoundingClientRect();
-        return { top:rect.top, height:rect.height, action:action.top, footer:footer.top, first:first.top, start:first.left-rect.left, favoriteRight:rect.right-favorite.right, buttonHeights:buttons.map(button=>button.height), overflow:card.scrollWidth>card.clientWidth+1 };
+        const jump = card.querySelector('.connection-card__jump');
+        const label = jump?.querySelector('.visually-hidden');
+        const labelStyle = label && getComputedStyle(label);
+        const launch = card.querySelector('.connection-card__go')?.getBoundingClientRect();
+        const route = jump?.querySelector('select')?.getBoundingClientRect();
+        const jumpAligned = !jump || !!launch && !!route && Math.abs(launch.top-route.top) <= 0.75 && Math.abs(launch.height-route.height) <= 0.75 && route.left >= launch.right-1 && labelStyle.position === 'absolute';
+        return { jumpAligned, top:rect.top, height:rect.height, action:action.top, footer:footer.top, first:first.top, start:first.left-rect.left, favoriteRight:rect.right-favorite.right, buttonHeights:buttons.map(button=>button.height), overflow:card.scrollWidth>card.clientWidth+1 };
       });
       return { boxes, overflow:document.documentElement.scrollWidth>innerWidth+1 };
     })()`);
     const groups = Map.groupBy(result.boxes, box => Math.round(box.top));
     const near = values => Math.max(...values) - Math.min(...values) <= 0.75;
-    if (result.overflow || result.boxes.some(box => box.overflow) || [...groups.values()].some(row =>
+    if (result.overflow || result.boxes.some(box => box.overflow || !box.jumpAligned) || [...groups.values()].some(row =>
       ["height", "action", "footer", "first", "start", "favoriteRight"].some(key => !near(row.map(box => box[key])))
         || !near(row.flatMap(box => box.buttonHeights)))) {
       throw new Error(`Misalignment: ${JSON.stringify({ mobile, theme, density, width, scale, result })}`);

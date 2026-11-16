@@ -9,11 +9,11 @@ describe("jump route metadata and conservative migration", () => {
     const gateway = profile("gateway", "gateway.invalid", "跳板自訂名稱");
     expect(jumpGateways([gateway, { ...gateway, id: "self" }, { ...gateway, id: "chained", jumpProfileId: gateway.id }, { ...gateway, id: "rdp", protocol: "rdp" }, { ...gateway, id: "retired", retiredTo: "target" }], "self")).toEqual([gateway]);
   });
-  it("requires an unambiguous non-loopback target with matching account and protocol", () => {
+  it("requires an unambiguous non-loopback target with matching account and normalized names", () => {
     const target = profile("target", "target.invalid");
     const legacy = profile("legacy", "127.0.0.1", "測試目標（經自訂跳板）");
     expect(legacyJumpCandidates([target, legacy])).toEqual([{ legacy, target }]);
-    for (const other of [{ ...target, username: "other" }, { ...target, protocol: "rdp" as const }, { ...target, name: "無關目標" }]) expect(legacyJumpCandidates([other, legacy])).toEqual([]);
+    for (const other of [{ ...target, username: "other" }, { ...target, name: "無關目標" }]) expect(legacyJumpCandidates([other, legacy])).toEqual([]);
     expect(legacyJumpCandidates([target, { ...target, id: "ambiguous" }, legacy])).toEqual([]);
     expect(legacyJumpCandidates([legacy])).toEqual([]);
   });
@@ -41,4 +41,36 @@ describe("jump route metadata and conservative migration", () => {
     const old = JSON.parse(data); old.profiles.forEach((entry: Record<string, unknown>) => { delete entry.jumpProfileId; delete entry.retiredTo; delete entry.id; });
     expect(parseAndValidateImport(JSON.stringify(old)).validProfiles).toHaveLength(3);
   });
+});
+
+it.each([
+  ["出流管制", "出流管制SSH(經AI通道)"],
+  ["X", "X (via Gateway)"],
+  ["Synthetic Host", "synthetic host - ssh（THROUGH Gateway）"],
+])("recognizes cross-protocol synthetic labels %s / %s", (name, oldName) => {
+  const target = { ...profile("target", "192.0.2.10", name), protocol: "rdp" as const, port: 3389 };
+  const legacy = { ...profile("legacy", "127.0.0.1", oldName), port: 14422 };
+  const gateway = profile("gateway", "192.0.2.20", "Synthetic Gateway");
+  expect(legacyJumpCandidates([target, legacy, gateway])).toEqual([{ legacy, target }]);
+  expect(() => planLegacyJumpMerge([target, legacy, gateway], legacy.id, target.id, gateway.id)).toThrow();
+  const merged = planLegacyJumpMerge([target, legacy, gateway], legacy.id, target.id, gateway.id, 2222);
+  expect(merged[0]).toMatchObject({ id: "target", protocol: "rdp", port: 3389, machineId: "target" });
+  expect(merged[1]).toMatchObject({ id: "legacy", hostname: "127.0.0.1", port: 14422, retiredTo: "target" });
+  expect(merged[3]).toMatchObject({ protocol: "ssh", hostname: "192.0.2.10", port: 2222, jumpProfileId: "gateway", machineId: "target" });
+  expect(mergeMachineCards(merged).find(card => card.profile.id === target.id)?.linked).toHaveLength(1);
+});
+it("reuses one same-protocol peer on the target machine and rejects ambiguous endpoints", () => {
+  const target = { ...profile("target", "192.0.2.10", "Synthetic Host"), protocol: "rdp" as const, machineId: "machine" };
+  const ssh = { ...profile("ssh", "192.0.2.10", "Synthetic Host SSH"), machineId: "machine", port: 2222 };
+  const legacy = profile("legacy", "localhost", "Synthetic Host SSH (via Gateway)"); const gateway = profile("gateway", "192.0.2.20", "Gateway");
+  const source = [target, ssh, legacy, gateway];
+  expect(legacyJumpCandidates(source)).toEqual([{ legacy, target: ssh }]);
+  const merged = planLegacyJumpMerge(source, legacy.id, ssh.id, gateway.id);
+  expect(merged).toHaveLength(4); expect(merged[1].jumpProfileId).toBe(gateway.id);
+  expect(legacyJumpCandidates([...source, { ...ssh, id: "second-ssh", hostname: "192.0.2.11" }])).toEqual([]);
+});
+it("allows two empty accounts only for a unique matching machine, without prefix guessing", () => {
+  const target = profile("target", "192.0.2.10", "Synthetic Alpha", ""); const legacy = profile("legacy", "::1", "Synthetic Alpha SQL (via Gateway)", "");
+  expect(legacyJumpCandidates([target, legacy])).toEqual([{ legacy, target }]);
+  expect(legacyJumpCandidates([{ ...target, name: "Synthetic Alphabet" }, legacy])).toEqual([]);
 });
