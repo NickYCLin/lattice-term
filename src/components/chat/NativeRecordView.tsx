@@ -1,3 +1,4 @@
+import { MemorySaveButton } from "./MemorySaveButton";
 import { agentDisplayName } from "../../app/agentNames";
 import type { ChatDefinitionId } from "../../app/agentChat";
 import { createPortal } from "react-dom";
@@ -202,6 +203,7 @@ export function NativeRecordView({
     <ConversationMessage
       assistant=""
       role={item.kind === "user" ? "user" : "assistant"}
+      actions={(item.kind === "user" || item.kind === "assistant") && <MemorySaveButton text={item.kind === "user" ? splitSessionAttachments(item.text).text : item.text} directory={directory} cli={conversation?.definitionId ?? null} conversationId={`${conversation?.nativeSessionId ?? threadId}#${item.messageId ?? item.id}`} />}
     >
       <ChatMarkdown
         source={

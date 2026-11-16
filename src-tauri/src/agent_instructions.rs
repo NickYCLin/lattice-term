@@ -39,6 +39,15 @@ fn claude_memory_files(user_directory: &Path, working_directory: &Path) -> Vec<P
         .join("projects")
         .join(claude_project_slug(working_directory))
         .join("memory");
+    let Ok(user_root) = user_directory.canonicalize() else {
+        return Vec::new();
+    };
+    if !memory
+        .canonicalize()
+        .is_ok_and(|path| path.starts_with(&user_root))
+    {
+        return Vec::new();
+    }
     let Ok(entries) = std::fs::read_dir(&memory) else {
         return Vec::new();
     };
@@ -74,15 +83,46 @@ pub struct InstructionFile {
     pub editable: bool,
 }
 
+fn allowed_read(path: &Path) -> bool {
+    !crate::transcript::redact::forbidden(path)
+        && !path
+            .canonicalize()
+            .ok()
+            .is_some_and(|path| crate::transcript::redact::forbidden(&path))
+}
 fn revision_of(path: &Path) -> String {
     use sha2::{Digest, Sha256};
-    match std::fs::read(path) {
-        Ok(bytes) => Sha256::digest(&bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-        Err(_) => "missing".to_string(),
+    use std::io::Read;
+    if !allowed_read(path) {
+        return "unavailable".into();
     }
+    if std::fs::symlink_metadata(path)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return "missing".into();
+    }
+    let Ok(file) = crate::local_files::open_regular(path) else {
+        return "unavailable".into();
+    };
+    if file
+        .metadata()
+        .map_or(true, |meta| meta.len() > MAX_SHOWN_BYTES)
+    {
+        return "unavailable".into();
+    }
+    let mut raw = Vec::new();
+    if file
+        .take(MAX_SHOWN_BYTES + 1)
+        .read_to_end(&mut raw)
+        .is_err()
+        || raw.len() as u64 > MAX_SHOWN_BYTES
+    {
+        return "unavailable".into();
+    }
+    Sha256::digest(raw)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// `(scope, path)` pairs in the order the CLI documents loading them.
@@ -143,7 +183,10 @@ fn candidates(
 }
 
 fn read_bounded(path: &Path) -> (bool, u64, String, bool) {
-    let Ok(metadata) = std::fs::metadata(path) else {
+    if !allowed_read(path) {
+        return (false, 0, String::new(), false);
+    }
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return (false, 0, String::new(), false);
     };
     if !metadata.is_file() {
@@ -151,7 +194,8 @@ fn read_bounded(path: &Path) -> (bool, u64, String, bool) {
     }
     let bytes = metadata.len();
     let mut buffer = Vec::new();
-    let read = std::fs::File::open(path)
+    let read = crate::local_files::open_regular(path)
+        .map_err(std::io::Error::other)
         .and_then(|file| file.take(MAX_SHOWN_BYTES).read_to_end(&mut buffer));
     if read.is_err() {
         return (true, bytes, String::new(), false);
@@ -201,11 +245,17 @@ pub fn inspect(
     )?
     .into_iter()
     .map(|(scope, path)| {
-        let (exists, bytes, content, truncated) = read_bounded(&path);
+        let (exists, bytes, raw_content, truncated) = read_bounded(&path);
+        let content = crate::transcript::redact::text(&raw_content);
+        let revision = revision_of(&path);
+        let editable = scope == InstructionScope::User
+            && !truncated
+            && content == raw_content
+            && revision != "unavailable";
         InstructionFile {
             scope,
-            revision: revision_of(&path),
-            editable: scope == InstructionScope::User && !truncated,
+            revision,
+            editable,
             path: path.display().to_string(),
             exists,
             bytes,
@@ -335,7 +385,7 @@ mod tests {
         std::fs::write(dir.path().join("AGENTS.md"), "# Rules\n").unwrap();
         std::fs::write(
             dir.path().join("AGENTS.override.md"),
-            "x".repeat(MAX_SHOWN_BYTES as usize + 10),
+            "public ".repeat(MAX_SHOWN_BYTES as usize / 7 + 2),
         )
         .unwrap();
         let files = inspect(
@@ -402,5 +452,45 @@ mod tests {
             .collect();
         assert_eq!(notes, ["MEMORY.md", "b-note.md"]);
         assert_eq!(claude_project_slug(work), "-data-me-My-Project");
+    }
+    #[test]
+    fn instruction_preview_masks_secrets_and_disables_destructive_editing() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("CLAUDE.md");
+        std::fs::write(&path, "token=FAKE_INSTRUCTION_SECRET").unwrap();
+        let files = inspect("claude", None, root.path().to_str()).unwrap();
+        assert!(!serde_json::to_string(&files)
+            .unwrap()
+            .contains("FAKE_INSTRUCTION_SECRET"));
+        let user = files
+            .iter()
+            .find(|file| file.path == path.display().to_string())
+            .unwrap();
+        assert!(!user.editable);
+        assert!(save(
+            "claude",
+            root.path().to_str(),
+            &user.path,
+            "overwrite",
+            &user.revision
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "token=FAKE_INSTRUCTION_SECRET"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn instruction_preview_never_reads_credential_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(".env"), "MUST_NOT_READ").unwrap();
+        std::os::unix::fs::symlink(root.path().join(".env"), root.path().join("CLAUDE.md"))
+            .unwrap();
+        let files = inspect("claude", None, root.path().to_str()).unwrap();
+        assert!(!serde_json::to_string(&files)
+            .unwrap()
+            .contains("MUST_NOT_READ"));
+        assert_eq!(revision_of(&root.path().join("CLAUDE.md")), "unavailable");
     }
 }

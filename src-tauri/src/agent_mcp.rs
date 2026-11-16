@@ -18,6 +18,16 @@ pub struct McpLaunch {
     pub args: Vec<String>,
 }
 
+impl McpLaunch {
+    pub(crate) fn data_directory(&self) -> Option<PathBuf> {
+        self.args
+            .windows(2)
+            .find(|pair| pair[0] == "--data-dir")
+            .map(|pair| PathBuf::from(&pair[1]))
+            .filter(|path| path.is_absolute())
+    }
+}
+
 /// The command line that reaches this installation's daemon. Inside an
 /// AppImage the running executable lives on a temporary mount, so the
 /// AppImage file itself is what a child client must start.
@@ -337,5 +347,25 @@ mod tests {
     fn copilot_keeps_the_servers_a_caller_chose_for_the_run() {
         let chosen = vec!["--additional-mcp-config".to_string(), "{}".to_string()];
         assert_eq!(apply_copilot_arguments(chosen.clone(), &launch()), chosen);
+    }
+    #[test]
+    fn memory_data_root_is_only_the_app_scoped_absolute_mcp_argument() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            launch_for(root.path()).data_directory().unwrap(),
+            root.path()
+        );
+        for args in [
+            vec![],
+            vec!["--data-dir".into()],
+            vec!["--data-dir".into(), "relative".into()],
+        ] {
+            assert!(McpLaunch {
+                command: "synthetic".into(),
+                args
+            }
+            .data_directory()
+            .is_none());
+        }
     }
 }

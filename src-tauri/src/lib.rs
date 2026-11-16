@@ -46,6 +46,7 @@ pub mod mcp_screen;
 pub mod metrics;
 pub mod notification_sound;
 mod project_directories;
+pub mod project_memory;
 pub mod rdp;
 pub mod remote;
 pub mod remote_chat_host;
@@ -3867,6 +3868,51 @@ async fn agent_instruction_files(
 }
 
 #[tauri::command]
+async fn project_memory_inspect(
+    app: AppHandle,
+    project_directory: Option<String>,
+) -> Result<crate::project_memory::Snapshot, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || crate::project_memory::inspect(&data, project_directory.as_deref())).await
+}
+#[tauri::command]
+async fn project_memory_mutate(
+    app: AppHandle,
+    project_directory: Option<String>,
+    expected_revision: String,
+    action: crate::project_memory::Action,
+) -> Result<crate::project_memory::Snapshot, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || {
+        crate::project_memory::mutate(
+            &data,
+            project_directory.as_deref(),
+            &expected_revision,
+            action,
+        )
+    })
+    .await
+}
+#[tauri::command]
+async fn project_memory_import(
+    app: AppHandle,
+    project_directory: Option<String>,
+    definition_id: String,
+    config_directory: Option<String>,
+) -> Result<crate::project_memory::ImportPreview, String> {
+    let data = app.path().app_data_dir().map_err(|_| "memory.path")?;
+    blocking(move || {
+        crate::project_memory::preview_import(
+            &data,
+            project_directory.as_deref(),
+            &definition_id,
+            config_directory.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 fn agent_shared_rules_inspect(
     project_directory: String,
 ) -> Result<SharedAgentRulesSnapshot, String> {
@@ -6460,6 +6506,9 @@ pub fn run() {
             agent_automations_sync,
             agent_automations_state,
             agent_automations_take_runs,
+            project_memory_inspect,
+            project_memory_mutate,
+            project_memory_import,
             agent_shared_rules_inspect,
             agent_instruction_files,
             agent_instruction_save,

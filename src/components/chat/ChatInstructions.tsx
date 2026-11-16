@@ -3,6 +3,7 @@ import type { ChatDefinitionId } from "../../app/agentChat";
 import { displayPath } from "../../app/displayPath";
 import { hasDesktopBackend } from "../../app/nativeRuntime";
 import { useI18n } from "../../i18n/context";
+import { ProjectMemoryPanel } from "./ProjectMemoryPanel";
 import { SharedAgentRulesPanel } from "../agents/SharedAgentRulesPanel";
 
 export interface InstructionFile {
@@ -219,6 +220,7 @@ export function ChatInstructions({
       >
         {t("chat.instructions.reload")}
       </button>
+      <ProjectMemoryPanel directory={workingDirectory} definitionId={definitionId} configDirectory={configDirectory} />
       {workingDirectory && (
         <details className="chat-instructions__edit">
           <summary>{t("chat.instructions.editShared")}</summary>

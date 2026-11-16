@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { ChatImageConversationContext } from "../../app/chatImagePreview";
+import { MemorySaveButton } from "./MemorySaveButton";
+import { useContext, useState } from "react";
 import type { SessionConversationMessage } from "../../app/useSessionConversation";
 import { mergeAttachmentPaths, splitSessionAttachments } from "../../app/chatAttachments";
 import { useI18n } from "../../i18n/context";
@@ -11,11 +13,13 @@ export function SessionMessage({ message, assistant, directory, sessionId, onOpe
   message: SessionConversationMessage; assistant: string; directory: string; sessionId: string;
   onOpenFile: (path: string) => void; onBranch?: () => void; onEdit?: (text: string) => Promise<void>;
 }) {
+  const source = useContext(ChatImageConversationContext);
   const { t } = useI18n(); const [editing, setEditing] = useState(false);
   const [text, setText] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const sent = message.role === "user" ? splitSessionAttachments(message.text) : null;
   const files = sent ? mergeAttachmentPaths([], sent.paths) ?? [] : [];
   const actions = <span className="chat-msg__actionGroup">
+    <MemorySaveButton text={sent?.text ?? message.text} directory={directory} cli={source?.definitionId ?? assistant} conversationId={`${source?.nativeSessionId ?? sessionId}${message.nativeMessageId ? `#${message.nativeMessageId}` : ""}`} />
     {onEdit && <button type="button" className="chat-msg__branch" aria-label={t("chat.message.edit")} title={t("chat.message.edit")} onClick={() => { setText(sent?.text ?? message.text); setError(""); setEditing(true); }}><EditIcon size={13} /></button>}
     {onBranch && <button type="button" className="chat-msg__branch" aria-label={t("chat.branch")} title={t("chat.branch")} onClick={onBranch}><DuplicateIcon size={13} /></button>}
   </span>;

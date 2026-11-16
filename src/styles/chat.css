@@ -2893,3 +2893,17 @@ button.chat-diff__line.is-commentable:focus-visible {
 .native-history-dialog__panel h2 { overflow-wrap: anywhere; margin: 0; }
 
 .native-history-dialog__handoff { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-3); }
+
+/* Memory uses the shared control and theme tokens; no source is read until opened. */
+.project-memory { margin-block: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.project-memory > summary { cursor: pointer; font-weight: 600; }
+.memory-entries { list-style: none; padding: 0; display: grid; gap: .6rem; }
+.memory-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-content small { display: block; }
+.memory-editor { border: 0; padding: .7rem 0; display: flex; flex-wrap: wrap; gap: .6rem; min-width: 0; }
+.memory-editor label { display: grid; gap: .3rem; min-width: 0; }
+.memory-editor label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.memory-editor__content { flex: 1 1 100%; }
+.memory-editor textarea { width: 100%; box-sizing: border-box; }
+.memory-candidate { display: flex; align-items: flex-start; gap: .6rem; margin-block: .5rem; }
+.memory-dialog { width: min(42rem, 92vw); max-height: 85dvh; overflow: auto; padding: 1.3rem; border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-solid); color: var(--text); }

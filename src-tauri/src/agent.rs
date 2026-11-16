@@ -8022,6 +8022,10 @@ pub(crate) fn launch_with_replay_and_tools(
     }
     let (definition_id, label, executable, mut arguments, working_directory) =
         resolve_launch(&request)?;
+    if let Some(data) = registry.mcp.as_ref().and_then(|mcp| mcp.data_directory()) {
+        crate::project_memory::prepare(&data, &working_directory, &definition_id)
+            .map_err(crate::project_memory::launch_error)?;
+    }
     let resumed_provider = if definition_id == "codex" {
         request
             .resume_session_id

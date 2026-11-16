@@ -1,3 +1,4 @@
+import { MemorySaveButton } from "../components/chat/MemorySaveButton";
 import { NativeRecordView, NativeHistoryAccess } from "../components/chat/NativeRecordView";
 import { ComposerPermissionMenu } from "../components/chat/ComposerPermissionMenu";
 import { recordRecentProject } from "../app/recentProjects";
@@ -1550,7 +1551,7 @@ function ChatItemView({
   const [editError, setEditError] = useState("");
   const [artifactPath, setArtifactPath] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  const branchButton = <span className="chat-msg__actionGroup">{onEdit && <button type="button" className="chat-msg__branch" aria-label={t("chat.message.edit")}
+  const branchButton = <span className="chat-msg__actionGroup">{(item.type === "user" || item.type === "text") && <MemorySaveButton text={item.type === "user" ? splitSessionAttachments(item.text).text : item.text} directory={workingDirectory} cli={assistant} conversationId={threadId ? `${threadId}#${item.id}` : null} />}{onEdit && <button type="button" className="chat-msg__branch" aria-label={t("chat.message.edit")}
     onClick={() => { setEdited(item.type === "user" ? item.text : ""); setEditing(true); }} title={t("chat.message.edit")}><EditIcon size={13} /></button>}{onBranch && (
     <button type="button" className="chat-msg__branch" onClick={onBranch} aria-label={t("chat.branch")} title={t("chat.branch")}><DuplicateIcon size={13} /></button>
   )}</span>;

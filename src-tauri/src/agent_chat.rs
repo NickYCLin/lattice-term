@@ -1714,6 +1714,16 @@ fn send_with_retry<S: ChatSink>(
             validate_native_session_id(id)?;
         }
         let working_directory = validate_working_directory(&request.working_directory)?;
+        if let Some(data) = registry.mcp.as_ref().and_then(|mcp| mcp.data_directory()) {
+            let project = working_directory.clone();
+            let definition = request.definition_id.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::project_memory::prepare(&data, &project, &definition)
+            })
+            .await
+            .map_err(|_| "專案記憶同步中斷，請重新檢查。")?
+            .map_err(crate::project_memory::launch_error)?;
+        }
         let profile_config_directory =
             profile_config_directory(dialect, request.profile_config_path.as_deref())?;
         if dialect == Dialect::Codex && request.cli_proxy_base_url.is_none() {
