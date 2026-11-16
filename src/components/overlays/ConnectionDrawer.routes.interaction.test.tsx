@@ -26,6 +26,8 @@ class HostNode {
     this.ownerDocument = document;
   }
   get nodeName() { return this.tagName; }
+  get options() { return allNodes(this).filter(node => node.tagName === "OPTION"); }
+  selected = false;
   get firstChild() { return this.childNodes[0] ?? null; }
   get textContent(): string { return this.text + this.childNodes.map((child) => child.textContent).join(""); }
   set textContent(value: string) { this.text = value; this.childNodes = []; }
@@ -235,5 +237,20 @@ it("opens a requested route with its own default port and a fresh record identit
     await act(async () => props(form).onSubmit({ preventDefault() {} }));
     expect(save.mock.calls[0][0]).toMatchObject({ protocol: "rdp", port: 3389, machineId: source.id });
     expect(save.mock.calls[0][2]).not.toBe(source.id);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("saves a selected existing SSH gateway with the original target identity", async () => {
+  const container = installHostDom(); const root = createRoot(container as unknown as Element);
+  const gateway = { ...source, id: "gateway", name: "任意跳板名稱", hostname: "gateway.invalid" }; const save = vi.fn();
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><ConnectionDrawer profile={source} profiles={[source, gateway, { ...gateway, id: "non-ssh", protocol: "rdp" }]}
+      supportedProtocols={["ssh"]} mobile={false} onSave={save} onClose={vi.fn()} /></I18nProvider>));
+    const select = allNodes(container).find(node => node.tagName === "SELECT" && node.options.some(option => option.textContent === gateway.name))!;
+    expect(select.options.map(option => props(option)?.value)).toEqual(["", gateway.id]);
+    await act(async () => props(select).onChange({ target: { value: gateway.id } }));
+    await act(async () => props(allNodes(container).find(node => node.tagName === "FORM")!).onSubmit({ preventDefault() {} }));
+    expect(save.mock.calls[0][0]).toMatchObject({ hostname: source.hostname, port: source.port, username: source.username, jumpProfileId: gateway.id });
+    expect(save.mock.calls[0][2]).toBe(source.id);
   } finally { await act(async () => root.unmount()); }
 });

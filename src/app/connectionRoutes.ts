@@ -4,7 +4,7 @@ export function cardRouteProfiles(profiles: readonly ConnectionProfile[], id: st
   const target = profiles.find((profile) => profile.id === id);
   if (!target) return [];
   return [target, ...profiles.filter((profile) =>
-    profile.id !== id && target.machineId && profile.machineId === target.machineId)];
+    !profile.retiredTo && profile.id !== id && target.machineId && profile.machineId === target.machineId)];
 }
 
 export function newRouteDraft(source: ConnectionProfile, profiles: readonly ConnectionProfile[], requestedProtocol?: Protocol) {

@@ -9,6 +9,7 @@ pub(super) struct ConnectionRoute {
     pub profile: DatabaseProfile,
     pub server_name: String,
     worker: Option<JoinHandle<()>>,
+    jump: Option<crate::jump::TcpRoute>,
     ssh: Option<(Arc<crate::tunnel::TunnelRegistry>, String)>,
 }
 impl Drop for ConnectionRoute {
@@ -33,10 +34,18 @@ impl DatabaseRegistry {
         &self,
         profile: &DatabaseProfile,
     ) -> Result<ConnectionRoute, String> {
+        self.connection_route_with_auth(profile, None).await
+    }
+    pub(super) async fn connection_route_with_auth(
+        &self,
+        profile: &DatabaseProfile,
+        jump: Option<crate::jump::JumpRequest>,
+    ) -> Result<ConnectionRoute, String> {
         let mut result = ConnectionRoute {
             profile: profile.clone(),
             server_name: profile.hostname.clone(),
             worker: None,
+            jump: None,
             ssh: None,
         };
         let Some(route) = &profile.route else {
@@ -44,22 +53,29 @@ impl DatabaseRegistry {
         };
         let app = self.app.as_ref().ok_or("此環境未提供資料庫遠端通道。")?;
         if matches!(route, DatabaseRoute::Ssh { .. }) {
-            let registry = app
-                .state::<Arc<crate::tunnel::TunnelRegistry>>()
-                .inner()
-                .clone();
-            return open_ssh_route(profile, registry, |request, listener| async move {
-                crate::tunnel_start_internal(
-                    request,
-                    app.state(),
-                    app.state(),
-                    app.state(),
-                    Some(listener),
-                )
-                .await
-                .map(|_| ())
-            })
-            .await;
+            let DatabaseRoute::Ssh { profile_id } = route else {
+                unreachable!()
+            };
+            let mut target = profile.credential_profile();
+            target.jump_profile_id = Some(profile_id.clone());
+            let gateway = crate::jump::from_app(
+                app,
+                &target,
+                jump.unwrap_or(crate::jump::JumpRequest {
+                    profile_id: profile_id.clone(),
+                    auth: None,
+                    use_saved_password: true,
+                    remember_password: false,
+                }),
+            )
+            .await?;
+            let jump = gateway
+                .forward(profile.hostname.clone(), profile.port)
+                .await?;
+            result.profile.hostname = "127.0.0.1".into();
+            result.profile.port = jump.port;
+            result.jump = Some(jump);
+            return Ok(result);
         }
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -113,6 +129,7 @@ impl DatabaseRegistry {
 
 // Resolve the database route once; production loads the gateway credential from
 // the application stores, while isolated tests supply only temporary fixtures.
+#[cfg(test)]
 pub(super) async fn open_ssh_route<F, Fut>(
     profile: &DatabaseProfile,
     registry: Arc<crate::tunnel::TunnelRegistry>,
@@ -157,6 +174,7 @@ where
         profile: profile.clone(),
         server_name: profile.hostname.clone(),
         worker: None,
+        jump: None,
         ssh: Some((registry, id)),
     };
     start(request, listener).await?;

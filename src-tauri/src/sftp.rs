@@ -28,6 +28,8 @@ const DIRECTORY_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SftpConnectRequest {
+    #[serde(default)]
+    pub jump: Option<crate::jump::JumpRequest>,
     pub profile_id: String,
     pub hostname: String,
     pub port: u16,
@@ -99,6 +101,7 @@ pub struct SftpDirectory {
 }
 
 struct SftpSessionEntry {
+    _gateway: Option<crate::jump::Gateway>,
     windows_server: bool,
     summary: SftpSessionSummary,
     sftp: Arc<SftpSession>,
@@ -275,6 +278,15 @@ pub async fn connect(
     known: Option<HostKeyRecord>,
     request: SftpConnectRequest,
 ) -> SftpConnectOutcome {
+    connect_via(registry, known, request, None).await
+}
+
+pub(crate) async fn connect_via(
+    registry: Arc<SftpRegistry>,
+    known: Option<HostKeyRecord>,
+    request: SftpConnectRequest,
+    gateway: Option<crate::jump::Gateway>,
+) -> SftpConnectOutcome {
     let verdict = Arc::new(Mutex::new(None));
     let windows_server = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handler = TrustingHandler {
@@ -290,14 +302,19 @@ pub async fn connect(
         ..Default::default()
     });
 
-    let mut transport =
-        match client::connect(config, (request.hostname.as_str(), request.port), handler).await {
-            Ok(transport) => transport,
-            Err(error) => {
-                let recorded = verdict.lock().ok().and_then(|slot| slot.clone());
-                return trust_outcome(recorded, error);
-            }
-        };
+    let mut transport = match match gateway.as_ref() {
+        Some(gateway) => match gateway.stream(&request.hostname, request.port).await {
+            Ok(stream) => client::connect_stream(config, stream, handler).await,
+            Err(detail) => return failed("target", detail),
+        },
+        None => client::connect(config, (request.hostname.as_str(), request.port), handler).await,
+    } {
+        Ok(transport) => transport,
+        Err(error) => {
+            let recorded = verdict.lock().ok().and_then(|slot| slot.clone());
+            return trust_outcome(recorded, error);
+        }
+    };
 
     match authenticate(&mut transport, &request.username, &request.auth).await {
         AuthAttempt::Accepted => {}
@@ -342,6 +359,7 @@ pub async fn connect(
         current_path,
     };
     if let Err(error) = registry.insert(SftpSessionEntry {
+        _gateway: gateway,
         summary: summary.clone(),
         sftp,
         _transport: Arc::new(transport),
@@ -392,6 +410,7 @@ pub(crate) async fn attach_to_ssh(
         current_path,
     };
     if let Err(error) = registry.insert(SftpSessionEntry {
+        _gateway: None,
         summary: summary.clone(),
         sftp,
         _transport: transport,

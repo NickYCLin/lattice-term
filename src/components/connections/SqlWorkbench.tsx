@@ -1,3 +1,4 @@
+import type { JumpRequest } from "../../app/jumpRoutes";
 import { databaseErrorMessage } from "../../app/databaseErrors";
 import { useI18n } from "../../i18n/context";
 import { SqlResultTable } from "./SqlResultTable";
@@ -7,8 +8,8 @@ import { draggedOutside, type SqlWorkbenchState } from "../../domain/sqlWorkbenc
 import { useRuntimeSummary } from "../../app/useRuntimeSummary";
 import { isMobilePlatform } from "../../app/navigation";
 
-export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllowed = false, onStateChange }: {
-  profileId?: string; workbenchId?: string; separate?: boolean; mcpAllowed?: boolean;
+export function SqlWorkbench({ jump, direct = false, profileId, workbenchId, separate = false, mcpAllowed = false, onStateChange }: {
+  jump?: JumpRequest; direct?: boolean; profileId?: string; workbenchId?: string; separate?: boolean; mcpAllowed?: boolean;
   onStateChange?: (state: { busy: boolean; dirty: boolean }) => void;
 }) {
   const { t } = useI18n();
@@ -61,7 +62,7 @@ export function SqlWorkbench({ profileId, workbenchId, separate = false, mcpAllo
     let id = workbenchId;
     async function refresh() {
       try {
-        const value = checked(await invoke<SqlWorkbenchState>("database_workbench", { action: id ? { kind: "read", id } : { kind: "open", profileId } }));
+        const value = checked(await invoke<SqlWorkbenchState>("database_workbench", { action: id ? { kind: "read", id } : { kind: "open", profileId, ...(direct ? { direct: true } : {}), ...(jump ? { jump } : {}) } }));
         if (cancelled || !live.current) return;
         id = value.id;
         if (value.revision < (current.current?.revision ?? -1)) { timer = setTimeout(() => void refresh(), 1000); return; }

@@ -238,6 +238,10 @@ pub struct SavedConnectionView {
     /// The grant to use while that session lasts; absent when not connected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jump_profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jump_name: Option<String>,
 }
 
 /// Reads the saved connection book. The desktop implements this over its own
@@ -1004,6 +1008,16 @@ impl DesktopService {
         let live = self.live_profiles();
         let state = self.state.lock().map_err(|_| ServiceError::failed())?;
         let mut profiles = book.profiles();
+        let names: HashMap<_, _> = profiles
+            .iter()
+            .map(|profile| (profile.id.clone(), profile.name.clone()))
+            .collect();
+        profiles.retain(|profile| {
+            profile
+                .retired_to
+                .as_ref()
+                .is_none_or(|id| !names.contains_key(id))
+        });
         profiles.sort_by(|left, right| {
             left.name
                 .cmp(&right.name)
@@ -1029,6 +1043,11 @@ impl DesktopService {
                 );
                 let connected = live.iter().any(|(id, _, _)| *id == profile.id);
                 SavedConnectionView {
+                    jump_name: profile
+                        .jump_profile_id
+                        .as_ref()
+                        .and_then(|id| names.get(id).cloned()),
+                    jump_profile_id: profile.jump_profile_id,
                     id: profile.id,
                     name: profile.name,
                     protocol: profile.protocol,
@@ -3110,6 +3129,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 
@@ -3118,6 +3139,23 @@ mod tests {
             .with_connection_book(Arc::new(FixedBook(entries)))
     }
 
+    #[test]
+    fn the_connection_book_lists_jump_references_and_hides_only_retained_legacy_entries() {
+        let gateway = book_entry("gateway", "Custom gateway");
+        let mut target = book_entry("target", "Target");
+        target.jump_profile_id = Some(gateway.id.clone());
+        let mut legacy = book_entry("legacy", "Legacy");
+        legacy.retired_to = Some(target.id.clone());
+        let service = book_service(vec![gateway, target, legacy]);
+        let (entries, _) = service.saved_connections().unwrap();
+        assert_eq!(entries.len(), 2);
+        let target = entries.iter().find(|entry| entry.id == "target").unwrap();
+        assert_eq!(target.jump_profile_id.as_deref(), Some("gateway"));
+        assert_eq!(target.jump_name.as_deref(), Some("Custom gateway"));
+        let data = serde_json::to_string(&entries).unwrap();
+        assert!(!data.contains("hidden.example"));
+        assert!(!data.contains("hidden-account"));
+    }
     #[test]
     fn the_connection_book_reads_by_default_and_closes_the_moment_it_is_turned_off() {
         let service = book_service(vec![book_entry("a", "second"), book_entry("b", "first")]);

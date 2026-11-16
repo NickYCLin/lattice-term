@@ -116,6 +116,11 @@ try {
       env: { ...env, PATH: join(directory, "unavailable-path") }, stdio: "inherit", timeout: 120000,
     });
     if (isolated.status !== 0) throw new Error(`${engine} tool-free direct/SSH acceptance failed`);
+    console.log(`Testing native jump SSH shell and ${engine} forwarding lifecycle`);
+    const jump = run(testBinary, ["jump::tests::isolated_jump_ssh_and_sql", "--exact", "--ignored", "--nocapture"], {
+      env: { ...env, PATH: join(directory, "unavailable-path") }, stdio: "inherit", timeout: 120000,
+    });
+    if (jump.status !== 0) throw new Error(`${engine} jump SSH/SQL acceptance failed`);
     checked("docker", ["rm", "-f", "-v", containerId]);
     containers.delete(containerId);
   }

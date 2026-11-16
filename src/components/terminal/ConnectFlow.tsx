@@ -1,3 +1,5 @@
+import { jumpError } from "../../app/jumpRoutes";
+import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { PathDropZone } from "../files/PathDropZone";
 /**
  * Everything between pressing Connect and having a terminal.
@@ -18,7 +20,6 @@ import type { FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   connectionTarget,
-  type ConnectionProfile,
 } from "../../domain/connection";
 import type { ConnectOutcome, SshApi } from "../../app/useSshSessions";
 import { useI18n } from "../../i18n/context";
@@ -108,7 +109,7 @@ export function ConnectFlow({
   onConnected,
   onCancel,
 }: {
-  profile: ConnectionProfile;
+  profile: ConnectionAttemptProfile;
   ssh: SshApi;
   onConnected: (sessionId: string) => void;
   onCancel: () => void;
@@ -189,6 +190,7 @@ export function ConnectFlow({
       const usingPassword = method === "password";
       const outcome = await ssh.connect({
         profileId: profile.id,
+        ...(profile.jump ? { jump: profile.jump } : {}),
         hostname: profile.hostname,
         port: profile.port,
         username: profile.username,
@@ -239,7 +241,7 @@ export function ConnectFlow({
             title: t("connect.failed.title"),
             body: t("connect.failed.body", {
               stage: t(stageKey(outcome.stage)),
-              detail: outcome.detail,
+              detail: jumpError(outcome.detail, t),
             }),
           });
       }

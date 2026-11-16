@@ -3370,3 +3370,12 @@
 }
 
 .connection-import__changes { max-height: 35vh; overflow: auto; padding-inline-start: var(--space-5); overflow-wrap: anywhere; }
+
+.connection-card__launch { display: grid; grid-template-columns: minmax(0, 1fr) 2.25rem; min-width: 0; height: var(--connection-card-action-height); }
+.connection-card__launch .button { min-width: 0; height: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline: var(--space-2); box-shadow: none; border-start-end-radius: 0; border-end-end-radius: 0; }
+.connection-card__jump { min-width: 0; }
+.connection-card__jump select { width: 100%; min-width: 0; height: var(--connection-card-action-height); font-size: 0; border-start-start-radius: 0; border-end-start-radius: 0; padding: 0; cursor: pointer; }
+.connection-card__jump option { font-size: var(--text-sm); }
+.jump-migration { width: min(54rem, 92vw); max-height: 85vh; overflow: auto; }
+.jump-migration__list { padding-inline-start: var(--space-5); }
+.jump-migration__list li { margin-block: var(--space-4); overflow-wrap: anywhere; }

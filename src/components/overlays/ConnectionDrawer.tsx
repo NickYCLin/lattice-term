@@ -1,3 +1,4 @@
+import { jumpGateways } from "../../app/jumpRoutes";
 /**
  * Add and edit connections in a centered modal.
  *
@@ -67,7 +68,8 @@ function sameDraft(a: ConnectionDraft, b: ConnectionDraft): boolean {
     (a.favorite ?? false) === (b.favorite ?? false) &&
     (a.tags ?? []).join(",") === (b.tags ?? []).join(",") &&
     (a.deviceId ?? "") === (b.deviceId ?? "") &&
-    (a.relayAddress ?? "") === (b.relayAddress ?? "")
+    (a.relayAddress ?? "") === (b.relayAddress ?? "") &&
+    (a.jumpProfileId ?? "") === (b.jumpProfileId ?? "")
   );
 }
 
@@ -477,6 +479,16 @@ export function ConnectionDrawer({
 
           <section className="form-section">
             <h3 className="form-section__title">{t("form.step.target")}</h3>
+            {draft.protocol !== "lattice" && <label className="field">
+              <span className="field__label">{t("jump.setting")}</span>
+              <select className="select" value={draft.jumpProfileId ?? ""} onChange={event => setDraft(current => ({ ...current, jumpProfileId: event.target.value || undefined }))}>
+                <option value="">{t("jump.directOnly")}</option>
+                {jumpGateways(profiles, profile?.id).map(gateway => <option key={gateway.id} value={gateway.id}>{gateway.name}</option>)}
+                {draft.jumpProfileId && !jumpGateways(profiles, profile?.id).some(entry => entry.id === draft.jumpProfileId) && <option value={draft.jumpProfileId}>{t("jump.missing")}</option>}
+              </select>
+              <span className="field__hint">{t("jump.settingHint")}</span>
+            </label>}
+
             <div className={relayEntry ? "field-grid field-grid--even" : "field"}>
               <div className="field">
                 <label className="field__label" htmlFor={`${formId}-name`}>

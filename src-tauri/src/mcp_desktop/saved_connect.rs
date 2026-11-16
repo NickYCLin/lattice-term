@@ -223,6 +223,7 @@ pub(crate) fn connect_from_desktop(
                 // without a domain can be used; the credential binding rejects
                 // another context, and the normal certificate check still runs.
                 let request = crate::rdp::RdpConnectRequest {
+                    jump: None,
                     profile_id: profile.id.clone(),
                     hostname: profile.hostname.clone(),
                     port: profile.port,
@@ -272,6 +273,8 @@ mod tests {
                 device_id: None,
                 relay_address: None,
                 machine_id: None,
+                jump_profile_id: None,
+                retired_to: None,
             }]
         }
         fn connect(&self, _: ConnectionProfile) -> ConnectFuture {

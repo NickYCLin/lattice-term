@@ -1,3 +1,5 @@
+import { JumpAuthenticationDialog } from "./components/connections/JumpAuthenticationDialog";
+import type { ConnectionAttemptProfile } from "./app/jumpRoutes";
 import { parseConversationLocation } from "./app/conversationNavigation";
 /**
  * Application shell.
@@ -437,9 +439,10 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [quickConnectOpen, setQuickConnectOpen] = useState(false);
   const [quickPairingCode, setQuickPairingCode] = useState("");
   const quickRelayAddress = useRef("");
-  const [connectTarget, setConnectTarget] = useState<ConnectionProfile | null>(
+  const [connectTarget, setConnectTarget] = useState<ConnectionAttemptProfile | null>(
     null,
   );
+  const [jumpTarget, setJumpTarget] = useState<ConnectionProfile | null>(null);
   const mobileDesktopDialogRef = useRef<HTMLDivElement>(null);
   const mobileDesktopCloseRef = useRef<HTMLButtonElement>(null);
   const mobileDesktopDialogOpen =
@@ -872,7 +875,8 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   }, [onMobile, update]);
 
   const openConnection = useCallback(
-    (profile: ConnectionProfile) => {
+    (profile: ConnectionProfile, viaJump = false) => {
+      if (viaJump) { setJumpTarget(profile); return; }
       if (profile.protocol === "lattice") {
         const targetDevice = profile.deviceId
           ? normalizeDeviceId(profile.deviceId)
@@ -1392,7 +1396,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       </main>
 
       <Suspense fallback={<LazyOverlayFallback />}>
-      {databaseWorkspace && <DatabaseManager profiles={profiles} initialProfileId={databaseWorkspace.profileId} hostKeys={databaseWorkspace.hostKeys} onConfigure={openDatabaseConfig} onClose={() => { setDatabaseWorkspace(null); setDatabaseRevision(revision => revision + 1); }} />}
+      {databaseWorkspace && <DatabaseManager profiles={profiles} initialDirect={databaseWorkspace.direct} initialProfileId={databaseWorkspace.profileId} hostKeys={databaseWorkspace.hostKeys} onConfigure={openDatabaseConfig} onClose={() => { setDatabaseWorkspace(null); setDatabaseRevision(revision => revision + 1); }} />}
       {drawer.open && (
         <ConnectionDrawer
           key={drawer.profileId ? `edit:${drawer.profileId}` : drawer.routeSourceId ? `route:${drawer.routeSourceId}:${drawer.routeProtocol ?? "auto"}` : `new:${drawer.mode ?? "remote"}:${drawer.databaseProfileId ?? ""}`}
@@ -1477,6 +1481,12 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
         />
       )}
 
+      {jumpTarget && (() => {
+        const gateway = workspace.profiles.find(entry => entry.id === jumpTarget.jumpProfileId && entry.protocol === "ssh");
+        return gateway ? <JumpAuthenticationDialog key={gateway.id} gateway={gateway}
+          onCancel={() => setJumpTarget(null)} onContinue={jump => { setConnectTarget({ ...jumpTarget, jump }); setJumpTarget(null); }} />
+          : <div className="scrim scrim--center"><div className="dialog" role="alertdialog"><p>{t("jump.missing")}</p><button className="button" onClick={() => setJumpTarget(null)}>{t("common.close")}</button></div></div>;
+      })()}
       {runtime.host === "tauri" && connectTarget?.protocol === "ssh" && (
         <ConnectFlow
           profile={connectTarget}

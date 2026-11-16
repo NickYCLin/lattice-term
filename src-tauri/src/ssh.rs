@@ -197,6 +197,8 @@ pub fn default_key_paths() -> Vec<String> {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectRequest {
+    #[serde(default)]
+    pub jump: Option<crate::jump::JumpRequest>,
     pub profile_id: String,
     pub hostname: String,
     pub port: u16,
@@ -524,6 +526,16 @@ pub async fn connect(
     known: Option<HostKeyRecord>,
     request: ConnectRequest,
 ) -> ConnectOutcome {
+    connect_via(sink, registry, known, request, None).await
+}
+
+pub(crate) async fn connect_via(
+    sink: Arc<dyn SessionSink>,
+    registry: Arc<SshRegistry>,
+    known: Option<HostKeyRecord>,
+    request: ConnectRequest,
+    gateway: Option<crate::jump::Gateway>,
+) -> ConnectOutcome {
     let verdict = Arc::new(Mutex::new(None));
     let disconnect_reason = Arc::new(Mutex::new(None));
     let windows_server = Arc::new(AtomicBool::new(false));
@@ -538,17 +550,27 @@ pub async fn connect(
 
     let config = Arc::new(shell_client_config());
 
-    let mut session =
-        match client::connect(config, (request.hostname.as_str(), request.port), handler).await {
-            Ok(session) => session,
-            Err(error) => {
-                // A rejected host key surfaces here as a generic failure, so the
-                // recorded verdict is what distinguishes "unreachable" from
-                // "reachable but not trusted".
-                let recorded = verdict.lock().ok().and_then(|slot| slot.clone());
-                return outcome_for(recorded, error.to_string());
+    let mut session = match match gateway.as_ref() {
+        Some(gateway) => match gateway.stream(&request.hostname, request.port).await {
+            Ok(stream) => client::connect_stream(config, stream, handler).await,
+            Err(detail) => {
+                return ConnectOutcome::Failed {
+                    stage: "target",
+                    detail,
+                }
             }
-        };
+        },
+        None => client::connect(config, (request.hostname.as_str(), request.port), handler).await,
+    } {
+        Ok(session) => session,
+        Err(error) => {
+            // A rejected host key surfaces here as a generic failure, so the
+            // recorded verdict is what distinguishes "unreachable" from
+            // "reachable but not trusted".
+            let recorded = verdict.lock().ok().and_then(|slot| slot.clone());
+            return outcome_for(recorded, error.to_string());
+        }
+    };
 
     match authenticate(&mut session, &request.username, &request.auth).await {
         AuthAttempt::Accepted => {}
@@ -636,6 +658,7 @@ pub async fn connect(
     // talks to it through the input queue, so there is no lock to hold across
     // an await and no way for two writers to interleave mid-message.
     tauri::async_runtime::spawn(async move {
+        let _gateway = gateway;
         let mut completion = ShellCompletion::default();
 
         loop {

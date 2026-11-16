@@ -44,6 +44,7 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
 
 fn request(auth: AuthMethod) -> ConnectRequest {
     ConnectRequest {
+        jump: None,
         profile_id: "keyauth-live".into(),
         use_saved_password: false,
         remember_password: false,

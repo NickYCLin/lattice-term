@@ -56,6 +56,7 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
 
 fn request() -> SftpConnectRequest {
     SftpConnectRequest {
+        jump: None,
         profile_id: "transfer-live".into(),
         hostname: HOST.into(),
         port: PORT,

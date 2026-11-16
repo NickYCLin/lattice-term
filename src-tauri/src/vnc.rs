@@ -35,6 +35,8 @@ static NEXT_RESERVATION: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VncConnectRequest {
+    #[serde(default)]
+    pub jump: Option<crate::jump::JumpRequest>,
     pub profile_id: String,
     pub hostname: String,
     pub port: u16,
@@ -586,6 +588,15 @@ pub async fn connect(
     registry: Arc<VncRegistry>,
     request: VncConnectRequest,
 ) -> VncConnectOutcome {
+    connect_via(app, registry, request, None).await
+}
+
+pub(crate) async fn connect_via(
+    app: AppHandle,
+    registry: Arc<VncRegistry>,
+    request: VncConnectRequest,
+    route: Option<crate::jump::TcpRoute>,
+) -> VncConnectOutcome {
     if request.profile_id.trim().is_empty() || request.hostname.trim().is_empty() {
         return failed("connect", "The VNC target is incomplete.");
     }
@@ -600,8 +611,14 @@ pub async fn connect(
         Err(error) => return failed("engine", error),
     };
     let command = EngineCommand::Connect {
-        hostname: request.hostname.clone(),
-        port: request.port,
+        hostname: route
+            .as_ref()
+            .map(|_| "127.0.0.1".into())
+            .unwrap_or_else(|| request.hostname.clone()),
+        port: route
+            .as_ref()
+            .map(|route| route.port)
+            .unwrap_or(request.port),
         password: request.password,
     };
     let write_result = tokio::select! {
@@ -701,6 +718,7 @@ pub async fn connect(
     let task_registry = Arc::clone(&registry);
     let task_app = app.clone();
     tokio::spawn(async move {
+        let _route = route;
         // The permit follows the actual worker through process reap, so rapid
         // connect/disconnect calls cannot bypass the cap.
         let _admission = admission;

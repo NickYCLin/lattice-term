@@ -34,9 +34,11 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 static NEXT_RESERVATION: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RdpConnectRequest {
+    #[serde(default)]
+    pub jump: Option<crate::jump::JumpRequest>,
     pub profile_id: String,
     pub hostname: String,
     pub port: u16,
@@ -875,6 +877,15 @@ pub async fn connect(
     registry: Arc<RdpRegistry>,
     request: RdpConnectRequest,
 ) -> RdpConnectOutcome {
+    connect_via(app, registry, request, None).await
+}
+
+pub(crate) async fn connect_via(
+    app: AppHandle,
+    registry: Arc<RdpRegistry>,
+    request: RdpConnectRequest,
+    route: Option<crate::jump::TcpRoute>,
+) -> RdpConnectOutcome {
     if request.profile_id.trim().is_empty()
         || request.hostname.trim().is_empty()
         || request.username.trim().is_empty()
@@ -896,7 +907,18 @@ pub async fn connect(
         None
     };
     let staging_path = staging.as_ref().map(|area| area.path());
-    let first = start_engine_attempt(&mut reservation, &request, None, staging_path.clone()).await;
+    let mut engine_request = request.clone();
+    if let Some(route) = &route {
+        engine_request.hostname = "127.0.0.1".into();
+        engine_request.port = route.port;
+    }
+    let first = start_engine_attempt(
+        &mut reservation,
+        &engine_request,
+        None,
+        staging_path.clone(),
+    )
+    .await;
     let connected = match first {
         EngineStartOutcome::Connected(connected) => connected,
         EngineStartOutcome::CertificateUnknown { fingerprint_sha256 } => {
@@ -927,8 +949,13 @@ pub async fn connect(
                 Err(error) => return failed("certificate", error),
             }
 
-            match start_engine_attempt(&mut reservation, &request, Some(approved_pin), staging_path)
-                .await
+            match start_engine_attempt(
+                &mut reservation,
+                &engine_request,
+                Some(approved_pin),
+                staging_path,
+            )
+            .await
             {
                 EngineStartOutcome::Connected(connected) => connected,
                 EngineStartOutcome::CertificateUnknown { .. } => {
@@ -983,6 +1010,7 @@ pub async fn connect(
     let task_app = app.clone();
     tokio::spawn(async move {
         // Keep snapshots available until the engine has actually exited.
+        let _route = route;
         let _staging = staging;
         // The permit follows the actual worker through process reap, so rapid
         // connect/disconnect calls cannot bypass the cap.

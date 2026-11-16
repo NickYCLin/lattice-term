@@ -1,3 +1,4 @@
+import type { JumpRequest } from "./jumpRoutes";
 /** Native VNC sessions rendered by the embedded Canvas pane. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ export interface VncSessionSummary {
 }
 
 export interface VncConnectRequest {
+  jump?: JumpRequest;
   profileId: string;
   hostname: string;
   port: number;

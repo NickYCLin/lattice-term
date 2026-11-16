@@ -164,6 +164,8 @@ impl DatabaseProfile {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 
@@ -512,6 +514,17 @@ impl DatabaseRegistry {
         mcp: bool,
         guard: Option<McpGuard>,
     ) -> Result<Value, String> {
+        self.execute_routed(action, mcp, guard, false, None).await
+    }
+
+    async fn execute_routed(
+        &self,
+        action: DatabaseAction,
+        mcp: bool,
+        guard: Option<McpGuard>,
+        direct: bool,
+        jump: Option<crate::jump::JumpRequest>,
+    ) -> Result<Value, String> {
         let _permit = self
             .calls
             .clone()
@@ -523,7 +536,7 @@ impl DatabaseRegistry {
             let panels = self.workbenches.lock().map_err(|_| "SQL 工作台忙碌中。")?;
             let profiles: Vec<_> = snapshot.profiles.into_iter().filter(|profile| !mcp || profile.allow_mcp_read).map(|profile| json!({
                 "id":profile.id, "hostKey":profile.host_key, "name":profile.name, "engine":profile.engine,
-                "hostname":profile.hostname, "port":profile.port, "database":profile.database,
+                "hostname":profile.hostname, "port":profile.port, "database":profile.database, "route":profile.route,
                 "readOnly": !panels.values().any(|panel| panel.bound_to(&profile) && panel.share_read && panel.share_execute && panel.share_write),
                 "tableBrowsingReadOnly":true
             })).collect();
@@ -567,7 +580,13 @@ impl DatabaseRegistry {
             })
         })
         .await?;
-        let route = self.connection_route(&profile).await?;
+        let mut routed_profile = profile.clone();
+        if direct {
+            routed_profile.route = None;
+        }
+        let route = self
+            .connection_route_with_auth(&routed_profile, jump)
+            .await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
             drivers::read_with_server_name(&route.profile, &password, &action, &route.server_name),
@@ -796,8 +815,12 @@ pub async fn database_cleanup(
 pub async fn database_read(
     registry: State<'_, DatabaseRegistry>,
     action: DatabaseAction,
+    direct: Option<bool>,
+    jump: Option<crate::jump::JumpRequest>,
 ) -> Result<Value, String> {
-    registry.execute(action, false).await
+    registry
+        .execute_routed(action, false, None, direct.unwrap_or(false), jump)
+        .await
 }
 
 pub fn from_desktop(
@@ -860,4 +883,21 @@ pub fn action_schema() -> Value {
         json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
     }).collect();
     json!({"oneOf":variants})
+}
+
+#[cfg(test)]
+pub(crate) async fn probe_jump_route(
+    profile: &DatabaseProfile,
+    password: &str,
+    server_name: &str,
+) -> Result<Value, String> {
+    drivers::execute_sql_with_server_name(
+        profile,
+        password,
+        "SELECT 1",
+        false,
+        || Ok(()),
+        server_name,
+    )
+    .await
 }

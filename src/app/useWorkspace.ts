@@ -29,6 +29,7 @@ import {
   type ConnectionFilter,
   type SortOrder,
 } from "../domain/query";
+import { activeConnectionProfiles, planLegacyJumpMerge } from "./jumpRoutes";
 import { importPlanMatches, type ConnectionImportPlan } from "../domain/export";
 import { sampleProfiles } from "../domain/samples";
 import { persistConnectionRecord, type ConnectionCredentialDraft } from "./connectionCredentialRecord";
@@ -279,6 +280,17 @@ export function useWorkspace() {
    * Marks entries as routes to the same computer. Joining an entry that is
    * already linked pulls the others into its existing link.
    */
+  const migrateJumpProfile = useCallback(async (legacyId: string, targetId?: string, gatewayId?: string): Promise<string | null> => {
+    try {
+      if (Boolean(targetId) !== Boolean(gatewayId)) return "jump.migration.invalid";
+      const next = targetId && gatewayId ? planLegacyJumpMerge(profiles, legacyId, targetId, gatewayId)
+        : profiles.map(profile => profile.id === legacyId ? { ...profile, retiredTo: undefined } : profile);
+      const failure = await syncReplaceBackend(next, profiles);
+      if (!failure) { setProfiles(next); if (targetId) setSelectedId(current => current === legacyId ? targetId : current); }
+      return failure;
+    } catch (reason) { return String(reason); }
+  }, [profiles]);
+
   const linkProfiles = useCallback(
     async (ids: string[]): Promise<string | null> => {
       const chosen = profiles.filter((entry) => ids.includes(entry.id));
@@ -411,11 +423,11 @@ export function useWorkspace() {
   );
 
   const visibleProfiles = useMemo(
-    () => sortProfiles(filterProfiles(profiles, filter), sortOrder),
+    () => sortProfiles(filterProfiles(activeConnectionProfiles(profiles), filter), sortOrder),
     [profiles, filter, sortOrder],
   );
 
-  const groups = useMemo(() => groupProfiles(profiles), [profiles]);
+  const groups = useMemo(() => groupProfiles(activeConnectionProfiles(profiles)), [profiles]);
   const visibleGroups = useMemo(
     () => groupProfiles(visibleProfiles),
     [visibleProfiles],
@@ -451,6 +463,7 @@ export function useWorkspace() {
     removeProfile,
     toggleFavorite,
     linkProfiles,
+    migrateJumpProfile,
     unlinkProfile,
     loadSamples,
     importProfiles,

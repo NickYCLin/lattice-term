@@ -96,6 +96,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 

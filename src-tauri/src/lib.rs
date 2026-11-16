@@ -32,6 +32,7 @@ pub mod git_changes;
 mod herdr;
 pub mod hostkeys;
 mod jev;
+mod jump;
 #[cfg(target_os = "linux")]
 pub mod linux_webkit;
 mod local_files;
@@ -303,6 +304,7 @@ async fn mcp_saved_connection_connect(
             let outcome = ssh_connect(
                 app,
                 ConnectRequest {
+                    jump: None,
                     profile_id: profile.id.clone(),
                     hostname: String::new(),
                     port: 0,
@@ -365,6 +367,7 @@ async fn mcp_saved_connection_connect(
             let outcome = sftp_connect(
                 app.clone(),
                 SftpConnectRequest {
+                    jump: None,
                     profile_id: profile.id.clone(),
                     hostname: String::new(),
                     port: 0,
@@ -419,6 +422,7 @@ async fn mcp_saved_connection_connect(
             let outcome = rdp_connect(
                 app,
                 RdpConnectRequest {
+                    jump: None,
                     profile_id: profile.id.clone(),
                     hostname: String::new(),
                     port: 0,
@@ -462,6 +466,7 @@ async fn mcp_saved_connection_connect(
             let outcome = vnc_connect(
                 app,
                 VncConnectRequest {
+                    jump: None,
                     profile_id: profile.id.clone(),
                     hostname: String::new(),
                     port: 0,
@@ -602,6 +607,7 @@ impl mcp_desktop::ConnectionBook for DesktopConnectionBook {
                     "username": profile.username,
                     "deviceId": profile.device_id,
                     "relayAddress": profile.relay_address,
+                    "jumpProfileId": profile.jump_profile_id,
                     "secret": secret.as_str(),
                 }))
             })
@@ -4521,12 +4527,25 @@ async fn ssh_connect(
         }
     };
 
+    let gateway = match request.jump.take() {
+        Some(jump) => match crate::jump::from_app(&app, &profile, jump).await {
+            Ok(gateway) => Some(gateway),
+            Err(detail) => {
+                return Ok(ConnectOutcome::Failed {
+                    stage: "jump",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
     let notify_handle = app.clone();
-    let outcome = crate::ssh::connect(
+    let outcome = crate::ssh::connect_via(
         Arc::new(EventSink(app)),
         Arc::clone(registry.inner()),
         known,
         request,
+        gateway,
     )
     .await;
     if matches!(outcome, ConnectOutcome::Connected { .. }) {
@@ -4691,7 +4710,20 @@ async fn sftp_connect(
         }
     };
 
-    let outcome = crate::sftp::connect(Arc::clone(registry.inner()), known, request).await;
+    let gateway = match request.jump.take() {
+        Some(jump) => match crate::jump::from_app(&app, &profile, jump).await {
+            Ok(gateway) => Some(gateway),
+            Err(detail) => {
+                return Ok(SftpConnectOutcome::Failed {
+                    stage: "jump",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
+    let outcome =
+        crate::sftp::connect_via(Arc::clone(registry.inner()), known, request, gateway).await;
     if let (SftpConnectOutcome::Connected { session }, Some(password)) =
         (&outcome, password_to_store)
     {
@@ -5557,7 +5589,35 @@ async fn rdp_connect(
     let password_to_store = request
         .remember_password
         .then(|| Zeroizing::new(request.password.clone()));
-    let outcome = crate::rdp::connect(app.clone(), Arc::clone(registry.inner()), request).await;
+    let gateway = match request.jump.take() {
+        Some(jump) => match crate::jump::from_app(&app, &profile, jump).await {
+            Ok(gateway) => Some(gateway),
+            Err(detail) => {
+                return Ok(RdpConnectOutcome::Failed {
+                    stage: "jump",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
+    let route = match gateway {
+        Some(gateway) => match gateway
+            .forward(profile.hostname.clone(), profile.port)
+            .await
+        {
+            Ok(route) => Some(route),
+            Err(detail) => {
+                return Ok(RdpConnectOutcome::Failed {
+                    stage: "target",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
+    let outcome =
+        crate::rdp::connect_via(app.clone(), Arc::clone(registry.inner()), request, route).await;
 
     if let (RdpConnectOutcome::Connected { session }, Some(password)) =
         (&outcome, password_to_store)
@@ -5712,7 +5772,35 @@ async fn vnc_connect(
     let password_to_store = request
         .remember_password
         .then(|| Zeroizing::new(request.password.clone()));
-    let outcome = crate::vnc::connect(app.clone(), Arc::clone(registry.inner()), request).await;
+    let gateway = match request.jump.take() {
+        Some(jump) => match crate::jump::from_app(&app, &profile, jump).await {
+            Ok(gateway) => Some(gateway),
+            Err(detail) => {
+                return Ok(VncConnectOutcome::Failed {
+                    stage: "jump",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
+    let route = match gateway {
+        Some(gateway) => match gateway
+            .forward(profile.hostname.clone(), profile.port)
+            .await
+        {
+            Ok(route) => Some(route),
+            Err(detail) => {
+                return Ok(VncConnectOutcome::Failed {
+                    stage: "target",
+                    detail,
+                })
+            }
+        },
+        None => None,
+    };
+    let outcome =
+        crate::vnc::connect_via(app.clone(), Arc::clone(registry.inner()), request, route).await;
 
     if let (VncConnectOutcome::Connected { session }, Some(password)) =
         (&outcome, password_to_store)
@@ -6750,6 +6838,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 
@@ -6818,6 +6908,7 @@ mod tests {
     #[test]
     fn saved_ssh_profile_owns_the_endpoint_used_with_its_credential() {
         let mut request = ConnectRequest {
+            jump: None,
             profile_id: "profile-safe".to_string(),
             hostname: "attacker.example".to_string(),
             port: 2222,
@@ -6844,6 +6935,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         };
 
         bind_ssh_request_to_profile(&mut request, &profile).unwrap();
@@ -6856,6 +6949,7 @@ mod tests {
     #[test]
     fn ssh_credentials_cannot_be_paired_with_another_protocol_profile() {
         let mut request = ConnectRequest {
+            jump: None,
             profile_id: "profile-rdp".to_string(),
             hostname: "gateway.internal".to_string(),
             port: 22,
@@ -6882,6 +6976,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         };
 
         assert!(bind_ssh_request_to_profile(&mut request, &profile).is_err());
@@ -6892,6 +6988,7 @@ mod tests {
     #[test]
     fn every_password_protocol_uses_its_saved_profile_endpoint() {
         let mut sftp = SftpConnectRequest {
+            jump: None,
             profile_id: "profile-sftp".to_string(),
             hostname: "attacker.example".to_string(),
             port: 2222,
@@ -6910,6 +7007,7 @@ mod tests {
         );
 
         let mut rdp = RdpConnectRequest {
+            jump: None,
             profile_id: "profile-rdp".to_string(),
             hostname: "attacker.example".to_string(),
             port: 4444,
@@ -6929,6 +7027,7 @@ mod tests {
         );
 
         let mut vnc = VncConnectRequest {
+            jump: None,
             profile_id: "profile-vnc".to_string(),
             hostname: "attacker.example".to_string(),
             port: 4444,
@@ -7168,6 +7267,8 @@ mod tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         };
 
         assert!(storage.insert_profile(profile.clone()).is_ok());

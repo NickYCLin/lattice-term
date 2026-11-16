@@ -4,7 +4,7 @@ import { emptyFilter, type ConnectionFilter } from "./query";
 
 export type ConnectionSetupMode = "remote" | "database";
 export type ConnectionSetupSection = "remote" | "database";
-export interface DatabaseWorkspaceTarget { profileId?: string; hostKeys?: string[] }
+export interface DatabaseWorkspaceTarget { direct?: boolean; profileId?: string; hostKeys?: string[] }
 
 export function databaseRemoteHost(database: DatabaseProfile, profiles: ConnectionProfile[]) {
   return profiles.find(profile => profile.id === database.hostKey || profile.machineId === database.hostKey);

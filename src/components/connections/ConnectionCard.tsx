@@ -56,6 +56,7 @@ export function ConnectionCard({
   onToggleFavorite,
   onConnect,
   unavailableReason,
+  jumpOptions = [],
 }: {
   profile: ConnectionProfile;
   linked?: LinkedRoute[];
@@ -75,8 +76,11 @@ export function ConnectionCard({
   /** Provided only for protocols that can actually open a session today. */
   onConnect?: () => void;
   unavailableReason?: ConnectionUnavailableReason;
+  jumpOptions?: { key: string; label: string; connect?: () => void }[];
 }) {
   const { t } = useI18n();
+  const [jumpChoice, setJumpChoice] = useState("");
+  const chosenJump = jumpOptions.find(option => option.key === jumpChoice) ?? jumpOptions[0];
   const routes: LinkedRoute[] = [{ profile, onConnect }, ...linked];
   const connectable = routes.filter((route) => route.onConnect);
   const protocols = [...new Set(routes.map((route) => route.profile.protocol))];
@@ -136,6 +140,20 @@ export function ConnectionCard({
     };
   }, [menuOpen]);
 
+  const launchButton = (
+    <button
+            type="button"
+            className="button button--primary button--sm connection-card__go"
+            disabled={jumpOptions.length > 0 && !chosenJump?.connect}
+            title={databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
+            onClick={jumpOptions.length ? chosenJump?.connect : routes.length > 1 ? onChooseRoute : onConnect}
+            aria-haspopup={routes.length > 1 ? "dialog" : undefined}
+          >
+            <TerminalIcon size={13} />
+            {databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
+          </button>
+  );
+
   return (
     <li
       className={`connection-card glass glass--sheen${databaseCount > 0 ? " connection-card--database" : ""}${selected ? " is-selected" : ""}`}
@@ -163,6 +181,7 @@ export function ConnectionCard({
 
       <div className="connection-card__meta">
         <EnvironmentBadge environment={profile.environment} />
+        {jumpOptions.length > 0 && <span className="badge tone-neutral">{t("jump.supported")}</span>}
         {protocols.map((routeProtocol) => (
           <span key={routeProtocol} className="badge tone-neutral">
             {findProtocol(routeProtocol).acronym}
@@ -184,16 +203,13 @@ export function ConnectionCard({
 
       <div className="connection-card__primary">
         {connectable.length > 0 ? (
-          <button
-            type="button"
-            className="button button--primary button--sm connection-card__go"
-            title={databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
-            onClick={routes.length > 1 ? onChooseRoute : onConnect}
-            aria-haspopup={routes.length > 1 ? "dialog" : undefined}
-          >
-            <TerminalIcon size={13} />
-            {databaseCount > 0 ? t("database.connectRemote") : t("row.connect")}
-          </button>
+          jumpOptions.length ? <div className="connection-card__launch">{launchButton}
+            <label className="connection-card__jump"><span className="sr-only">{t("jump.route")}</span>
+              <select className="select" aria-label={t("jump.route")} title={chosenJump?.label} value={chosenJump?.key ?? ""} onChange={event => setJumpChoice(event.target.value)}>
+                {jumpOptions.map(option => <option key={option.key} value={option.key} disabled={!option.connect}>{option.label}</option>)}
+              </select>
+            </label>
+          </div> : launchButton
         ) : (
           <span
             className="connection-card__connect"
@@ -215,6 +231,7 @@ export function ConnectionCard({
             )}
           </span>
         )}
+
         {onOpenSql && <button type="button" className="button button--secondary button--sm" title={databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")} onClick={onOpenSql}>{databaseCount > 1 ? t("database.openSqlCount", { count: databaseCount }) : t("database.openSql")}</button>}
         <button
           type="button"

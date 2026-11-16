@@ -94,6 +94,10 @@ export interface ConnectionDraft {
   relayAddress?: string;
   /** See `ConnectionProfile.machineId`. */
   machineId?: string;
+  /** SSH gateway reference; never contains authentication material. */
+  jumpProfileId?: string;
+  /** Explicitly merged legacy loopback entry retained for recovery. */
+  retiredTo?: string;
 }
 
 export interface ConnectionProfile {
@@ -124,6 +128,10 @@ export interface ConnectionProfile {
    * SSH and Lattice Remote, share this value and are shown as one card.
    */
   machineId?: string;
+  /** SSH gateway reference; never contains authentication material. */
+  jumpProfileId?: string;
+  /** Explicitly merged legacy loopback entry retained for recovery. */
+  retiredTo?: string;
 }
 
 /** Whether an entry is addressed by device ID instead of hostname and port. */
@@ -209,6 +217,8 @@ export function draftFromProfile(profile: ConnectionProfile): ConnectionDraft {
     ...(profile.deviceId ? { deviceId: profile.deviceId } : {}),
     ...(profile.relayAddress ? { relayAddress: profile.relayAddress } : {}),
     ...(profile.machineId ? { machineId: profile.machineId } : {}),
+    ...(profile.jumpProfileId ? { jumpProfileId: profile.jumpProfileId } : {}),
+    ...(profile.retiredTo ? { retiredTo: profile.retiredTo } : {}),
   };
 }
 
@@ -354,7 +364,14 @@ export function createConnectionProfile(
         }
       : {}),
     ...(machineId ? { machineId } : {}),
+    ...(draft.protocol !== "lattice" && normalizeProfileReference(draft.jumpProfileId) ? { jumpProfileId: normalizeProfileReference(draft.jumpProfileId) } : {}),
+    ...(normalizeProfileReference(draft.retiredTo) ? { retiredTo: normalizeProfileReference(draft.retiredTo) } : {}),
   };
+}
+
+function normalizeProfileReference(value: string | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(trimmed) ? trimmed : undefined;
 }
 
 /** A link key is an opaque short token; anything else is dropped. */
@@ -374,6 +391,7 @@ export interface MachineCard {
  * incoming order. A link with only one visible member stays an ordinary card.
  */
 export function mergeMachineCards(profiles: ConnectionProfile[]): MachineCard[] {
+  profiles = profiles.filter(entry => !entry.retiredTo || !profiles.some(target => target.id === entry.retiredTo && target.id !== entry.id && !target.retiredTo));
   const members = new Map<string, ConnectionProfile[]>();
   for (const profile of profiles) {
     if (!profile.machineId) continue;

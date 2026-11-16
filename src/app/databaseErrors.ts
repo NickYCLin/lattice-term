@@ -1,3 +1,4 @@
+import { jumpError } from "./jumpRoutes";
 import type { I18nValue } from "../i18n/context";
 
 const driverErrors = [
@@ -14,5 +15,5 @@ export function databaseErrorMessage(reason: unknown, t: I18nValue["t"]): string
   if (known) return t(known);
   // Do not echo malformed/future driver diagnostics with appended details.
   if (code.startsWith("database.error.")) return t("database.error.other");
-  return raw;
+  return /^(?:Error: )?(jump|target):/.test(raw) ? jumpError(raw.replace(/^Error: /, ""), t) : raw;
 }

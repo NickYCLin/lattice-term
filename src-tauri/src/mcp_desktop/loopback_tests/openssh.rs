@@ -25,6 +25,7 @@ impl Fixture {
             Arc::clone(&sftp),
             Some(peer.known.clone()),
             SftpConnectRequest {
+                jump: None,
                 profile_id: "isolated-sftp".into(),
                 hostname: "127.0.0.1".into(),
                 port: peer.port,

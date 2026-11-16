@@ -429,6 +429,7 @@ impl Peer {
 
     fn request(&self) -> ConnectRequest {
         ConnectRequest {
+            jump: None,
             profile_id: "synthetic-only".into(),
             hostname: "127.0.0.1".into(),
             port: self.port,
@@ -575,6 +576,8 @@ async fn saved_ssh_connect_reuses_one_session_and_respects_revocation() {
                 device_id: None,
                 relay_address: None,
                 machine_id: None,
+                jump_profile_id: None,
+                retired_to: None,
             }]
         }
         fn connect(&self, _: ConnectionProfile) -> ConnectFuture {

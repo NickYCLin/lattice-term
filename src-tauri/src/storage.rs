@@ -404,6 +404,8 @@ mod file_storage_tests {
             device_id: None,
             relay_address: None,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 
@@ -413,6 +415,8 @@ mod file_storage_tests {
         assert!(plain.get("machineId").is_none());
         let linked = ConnectionProfile {
             machine_id: Some("m1".to_string()),
+            jump_profile_id: None,
+            retired_to: None,
             ..profile("b", "B")
         };
         let value = serde_json::to_value(&linked).unwrap();

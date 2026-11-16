@@ -72,6 +72,8 @@ export function serializeProfiles(
       ...(profile.deviceId ? { deviceId: profile.deviceId } : {}),
       ...(profile.relayAddress ? { relayAddress: profile.relayAddress } : {}),
       ...(profile.machineId ? { machineId: profile.machineId } : {}),
+      ...(profile.jumpProfileId ? { jumpProfileId: profile.jumpProfileId } : {}),
+      ...(profile.retiredTo ? { retiredTo: profile.retiredTo } : {}),
     })),
   };
 
@@ -193,6 +195,8 @@ export function parseAndValidateImport(jsonContent: string): ImportResult {
       ...(typeof record.relayAddress === "string"
         ? { relayAddress: record.relayAddress }
         : {}),
+      ...(typeof record.jumpProfileId === "string" ? { jumpProfileId: record.jumpProfileId } : {}),
+      ...(typeof record.retiredTo === "string" ? { retiredTo: record.retiredTo } : {}),
       ...(typeof record.machineId === "string"
         ? { machineId: record.machineId }
         : {}),
@@ -247,6 +251,8 @@ export function planProfileImport(existing: readonly ConnectionProfile[], import
     ...(profile.deviceId !== undefined ? { deviceId: profile.deviceId } : {}),
     ...(profile.relayAddress !== undefined ? { relayAddress: profile.relayAddress } : {}),
     ...(profile.machineId !== undefined ? { machineId: profile.machineId } : {}),
+    ...(profile.jumpProfileId !== undefined ? { jumpProfileId: profile.jumpProfileId } : {}),
+    ...(profile.retiredTo !== undefined ? { retiredTo: profile.retiredTo } : {}),
   }));
   const next = [...original];
   const local = new Map(original.map((profile, index) => [profile.id, index]));
@@ -267,6 +273,14 @@ export function planProfileImport(existing: readonly ConnectionProfile[], import
       const profile = createConnectionProfile(clean);
       next.push(profile); changed.add(next.length - 1);
       if (source.id) aliases.set(source.id, next.length - 1);
+    }
+  }
+  // References in a foreign export follow the newly allocated local IDs.
+  for (const index of changed) {
+    for (const field of ["jumpProfileId", "retiredTo"] as const) {
+      const reference = next[index][field];
+      const mapped = reference ? local.get(reference) ?? aliases.get(reference) : undefined;
+      if (mapped !== undefined) next[index] = { ...next[index], [field]: next[mapped].id };
     }
   }
   // Id priority may deliberately change an endpoint. If that would create a

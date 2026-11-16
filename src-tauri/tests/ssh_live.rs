@@ -72,6 +72,7 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
 
 fn request() -> ConnectRequest {
     ConnectRequest {
+        jump: None,
         profile_id: "live-test".into(),
         use_saved_password: false,
         remember_password: false,

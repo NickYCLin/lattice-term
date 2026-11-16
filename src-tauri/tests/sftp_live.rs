@@ -20,6 +20,7 @@ const PASSWORD: &str = "testpass123";
 
 fn request() -> SftpConnectRequest {
     SftpConnectRequest {
+        jump: None,
         profile_id: "sftp-live-test".into(),
         hostname: HOST.into(),
         port: PORT,

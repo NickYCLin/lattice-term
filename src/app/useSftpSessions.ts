@@ -1,3 +1,4 @@
+import type { JumpRequest } from "./jumpRoutes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HostKeyRecord } from "../domain/security";
 import type { RemoteTextDocument } from "../domain/remoteText";
@@ -46,6 +47,7 @@ export interface SftpTransfer {
 const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
 
 export interface SftpConnectRequest {
+  jump?: JumpRequest;
   profileId: string;
   hostname: string;
   port: number;

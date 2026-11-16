@@ -58,6 +58,7 @@ async fn trusted_record(label: &str) -> latticeterm_lib::hostkeys::HostKeyRecord
     let mut store = HostTrustStore::open(&temp_dir(label)).unwrap();
 
     let request = ConnectRequest {
+        jump: None,
         profile_id: "tunnel-live".into(),
         use_saved_password: false,
         remember_password: false,

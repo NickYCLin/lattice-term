@@ -1,3 +1,5 @@
+import type { JumpRequest } from "../../app/jumpRoutes";
+import { JumpAuthenticationDialog } from "./JumpAuthenticationDialog";
 import { databaseErrorMessage } from "../../app/databaseErrors";
 import { useI18n } from "../../i18n/context";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,8 +12,9 @@ import {
 import { useModalFocus } from "../overlays/modalFocus";
 import { SqlWorkbench } from "./SqlWorkbench";
 
-export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?.[0], onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
+export function DatabaseManager({ initialDirect = false, profiles, hostKeys, defaultHostKey = hostKeys?.[0], onClose, embedded = false, onStateChange, initialProfileId, initialView = "sql", settingsOnly = false, createNew = false, onProfileSelected, onConfigure, catalogRevision = 0, settingsFormId, onSaved }: {
   profiles: ConnectionProfile[];
+  initialDirect?: boolean;
   hostKeys?: string[];
   defaultHostKey?: string;
   onClose: () => void;
@@ -34,6 +37,8 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
   const operationBusy = useRef(false);
   const titleId = useId();
   const cardTargets = new Map(mergeMachineCards(profiles).map(({ profile }) => [profile.machineId ?? profile.id, profile]));
+  const [direct, setDirect] = useState(initialDirect);
+  const [jumpAuth, setJumpAuth] = useState<JumpRequest | null>(null);
   const [view, setView] = useState<"sql" | "tables" | "settings">(settingsOnly ? "settings" : initialView);
   const [search, setSearch] = useState("");
   const [snapshot, setSnapshot] = useState<DatabaseSnapshot | null>(null);
@@ -157,7 +162,7 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
         : { kind, profileId: saved.id, schema: table[0]!, table: table[1]!, limit: 50, offset: nextOffset };
     void perform(async () => {
       setResult(null);
-      const value = await invoke<DatabaseResult>("database_read", { action });
+      const value = await invoke<DatabaseResult>("database_read", { action, ...(direct ? { direct: true } : {}), ...(!direct && jumpAuth ? { jump: jumpAuth } : {}) });
       setResult(value);
       setResultKind(kind);
       if (kind === "version") setNotice(t("database.testSuccess"));
@@ -188,6 +193,11 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
           </aside>
           <section className="database-manager__workspace" aria-label={t("database.content")}>
             <div className="database-manager__connection-head"><div><h3>{saved?.name || t("database.create")}</h3><p>{saved ? `${databaseEngines.find((engine) => engine.value === saved.engine)?.label} · ${saved.engine === "sqlite" ? t("database.localFile") : `${saved.hostname}:${saved.port} / ${saved.database}`}` : t("database.workspaceHint")}</p></div><span className="database-manager__badge">{saved ? t("database.saved") : t("database.unsaved")}</span></div>
+            {!settingsOnly && !direct && saved?.route?.kind === "ssh" && jumpAuth?.profileId !== saved.route.profileId && (() => {
+              const gateway = profiles.find(profile => profile.id === saved.route?.profileId && profile.protocol === "ssh");
+              return gateway ? <JumpAuthenticationDialog key={gateway.id} gateway={gateway} onContinue={setJumpAuth} onCancel={onClose} /> : <p role="alert">{t("jump.missing")}</p>;
+            })()}
+            {!settingsOnly && saved?.route?.kind === "ssh" && <label>{t("jump.route")}<select className="select" disabled={navigationBlocked} value={direct ? "direct" : "jump"} onChange={event => setDirect(event.target.value === "direct")}><option value="direct">{t("jump.direct")}</option><option value="jump">{t("jump.via", { name: profiles.find(profile => profile.id === saved.route?.profileId)?.name ?? t("jump.missing") })}</option></select></label>}
             {!settingsOnly && <nav className="database-manager__tabs" aria-label={t("database.pages")}>{([ ["sql", t("database.workbench")], ["tables", t("database.browse")], ["settings", t("database.settings")] ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={activeView === key} disabled={navigationBlocked || (!saved && key !== "settings")} onClick={() => key === "settings" && onConfigure ? onConfigure(saved?.id, saved?.hostKey ?? defaultHostKey) : setView(key)}>{label}</button>)}</nav>}
             <div className="database-manager__content" ref={contentRef}>
               {error && <p role="alert" className="database-manager__notice database-manager__error">{databaseErrorMessage(error, t)}</p>}
@@ -315,7 +325,7 @@ export function DatabaseManager({ profiles, hostKeys, defaultHostKey = hostKeys?
           </>}
         </section>
 
-              {saved && !settingsOnly && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={JSON.stringify(saved)} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">{t("database.saveOrCancel")}</p>}</div>}
+              {saved && !settingsOnly && (direct || saved.route?.kind !== "ssh" || jumpAuth?.profileId === saved.route.profileId) && <div hidden={activeView !== "sql"}>{!dirty ? <SqlWorkbench key={`${JSON.stringify(saved)}:${direct}:${jumpAuth?.profileId ?? ""}`} jump={!direct ? jumpAuth ?? undefined : undefined} direct={direct} profileId={saved.id} mcpAllowed={saved.allowMcpRead} onStateChange={setSqlState} /> : <p className="database-manager__notice">{t("database.saveOrCancel")}</p>}</div>}
             </div>
             <footer className="database-manager__footer"><span>{sqlState.dirty ? t("database.syncBeforeSwitch") : touched && dirty ? t("database.settingsUnsaved") : settingsOnly ? t("database.settingsLocal") : t("database.queryAndWrite")}</span><span>{draft.engine === "sqlite" ? t("database.sqliteLocal") : t(verifiesDatabaseCertificate(draft) ? "database.tls.verifying" : "database.tls.unverified")}</span></footer>
           </section>

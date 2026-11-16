@@ -1,9 +1,10 @@
+import { jumpError } from "../../app/jumpRoutes";
+import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { SftpApi, SftpConnectOutcome } from "../../app/useSftpSessions";
 import { useSavedCredential } from "../../app/useSavedCredential";
 import {
   connectionTarget,
-  type ConnectionProfile,
 } from "../../domain/connection";
 import type { HostFingerprint } from "../../domain/security";
 import { useI18n, type MessageKey } from "../../i18n/context";
@@ -72,7 +73,7 @@ export function SftpConnectFlow({
   onConnected,
   onCancel,
 }: {
-  profile: ConnectionProfile;
+  profile: ConnectionAttemptProfile;
   sftp: SftpApi;
   onConnected: (sessionId: string) => void;
   onCancel: () => void;
@@ -123,6 +124,7 @@ export function SftpConnectFlow({
       setProblem(null);
       const outcome = await sftp.connect({
         profileId: profile.id,
+        ...(profile.jump ? { jump: profile.jump } : {}),
         hostname: profile.hostname,
         port: profile.port,
         username: profile.username,
@@ -156,7 +158,7 @@ export function SftpConnectFlow({
             title: t("connect.failed.title"),
             body: t("connect.failed.body", {
               stage: t(stageKey(outcome.stage)),
-              detail: outcome.detail,
+              detail: jumpError(outcome.detail, t),
             }),
           });
       }

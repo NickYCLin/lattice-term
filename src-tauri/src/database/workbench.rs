@@ -7,10 +7,16 @@ use super::*;
 pub struct Workbench {
     #[serde(skip)]
     bound_profile: DatabaseProfile,
+    #[serde(skip)]
+    direct: bool,
+    #[serde(skip)]
+    jump: Option<crate::jump::JumpRequest>,
     pub id: String,
     pub profile_id: String,
     pub name: String,
     pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<DatabaseRoute>,
     pub sql: String,
     pub revision: u64,
     pub busy: bool,
@@ -35,6 +41,10 @@ pub struct Workbench {
 pub enum WorkbenchAction {
     Open {
         profile_id: String,
+        #[serde(default)]
+        direct: bool,
+        #[serde(default)]
+        jump: Option<crate::jump::JumpRequest>,
     },
     Read {
         id: String,
@@ -124,7 +134,12 @@ impl DatabaseRegistry {
     }
 
     async fn workbench_local(&self, action: WorkbenchAction) -> Result<Workbench, String> {
-        if let WorkbenchAction::Open { profile_id } = &action {
+        if let WorkbenchAction::Open {
+            profile_id,
+            direct,
+            jump,
+        } = &action
+        {
             let registry = self.clone();
             let snapshot = crate::credential_call(move || registry.snapshot()).await?;
             let profile = snapshot
@@ -141,13 +156,17 @@ impl DatabaseRegistry {
                         .iter()
                         .any(|profile| profile.id == panel.profile_id)
             });
-            if let Some(existing) = panels.values_mut().find(|w| w.profile_id == *profile_id) {
+            if let Some(existing) = panels
+                .values_mut()
+                .find(|w| w.profile_id == *profile_id && w.direct == *direct)
+            {
                 if existing.bound_profile != *profile {
                     if existing.busy {
                         return Err("原連線的 SQL 仍在執行，請等候完成後重新開啟。".into());
                     }
                     existing.bound_profile = profile.clone();
                     existing.target = target(profile);
+                    existing.route = if *direct { None } else { profile.route.clone() };
                     existing.name = profile.name.clone();
                     existing.share_read = false;
                     existing.share_edit = false;
@@ -158,6 +177,7 @@ impl DatabaseRegistry {
                     existing.error = None;
                     existing.revision += 1;
                 }
+                existing.jump = jump.clone();
                 return Ok(existing.clone());
             }
             if panels.len() >= 16 {
@@ -168,10 +188,13 @@ impl DatabaseRegistry {
             let id: String = nonce.iter().map(|b| format!("{b:02x}")).collect();
             let panel = Workbench {
                 bound_profile: profile.clone(),
+                direct: *direct,
+                jump: jump.clone(),
                 id: id.clone(),
                 profile_id: profile_id.clone(),
                 name: profile.name.clone(),
                 target: target(profile),
+                route: if *direct { None } else { profile.route.clone() },
                 sql: "SELECT 1".into(),
                 revision: 0,
                 busy: false,
@@ -394,7 +417,13 @@ impl DatabaseRegistry {
             Ok(())
         };
         revalidate()?;
-        let route = self.connection_route(&profile).await?;
+        let mut routed_profile = profile.clone();
+        if panel.direct {
+            routed_profile.route = None;
+        }
+        let route = self
+            .connection_route_with_auth(&routed_profile, panel.jump.clone())
+            .await?;
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(20),
             drivers::execute_sql_with_server_name(
@@ -507,6 +536,45 @@ pub async fn database_popout(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn direct_and_jump_workbenches_keep_separate_route_choices_without_exporting_auth() {
+        let (_directory, registry, panel) = mcp_fixture(false, false, "SELECT 1").await;
+        let direct = registry
+            .workbench_local(WorkbenchAction::Open {
+                profile_id: panel.profile_id.clone(),
+                direct: true,
+                jump: None,
+            })
+            .await
+            .unwrap();
+        assert_ne!(direct.id, panel.id);
+        assert!(direct.direct);
+        assert!(!panel.direct);
+        let with_auth = registry
+            .workbench_local(WorkbenchAction::Open {
+                profile_id: panel.profile_id.clone(),
+                direct: false,
+                jump: Some(crate::jump::JumpRequest {
+                    profile_id: "gateway".into(),
+                    auth: Some(crate::ssh::AuthMethod::Password {
+                        password: "synthetic-ephemeral-auth".into(),
+                    }),
+                    use_saved_password: false,
+                    remember_password: false,
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(with_auth.jump.is_some());
+        assert!(!serde_json::to_string(&with_auth)
+            .unwrap()
+            .contains("synthetic-ephemeral-auth"));
+        assert_eq!(
+            registry.snapshot().unwrap().profiles[0],
+            panel.bound_profile
+        );
+    }
+
     async fn mcp_fixture(
         execute: bool,
         write: bool,
@@ -537,6 +605,8 @@ mod tests {
             .unwrap();
         let panel = registry
             .workbench_local(WorkbenchAction::Open {
+                direct: false,
+                jump: None,
                 profile_id: "mcp".into(),
             })
             .await
@@ -714,6 +784,8 @@ mod tests {
             .unwrap();
         let panel = registry
             .workbench_local(WorkbenchAction::Open {
+                direct: false,
+                jump: None,
                 profile_id: profile.id.clone(),
             })
             .await
@@ -801,6 +873,8 @@ mod tests {
         assert!(registry.execute(read, true).await.is_err());
         let reopened = registry
             .workbench_local(WorkbenchAction::Open {
+                direct: false,
+                jump: None,
                 profile_id: profile.id,
             })
             .await

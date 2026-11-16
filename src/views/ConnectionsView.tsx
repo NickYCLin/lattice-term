@@ -1,3 +1,5 @@
+import { JumpMigrationDialog } from "../components/connections/JumpMigrationDialog";
+import { legacyJumpCandidates } from "../app/jumpRoutes";
 import { FileDropZone } from "../components/files/FileDropZone";
 import { readSelectedText, localFileError, type UploadFile } from "../app/localFiles";
 /**
@@ -78,7 +80,7 @@ export function ConnectionsView({
   onEdit: (id: string, section?: "remote" | "database") => void;
   onAddRoute?: (id: string) => void;
   onDelete: (id: string) => void;
-  onConnect: (profile: ConnectionProfile) => void;
+  onConnect: (profile: ConnectionProfile, viaJump?: boolean) => void;
   supportedProtocols: readonly string[];
   backendAvailable: boolean;
   mobile: boolean;
@@ -141,11 +143,12 @@ export function ConnectionsView({
   const databaseEntries = databaseListEntries(databases.profiles, profiles, visibleProfiles, kind, workspace.filter);
   const openSql = (target: DatabaseWorkspaceTarget) => onOpenDatabase ? onOpenDatabase(target) : setDatabaseScope(target);
   const configureDatabase = (id?: string, hostKey?: string) => onEditDatabase ? onEditDatabase(id, hostKey) : setDatabaseScope({ profileId: id });
-  const databaseCards = databaseEntries.length > 0 && <section className="connection-group database-connection-group" aria-label={t("database.connection")}><h2 className="connection-group__title">{t("database.databases")} <span>{databaseEntries.length}</span></h2><ul className="connection-grid">{databaseEntries.map(database => <DatabaseConnectionCard key={database.id} profile={database} remoteName={databaseRemoteHost(database, profiles)?.name} onOpen={() => openSql({ profileId: database.id })} onEdit={() => configureDatabase(database.id, database.hostKey)} />)}</ul></section>;
+  const databaseCards = databaseEntries.length > 0 && <section className="connection-group database-connection-group" aria-label={t("database.connection")}><h2 className="connection-group__title">{t("database.databases")} <span>{databaseEntries.length}</span></h2><ul className="connection-grid">{databaseEntries.map(database => <DatabaseConnectionCard key={database.id} profile={database} remoteName={databaseRemoteHost(database, profiles)?.name} jumpName={profiles.find(profile => profile.id === database.route?.profileId)?.name} onOpen={direct => openSql({ profileId: database.id, ...(direct ? { direct: true } : {}) })} onEdit={() => configureDatabase(database.id, database.hostKey)} />)}</ul></section>;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [jumpMigrationOpen, setJumpMigrationOpen] = useState(false);
   const [pendingImport, setPendingImport] = useState<ImportResult | null>(null);
   const importReadRevision = useRef(0);
   const importWriting = useRef(false);
@@ -267,7 +270,7 @@ export function ConnectionsView({
     />
   );
 
-  const databaseManager = databaseScope && <DatabaseManager profiles={profiles} initialProfileId={databaseScope.profileId} hostKeys={databaseScope.hostKeys} onClose={() => { setDatabaseScope(null); void databases.refresh(); }} />;
+  const databaseManager = databaseScope && <DatabaseManager profiles={profiles} initialDirect={databaseScope?.direct} initialProfileId={databaseScope.profileId} hostKeys={databaseScope.hostKeys} onClose={() => { setDatabaseScope(null); void databases.refresh(); }} />;
   const databaseButton = backendAvailable && <button type="button" className="button button--secondary button--sm" title={t("database.openSavedHint")} onClick={() => onOpenDatabase ? onOpenDatabase({}) : setDatabaseScope({})}>{t("database.workbench")}</button>;
 
   if (profiles.length === 0 && databases.profiles.length === 0 && !databases.loading) {
@@ -327,6 +330,8 @@ export function ConnectionsView({
   return (
     <div className="connections">
       {importPreview}
+      {(legacyJumpCandidates(profiles).length > 0 || profiles.some(profile => profile.retiredTo)) && <button type="button" className="button button--secondary" onClick={() => setJumpMigrationOpen(true)}>{t("jump.migration.title")}</button>}
+      {jumpMigrationOpen && <JumpMigrationDialog profiles={profiles} onMerge={workspace.migrateJumpProfile} onClose={() => setJumpMigrationOpen(false)} />}
       {routePicker}
       {mergeDialog}
       {databaseManager}
@@ -447,6 +452,12 @@ export function ConnectionsView({
                           onOpenSql={backendAvailable && databasesForHost(databases.profiles, [profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)]).length ? () => openSql({ hostKeys: [...new Set([profile.machineId ?? profile.id, profile.id, ...linked.map(peer => peer.id)])] }) : undefined}
                           key={profile.id}
                           profile={profile}
+                          jumpOptions={[profile, ...linked].some(entry => entry.jumpProfileId) ? [profile, ...linked].flatMap(entry => {
+                            const connect = canConnectProtocol(entry.protocol, supportedProtocols);
+                            const gateway = profiles.find(candidate => candidate.id === entry.jumpProfileId && candidate.protocol === "ssh");
+                            return [{ key: `${entry.id}:direct`, label: `${entry.name} · ${t("jump.direct")}`, connect: connect ? () => onConnect(entry) : undefined },
+                              ...(entry.jumpProfileId ? [{ key: `${entry.id}:jump`, label: `${entry.name} · ${t("jump.via", { name: gateway?.name ?? t("jump.missing") })}`, connect: connect && gateway ? () => onConnect(entry, true) : undefined }] : [])];
+                          }) : []}
                           linked={linked.map((peer) => ({
                             profile: peer,
                             onConnect: canConnectProtocol(

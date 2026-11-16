@@ -1,3 +1,4 @@
+import type { JumpRequest } from "./jumpRoutes";
 /** Native RDP sessions rendered by the embedded Canvas pane. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,6 +30,7 @@ export interface RdpSessionSummary {
 }
 
 export interface RdpConnectRequest {
+  jump?: JumpRequest;
   profileId: string;
   hostname: string;
   port: number;

@@ -1,9 +1,11 @@
+import { jumpError } from "../../app/jumpRoutes";
+import type { ConnectionAttemptProfile } from "../../app/jumpRoutes";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { RdpApi } from "../../app/useRdpSessions";
 import { useSavedCredential } from "../../app/useSavedCredential";
 import { rdpCredentialFailure } from "../../app/rdpCredentialFailure";
-import { connectionTarget, type ConnectionProfile } from "../../domain/connection";
+import { connectionTarget } from "../../domain/connection";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import { CheckIcon, CloseIcon, ScreenShareIcon, ShieldIcon, TrashIcon } from "../icons";
@@ -15,7 +17,7 @@ export function RdpConnectFlow({
   onConnected,
   onCancel,
 }: {
-  profile: ConnectionProfile;
+  profile: ConnectionAttemptProfile;
   rdp: RdpApi;
   onConnected: (sessionId: string) => void;
   onCancel: () => void;
@@ -68,6 +70,7 @@ export function RdpConnectFlow({
       setProblem(null);
       const outcome = await rdp.connect({
         profileId: profile.id,
+        ...(profile.jump ? { jump: profile.jump } : {}),
         hostname: profile.hostname,
         port: profile.port,
         username: profile.username,
@@ -89,7 +92,7 @@ export function RdpConnectFlow({
         setProblem(
           (credentialFailure ? t(`rdp.connect.${credentialFailure}`) + "\n\n" : "") + t("rdp.connect.failedBody", {
             stage: outcome.stage,
-            detail: outcome.detail,
+            detail: jumpError(outcome.detail, t),
           }),
         );
       }

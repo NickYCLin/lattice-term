@@ -1,3 +1,4 @@
+import type { JumpRequest } from "./jumpRoutes";
 /**
  * SSH sessions, from the interface's side.
  *
@@ -54,6 +55,7 @@ export type SshAuth =
   | { kind: "privateKey"; path: string; passphrase?: string };
 
 export interface ConnectRequest {
+  jump?: JumpRequest;
   profileId: string;
   hostname: string;
   port: number;

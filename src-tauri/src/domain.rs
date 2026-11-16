@@ -115,6 +115,10 @@ pub struct ConnectionProfile {
     /// and Lattice Remote) share this value and show as one card.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -333,6 +337,8 @@ impl ConnectionProfile {
                 .filter(|address| !address.is_empty()),
             device_id,
             machine_id: None,
+            jump_profile_id: None,
+            retired_to: None,
         }
     }
 
