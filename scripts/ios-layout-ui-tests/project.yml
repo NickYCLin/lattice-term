@@ -10,6 +10,7 @@ targets:
       - LayoutUITests.swift
       - SoftwareKeyboardUITests.swift
       - AlignmentUITests.swift
+      - ConnectionPersistenceUITests.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nickyclin.latticeterm.layoutchecks
