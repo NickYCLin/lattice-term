@@ -4,6 +4,11 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "nav.more": "更多",
+  "nav.moreUnread": "更多，活动有 {count} 个未读",
+  "nav.remoteShort": "远端助理",
+  "fileExport.insufficientSpace": "存储空间不足，无法导出。请释放空间后重试。",
+  "fileExport.spaceUnavailable": "无法确认导出位置的可用空间，请重试。",
   "history.viewArchive": "在对话中查看只读副本",
   "history.directoryMissing": "原工作目录已不存在；仍可阅读记录，但需先恢复该文件夹才能继续。",
   "history.archive": "只读导出文件",

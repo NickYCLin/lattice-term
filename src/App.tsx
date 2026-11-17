@@ -1121,6 +1121,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
     <NativeHistoryContext.Provider value={nativeHistory}>
     <div className={`app${onMobile ? " app--mobile" : ""}`} data-view={view}>
       <NavRail
+        mobile={onMobile}
         current={view}
         onSelect={(next) => {
           if (next === "activity" && view !== "activity") {

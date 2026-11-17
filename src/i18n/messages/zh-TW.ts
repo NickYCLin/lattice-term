@@ -6,6 +6,11 @@
  */
 
 export const zhTW = {
+  "nav.more": "更多",
+  "nav.moreUnread": "更多，活動有 {count} 個未讀",
+  "nav.remoteShort": "遠端助理",
+  "fileExport.insufficientSpace": "儲存空間不足，無法匯出。請釋放空間後再試。",
+  "fileExport.spaceUnavailable": "無法確認匯出位置的可用空間，請重新嘗試。",
   "memory.autoCompactionRecord": "自動壓縮紀錄",
   "memory.savedWithFallback": "條目已儲存並以確定性結果同步；AI 摘要未採用。",
   "memory.compactTitle": "記憶與交接壓縮",

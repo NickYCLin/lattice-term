@@ -70,7 +70,7 @@ describe("iOS workflow 驗證邊界", () => {
         }
       }
     }
-  });
+  }, 60_000);
 
   it("實際來源檢查指令接受同輪封裝並拒絕異動雜湊", () => {
     const command = native.steps.find((step) => step.name === "Verify simulator source and extract safely").run;

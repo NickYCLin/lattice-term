@@ -20,9 +20,10 @@ class BundleVerificationTests(unittest.TestCase):
         self.assertNotIn("sqlite", cargo["dependencies"]["sqlx"]["features"])
         self.assertNotIn("sqlite-unbundled", cargo["dependencies"]["sqlx"]["features"])
         self.assertIn("sqlite", cargo["target"]['cfg(not(target_os = "ios"))']["dependencies"]["sqlx"]["features"])
-        ios = cargo["target"]['cfg(target_os = "ios")']["dependencies"]
-        self.assertEqual(ios["rusqlite"]["features"], ["modern_sqlite"])
-        self.assertFalse(ios["rusqlite"]["default-features"])
+        sqlite = cargo["dependencies"]["rusqlite"]
+        self.assertEqual(sqlite["version"], "0.32.1")
+        self.assertEqual(sqlite["features"], ["modern_sqlite"])
+        self.assertFalse(sqlite["default-features"])
         apple = manifest.parent / "gen/apple"
         self.assertIn("- sdk: libsqlite3.tbd", (apple / "project.yml").read_text(encoding="utf-8"))
         project = (apple / "lattice-term.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
@@ -105,17 +106,47 @@ class BundleVerificationTests(unittest.TestCase):
                 module.verify(self.app, "0.45.0")
             self.info[key] = True
 
-    def test_reports_undeclared_imports_in_simulator_without_claiming_readiness(self):
-        self.nm.return_value.stdout += "_fstatvfs\n"
+    def remove_disk_declaration(self):
+        path = self.app / "PrivacyInfo.xcprivacy"
+        privacy = plistlib.loads(path.read_bytes())
+        privacy["NSPrivacyAccessedAPITypes"] = [entry for entry in privacy["NSPrivacyAccessedAPITypes"] if entry["NSPrivacyAccessedAPIType"] != "NSPrivacyAccessedAPICategoryDiskSpace"]
+        path.write_bytes(plistlib.dumps(privacy))
+
+    def test_declared_disk_imports_pass_without_claiming_store_readiness(self):
+        self.nm.return_value.stdout += "_fstatvfs\n_fstatfs\n_statvfs\n"
         result = module.verify(self.app, "0.45.0", check_api_symbols=True)
-        self.assertEqual(result["privacyAPIReview"]["status"], "needs_review")
-        self.assertEqual(result["privacyAPIReview"]["missingManifestCategories"], ["NSPrivacyAccessedAPICategoryDiskSpace"])
+        self.assertEqual(result["privacyAPIReview"]["status"], "declared_c_imports")
+        self.assertEqual(result["privacyAPIReview"]["missingManifestCategories"], [])
         self.assertEqual(self.nm.call_args.args[0], ["xcrun", "nm", "-u", "-j", str(self.app / "LatticeTerm")])
+        self.remove_disk_declaration()
+        with self.assertRaisesRegex(ValueError, "DiskSpace"):
+            module.verify(self.app, "0.45.0", check_api_symbols=True)
 
     def test_rejects_undeclared_imports_for_store(self):
         self.nm.return_value.stdout += "_fstatfs\n"
+        self.assertEqual(module.verify(self.app, "0.45.0", require_store_sdk=True)["privacyAPIReview"]["status"], "declared_c_imports")
+        self.remove_disk_declaration()
         with self.assertRaisesRegex(ValueError, "DiskSpace"):
             module.verify(self.app, "0.45.0", require_store_sdk=True)
+
+    def test_rejects_incorrect_or_speculative_disk_reasons(self):
+        path = self.app / "PrivacyInfo.xcprivacy"
+        original = path.read_bytes()
+        for reasons in (["85F4.1"], ["E174.1", "85F4.1"], ["7D9E.1"], ["B728.1"], []):
+            privacy = plistlib.loads(original)
+            for entry in privacy["NSPrivacyAccessedAPITypes"]:
+                if entry["NSPrivacyAccessedAPIType"] == "NSPrivacyAccessedAPICategoryDiskSpace":
+                    entry["NSPrivacyAccessedAPITypeReasons"] = reasons
+            path.write_bytes(plistlib.dumps(privacy))
+            with self.assertRaisesRegex(ValueError, "DiskSpace"):
+                module.verify(self.app, "0.45.0")
+
+    def test_flags_new_undeclared_user_defaults_imports_for_review(self):
+        self.nm.return_value.stdout += "_OBJC_CLASS_$_NSUserDefaults\n"
+        result = module.verify(self.app, "0.45.0", check_api_symbols=True)
+        self.assertEqual(result["privacyAPIReview"]["missingManifestCategories"], ["NSPrivacyAccessedAPICategoryUserDefaults"])
+        with self.assertRaisesRegex(ValueError, "UserDefaults"):
+            module.verify(self.app, "0.45.0", require_declared_api=True)
 
     def test_symbol_inspection_failures_are_not_reported_as_success(self):
         self.nm.side_effect = module.subprocess.CalledProcessError(1, "nm")
@@ -127,6 +158,8 @@ class BundleVerificationTests(unittest.TestCase):
         self.write_info()
         self.assertEqual(module.verify(self.app, "0.45.0", require_declared_api=True)["privacyAPIReview"]["status"], "declared_c_imports")
         self.nm.return_value.stdout += "_statvfs\n"
+        self.assertEqual(module.verify(self.app, "0.45.0", require_declared_api=True)["privacyAPIReview"]["status"], "declared_c_imports")
+        self.remove_disk_declaration()
         with self.assertRaisesRegex(ValueError, "DiskSpace"):
             module.verify(self.app, "0.45.0", require_declared_api=True)
 

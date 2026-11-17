@@ -69,6 +69,22 @@
   padding: 4px var(--space-1);
 }
 .app--mobile .rail__label { display: block; font-size: calc(10px * var(--interface-text-scale)); line-height: 1.2; white-space: nowrap; }
+/* The compact rail partitions items in React at the same 42rem breakpoint.
+   Labels wrap inside five equal tracks; settings never depends on scrolling. */
+.app--mobile .rail--compact .rail__items {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: visible;
+  align-items: stretch;
+}
+.app--mobile .rail--compact .rail__items > li { min-width: 0; display: flex; }
+.app--mobile .rail--compact .rail__item { min-width: 0; min-height: 44px; height: 100%; }
+.app--mobile .rail--compact .rail__label { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+/* Portal menu is outside .app--mobile; keep touch sizes and theme tokens here. */
+.rail__more-option { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3); color: var(--text); }
+.rail__more-option > span:first-of-type { flex: 1; text-align: start; }
+.rail__more-option[aria-current="page"] { background: var(--accent-soft); color: var(--accent-strong); }
+
 .app--mobile input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .app--mobile select,
 .app--mobile textarea { font-size: calc(16px * var(--interface-text-scale)); }

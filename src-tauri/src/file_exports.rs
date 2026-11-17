@@ -34,11 +34,59 @@ fn validate_export(filename: &str, contents: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Required Reason API E174.1: only gate a user-requested iOS export.
+// Capacity values never leave the device and are not logged or displayed.
+#[cfg(any(target_os = "ios", test))]
+fn require_export_space(available: u64, bytes: usize) -> Result<(), String> {
+    let needed = (bytes as u64).saturating_add(64 * 1024); // allocation/staging margin
+    if available < needed {
+        Err("fileExport.insufficientSpace".into())
+    } else {
+        Ok(())
+    }
+}
+#[cfg(any(target_os = "ios", all(test, unix)))]
+fn available_export_bytes(directory: &Path) -> Result<u64, String> {
+    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+    let handle = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+        .open(directory)
+        .map_err(|_| "fileExport.spaceUnavailable")?;
+    let mut info = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // The held directory fd remains live for this call; only initialize after success.
+    if unsafe { libc::fstatvfs(handle.as_raw_fd(), info.as_mut_ptr()) } != 0 {
+        return Err("fileExport.spaceUnavailable".into());
+    }
+    let info = unsafe { info.assume_init() };
+    let block = if info.f_frsize > 0 {
+        info.f_frsize
+    } else {
+        info.f_bsize
+    };
+    Ok((u128::from(info.f_bavail) * u128::from(block)).min(u128::from(u64::MAX)) as u64)
+}
+
 /// Write completely before publishing; never overwrite an existing file,
 /// including a symlink or a file created concurrently by the Files app.
 pub fn save_document(directory: &Path, filename: &str, contents: &str) -> Result<String, String> {
+    #[cfg(target_os = "ios")]
+    return save_document_with_check(directory, filename, contents, |directory, bytes| {
+        require_export_space(available_export_bytes(directory)?, bytes)
+    });
+    #[cfg(not(target_os = "ios"))]
+    save_document_with_check(directory, filename, contents, |_, _| Ok(()))
+}
+
+fn save_document_with_check(
+    directory: &Path,
+    filename: &str,
+    contents: &str,
+    check: impl FnOnce(&Path, usize) -> Result<(), String>,
+) -> Result<String, String> {
     validate_export(filename, contents)?;
     prepare_documents(directory)?;
+    check(directory, contents.len())?;
     let mut staging = tempfile::Builder::new()
         .prefix(".latticeterm-export-")
         .tempfile_in(directory)
@@ -68,6 +116,43 @@ mod tests {
     use super::*;
 
     const NAME: &str = "latticeterm-connections-2026-09-05.json";
+
+    #[test]
+    fn insufficient_space_stops_before_staging_and_preserves_existing_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(NAME), "synthetic existing").unwrap();
+        let error = save_document_with_check(dir.path(), NAME, "synthetic new", |_, bytes| {
+            require_export_space(0, bytes)
+        })
+        .unwrap_err();
+        assert_eq!(error, "fileExport.insufficientSpace");
+        assert_eq!(
+            fs::read_to_string(dir.path().join(NAME)).unwrap(),
+            "synthetic existing"
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert!(require_export_space(64 * 1024 + 3, 3).is_ok());
+        assert!(require_export_space(64 * 1024 + 2, 3).is_err());
+        assert!(
+            save_document_with_check(dir.path(), NAME, "synthetic", |_, _| Err(
+                "fileExport.spaceUnavailable".into()
+            ))
+            .is_err()
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn capacity_check_uses_only_the_selected_directory_and_rejects_links() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(available_export_bytes(dir.path()).is_ok());
+        assert_eq!(
+            available_export_bytes(&dir.path().join("missing")).unwrap_err(),
+            "fileExport.spaceUnavailable"
+        );
+        std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).unwrap();
+        assert!(available_export_bytes(&dir.path().join("link")).is_err());
+    }
 
     #[test]
     fn publishes_complete_files_without_overwriting_previous_exports() {

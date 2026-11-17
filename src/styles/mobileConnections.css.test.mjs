@@ -20,11 +20,14 @@ describe("mobile connection layout", () => {
     expect(databaseStyles).toMatch(/\.database-manager__result th \{[^}]*min-width: 8rem;/);
     expect(databaseStyles).toMatch(/@media \(max-width: 700px\)[\s\S]*?\.database-manager__actions > label \{ width: 100%; \}/);
   });
-  it("scales navigation labels and keeps every tab reachable by scrolling", () => {
+  it("keeps wide navigation intact and gives compact navigation five non-clipping tracks", () => {
     expect(mobileStyles).toMatch(/\.app--mobile \.rail__label\s*\{[^}]*font-size: calc\(10px \* var\(--interface-text-scale\)\)/s);
     expect(mobileStyles).toMatch(/\.app--mobile \.rail__items\s*\{[^}]*min-width: 0;[^}]*overflow-x: auto;[^}]*justify-content: flex-start;/s);
     expect(mobileStyles).toContain(".app--mobile .rail__items > li { flex: 1 0 auto; }");
     expect(mobileStyles).toMatch(/\.app--mobile \.rail__item\s*\{[^}]*width: 100%;[^}]*height: auto;[^}]*min-height: 3\.25rem;/s);
+    expect(mobileStyles).toMatch(/\.app--mobile \.rail--compact \.rail__items\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\);[^}]*overflow: visible;/s);
+    expect(mobileStyles).toMatch(/\.app--mobile \.rail--compact \.rail__label\s*\{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/s);
+    expect(mobileStyles).toMatch(/\.rail__more-option\s*\{[^}]*min-height: 44px;/s);
   });
   it("lets the empty connections page scroll to actions in landscape", () => {
     expect(mobileStyles).toMatch(/\.app--mobile \.connections--empty\s*\{[^}]*overflow-y:\s*auto;/s);

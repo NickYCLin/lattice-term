@@ -9,6 +9,11 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "nav.more": "More",
+  "nav.moreUnread": "More, {count} unread activities",
+  "nav.remoteShort": "Remote",
+  "fileExport.insufficientSpace": "Not enough storage to export. Free space and try again.",
+  "fileExport.spaceUnavailable": "Cannot check available space at the export destination. Please try again.",
   "memory.autoCompactionRecord": "Automatic compaction record",
   "memory.savedWithFallback": "The entry is saved and synced using deterministic results; the AI summary was not used.",
   "memory.compactTitle": "Memory and handoff compaction",

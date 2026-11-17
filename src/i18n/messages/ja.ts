@@ -4,6 +4,11 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "nav.more": "その他",
+  "nav.moreUnread": "その他、未読のアクティビティ {count} 件",
+  "nav.remoteShort": "リモート",
+  "fileExport.insufficientSpace": "空き容量が不足しているため書き出せません。空き容量を増やして再試行してください。",
+  "fileExport.spaceUnavailable": "書き出し先の空き容量を確認できません。再試行してください。",
   "localFile.invalidPath": "本機上の絶対パスを指定してください。",
   "localFile.unreadable": "このファイルを読み込むことはできません。",
   "localFile.unsupported": "ショートカット、シンボリックリンク、特殊ファイルはサポートされていません。",

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportTextFile } from "./fileExport";
 import { exportEncryptedBackup } from "./encryptedBackup";
+import { localFileError } from "./localFiles";
 import { defaultPreferences } from "./preferences";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -86,4 +87,10 @@ describe("file exports", () => {
     await expect(exportEncryptedBackup("user supplied password", defaultPreferences, "ios"))
       .rejects.toThrow("write failed");
   });
+});
+
+it.each(["fileExport.insufficientSpace","fileExport.spaceUnavailable"])("exposes a translatable iOS export failure without reporting success: %s", async code=>{
+  invoke.mockRejectedValueOnce(code);
+  await expect(exportTextFile("synthetic","latticeterm-connections-test.json","ios")).rejects.toBe(code);
+  expect(localFileError(code,key=>`translated:${key}`)).toBe(`translated:${code}`);
 });

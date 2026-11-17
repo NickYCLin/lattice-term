@@ -192,7 +192,7 @@ export function ConnectionsView({
         tone: "warn",
         title: t("transfer.export.failed"),
         body: t("transfer.export.failedBody", {
-          error: reason instanceof Error ? reason.message : String(reason),
+          error: localFileError(reason, t),
         }),
       });
     } finally {

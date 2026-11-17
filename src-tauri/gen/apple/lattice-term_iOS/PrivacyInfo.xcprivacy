@@ -8,6 +8,16 @@
   <array/>
   <key>NSPrivacyCollectedDataTypes</key>
   <array/>
+  <!-- FileTimestamp C617.1: app-owned storage/export metadata. 3B52.1:
+       metadata for files explicitly selected by the user for import.
+       SystemBootTime 35F9.1: Rust/Tokio elapsed-time and timeout timers;
+       no system boot-time value is exported.
+       DiskSpace E174.1: file_exports.rs checks the selected Documents volume
+       before publishing an iOS export and rejects insufficient space with a
+       visible export error. No capacity values are displayed or transmitted.
+       SQLite/rustix also link filesystem-query APIs; symbol presence alone
+       was not used to infer a disk-space purpose. No first-party or iOS
+       Tauri/Wry UserDefaults access was found; do not add CA92.1 speculatively. -->
   <key>NSPrivacyAccessedAPITypes</key>
   <array>
     <dict>
@@ -25,6 +35,14 @@
       <key>NSPrivacyAccessedAPITypeReasons</key>
       <array>
         <string>35F9.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>E174.1</string>
       </array>
     </dict>
   </array>

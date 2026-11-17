@@ -14,7 +14,7 @@ export async function droppedUpload(path: string): Promise<NativeFile> {
 export async function droppedText(path: string, maxBytes: number): Promise<string> {
   return invoke("local_file_read_text", { path, maxBytes });
 }
-const errorKeys = new Set<string>(["localFile.invalidPath", "localFile.unreadable", "localFile.unsupported", "localFile.tooLarge", "localFile.invalidText", "localFile.changed", "localFile.expectedFile", "localFile.expectedDirectory", "localFile.single"]);
+const errorKeys = new Set<string>(["fileExport.insufficientSpace", "fileExport.spaceUnavailable", "localFile.invalidPath", "localFile.unreadable", "localFile.unsupported", "localFile.tooLarge", "localFile.invalidText", "localFile.changed", "localFile.expectedFile", "localFile.expectedDirectory", "localFile.single"]);
 export function localFileError(reason: unknown, t: (key: MessageKey) => string): string {
   const detail = reason instanceof Error ? reason.message : String(reason);
   return errorKeys.has(detail) ? t(detail as MessageKey) : detail;

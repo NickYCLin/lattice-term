@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { isMobilePlatform } from "../app/navigation";
 import mobileDownloadQr from "../assets/mobile-download-qr.svg";
 import type {
   DensityChoice,
@@ -368,7 +369,7 @@ export function SettingsView({
         </div>
       </section>
 
-      <ChatInputSettings preferences={preferences} onChange={onChange} />
+      {!isMobilePlatform(summary?.platform) && <ChatInputSettings preferences={preferences} onChange={onChange} />}
 
       <section className="panel glass glass--sheen">
         <header className="panel__head">

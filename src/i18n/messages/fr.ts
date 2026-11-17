@@ -4,6 +4,11 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "nav.more": "Plus",
+  "nav.moreUnread": "Plus, {count} activités non lues",
+  "nav.remoteShort": "Distant",
+  "fileExport.insufficientSpace": "Espace insuffisant pour exporter. Libérez de l’espace et réessayez.",
+  "fileExport.spaceUnavailable": "Impossible de vérifier l’espace disponible à destination. Réessayez.",
   "localFile.invalidPath": "Laissez tomber un chemin local absolu.",
   "localFile.unreadable": "Impossible de lire ce fichier.",
   "localFile.unsupported": "Les raccourcis, les liens symboliques et les fichiers spéciaux ne sont pas pris en charge.",

@@ -4,6 +4,11 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "nav.more": "더 보기",
+  "nav.moreUnread": "더 보기, 읽지 않은 활동 {count}개",
+  "nav.remoteShort": "원격",
+  "fileExport.insufficientSpace": "저장 공간이 부족하여 내보낼 수 없습니다. 공간을 확보한 후 다시 시도하세요.",
+  "fileExport.spaceUnavailable": "내보낼 위치의 사용 가능한 공간을 확인할 수 없습니다. 다시 시도하세요.",
   "localFile.invalidPath": "로컬 파일의 절대 경로를 지정하세요.",
   "localFile.unreadable": "이 파일을 읽을 수 없습니다.",
   "localFile.unsupported": "바로 가기, 심볼릭 링크 및 특수 파일은 지원하지 않습니다.",

@@ -19,6 +19,7 @@ def inspect_required_reason_apis(executable):
             "stat", "fstat", "lstat", "fstatat", "getattrlist", "fgetattrlist", "getattrlistbulk",
         },
         "NSPrivacyAccessedAPICategorySystemBootTime": {"mach_absolute_time", "clock_gettime"},
+        "NSPrivacyAccessedAPICategoryUserDefaults": {"OBJC_CLASS_$_NSUserDefaults"},
         "NSPrivacyAccessedAPICategoryDiskSpace": {"statfs", "fstatfs", "statvfs", "fstatvfs", "getfsstat"},
     }
     return {category: sorted(symbols & names) for category, names in categories.items() if symbols & names}
@@ -50,9 +51,13 @@ def verify(app, version, build_number=None, require_store_sdk=False, check_api_s
     for category, expected in {
         "NSPrivacyAccessedAPICategoryFileTimestamp": {"C617.1", "3B52.1"},
         "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1"},
+        "NSPrivacyAccessedAPICategoryDiskSpace": {"E174.1"},
     }.items():
         if not expected <= reasons.get(category, set()):
             errors.append(f"隱私清單缺少 {category} 的用途")
+    # Only E174.1 matches this app's observed export-space behavior.
+    if reasons.get("NSPrivacyAccessedAPICategoryDiskSpace") != {"E174.1"}:
+        errors.append("DiskSpace 必須僅宣告符合匯出前空間檢查的 E174.1")
     if require_store_sdk:
         sdk = re.fullmatch(r"iphoneos(\d+)(?:\.\d+)*", info.get("DTSDKName", ""))
         if not sdk or int(sdk[1]) < 26:

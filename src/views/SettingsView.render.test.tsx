@@ -157,3 +157,14 @@ it.each([
   expect(section.split(`>${action}</button>`)).toHaveLength(2);
   if (status === "available") expect(section).toContain("Synthetic notes");
 });
+
+it.each(["ios", "android"])("hides local chat and memory settings on %s while keeping usable preferences", platform => {
+  const html = renderSettings(platform);
+  expect(html).not.toContain(">對話輸入</h2>");
+  for (const label of ["送出快捷鍵", "進行中送出", "記憶與交接壓縮", "用 AI 摘要記憶"]) expect(html).not.toContain(label);
+  for (const label of ["介面字級", "語言", "音效", "加密備份"]) expect(html).toContain(label);
+});
+it.each(["linux", "macos"])("retains local chat and memory settings on %s", platform => {
+  const html=renderSettings(platform);
+  expect(html).toContain(">對話輸入</h2>");expect(html).toContain("記憶與交接壓縮");
+});

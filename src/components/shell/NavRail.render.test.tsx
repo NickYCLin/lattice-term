@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { navigationItems } from "../../app/navigation";
+import { navigationItems, navigationItemsFor } from "../../app/navigation";
 import { I18nProvider } from "../../i18n";
 import { NavRail } from "./NavRail";
 
@@ -45,4 +45,24 @@ describe("navigation activity badge", () => {
     expect(markup).toContain('aria-label="Activity, 120 unread"');
     expect(markup).toContain(">99+</span>");
   });
+});
+
+it.each([true,false])("partitions mobile navigation only below the compact breakpoint: %s", narrow => {
+  vi.stubGlobal("window",{matchMedia:()=>({matches:narrow})});
+  try {
+    const html=renderToStaticMarkup(<I18nProvider locale="zh-TW"><NavRail mobile current="settings" items={navigationItemsFor("ios")} onSelect={vi.fn()} /></I18nProvider>);
+    const count=(html.match(/class="rail__item(?: is-active)?"/g)??[]).length;
+    expect(count).toBe(narrow?5:7);
+    for (const label of ["我的連線","工作階段","設定"]) expect(html).toContain(label);
+    expect(html.includes('>更多</span>')).toBe(narrow);
+    if(narrow){expect(html).toContain("遠端助理");expect(html).not.toContain('aria-label="通道"');}
+    else {expect(html).toContain("遠端 Agent Fleet");expect(html).toContain("金鑰保管庫");}
+  } finally {vi.unstubAllGlobals();}
+});
+it("keeps hidden-page selection and the activity unread badge visible on More",()=>{
+  vi.stubGlobal("window",{matchMedia:()=>({matches:true})});
+  try {
+    const html=renderToStaticMarkup(<I18nProvider locale="zh-TW"><NavRail mobile current="vault" items={navigationItemsFor("ios")} activityUnreadCount={3} onSelect={vi.fn()} /></I18nProvider>);
+    expect(html).toContain('aria-label="更多，活動有 3 個未讀"');expect(html).toContain('aria-current="page"');expect(html).toContain('>3</span>');
+  } finally {vi.unstubAllGlobals();}
 });
