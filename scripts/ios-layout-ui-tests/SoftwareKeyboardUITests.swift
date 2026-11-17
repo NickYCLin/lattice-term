@@ -69,11 +69,25 @@ final class SoftwareKeyboardUITests: XCTestCase {
         }
         button.tap()
         let field = app.textFields.firstMatch
-        guard field.waitForExistence(timeout: 8) else { return }
-        if !cheapKeyboardVisible() { field.tap() }
-        if cheapKeyboardVisible() {
+        guard field.waitForExistence(timeout: 8) else {
+            emit("skip-id-connect", extra: ["reason": "field-missing"])
+            attachShot("keyboard-\(deviceFamily())-id-connect-\(orientationName)-missing")
+            return
+        }
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 3) {
+            field.tap()
+        }
+        // 只在鍵盤確實出現後才做遮擋斷言；不要用瞬間 .exists 走進
+        // 會硬等再讓整項測試失敗的路徑（先前 iPhone SE 在對話框被捲走後發生）。
+        if app.keyboards.firstMatch.waitForExistence(timeout: 4) {
             assertFieldAboveKeyboard(field, surface: "id-connect", orientationName: orientationName)
             attachShot("keyboard-\(deviceFamily())-id-connect-\(orientationName)")
+        } else {
+            attachShot("keyboard-\(deviceFamily())-id-connect-\(orientationName)-no-keyboard")
+            emit("skip-id-connect", extra: [
+                "reason": "keyboard-missing",
+                "note": "以 ID 連線欄位已出現，但軟體鍵盤未在時限內出現；不讓整項測試失敗",
+            ])
         }
         dismissFormIfNeeded()
     }

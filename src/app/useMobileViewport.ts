@@ -18,6 +18,9 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
   let restWidth = currentWidth();
   let restHeight = currentHeight();
   let lastRevealKey = "";
+  let revealing = false;
+  let revealAttempts = 0;
+  let revealFocus: Element | null = null;
 
   const expectedRest = (width: number, height: number) => {
     const screenW = Number(win.screen?.width);
@@ -31,44 +34,69 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     return { width: restWidth, height: restHeight };
   };
 
+  const sheetScroller = (target: HTMLElement): HTMLElement | null => {
+    const body = target.closest?.(".drawer__body") as HTMLElement | null;
+    if (body) return body;
+    return (target.closest?.(".dialog, .drawer, [role='dialog']") as HTMLElement | null) ?? null;
+  };
+
   const revealFocusedField = () => {
+    if (revealing) return;
     const focused = root.ownerDocument.activeElement as HTMLElement | null;
     if (!focused?.matches?.("input, textarea, [contenteditable='true']") || !focused.getBoundingClientRect) return;
-    const visibleTop = viewport?.offsetTop ?? 0;
-    const visibleLeft = viewport?.offsetLeft ?? 0;
-    const visibleBottom = visibleTop + currentHeight();
-    const visibleRight = visibleLeft + currentWidth();
-    let clipTop = visibleTop;
-    let clipBottom = visibleBottom;
-    const clipLeft = visibleLeft;
-    const clipRight = visibleRight;
-    const body = focused.closest?.(".drawer__body") as HTMLElement | null;
-    if (body?.getBoundingClientRect) {
-      const bodyRect = body.getBoundingClientRect();
-      clipTop = Math.max(clipTop, bodyRect.top);
-      clipBottom = Math.min(clipBottom, bodyRect.bottom);
+    if (revealFocus !== focused) {
+      revealFocus = focused;
+      revealAttempts = 0;
     }
-    const drawer = focused.closest?.(".drawer") as HTMLElement | null;
-    const foot = drawer?.querySelector?.(".drawer__foot") as HTMLElement | null;
-    if (foot?.getBoundingClientRect) clipBottom = Math.min(clipBottom, foot.getBoundingClientRect().top);
-    const fieldRect = focused.getBoundingClientRect();
-    const verticallyVisible = fieldRect.bottom <= clipBottom - 8 && fieldRect.top >= clipTop + 8;
-    const horizontallyVisible = fieldRect.right <= clipRight - 8 && fieldRect.left >= clipLeft + 8;
-    if (verticallyVisible && horizontallyVisible) {
-      lastRevealKey = "";
-      return;
-    }
-    const revealKey = `${fieldRect.top}:${fieldRect.bottom}:${fieldRect.left}:${fieldRect.right}:${clipTop}:${clipBottom}:${clipLeft}:${clipRight}`;
-    if (revealKey === lastRevealKey) return;
-    lastRevealKey = revealKey;
-    if (body) {
-      if (fieldRect.bottom > clipBottom - 8) body.scrollTop += fieldRect.bottom - clipBottom + 8;
-      else if (fieldRect.top < clipTop + 8) body.scrollTop += fieldRect.top - clipTop - 8;
-    }
-    focused.scrollIntoView?.({ block: "center", inline: "nearest" });
-    const after = focused.getBoundingClientRect();
-    if (body && after.bottom !== fieldRect.bottom && after.bottom > clipBottom - 8) {
-      body.scrollTop += after.bottom - clipBottom + 8;
+    if (revealAttempts >= 6) return;
+    revealing = true;
+    try {
+      const visibleTop = viewport?.offsetTop ?? 0;
+      const visibleLeft = viewport?.offsetLeft ?? 0;
+      const visibleBottom = visibleTop + currentHeight();
+      const visibleRight = visibleLeft + currentWidth();
+      let clipTop = visibleTop;
+      let clipBottom = visibleBottom;
+      const clipLeft = visibleLeft;
+      const clipRight = visibleRight;
+      const body = focused.closest?.(".drawer__body") as HTMLElement | null;
+      if (body?.getBoundingClientRect) {
+        const bodyRect = body.getBoundingClientRect();
+        clipTop = Math.max(clipTop, bodyRect.top);
+        clipBottom = Math.min(clipBottom, bodyRect.bottom);
+      }
+      const sheet = focused.closest?.(".dialog, .drawer, [role='dialog']") as HTMLElement | null;
+      if (sheet?.getBoundingClientRect) {
+        const sheetRect = sheet.getBoundingClientRect();
+        clipTop = Math.max(clipTop, sheetRect.top);
+        clipBottom = Math.min(clipBottom, sheetRect.bottom);
+      }
+      const drawer = focused.closest?.(".drawer") as HTMLElement | null;
+      const foot = drawer?.querySelector?.(".drawer__foot") as HTMLElement | null;
+      if (foot?.getBoundingClientRect) clipBottom = Math.min(clipBottom, foot.getBoundingClientRect().top);
+      const fieldRect = focused.getBoundingClientRect();
+      const verticallyVisible = fieldRect.bottom <= clipBottom - 8 && fieldRect.top >= clipTop + 8;
+      const horizontallyVisible = fieldRect.right <= clipRight - 8 && fieldRect.left >= clipLeft + 8;
+      if (verticallyVisible && horizontallyVisible) {
+        lastRevealKey = "";
+        return;
+      }
+      const revealKey = `${fieldRect.top}:${fieldRect.bottom}:${fieldRect.left}:${fieldRect.right}:${clipTop}:${clipBottom}:${clipLeft}:${clipRight}`;
+      if (revealKey === lastRevealKey) return;
+      lastRevealKey = revealKey;
+      revealAttempts += 1;
+      const scroller = sheetScroller(focused);
+      if (scroller) {
+        if (fieldRect.bottom > clipBottom - 8) scroller.scrollTop += fieldRect.bottom - clipBottom + 8;
+        else if (fieldRect.top < clipTop + 8) scroller.scrollTop += fieldRect.top - clipTop - 8;
+        // Skip scrollIntoView: it also scrolls ancestor containers, and on a
+        // small iPhone can push a centered dialog off-screen and keep the
+        // event loop busy (iPhone SE, 以 ID 連線).
+        return;
+      }
+      focused.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    } finally {
+      revealing = false;
     }
   };
 

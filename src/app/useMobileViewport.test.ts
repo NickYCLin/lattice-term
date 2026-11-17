@@ -123,6 +123,37 @@ describe("mobile keyboard viewport", () => {
     stop();
   });
 
+  it("scrolls a focused dialog field without scrollIntoView so the overlay stays on screen", () => {
+    const mobile = fixture();
+    const dialog = {
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ top: 40, bottom: 460, left: 8, right: 382 }),
+    };
+    const field = mobile.root.ownerDocument.activeElement as {
+      closest: ReturnType<typeof vi.fn>;
+      getBoundingClientRect: ReturnType<typeof vi.fn>;
+      scrollIntoView?: ReturnType<typeof vi.fn>;
+    };
+    field.closest.mockImplementation((selector: string) => {
+      if (selector.includes("drawer__body")) return null;
+      if (selector.includes("dialog") || selector.includes("role='dialog'")) return dialog as unknown as HTMLElement;
+      return null;
+    });
+    field.getBoundingClientRect.mockReturnValue({ top: 500, bottom: 542, left: 16, right: 374 });
+    field.scrollIntoView = vi.fn();
+    const stop = mobile.start();
+    mobile.viewport.height = 520;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(dialog.scrollTop).toBe(90);
+    expect(field.scrollIntoView).not.toHaveBeenCalled();
+    const afterFirst = dialog.scrollTop;
+    mobile.viewport.dispatchEvent(new Event("scroll"));
+    mobile.flush();
+    expect(dialog.scrollTop).toBe(afterFirst);
+    stop();
+  });
+
   it("still reveals a focused field when innerHeight shrinks with the visual viewport", () => {
     const mobile = fixture();
     const body = { scrollTop: 0, getBoundingClientRect: () => ({ top: 80, bottom: 360 }) };
