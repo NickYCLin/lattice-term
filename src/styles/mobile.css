@@ -13,8 +13,16 @@
 }
 
 .app--mobile .view-header {
+  /* Override the narrow-desktop flex-start rule so the sidebar toggle
+     and the (description-hidden) title share one vertical center line. */
+  align-items: center;
   gap: var(--space-2);
   padding-block: var(--space-2);
+}
+
+.app--mobile .view-header .icon-button {
+  align-self: center;
+  flex: none;
 }
 
 .app--mobile .view-header__title { font-size: var(--text-lg); }

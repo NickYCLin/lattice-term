@@ -9,6 +9,7 @@ targets:
     sources:
       - LayoutUITests.swift
       - SoftwareKeyboardUITests.swift
+      - AlignmentUITests.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nickyclin.latticeterm.layoutchecks
