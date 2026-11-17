@@ -2913,6 +2913,49 @@ async fn agent_sessions(
     Ok(sessions)
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PromptReadinessView {
+    ready: bool,
+    blockers: Vec<&'static str>,
+    basis: String,
+    unconfirmed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reconciled: Option<bool>,
+}
+
+fn prompt_readiness_view(
+    registry: &AgentRegistry,
+    session_id: &str,
+    reconciled: Option<bool>,
+) -> Result<PromptReadinessView, String> {
+    let blockers = registry.mcp_prompt_blockers(session_id)?;
+    Ok(PromptReadinessView {
+        ready: blockers.is_empty(),
+        blockers,
+        basis: registry.mcp_readiness_basis(session_id)?.to_string(),
+        unconfirmed_ms: registry.prompt_unconfirmed_ms(session_id),
+        reconciled,
+    })
+}
+
+#[tauri::command]
+fn agent_prompt_readiness(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<PromptReadinessView, String> {
+    prompt_readiness_view(registry.inner(), &session_id, None)
+}
+
+#[tauri::command]
+fn agent_reconcile_prompt(
+    session_id: String,
+    registry: State<'_, Arc<AgentRegistry>>,
+) -> Result<PromptReadinessView, String> {
+    let reconciled = registry.mcp_reconcile_prompt(&session_id)?;
+    prompt_readiness_view(registry.inner(), &session_id, Some(reconciled))
+}
+
 #[tauri::command]
 async fn agent_rename(
     session_id: String,
@@ -6601,6 +6644,8 @@ pub fn run() {
             agent_chat_stage_remote_image,
             agent_disconnect,
             agent_sessions,
+            agent_prompt_readiness,
+            agent_reconcile_prompt,
             agent_rename,
             agent_output_snapshots,
             agent_daemon_status,

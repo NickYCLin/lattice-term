@@ -14,7 +14,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 use zeroize::Zeroizing;
 
@@ -1063,6 +1063,9 @@ struct AgentSessionEntry {
     prompt_screen: Mutex<prompt_screen::PromptScreen>,
     /// A quiet screen cannot prove that a previously submitted turn finished.
     terminal_turn_started: AtomicBool,
+    terminal_turn_started_at: Mutex<Option<Instant>>,
+    turn_receipt_cache: Mutex<Option<TurnReceiptCache>>,
+    turn_reconciled_from_rollout: AtomicBool,
     /// Native resume can replay work markers before any new turn is submitted.
     resumed_history: bool,
     startup_gate: StartupGate,
@@ -2529,8 +2532,12 @@ impl AgentRegistry {
         // During native resume these bytes may describe a historical turn.
         // Keep its visible lifecycle guess, but only real input/integration
         // may permanently disqualify the resumed session's first prompt.
-        if next == AgentLifecycle::Working && !(from_output && entry.resumed_history) {
-            entry.terminal_turn_started.store(true, Ordering::Release);
+        if source == AgentStateSource::Integration
+            && matches!(next, AgentLifecycle::Done | AgentLifecycle::Idle)
+        {
+            clear_terminal_turn_started(&entry, false);
+        } else if next == AgentLifecycle::Working && !(from_output && entry.resumed_history) {
+            mark_terminal_turn_started(&entry);
         }
         true
     }
@@ -2560,7 +2567,7 @@ impl AgentRegistry {
         }
         summary.state = AgentLifecycle::Working;
         summary.state_source = AgentStateSource::Heuristic;
-        entry.terminal_turn_started.store(true, Ordering::Release);
+        mark_terminal_turn_started(&entry);
         true
     }
 
@@ -3040,6 +3047,7 @@ impl AgentRegistry {
         &self,
         session_id: &str,
     ) -> Result<Vec<&'static str>, String> {
+        self.refresh_completed_turn_from_rollout(session_id);
         let entry = self.get(session_id)?;
         let input = entry.input.lock().map_err(|e| e.to_string())?;
         let summary = entry.summary.lock().map_err(|e| e.to_string())?;
@@ -3079,6 +3087,71 @@ impl AgentRegistry {
             reasons.push("queued_prompts_pending");
         }
         Ok(reasons)
+    }
+
+    pub(crate) fn prompt_unconfirmed_ms(&self, session_id: &str) -> Option<u64> {
+        let entry = self.get(session_id).ok()?;
+        if !entry.terminal_turn_started.load(Ordering::Acquire) {
+            return None;
+        }
+        let ms = entry
+            .terminal_turn_started_at
+            .lock()
+            .ok()?
+            .map(|at| at.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+        Some(ms)
+    }
+
+    pub(crate) fn mcp_reconcile_prompt(&self, session_id: &str) -> Result<bool, String> {
+        Ok(self.refresh_completed_turn_from_rollout(session_id))
+    }
+
+    /// When the official hook never reported, a finished native transcript is
+    /// enough to release a stale turn lock. Human drafts, approvals and an
+    /// actually open turn stay blocked.
+    fn refresh_completed_turn_from_rollout(&self, session_id: &str) -> bool {
+        let Ok(entry) = self.get(session_id) else {
+            return false;
+        };
+        if !entry.terminal_turn_started.load(Ordering::Acquire) {
+            return false;
+        }
+        let Ok(input) = entry.input.try_lock() else {
+            return false;
+        };
+        if input.desktop_busy() || input.startup_seed_pending {
+            return false;
+        }
+        let Ok(summary) = entry.summary.lock() else {
+            return false;
+        };
+        if !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done) {
+            return false;
+        }
+        if self.approvals.current(session_id).is_some() {
+            return false;
+        }
+        if entry
+            .queued_prompts
+            .lock()
+            .is_ok_and(|queue| !queue.is_empty())
+        {
+            return false;
+        }
+        let Some(native_id) = summary.captured_session_id.as_deref() else {
+            return false;
+        };
+        let Some(complete) = cached_native_turn_complete(&entry, &summary, native_id) else {
+            return false;
+        };
+        if !complete {
+            return false;
+        }
+        drop(summary);
+        drop(input);
+        clear_terminal_turn_started(&entry, true);
+        true
     }
 
     pub(crate) fn native_command_pending(&self, session_id: &str) -> bool {
@@ -3251,7 +3324,9 @@ impl AgentRegistry {
             } else if summary.state_source != AgentStateSource::Integration
                 && self.foreground_terminal_blocker(&entry, &summary).is_none()
             {
-                if entry.resumed_history {
+                if entry.turn_reconciled_from_rollout.load(Ordering::Acquire) {
+                    "completed_native_turn"
+                } else if entry.resumed_history {
                     "stable_empty_resumed_terminal_prompt"
                 } else {
                     "stable_empty_terminal_prompt"
@@ -8563,6 +8638,9 @@ pub(crate) fn launch_with_replay_and_tools(
         )),
         prompt_screen: Mutex::new(prompt_screen::PromptScreen::new(size.rows, size.cols)),
         terminal_turn_started: AtomicBool::new(false),
+        terminal_turn_started_at: Mutex::new(None),
+        turn_receipt_cache: Mutex::new(None),
+        turn_reconciled_from_rollout: AtomicBool::new(false),
         resumed_history: request.restore_existing_session || request.resume_session_id.is_some(),
         startup_gate: StartupGate::default(),
         completion_gate: Mutex::new(CompletionReadiness::default()),
@@ -9393,10 +9471,10 @@ fn record_sent_input(
         },
     };
     if submission == PromptSubmission::Text {
-        entry.terminal_turn_started.store(true, Ordering::Release);
+        mark_terminal_turn_started(entry);
     }
     if registry.mark_working_from_input(session_id, submission) {
-        entry.terminal_turn_started.store(true, Ordering::Release);
+        mark_terminal_turn_started(entry);
         sink.state(
             session_id,
             AgentLifecycle::Working,
@@ -9650,7 +9728,7 @@ fn send_prompt_bytes_locked(
     }
     // Native app-server submissions bypass record_sent_input. Unknown write
     // outcomes also need an official completion before another fallback.
-    entry.terminal_turn_started.store(true, Ordering::Release);
+    mark_terminal_turn_started(&entry);
     #[cfg(windows)]
     if let Some(control) = entry.codex_control.as_ref().filter(|_| {
         grant.is_some() || (bytes.starts_with(b"\x1b[200~") && bytes.ends_with(b"\x1b[201~\r"))
@@ -9766,6 +9844,68 @@ fn send_prompt_bytes_locked(
 fn releases_queued_prompt(state: AgentLifecycle, source: AgentStateSource) -> bool {
     source == AgentStateSource::Integration
         && matches!(state, AgentLifecycle::Done | AgentLifecycle::Idle)
+}
+
+pub const PROMPT_STUCK_AFTER: Duration = Duration::from_secs(30);
+
+struct TurnReceiptCache {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    len: u64,
+    complete: bool,
+}
+
+fn mark_terminal_turn_started(entry: &AgentSessionEntry) {
+    if !entry.terminal_turn_started.swap(true, Ordering::AcqRel) {
+        if let Ok(mut started_at) = entry.terminal_turn_started_at.lock() {
+            *started_at = Some(Instant::now());
+        }
+    }
+    entry
+        .turn_reconciled_from_rollout
+        .store(false, Ordering::Release);
+}
+
+fn clear_terminal_turn_started(entry: &AgentSessionEntry, from_rollout: bool) {
+    entry.terminal_turn_started.store(false, Ordering::Release);
+    if let Ok(mut started_at) = entry.terminal_turn_started_at.lock() {
+        *started_at = None;
+    }
+    entry
+        .turn_reconciled_from_rollout
+        .store(from_rollout, Ordering::Release);
+}
+
+fn cached_native_turn_complete(
+    entry: &AgentSessionEntry,
+    summary: &AgentSessionSummary,
+    native_id: &str,
+) -> Option<bool> {
+    if let Ok(cache) = entry.turn_receipt_cache.lock() {
+        if let Some(current) = cache.as_ref() {
+            if let Ok(metadata) = std::fs::metadata(&current.path) {
+                if current.len == metadata.len() && current.modified == metadata.modified().ok() {
+                    return Some(current.complete);
+                }
+            }
+        }
+    }
+    let (path, complete) = crate::transcript::native_turn_receipt(
+        &summary.definition_id,
+        &summary.working_directory,
+        native_id,
+        summary.profile_config_path.as_deref().map(Path::new),
+    )?;
+    let metadata = std::fs::metadata(&path).ok()?;
+    if let Ok(mut cache) = entry.turn_receipt_cache.lock() {
+        *cache = Some(TurnReceiptCache {
+            path,
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            complete,
+        });
+    }
+    Some(complete)
 }
 
 /// Why a queued prompt stays put even though its own session is free.

@@ -1671,7 +1671,7 @@ impl DesktopService {
             && matches!(
                 operation,
                 DesktopOperation::DesktopAgent {
-                    action: DesktopAgentAction::Prompt { .. },
+                    action: DesktopAgentAction::Prompt { .. } | DesktopAgentAction::Reconcile {},
                     ..
                 }
             )

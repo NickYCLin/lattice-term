@@ -1060,6 +1060,8 @@ mod robust_tests;
 mod sync_tests;
 
 mod additional;
+mod turn_receipt;
+pub(crate) use turn_receipt::native_turn_receipt;
 pub(crate) mod diagnostics;
 mod images;
 pub(crate) mod normalized;

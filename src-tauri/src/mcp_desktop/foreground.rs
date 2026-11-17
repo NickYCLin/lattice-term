@@ -24,6 +24,8 @@ pub enum DesktopAgentAction {
         #[serde(default)]
         mode: DesktopPromptMode,
     },
+    /// Recheck official rollout and terminal state; never types into the CLI.
+    Reconcile {},
 }
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +43,7 @@ impl DesktopAgentAction {
         match self {
             Self::State {} => Scope::FleetObserve,
             Self::Read { .. } => Scope::FleetRead,
-            Self::Prompt { .. } => Scope::FleetControl,
+            Self::Prompt { .. } | Self::Reconcile {} => Scope::FleetControl,
         }
     }
     pub(super) fn request_id(&self) -> Option<&str> {
@@ -243,7 +245,7 @@ impl DesktopService {
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
                 "state":summary.state,"stateSource":summary.state_source,"queuedPrompts":summary.queued_prompts,
-                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"basis":registry.mcp_readiness_basis(&grant.session_id).map_err(|_| ServiceError::unavailable())?,"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
+                "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"basis":registry.mcp_readiness_basis(&grant.session_id).map_err(|_| ServiceError::unavailable())?,"unconfirmedMs":registry.prompt_unconfirmed_ms(&grant.session_id),"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
                 "configuration":launch_identity(&summary),"readOutput":grant.view.scopes.fleet_read,"control":grant.view.scopes.fleet_control}))
             }
             DesktopAgentAction::Read { cursor, max_bytes } => {
@@ -253,6 +255,28 @@ impl DesktopService {
                 Ok(crate::agent_daemon::mcp::render_range(
                     range, true, *max_bytes,
                 ))
+            }
+            DesktopAgentAction::Reconcile {} => {
+                let reconciled = registry
+                    .mcp_reconcile_prompt(&grant.session_id)
+                    .map_err(|_| ServiceError::unavailable())?;
+                let blockers = registry
+                    .mcp_prompt_blockers(&grant.session_id)
+                    .map_err(|_| ServiceError::unavailable())?;
+                Ok(json!({
+                    "sessionId": summary.session_id,
+                    "reconciled": reconciled,
+                    "state": summary.state,
+                    "stateSource": summary.state_source,
+                    "promptReadiness": {
+                        "ready": blockers.is_empty(),
+                        "blockers": blockers,
+                        "snapshotOnly": true,
+                        "basis": registry.mcp_readiness_basis(&grant.session_id).map_err(|_| ServiceError::unavailable())?,
+                        "unconfirmedMs": registry.prompt_unconfirmed_ms(&grant.session_id),
+                        "lastInputKind": registry.mcp_last_input_kind(&grant.session_id)
+                    }
+                }))
             }
             DesktopAgentAction::Prompt { text, mode, .. } => {
                 let mode = *mode;

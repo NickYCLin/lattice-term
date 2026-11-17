@@ -30,6 +30,8 @@ import { SessionPromptQueue } from "./SessionPromptQueue";
 import { sessionSubmissionsNotQueued } from "../../app/sessionSubmittedPrompts";
 import { useConversationDraft } from "../../app/useConversationDraft";
 import { SESSION_PROMPT_NOT_READY, sessionNeedsReadyConfirmation } from "../../app/sessionConversationReadiness";
+import { usePromptReadiness } from "../../app/usePromptReadiness";
+import { SessionPromptReadinessNotice } from "./SessionPromptReadinessNotice";
 import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/useAgentSessions";
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
@@ -114,6 +116,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
   const working = live && session.state === "working";
   const attention = live && session.state === "needsAttention";
   const unconfirmed = sessionNeedsReadyConfirmation(session);
+  const readiness = usePromptReadiness(session.sessionId, live && unconfirmed);
   const waitingForReady = conversation.sendError === SESSION_PROMPT_NOT_READY;
   const queuedCount = Math.max(session.queuedPrompts, conversation.queued ?? 0);
   const { acknowledge } = conversation;
@@ -396,6 +399,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
           ? t("sessionChat.permission.gone")
           : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
         {waitingForReady && <Callout tone="warn">{t("sessionChat.notReady")}</Callout>}
+        {unconfirmed && <SessionPromptReadinessNotice readiness={readiness.value} pending={readiness.pending} error={readiness.error} onReconcile={() => { void readiness.reconcile(); }} />}
         {queuedCount > 0 && <div role="status">
           <p>{t("sessionChat.queued", { count: queuedCount })}</p>
           {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
