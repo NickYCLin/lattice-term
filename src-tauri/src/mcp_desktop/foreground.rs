@@ -233,14 +233,14 @@ impl DesktopService {
         if !self.connected(grant) {
             return Err(ServiceError::unavailable());
         }
-        let summary = registry
-            .session_summary(&grant.session_id)
-            .ok_or_else(ServiceError::unavailable)?;
         match action {
             DesktopAgentAction::State {} => {
                 let blockers = registry
                     .mcp_prompt_blockers(&grant.session_id)
                     .map_err(|_| ServiceError::unavailable())?;
+                let summary = registry
+                    .session_summary(&grant.session_id)
+                    .ok_or_else(ServiceError::unavailable)?;
                 Ok(json!({"sessionId":summary.session_id,"source":"desktop",
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
@@ -263,6 +263,9 @@ impl DesktopService {
                 let blockers = registry
                     .mcp_prompt_blockers(&grant.session_id)
                     .map_err(|_| ServiceError::unavailable())?;
+                let summary = registry
+                    .session_summary(&grant.session_id)
+                    .ok_or_else(ServiceError::unavailable)?;
                 Ok(json!({
                     "sessionId": summary.session_id,
                     "reconciled": reconciled,

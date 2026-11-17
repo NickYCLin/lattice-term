@@ -654,3 +654,98 @@ async fn heuristic_idle_without_a_completed_rollout_stays_unconfirmed() {
     assert!(state["promptReadiness"]["blockers"].as_array().unwrap().iter().any(|value| value == "terminal_turn_unconfirmed"));
     assert!(f.registry.get(&f.id).unwrap().terminal_turn_started.load(Ordering::Acquire));
 }
+
+#[tokio::test]
+async fn completed_native_rollout_recovers_a_heuristic_working_session() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let profile = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let native_id = {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.profile_config_path = Some(profile.path().display().to_string());
+        summary.working_directory = "/synthetic".into();
+        summary.captured_session_id.clone().unwrap()
+    };
+    write_codex_turn_rollout(profile.path(), &native_id, true);
+    f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration);
+    f.registry
+        .record_output(&f.id, "\x1b[2J\x1b[H\x1b[?2004h\x1b[?25h› ".as_bytes())
+        .unwrap();
+    {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.state = AgentLifecycle::Working;
+        summary.state_source = AgentStateSource::Heuristic;
+    }
+    entry.prompt_screen.lock().unwrap().settle_for_test();
+    *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+    let state = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(state["state"], "idle", "{state}");
+    assert_eq!(state["stateSource"], "heuristic");
+    assert_eq!(state["promptReadiness"]["ready"], true, "{state}");
+    assert_eq!(state["promptReadiness"]["basis"], "completed_native_turn");
+    assert!(!entry.terminal_turn_started.load(Ordering::Acquire));
+    let reconciled = f.call(&target, Action::Reconcile {}).await.unwrap();
+    assert_eq!(reconciled["reconciled"], false);
+    assert_eq!(reconciled["state"], "idle");
+    assert_eq!(reconciled["promptReadiness"]["ready"], true);
+}
+
+#[tokio::test]
+async fn open_native_turn_keeps_a_heuristic_working_session_unready() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let profile = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let native_id = {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.profile_config_path = Some(profile.path().display().to_string());
+        summary.working_directory = "/synthetic".into();
+        summary.captured_session_id.clone().unwrap()
+    };
+    write_codex_turn_rollout(profile.path(), &native_id, false);
+    f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration);
+    {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.state = AgentLifecycle::Working;
+        summary.state_source = AgentStateSource::Heuristic;
+    }
+    let blocked = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(blocked["state"], "working", "{blocked}");
+    assert_eq!(blocked["promptReadiness"]["ready"], false, "{blocked}");
+    let blockers = blocked["promptReadiness"]["blockers"].as_array().unwrap();
+    assert!(
+        blockers.iter().any(|value| value == "lifecycle_not_ready" || value == "terminal_turn_unconfirmed"),
+        "{blocked}"
+    );
+    let refused = f.call(&target, Action::Reconcile {}).await.unwrap();
+    assert_eq!(refused["reconciled"], false);
+    assert_eq!(refused["state"], "working");
+    assert_eq!(refused["promptReadiness"]["ready"], false);
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn official_integration_working_is_not_settled_from_a_completed_rollout() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let profile = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let native_id = {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.profile_config_path = Some(profile.path().display().to_string());
+        summary.working_directory = "/synthetic".into();
+        summary.captured_session_id.clone().unwrap()
+    };
+    write_codex_turn_rollout(profile.path(), &native_id, true);
+    f.registry.update_state(&f.id, AgentLifecycle::Working, AgentStateSource::Integration);
+    let blocked = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(blocked["state"], "working", "{blocked}");
+    assert_eq!(blocked["stateSource"], "integration");
+    assert_eq!(blocked["promptReadiness"]["ready"], false);
+    let refused = f.call(&target, Action::Reconcile {}).await.unwrap();
+    assert_eq!(refused["reconciled"], false);
+    assert_eq!(refused["state"], "working");
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+}

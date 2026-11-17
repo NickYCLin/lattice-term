@@ -3108,8 +3108,8 @@ impl AgentRegistry {
     }
 
     /// When the official hook never reported, a finished native transcript is
-    /// enough to release a stale turn lock. Human drafts, approvals and an
-    /// actually open turn stay blocked.
+    /// enough to release a stale turn lock and a stale heuristic "working"
+    /// guess. Human drafts, approvals and an actually open turn stay blocked.
     fn refresh_completed_turn_from_rollout(&self, session_id: &str) -> bool {
         let Ok(entry) = self.get(session_id) else {
             return false;
@@ -3123,12 +3123,9 @@ impl AgentRegistry {
         if input.desktop_busy() || input.startup_seed_pending {
             return false;
         }
-        let Ok(summary) = entry.summary.lock() else {
+        let Ok(mut summary) = entry.summary.lock() else {
             return false;
         };
-        if !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done) {
-            return false;
-        }
         if self.approvals.current(session_id).is_some() {
             return false;
         }
@@ -3147,6 +3144,16 @@ impl AgentRegistry {
         };
         if !complete {
             return false;
+        }
+        let settle_heuristic_working = summary.state == AgentLifecycle::Working
+            && summary.state_source == AgentStateSource::Heuristic;
+        if !settle_heuristic_working
+            && !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done)
+        {
+            return false;
+        }
+        if settle_heuristic_working {
+            summary.state = AgentLifecycle::Idle;
         }
         drop(summary);
         drop(input);
