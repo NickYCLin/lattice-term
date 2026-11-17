@@ -10,7 +10,7 @@ import { TerminalPane } from "./TerminalPane";
 
 const mocks = vi.hoisted(() => ({ terminals: [] as any[] }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class {
-  textarea = Object.assign(new EventTarget(), { value: "" });
+  textarea = Object.assign(new EventTarget(), { value: "", setAttribute() {} });
   options: Record<string, unknown>;
   keyHandler: (event: KeyboardEvent) => boolean = () => true;
   dataHandler: (data: string) => void = () => {};
