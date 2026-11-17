@@ -20,6 +20,7 @@ import {
 import { NativeHistoryContext, type NativeHistory } from "../app/useNativeConversations";
 import type { LocalConversation } from "../app/localConversationSessions";
 import { I18nProvider } from "../i18n";
+import { loadCatalogue } from "../i18n/catalog";
 import { ChatView } from "./ChatView";
 import { createAutomation, emptyAutomationDraft } from "../app/agentAutomations";
 import { CLI_PROXY_SETTINGS_KEY } from "../app/cliProxyApi";
@@ -436,4 +437,46 @@ it("keeps one advanced settings trigger, composer metadata and sidebar managemen
   expect(markup).toContain('aria-label="封存：設定入口檢查"');
   expect(markup).toContain('class="session-composer__model"');
   expect(markup).toContain('aria-label="權限：');
+});
+
+
+describe("Codex conversation writer conflicts", () => {
+  it.each([
+    "This conversation is open in another Codex app, such as Codex Desktop. Close it there, then send again.",
+    "thread has an active writer",
+    "thread has a live local writer",
+    "Active writer; authentication check returned 401",
+  ])("explains a locked conversation in Traditional Chinese: %s", error => {
+    const thread = fakeThread({ items: [{ type: "turnEnd", id: "locked-turn", usage: null, costUsd: null, durationMs: null, error }] });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(html).toContain("這段對話正在其他 Codex 應用程式中使用");
+    expect(html).toContain("同一時間只允許一個應用程式寫入同一段對話");
+    expect(html).toContain("即使切到別的對話也可能持續占用");
+    expect(html).toContain("請重新開啟 Codex Desktop");
+    expect(html).toContain("請先結束該工作階段");
+    expect(html).toContain(error);
+    expect(html).not.toContain("助理需要重新登入");
+  });
+  it.each([
+    ["login expired", "助理需要重新登入"],
+    ["synthetic transport failure", "這一輪沒有完成"],
+  ])("preserves other errors: %s", (error, title) => {
+    const thread = fakeThread({ items: [{ type: "turnEnd", id: "other-turn", usage: null, costUsd: null, durationMs: null, error }] });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id }));
+    expect(html).toContain(title);
+    expect(html).not.toContain("這段對話正在其他 Codex 應用程式中使用");
+  });
+});
+
+
+it.each(["en", "zh-CN"] as const)("renders writer-lock guidance from the %s catalogue", async locale => {
+  const messages = await loadCatalogue(locale);
+  const thread = fakeThread({ items: [{ type: "turnEnd", id: "locked-turn", usage: null, costUsd: null, durationMs: null, error: "thread has a live local writer" }] });
+  const html = renderToStaticMarkup(<I18nProvider locale={locale}><ChatView
+    chat={fakeChatApi({ threads: [thread], activeThreadId: thread.id })} agents={fakeAgentApi()}
+    automations={fakeAutomationsApi()} onOpenSession={() => {}} />
+  </I18nProvider>);
+  expect(html).toContain(messages["chat.turn.openElsewhere"]);
+  expect(html).toContain(messages["chat.turn.openElsewhere.body"]);
+  expect(html).toContain("thread has a live local writer");
 });

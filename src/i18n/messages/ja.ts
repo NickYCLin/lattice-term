@@ -4,6 +4,10 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "chat.turn.openElsewhere": "この会話は別の Codex アプリで使用されています",
+  "chat.turn.openElsewhere.body": "Codex では、同じ会話に同時に書き込めるアプリは1つだけです。Codex Desktop でメッセージを送信すると、別の会話に切り替えてもロックが残る場合があります。Codex Desktop を再起動してから LatticeTerm に戻り、もう一度送信してください。LatticeTerm のセッションページのターミナルで同じ会話を開いている場合は、先にそのセッションを終了してください。",
+  "native.system": "システムイベント",
+  "native.compaction": "コンテキスト圧縮イベント",
   "nav.more": "その他",
   "nav.moreUnread": "その他、未読のアクティビティ {count} 件",
   "nav.remoteShort": "リモート",

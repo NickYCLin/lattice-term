@@ -4,6 +4,10 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "chat.turn.openElsewhere": "이 대화는 다른 Codex 앱에서 사용 중입니다",
+  "chat.turn.openElsewhere.body": "Codex는 한 번에 하나의 앱만 같은 대화에 쓸 수 있습니다. Codex Desktop에서 메시지를 보낸 뒤 다른 대화로 전환해도 잠금이 유지될 수 있습니다. Codex Desktop을 다시 시작한 다음 LatticeTerm으로 돌아와 다시 보내세요. LatticeTerm 세션 페이지의 터미널에서 같은 대화가 열려 있다면 먼저 해당 세션을 종료하세요.",
+  "native.system": "시스템 이벤트",
+  "native.compaction": "컨텍스트 압축 이벤트",
   "nav.more": "더 보기",
   "nav.moreUnread": "더 보기, 읽지 않은 활동 {count}개",
   "nav.remoteShort": "원격",

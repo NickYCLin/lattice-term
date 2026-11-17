@@ -4,6 +4,10 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "chat.turn.openElsewhere": "这段对话正在其他 Codex 应用程序中使用",
+  "chat.turn.openElsewhere.body": "Codex 同一时间只允许一个应用程序写入同一段对话。Codex Desktop 发送过消息后，即使切到别的对话也可能持续占用。请重新打开 Codex Desktop，再回到 LatticeTerm 发送一次。如果 LatticeTerm 工作会话页的终端正打开同一段对话，请先结束该工作会话。",
+  "native.system": "系统事件",
+  "native.compaction": "上下文压缩事件",
   "nav.more": "更多",
   "nav.moreUnread": "更多，活动有 {count} 个未读",
   "nav.remoteShort": "远端助理",

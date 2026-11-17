@@ -6,6 +6,9 @@
  */
 
 export const zhTW = {
+  "chat.turn.openElsewhere": "這段對話正在其他 Codex 應用程式中使用",
+  "chat.turn.openElsewhere.body": "Codex 同一時間只允許一個應用程式寫入同一段對話。Codex Desktop 送出過訊息後，即使切到別的對話也可能持續占用。請重新開啟 Codex Desktop，再回到 LatticeTerm 送一次。若 LatticeTerm 工作階段頁的終端機正開著同一段對話，請先結束該工作階段。",
+  "native.compaction": "內容壓縮事件",
   "nav.more": "更多",
   "nav.moreUnread": "更多，活動有 {count} 個未讀",
   "nav.remoteShort": "遠端助理",
@@ -2034,7 +2037,7 @@ export const zhTW = {
   "native.unreadable": "內容已加密或不可讀",
   "native.diff": "檔案差異",
   "native.subagent": "子代理紀錄",
-  "native.system": "系統／壓縮事件",
+  "native.system": "系統事件",
   "native.unsupportedFormat": "此版本格式尚未支援。",
   "native.databaseBusy": "紀錄資料庫仍有未合併的 WAL，請先在原 CLI 正常關閉，再重新讀取。",
   "native.handoff": "交接到 {assistant}（新對話）",

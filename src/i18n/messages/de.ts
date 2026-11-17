@@ -4,6 +4,10 @@ import type { Messages } from "./zh-TW";
 
 export const messages: Messages = {
   ...en,
+  "chat.turn.openElsewhere": "Diese Unterhaltung wird in einer anderen Codex-App verwendet",
+  "chat.turn.openElsewhere.body": "Codex erlaubt jeweils nur einer App, in eine Unterhaltung zu schreiben. Nach dem Senden einer Nachricht kann Codex Desktop die Unterhaltung auch beim Wechsel zu einer anderen Unterhaltung gesperrt halten. Starte Codex Desktop neu und sende die Nachricht danach erneut in LatticeTerm. Ist dieselbe Unterhaltung in einem Terminal auf der Seite „Sitzungen“ von LatticeTerm geöffnet, beende zuerst diese Sitzung.",
+  "native.system": "Systemereignis",
+  "native.compaction": "Kontextkomprimierung",
   "nav.more": "Mehr",
   "nav.moreUnread": "Mehr, {count} ungelesene Aktivitäten",
   "nav.remoteShort": "Remote",

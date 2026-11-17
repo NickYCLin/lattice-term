@@ -1714,10 +1714,13 @@ function ChatItemView({
       if (item.error) {
         // A headless turn cannot open the CLI's own login screen, so an
         // expired login surfaces as a bare error. Say what to do about it.
-        const needsLogin =
+        const openElsewhere =
+          /This conversation is open in another Codex app|active writer|live local writer/i.test(item.error);
+        const needsLogin = !openElsewhere &&
           /authenticat|oauth|logged in|log in|login|unauthori[sz]ed|\b401\b/i.test(item.error);
         return (
-          <Callout tone="danger" title={needsLogin ? t("chat.turn.needsLogin") : t("chat.turn.failed")}>
+          <Callout tone="danger" title={openElsewhere ? t("chat.turn.openElsewhere") : needsLogin ? t("chat.turn.needsLogin") : t("chat.turn.failed")}>
+            {openElsewhere && <p className="chat-callout__lead">{t("chat.turn.openElsewhere.body")}</p>}
             {needsLogin && <p className="chat-callout__lead">{t("chat.turn.needsLogin.body", { assistant })}</p>}
             {item.error}
           </Callout>
