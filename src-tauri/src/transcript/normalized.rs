@@ -566,10 +566,15 @@ impl Parser<'_> {
                     if let Some(diff) = payload["diff"].as_str() {
                         self.emit(self.item(id, ItemKind::FileChange, diff.into()));
                     }
-                } else if matches!(
-                    payload["type"].as_str(),
-                    Some("context_compacted" | "task_complete" | "turn_aborted")
-                ) {
+                } else if row["type"] == "event_msg" && payload["type"] == "task_complete" {
+                    // A lifecycle boundary is not a visible system/compaction event.
+                    self.turn = None;
+                } else if row["type"] == "event_msg"
+                    && matches!(
+                        payload["type"].as_str(),
+                        Some("context_compacted" | "turn_aborted")
+                    )
+                {
                     self.emit(self.item(
                         id,
                         ItemKind::System,
@@ -1711,6 +1716,68 @@ mod tests {
         assert!(found.iter().any(|item| item.kind == ItemKind::System));
         assert!(!serde_json::to_string(&found).unwrap().contains("NEVER_"));
     }
+    #[test]
+    fn codex_turn_completion_and_metadata_do_not_masquerade_as_compaction() {
+        let mut rows = vec![json!({"type":"session_meta","payload":{"id":"synthetic"}})];
+        for turn in ["t1", "t2", "t3"] {
+            rows.extend([
+                json!({"type":"event_msg","payload":{"type":"task_started","turn_id":turn}}),
+                json!({"type":"turn_context","payload":{"turn_id":turn}}),
+                json!({"type":"response_item","payload":{"type":"additional_tools","role":"developer","tools":[]}}),
+                json!({"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"synthetic internal configuration"}]}}),
+                json!({"type":"world_state","payload":{}}),
+                json!({"type":"response_item","payload":{"type":"world_state"}}),
+                json!({"type":"event_msg","payload":{"type":"thread_settings_applied"}}),
+                json!({"type":"event_msg","payload":{"type":"item_completed"}}),
+                json!({"type":"token_usage_record","payload":{}}),
+                json!({"type":"event_msg","payload":{"type":"token_count"}}),
+                json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":format!("request {turn}")}]}}),
+                json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":format!("answer {turn}")}]}}),
+                json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":turn}}),
+            ]);
+        }
+        let (_dir, path) = fixture(&rows);
+        let original = fs::read(&path).unwrap();
+        let found = items(&path, TranscriptKind::Codex);
+        assert_eq!(
+            found.len(),
+            6,
+            "only the user and assistant messages are visible"
+        );
+        for (pair, turn) in found.as_chunks::<2>().0.iter().zip(["t1", "t2", "t3"]) {
+            assert_eq!(pair[0].kind, ItemKind::User);
+            assert_eq!(pair[1].kind, ItemKind::Assistant);
+            assert_eq!(pair[0].turn_id.as_deref(), Some(turn));
+            assert_eq!(pair[1].turn_id.as_deref(), Some(turn));
+        }
+        assert_eq!(fs::read(&path).unwrap(), original);
+        // The large/compressed-file reader shares the classification too.
+        let spooled = codex_spool::page(&path, None).unwrap();
+        assert_eq!(
+            spooled
+                .turns
+                .iter()
+                .map(|turn| turn.items.len())
+                .sum::<usize>(),
+            6
+        );
+    }
+
+    #[test]
+    fn codex_real_compaction_and_aborted_turns_remain_visible() {
+        let (_dir, path) = fixture(&[
+            json!({"type":"compacted","payload":{"message":"synthetic compacted context"}}),
+            json!({"type":"event_msg","payload":{"type":"context_compacted"}}),
+            json!({"type":"event_msg","payload":{"type":"turn_aborted"}}),
+        ]);
+        let found = items(&path, TranscriptKind::Codex);
+        assert_eq!(found.len(), 3);
+        assert!(found.iter().all(|item| item.kind == ItemKind::System));
+        assert_eq!(found[0].text, "context_compacted");
+        assert_eq!(found[1].text, "context_compacted");
+        assert_eq!(found[2].text, "turn_aborted");
+    }
+
     #[test]
     fn gemini_json_and_jsonl_share_rich_normalization() {
         let messages = vec![

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
+import { loadCatalogue } from "../../i18n/catalog";
 import { NativeHistoryReader, NativeRecordView } from "./NativeRecordView";
 import type { NativeRecord, NativeRecordPage } from "../../app/nativeRecords";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -340,4 +341,43 @@ it("walks to the beginning and back through recycled pages using bidirectional c
 it("marks a clipped record while retaining its readable prefix",()=>{
   const html=renderToStaticMarkup(<I18nProvider locale="zh-TW"><NativeRecordView item={record("assistant",{text:"Synthetic readable prefix",truncated:true})} threadId="owner" directory="/synthetic" /></I18nProvider>);
   expect(html).toContain("Synthetic readable prefix");expect(html).toContain("此則內容過長，已截斷顯示");
+});
+
+it.each([
+  ["zh-TW", "系統事件", "內容壓縮事件"],
+  ["zh-CN", "系统事件", "上下文压缩事件"],
+  ["en", "System event", "Context compaction event"],
+] as const)("distinguishes true compaction from generic system events in %s", async (locale, system, compaction) => {
+  await loadCatalogue(locale);
+  const render = (item: NativeRecord) => renderToStaticMarkup(<I18nProvider locale={locale}>
+    <NativeRecordView item={item} threadId="synthetic-owner" directory="/synthetic" />
+  </I18nProvider>);
+  for (const text of ["context_compacted", "compacted"]) {
+    const html = render(record("system", { text }));
+    expect(html).toContain(`<summary>${compaction}</summary>`);
+    expect(html).not.toContain(`<summary>${system}</summary>`);
+  }
+  for (const text of ["turn_aborted", "synthetic read error"]) {
+    const html = render(record("system", { text, isError: true }));
+    expect(html).toContain(`<summary>${system}</summary>`);
+    expect(html).not.toContain(compaction);
+    expect(html).toContain('role="alert"');
+  }
+  for (const kind of ["user", "assistant"] as const) {
+    const html = render(record(kind, { text: "context_compacted" }));
+    expect(html).toContain("context_compacted");
+    expect(html).not.toContain(compaction);
+  }
+});
+
+
+it("hides old imported completion boundaries without hiding messages or errors", () => {
+  const render = (item: NativeRecord) => renderToStaticMarkup(<I18nProvider locale="zh-TW">
+    <NativeRecordView item={item} threadId="synthetic-owner" directory="/synthetic" />
+  </I18nProvider>);
+  expect(render(record("system", { text: "task_complete" }))).toBe("");
+  for (const kind of ["user", "assistant"] as const) {
+    expect(render(record(kind, { text: "task_complete" }))).toContain("task_complete");
+  }
+  expect(render(record("system", { text: "task_complete", isError: true }))).toContain('role="alert"');
 });

@@ -116,6 +116,9 @@ function NativeImage({
 }
 export function NativeRecordView(props: Parameters<typeof NativeRecordContent>[0]) {
   const { t } = useI18n();
+  // Previously imported mirrors may still contain this lifecycle-only row.
+  // Preserve stored history; only suppress the obsolete non-error card.
+  if (props.item.kind === "system" && props.item.text === "task_complete" && !props.item.isError) return null;
   return <div>{props.item.truncated && <p role="status">{t("native.recordTruncated")}</p>}<NativeRecordContent {...props} /></div>;
 }
 function NativeRecordContent({
@@ -198,7 +201,7 @@ function NativeRecordContent({
         className={`chat-card${item.isError ? " is-error" : ""}`}
         open={item.isError}
       >
-        <summary>{t("native.system")}</summary>
+        <summary>{t(item.text === "context_compacted" || item.text === "compacted" ? "native.compaction" : "native.system")}</summary>
         <div role={item.isError ? "alert" : undefined}>
           <ChatMarkdown source={item.text} />
         </div>
