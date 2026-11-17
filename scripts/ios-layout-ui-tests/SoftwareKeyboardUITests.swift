@@ -24,6 +24,109 @@ final class SoftwareKeyboardUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+
+    /// Real-user check: with the name field focused and the keyboard open,
+    /// can a person reach 主機位址 by tapping Next, or is that field trapped
+    /// under the sticky footer?
+    func testFooterAndNextFieldOnConnectionForm() throws {
+        continueAfterFailure = false
+        app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
+        if app.state != .notRunning { app.terminate() }
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "App 未能進入前景")
+        XCUIDevice.shared.orientation = .portrait
+        waitForFrontend()
+        dismissKeyboardTutorial()
+        try openAddConnection()
+        let name = nameField()
+        XCTAssertTrue(name.waitForExistence(timeout: 15))
+        if !cheapKeyboardVisible() { name.tap() }
+        assertSoftwareKeyboardVisible()
+        Thread.sleep(forTimeInterval: 0.6)
+        attachShot("footer-name-focused")
+        let host = hostField()
+        XCTAssertTrue(host.waitForExistence(timeout: 5), "主機位址欄位不存在")
+        emit("footer-name-focused", extra: [
+            "name": NSCoder.string(for: name.frame),
+            "host": NSCoder.string(for: host.frame),
+            "footerTop": Double(visualFooterTop()),
+            "headerBottom": Double(visualHeaderBottom()),
+            "keyboardMinY": cheapKeyboardVisible() ? Double(app.keyboards.firstMatch.frame.minY) : -1,
+            "hostAboveFooter": Double(host.frame.maxY) <= Double(visualFooterTop()) - 4,
+            "hostSafelyTappable": fieldIsSafelyTappable(host),
+        ])
+        // After focusing 顯示名稱, the next field (主機位址) must also sit
+        // above the sticky footer so a person can see and tap it.
+        XCTAssertTrue(
+            fieldIsSafelyTappable(host),
+            "聚焦顯示名稱後，主機位址仍被頁尾或鍵盤擋住，使用者看不到、點不到。host=\(NSCoder.string(for: host.frame)) footerTop=\(visualFooterTop())"
+        )
+        let moved = tapNextFormField()
+        Thread.sleep(forTimeInterval: 0.8)
+        attachShot("footer-after-next")
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+        emit("footer-after-next", extra: [
+            "moved": moved,
+            "focusedLabel": (focused.exists ? (focused.label as String) : ""),
+            "focused": focused.exists ? NSCoder.string(for: focused.frame) : "",
+            "host": NSCoder.string(for: host.frame),
+            "footerTop": Double(visualFooterTop()),
+            "keyboardMinY": cheapKeyboardVisible() ? Double(app.keyboards.firstMatch.frame.minY) : -1,
+            "hostHasFocus": host.value(forKey: "hasKeyboardFocus") as? Bool ?? false,
+            "hostSafelyTappable": fieldIsSafelyTappable(host),
+        ])
+        if moved {
+            XCTAssertTrue(cheapKeyboardVisible(), "切到下一欄後鍵盤不應消失")
+            XCTAssertTrue(
+                fieldIsSafelyTappable(host),
+                "用「下一個」切換後，主機位址仍被頁尾或鍵盤擋住。host=\(NSCoder.string(for: host.frame)) footerTop=\(visualFooterTop())"
+            )
+            let hostFocused = (host.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
+            let stillOnName = focused.exists && (focused.label == "顯示名稱")
+            XCTAssertTrue(hostFocused || !stillOnName, "鍵盤「下一個」沒有把焦點從顯示名稱移到主機位址")
+        } else {
+            emit("footer-next-missing", extra: ["note": "no next-field control; tapping the now-visible host field"])
+            host.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.5)
+            attachShot("footer-host-tapped")
+            XCTAssertTrue(cheapKeyboardVisible(), "點主機位址應叫出鍵盤")
+            XCTAssertTrue(fieldIsSafelyTappable(host), "點選後主機位址仍被頁尾擋住")
+        }
+        dismissFormIfNeeded()
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    @discardableResult
+    private func tapNextFormField() -> Bool {
+        let names = ["下一個", "下一個欄位", "Next", "Next Field", "next", "下一項"]
+        let roots: [XCUIElement] = [app.keyboards.firstMatch, app.toolbars.firstMatch, app]
+        for root in roots {
+            guard root.exists else { continue }
+            for name in names {
+                let button = root.buttons[name]
+                if button.exists && button.isHittable {
+                    button.tap()
+                    return true
+                }
+            }
+            // The WKWebView accessory often exposes a nameless downward chevron
+            // in a toolbar just above the keyboard.
+            let buttons = root.buttons
+            if buttons.count >= 2 {
+                for i in 0..<min(buttons.count, 8) {
+                    let candidate = buttons.element(boundBy: i)
+                    guard candidate.exists, candidate.isHittable else { continue }
+                    let label = candidate.label.lowercased()
+                    if label.contains("next") || label.contains("下") || label.contains("forward") {
+                        candidate.tap()
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     // MARK: - Scenarios
 
     private func runConnectionForm(orientationName: String) throws {

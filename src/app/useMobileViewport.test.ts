@@ -242,10 +242,95 @@ describe("mobile keyboard viewport", () => {
     expect(f.styles.has("--app-viewport-top")).toBe(false);
     expect(f.styles.has("--app-viewport-width")).toBe(false);
     expect(f.styles.has("--app-viewport-left")).toBe(false);
+    expect(f.styles.has("--app-keyboard-inset")).toBe(false);
+    expect(f.styles.has("--app-drawer-foot-height")).toBe(false);
     expect(f.attributes.get("data-mobile-keyboard")).toBe("previous");
     f.viewport.dispatchEvent(new Event("resize"));
     f.root.dispatchEvent(new Event("focusin"));
     f.win.dispatchEvent(new Event("resize"));
     expect(f.frames.size).toBe(0);
+  });
+
+  it("scrolls the next drawer field above the footer when both fit in the visible band", () => {
+    const mobile = fixture();
+    const field = mobile.root.ownerDocument.activeElement as {
+      matches: (s: string) => boolean;
+      closest: ReturnType<typeof vi.fn>;
+      getBoundingClientRect: ReturnType<typeof vi.fn>;
+    };
+    const next = {
+      disabled: false,
+      getAttribute: () => null,
+      offsetParent: {},
+      getClientRects: () => [{ width: 200, height: 50 }],
+      getBoundingClientRect: () => ({ top: 412, bottom: 462, left: 16, right: 374 }),
+      focus: vi.fn(),
+    };
+    const foot = { getBoundingClientRect: () => ({ top: 380, bottom: 460, height: 80 }) };
+    const body = {
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ top: 100, bottom: 380 }),
+      querySelector: (selector: string) => (selector.includes("drawer__foot") ? foot : null),
+      querySelectorAll: () => [field, next],
+    };
+    field.getBoundingClientRect.mockReturnValue({ top: 314, bottom: 364, left: 16, right: 374 });
+    field.closest.mockImplementation(() => body);
+    const stop = mobile.start();
+    mobile.viewport.height = 540;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    // next.bottom (462) - clipBottom (380) + 8
+    expect(body.scrollTop).toBe(90);
+    expect(mobile.styles.get("--app-keyboard-inset")).toBe("312px");
+    expect(mobile.styles.get("--app-drawer-foot-height")).toBe("80px");
+    stop();
+  });
+
+  it("moves focus to the next field when Enter is pressed on an enterKeyHint=next input", () => {
+    const mobile = fixture();
+    const field = mobile.root.ownerDocument.activeElement as unknown as {
+      matches: (s: string) => boolean;
+      closest: ReturnType<typeof vi.fn>;
+      getBoundingClientRect: ReturnType<typeof vi.fn>;
+      tagName: string;
+      enterKeyHint: string;
+      getAttribute: (name: string) => string | null;
+    };
+    const next = {
+      disabled: false,
+      getAttribute: () => null,
+      offsetParent: {},
+      getClientRects: () => [{ width: 200, height: 50 }],
+      getBoundingClientRect: () => ({ top: 200, bottom: 250, left: 16, right: 374 }),
+      focus: vi.fn(),
+    };
+    const body = {
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ top: 80, bottom: 400 }),
+      querySelector: () => null,
+      querySelectorAll: () => [field, next],
+    };
+    field.tagName = "INPUT";
+    field.enterKeyHint = "next";
+    field.getAttribute = (name: string) => (name === "enterkeyhint" ? "next" : null);
+    field.closest.mockImplementation(() => body);
+    field.getBoundingClientRect.mockReturnValue({ top: 120, bottom: 170, left: 16, right: 374 });
+    const handlers = new Map<string, EventListener>();
+    const originalAdd = mobile.root.addEventListener.bind(mobile.root);
+    mobile.root.addEventListener = ((type: string, fn: EventListenerOrEventListenerObject, options?: unknown) => {
+      if (typeof fn === "function") handlers.set(type, fn);
+      return originalAdd(type, fn, options as never);
+    }) as typeof mobile.root.addEventListener;
+    const stop = mobile.start();
+    const event = {
+      key: "Enter",
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+      target: field,
+    };
+    handlers.get("keydown")?.(event as unknown as Event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(next.focus).toHaveBeenCalledTimes(1);
+    stop();
   });
 });

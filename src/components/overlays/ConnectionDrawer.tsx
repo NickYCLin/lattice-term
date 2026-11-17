@@ -498,6 +498,7 @@ export function ConnectionDrawer({
                   id={`${formId}-name`}
                   data-field="name"
                   ref={nameRef}
+                  enterKeyHint="next"
                   className={`input${errors.name ? " is-invalid" : ""}`}
                   value={draft.name}
                   maxLength={limits.nameLength}
@@ -545,6 +546,7 @@ export function ConnectionDrawer({
                     <input
                       id={`${formId}-host`}
                       data-field="hostname"
+                      enterKeyHint="next"
                       className={`input mono${errors.hostname ? " is-invalid" : ""}`}
                       value={draft.hostname}
                       onChange={(event) =>
@@ -566,7 +568,7 @@ export function ConnectionDrawer({
                   <div className="field">
                     <label className="field__label" htmlFor={`${formId}-port`}>{t("form.port")}</label>
                     <input
-                      id={`${formId}-port`} data-field="port" type="number" inputMode="numeric"
+                      id={`${formId}-port`} data-field="port" type="number" inputMode="numeric" enterKeyHint="next"
                       min={limits.minPort} max={limits.maxPort}
                       className={`input mono${errors.port ? " is-invalid" : ""}`}
                       value={Number.isFinite(draft.port) ? draft.port : ""}
@@ -583,6 +585,7 @@ export function ConnectionDrawer({
                       {t("form.additionalHostname")}<span className="field__optional">{t("common.optional")}</span>
                     </label>
                     <input id={`${formId}-additional-host`} data-field="additional-hostname"
+                      enterKeyHint="next"
                       className={`input mono${additionalErrors.hostname ? " is-invalid" : ""}`}
                       value={additionalHostname} placeholder={t(hostnamePlaceholderKeys[draft.protocol])}
                       autoCapitalize="none" autoCorrect="off" spellCheck={false}
@@ -598,7 +601,7 @@ export function ConnectionDrawer({
                   <div className="field">
                     <label className="field__label" htmlFor={`${formId}-additional-port`}>{t("form.port")}</label>
                     <input id={`${formId}-additional-port`} data-field="additional-port" type="number"
-                      inputMode="numeric" aria-label={t("form.additionalPort")}
+                      inputMode="numeric" enterKeyHint="next" aria-label={t("form.additionalPort")}
                       className={`input mono${additionalErrors.port ? " is-invalid" : ""}`}
                       min={limits.minPort} max={limits.maxPort} step={1}
                       value={additionalPort} placeholder={String(draft.port)}
@@ -621,6 +624,7 @@ export function ConnectionDrawer({
                 <input
                   id={`${formId}-relay`}
                   data-field="relayAddress"
+                  enterKeyHint="next"
                   className={`input mono${errors.hostname ? " is-invalid" : ""}`}
                   value={draft.relayAddress ?? ""}
                   onChange={(event) =>
@@ -653,6 +657,7 @@ export function ConnectionDrawer({
                   <input
                     id={`${formId}-user`}
                     data-field="username"
+                    enterKeyHint="next"
                     className={`input mono${errors.username ? " is-invalid" : ""}`}
                     value={draft.username}
                     onChange={(event) =>
@@ -693,6 +698,7 @@ export function ConnectionDrawer({
                   id={`${formId}-secret`}
                   className="input"
                   type={showSecret ? "text" : "password"}
+                  enterKeyHint="done"
                   autoComplete="new-password"
                   value={credential.secret}
                   maxLength={4096}

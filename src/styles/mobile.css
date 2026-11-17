@@ -218,6 +218,13 @@
 :root[data-mobile-keyboard="true"] .app--mobile > .rail { display: none; }
 :root[data-mobile-keyboard="true"] .app--mobile .ssh-pane-switch { display: none; }
 :root[data-mobile-keyboard="true"] .app--mobile .scrim { padding-bottom: var(--space-1); }
+/* The drawer foot is a flex sibling, and the overlay already matches the
+   keyboard-visible viewport. Reserve the foot height at the end of the
+   scroll area so later fields can still be scrolled fully above it. */
+:root[data-mobile-keyboard="true"] .app--mobile .drawer__body {
+  padding-bottom: calc(var(--space-3) + var(--app-drawer-foot-height, 0px));
+  scroll-padding-bottom: var(--space-2);
+}
 
 @media (max-height: 500px) {
   .app--mobile { padding-top: max(var(--space-1), env(safe-area-inset-top, 0px)); }

@@ -8,6 +8,8 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     "--app-viewport-top",
     "--app-viewport-width",
     "--app-viewport-left",
+    "--app-keyboard-inset",
+    "--app-drawer-foot-height",
   ] as const;
   const previous = properties.map((name) => root.style.getPropertyValue(name));
   const previousKeyboard = root.getAttribute("data-mobile-keyboard");
@@ -38,6 +40,49 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     const body = target.closest?.(".drawer__body") as HTMLElement | null;
     if (body) return body;
     return (target.closest?.(".dialog, .drawer, [role='dialog']") as HTMLElement | null) ?? null;
+  };
+
+  const nextFocusable = (current: HTMLElement): HTMLElement | null => {
+    const root = (current.closest?.("form, .drawer__body, .dialog, .drawer, [role='dialog']") as HTMLElement | null)
+      ?? (current.ownerDocument?.body as HTMLElement | null);
+    if (!root?.querySelectorAll) return null;
+    const nodes = root.querySelectorAll<HTMLElement>(
+      "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled])",
+    );
+    const fields = [...nodes].filter((el) => {
+      if (el === current) return true;
+      if (el.getAttribute?.("aria-hidden") === "true") return false;
+      if ((el as HTMLInputElement).disabled) return false;
+      if (el.getClientRects) {
+        try {
+          if (el.getClientRects().length > 0) return true;
+        } catch {
+          /* jsdom-like test doubles may not implement getClientRects fully */
+        }
+      }
+      return Boolean(el.offsetParent);
+    });
+    const index = fields.indexOf(current);
+    return index >= 0 && index < fields.length - 1 ? fields[index + 1] : null;
+  };
+
+  const onFieldKeyDown = (event: Event) => {
+    const keyboard = event as KeyboardEvent;
+    if (keyboard.key !== "Enter" || keyboard.defaultPrevented) return;
+    const target = keyboard.target as HTMLElement | null;
+    if (!target?.matches?.("input, select, textarea")) return;
+    const hint = ((target as HTMLInputElement).enterKeyHint || target.getAttribute?.("enterkeyhint") || "").toLowerCase();
+    if (target.tagName === "TEXTAREA" && hint !== "next" && hint !== "done") return;
+    if (hint === "done") {
+      keyboard.preventDefault();
+      target.blur();
+      return;
+    }
+    if (hint !== "next") return;
+    const next = nextFocusable(target);
+    if (!next) return;
+    keyboard.preventDefault();
+    next.focus();
   };
 
   const revealFocusedField = () => {
@@ -75,20 +120,36 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
       const foot = drawer?.querySelector?.(".drawer__foot") as HTMLElement | null;
       if (foot?.getBoundingClientRect) clipBottom = Math.min(clipBottom, foot.getBoundingClientRect().top);
       const fieldRect = focused.getBoundingClientRect();
-      const verticallyVisible = fieldRect.bottom <= clipBottom - 8 && fieldRect.top >= clipTop + 8;
+      const scroller = sheetScroller(focused);
+      const next = nextFocusable(focused);
+      const nextRect = next?.getBoundingClientRect?.();
+      const band = clipBottom - clipTop - 16;
+      const bothFit = Boolean(
+        nextRect && band > 0 && nextRect.bottom - fieldRect.top > 0 && nextRect.bottom - fieldRect.top <= band,
+      );
+      const focusedVisible = fieldRect.bottom <= clipBottom - 8 && fieldRect.top >= clipTop + 8;
+      const nextVisible = Boolean(nextRect && nextRect.bottom <= clipBottom - 8 && nextRect.top >= clipTop + 8);
       const horizontallyVisible = fieldRect.right <= clipRight - 8 && fieldRect.left >= clipLeft + 8;
-      if (verticallyVisible && horizontallyVisible) {
+      if (focusedVisible && horizontallyVisible && (!bothFit || nextVisible)) {
         lastRevealKey = "";
         return;
       }
-      const revealKey = `${fieldRect.top}:${fieldRect.bottom}:${fieldRect.left}:${fieldRect.right}:${clipTop}:${clipBottom}:${clipLeft}:${clipRight}`;
+      const revealKey = `${fieldRect.top}:${fieldRect.bottom}:${fieldRect.left}:${fieldRect.right}:${clipTop}:${clipBottom}:${clipLeft}:${clipRight}:${nextRect?.top ?? ""}:${nextRect?.bottom ?? ""}`;
       if (revealKey === lastRevealKey) return;
       lastRevealKey = revealKey;
       revealAttempts += 1;
-      const scroller = sheetScroller(focused);
       if (scroller) {
-        if (fieldRect.bottom > clipBottom - 8) scroller.scrollTop += fieldRect.bottom - clipBottom + 8;
-        else if (fieldRect.top < clipTop + 8) scroller.scrollTop += fieldRect.top - clipTop - 8;
+        // Prefer showing the focused field and the next one above the sticky
+        // footer / keyboard when both fit, so a user can tap 主機位址 without
+        // the footer swallowing the hit target.
+        if (bothFit && nextRect) {
+          if (nextRect.bottom > clipBottom - 8) scroller.scrollTop += nextRect.bottom - clipBottom + 8;
+          else if (fieldRect.top < clipTop + 8) scroller.scrollTop += fieldRect.top - clipTop - 8;
+        } else if (fieldRect.bottom > clipBottom - 8) {
+          scroller.scrollTop += fieldRect.bottom - clipBottom + 8;
+        } else if (fieldRect.top < clipTop + 8) {
+          scroller.scrollTop += fieldRect.top - clipTop - 8;
+        }
         // Skip scrollIntoView: it also scrolls ancestor containers, and on a
         // small iPhone can push a centered dialog off-screen and keep the
         // event loop busy (iPhone SE, 以 ID 連線).
@@ -123,10 +184,17 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     const keyboardVisible = Boolean(
       editing && (expected.height - height > 80 || expected.width - width > 80),
     );
+    const editingEl = editing ? (focused as HTMLElement | null) : null;
+    const drawer = editingEl?.closest?.(".drawer") as HTMLElement | null;
+    const foot = drawer?.querySelector?.(".drawer__foot") as HTMLElement | null;
+    const footHeight = foot?.getBoundingClientRect?.()?.height ?? 0;
+    const keyboardInset = keyboardVisible ? Math.max(0, expected.height - height, expected.width - width) : 0;
     root.style.setProperty("--app-viewport-height", `${height}px`);
     root.style.setProperty("--app-viewport-top", `${viewport?.offsetTop ?? 0}px`);
     root.style.setProperty("--app-viewport-width", `${width}px`);
     root.style.setProperty("--app-viewport-left", `${viewport?.offsetLeft ?? 0}px`);
+    root.style.setProperty("--app-keyboard-inset", `${keyboardInset}px`);
+    root.style.setProperty("--app-drawer-foot-height", `${Math.max(0, footHeight)}px`);
     root.setAttribute("data-mobile-keyboard", String(keyboardVisible));
     if (keyboardVisible) {
       revealFocusedField();
@@ -146,6 +214,7 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
   win.addEventListener("resize", schedule);
   root.addEventListener("focusin", schedule);
   root.addEventListener("focusout", schedule);
+  root.addEventListener("keydown", onFieldKeyDown);
   update();
 
   return () => {
@@ -154,6 +223,7 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     win.removeEventListener("resize", schedule);
     root.removeEventListener("focusin", schedule);
     root.removeEventListener("focusout", schedule);
+    root.removeEventListener("keydown", onFieldKeyDown);
     if (frame !== null) win.cancelAnimationFrame(frame);
     if (revealFrame !== null) win.cancelAnimationFrame(revealFrame);
     properties.forEach((name, index) => {
