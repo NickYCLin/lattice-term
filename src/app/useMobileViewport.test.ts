@@ -18,11 +18,13 @@ function fixture(withViewport = true) {
   const styles = new Map<string, string>();
   const attributes = new Map<string, string>();
   let editing = true;
-  const viewport = Object.assign(new EventTarget(), { height: 852, offsetTop: 0, scale: 1 });
+  const viewport = Object.assign(new EventTarget(), { height: 852, width: 390, offsetTop: 0, offsetLeft: 0, scale: 1 });
   let nextId = 0;
   const frames = new Map<number, FrameRequestCallback>();
   const win = Object.assign(new EventTarget(), {
     innerHeight: 852,
+    innerWidth: 390,
+    screen: { width: 390, height: 852 },
     visualViewport: withViewport ? viewport : null,
     requestAnimationFrame(callback: FrameRequestCallback) { frames.set(++nextId, callback); return nextId; },
     cancelAnimationFrame(id: number) { frames.delete(id); },
@@ -33,7 +35,7 @@ function fixture(withViewport = true) {
       setProperty: (name: string, value: string) => styles.set(name, value),
       removeProperty: (name: string) => styles.delete(name),
     },
-    ownerDocument: { activeElement: { matches: () => editing, closest: vi.fn((): HTMLElement | null => null), getBoundingClientRect: vi.fn(() => ({ top: 440, bottom: 482 })) } },
+    ownerDocument: { activeElement: { matches: () => editing, closest: vi.fn((): HTMLElement | null => null), getBoundingClientRect: vi.fn(() => ({ top: 440, bottom: 482, left: 16, right: 374 })) } },
     getAttribute: (name: string) => attributes.get(name) ?? null,
     setAttribute: (name: string, value: string) => attributes.set(name, value),
     removeAttribute: (name: string) => attributes.delete(name),
@@ -58,11 +60,11 @@ describe("mobile keyboard viewport", () => {
     mobile.viewport.dispatchEvent(new Event("resize"));
     mobile.flush();
     expect(body.scrollTop).toBe(20);
-    field.getBoundingClientRect.mockReturnValue({ top: 200, bottom: 242 });
+    field.getBoundingClientRect.mockReturnValue({ top: 200, bottom: 242, left: 16, right: 374 });
     mobile.viewport.dispatchEvent(new Event("scroll"));
     mobile.flush();
     expect(body.scrollTop).toBe(20);
-    field.getBoundingClientRect.mockReturnValue({ top: 110, bottom: 152 });
+    field.getBoundingClientRect.mockReturnValue({ top: 110, bottom: 152, left: 16, right: 374 });
     mobile.root.dispatchEvent(new Event("focusin"));
     mobile.flush();
     expect(body.scrollTop).toBe(2);
@@ -121,10 +123,45 @@ describe("mobile keyboard viewport", () => {
     stop();
   });
 
+  it("still reveals a focused field when innerHeight shrinks with the visual viewport", () => {
+    const mobile = fixture();
+    const body = { scrollTop: 0, getBoundingClientRect: () => ({ top: 80, bottom: 360 }) };
+    const field = mobile.root.ownerDocument.activeElement;
+    field.closest.mockReturnValue(body as unknown as HTMLElement);
+    field.getBoundingClientRect.mockReturnValue({ top: 400, bottom: 442, left: 16, right: 374 });
+    const stop = mobile.start();
+    mobile.win.innerHeight = mobile.viewport.height = 480;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(body.scrollTop).toBeGreaterThan(0);
+    stop();
+  });
+
+  it("shrinks the layout for a landscape side keyboard without treating rotation itself as a keyboard", () => {
+    const f = fixture();
+    const stop = f.start();
+    f.win.innerHeight = f.viewport.height = 393;
+    f.win.innerWidth = f.viewport.width = 852;
+    f.win.dispatchEvent(new Event("resize"));
+    f.flush();
+    expect(f.attributes.get("data-mobile-keyboard")).toBe("false");
+    expect(f.styles.get("--app-viewport-width")).toBe("852px");
+    f.viewport.width = 620;
+    f.viewport.offsetLeft = 0;
+    f.viewport.dispatchEvent(new Event("resize"));
+    f.flush();
+    expect(f.attributes.get("data-mobile-keyboard")).toBe("true");
+    expect(f.styles.get("--app-viewport-width")).toBe("620px");
+    expect(f.styles.get("--app-viewport-left")).toBe("0px");
+    expect(f.styles.get("--app-viewport-height")).toBe("393px");
+    stop();
+  });
+
   it("does not mistake landscape rotation or non-editing browser chrome for a keyboard", () => {
     const f = fixture();
     const stop = f.start();
     f.win.innerHeight = f.viewport.height = 393;
+    f.win.innerWidth = f.viewport.width = 852;
     f.win.dispatchEvent(new Event("resize"));
     f.flush();
     expect(f.attributes.get("data-mobile-keyboard")).toBe("false");
@@ -172,6 +209,8 @@ describe("mobile keyboard viewport", () => {
     expect(f.frames.size).toBe(0);
     expect(f.styles.get("--app-viewport-height")).toBe("90dvh");
     expect(f.styles.has("--app-viewport-top")).toBe(false);
+    expect(f.styles.has("--app-viewport-width")).toBe(false);
+    expect(f.styles.has("--app-viewport-left")).toBe(false);
     expect(f.attributes.get("data-mobile-keyboard")).toBe("previous");
     f.viewport.dispatchEvent(new Event("resize"));
     f.root.dispatchEvent(new Event("focusin"));

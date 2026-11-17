@@ -3,8 +3,9 @@
 .rail__label { display: none; }
 .app--mobile {
   position: fixed;
-  inset-inline: 0;
   top: var(--app-viewport-top, 0px);
+  left: var(--app-viewport-left, 0px);
+  width: var(--app-viewport-width, 100vw);
   height: var(--app-viewport-height, 100dvh);
   padding-left: max(var(--space-2), env(safe-area-inset-left, 0px));
   padding-right: max(var(--space-2), env(safe-area-inset-right, 0px));
@@ -116,6 +117,9 @@
 /* Fixed overlays follow the same keyboard-visible rectangle as the app. */
 .app--mobile .scrim {
   top: var(--app-viewport-top, 0px);
+  left: var(--app-viewport-left, 0px);
+  width: var(--app-viewport-width, 100vw);
+  right: auto;
   bottom: auto;
   height: var(--app-viewport-height, 100dvh);
   padding: max(var(--space-2), env(safe-area-inset-top, 0px))
@@ -186,6 +190,9 @@
 .app--mobile .tunnels__card-title { min-width: 0; overflow-wrap: anywhere; }
 .app--mobile .tunnel-form-scrim {
   top: var(--app-viewport-top, 0px) !important;
+  left: var(--app-viewport-left, 0px) !important;
+  width: var(--app-viewport-width, 100vw) !important;
+  right: auto !important;
   bottom: auto !important;
   height: var(--app-viewport-height, 100dvh);
   padding: max(var(--space-2), env(safe-area-inset-top, 0px)) var(--space-2)
