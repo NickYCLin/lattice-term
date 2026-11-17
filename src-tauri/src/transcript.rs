@@ -1050,6 +1050,9 @@ const HISTORY_MAX_MESSAGES: usize = 300;
 const HISTORY_MAX_TEXT_BYTES: usize = 256 * 1024;
 
 #[cfg(test)]
+#[path = "transcript/interop_tests.rs"]
+mod interop_tests;
+#[cfg(test)]
 #[path = "transcript/robust_tests.rs"]
 mod robust_tests;
 #[cfg(test)]

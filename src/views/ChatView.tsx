@@ -30,6 +30,8 @@ import { conversationDraftHasInput, useConversationDraft } from "../app/useConve
 import { desktopChatAccess } from "../app/desktopChat";
 import { useNativeConversationList } from "../components/chat/NativeConversationRows";
 import { ConversationReadProgress } from "../components/chat/ConversationReadProgress";
+import { NativeHistoryGateError } from "../app/nativeHistoryGate";
+import { nativeReadError } from "../app/nativeReadDiagnostics";
 import { useNativeHistory } from "../app/useNativeConversations";
 import { useFileDrop } from "../app/fileDrop";
 import { SessionConversationPane } from "../components/chat/SessionConversationPane";
@@ -811,6 +813,7 @@ export function ThreadPane({
     pasting: pastingImage, setPasting: setPastingImage, steering, setSteering,
     addAttachmentPaths, readDraft } = useConversationDraft("thread", thread.id);
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyGateNotice, setHistoryGateNotice] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [repositoryBusy, setRepositoryBusy] = useState(false);
   const pastingImageRef = useRef(false);
@@ -855,7 +858,7 @@ export function ThreadPane({
   const running = thread.runningTurnId !== null;
   const pendingInputs = thread.pendingInputs ?? [];
   const nativeRead = chat.nativeRead?.threadId === thread.id ? chat.nativeRead : null;
-  const awaitingHistory = Boolean(thread.nativeHistorySource && nativeRead && !nativeRead.ready) || Boolean(thread.continuedInSession) || Boolean(handoffPending);
+  const awaitingHistory = Boolean(thread.nativeHistorySource && !chat.historyReady) || Boolean(thread.continuedInSession) || Boolean(handoffPending);
   const settingsLocked = repositoryBusy || Boolean(thread.pendingOperation) || running || pendingInputs.length > 0 || awaitingHistory || pastingImage || steering;
   const directProxy = thread.provider === "cliproxyapi" && !thread.nativeSessionId;
   const cliInstalled = directProxy || installed.includes(thread.definitionId);
@@ -888,6 +891,7 @@ export function ThreadPane({
 
   useEffect(() => {
     setNotice(null);
+    setHistoryGateNotice(false);
   }, [thread.id]);
 
   function addAttachments(paths: readonly string[]): boolean {
@@ -1003,7 +1007,15 @@ export function ThreadPane({
       followBottom();
       if (mounted.current) { setSettingsOpen(false); setNotice(null); }
     } catch (reason) {
-      if (mounted.current) setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
+      if (mounted.current) {
+        if (reason instanceof NativeHistoryGateError) {
+          setHistoryGateNotice(true);
+          setNotice(t("history.sendBlocked"));
+          nativeRead?.refresh();
+        } else {
+          setNotice(reason instanceof ChatQueueError ? t(`chat.queue.${reason.code}`) : reason instanceof Error ? reason.message : String(reason));
+        }
+      }
     } finally {
       pastingImageRef.current = false;
       setPastingImage(false);
@@ -1254,7 +1266,10 @@ export function ThreadPane({
         {thread.pendingOperation && <p role="status">{t("chat.nativeOperation.running")}</p>}
         {thread.planMode && <span className="chat-chip">{t("chat.plan.mode")}</span>}
         {running && thread.activeOperation && <p role="status">{t(thread.activeOperation === "compact" ? "chat.compact.running" : "chat.review.running")}</p>}
-        {notice && <Callout tone="danger">{notice}</Callout>}
+        {notice && <Callout tone="danger">{notice}{historyGateNotice && <>
+          {nativeRead?.error ? <p className="session-chat__diagnostic">{nativeReadError(nativeRead.error, t)}</p> : null}
+          <button type="button" className="button button--ghost button--sm" disabled={Boolean(nativeRead?.loading)} onClick={() => { nativeRead?.refresh(); setHistoryGateNotice(false); setNotice(null); }}>{t("history.retryRead")}</button>
+        </>}</Callout>}
         {statusMessage && <p className="chat-settings__hint" role="status">{statusMessage}</p>}
         {handoffProblem && <Callout tone="danger">{handoffProblem}</Callout>}
       </header>
@@ -1265,14 +1280,14 @@ export function ThreadPane({
         state={t(running ? "agents.state.working" : "agents.state.idle")} onClose={() => setStatusOpen(false)} />}
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onWheel={onWheel}>
         <div className="chat-messages__inner">
-          {nativeRead && <ConversationReadProgress loading={nativeRead.loading} error={nativeRead.error} diagnostics={nativeRead.diagnostics} onRetry={nativeRead.refresh} />}
+          {(nativeRead || (thread.nativeHistorySource && !chat.historyReady)) && <ConversationReadProgress loading={Boolean(nativeRead?.loading) || Boolean(thread.nativeHistorySource && !chat.historyReady && !nativeRead?.error && !nativeRead?.ready)} error={nativeRead?.error} diagnostics={nativeRead?.diagnostics} onRetry={nativeRead?.refresh} />}
           {sessionRead && <ConversationReadProgress loading={sessionRead.loading} error={sessionRead.error} diagnostics={sessionRead.diagnostics} onRetry={sessionRead.refresh} />}
           {thread.nativeHistorySource && !thread.runningTurnId && <p role="status">{t("native.readOnly")} · {t("history.stateUnknown")}</p>}
           {thread.nativeHistoryArchived && <p role="status">{t("history.nativeArchivedHint")}</p>}
           {thread.nativeSessionId && <NativeHistoryAccess threadId={thread.id} directory={thread.workingDirectory} />}
           {thread.historyTruncated && <p role="status">{t("history.truncated")}</p>}
           {thread.nativeSyncPending && !thread.runningTurnId && <p role="status">{t("history.syncPending")}</p>}
-          {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && (
+          {thread.items.length === 0 && !nativeRead?.loading && !nativeRead?.error && !sessionRead?.loading && !sessionRead?.error && !(thread.nativeHistorySource && !chat.historyReady) && (
             <div className="chat-welcome">
               <h3>{t("chat.welcome.title", { assistant })}</h3>
               <p>

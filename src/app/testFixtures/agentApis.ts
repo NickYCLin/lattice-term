@@ -161,11 +161,13 @@ export function fakeThread(overrides: Partial<ChatThread> = {}): ChatThread {
 }
 
 export function fakeChatApi(overrides: Partial<AgentChatApi> = {}): AgentChatApi {
+  const nativeRead = overrides.nativeRead === undefined ? null : overrides.nativeRead;
   return {
     removal: null,
     archivedReceipt: null,
     undoArchive: vi.fn().mockResolvedValue(undefined),
     nativeRead: null,
+    historyReady: nativeRead ? nativeRead.ready : true,
     getThread: (id: string) => overrides.threads?.find(thread => thread.id === id),
     threads: [],
     activeThreadId: null,

@@ -334,6 +334,7 @@ export const zhTW = {
   "history.reason.unavailable": "找不到紀錄檔或無法存取。",
   "history.reason.read": "無法安全讀取紀錄。",
   "history.readFailed": "對話紀錄讀取失敗，既有內容與未送出的草稿仍保留。",
+  "history.sendBlocked": "請先讀取對話紀錄再送出。若讀取失敗，請重試。",
   "history.retryRead": "重新讀取",
   "history.sessionMissing": "尚未取得終端工作階段的原生對話識別碼，請開啟原工作階段確認，不會改讀其他對話。",
   "history.incomplete": "紀錄掃描已達安全上限；此清單可能不完整。",

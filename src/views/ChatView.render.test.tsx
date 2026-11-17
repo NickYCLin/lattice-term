@@ -132,9 +132,31 @@ describe("ChatView", () => {
     expect(html).toContain('role="progressbar"');
     expect(html).toContain("已等待 0 秒");
     expect(html).not.toContain('class="chat-welcome"');
-    const unrelated = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id,
+    const unrelated = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id, historyReady: false,
       nativeRead: { threadId: "other", ready: false, loading: true, error: null, refresh: () => {} } }));
-    expect(unrelated).not.toContain('role="progressbar"');
+    expect(unrelated).toContain('role="progressbar"');
+    expect(unrelated).toContain("正在讀取對話紀錄");
+    expect(unrelated).not.toContain("Read the conversation history before sending");
+  });
+
+  it("blocks sending and shows progress when native history is not ready yet", () => {
+    const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id, nativeRead: null, historyReady: false }));
+    expect(html).toContain("正在讀取對話紀錄");
+    expect(html).toContain('role="progressbar"');
+    expect(html).not.toContain("Read the conversation history before sending");
+    expect(html).not.toContain('class="chat-welcome"');
+  });
+
+  it("shows a translated send-gate failure with the read reason and retry", () => {
+    const thread = fakeThread({ nativeSessionId: "native", nativeHistorySource: true });
+    const error = `native.read:${JSON.stringify({ cli: "Codex", file: "rollout.jsonl", reason: "permission" })}`;
+    const html = render(fakeChatApi({ threads: [thread], activeThreadId: thread.id, historyReady: false,
+      nativeRead: { threadId: thread.id, ready: false, loading: false, error, refresh: () => {} } }));
+    expect(html).toContain("對話紀錄讀取失敗，既有內容與未送出的草稿仍保留。");
+    expect(html).toContain("沒有讀取紀錄的權限");
+    expect(html).toContain("重新讀取");
+    expect(html).not.toContain("Read the conversation history before sending");
   });
 
   it("keeps the history read error and retry in the thread", () => {

@@ -5,6 +5,7 @@ import { createThread, type ChatThread, type NativeHistoryMessage } from "./agen
 import { installFakeDom } from "./testFixtures/hookDom";
 import { NativeHistoryContext, type NativeHistory, NATIVE_MESSAGE_REFRESH_MS } from "./useNativeConversations";
 import { useAgentChat, type AgentChatApi } from "./useAgentChat";
+import { NativeHistoryGateError } from "./nativeHistoryGate";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -36,13 +37,15 @@ it("opens an empty history mirror immediately, blocks sending until read and ret
       workingDirectory: "/work", title: "Slow conversation", accountProfileId: null, messages: [] }); });
     expect(chat.activeThreadId).toBe(thread.id);
     expect(chat.nativeRead).toMatchObject({ threadId: thread.id, ready: false, loading: true });
-    await expect(chat.send(thread.id, "not yet")).rejects.toThrow("Read the conversation history");
+    await expect(chat.send(thread.id, "not yet")).rejects.toBeInstanceOf(NativeHistoryGateError);
+    expect(chat.historyReady).toBe(false);
     expect(invoke.mock.calls.some(([command]) => command === "agent_chat_send")).toBe(false);
     await act(async () => { fail(new Error("disk busy")); });
     expect(chat.nativeRead).toMatchObject({ ready: false, loading: false, error: "disk busy" });
     await act(async () => chat.nativeRead!.refresh());
     await act(async () => { finish({ messages: [{ role: "user", text: "old question" }, { role: "assistant", text: "old reply" }], truncated: false }); });
     expect(chat.nativeRead).toMatchObject({ ready: true, loading: false, error: null });
+    expect(chat.historyReady).toBe(true);
     expect(chat.getThread(thread.id)?.items).toHaveLength(2);
     await act(async () => { chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "native",
       workingDirectory: "/work", title: "Slow conversation", accountProfileId: null, messages: [] }); });
@@ -50,8 +53,44 @@ it("opens an empty history mirror immediately, blocks sending until read and ret
     const changedHistory = { ...history, profileKey: JSON.stringify([{ profileId: "other", definitionId: "codex", configDirectory: "/another" }]) };
     await act(async () => root.render(<NativeHistoryContext.Provider value={changedHistory}><Probe /></NativeHistoryContext.Provider>));
     expect(chat.nativeRead).toMatchObject({ ready: false, loading: true });
-    await expect(chat.send(thread.id, "wait for the new config")).rejects.toThrow("Read the conversation history");
+    expect(chat.historyReady).toBe(false);
+    await expect(chat.send(thread.id, "wait for the new config")).rejects.toBeInstanceOf(NativeHistoryGateError);
     expect(chat.getThread(thread.id)?.items).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("automatically retries a failed native history read without sending or forking", async () => {
+  vi.useFakeTimers();
+  const container = installFakeDom();
+  vi.stubGlobal("addEventListener", () => {});
+  vi.stubGlobal("removeEventListener", () => {});
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+  let finish!: (value: unknown) => void;
+  let fail!: (reason: Error) => void;
+  invoke.mockImplementation(command => command === "agent_chat_local_history_snapshot"
+    ? new Promise((resolve, reject) => { finish = resolve; fail = reject; })
+    : Promise.resolve(command === "agent_chat_supported" ? ["codex"] : undefined));
+  const history = { entries: [], profileKey: "[]" } as unknown as NativeHistory;
+  let chat!: AgentChatApi;
+  function Probe() { chat = useAgentChat(); return null; }
+  const root = createRoot(container as unknown as Element);
+  try {
+    await act(async () => root.render(<NativeHistoryContext.Provider value={history}><Probe /></NativeHistoryContext.Provider>));
+    let thread!: ChatThread;
+    await act(async () => { thread = chat.importNativeConversation({ definitionId: "codex", nativeSessionId: "native",
+      workingDirectory: "/work", title: "Retry conversation", accountProfileId: null, messages: [] }); });
+    await expect(chat.send(thread.id, "not yet")).rejects.toBeInstanceOf(NativeHistoryGateError);
+    await act(async () => { fail(new Error("disk busy")); });
+    expect(chat.nativeRead).toMatchObject({ ready: false, error: "disk busy" });
+    expect(chat.historyReady).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(NATIVE_MESSAGE_REFRESH_MS); });
+    await act(async () => { finish({ messages: [{ role: "user", text: "old question" }, { role: "assistant", text: "old reply" }], truncated: false }); });
+    expect(chat.nativeRead).toMatchObject({ ready: true, loading: false, error: null });
+    expect(chat.historyReady).toBe(true);
+    expect(chat.getThread(thread.id)?.items).toHaveLength(2);
+    expect(invoke.mock.calls.some(([command]) => command === "agent_chat_send")).toBe(false);
   } finally { await act(async () => root.unmount()); }
 });
 

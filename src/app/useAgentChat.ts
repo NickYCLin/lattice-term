@@ -3,6 +3,7 @@ import { loadChatAccountProfiles } from "./chatAccountProfiles";
 import { runtimeIdentity } from "./chatRuntimeStatus";
 import type { NativeChatAction } from "./chatNativeActions";
 import { isNativeHistoryMirror, refreshNativeHistoryMirror } from "./nativeHistoryMirror";
+import { NativeHistoryGateError, nativeHistoryReadyKey } from "./nativeHistoryGate";
 import { useNativeHistory, useNativeConversationMessages } from "./useNativeConversations";
 import { dismissNativeConversation, restoreNativeConversation } from "./nativeConversationDismissals";
 import { removeConversationDraft } from "./useConversationDraft";
@@ -130,6 +131,8 @@ export interface AgentChatApi {
   archivedReceipt: { title: string; pending: boolean; error: string | null } | null;
   undoArchive: () => Promise<void>;
   nativeRead: { diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics; threadId: string; ready: boolean; loading: boolean; error: string | null; refresh: () => void } | null;
+  /** True when send() may proceed for the active native-history thread. */
+  historyReady: boolean;
   threads: ChatThread[];
   getThread: (id: string) => ChatThread | undefined;
   activeThreadId: string | null;
@@ -349,7 +352,7 @@ export function useAgentChat(
   nativeReadProfileKey.current = nativeHistory?.profileKey ?? "[]";
   useEffect(() => {
     if (!nativeEntry || !nativeMessages.value || !mirror) return;
-    readyNativeThreads.current.add(JSON.stringify([mirror.id, mirror.nativeSessionId, mirror.accountProfileId, nativeReadProfileKey.current]));
+    readyNativeThreads.current.add(nativeHistoryReadyKey(mirror.id, mirror.nativeSessionId, mirror.accountProfileId, nativeReadProfileKey.current));
     changeThreads(current => {
       const old = current.find(thread => thread.id === mirror.id);
       if (!old) return current;
@@ -831,7 +834,9 @@ export function useAgentChat(
     if (!thread || thread.runningTurnId) return;
     if (nativeAction && (thread.definitionId !== "codex" || (thread.provider === "cliproxyapi" && !thread.nativeSessionId))) throw new Error("This source does not expose the requested native operation.");
     if (handingOffThreads.current.has(id) || thread.continuedInSession) throw new Error("This conversation is held by a terminal session. Return after it closes before sending.");
-    if (thread.nativeHistorySource && !readyNativeThreads.current.has(JSON.stringify([id, thread.nativeSessionId, thread.accountProfileId, nativeReadProfileKey.current]))) throw new Error("Read the conversation history before sending. Retry if reading failed.");
+    if (thread.nativeHistorySource && !readyNativeThreads.current.has(nativeHistoryReadyKey(id, thread.nativeSessionId, thread.accountProfileId, nativeReadProfileKey.current))) {
+      throw new NativeHistoryGateError(mirror?.id === id ? nativeMessages.error : null);
+    }
     const turnId = crypto.randomUUID();
     const next = nativeAction ? { ...thread, runningTurnId: turnId, activeOperation: nativeAction.kind, updatedAt: Date.now() }
       : beginTurn(queuedInputId ? removeQueuedInput(thread, queuedInputId) : thread, prompt, turnId, Date.now(), attachments);
@@ -1213,6 +1218,16 @@ export function useAgentChat(
     // Only the set of open remote subtasks matters, not every keystroke.
   }, [threads.map((thread) => (thread.remote && thread.runningTurnId ? thread.id : "")).join(), changeThreads]);
 
+  if (mirror && nativeMessages.value) {
+    readyNativeThreads.current.add(nativeHistoryReadyKey(
+      mirror.id, mirror.nativeSessionId, mirror.accountProfileId, nativeReadProfileKey.current,
+    ));
+  }
+  const activeThread = threads.find(thread => thread.id === activeThreadId);
+  const historyReady = !activeThread || !activeThread.nativeHistorySource || readyNativeThreads.current.has(nativeHistoryReadyKey(
+    activeThread.id, activeThread.nativeSessionId, activeThread.accountProfileId, nativeReadProfileKey.current,
+  ));
+
   return useMemo(
     () => ({
       removal,
@@ -1222,6 +1237,7 @@ export function useAgentChat(
       nativeRead: mirror ? { diagnostics: nativeMessages.value?.diagnostics, threadId: mirror.id, ready: nativeMessages.value !== null,
         loading: !nativeMessages.value && (nativeMessages.busy || !nativeMessages.error),
         error: nativeMessages.error, refresh: nativeMessages.refresh } : null,
+      historyReady,
       getThread: (id: string) => threadsRef.current.find(thread => thread.id === id),
       activeThreadId,
       setActiveThreadId: activate,
@@ -1269,6 +1285,7 @@ export function useAgentChat(
       nativeMessages.busy,
       nativeMessages.error,
       nativeMessages.refresh,
+      historyReady,
       importNative,
       activeThreadId,
       activate,

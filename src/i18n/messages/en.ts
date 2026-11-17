@@ -342,6 +342,7 @@ export const en: Messages = {
   "history.reason.unavailable": "The transcript is missing or unavailable.",
   "history.reason.read": "The transcript could not be read safely.",
   "history.readFailed": "Could not read the conversation history. Existing content and unsent drafts are preserved.",
+  "history.sendBlocked": "Read the conversation history before sending. Retry if reading failed.",
   "history.retryRead": "Read again",
   "history.sessionMissing": "The terminal session has no confirmed conversation ID. Open its original session to check; another conversation will not be substituted.",
   "history.incomplete": "The history scan reached its safety limit; this list may be incomplete.",
