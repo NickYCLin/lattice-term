@@ -7,7 +7,7 @@
    flows only deal with device ID and pairing code. */
 .relay-address-saved {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--control-icon-text-gap);
   align-items: center;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
@@ -41,14 +41,22 @@
 
 .remote-code-field > svg {
   position: absolute;
-  left: var(--space-4);
+  left: var(--control-leading-icon-inset);
+  top: 50%;
+  width: var(--control-leading-icon-size);
+  height: var(--control-leading-icon-size);
+  transform: translateY(-50%);
   z-index: 1;
   color: var(--ok);
   pointer-events: none;
 }
 
 .remote-code-field .input {
-  padding-left: 2.5rem;
+  padding-inline-start: calc(
+    var(--control-leading-icon-inset)
+    + var(--control-leading-icon-size)
+    + var(--control-leading-icon-gap)
+  );
   letter-spacing: 0.16em;
   font-size: var(--text-md);
 }
@@ -85,9 +93,18 @@
 
 .remote-toolbar__identity {
   flex: 0 1 auto;
-  min-width: 3rem;
+  min-width: 8rem;
   color: var(--text);
   font-weight: 600;
+  overflow: hidden;
+}
+
+.remote-toolbar__identity .truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .remote-toolbar > * {
@@ -162,7 +179,7 @@
 .remote-files-transfer {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--control-icon-text-gap);
 }
 
 .remote-files-path .input {
@@ -252,7 +269,7 @@
 .remote-files-entry {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--control-icon-text-gap);
   max-width: 100%;
   padding: 0;
   border: 0;
@@ -858,5 +875,21 @@
   .remote-files-table th:nth-child(3),
   .remote-files-table td:nth-child(3) {
     display: none;
+  }
+}
+
+
+@media (max-width: 42rem) {
+  .remote-workspace--files,
+  .remote-workspace--cli,
+  .remote-workspace--chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-workspace__files {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    max-height: none;
+    overflow: auto;
   }
 }

@@ -26,6 +26,7 @@ import { attachTerminalClipboard } from "./terminalClipboard";
 import { nativeTerminalClipboard } from "./nativeTerminalClipboard";
 import { attachTerminalScrollback } from "./terminalScrollback";
 import { MobileTerminalInput } from "./mobileTerminalInput";
+import { configurePlainTextInput } from "../../app/plainTextInput";
 import { openTerminalKeyboard, TerminalKeybar, useTerminalControlKey } from "./TerminalKeybar";
 
 export function TerminalPane({
@@ -85,6 +86,7 @@ export function TerminalPane({
     termRef.current = terminal;
     fitRef.current = fit;
     const textarea = terminal.textarea;
+    configurePlainTextInput(textarea);
     const imePresentation = new TerminalImePresentation(
       terminal,
       textarea,

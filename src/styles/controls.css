@@ -6,7 +6,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: var(--control-icon-text-gap);
   height: var(--control-field-height);
   padding: 0 var(--space-5);
   border: 1px solid transparent;
@@ -142,6 +142,36 @@
 }
 
 /* Source then model: side by side when there is room, stacked in dialogs. */
+
+/* Leading icon inside a text/password/search field: inset, gap, and
+   vertical centering come from the shared tokens so every form stays
+   consistent instead of inventing its own padding. */
+.field-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.field-with-icon > svg,
+.field-with-icon > .field-with-icon__icon {
+  position: absolute;
+  left: var(--control-leading-icon-inset);
+  top: 50%;
+  width: var(--control-leading-icon-size);
+  height: var(--control-leading-icon-size);
+  transform: translateY(-50%);
+  z-index: 1;
+  pointer-events: none;
+  color: inherit;
+}
+.field-with-icon .input,
+.field-with-icon input:not([type="checkbox"]):not([type="radio"]) {
+  padding-inline-start: calc(
+    var(--control-leading-icon-inset)
+    + var(--control-leading-icon-size)
+    + var(--control-leading-icon-gap)
+  );
+}
+
 .account-model-field {
   display: flex;
   flex-wrap: wrap;

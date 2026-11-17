@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { normalizeViewerPairingToken } from "../../app/pairingToken";
+import { plainTextInputProps } from "../../app/plainTextInput";
 import {
   formatDeviceId,
-  loadRelayAddress,
+  inferRelayAddress,
   normalizeDeviceId,
   saveRelayAddress,
 } from "../../app/remoteRelay";
+import type { ConnectionProfile } from "../../domain/connection";
 import type { RemoteApi } from "../../app/useRemoteSessions";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
@@ -32,14 +34,17 @@ export function RemoteQuickConnect({
   onConnected,
   onCancel,
   onPrepareSave,
+  profiles = [],
 }: {
   remote: RemoteApi;
   onConnected: (result: RemoteQuickConnectResult) => void;
   onCancel: () => void;
   onPrepareSave?: (deviceId: string, relayAddress: string, pairingCode: string) => Promise<void>;
+  /** Saved connections whose relay addresses can pre-fill a first-time dial. */
+  profiles?: ReadonlyArray<Pick<ConnectionProfile, "relayAddress">>;
 }) {
   const { t } = useI18n();
-  const [savedRelay] = useState(() => loadRelayAddress(window.localStorage));
+  const [savedRelay] = useState(() => inferRelayAddress(window.localStorage, profiles));
   const [relayAddress, setRelayAddress] = useState(savedRelay);
   const [deviceId, setDeviceId] = useState("");
   const [pairingCode, setPairingCode] = useState("");
@@ -189,6 +194,7 @@ export function RemoteQuickConnect({
             </label>
             <input
               id="remote-quick-id"
+                {...plainTextInputProps}
               ref={idRef}
               className="input mono remote-quick-id"
               value={formatDeviceId(deviceId)}
@@ -216,8 +222,7 @@ export function RemoteQuickConnect({
                 className="input mono"
                 value={pairingCode}
                 type="password"
-                autoComplete="off"
-                spellCheck={false}
+                {...plainTextInputProps}
                 maxLength={64}
                 disabled={busy}
                 onChange={(event) =>

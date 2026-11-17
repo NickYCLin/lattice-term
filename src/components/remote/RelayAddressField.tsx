@@ -1,3 +1,4 @@
+import { plainTextInputProps } from "../../app/plainTextInput";
 import { useState } from "react";
 import { useI18n } from "../../i18n/context";
 import { CheckIcon, EditIcon } from "../icons";
@@ -59,7 +60,7 @@ export function RelayAddressField({
       <label className="field__label" htmlFor={id}>
         {t("remote.host.relayAddress")}
       </label>
-      <input
+      <input {...plainTextInputProps}
         id={id}
         className="input mono"
         value={value}

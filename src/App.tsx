@@ -1457,6 +1457,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
       {quickConnectOpen && runtime.host === "tauri" && (
         <RemoteQuickConnect
           remote={remote}
+          profiles={workspace.profiles}
           onPrepareSave={platform === "ios" ? async (deviceId, relayAddress, code) => {
             const memory = rememberRelayDevice(workspace.profiles, { deviceId, relayAddress });
             const existing = workspace.profiles.find((profile) => profile.protocol === "lattice" && profile.deviceId === deviceId);

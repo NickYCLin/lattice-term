@@ -150,7 +150,7 @@
 .sidebar__search {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   margin: var(--space-4);
   padding: 0 var(--space-4);
   height: var(--control-height);
@@ -220,7 +220,7 @@
 .sidebar__row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   width: 100%;
   padding: 0 var(--space-3);
   height: 2.125rem;

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { plainTextInputProps, unsweetenPunctuation } from "../../app/plainTextInput";
 import type { RemoteSessionSummary } from "../../app/useRemoteSessions";
 import { commandActive, useRemoteCommand } from "../../app/useRemoteCommand";
 import { useI18n } from "../../i18n/context";
@@ -32,10 +33,10 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
         </select>
       </label>
       <label className="field">{t("remote.commands.directory")}
-        <input className="input mono" maxLength={4096} value={directory} disabled={busy || active} placeholder={t("remote.commands.home")} onChange={e => setDirectory(e.currentTarget.value)} />
+        <input className="input mono" maxLength={4096} {...plainTextInputProps} value={directory} disabled={busy || active} placeholder={t("remote.commands.home")} onChange={e => setDirectory(unsweetenPunctuation(e.currentTarget.value))} />
       </label>
       <label className="field">{t("remote.commands.command")}
-        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} spellCheck={false} value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(e.currentTarget.value)} />
+        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} {...plainTextInputProps} value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(unsweetenPunctuation(e.currentTarget.value))} />
       </label>
       <label className="field">{t("remote.commands.timeout")}
         <select className="input" value={seconds} disabled={busy || active} onChange={e => setSeconds(Number(e.currentTarget.value))}>

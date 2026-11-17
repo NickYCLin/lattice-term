@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatDeviceId,
+  inferRelayAddress,
   loadRelayAddress,
   normalizeDeviceId,
   saveRelayAddress,
@@ -54,5 +55,29 @@ describe("remembered relay address", () => {
     saveRelayAddress(storage, "relay.example.com");
     saveRelayAddress(storage, "   ");
     expect(loadRelayAddress(storage)).toBe("");
+  });
+});
+
+describe("inferRelayAddress", () => {
+  it("prefers the install-wide remembered address", () => {
+    const storage = memoryStorage();
+    saveRelayAddress(storage, "wss://remembered.example/relay");
+    expect(
+      inferRelayAddress(storage, [{ relayAddress: "wss://profile.example/relay" }]),
+    ).toBe("wss://remembered.example/relay");
+  });
+
+  it("falls back to a saved connection's relay when nothing is remembered", () => {
+    const storage = memoryStorage();
+    expect(
+      inferRelayAddress(storage, [
+        { relayAddress: "  " },
+        { relayAddress: "wss://profile.example/relay" },
+      ]),
+    ).toBe("wss://profile.example/relay");
+  });
+
+  it("returns empty when no relay has been used or saved", () => {
+    expect(inferRelayAddress(memoryStorage(), [{ relayAddress: "" }])).toBe("");
   });
 });

@@ -4,6 +4,7 @@ import type {
   FormEvent,
   KeyboardEvent,
 } from "react";
+import { configurePlainTextInput } from "../../app/plainTextInput";
 import { KeyboardIcon } from "../icons";
 
 export type CanvasSoftKeyboardAction =
@@ -214,6 +215,10 @@ export function CanvasSoftKeyboard({
   onReleaseAll: () => void;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    configurePlainTextInput(inputRef.current);
+  }, []);
+
   const compositionFallback = useRef<number | null>(null);
   const suppressionExpiry = useRef<number | null>(null);
   const controlExpiry = useRef<number | null>(null);

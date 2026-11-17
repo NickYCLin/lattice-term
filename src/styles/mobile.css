@@ -233,3 +233,67 @@
 
 /* Standard fields share the mobile touch height; inline composite selects opt out. */
 .app--mobile { --control-field-height: max(2.75rem, calc(var(--control-height) + .25rem * var(--interface-text-scale))); }
+
+
+/* Session toolbars must wrap instead of shrinking the name to "La…" or
+   painting action chips over the command form underneath. */
+.app--mobile .remote-toolbar {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--control-icon-text-gap);
+  height: auto;
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+}
+.app--mobile .remote-toolbar__identity {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.app--mobile .remote-toolbar__status {
+  margin-left: 0;
+}
+.app--mobile .capture-button,
+.app--mobile .remote-toolbar .capture-button {
+  flex: 0 1 auto;
+}
+.app--mobile .remote-workspace--files,
+.app--mobile .remote-workspace--cli,
+.app--mobile .remote-workspace--chat {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app--mobile .remote-workspace__files,
+.app--mobile .remote-command-pane {
+  min-width: 0;
+  border-right: 0;
+}
+
+/* Keep dialog titles on the same center line as the leading icon and close
+   control; the default title margin is for stacked, not header, layouts. */
+.app--mobile .dialog__head {
+  align-items: center;
+  gap: var(--control-icon-text-gap);
+}
+.app--mobile .dialog__head .dialog__title {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* When the software keyboard (and its accessory bar) is up, keep the
+   連線 / 取消 row in view at the bottom of the dialog. */
+:root[data-mobile-keyboard="true"] .app--mobile .dialog,
+:root[data-mobile-keyboard="true"] .app--mobile .dialog--wide {
+  scroll-padding-bottom: 5.5rem;
+}
+:root[data-mobile-keyboard="true"] .app--mobile .dialog__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: var(--space-4);
+  padding: var(--space-3) 0 var(--space-1);
+  background: var(--surface-overlay);
+  box-shadow: 0 -1px 0 var(--line);
+}

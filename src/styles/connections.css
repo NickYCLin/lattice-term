@@ -294,7 +294,7 @@
 .connection-card__primary > .connection-card__connect { line-height: var(--connection-card-action-height); }
 .connection-card__primary > :first-child { grid-column: 1; }
 .connection-card__primary > .button--secondary { grid-column: 2; }
-.connection-card__primary > .button svg { vertical-align: middle; margin-inline-end: var(--space-1); }
+.connection-card__primary > .button svg { vertical-align: middle; margin-inline-end: var(--control-icon-text-gap); }
 .connection-card__primary > .connection-card__favorite {
   grid-column: 3;
   justify-self: end;
@@ -1630,7 +1630,7 @@
 .activity-search {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   flex: 1 1 12rem;
   max-width: 20rem;
   height: 2.125rem;
@@ -1850,7 +1850,7 @@
 .session-projects__search-input {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--control-icon-text-gap);
   min-width: 0;
   padding: 0.38rem 0.48rem;
   border: 1px solid var(--line);

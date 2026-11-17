@@ -16,6 +16,7 @@ import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSession
 import { TerminalImeFallback } from "../terminal/terminalImeFallback";
 import { TerminalImePresentation } from "../terminal/terminalImePresentation";
 import { MobileTerminalInput } from "../terminal/mobileTerminalInput";
+import { configurePlainTextInput } from "../../app/plainTextInput";
 import { openTerminalKeyboard, TerminalKeybar, useTerminalControlKey } from "../terminal/TerminalKeybar";
 import {
   TERMINAL_LETTER_SPACING,
@@ -97,6 +98,7 @@ export function RemoteTerminalView({
     terminal.open(host);
     termRef.current = terminal;
     const textarea = terminal.textarea;
+    configurePlainTextInput(textarea);
     const imePresentation = new TerminalImePresentation(terminal, textarea);
 
     let resizeFrame: number | null = null;

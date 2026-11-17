@@ -12,6 +12,7 @@ import {
   type ConnectionProfile,
 } from "../../domain/connection";
 import { shouldConnectWithoutAsking } from "../../app/remoteAutoConnect";
+import { plainTextInputProps } from "../../app/plainTextInput";
 import { useI18n } from "../../i18n/context";
 import { Callout } from "../common/Callout";
 import {
@@ -382,7 +383,7 @@ export function RemoteConnectFlow({
               <div className="remote-code-field">
                 <ShieldIcon size={16} />
                 <input
-                  id="remote-pairing-code"
+                  id="remote-pairing-code" {...plainTextInputProps}
                   aria-describedby="remote-pairing-code-hint"
                   ref={codeRef}
                   className="input mono"

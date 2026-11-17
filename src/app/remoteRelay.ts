@@ -36,3 +36,21 @@ export function formatDeviceId(deviceId: string): string {
   if (!/^\d{9}$/.test(digits)) return deviceId;
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
 }
+
+/**
+ * Prefer the last successful relay remembered on this install. If that is
+ * empty, fall back to a relay address already stored on a saved connection.
+ * Never invents a built-in host.
+ */
+export function inferRelayAddress(
+  storage: Storage,
+  profiles: ReadonlyArray<{ relayAddress?: string | null }> = [],
+): string {
+  const remembered = loadRelayAddress(storage).trim();
+  if (remembered) return remembered;
+  for (const profile of profiles) {
+    const address = (profile.relayAddress ?? "").trim();
+    if (address) return address;
+  }
+  return "";
+}

@@ -426,7 +426,7 @@
 .dialog__head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   margin-bottom: var(--space-4);
 }
 
@@ -456,6 +456,12 @@
   font-size: var(--text-md);
   font-weight: 650;
   margin-bottom: var(--space-2);
+}
+
+.dialog__head .dialog__title {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .dialog__body {
@@ -643,7 +649,7 @@
 .palette__search {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--line);
   color: var(--text-faint);
@@ -676,7 +682,7 @@
 .palette__item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-icon-text-gap);
   width: 100%;
   padding: var(--space-2) var(--space-3);
   min-height: 2.375rem;

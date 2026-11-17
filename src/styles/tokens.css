@@ -57,6 +57,13 @@
   --control-choice-radius: var(--radius-sm);
   --control-focus-width: 2px;
   --control-focus-offset: 2px;
+
+  /* Shared gap between a leading icon and the text or field it accompanies. */
+  --control-icon-text-gap: var(--space-3);
+  --control-leading-icon-size: 1rem;
+  --control-leading-icon-inset: var(--space-4);
+  --control-leading-icon-gap: var(--space-4);
+
   --control-disabled-opacity: .48;
 
   --rail-width: 4rem;
