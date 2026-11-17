@@ -9,6 +9,11 @@ use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+#[path = "bounded_json.rs"]
+mod bounded_json;
+#[path = "codex_spool.rs"]
+pub(super) mod codex_spool;
+
 const LINE_LIMIT: usize = 24 * 1024 * 1024;
 const SCAN_LIMIT: u64 = 512 * 1024 * 1024;
 const PAGE_BYTES: usize = 256 * 1024;
@@ -45,6 +50,8 @@ pub struct NormalizedItem {
     pub output: Option<String>,
     pub is_error: bool,
     pub unreadable: bool,
+    #[serde(default)]
+    pub truncated: bool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +65,8 @@ pub struct NormalizedPage {
     pub diagnostics: ReadDiagnostics,
     pub turns: Vec<NormalizedTurn>,
     pub previous_cursor: Option<HistoryCursor>,
+    pub next_cursor: Option<HistoryCursor>,
+    pub decoded_bytes: Option<u64>,
     pub truncated: bool,
     pub warnings: Vec<String>,
 }
@@ -65,6 +74,8 @@ pub struct NormalizedPage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistoryCursor {
     pub before: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<u64>,
     pub length: u64,
     pub modified: String,
 }
@@ -78,6 +89,9 @@ struct Parser<'a> {
     bytes: usize,
     count: u64,
     before: u64,
+    after: Option<u64>,
+    source_truncated: bool,
+    sink: Option<codex_spool::Writer>,
     turn: Option<String>,
     message_id: Option<String>,
     preserve_turn: bool,
@@ -91,6 +105,7 @@ struct Parser<'a> {
 }
 impl Parser<'_> {
     fn emit(&mut self, mut item: NormalizedItem) {
+        item.truncated |= self.source_truncated;
         item.text = self.masker.text(&item.text);
         item.input = item.input.map(|text| self.masker.text(&text));
         item.output = item.output.map(|text| self.masker.text(&text));
@@ -115,12 +130,13 @@ impl Parser<'_> {
         }
         let ordinal = self.count;
         self.count += 1;
-        if ordinal >= self.before {
+        if ordinal >= self.before || self.after.is_some_and(|after| ordinal < after) {
             return;
         }
         let size = serde_json::to_vec(&item).map_or(0, |data| data.len());
-        if size > PAGE_BYTES {
+        if size > PAGE_BYTES - 4096 {
             self.clipped = true;
+            item.truncated = true;
             item.text = truncate_text(&item.text, PAGE_BYTES / 4);
             item.input = item.input.map(|s| truncate_text(&s, PAGE_BYTES / 4));
             item.output = item.output.map(|s| truncate_text(&s, PAGE_BYTES / 4));
@@ -128,8 +144,9 @@ impl Parser<'_> {
         let mut size = serde_json::to_vec(&item).map_or(0, |data| data.len());
         // JSON escaping can expand control characters sixfold. Bound the wire
         // representation as well as raw string bytes, without dropping a row.
-        while size > PAGE_BYTES {
+        while size > PAGE_BYTES - 4096 {
             self.clipped = true;
+            item.truncated = true;
             item.text = truncate_text(&item.text, (item.text.len() / 2).max(64));
             item.input = item
                 .input
@@ -139,9 +156,18 @@ impl Parser<'_> {
                 .map(|text| truncate_text(&text, (text.len() / 2).max(64)));
             size = serde_json::to_vec(&item).map_or(0, |data| data.len());
         }
+        if let Some(sink) = &mut self.sink {
+            sink.push(&item);
+            return;
+        }
+        if self.after.is_some()
+            && (self.items.len() >= PAGE_ITEMS || self.bytes + size > PAGE_BYTES - 4096)
+        {
+            return;
+        }
         self.bytes += size;
         self.items.push_back((ordinal, item));
-        while self.items.len() > PAGE_ITEMS || self.bytes > PAGE_BYTES {
+        while self.items.len() > PAGE_ITEMS || self.bytes > PAGE_BYTES - 4096 {
             if let Some((_, old)) = self.items.pop_front() {
                 self.bytes = self
                     .bytes
@@ -163,6 +189,7 @@ impl Parser<'_> {
             output: None,
             is_error: false,
             unreadable: false,
+            truncated: false,
         }
     }
     fn plain(&mut self, id: String, role: &str, text: String) {
@@ -658,9 +685,6 @@ impl Parser<'_> {
 pub(super) fn decoded_reader(path: &Path) -> Option<Box<dyn Read>> {
     let file = open_regular_transcript_handle(path)?;
     if path.extension().is_some_and(|ext| ext == "zst") {
-        if file.metadata().ok()?.len() > super::MAX_TRANSCRIPT_FILE_BYTES {
-            return None;
-        }
         let mut decoder = zstd::stream::read::Decoder::new(file).ok()?;
         decoder.window_log_max(27).ok()?;
         Some(Box::new(decoder))
@@ -761,6 +785,9 @@ fn stream_mode_limit(
         offset += before - (reader.get_ref().limit() + reader.buffer().len() as u64);
     }
     if reader.get_ref().limit() == 0 {
+        if !path.extension().is_some_and(|ext| ext == "zst") {
+            return Err("The native history changed while reading; retry.".into());
+        }
         return Err("Transcript exceeds the decoded size limit.".into());
     }
     Ok(skipped)
@@ -776,6 +803,9 @@ fn parser<'a>(
         bytes: 0,
         count: 0,
         before,
+        after: None,
+        source_truncated: false,
+        sink: None,
         turn: None,
         message_id: None,
         preserve_turn: false,
@@ -792,7 +822,17 @@ pub fn recent(
     path: &Path,
     kind: TranscriptKind,
 ) -> Result<super::LocalConversationSnapshot, String> {
-    recent_inner(path, kind).map_err(|error| diagnostics::failure(kind, path, &error))
+    let read = || {
+        if kind == TranscriptKind::Codex && codex_spool::needed(path)? {
+            return codex_spool::page(path, None).map(legacy);
+        }
+        let result = recent_inner(path, kind)?;
+        if kind == TranscriptKind::Codex && result.diagnostics.reasons.contains_key("oversized") {
+            return codex_spool::page(path, None).map(legacy);
+        }
+        Ok(result)
+    };
+    read().map_err(|error| diagnostics::failure(kind, path, &error))
 }
 fn recent_inner(
     path: &Path,
@@ -839,6 +879,8 @@ fn recent_inner(
     Ok(legacy(NormalizedPage {
         turns,
         previous_cursor: None,
+        next_cursor: None,
+        decoded_bytes: None,
         diagnostics: skipped.clone(),
         truncated: skipped.partial || parser.count > PAGE_ITEMS as u64 || parser.clipped || dropped,
         warnings: if skipped.partial {
@@ -1064,8 +1106,20 @@ pub fn page(
     cursor: Option<&HistoryCursor>,
     image_request: Option<&str>,
 ) -> Result<(NormalizedPage, Option<ImageSource>), String> {
-    page_inner(path, kind, cursor, image_request)
-        .map_err(|error| diagnostics::failure(kind, path, &error))
+    let read = || {
+        if kind == TranscriptKind::Codex && image_request.is_none() && codex_spool::needed(path)? {
+            return codex_spool::page(path, cursor).map(|page| (page, None));
+        }
+        let result = page_inner(path, kind, cursor, image_request)?;
+        if kind == TranscriptKind::Codex
+            && image_request.is_none()
+            && result.0.diagnostics.reasons.contains_key("oversized")
+        {
+            return codex_spool::page(path, cursor).map(|page| (page, None));
+        }
+        Ok(result)
+    };
+    read().map_err(|error| diagnostics::failure(kind, path, &error))
 }
 fn page_inner(
     path: &Path,
@@ -1085,6 +1139,9 @@ fn page_inner(
         bytes: 0,
         count: 0,
         before: cursor.map_or(u64::MAX, |cursor| cursor.before),
+        after: cursor.and_then(|cursor| cursor.after),
+        source_truncated: false,
+        sink: None,
         turn: None,
         message_id: None,
         preserve_turn: false,
@@ -1120,6 +1177,13 @@ fn page_inner(
         return Err("The native history changed while reading; retry.".into());
     }
     let first = parser.items.front().map_or(0, |(ordinal, _)| *ordinal);
+    let last = parser.items.back().map_or(0, |(ordinal, _)| ordinal + 1);
+    let next_cursor = (last > 0 && last < parser.count).then_some(HistoryCursor {
+        before: parser.count,
+        after: Some(last),
+        length,
+        modified: modified.clone(),
+    });
     let mut turns = Vec::<NormalizedTurn>::new();
     for (_, item) in parser.items {
         let turn = item.turn_id.clone().unwrap_or_else(|| "unscoped".into());
@@ -1134,14 +1198,23 @@ fn page_inner(
     for turn in &mut turns {
         turn.items = coalesce(std::mem::take(&mut turn.items));
     }
+    if kind == TranscriptKind::Codex {
+        turns = vec![NormalizedTurn {
+            id: "page".into(),
+            items: turns.into_iter().flat_map(|turn| turn.items).collect(),
+        }];
+    }
     Ok((
         NormalizedPage {
             turns,
             previous_cursor: (first > 0).then_some(HistoryCursor {
                 before: first,
+                after: None,
                 length,
                 modified,
             }),
+            next_cursor,
+            decoded_bytes: None,
             diagnostics: skipped.clone(),
             truncated: skipped.partial || first > 0 || parser.clipped,
             warnings: if skipped.partial || parser.clipped {
@@ -1479,6 +1552,7 @@ fn coalesce(items: Vec<NormalizedItem>) -> Vec<NormalizedItem> {
                 } else if let Some(index) = calls.get(id).copied() {
                     output[index].output = item.output;
                     output[index].is_error |= item.is_error;
+                    output[index].truncated |= item.truncated;
                     output[index].result_id = Some(item.id);
                     continue;
                 }
@@ -2019,5 +2093,34 @@ mod tests {
         assert!(!serde_json::to_string(&found)
             .unwrap()
             .contains("NEVER_SIGNATURE"));
+    }
+}
+
+#[cfg(test)]
+mod growth_tests {
+    use super::*;
+    #[test]
+    fn appended_plain_jsonl_is_changed_not_a_decoded_size_limit() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-synthetic.jsonl");
+        std::fs::write(&path, "{\"synthetic\":true}\n").unwrap();
+        let mut appended = false;
+        let error = stream_rows(&path, |_, _| {
+            if !appended {
+                appended = true;
+                writeln!(
+                    std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&path)
+                        .unwrap(),
+                    "{{\"synthetic\":true}}"
+                )
+                .unwrap();
+            }
+        })
+        .unwrap_err();
+        assert!(error.contains("changed"));
+        assert!(!error.contains("size limit"));
     }
 }

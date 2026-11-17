@@ -114,7 +114,11 @@ function NativeImage({
     </>
   );
 }
-export function NativeRecordView({
+export function NativeRecordView(props: Parameters<typeof NativeRecordContent>[0]) {
+  const { t } = useI18n();
+  return <div>{props.item.truncated && <p role="status">{t("native.recordTruncated")}</p>}<NativeRecordContent {...props} /></div>;
+}
+function NativeRecordContent({
   item,
   threadId,
   directory,
@@ -232,7 +236,7 @@ export function NativeHistoryReader({
     [error, setError] = useState("");
   const [discarded, setDiscarded] = useState(false);
   const box = useRef<HTMLDivElement>(null);
-  const anchor = useRef<{ height: number; top: number } | null>(null);
+  const pendingScroll = useRef(false);
   const generation = useRef(0);
   const inFlight = useRef(false);
   const signature = JSON.stringify({
@@ -242,17 +246,13 @@ export function NativeHistoryReader({
     conversation,
   });
   const cursor = pages[0]?.previousCursor ?? null;
+  const newer = pages[pages.length - 1]?.nextCursor ?? null;
   async function read(before: NativeHistoryCursor | null) {
     if (inFlight.current) return;
     inFlight.current = true;
     const ticket = generation.current;
     setBusy(true);
     setError("");
-    if (before && box.current)
-      anchor.current = {
-        height: box.current.scrollHeight,
-        top: box.current.scrollTop,
-      };
     try {
       const page = maskNativeValue(
         await invoke<NativeRecordPage>("native_conversation_page", {
@@ -264,8 +264,11 @@ export function NativeHistoryReader({
         }),
       );
       if (ticket !== generation.current) return;
-      if (before && pages.length >= 6) setDiscarded(true);
-      setPages((old) => (before ? [page, ...old] : [page]).slice(0, 6));
+      setDiscarded(Boolean(page.previousCursor || page.nextCursor));
+      pendingScroll.current = true;
+      // One visible page: off-screen pages and React trees are released.
+      // Bidirectional cursors fetch them again without an unbounded history array.
+      setPages([page]);
     } catch (reason) {
       if (ticket === generation.current)
         setError(
@@ -294,11 +297,7 @@ export function NativeHistoryReader({
     };
   }, [signature]);
   useLayoutEffect(() => {
-    if (anchor.current && box.current) {
-      box.current.scrollTop =
-        anchor.current.top + box.current.scrollHeight - anchor.current.height;
-      anchor.current = null;
-    }
+    if (pendingScroll.current && box.current) { box.current.scrollTop = 0; pendingScroll.current = false; }
   }, [pages]);
   const messages: SessionConversationMessage[] = pages
     .flatMap((page) => page.turns.flatMap((turn) => turn.items))
@@ -334,6 +333,7 @@ export function NativeHistoryReader({
         >
           {t("native.earlier")}
         </button>
+        <button className="button button--ghost button--sm" type="button" disabled={busy || !newer} onClick={() => void read(newer)}>{t("native.newer")}</button>
         <button
           className="button button--ghost button--sm"
           type="button"
@@ -349,6 +349,7 @@ export function NativeHistoryReader({
       {busy && <p role="status">{t("common.loading")}</p>}
       {error && <p role="alert">{nativeReadError(error, t)}</p>}
       {!!pages[0]?.diagnostics?.skippedRows && <p role="status">{t("history.skippedRows", { count: pages[0].diagnostics.skippedRows })}</p>}
+      {!!pages[0]?.diagnostics?.truncatedRows && <p role="status">{t("native.truncatedRows", { count: pages[0].diagnostics.truncatedRows })}</p>}
       {(discarded || pages.some((page) => page.warnings.length)) && (
         <p role="status">{t("native.bounded")}</p>
       )}
@@ -356,7 +357,7 @@ export function NativeHistoryReader({
         {rows.map((row) => (
           <div key={row.value.record?.id ?? row.id}>
             {row.tool ? (
-              <ReadableToolCard tool={row.tool} />
+              <>{row.value.record?.truncated && <p role="status">{t("native.recordTruncated")}</p>}<ReadableToolCard tool={row.tool} /></>
             ) : row.value.record ? (
               <NativeRecordView
                 item={row.value.record}

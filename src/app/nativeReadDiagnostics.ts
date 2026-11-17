@@ -2,10 +2,12 @@ import type { I18nValue } from "../i18n/context";
 import { maskNativeText } from "./nativeRecords";
 export interface NativeReadDiagnostics {
   skippedRows: number;
+  truncatedRows?: number;
   reasons: Record<string, number>;
   partial: boolean;
 }
 const reasons = {
+  cache_capacity: "history.reason.cacheCapacity", busy: "history.reason.busy",
   empty: "history.reason.empty", decode: "history.reason.decode",
   size_limit: "history.reason.sizeLimit", changed: "history.reason.changed",
   unsupported_version: "history.reason.unsupported", no_readable_records: "history.reason.unreadable",

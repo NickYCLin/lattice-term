@@ -191,9 +191,8 @@ it("loads earlier pages in order and stops at the beginning without touching nat
       (node) => node.tagName === "BUTTON" && node.textContent.includes("更早"),
     )!;
     await act(async () => onClick(earlier)());
-    expect(container.textContent.indexOf("earlier")).toBeLessThan(
-      container.textContent.indexOf("latest"),
-    );
+    expect(container.textContent).toContain("earlier");
+    expect(container.textContent).not.toContain("latest");
     expect(invoke).toHaveBeenLastCalledWith(
       "native_conversation_page",
       expect.objectContaining({
@@ -277,7 +276,7 @@ it("opens image pixels through the exact native item and revalidates in the ligh
   }
 });
 
-it("bounds the full reader to six pages and keeps a route back to the latest snapshot", async () => {
+it("recycles off-screen pages and keeps a route back to the latest snapshot", async () => {
   const container = installHostDom();
   const root = createRoot(container as unknown as Element);
   let sequence = 0;
@@ -304,9 +303,9 @@ it("bounds the full reader to six pages and keeps a route back to the latest sna
     }
     expect(container.textContent).not.toContain("page-0");
     expect(container.textContent).not.toContain("page-1");
-    expect(container.textContent).toContain("page-2");
+    expect(container.textContent).not.toContain("page-2");
     expect(container.textContent).toContain("page-7");
-    expect(container.textContent).toContain("六頁");
+    expect(container.textContent).toContain("目前僅保留顯示中的一頁");
     await act(async () =>
       onClick(
         allNodes(container).find(
@@ -320,4 +319,25 @@ it("bounds the full reader to six pages and keeps a route back to the latest sna
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+it("walks to the beginning and back through recycled pages using bidirectional cursors", async () => {
+  const container=installHostDom();const root=createRoot(container as unknown as Element);
+  invoke.mockImplementation((_command,args) => {
+    const index=args.cursor?.after ?? args.cursor?.before ?? 9;
+    return Promise.resolve({...page(`bounded-${index}`,index>0?index-1:null),
+      nextCursor:index<9?{before:999,after:index+1,length:100,modified:"1000000000000000000"}:null});
+  });
+  const click=async(text:string)=>act(async()=>onClick(allNodes(container).find(node=>node.tagName==="BUTTON"&&node.textContent===text)!)());
+  try {
+    await act(async()=>root.render(<I18nProvider locale="zh-TW"><NativeHistoryReader threadId="owner" directory="/synthetic" /></I18nProvider>));
+    for(let i=8;i>=0;i--){await click("載入更早內容");expect(container.textContent).toContain(`bounded-${i}`);expect(container.textContent).not.toContain(`bounded-${i+1}`);}
+    expect(allNodes(container).find(node=>node.tagName==="BUTTON"&&node.textContent==="載入更早內容")!.attributes.disabled).toBeDefined();
+    for(let i=1;i<=9;i++){await click("較新的紀錄");expect(container.textContent).toContain(`bounded-${i}`);expect(container.textContent).not.toContain(`bounded-${i-1}`);}
+    expect(allNodes(container).find(node=>node.tagName==="BUTTON"&&node.textContent==="較新的紀錄")!.attributes.disabled).toBeDefined();
+  } finally {await act(async()=>root.unmount());}
+});
+it("marks a clipped record while retaining its readable prefix",()=>{
+  const html=renderToStaticMarkup(<I18nProvider locale="zh-TW"><NativeRecordView item={record("assistant",{text:"Synthetic readable prefix",truncated:true})} threadId="owner" directory="/synthetic" /></I18nProvider>);
+  expect(html).toContain("Synthetic readable prefix");expect(html).toContain("此則內容過長，已截斷顯示");
 });

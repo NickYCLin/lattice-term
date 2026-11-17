@@ -17,7 +17,7 @@ export function ConversationReadProgress({ loading, error, onRetry, diagnostics 
     const timer = setInterval(() => setSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [loading]);
-  if (!loading && !error && !diagnostics?.skippedRows) return null;
+  if (!loading && !error && !diagnostics?.skippedRows && !diagnostics?.truncatedRows) return null;
   return <div className="chat-read-progress" aria-busy={loading}>
     {loading && <>
       <div className="chat-read-progress__bar" role="progressbar" aria-label={t("history.reading")} />
@@ -27,6 +27,7 @@ export function ConversationReadProgress({ loading, error, onRetry, diagnostics 
     </>}
     {error && <div role="alert"><p>{t("history.readFailed")}</p><p className="session-chat__diagnostic">{nativeReadError(error, t)}</p></div>}
     {!!diagnostics?.skippedRows && <p role="status">{t("history.skippedRows", { count: diagnostics.skippedRows })}</p>}
+    {!!diagnostics?.truncatedRows && <p role="status">{t("native.truncatedRows", { count: diagnostics.truncatedRows })}</p>}
     {onRetry && error && <button type="button" className="button button--ghost button--sm" disabled={loading} onClick={onRetry}>{t("history.retryRead")}</button>}
   </div>;
 }

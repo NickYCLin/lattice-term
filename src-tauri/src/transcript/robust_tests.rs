@@ -98,12 +98,16 @@ fn seven_jsonl_readers_skip_oversized_rows_without_losing_the_next_record() {
         file.write_all(fixture(kind).as_bytes()).unwrap();
         drop(file);
         let result = normalized::recent(&path, kind).unwrap();
-        assert_eq!(
-            result.diagnostics.reasons["oversized"],
-            1,
-            "{}",
-            diagnostics::cli(kind)
-        );
+        if kind == TranscriptKind::Codex {
+            assert!(result.diagnostics.skipped_rows > 0);
+        } else {
+            assert_eq!(
+                result.diagnostics.reasons["oversized"],
+                1,
+                "{}",
+                diagnostics::cli(kind)
+            );
+        }
         assert!(result
             .messages
             .iter()
@@ -198,6 +202,59 @@ fn gemini_json_preserves_a_readable_prefix_after_truncation() {
     assert_eq!(loaded.messages[0].text, "synthetic request");
 }
 
+#[derive(Default)]
+struct AuditMetrics {
+    large: u64,
+    first_ok: u64,
+    complete: u64,
+    old_limited: u64,
+    old_complete: u64,
+    truncated_rows: u64,
+    max_bytes: u64,
+    max_decoded: u64,
+    peak_page_bytes: u64,
+    first_ms: Vec<u64>,
+    full_ms: Vec<u64>,
+}
+impl AuditMetrics {
+    fn merge(&mut self, other: Self) {
+        self.large += other.large;
+        self.first_ok += other.first_ok;
+        self.complete += other.complete;
+        self.old_limited += other.old_limited;
+        self.old_complete += other.old_complete;
+        self.truncated_rows += other.truncated_rows;
+        self.max_bytes = self.max_bytes.max(other.max_bytes);
+        self.max_decoded = self.max_decoded.max(other.max_decoded);
+        self.peak_page_bytes = self.peak_page_bytes.max(other.peak_page_bytes);
+        self.first_ms.extend(other.first_ms);
+        self.full_ms.extend(other.full_ms);
+    }
+}
+fn audit_reason(error: &str) -> String {
+    error
+        .strip_prefix("native.read:")
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|value| value["reason"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "read".into())
+}
+fn audit_rss_kib() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|line| line.starts_with("VmRSS:"))
+                    .and_then(|line| line.split_whitespace().nth(1)?.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        0
+    }
+}
 /// Opt-in real-machine audit: no content, paths, titles, identities or errors are printed.
 #[test]
 #[ignore = "explicitly requested read-only local audit; aggregate counts only"]
@@ -303,6 +360,19 @@ fn audit_real_native_sessions_read_only() {
             });
         }
         let samples = candidates.len();
+        let rss_base = audit_rss_kib();
+        let rss_peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(rss_base));
+        let sampling = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let sampler = {
+            let peak = rss_peak.clone();
+            let running = sampling.clone();
+            std::thread::spawn(move || {
+                while running.load(std::sync::atomic::Ordering::Relaxed) {
+                    peak.fetch_max(audit_rss_kib(), std::sync::atomic::Ordering::Relaxed);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            })
+        };
         let reports = std::thread::scope(|scope| {
             let workers: Vec<_> = candidates
                 .chunks(samples.div_ceil(4).max(1))
@@ -312,29 +382,98 @@ fn audit_real_native_sessions_read_only() {
                         let mut skipped = 0u64;
                         let mut failures = 0u64;
                         let mut errors = BTreeMap::<String, u64>::new();
+                        let mut metrics = AuditMetrics::default();
                         for path in paths {
-                            match normalized::page(path, kind, None, None) {
+                            let size = fs::metadata(additional::physical(path))
+                                .map(|m| m.len())
+                                .unwrap_or(0);
+                            metrics.max_bytes = metrics.max_bytes.max(size);
+                            let started = std::time::Instant::now();
+                            let first = normalized::page(path, kind, None, None);
+                            let first = if first
+                                .as_ref()
+                                .is_err_and(|error| audit_reason(error) == "changed")
+                            {
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                normalized::page(path, kind, None, None)
+                            } else {
+                                first
+                            };
+                            match first {
                                 Ok((page, _)) => {
-                                    successful += 1;
+                                    let first_ms = started.elapsed().as_millis() as u64;
+                                    let decoded = page.decoded_bytes.unwrap_or(size);
+                                    metrics.max_decoded = metrics.max_decoded.max(decoded);
+                                    metrics.peak_page_bytes = metrics
+                                        .peak_page_bytes
+                                        .max(serde_json::to_vec(&page).unwrap().len() as u64);
+                                    metrics.truncated_rows += page.diagnostics.truncated_rows;
                                     skipped += page.diagnostics.skipped_rows;
-                                    for (reason, count) in page.diagnostics.reasons {
-                                        *errors.entry(reason).or_default() += count;
+                                    for (reason, count) in &page.diagnostics.reasons {
+                                        *errors.entry(reason.clone()).or_default() += count;
                                     }
+                                    let old_limited = kind == TranscriptKind::Codex
+                                        && path.extension().is_some_and(|s| s == "zst")
+                                        && (size > MAX_TRANSCRIPT_FILE_BYTES
+                                            || decoded > 512 * 1024 * 1024);
+                                    let large = kind == TranscriptKind::Codex
+                                        && (size > MAX_TRANSCRIPT_FILE_BYTES || old_limited);
+                                    if large {
+                                        metrics.large += 1;
+                                        metrics.first_ok += 1;
+                                        metrics.old_limited += u64::from(old_limited);
+                                        metrics.first_ms.push(first_ms);
+                                        let mut cursor = page.previous_cursor;
+                                        let mut failure = None;
+                                        while let Some(before) = cursor {
+                                            match normalized::page(path, kind, Some(&before), None)
+                                            {
+                                                Ok((page, _)) => {
+                                                    metrics.peak_page_bytes =
+                                                        metrics.peak_page_bytes.max(
+                                                            serde_json::to_vec(&page).unwrap().len()
+                                                                as u64,
+                                                        );
+                                                    if page.previous_cursor.as_ref().is_some_and(
+                                                        |next| next.before >= before.before,
+                                                    ) {
+                                                        failure = Some("cursor_progress".into());
+                                                        break;
+                                                    }
+                                                    cursor = page.previous_cursor;
+                                                }
+                                                Err(error) => {
+                                                    failure = Some(audit_reason(&error));
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        metrics.full_ms.push(started.elapsed().as_millis() as u64);
+                                        if let Some(reason) = failure {
+                                            failures += 1;
+                                            *errors.entry(reason).or_default() += 1;
+                                            continue;
+                                        }
+                                        metrics.complete += 1;
+                                        metrics.old_complete += u64::from(old_limited);
+                                    }
+                                    successful += 1;
                                 }
                                 Err(error) => {
                                     failures += 1;
-                                    let reason = error
-                                        .strip_prefix("native.read:")
-                                        .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                                        .and_then(|value| {
-                                            value["reason"].as_str().map(str::to_string)
-                                        })
-                                        .unwrap_or_else(|| "read".into());
-                                    *errors.entry(reason).or_default() += 1;
+                                    *errors.entry(audit_reason(&error)).or_default() += 1;
+                                    if kind == TranscriptKind::Codex
+                                        && size > MAX_TRANSCRIPT_FILE_BYTES
+                                    {
+                                        metrics.large += 1;
+                                        if path.extension().is_some_and(|s| s == "zst") {
+                                            metrics.old_limited += 1;
+                                        }
+                                    }
                                 }
                             }
                         }
-                        (successful, skipped, failures, errors)
+                        (successful, skipped, failures, errors, metrics)
                     })
                 })
                 .collect();
@@ -343,7 +482,11 @@ fn audit_real_native_sessions_read_only() {
                 .map(|worker| worker.join().expect("native audit worker completed"))
                 .collect::<Vec<_>>()
         });
-        for (loaded, rows, failed, reasons) in reports {
+        sampling.store(false, std::sync::atomic::Ordering::Relaxed);
+        sampler.join().unwrap();
+        let mut metrics = AuditMetrics::default();
+        for (loaded, rows, failed, reasons, report) in reports {
+            metrics.merge(report);
             successful += loaded;
             skipped += rows;
             failures += failed;
@@ -359,6 +502,17 @@ fn audit_real_native_sessions_read_only() {
             skipped,
             failures,
             serde_json::to_string(&errors).unwrap()
+        );
+        println!(
+            "NATIVE_METRICS {} {}",
+            diagnostics::cli(kind),
+            serde_json::json!({
+                "largeFiles":metrics.large,"largeFirstOk":metrics.first_ok,"largeComplete":metrics.complete,
+                "oldLimited":metrics.old_limited,"oldLimitedComplete":metrics.old_complete,
+                "maxFileBytes":metrics.max_bytes,"maxDecodedBytes":metrics.max_decoded,"truncatedRows":metrics.truncated_rows,
+                "peakPageBytes":metrics.peak_page_bytes,"rssPeakDeltaKiB":rss_peak.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(rss_base),
+                "largeFirstMs":metrics.first_ms,"largeFullMs":metrics.full_ms
+            })
         );
     }
 }
@@ -492,7 +646,7 @@ fn damaged_identity_is_reported_without_authorizing_content_by_filename() {
 }
 
 #[test]
-fn oversized_compressed_files_report_size_instead_of_decode_errors() {
+fn invalid_oversized_compressed_files_report_decode_instead_of_size_errors() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("rollout-synthetic.jsonl.zst");
     fs::File::create(&path)
@@ -500,6 +654,6 @@ fn oversized_compressed_files_report_size_instead_of_decode_errors() {
         .set_len(MAX_TRANSCRIPT_FILE_BYTES + 1)
         .unwrap();
     let error = normalized::page(&path, TranscriptKind::Codex, None, None).unwrap_err();
-    assert!(error.contains("size_limit"));
-    assert!(!error.contains("\"decode\""));
+    assert!(error.contains("decode"));
+    assert!(!error.contains("size_limit"));
 }

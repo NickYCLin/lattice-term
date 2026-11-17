@@ -21,9 +21,11 @@ export interface NativeRecord {
   output?: string;
   isError: boolean;
   unreadable: boolean;
+  truncated?: boolean;
 }
 export interface NativeHistoryCursor {
   before: number;
+  after?: number;
   length: number;
   modified: string;
 }
@@ -31,6 +33,8 @@ export interface NativeRecordPage {
   diagnostics?: import("./nativeReadDiagnostics").NativeReadDiagnostics;
   turns: { id: string; items: NativeRecord[] }[];
   previousCursor: NativeHistoryCursor | null;
+  nextCursor?: NativeHistoryCursor | null;
+  decodedBytes?: number | null;
   truncated: boolean;
   warnings: string[];
 }

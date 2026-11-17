@@ -7,6 +7,8 @@ use std::{collections::BTreeMap, path::Path};
 #[serde(rename_all = "camelCase")]
 pub struct ReadDiagnostics {
     pub skipped_rows: u64,
+    #[serde(default)]
+    pub truncated_rows: u64,
     pub reasons: BTreeMap<String, u64>,
     pub partial: bool,
 }
@@ -55,6 +57,13 @@ pub fn failure(kind: TranscriptKind, path: &Path, error: &str) -> String {
         "permission"
     } else if error == "empty" || std::fs::metadata(physical).is_ok_and(|m| m.len() == 0) {
         "empty"
+    } else if error.contains("history cache capacity")
+        || error.contains("write private history")
+        || error.contains("create private history")
+    {
+        "cache_capacity"
+    } else if error.contains("readers are busy") {
+        "busy"
     } else if error.contains("size") || error.contains("limit") {
         "size_limit"
     } else if error == "decode" || error.contains("decode JSON") || error.contains("compressed") {
