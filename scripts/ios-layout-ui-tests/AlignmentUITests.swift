@@ -91,13 +91,13 @@ final class AlignmentUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         assertHeaderCentered(title: "我的連線", stage: "connections")
 
-        let pages: [(label: String, titles: [String], stage: String)] = [
-            ("工作階段", ["工作階段", "Sessions"], "sessions"),
-            ("遠端助理", ["遠端 Agent Fleet", "AI Agent Fleet", "遠端助理"], "remote"),
-            ("設定", ["設定", "Settings"], "settings"),
+        let pages: [(labels: [String], titles: [String], stage: String)] = [
+            (["工作階段", "Sessions"], ["工作階段", "Sessions"], "sessions"),
+            (["遠端助理", "遠端 Agent Fleet", "AI Agent Fleet", "Remote assistant"], ["遠端 Agent Fleet", "AI Agent Fleet", "遠端助理"], "remote"),
+            (["設定", "Settings"], ["設定", "Settings"], "settings"),
         ]
         for page in pages {
-            let tab = button(page.label)
+            let tab = button(page.labels[0], page.labels[1], page.labels.count > 2 ? page.labels[2] : page.labels[0], page.labels.count > 3 ? page.labels[3] : page.labels[0])
             waitFor(tab)
             tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
             Thread.sleep(forTimeInterval: 1)
@@ -105,6 +105,25 @@ final class AlignmentUITests: XCTestCase {
                 // Mobile hides the workspace view-header on the terminal page.
                 Thread.sleep(forTimeInterval: 0.5)
                 attachScreen("align-sessions")
+                // If a running session exists, open its inner page; otherwise note it.
+                let sessionRow = app.cells.firstMatch
+                let sessionButton = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "session", "工作階段")).firstMatch
+                if sessionRow.exists && sessionRow.isHittable {
+                    sessionRow.tap()
+                    Thread.sleep(forTimeInterval: 1)
+                    attachScreen("align-session-inner")
+                    // Leave the inner page so later tabs are reachable.
+                    if button("工作階段", "Sessions").waitForExistence(timeout: 2) {
+                        button("工作階段", "Sessions").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+                    }
+                } else if sessionButton.exists && sessionButton.isHittable {
+                    sessionButton.tap()
+                    Thread.sleep(forTimeInterval: 1)
+                    attachScreen("align-session-inner")
+                } else {
+                    attachScreen("align-session-inner-none")
+                    print("LATTICE_ALIGN no session inner page available to open")
+                }
                 continue
             }
             var checked = false
