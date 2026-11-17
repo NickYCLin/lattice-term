@@ -6,7 +6,9 @@ targets:
   LayoutUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [LayoutUITests.swift]
+    sources:
+      - LayoutUITests.swift
+      - SoftwareKeyboardUITests.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.nickyclin.latticeterm.layoutchecks

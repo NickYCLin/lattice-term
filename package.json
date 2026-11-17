@@ -39,7 +39,8 @@
     "ios:prepare": "node scripts/ios-release.mjs prepare",
     "ios:preflight": "node scripts/ios-release.mjs preflight",
     "ios:build": "node scripts/ios-release.mjs build",
-    "ios:check": "vitest run scripts/ios-config.test.mjs scripts/ios-release.test.mjs src/app/platformCapabilities.test.ts src/app/fileExport.test.ts src/views/ConnectionsView.render.test.tsx src/views/SettingsView.render.test.tsx",
+    "ios:software-keyboard": "python3 scripts/run-ios-software-keyboard-tests.py",
+    "ios:check": "vitest run scripts/ios-config.test.mjs scripts/ios-release.test.mjs src/app/platformCapabilities.test.ts src/app/fileExport.test.ts src/views/ConnectionsView.render.test.tsx src/views/SettingsView.render.test.tsx scripts/ios-software-keyboard-ui.test.mjs",
     "build:vnc": "node scripts/build-vnc-engine.mjs",
     "build:vnc:release": "node scripts/build-vnc-engine.mjs --release"
   },

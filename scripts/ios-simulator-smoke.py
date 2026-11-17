@@ -507,6 +507,7 @@ def capture_interactions(device_id, cache, output, label, runner):
     command = ["xcodebuild", "test-without-building", "-project", str(project / "LatticeLayoutChecks.xcodeproj"),
                "-scheme", "LayoutUITests", "-destination", f"platform=iOS Simulator,id={device_id}",
                "-derivedDataPath", str(derived), "-resultBundlePath", str(result),
+               "-only-testing:LayoutUITests/LayoutUITests",
                "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO"]
     try:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=300)
