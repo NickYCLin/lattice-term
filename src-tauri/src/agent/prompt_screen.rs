@@ -16,6 +16,9 @@ pub(super) struct PromptScreen {
     synchronized: bool,
     size_supported: bool,
     codex_idle: bool,
+    /// Latest report was `done`: a finished turn back at the composer. It is
+    /// composer evidence only, never a native-command (`idle`) receipt.
+    codex_turn_done: bool,
     codex_idle_at: Option<Instant>,
     review_menu_at: Option<Instant>,
 }
@@ -36,6 +39,7 @@ impl PromptScreen {
             synchronized: false,
             size_supported: rows <= MAX_ROWS && cols <= MAX_COLS,
             codex_idle: false,
+            codex_turn_done: false,
             codex_idle_at: None,
             review_menu_at: None,
         }
@@ -51,8 +55,9 @@ impl PromptScreen {
         let end = crate::agent_daemon::mcp::complete_terminal_prefix(&self.pending);
         for control in crate::agent_daemon::mcp::terminal_controls(&self.pending[..end]) {
             if control.starts_with(b"\x1b]7501;") {
-                self.codex_idle = control == b"\x1b]7501;state=idle:app=codex\x1b\\"
-                    || control == b"\x1b]7501;state=idle:app=codex\x07";
+                let report = codex_report(control);
+                self.codex_idle = report == Some(b"state=idle:app=codex".as_slice());
+                self.codex_turn_done = report == Some(b"state=done:app=codex".as_slice());
                 self.codex_idle_at = self.codex_idle.then_some(now);
             }
             match control {
@@ -238,7 +243,7 @@ impl PromptScreen {
         // and its model/status plus shortcut footer. Idle alone also occurs
         // in selection menus, which must never authorize Enter.
         let native_main_composer = definition == "codex"
-            && (self.codex_idle || compaction_receipt_required)
+            && (self.codex_idle || self.codex_turn_done || compaction_receipt_required)
             && placeholder
             && rows
                 .iter()
@@ -320,6 +325,16 @@ impl PromptScreen {
     pub(super) fn settle_for_test(&mut self) {
         self.last_output = Instant::now() - QUIET;
     }
+}
+
+/// Body of one OSC 7501 report. Codex 0.169 reports `idle` when its composer
+/// opens without a turn (start, resume) and `done` when a turn has just
+/// finished; both leave the main composer waiting for input. `working`,
+/// `blocked`, `clear` and other apps are never composer evidence.
+fn codex_report(control: &[u8]) -> Option<&[u8]> {
+    let body = control.strip_prefix(b"\x1b]7501;".as_slice())?;
+    body.strip_suffix(b"\x1b\\".as_slice())
+        .or_else(|| body.strip_suffix(b"\x07".as_slice()))
 }
 
 /// The exact unwrapped permission-mode line is safe only under a recognizable
@@ -532,6 +547,30 @@ mod tests {
             screen.feed(report.as_bytes(), Instant::now());
             screen.settle_for_test();
             assert!(screen.blocker("codex", Instant::now()).is_some(), "{state}");
+        }
+    }
+
+    #[test]
+    fn codex_0169_done_report_after_a_turn_counts_as_an_idle_main_composer() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/codex-0169-resumed-idle.json"
+        ))
+        .unwrap();
+        let output = fixture["output"].as_str().unwrap();
+        let history = "\x1b[4;1H1. approve the permission change; working notes\x1b[K\x1b[22;3H";
+        for (report, ready) in [
+            ("state=done:app=codex", true),
+            ("state=idle:app=codex", true),
+            ("state=clear", false),
+            ("state=done:app=other", false),
+            ("state=working:app=codex", false),
+        ] {
+            let mut screen = PromptScreen::new(30, 120);
+            let body = output.replace("state=idle:app=codex", report);
+            screen.feed(format!("{body}{history}").as_bytes(), Instant::now());
+            screen.settle_for_test();
+            let blocker = screen.blocker("codex", Instant::now());
+            assert_eq!(blocker.is_none(), ready, "{report}: {blocker:?}");
         }
     }
 

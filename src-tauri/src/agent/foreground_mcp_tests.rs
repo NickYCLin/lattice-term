@@ -800,3 +800,94 @@ fn unfocused_rollout_completion_publishes_once_and_ignores_replayed_working_unti
     f.registry.refresh_observed_lifecycle(&f.id);
     assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Idle);
 }
+
+/// Codex 0.169 ends a turn with OSC 7501 `state=done`, not `idle`. A finished
+/// MCP turn whose history contains list/approval words must still leave the
+/// verified main composer ready for the next prompt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finished_codex_turn_done_report_keeps_the_next_mcp_prompt_ready() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let profile = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let native_id = {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.profile_config_path = Some(profile.path().display().to_string());
+        summary.working_directory = "/synthetic".into();
+        summary.captured_session_id.clone().unwrap()
+    };
+    f.unreported_prompt();
+    *entry.prompt_screen.lock().unwrap() = prompt_screen::PromptScreen::new(30, 120);
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/codex-0169-resumed-idle.json"
+    ))
+    .unwrap();
+    let idle_screen = fixture["output"].as_str().unwrap();
+    let settle = || {
+        entry.prompt_screen.lock().unwrap().settle_for_test();
+        *entry.last_output_at.lock().unwrap() = Instant::now() - prompt_screen::QUIET;
+    };
+    f.registry
+        .record_output(&f.id, idle_screen.as_bytes())
+        .unwrap();
+    settle();
+    let ready = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(ready["promptReadiness"]["ready"], true, "{ready}");
+
+    let first = Action::Prompt {
+        mode: crate::mcp_desktop::DesktopPromptMode::Now,
+        text: "short synthetic turn".into(),
+        request_id: "done-first".into(),
+    };
+    assert_eq!(
+        f.call(&target, first).await.unwrap()["sentImmediately"],
+        true
+    );
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+
+    // The turn runs: Codex reports working and shows its live banner.
+    f.registry.record_output(
+        &f.id,
+        "\x1b]7501;state=working:app=codex\x1b\\\x1b[20;1HWorking (0s \u{2022} esc to interrupt)\x1b[22;3H".as_bytes(),
+    ).unwrap();
+    f.registry
+        .update_state_from_output(&f.id, AgentLifecycle::Working);
+    settle();
+    let busy = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(busy["promptReadiness"]["ready"], false, "{busy}");
+
+    // The turn finishes: rollout records task_complete, Codex clears the
+    // banner, redraws the main composer under history that mentions list
+    // items and approvals, and reports `done`.
+    write_codex_turn_rollout(profile.path(), &native_id, true);
+    let done_screen = format!(
+        "\x1b[20;1H\x1b[2K{}\x1b[4;1H1. approve the permission change; working notes\x1b[K\x1b[22;3H",
+        idle_screen.replace("state=idle:app=codex", "state=done:app=codex"),
+    );
+    f.registry
+        .record_output(&f.id, done_screen.as_bytes())
+        .unwrap();
+    settle();
+    let state = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(state["state"], "idle", "{state}");
+    assert_eq!(state["promptReadiness"]["ready"], true, "{state}");
+    assert!(
+        state["promptReadiness"]["blockers"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{state}"
+    );
+    assert!(f.registry.mcp_prompt_blockers(&f.id).unwrap().is_empty());
+
+    let second = Action::Prompt {
+        mode: crate::mcp_desktop::DesktopPromptMode::Now,
+        text: "next synthetic turn".into(),
+        request_id: "done-second".into(),
+    };
+    assert_eq!(
+        f.call(&target, second).await.unwrap()["sentImmediately"],
+        true
+    );
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+}
