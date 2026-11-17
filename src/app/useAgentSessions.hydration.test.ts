@@ -326,4 +326,19 @@ describe("Agent Fleet hydration and MCP permissions", () => {
     await expect(render().updateMcpLaunch(true)).rejects.toThrow("MCP launch sync failed");
     expect(render().mcpLaunch).toBe(false);
   });
+  it("applies backend idle to an unfocused heuristic-working session through the shared event listener", async () => {
+    const original = host.invoke.getMockImplementation()!;
+    const session = fakeSession({ state: "working", stateSource: "heuristic" });
+    host.invoke.mockImplementation(async (command, args) => command === "agent_sessions"
+      ? [session] : original(command, args));
+    render();
+    await vi.waitFor(() => expect(render().mode).toBe("ready"));
+    expect(render().sessions[0].state).toBe("working");
+    host.listeners.get("agent://state")!({ payload: {
+      sessionId: session.sessionId, state: "idle", source: "heuristic",
+    } });
+    expect(render().sessions[0].state).toBe("idle");
+    expect(host.invoke.mock.calls.filter(([command]) => command === "agent_sessions")).toHaveLength(1);
+  });
+
 });

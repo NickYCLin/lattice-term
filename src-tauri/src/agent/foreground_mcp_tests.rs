@@ -682,6 +682,9 @@ async fn completed_native_rollout_recovers_a_heuristic_working_session() {
     assert!(entry.terminal_turn_started.load(Ordering::Acquire));
     let state = f.call(&target, Action::State {}).await.unwrap();
     assert_eq!(state["state"], "idle", "{state}");
+    assert_eq!(f.collector.states.lock().unwrap().iter().filter(|(id, state, _)|
+        id == &f.id && *state == AgentLifecycle::Idle).count(), 1,
+        "the same idle verdict must reach every GUI subscriber");
     assert_eq!(state["stateSource"], "heuristic");
     assert_eq!(state["promptReadiness"]["ready"], true, "{state}");
     assert_eq!(state["promptReadiness"]["basis"], "completed_native_turn");
@@ -748,4 +751,52 @@ async fn official_integration_working_is_not_settled_from_a_completed_rollout() 
     assert_eq!(refused["reconciled"], false);
     assert_eq!(refused["state"], "working");
     assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+}
+
+#[test]
+fn unfocused_rollout_completion_publishes_once_and_ignores_replayed_working_until_new_input() {
+    let f = ForegroundFixture::new();
+    let profile = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    let native_id = {
+        let mut summary = entry.summary.lock().unwrap();
+        summary.profile_config_path = Some(profile.path().display().to_string());
+        summary.working_directory = "/synthetic".into();
+        summary.state = AgentLifecycle::Working;
+        summary.state_source = AgentStateSource::Heuristic;
+        summary.captured_session_id.clone().unwrap()
+    };
+    mark_terminal_turn_started(&entry);
+    // First background tick sees an open turn: no quiet-screen completion.
+    write_codex_turn_rollout(profile.path(), &native_id, false);
+    f.registry.refresh_observed_lifecycle(&f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
+    assert!(f.collector.states.lock().unwrap().is_empty());
+
+    write_codex_turn_rollout(profile.path(), &native_id, true);
+    // No MCP call, focus change, PTY bytes or frontend polling required.
+    f.registry.refresh_observed_lifecycle(&f.id);
+    f.registry.refresh_observed_lifecycle(&f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Idle);
+    assert_eq!(*f.collector.states.lock().unwrap(), vec![(f.id.clone(), AgentLifecycle::Idle, AgentStateSource::Heuristic)]);
+    assert!(!f.registry.update_state_from_output(&f.id, AgentLifecycle::Working));
+    assert!(!f.registry.update_state_from_output(&f.id, AgentLifecycle::NeedsAttention));
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Idle);
+
+    // Actual user input starts a fresh turn, retaining normal working feedback.
+    record_sent_input(f.sink.as_ref(), &f.registry, &f.id, &entry, b"synthetic next prompt\r");
+    assert!(!entry.turn_reconciled_from_rollout.load(Ordering::Acquire));
+    assert!(entry.terminal_turn_started.load(Ordering::Acquire));
+    f.registry.refresh_observed_lifecycle(&f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
+    // An unrelated record changing the file's mtime/size cannot reuse t1's completion.
+    let path = profile.path().join("sessions").join(format!("rollout-{native_id}.jsonl"));
+    let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"event_msg","payload":{"type":"token_count"}})).unwrap();
+    f.registry.refresh_observed_lifecycle(&f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Working);
+    assert_eq!(f.collector.states.lock().unwrap().last(), Some(&(f.id.clone(), AgentLifecycle::Working, AgentStateSource::Heuristic)));
+    writeln!(file, "{}", serde_json::json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":"t2"}})).unwrap();
+    f.registry.refresh_observed_lifecycle(&f.id);
+    assert_eq!(f.registry.session_summary(&f.id).unwrap().state, AgentLifecycle::Idle);
 }

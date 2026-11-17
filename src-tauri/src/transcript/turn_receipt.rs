@@ -1,18 +1,26 @@
 //! Read-only check: whether the latest Codex native turn has already finished.
 use super::*;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 
 const TAIL_CHUNK: usize = 64 * 1024;
 
-/// `Some(true)` when the latest Codex task finished (`task_complete` or
-/// `turn_aborted`); `Some(false)` when a `task_started` is still open; `None`
-/// when the transcript is missing or has no task boundary.
+#[derive(Clone, Copy)]
+pub(crate) struct CodexTurnReceipt {
+    pub complete: bool,
+    /// Identity only: never retain or transmit the original event contents.
+    pub fingerprint: u64,
+}
+
+/// Latest native task boundary: completion (`task_complete`/`turn_aborted`)
+/// or an open `task_started`, plus its identity to reject reused completions.
+/// `None` when the transcript is missing or has no task boundary.
 pub(crate) fn native_turn_receipt(
     definition_id: &str,
     working_directory: &str,
     native_id: &str,
     profile: Option<&Path>,
-) -> Option<(PathBuf, bool)> {
+) -> Option<(PathBuf, CodexTurnReceipt)> {
     let (kind, path) =
         session_transcript_path(definition_id, working_directory, native_id, profile)
             .ok()
@@ -20,14 +28,18 @@ pub(crate) fn native_turn_receipt(
     if kind != TranscriptKind::Codex {
         return None;
     }
-    Some((path.clone(), latest_codex_turn_complete(&path)?))
+    Some((path.clone(), last_codex_task_receipt(&path).ok().flatten()?))
 }
 
-pub(crate) fn latest_codex_turn_complete(path: &Path) -> Option<bool> {
-    last_codex_task_complete(path).ok().flatten()
+#[cfg(test)]
+fn latest_codex_turn_complete(path: &Path) -> Option<bool> {
+    last_codex_task_receipt(path)
+        .ok()
+        .flatten()
+        .map(|receipt| receipt.complete)
 }
 
-fn last_codex_task_complete(path: &Path) -> std::io::Result<Option<bool>> {
+fn last_codex_task_receipt(path: &Path) -> std::io::Result<Option<CodexTurnReceipt>> {
     let mut file = fs::File::open(path)?;
     let mut pos = file.metadata()?.len();
     let mut carry = Vec::new();
@@ -61,11 +73,17 @@ fn last_codex_task_complete(path: &Path) -> std::io::Result<Option<bool>> {
             if value["type"] != "event_msg" {
                 continue;
             }
-            match value["payload"]["type"].as_str() {
-                Some("task_complete" | "turn_aborted") => return Ok(Some(true)),
-                Some("task_started") => return Ok(Some(false)),
-                _ => {}
-            }
+            let complete = match value["payload"]["type"].as_str() {
+                Some("task_complete" | "turn_aborted") => true,
+                Some("task_started") => false,
+                _ => continue,
+            };
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            line.hash(&mut hash);
+            return Ok(Some(CodexTurnReceipt {
+                complete,
+                fingerprint: hash.finish(),
+            }));
         }
         pos = start;
     }
@@ -148,7 +166,7 @@ mod tests {
         let before = fs::read(&path).unwrap();
         assert_eq!(
             native_turn_receipt("codex", "/synthetic", id, Some(dir.path()))
-                .map(|(_, complete)| complete),
+                .map(|(_, receipt)| receipt.complete),
             Some(true)
         );
         assert_eq!(fs::read(&path).unwrap(), before);

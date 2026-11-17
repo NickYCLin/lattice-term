@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 use zeroize::Zeroizing;
@@ -81,9 +81,9 @@ const STARTUP_SEED_MIN_WAIT: Duration = Duration::from_millis(1800);
 const STARTUP_SEED_OUTPUT_QUIET: Duration = Duration::from_millis(550);
 const STARTUP_SEED_TIMEOUT: Duration = Duration::from_secs(20);
 const STARTUP_CONTROL_WINDOW_BYTES: usize = 64;
-/// How often a session is checked for a terminal that has gone completely
-/// silent while the interface still claims it is working.
-const SILENT_WORKING_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+/// Reconcile native completion for all PTYs, including unfocused sessions.
+/// The ten-minute silent-terminal fallback retains its separate timeout.
+const LIFECYCLE_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 /// Every interactive CLI redraws an elapsed-time or token counter while it
 /// works, so a PTY this quiet is parked at its prompt.
 const SILENT_WORKING_TIMEOUT: Duration = Duration::from_secs(600);
@@ -1027,6 +1027,9 @@ impl AgentSink for EventSink {
 }
 
 struct AgentSessionEntry {
+    /// Publish read-side reconciliation through the same desktop/daemon sink.
+    /// Weak ownership avoids retaining the application through its registry.
+    state_sink: Weak<dyn AgentSink>,
     summary: Mutex<AgentSessionSummary>,
     /// Serializes input, lifecycle readiness and MCP grant changes for this
     /// PTY only. A user editing a prompt owns it until submitting it.
@@ -1065,6 +1068,8 @@ struct AgentSessionEntry {
     terminal_turn_started: AtomicBool,
     terminal_turn_started_at: Mutex<Option<Instant>>,
     turn_receipt_cache: Mutex<Option<TurnReceiptCache>>,
+    /// A completed boundary may settle one turn, never a newer submission.
+    last_reconciled_receipt: Mutex<Option<(PathBuf, u64)>>,
     turn_reconciled_from_rollout: AtomicBool,
     /// Native resume can replay work markers before any new turn is submitted.
     resumed_history: bool,
@@ -2509,6 +2514,11 @@ impl AgentRegistry {
         let Some(input) = input else {
             return false;
         };
+        // A completed native turn outranks historical PTY redraws. A genuine
+        // submission (or an official new turn) clears this receipt first.
+        if from_output && entry.turn_reconciled_from_rollout.load(Ordering::Acquire) {
+            return false;
+        }
         if source == AgentStateSource::Heuristic
             && input.native_command_after.is_some()
             && input.native_command_mode_only
@@ -2539,6 +2549,14 @@ impl AgentRegistry {
         } else if next == AgentLifecycle::Working && !(from_output && entry.resumed_history) {
             mark_terminal_turn_started(&entry);
         }
+        if from_output {
+            drop(summary);
+            // Publish before releasing input: a delayed reader must not emit
+            // its older working guess after a native completion emitted idle.
+            if let Some(sink) = entry.state_sink.upgrade() {
+                sink.state(session_id, next, source);
+            }
+        }
         true
     }
 
@@ -2568,6 +2586,14 @@ impl AgentRegistry {
         summary.state = AgentLifecycle::Working;
         summary.state_source = AgentStateSource::Heuristic;
         mark_terminal_turn_started(&entry);
+        drop(summary);
+        if let Some(sink) = entry.state_sink.upgrade() {
+            sink.state(
+                session_id,
+                AgentLifecycle::Working,
+                AgentStateSource::Heuristic,
+            );
+        }
         true
     }
 
@@ -3136,6 +3162,14 @@ impl AgentRegistry {
         {
             return false;
         }
+        let settle_heuristic_working = summary.state == AgentLifecycle::Working
+            && summary.state_source == AgentStateSource::Heuristic;
+        if summary.definition_id != "codex"
+            || (!settle_heuristic_working
+                && !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done))
+        {
+            return false;
+        }
         let Some(native_id) = summary.captured_session_id.as_deref() else {
             return false;
         };
@@ -3145,20 +3179,47 @@ impl AgentRegistry {
         if !complete {
             return false;
         }
-        let settle_heuristic_working = summary.state == AgentLifecycle::Working
-            && summary.state_source == AgentStateSource::Heuristic;
-        if !settle_heuristic_working
-            && !matches!(summary.state, AgentLifecycle::Idle | AgentLifecycle::Done)
-        {
-            return false;
-        }
         if settle_heuristic_working {
             summary.state = AgentLifecycle::Idle;
         }
         drop(summary);
-        drop(input);
+        if let (Ok(cache), Ok(mut last)) = (
+            entry.turn_receipt_cache.lock(),
+            entry.last_reconciled_receipt.lock(),
+        ) {
+            if let Some(receipt) = cache.as_ref() {
+                *last = Some((receipt.path.clone(), receipt.fingerprint));
+            }
+        }
         clear_terminal_turn_started(&entry, true);
+        if settle_heuristic_working {
+            if let Some(sink) = entry.state_sink.upgrade() {
+                sink.state(
+                    session_id,
+                    AgentLifecycle::Idle,
+                    AgentStateSource::Heuristic,
+                );
+            }
+        }
+        drop(input);
         true
+    }
+
+    /// Same authority and event stream for the sidebar, tabs and chat header;
+    /// this runs without requiring a focused view or an MCP state request.
+    fn refresh_observed_lifecycle(&self, session_id: &str) {
+        self.refresh_completed_turn_from_rollout(session_id);
+        if self.settle_silent_working(session_id) {
+            if let Ok(entry) = self.get(session_id) {
+                if let Some(sink) = entry.state_sink.upgrade() {
+                    sink.state(
+                        session_id,
+                        AgentLifecycle::Idle,
+                        AgentStateSource::Heuristic,
+                    );
+                }
+            }
+        }
     }
 
     pub(crate) fn native_command_pending(&self, session_id: &str) -> bool {
@@ -8622,6 +8683,7 @@ pub(crate) fn launch_with_replay_and_tools(
     )
     .then(|| Mutex::new(HermesActivity::default()));
     let entry = Arc::new(AgentSessionEntry {
+        state_sink: Arc::downgrade(&sink),
         summary: Mutex::new(summary.clone()),
         report_token,
         writer: Mutex::new(writer),
@@ -8647,6 +8709,7 @@ pub(crate) fn launch_with_replay_and_tools(
         terminal_turn_started: AtomicBool::new(false),
         terminal_turn_started_at: Mutex::new(None),
         turn_receipt_cache: Mutex::new(None),
+        last_reconciled_receipt: Mutex::new(None),
         turn_reconciled_from_rollout: AtomicBool::new(false),
         resumed_history: request.restore_existing_session || request.resume_session_id.is_some(),
         startup_gate: StartupGate::default(),
@@ -8793,12 +8856,11 @@ pub(crate) fn launch_with_replay_and_tools(
                             });
                         }
                     } else if let Some(state) = state {
-                        let changed = reader_registry.update_state_from_output(&reader_id, state)
-                            || (explicit_status
-                                && state == AgentLifecycle::Working
-                                && reader_registry.update_codex_working_from_output(&reader_id));
-                        if changed {
-                            reader_sink.state(&reader_id, state, AgentStateSource::Heuristic);
+                        if !reader_registry.update_state_from_output(&reader_id, state)
+                            && explicit_status
+                            && state == AgentLifecycle::Working
+                        {
+                            reader_registry.update_codex_working_from_output(&reader_id);
                         }
                     }
                     if let Some(native_id) = reader_registry.scan_for_session_id(&reader_id, bytes)
@@ -8815,24 +8877,16 @@ pub(crate) fn launch_with_replay_and_tools(
         }
     });
 
-    // A CLI whose lifecycle integration never reports leaves the sidebar on
-    // "working" for the rest of the session. Watch for a terminal that has
-    // gone completely silent and release only this process's own guess.
+    // Reconcile completed native turns even when no UI or MCP client polls
+    // this session. Quiet alone still uses the existing conservative timeout.
     let watchdog_id = session_id.clone();
     let watchdog_registry = Arc::clone(&registry);
-    let watchdog_sink = Arc::clone(&sink);
     std::thread::spawn(move || loop {
-        std::thread::sleep(SILENT_WORKING_CHECK_INTERVAL);
+        std::thread::sleep(LIFECYCLE_CHECK_INTERVAL);
         if watchdog_registry.get(&watchdog_id).is_err() {
             return;
         }
-        if watchdog_registry.settle_silent_working(&watchdog_id) {
-            watchdog_sink.state(
-                &watchdog_id,
-                AgentLifecycle::Idle,
-                AgentStateSource::Heuristic,
-            );
-        }
+        watchdog_registry.refresh_observed_lifecycle(&watchdog_id);
     });
 
     if let Some(seed) = request
@@ -9857,6 +9911,7 @@ pub const PROMPT_STUCK_AFTER: Duration = Duration::from_secs(30);
 
 struct TurnReceiptCache {
     path: PathBuf,
+    fingerprint: u64,
     modified: Option<SystemTime>,
     len: u64,
     complete: bool,
@@ -9892,12 +9947,19 @@ fn cached_native_turn_complete(
         if let Some(current) = cache.as_ref() {
             if let Ok(metadata) = std::fs::metadata(&current.path) {
                 if current.len == metadata.len() && current.modified == metadata.modified().ok() {
-                    return Some(current.complete);
+                    return Some(
+                        current.complete
+                            && !receipt_already_reconciled(
+                                entry,
+                                &current.path,
+                                current.fingerprint,
+                            ),
+                    );
                 }
             }
         }
     }
-    let (path, complete) = crate::transcript::native_turn_receipt(
+    let (path, receipt) = crate::transcript::native_turn_receipt(
         &summary.definition_id,
         &summary.working_directory,
         native_id,
@@ -9906,13 +9968,22 @@ fn cached_native_turn_complete(
     let metadata = std::fs::metadata(&path).ok()?;
     if let Ok(mut cache) = entry.turn_receipt_cache.lock() {
         *cache = Some(TurnReceiptCache {
-            path,
+            path: path.clone(),
             modified: metadata.modified().ok(),
             len: metadata.len(),
-            complete,
+            complete: receipt.complete,
+            fingerprint: receipt.fingerprint,
         });
     }
-    Some(complete)
+    Some(receipt.complete && !receipt_already_reconciled(entry, &path, receipt.fingerprint))
+}
+
+fn receipt_already_reconciled(entry: &AgentSessionEntry, path: &Path, fingerprint: u64) -> bool {
+    entry.last_reconciled_receipt.lock().map_or(true, |last| {
+        last.as_ref().is_some_and(|(previous_path, previous)| {
+            previous_path == path && *previous == fingerprint
+        })
+    })
 }
 
 /// Why a queued prompt stays put even though its own session is free.
