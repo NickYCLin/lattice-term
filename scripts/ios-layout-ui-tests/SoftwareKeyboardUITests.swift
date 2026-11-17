@@ -8,12 +8,11 @@ final class SoftwareKeyboardUITests: XCTestCase {
     func testSoftwareKeyboardAcceptance() throws {
         continueAfterFailure = false
         app = XCUIApplication(bundleIdentifier: "io.github.nickyclin.latticeterm")
-        if app.state == .notRunning {
-            app.launchEnvironment["LATTICETERM_LAYOUT_DIAGNOSTICS"] = "1"
-            app.launch()
-        } else {
-            app.activate()
+        if app.state != .notRunning {
+            app.terminate()
         }
+        app.launchEnvironment["LATTICETERM_LAYOUT_DIAGNOSTICS"] = "1"
+        app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "App 未能進入前景")
         XCUIDevice.shared.orientation = .portrait
         waitForFrontend()
@@ -114,23 +113,31 @@ final class SoftwareKeyboardUITests: XCTestCase {
     }
 
     private func runLandscapePass() throws {
-        // 橫向直接點欄位時，模擬器常不彈出軟體鍵盤。改為直向先叫出鍵盤再旋轉。
+        // Do not rotate with the software keyboard already visible.
+        // XCUIDevice.orientation changes the app's interface orientation
+        // without a matching physical/keyboard rotation, so the form goes
+        // landscape while the Zhuyin keyboard stays portrait. That is a
+        // test artifact, not an App Info.plist / view-controller bug.
+        // Rotate first, then focus a field to summon a keyboard in the
+        // current interface orientation.
         dismissFormIfNeeded()
-        XCUIDevice.shared.orientation = .portrait
-        Thread.sleep(forTimeInterval: 0.5)
-        try openAddConnection()
-        let field = nameField()
-        XCTAssertTrue(field.waitForExistence(timeout: 15), "找不到顯示名稱輸入框")
-        if !cheapKeyboardVisible() { field.tap() }
-        assertSoftwareKeyboardVisible()
+        dismissSoftwareKeyboard()
         XCUIDevice.shared.orientation = .landscapeLeft
         Thread.sleep(forTimeInterval: 1.2)
         XCTAssertTrue(
             XCUIDevice.shared.orientation == .landscapeLeft || XCUIDevice.shared.orientation == .landscapeRight,
             "XCUIDevice 未真正轉到橫向（目前 \(String(describing: XCUIDevice.shared.orientation.rawValue))）"
         )
+        try openAddConnection()
+        let field = nameField()
+        XCTAssertTrue(field.waitForExistence(timeout: 15), "找不到顯示名稱輸入框")
         if !cheapKeyboardVisible() {
-            field.tap()
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        if !cheapKeyboardVisible() {
+            // One retry; the first tap can dismiss a leftover keyboard without focusing.
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
             Thread.sleep(forTimeInterval: 1.0)
         }
         if cheapKeyboardVisible() {
@@ -144,16 +151,39 @@ final class SoftwareKeyboardUITests: XCTestCase {
                 "deviceOrientation": Int(XCUIDevice.shared.orientation.rawValue),
                 "fieldWidth": Double(landscapeFrame.width),
                 "fieldHeight": Double(landscapeFrame.height),
+                "keyboardFrame": [
+                    "x": Double(app.keyboards.firstMatch.frame.minX),
+                    "y": Double(app.keyboards.firstMatch.frame.minY),
+                    "width": Double(app.keyboards.firstMatch.frame.width),
+                    "height": Double(app.keyboards.firstMatch.frame.height),
+                ],
+                "keyboardMatchesInterface": keyboardMatchesAppOrientation(),
             ])
-            assertFieldAboveKeyboard(landscapeField, surface: "connection-form-name", orientationName: "landscape")
             attachShot("keyboard-\(deviceFamily())-connection-form-landscape")
+            XCTAssertTrue(
+                keyboardMatchesAppOrientation(),
+                "橫向後系統鍵盤方向應與頁面一致（先旋轉再叫出鍵盤）。若仍是直向鍵盤，才需要再查 App 的方向設定。"
+            )
+            assertFieldAboveKeyboard(landscapeField, surface: "connection-form-name", orientationName: "landscape")
             emit("first-open-keyboard", extra: ["surface": "connection-form", "orientation": "landscape"])
+            // iPhone landscape leaves a very short band between the sticky
+            // header and the keyboard/footer; do not fail the test trying to
+            // park a second field in a space smaller than the field itself.
             let host = hostField()
-            if host.exists {
+            let safeBand = visualFooterTop() - visualHeaderBottom()
+            if host.exists, host.frame.height + 24 < safeBand {
                 revealOrTap(host)
                 if cheapKeyboardVisible() {
                     assertFieldAboveKeyboard(host, surface: "connection-form-host", orientationName: "landscape")
                 }
+            } else if host.exists {
+                emit("skip-host-reveal", extra: [
+                    "reason": "landscape-safe-band-too-small",
+                    "safeBand": Double(safeBand),
+                    "headerBottom": Double(visualHeaderBottom()),
+                    "footerTop": Double(visualFooterTop()),
+                    "fieldHeight": Double(host.frame.height),
+                ])
             }
         } else {
             attachShot("keyboard-" + deviceFamily() + "-connection-form-landscape-no-keyboard")
@@ -163,6 +193,34 @@ final class SoftwareKeyboardUITests: XCTestCase {
         dismissFormIfNeeded()
         try runQuickConnectIfPresent(orientationName: "landscape")
         try runSearchIfPresent(orientationName: "landscape")
+        XCUIDevice.shared.orientation = .portrait
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    /// Dismiss the software keyboard if it is up, without closing the form.
+    private func dismissSoftwareKeyboard() {
+        guard cheapKeyboardVisible() else { return }
+        let keyboard = app.keyboards.firstMatch
+        for label in ["完成", "Done", "Return", "return"] {
+            let key = keyboard.buttons[label]
+            if key.exists && key.isHittable {
+                key.tap()
+                Thread.sleep(forTimeInterval: 0.4)
+                if !cheapKeyboardVisible() { return }
+            }
+        }
+        // A downward swipe from mid-form dismisses the keyboard more reliably
+        // than tapping a chrome button that might also close the drawer.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    /// True when the visible keyboard is a bottom bar in the same orientation as the app.
+    private func keyboardMatchesAppOrientation() -> Bool {
+        guard cheapKeyboardVisible() else { return false }
+        return bottomKeyboardMinY() != nil
     }
 
     // MARK: - Typing
@@ -256,6 +314,10 @@ final class SoftwareKeyboardUITests: XCTestCase {
 
     private func waitForFrontend() {
         let add = element(labels: ["新增連線", "Add connection"], type: .button)
+        if !add.waitForExistence(timeout: 8) {
+            // A leftover drawer or discard sheet from a previous run hides 新增連線.
+            dismissFormIfNeeded()
+        }
         XCTAssertTrue(add.waitForExistence(timeout: 90), "連線頁在 90 秒內未出現「新增連線」")
     }
 
@@ -275,15 +337,132 @@ final class SoftwareKeyboardUITests: XCTestCase {
         if discard.waitForExistence(timeout: 3) { discard.tap(); Thread.sleep(forTimeInterval: 0.5) }
     }
 
-    private func revealOrTap(_ field: XCUIElement) {
-        if field.exists && field.isHittable && cheapKeyboardVisible()
-            && field.frame.maxY <= app.keyboards.firstMatch.frame.minY + 8 {
-            field.tap(); return
+    /// Top of a keyboard that actually sits along the bottom edge. Landscape
+    /// on this device often reports a rotated/sideways keyboard frame
+    /// (minY == 0) that must not be treated as covering the whole screen.
+    private func bottomKeyboardMinY() -> CGFloat? {
+        guard cheapKeyboardVisible() else { return nil }
+        let keyboard = app.keyboards.firstMatch.frame
+        guard keyboard.minY > app.frame.midY * 0.5, keyboard.width >= keyboard.height else {
+            return nil
         }
-        if app.scrollViews.firstMatch.exists { app.scrollViews.firstMatch.swipeUp() }
-        else { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 0.35)
-        if field.exists { field.tap() }
+        return keyboard.minY
+    }
+
+    /// Visible top edge of the sticky drawer footer (取消／儲存), not the
+    /// possibly unclipped WebView accessibility minY of those buttons.
+    private func visualFooterTop() -> CGFloat {
+        var top = app.frame.maxY
+        if let keyboardMinY = bottomKeyboardMinY() {
+            top = min(top, keyboardMinY)
+        }
+        let chromeLabels = [
+            "取消", "Cancel", "儲存", "儲存並連線", "Save", "Save and connect",
+        ]
+        for label in chromeLabels {
+            let chrome = element(labels: [label], type: .button)
+            guard chrome.exists else { continue }
+            let frame = chrome.frame
+            let height = min(max(frame.height, 44), 56)
+            top = min(top, frame.maxY - height)
+        }
+        return top
+    }
+
+    /// Bottom of the sticky drawer header. The close button is shorter than
+    /// the eyebrow+title block, so close.maxY alone underestimates the bar.
+    private func visualHeaderBottom() -> CGFloat {
+        var bottom = app.frame.minY + 80
+        let close = element(labels: ["關閉", "Close"], type: .button)
+        if close.exists { bottom = max(bottom, close.frame.maxY) }
+        let titles = ["新增連線", "Add connection", "編輯連線", "Edit connection", "新增", "Add"]
+        for title in titles {
+            let labels = app.staticTexts.matching(NSPredicate(format: "label == %@", title))
+            for i in 0..<min(labels.count, 6) {
+                let item = labels.element(boundBy: i)
+                guard item.exists else { continue }
+                // Ignore the same label on the connections page behind the drawer.
+                guard item.frame.minY < 220, item.frame.maxY < 240 else { continue }
+                bottom = max(bottom, item.frame.maxY)
+            }
+        }
+        return bottom
+    }
+
+    /// 欄位在無障礙樹裡的 frame 可能還落在固定頁尾（取消／儲存）上。
+    /// 此時直接 tap 會點到「取消」，髒表單就會跳出「要放棄這次的修改？」，鍵盤也會收掉。
+    private func fieldIsSafelyTappable(_ field: XCUIElement) -> Bool {
+        guard field.exists, field.frame.width > 8, field.frame.height > 8 else { return false }
+        let rect = field.frame
+        if let keyboardMinY = bottomKeyboardMinY(), rect.maxY > keyboardMinY + 1 {
+            return false
+        }
+        if rect.maxY > visualFooterTop() - 4 { return false }
+        if rect.minY < visualHeaderBottom() + 4 { return false }
+        return true
+    }
+
+    /// `delta > 0` moves content up (reveals lower fields). `delta < 0` moves it down.
+    private func scrollForm(delta: CGFloat) {
+        let header = visualHeaderBottom()
+        let footer = visualFooterTop()
+        guard footer - header > 80 else { return }
+        let startY: CGFloat
+        let endY: CGFloat
+        if delta > 0 {
+            startY = min(footer - 16, header + 80 + delta)
+            endY = startY - min(abs(delta), startY - (header + 16))
+        } else {
+            startY = max(header + 16, footer - 80 - abs(delta))
+            endY = startY + min(abs(delta), (footer - 16) - startY)
+        }
+        guard abs(endY - startY) > 20 else { return }
+        // Start on the left padding so the gesture does not become a text
+        // selection inside the focused field.
+        let startX = max(app.frame.minX + 20, 20)
+        let start = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: startX, dy: startY))
+        let end = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: startX, dy: endY))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        Thread.sleep(forTimeInterval: 0.4)
+    }
+
+    private func revealOrTap(_ field: XCUIElement) {
+        for attempt in 0..<10 {
+            if fieldIsSafelyTappable(field) {
+                field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+                return
+            }
+            guard field.exists else { break }
+            if attempt == 0 {
+                emit("reveal-start", extra: [
+                    "field": NSCoder.string(for: field.frame),
+                    "headerBottom": Double(visualHeaderBottom()),
+                    "footerTop": Double(visualFooterTop()),
+                    "keyboardMinY": cheapKeyboardVisible() ? Double(app.keyboards.firstMatch.frame.minY) : -1,
+                ])
+            }
+            let header = visualHeaderBottom()
+            let footer = visualFooterTop()
+            if field.frame.maxY > footer - 4 {
+                scrollForm(delta: field.frame.maxY - (footer - 16))
+            } else if field.frame.minY < header + 4 {
+                scrollForm(delta: field.frame.minY - (header + 16))
+            } else {
+                scrollForm(delta: 80)
+            }
+        }
+        emit("reveal-failed", extra: [
+            "field": NSCoder.string(for: field.frame),
+            "headerBottom": Double(visualHeaderBottom()),
+            "footerTop": Double(visualFooterTop()),
+            "keyboardMinY": cheapKeyboardVisible() ? Double(app.keyboards.firstMatch.frame.minY) : -1,
+        ])
+        attachShot("reveal-failed")
+        XCTAssertTrue(field.exists, "要點的欄位不存在")
+        XCTAssertTrue(fieldIsSafelyTappable(field), "欄位仍被頁尾或鍵盤擋住，無法安全點擊")
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
     }
 
     private func nameField() -> XCUIElement {
@@ -291,7 +470,9 @@ final class SoftwareKeyboardUITests: XCTestCase {
     }
 
     private func hostField() -> XCUIElement {
-        element(labels: ["ssh.example.com", "files.example.com", "192.0.2.10", "主機位址", "Hostname", "Host"], type: .textField)
+        let primary = element(labels: ["主機位址", "Hostname"], type: .textField)
+        if primary.exists { return primary }
+        return element(labels: ["ssh.example.com", "files.example.com", "192.0.2.10", "Host"], type: .textField)
     }
 
     private func portField() -> XCUIElement {
