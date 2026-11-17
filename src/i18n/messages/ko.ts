@@ -2005,6 +2005,7 @@ export const messages: Messages = {
   "remote.commands.seconds": "초",
   "remote.commands.run": "실행",
   "remote.commands.submitHint": "Enter로 실행, Shift+Enter로 줄바꿈",
+  "remote.commands.submitHintTouch": "Enter로 줄바꿈, 실행을 눌러 전송",
   "remote.commands.stop": "중지",
   "remote.commands.tooLarge": "명령은 16 KiB로 제한됩니다.",
   "remote.commands.result": "결과",

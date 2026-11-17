@@ -5,7 +5,50 @@ import { commandActive, useRemoteCommand } from "../../app/useRemoteCommand";
 import { useI18n } from "../../i18n/context";
 import "./RemoteCommandPane.css";
 
-/** Enter submits a one-shot command; Shift+Enter (or IME composition) inserts a newline. */
+export type CommandEnterEnv = {
+  matches: (query: string) => boolean;
+  onScreenKeyboardVisible: () => boolean;
+};
+
+export function readOnScreenKeyboardVisible(
+  win: Pick<Window, "innerHeight" | "innerWidth" | "visualViewport"> | undefined,
+  root: { getAttribute(name: string): string | null; style: { getPropertyValue(name: string): string } } | undefined,
+): boolean {
+  if (root?.getAttribute("data-mobile-keyboard") === "true") return true;
+  const inset = parseFloat(root?.style.getPropertyValue("--app-keyboard-inset") || "0");
+  if (Number.isFinite(inset) && inset > 80) return true;
+  const viewport = win?.visualViewport;
+  if (win && viewport) {
+    if (win.innerHeight - viewport.height > 80) return true;
+    if (win.innerWidth - viewport.width > 80) return true;
+  }
+  return false;
+}
+
+export function defaultCommandEnterEnv(): CommandEnterEnv {
+  return {
+    matches: (query) => typeof window !== "undefined" && window.matchMedia(query).matches,
+    onScreenKeyboardVisible: () =>
+      typeof window !== "undefined" && typeof document !== "undefined"
+        ? readOnScreenKeyboardVisible(window, document.documentElement)
+        : false,
+  };
+}
+
+/**
+ * On a coarse-pointer phone (or whenever the software keyboard is up), Enter
+ * inserts a newline and the sticky Run button submits. A desktop or a
+ * fine-pointer hardware keyboard keeps Enter-to-submit and Shift+Enter for a
+ * newline. IME composition never submits.
+ */
+export function commandEnterInsertsNewline(env: CommandEnterEnv = defaultCommandEnterEnv()): boolean {
+  if (!env.matches("(pointer: coarse)")) return false;
+  if (env.onScreenKeyboardVisible()) return true;
+  // iPad / hybrid with a trackpad or mouse and no on-screen keyboard.
+  if (env.matches("(any-pointer: fine)")) return false;
+  return true;
+}
+
 export function shouldSubmitCommandOnEnter(event: {
   key: string;
   shiftKey: boolean;
@@ -14,9 +57,10 @@ export function shouldSubmitCommandOnEnter(event: {
   ctrlKey?: boolean;
   nativeEvent?: { isComposing?: boolean };
   keyCode?: number;
-}): boolean {
+}, options?: { enterInsertsNewline?: boolean }): boolean {
   if (event.key !== "Enter" || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
   if (event.nativeEvent?.isComposing || event.keyCode === 229) return false;
+  if (options?.enterInsertsNewline) return false;
   return true;
 }
 
@@ -28,6 +72,7 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
   const [directory, setDirectory] = useState("");
   const [seconds, setSeconds] = useState(30);
   const [busy, setBusy] = useState(false);
+  const enterInsertsNewline = commandEnterInsertsNewline();
   const active = commandActive(command.view);
   const blocked = active || !!command.view?.reconnectRequired;
   const tooLarge = new TextEncoder().encode(text).length > 16 * 1024;
@@ -55,15 +100,15 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
         <input className="input mono" maxLength={4096} {...plainTextInputProps} value={directory} disabled={busy || active} placeholder={t("remote.commands.home")} onChange={e => setDirectory(unsweetenPunctuation(e.currentTarget.value))} />
       </label>
       <label className="field">{t("remote.commands.command")}
-        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} {...plainTextInputProps} enterKeyHint="send" value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(unsweetenPunctuation(e.currentTarget.value))} onKeyDown={event => {
-          if (!shouldSubmitCommandOnEnter(event)) return;
+        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} {...plainTextInputProps} enterKeyHint={enterInsertsNewline ? "enter" : "send"} value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(unsweetenPunctuation(e.currentTarget.value))} onKeyDown={event => {
+          if (!shouldSubmitCommandOnEnter(event, { enterInsertsNewline: commandEnterInsertsNewline() })) return;
           event.preventDefault();
           const form = event.currentTarget.form;
           if (form && typeof form.requestSubmit === "function") form.requestSubmit();
           else run();
         }} />
       </label>
-      <p className="muted remote-command-submit-hint">{t("remote.commands.submitHint")}</p>
+      <p className="muted remote-command-submit-hint">{t(enterInsertsNewline ? "remote.commands.submitHintTouch" : "remote.commands.submitHint")}</p>
       <label className="field">{t("remote.commands.timeout")}
         <select className="input" value={seconds} disabled={busy || active} onChange={e => setSeconds(Number(e.currentTarget.value))}>
           {[30, 60, 300].map(value => <option key={value} value={value}>{value} {t("remote.commands.seconds")}</option>)}

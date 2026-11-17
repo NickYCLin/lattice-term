@@ -2005,6 +2005,7 @@ export const messages: Messages = {
   "remote.commands.seconds": "secondes",
   "remote.commands.run": "Exécuter",
   "remote.commands.submitHint": "Entrée pour exécuter, Maj+Entrée pour un saut de ligne",
+  "remote.commands.submitHintTouch": "Entrée pour un saut de ligne, appuyez sur Exécuter pour envoyer",
   "remote.commands.stop": "Arrêter",
   "remote.commands.tooLarge": "Les commandes sont limitées à 16 KiB.",
   "remote.commands.result": "Résultat",

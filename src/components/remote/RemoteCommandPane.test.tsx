@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../../i18n";
 import type { RemoteSessionSummary } from "../../app/useRemoteSessions";
-import { RemoteCommandPane, shouldSubmitCommandOnEnter } from "./RemoteCommandPane";
+import { RemoteCommandPane, commandEnterInsertsNewline, shouldSubmitCommandOnEnter } from "./RemoteCommandPane";
 const mock = vi.hoisted(() => ({ state: "running", stdout: "<script>unsafe()</script>中文", reconnectRequired: false }));
 vi.mock("../../app/useRemoteCommand", () => ({
   commandActive: (view: { state: string }) => view.state === "running",
@@ -65,12 +65,37 @@ describe("command field submit keys", () => {
     expect(shouldSubmitCommandOnEnter(enter)).toBe(true);
     expect(shouldSubmitCommandOnEnter({ ...enter, shiftKey: true })).toBe(false);
   });
+  it("does not submit on Enter when the field is in touch newline mode", () => {
+    expect(shouldSubmitCommandOnEnter(enter, { enterInsertsNewline: true })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, shiftKey: true }, { enterInsertsNewline: true })).toBe(false);
+  });
   it("does not submit while an IME is composing or with modifier keys", () => {
     expect(shouldSubmitCommandOnEnter({ ...enter, nativeEvent: { isComposing: true } })).toBe(false);
     expect(shouldSubmitCommandOnEnter({ ...enter, keyCode: 229 })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, nativeEvent: { isComposing: true } }, { enterInsertsNewline: false })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, keyCode: 229 }, { enterInsertsNewline: true })).toBe(false);
     expect(shouldSubmitCommandOnEnter({ ...enter, metaKey: true })).toBe(false);
     expect(shouldSubmitCommandOnEnter({ ...enter, ctrlKey: true })).toBe(false);
     expect(shouldSubmitCommandOnEnter({ ...enter, altKey: true })).toBe(false);
     expect(shouldSubmitCommandOnEnter({ key: "a", shiftKey: false })).toBe(false);
+  });
+});
+
+describe("touch versus hardware Enter", () => {
+  const env = (queries: string[], keyboard: boolean) => ({
+    matches: (query: string) => queries.includes(query),
+    onScreenKeyboardVisible: () => keyboard,
+  });
+  it("inserts a newline on a coarse-only phone even before the keyboard inset is published", () => {
+    expect(commandEnterInsertsNewline(env(["(pointer: coarse)"], false))).toBe(true);
+  });
+  it("inserts a newline when a coarse device is showing the software keyboard", () => {
+    expect(commandEnterInsertsNewline(env(["(pointer: coarse)", "(any-pointer: fine)"], true))).toBe(true);
+  });
+  it("keeps Enter-to-submit on a desktop fine pointer", () => {
+    expect(commandEnterInsertsNewline(env(["(any-pointer: fine)"], false))).toBe(false);
+  });
+  it("keeps Enter-to-submit on a coarse device that also has a fine pointer and no software keyboard", () => {
+    expect(commandEnterInsertsNewline(env(["(pointer: coarse)", "(any-pointer: fine)"], false))).toBe(false);
   });
 });

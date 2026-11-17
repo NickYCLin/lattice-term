@@ -2860,6 +2860,7 @@ export const zhTW = {
   "remote.commands.seconds": "秒",
   "remote.commands.run": "執行",
   "remote.commands.submitHint": "Enter 送出，Shift+Enter 換行",
+  "remote.commands.submitHintTouch": "Enter 換行，點選執行送出",
   "remote.commands.stop": "停止",
   "remote.commands.tooLarge": "指令最多 16 KiB。",
   "remote.commands.result": "執行結果",

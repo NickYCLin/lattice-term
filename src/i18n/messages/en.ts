@@ -2948,6 +2948,7 @@ export const en: Messages = {
   "remote.commands.seconds": "seconds",
   "remote.commands.run": "Run",
   "remote.commands.submitHint": "Enter to run, Shift+Enter for a new line",
+  "remote.commands.submitHintTouch": "Enter for a new line, tap Run to send",
   "remote.commands.stop": "Stop",
   "remote.commands.tooLarge": "Commands are limited to 16 KiB.",
   "remote.commands.result": "Result",
