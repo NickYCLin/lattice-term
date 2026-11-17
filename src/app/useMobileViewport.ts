@@ -13,6 +13,7 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
   ] as const;
   const previous = properties.map((name) => root.style.getPropertyValue(name));
   const previousKeyboard = root.getAttribute("data-mobile-keyboard");
+  const previousCompact = root.getAttribute("data-mobile-keyboard-compact");
   let frame: number | null = null;
   let revealFrame: number | null = null;
   const currentWidth = () => viewport?.width ?? win.innerWidth;
@@ -36,8 +37,25 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     return { width: restWidth, height: restHeight };
   };
 
+  const canScroll = (el: HTMLElement | null): el is HTMLElement => {
+    if (!el) return false;
+    try {
+      if (el.scrollHeight - el.clientHeight > 1) return true;
+    } catch {
+      /* jsdom-like test doubles may not implement scrollHeight */
+    }
+    const overflowY = el.ownerDocument?.defaultView?.getComputedStyle?.(el)?.overflowY ?? "";
+    return overflowY === "auto" || overflowY === "scroll";
+  };
+
   const sheetScroller = (target: HTMLElement): HTMLElement | null => {
     const body = target.closest?.(".drawer__body") as HTMLElement | null;
+    const drawer = target.closest?.(".drawer") as HTMLElement | null;
+    // In landscape + keyboard the drawer itself becomes the scroller so the
+    // footer can move out of the way; prefer whichever element can actually scroll.
+    if (canScroll(drawer) && !canScroll(body)) return drawer;
+    if (canScroll(body)) return body;
+    if (canScroll(drawer)) return drawer;
     if (body) return body;
     return (target.closest?.(".dialog, .drawer, [role='dialog']") as HTMLElement | null) ?? null;
   };
@@ -118,7 +136,10 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
       }
       const drawer = focused.closest?.(".drawer") as HTMLElement | null;
       const foot = drawer?.querySelector?.(".drawer__foot") as HTMLElement | null;
-      if (foot?.getBoundingClientRect) clipBottom = Math.min(clipBottom, foot.getBoundingClientRect().top);
+      const compactKeyboard = root.getAttribute("data-mobile-keyboard-compact") === "true";
+      // When the foot scrolls with the form it is not a sticky overlay, so
+      // do not treat it as a clip edge; the next field can move above the keyboard.
+      if (!compactKeyboard && foot?.getBoundingClientRect) clipBottom = Math.min(clipBottom, foot.getBoundingClientRect().top);
       const fieldRect = focused.getBoundingClientRect();
       const scroller = sheetScroller(focused);
       const next = nextFocusable(focused);
@@ -196,6 +217,10 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     root.style.setProperty("--app-keyboard-inset", `${keyboardInset}px`);
     root.style.setProperty("--app-drawer-foot-height", `${Math.max(0, footHeight)}px`);
     root.setAttribute("data-mobile-keyboard", String(keyboardVisible));
+    // A short landscape band cannot keep a sticky footer and the next field
+    // on screen together; mark compact so CSS lets the footer scroll away.
+    const compactKeyboard = Boolean(keyboardVisible && width >= height);
+    root.setAttribute("data-mobile-keyboard-compact", String(compactKeyboard));
     if (keyboardVisible) {
       revealFocusedField();
       if (revealFrame === null) {
@@ -232,6 +257,8 @@ export function observeMobileViewport(win: Window, root: HTMLElement): () => voi
     });
     if (previousKeyboard === null) root.removeAttribute("data-mobile-keyboard");
     else root.setAttribute("data-mobile-keyboard", previousKeyboard);
+    if (previousCompact === null) root.removeAttribute("data-mobile-keyboard-compact");
+    else root.setAttribute("data-mobile-keyboard-compact", previousCompact);
   };
 }
 

@@ -2041,6 +2041,7 @@ export const messages: Messages = {
   "remote.commands.timeout": "运行时间上限",
   "remote.commands.seconds": "秒",
   "remote.commands.run": "运行",
+  "remote.commands.submitHint": "Enter 发送，Shift+Enter 换行",
   "remote.commands.stop": "停止",
   "remote.commands.tooLarge": "指令最多 16 KiB。",
   "remote.commands.result": "运行结果",

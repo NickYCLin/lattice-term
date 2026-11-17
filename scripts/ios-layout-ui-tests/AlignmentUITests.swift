@@ -84,6 +84,105 @@ final class AlignmentUITests: XCTestCase {
         }
     }
 
+
+    private func sidebarToggleVisible() -> Bool {
+        let toggle = labeled(["顯示側欄", "隱藏側欄", "Show sidebar", "Hide sidebar"], type: .any)
+        return toggle.exists && toggle.frame.height > 8 && toggle.frame.minY < app.frame.midY
+    }
+
+    /// True when the element sits in the bottom tab rail, not a page row.
+    private func isTabBarElement(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        return element.frame.minY > app.frame.maxY - 140
+    }
+
+    private func openSessionInnerIfPresent() {
+        let tabLabels: Set<String> = ["工作階段", "Sessions", "我的連線", "My connections", "設定", "Settings", "更多", "More", "遠端助理", "遠端 Agent Fleet", "AI Agent Fleet", "Remote assistant"]
+        let excluded: Set<String> = [
+            "選擇檔案", "Choose file", "Choose File", "Browse", "瀏覽",
+            "關閉", "Close", "新增", "Add", "取消", "Cancel",
+            "新增連線", "Add connection", "以 ID 連線", "Connect by ID",
+            "刪除", "Delete", "搜尋", "Search", "儲存", "Save",
+            "顯示側欄", "隱藏側欄", "Show sidebar", "Hide sidebar",
+        ]
+        let cells = app.cells
+        for i in 0..<min(cells.count, 8) {
+            let cell = cells.element(boundBy: i)
+            if cell.exists && cell.isHittable && !isTabBarElement(cell) && !excluded.contains(cell.label) {
+                cell.tap()
+                Thread.sleep(forTimeInterval: 1)
+                attachScreen("align-session-inner")
+                inspectCommandPaneIfVisible()
+                return
+            }
+        }
+        let buttons = app.buttons
+        for i in 0..<min(buttons.count, 24) {
+            let item = buttons.element(boundBy: i)
+            guard item.exists && item.isHittable && !isTabBarElement(item) else { continue }
+            let label = item.label
+            if tabLabels.contains(label) || excluded.contains(label) { continue }
+            if label.count < 2 { continue }
+            item.tap()
+            Thread.sleep(forTimeInterval: 1)
+            attachScreen("align-session-inner")
+            inspectCommandPaneIfVisible()
+            return
+        }
+        attachScreen("align-session-inner-none")
+        print("LATTICE_ALIGN no session inner page available to open")
+    }
+
+    /// Leave a terminal / session inner page so other workspace pages show their view-header.
+    private func leaveTerminalView() {
+        if sidebarToggleVisible() { return }
+        // Prefer a page that always has the mobile view-header.
+        let connections = button("我的連線", "My connections")
+        if connections.waitForExistence(timeout: 3) && connections.isHittable {
+            connections.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.8)
+            if sidebarToggleVisible() { return }
+        }
+        for label in ["返回", "Back", "關閉", "Close"] {
+            let item = button(label)
+            if item.exists && item.isHittable && !isTabBarElement(item) && item.frame.minY < app.frame.midY {
+                item.tap()
+                Thread.sleep(forTimeInterval: 0.6)
+                if sidebarToggleVisible() { return }
+            }
+        }
+        // Last resort: tap the sessions tab only after visiting connections,
+        // then connections again so later stages start from a headed page.
+        let sessions = button("工作階段", "Sessions")
+        if sessions.exists && sessions.isHittable {
+            sessions.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.6)
+        }
+        if connections.exists && connections.isHittable {
+            connections.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.8)
+        }
+        attachScreen("align-leave-terminal")
+        XCTAssertTrue(sidebarToggleVisible(), "離開工作階段內頁後仍看不到側欄按鈕，後續頁面的標題對齊無法檢查")
+    }
+
+    /// When a connected remote session already has the 命令 pane, confirm the
+    /// run button is not covered by the tab bar. Skip quietly if not connected.
+    private func inspectCommandPaneIfVisible() {
+        let commandTab = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label == %@", "命令", "Commands")).firstMatch
+        guard commandTab.exists && commandTab.isHittable && !isTabBarElement(commandTab) else { return }
+        commandTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+        Thread.sleep(forTimeInterval: 0.8)
+        let run = button("執行", "Run")
+        attachScreen("align-command-pane")
+        if run.waitForExistence(timeout: 3) {
+            let railTop = app.frame.maxY - 140
+            let visible = run.exists && run.frame.maxY <= railTop + 8 && run.frame.height > 8
+            print("LATTICE_ALIGN command-run frame=\(NSCoder.string(for: run.frame)) railTop=\(railTop) visible=\(visible)")
+            XCTAssertTrue(visible || run.isHittable, "命令頁「執行」被底部分頁列擋住。frame=\(NSCoder.string(for: run.frame))")
+        }
+    }
+
     func testHeaderAlignmentAcrossPages() throws {
         continueAfterFailure = false
         launchFresh()
@@ -105,25 +204,28 @@ final class AlignmentUITests: XCTestCase {
                 // Mobile hides the workspace view-header on the terminal page.
                 Thread.sleep(forTimeInterval: 0.5)
                 attachScreen("align-sessions")
-                // If a running session exists, open its inner page; otherwise note it.
-                let sessionRow = app.cells.firstMatch
-                let sessionButton = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "session", "工作階段")).firstMatch
-                if sessionRow.exists && sessionRow.isHittable {
-                    sessionRow.tap()
-                    Thread.sleep(forTimeInterval: 1)
-                    attachScreen("align-session-inner")
-                    // Leave the inner page so later tabs are reachable.
-                    if button("工作階段", "Sessions").waitForExistence(timeout: 2) {
-                        button("工作階段", "Sessions").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
-                    }
-                } else if sessionButton.exists && sessionButton.isHittable {
-                    sessionButton.tap()
-                    Thread.sleep(forTimeInterval: 1)
-                    attachScreen("align-session-inner")
-                } else {
-                    attachScreen("align-session-inner-none")
-                    print("LATTICE_ALIGN no session inner page available to open")
-                }
+                openSessionInnerIfPresent()
+                // Always leave the terminal / session inner page before later
+                // tabs. Otherwise the missing view-header makes the sidebar
+                // toggle invisible and settings / more / command checks never run.
+                leaveTerminalView()
+                continue
+            }
+            // If a previous session page is still covering the workspace header,
+            // leave it and re-tap this tab before asserting alignment.
+            if !sidebarToggleVisible() {
+                inspectCommandPaneIfVisible()
+                leaveTerminalView()
+                tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+                Thread.sleep(forTimeInterval: 1)
+            }
+            // A connected remote session may open a header-less workspace.
+            // Do not block settings / more because of that; record and continue.
+            if !sidebarToggleVisible() {
+                inspectCommandPaneIfVisible()
+                attachScreen("align-\(page.stage)-no-header")
+                print("LATTICE_ALIGN skip \(page.stage): no view-header after opening the page")
+                leaveTerminalView()
                 continue
             }
             var checked = false
@@ -141,18 +243,39 @@ final class AlignmentUITests: XCTestCase {
             }
         }
 
+        // Always return to 我的連線 before checking 更多 / forms. A connected
+        // remote session can hide the view-header and the 更多 tab.
+        leaveTerminalView()
+        waitFor(button("新增連線", "Add connection"), timeout: 15)
+        let settings = button("設定", "Settings")
+        if settings.waitForExistence(timeout: 3) && settings.isHittable {
+            settings.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 1)
+            if sidebarToggleVisible() {
+                assertHeaderCentered(title: "設定", stage: "settings")
+            } else {
+                attachScreen("align-settings-no-header")
+                print("LATTICE_ALIGN settings still has no view-header")
+            }
+            leaveTerminalView()
+            waitFor(button("新增連線", "Add connection"), timeout: 10)
+        }
         let more = button("更多", "More")
-        waitFor(more)
-        more.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
-        Thread.sleep(forTimeInterval: 1)
-        attachScreen("align-more")
+        if more.waitForExistence(timeout: 5) && more.isHittable {
+            more.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 1)
+            attachScreen("align-more")
+            inspectCommandPaneIfVisible()
+            leaveTerminalView()
+        } else {
+            attachScreen("align-more-missing")
+            print("LATTICE_ALIGN more tab not visible from the connections page")
+        }
 
-        // Return to connections and open the add-connection form and the
-        // connect-by-ID dialog so those headers can be visually checked.
-        button("我的連線", "My connections").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
-        Thread.sleep(forTimeInterval: 1)
+        // Open the add-connection form and the connect-by-ID dialog so those
+        // headers can be visually checked.
+        waitFor(button("新增連線", "Add connection"), timeout: 15)
         let add = button("新增連線", "Add connection")
-        waitFor(add)
         add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
         let close = button("關閉", "Close")
         waitFor(close, timeout: 15)

@@ -2008,6 +2008,7 @@ export const messages: Messages = {
   "remote.commands.timeout": "時間制限",
   "remote.commands.seconds": "秒",
   "remote.commands.run": "実行",
+  "remote.commands.submitHint": "Enter で実行、Shift+Enter で改行",
   "remote.commands.stop": "停止",
   "remote.commands.tooLarge": "コマンドは16 KiBに制限されます。",
   "remote.commands.result": "結果",

@@ -2004,6 +2004,7 @@ export const messages: Messages = {
   "remote.commands.timeout": "Frist",
   "remote.commands.seconds": "Sekunden",
   "remote.commands.run": "Ausführen",
+  "remote.commands.submitHint": "Eingabe führt aus, Umschalt+Eingabe für eine neue Zeile",
   "remote.commands.stop": "Stoppen",
   "remote.commands.tooLarge": "Befehle sind auf 16 KiB beschränkt.",
   "remote.commands.result": "Ergebnis",

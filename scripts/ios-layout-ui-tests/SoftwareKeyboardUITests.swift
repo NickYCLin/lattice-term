@@ -434,10 +434,25 @@ final class SoftwareKeyboardUITests: XCTestCase {
     }
 
     private func dismissFormIfNeeded() {
+        // In landscape the footer may have scrolled out of the keyboard-visible
+        // band, so 取消 exists but is not hittable. Put the keyboard away first
+        // so the footer returns, then tap with a coordinate if needed.
+        dismissSoftwareKeyboard()
         let close = element(labels: ["關閉", "Close", "取消", "Cancel"], type: .button)
-        if close.exists { close.tap(); Thread.sleep(forTimeInterval: 0.5) }
+        if close.exists {
+            if close.isHittable {
+                close.tap()
+            } else {
+                close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
         let discard = element(labels: ["放棄修改", "放棄", "Discard", "Discard changes"], type: .button)
-        if discard.waitForExistence(timeout: 3) { discard.tap(); Thread.sleep(forTimeInterval: 0.5) }
+        if discard.waitForExistence(timeout: 3) {
+            if discard.isHittable { discard.tap() }
+            else { discard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1) }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
     }
 
     /// Top of a keyboard that actually sits along the bottom edge. Landscape

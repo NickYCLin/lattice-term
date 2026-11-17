@@ -5,6 +5,21 @@ import { commandActive, useRemoteCommand } from "../../app/useRemoteCommand";
 import { useI18n } from "../../i18n/context";
 import "./RemoteCommandPane.css";
 
+/** Enter submits a one-shot command; Shift+Enter (or IME composition) inserts a newline. */
+export function shouldSubmitCommandOnEnter(event: {
+  key: string;
+  shiftKey: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  nativeEvent?: { isComposing?: boolean };
+  keyCode?: number;
+}): boolean {
+  if (event.key !== "Enter" || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
+  if (event.nativeEvent?.isComposing || event.keyCode === 229) return false;
+  return true;
+}
+
 export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionSummary; hidden: boolean }) {
   const { t } = useI18n();
   const command = useRemoteCommand(session.sessionId);
@@ -16,14 +31,18 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
   const active = commandActive(command.view);
   const blocked = active || !!command.view?.reconnectRequired;
   const tooLarge = new TextEncoder().encode(text).length > 16 * 1024;
+  const canRun = command.ready && !busy && !blocked && !!text.trim() && !tooLarge;
+  const run = () => {
+    if (!canRun) return;
+    setBusy(true);
+    void command.start({ shell, command: text, directory, timeoutSeconds: seconds }).finally(() => setBusy(false));
+  };
   return <aside className="remote-workspace__files remote-command-pane" hidden={hidden} aria-label={t("remote.commands.title")}>
     <strong>{t("remote.commands.title")}</strong>
     <p className="muted">{t("remote.commands.hint")}</p>
     <form onSubmit={event => {
       event.preventDefault();
-      if (!command.ready || busy || blocked || !text.trim() || tooLarge) return;
-      setBusy(true);
-      void command.start({ shell, command: text, directory, timeoutSeconds: seconds }).finally(() => setBusy(false));
+      run();
     }}>
       <label className="field">{t("remote.commands.shell")}
         <select className="input" value={shell} disabled={busy || active} onChange={e => setShell(e.currentTarget.value as typeof shell)}>
@@ -36,15 +55,22 @@ export function RemoteCommandPane({ session, hidden }: { session: RemoteSessionS
         <input className="input mono" maxLength={4096} {...plainTextInputProps} value={directory} disabled={busy || active} placeholder={t("remote.commands.home")} onChange={e => setDirectory(unsweetenPunctuation(e.currentTarget.value))} />
       </label>
       <label className="field">{t("remote.commands.command")}
-        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} {...plainTextInputProps} value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(unsweetenPunctuation(e.currentTarget.value))} />
+        <textarea className="input mono remote-command-input" maxLength={16384} rows={5} {...plainTextInputProps} enterKeyHint="send" value={text} disabled={busy || active} placeholder={shell === "posix" ? "id; pwd" : shell === "cmd" ? "whoami && dir" : "Get-Location; Get-Process | Select-Object -First 5"} onChange={e => setText(unsweetenPunctuation(e.currentTarget.value))} onKeyDown={event => {
+          if (!shouldSubmitCommandOnEnter(event)) return;
+          event.preventDefault();
+          const form = event.currentTarget.form;
+          if (form && typeof form.requestSubmit === "function") form.requestSubmit();
+          else run();
+        }} />
       </label>
+      <p className="muted remote-command-submit-hint">{t("remote.commands.submitHint")}</p>
       <label className="field">{t("remote.commands.timeout")}
         <select className="input" value={seconds} disabled={busy || active} onChange={e => setSeconds(Number(e.currentTarget.value))}>
           {[30, 60, 300].map(value => <option key={value} value={value}>{value} {t("remote.commands.seconds")}</option>)}
         </select>
       </label>
       <div className="remote-command-actions">
-        <button className="button button--primary" type="submit" disabled={!command.ready || busy || blocked || !text.trim() || tooLarge}>{t("remote.commands.run")}</button>
+        <button className="button button--primary" type="submit" disabled={!canRun}>{t("remote.commands.run")}</button>
         {active && <button className="button button--ghost" type="button" disabled={busy} onClick={() => {
           if (!command.view) return;
           setBusy(true);

@@ -76,10 +76,17 @@ final class LayoutUITests: XCTestCase {
             screenshot.lifetime = .keepAlways
             self.add(screenshot)
         }
+        if app.state != .notRunning { app.terminate() }
         XCUIDevice.shared.orientation = .portrait
-        app.activate()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30), "App 未能進入前景")
+        let leftover = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@ OR label == %@ OR label == %@", "關閉", "Close", "取消", "Cancel")).firstMatch
+        if leftover.waitForExistence(timeout: 2) {
+            leftover.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.4)
+        }
         let add = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add connection", "新增連線")).firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 30))
+        XCTAssertTrue(add.waitForExistence(timeout: 30), "連線頁未出現「新增連線」")
         try tapCenter(add)
         let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR placeholderValue == %@", "For example: Production gateway", "例如：正式站主機")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 15))

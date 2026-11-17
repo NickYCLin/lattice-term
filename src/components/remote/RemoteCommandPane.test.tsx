@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../../i18n";
 import type { RemoteSessionSummary } from "../../app/useRemoteSessions";
-import { RemoteCommandPane } from "./RemoteCommandPane";
+import { RemoteCommandPane, shouldSubmitCommandOnEnter } from "./RemoteCommandPane";
 const mock = vi.hoisted(() => ({ state: "running", stdout: "<script>unsafe()</script>中文", reconnectRequired: false }));
 vi.mock("../../app/useRemoteCommand", () => ({
   commandActive: (view: { state: string }) => view.state === "running",
@@ -48,5 +48,29 @@ describe("remote command panel", () => {
     expect(markup).toContain("結束代碼: 7");
     expect(markup).toContain('value="cmd"');
     expect(markup).not.toContain(">停止</button>");
+  });
+  it("shows a send key hint and enterKeyHint=send on the command field", () => {
+    mock.state = "exited";
+    const markup = render(4);
+    expect(markup).toContain("Enter 送出，Shift+Enter 換行");
+    expect(markup.toLowerCase()).toContain("enterkeyhint");
+    expect(markup.toLowerCase()).toContain("send");
+    expect(markup).toContain("執行");
+  });
+});
+
+describe("command field submit keys", () => {
+  const enter = { key: "Enter", shiftKey: false };
+  it("submits on Enter and keeps a newline on Shift+Enter", () => {
+    expect(shouldSubmitCommandOnEnter(enter)).toBe(true);
+    expect(shouldSubmitCommandOnEnter({ ...enter, shiftKey: true })).toBe(false);
+  });
+  it("does not submit while an IME is composing or with modifier keys", () => {
+    expect(shouldSubmitCommandOnEnter({ ...enter, nativeEvent: { isComposing: true } })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, keyCode: 229 })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, metaKey: true })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, ctrlKey: true })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ ...enter, altKey: true })).toBe(false);
+    expect(shouldSubmitCommandOnEnter({ key: "a", shiftKey: false })).toBe(false);
   });
 });

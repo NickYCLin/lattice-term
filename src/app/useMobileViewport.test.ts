@@ -115,6 +115,7 @@ describe("mobile keyboard viewport", () => {
     expect(f.styles.get("--app-viewport-height")).toBe("480px");
     expect(f.styles.get("--app-viewport-top")).toBe("24px");
     expect(f.attributes.get("data-mobile-keyboard")).toBe("true");
+    expect(f.attributes.get("data-mobile-keyboard-compact")).toBe("false");
     f.viewport.height = 852;
     f.viewport.offsetTop = 0;
     f.viewport.dispatchEvent(new Event("resize"));
@@ -182,6 +183,7 @@ describe("mobile keyboard viewport", () => {
     f.viewport.dispatchEvent(new Event("resize"));
     f.flush();
     expect(f.attributes.get("data-mobile-keyboard")).toBe("true");
+    expect(f.attributes.get("data-mobile-keyboard-compact")).toBe("true");
     expect(f.styles.get("--app-viewport-width")).toBe("620px");
     expect(f.styles.get("--app-viewport-left")).toBe("0px");
     expect(f.styles.get("--app-viewport-height")).toBe("393px");
@@ -234,6 +236,7 @@ describe("mobile keyboard viewport", () => {
     const f = fixture();
     f.styles.set("--app-viewport-height", "90dvh");
     f.attributes.set("data-mobile-keyboard", "previous");
+    f.attributes.set("data-mobile-keyboard-compact", "kept");
     const stop = f.start();
     f.viewport.dispatchEvent(new Event("resize"));
     stop();
@@ -245,6 +248,7 @@ describe("mobile keyboard viewport", () => {
     expect(f.styles.has("--app-keyboard-inset")).toBe(false);
     expect(f.styles.has("--app-drawer-foot-height")).toBe(false);
     expect(f.attributes.get("data-mobile-keyboard")).toBe("previous");
+    expect(f.attributes.get("data-mobile-keyboard-compact")).toBe("kept");
     f.viewport.dispatchEvent(new Event("resize"));
     f.root.dispatchEvent(new Event("focusin"));
     f.win.dispatchEvent(new Event("resize"));
@@ -331,6 +335,38 @@ describe("mobile keyboard viewport", () => {
     handlers.get("keydown")?.(event as unknown as Event);
     expect(event.defaultPrevented).toBe(true);
     expect(next.focus).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("does not treat a landscape footer as a clip edge once the keyboard is open", () => {
+    const mobile = fixture();
+    mobile.win.innerHeight = mobile.viewport.height = 390;
+    mobile.win.innerWidth = mobile.viewport.width = 844;
+    mobile.win.screen = { width: 390, height: 844 };
+    const field = mobile.root.ownerDocument.activeElement as {
+      closest: ReturnType<typeof vi.fn>;
+      getBoundingClientRect: ReturnType<typeof vi.fn>;
+    };
+    const foot = { getBoundingClientRect: () => ({ top: 198, bottom: 226, height: 28 }) };
+    const body = {
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ top: 80, bottom: 420 }),
+      querySelector: (selector: string) => (selector.includes("drawer__foot") ? foot : null),
+      querySelectorAll: () => [field],
+    };
+    field.closest.mockImplementation(() => body);
+    // Real iPhone 13 landscape failure: the next / focused field ends at 202,
+    // overlapping a sticky footer at 198 but still above the keyboard at 226.
+    field.getBoundingClientRect.mockReturnValue({ top: 152, bottom: 202, left: 28, right: 696 });
+    const stop = mobile.start();
+    mobile.viewport.height = 226;
+    mobile.viewport.dispatchEvent(new Event("resize"));
+    mobile.flush();
+    expect(mobile.attributes.get("data-mobile-keyboard-compact")).toBe("true");
+    // If the footer were still a clip edge, the field would be treated as
+    // hidden (202 > 198) and the body would scroll. It is already above the
+    // keyboard, so leave it where it is.
+    expect(body.scrollTop).toBe(0);
     stop();
   });
 });

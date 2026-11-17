@@ -226,6 +226,31 @@
   scroll-padding-bottom: var(--space-2);
 }
 
+/* Landscape + keyboard: the sticky footer and the next field cannot both
+   fit in the short band above the keyboard. Let the whole drawer scroll
+   so 取消／儲存 move out of the way and later fields can rise above the
+   keyboard. Keep the title bar pinned. */
+:root[data-mobile-keyboard-compact="true"] .app--mobile .drawer {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:root[data-mobile-keyboard-compact="true"] .app--mobile .drawer__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface-hover, var(--surface-solid, var(--surface)));
+}
+:root[data-mobile-keyboard-compact="true"] .app--mobile .drawer__body {
+  overflow: visible;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding-bottom: var(--space-3);
+}
+:root[data-mobile-keyboard-compact="true"] .app--mobile .drawer__foot {
+  position: static;
+  flex: 0 0 auto;
+}
+
 @media (max-height: 500px) {
   .app--mobile { padding-top: max(var(--space-1), env(safe-area-inset-top, 0px)); }
   .app--mobile .view-header { padding-block: 0; }
@@ -266,6 +291,24 @@
 .app--mobile .remote-command-pane {
   min-width: 0;
   border-right: 0;
+}
+
+/* Keep 執行 above the bottom tab bar and, when the keyboard is open,
+   at the bottom of the visual viewport so it is always tappable. */
+.app--mobile .remote-command-pane {
+  padding-bottom: calc(14px + var(--space-6));
+}
+.app--mobile .remote-command-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: var(--space-2);
+  padding: var(--space-2) 0 var(--space-3);
+  background: var(--surface-solid, var(--surface));
+  box-shadow: 0 -1px 0 var(--line);
+}
+.app--mobile .remote-command-submit-hint {
+  margin: 0;
 }
 
 /* Keep dialog titles on the same center line as the leading icon and close

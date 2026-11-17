@@ -2947,6 +2947,7 @@ export const en: Messages = {
   "remote.commands.timeout": "Time limit",
   "remote.commands.seconds": "seconds",
   "remote.commands.run": "Run",
+  "remote.commands.submitHint": "Enter to run, Shift+Enter for a new line",
   "remote.commands.stop": "Stop",
   "remote.commands.tooLarge": "Commands are limited to 16 KiB.",
   "remote.commands.result": "Result",
