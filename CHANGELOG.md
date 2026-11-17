@@ -4,6 +4,38 @@
 
 ---
 
+## [2026.11.18](https://github.com/NickYCLin/lattice-term/compare/v2026.11.17...v2026.11.18) (2026-11-17)
+
+
+### 🚀 新增功能
+
+* Codex 對話閒置時放開寫入鎖並可等待接手 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 圖示改用 PulsoIcon 動畫圖示 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 觸控與狀態變化時播放一次圖示動畫 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+
+
+### 🛠️ 問題修正
+
+* Codex 回合結束後恢復 MCP 送訊就緒 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* iOS 鍵盤遮住輸入框 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* iPhone SE 以 ID 連線被鍵盤避讓捲出畫面 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 原生紀錄每輪多出「系統／壓縮事件」 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 回合完成後側欄與分頁仍顯示處理中 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 圖片附件列預設收起 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 完成回合後從 heuristic working 恢復 MCP 就緒 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 對話被 Codex Desktop 占用時顯示在地化說明 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 已載完時隱藏載入較舊對話按鈕 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 強化原生工作階段載入容錯 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 橫向鍵盤時讓連線頁尾可捲動並讓命令列 Enter 送出 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 統一輸入框圖示間距並避免命令列智慧標點 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 補齊 iOS 隱私宣告並整理行動導覽與設定 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 觸控裝置命令欄改為 Enter 換行並以執行鈕送出 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 讓手機標題列與側欄圖示垂直置中 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 讓新增連線表單在鍵盤開啟時把下一欄捲出頁尾 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 超大原生工作階段改為串流分段讀取 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 送出前先讀取原生對話並保持紀錄互通 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+* 閒置工作階段可恢復 MCP 送訊就緒 ([874838e](https://github.com/NickYCLin/lattice-term/commit/874838e9ba0b0b476a67be77bb3c9bbe9a3bc07a))
+
 ## [2026.11.17](https://github.com/NickYCLin/lattice-term/compare/v2026.11.16...v2026.11.17) (2026-11-16)
 
 
