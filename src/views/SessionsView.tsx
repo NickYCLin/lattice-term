@@ -1340,7 +1340,7 @@ export function SessionsView({
         label: session.hasCustomGroupLabel
           ? `${session.label} · ${sessionCliLabel(member)}`
           : sessionCliLabel(member),
-        detail: member.model ?? t("terminal.model.pending"),
+        detail: member.writerReleased ? t("handoff.released") : member.model ?? t("terminal.model.pending"),
         kind: "agent" as const,
         searchText: [
           session.label,

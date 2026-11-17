@@ -1,3 +1,4 @@
+import { useCodexHandoffPresence } from "./app/useCodexHandoffPresence";
 import { JumpAuthenticationDialog } from "./components/connections/JumpAuthenticationDialog";
 import type { ConnectionAttemptProfile } from "./app/jumpRoutes";
 import { parseConversationLocation } from "./app/conversationNavigation";
@@ -459,6 +460,7 @@ function Workspace({ preferences, update, activeTheme }: PreferencesValue) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [chatWorkspaceSessionId, setChatWorkspaceSessionId] = useState<string | null>(null);
   const [terminalMounted, setTerminalMounted] = useState(false);
+  useCodexHandoffPresence(view === "terminal" ? activeSessionId : view === "chat" ? chatWorkspaceSessionId : null, preferences.codexHandoffMinutes);
   const [initialWorkspaceSnapshot] = useState(() => {
     const loaded = loadWorkspaceSessionSnapshot(window.localStorage);
     const sessions = loaded?.sessions ?? [];

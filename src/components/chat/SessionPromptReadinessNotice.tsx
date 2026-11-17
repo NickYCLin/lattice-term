@@ -33,6 +33,7 @@ export function SessionPromptReadinessNotice({
         const key = readinessReasonKey(code);
         return <p key={code}>{key ? t(key) : code}</p>;
       })}
+      {readiness?.writerHolder && <p>{t("handoff.holder", { kind: readiness.writerHolder.kind, pid: readiness.writerHolder.pid })}</p>}
       <p>{t("sessionChat.reconcileHint")}</p>
       {error && <p role="alert">{error}</p>}
     </Callout>

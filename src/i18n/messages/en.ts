@@ -9,6 +9,19 @@
 import type { Messages } from "./zh-TW";
 
 export const en: Messages = {
+  "handoff.setting": "Codex automatic handoff",
+  "handoff.off": "Off",
+  "handoff.minutes": "After {minutes} idle minutes",
+  "handoff.settingHint": "Gracefully exit an idle, unfocused Codex terminal; resume before the next prompt. Daemon sessions are excluded.",
+  "handoff.released": "Writer released (another app may continue)",
+  "handoff.locked": "Another writer owns this conversation. Release it in that application first.",
+  "handoff.holder": "Holder: {kind} · PID {pid}",
+  "handoff.unknown": "Unknown process",
+  "handoff.retry": "Retry",
+  "handoff.take": "Take over (wait for release)",
+  "handoff.cancel": "Cancel waiting",
+  "handoff.waiting": "Waiting up to two minutes for release; no other process will be ended.",
+  "handoff.waitFailed": "Cannot confirm availability, or waiting timed out. No automatic replay was made; retry later.",
   "chat.turn.openElsewhere": "This conversation is in use in another Codex app",
   "chat.turn.openElsewhere.body": "Codex allows only one app to write to a conversation at a time. After Codex Desktop sends a message, it may keep the conversation locked even when you switch to another conversation. Restart Codex Desktop, then return to LatticeTerm and send again. If the same conversation is open in a terminal on LatticeTerm’s Sessions page, end that session first.",
   "native.compaction": "Context compaction event",

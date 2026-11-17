@@ -677,6 +677,7 @@ fn detached_list(registry: &AgentRegistry) -> Vec<AgentSessionSummary> {
 /// launch/account material at the observer boundary, not just in MCP views.
 fn observer_summary(summary: AgentSessionSummary) -> AgentSessionSummary {
     AgentSessionSummary {
+        writer_released: false,
         session_id: summary.session_id,
         group_id: summary.group_id,
         group_label: summary.group_label,
@@ -2357,6 +2358,9 @@ fn observer_event(name: &str, payload: &Value) -> Option<Value> {
 }
 
 impl AgentSink for DaemonSink {
+    fn writer(&self, summary: &AgentSessionSummary) {
+        self.broadcast("state", json!({"sessionId":summary.session_id,"state":summary.state,"source":summary.state_source,"writerReleased":summary.writer_released,"processId":summary.process_id}));
+    }
     fn startup_input_unconfirmed(&self, session_id: &str) {
         self.broadcast("startup-input", json!({ "sessionId": session_id }));
     }

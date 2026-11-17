@@ -4,6 +4,7 @@ import { hasDesktopBackend } from "./nativeRuntime";
 export const PROMPT_STUCK_AFTER_MS = 30_000;
 
 export interface PromptReadiness {
+  writerHolder?: { kind: string; pid: number } | null;
   ready: boolean;
   blockers: string[];
   basis: string;
@@ -12,6 +13,7 @@ export interface PromptReadiness {
 }
 
 const READINESS_MESSAGE_KEYS = {
+  thread_locked_by_other_writer: "handoff.locked",
   integration_not_reported: "sessionChat.readiness.integration_not_reported",
   terminal_turn_unconfirmed: "sessionChat.readiness.terminal_turn_unconfirmed",
   lifecycle_not_ready: "sessionChat.readiness.lifecycle_not_ready",

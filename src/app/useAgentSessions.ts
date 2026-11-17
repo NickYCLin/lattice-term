@@ -116,6 +116,7 @@ export interface AgentSessionSummary {
   /** True when this process was recreated from the persisted workspace. */
   restoreExistingSession?: boolean;
   startupInputUnconfirmed?: boolean;
+  writerReleased?: boolean;
   workingDirectory: string;
   state: AgentLifecycle;
   stateSource: AgentStateSource;
@@ -197,6 +198,8 @@ interface AgentPlanSnapshot {
 }
 
 export interface AgentStateEvent {
+  writerReleased?: boolean;
+  processId?: number | null;
   sessionId: string;
   state: AgentLifecycle;
   source: AgentStateSource;
@@ -254,7 +257,9 @@ export function applyAgentStateEvent(
 ): AgentSessionSummary[] {
   return sessions.map((session) =>
     session.sessionId === event.sessionId
-      ? { ...session, state: event.state, stateSource: event.source }
+      ? { ...session, state: event.state, stateSource: event.source,
+          ...(event.writerReleased !== undefined ? { writerReleased: event.writerReleased } : {}),
+          ...(event.processId !== undefined ? { processId: event.processId } : {}) }
       : session,
   );
 }

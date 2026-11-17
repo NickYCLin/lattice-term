@@ -28,6 +28,7 @@ mod codex_input_profile;
 mod codex_launcher;
 mod codex_resume;
 mod fleet_hooks;
+mod handoff;
 mod prompt_screen;
 
 pub use approval::AgentApprovalRequest;
@@ -353,6 +354,8 @@ impl AgentTokenUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionSummary {
+    #[serde(default)]
+    pub writer_released: bool,
     pub session_id: String,
     /// Groups CLIs that share one tab; defaults to the session's own id.
     pub group_id: String,
@@ -930,6 +933,7 @@ pub trait AgentSink: Send + Sync + 'static {
     /// How many prompts are now waiting for this session.
     fn queue(&self, session_id: &str, queued_prompts: usize);
     fn startup_input_unconfirmed(&self, _session_id: &str) {}
+    fn writer(&self, _summary: &AgentSessionSummary) {}
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -942,6 +946,9 @@ struct AgentSessionIdCaptured {
 pub struct EventSink(pub AppHandle);
 
 impl AgentSink for EventSink {
+    fn writer(&self, summary: &AgentSessionSummary) {
+        let _ = self.0.emit(EVENT_STATE, serde_json::json!({"sessionId":summary.session_id,"state":summary.state,"source":summary.state_source,"writerReleased":summary.writer_released,"processId":summary.process_id}));
+    }
     fn startup_input_unconfirmed(&self, session_id: &str) {
         let _ = self.0.emit(
             EVENT_STARTUP_INPUT,
@@ -1030,6 +1037,7 @@ struct AgentSessionEntry {
     /// Publish read-side reconciliation through the same desktop/daemon sink.
     /// Weak ownership avoids retaining the application through its registry.
     state_sink: Weak<dyn AgentSink>,
+    handoff: Mutex<handoff::Handoff>,
     summary: Mutex<AgentSessionSummary>,
     /// Serializes input, lifecycle readiness and MCP grant changes for this
     /// PTY only. A user editing a prompt owns it until submitting it.
@@ -1037,7 +1045,7 @@ struct AgentSessionEntry {
     /// Revocation and stopping must stay available when a PTY write blocks.
     /// Odd epochs grant control; even epochs revoke it. A new grant cannot
     /// revive a prompt accepted under an earlier one.
-    mcp_grant_epoch: AtomicU64,
+    mcp_grant_epoch: Arc<AtomicU64>,
     /// Tickets are acquired before waiting on input, so a cancelled split
     /// paste can reject already-waiting desktop writes instead of merging them.
     desktop_input_ticket: AtomicU64,
@@ -2452,7 +2460,9 @@ impl AgentRegistry {
         entry: Arc<AgentSessionEntry>,
     ) -> Result<(), String> {
         let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
-        if agent_session_limit_reached(sessions.len()) {
+        if !sessions.contains_key(&summary.session_id)
+            && agent_session_limit_reached(sessions.len())
+        {
             return Err(format!(
                 "At most {MAX_AGENT_SESSIONS} agent sessions may run at once."
             ));
@@ -3064,7 +3074,7 @@ impl AgentRegistry {
     pub(crate) fn session_identity(&self, session_id: &str) -> Option<usize> {
         self.get(session_id)
             .ok()
-            .map(|entry| Arc::as_ptr(&entry) as usize)
+            .map(|entry| Arc::as_ptr(&entry.mcp_grant_epoch) as usize)
     }
 
     /// A read-only snapshot of prompt gates; never includes draft text or keys.
@@ -3074,6 +3084,17 @@ impl AgentRegistry {
         session_id: &str,
     ) -> Result<Vec<&'static str>, String> {
         self.refresh_completed_turn_from_rollout(session_id);
+        if self.writer_holder(session_id).is_some() {
+            return Ok(vec!["thread_locked_by_other_writer"]);
+        }
+        if self.writer_released(session_id) {
+            let entry = self.get(session_id)?;
+            return Ok(if current_mcp_grant(&entry).is_some() {
+                vec![]
+            } else {
+                vec!["control_not_granted"]
+            });
+        }
         let entry = self.get(session_id)?;
         let input = entry.input.lock().map_err(|e| e.to_string())?;
         let summary = entry.summary.lock().map_err(|e| e.to_string())?;
@@ -3383,6 +3404,9 @@ impl AgentRegistry {
     }
 
     pub(crate) fn mcp_readiness_basis(&self, session_id: &str) -> Result<&'static str, String> {
+        if self.writer_released(session_id) {
+            return Ok("writer_released");
+        }
         let entry = self.get(session_id)?;
         let _input = entry.input.lock().map_err(|e| e.to_string())?;
         let summary = entry.summary.lock().map_err(|e| e.to_string())?;
@@ -3684,6 +3708,14 @@ impl AgentRegistry {
 }
 
 fn terminate_agent_entry(entry: &AgentSessionEntry) -> Result<(), String> {
+    // The old PID may already have been reused after cooperative parking.
+    if entry
+        .summary
+        .lock()
+        .is_ok_and(|s| s.writer_released && s.process_id.is_none())
+    {
+        return Ok(());
+    }
     // Cancellation must prevent a delayed submit before waiting on a killer.
     entry.stopping.store(true, Ordering::Release);
     #[cfg(unix)]
@@ -8037,6 +8069,7 @@ fn active_codex_resume_session(
     let root = codex_resume_root(profile)?;
     registry.list().into_iter().find(|session| {
         session.definition_id == "codex"
+            && !session.writer_released
             && session.captured_session_id.as_deref().map(str::trim) == Some(native_session_id)
             && codex_resume_root(session.profile_config_path.as_deref().map(Path::new))
                 .is_some_and(|existing| existing == root)
@@ -8133,6 +8166,17 @@ pub(crate) fn launch_with_replay_and_tools(
     request: AgentLaunchRequest,
     restored_output: Option<Vec<u8>>,
     tools: Option<crate::chat_tools::SessionLaunchTools>,
+) -> Result<AgentSessionSummary, String> {
+    launch_reusing(sink, registry, request, restored_output, tools, None)
+}
+
+fn launch_reusing(
+    sink: Arc<dyn AgentSink>,
+    registry: Arc<AgentRegistry>,
+    request: AgentLaunchRequest,
+    restored_output: Option<Vec<u8>>,
+    tools: Option<crate::chat_tools::SessionLaunchTools>,
+    previous: Option<Arc<AgentSessionEntry>>,
 ) -> Result<AgentSessionSummary, String> {
     let mut request =
         migrate_deprecated_google_consumer_request(&request, gemini_consumer_oauth_deprecated())?;
@@ -8254,7 +8298,15 @@ pub(crate) fn launch_with_replay_and_tools(
     });
     let session_id = match &tools {
         Some(tools) => tools.id.clone(),
-        None => registry.next_id()?,
+        None => match previous.as_ref() {
+            Some(old) => old
+                .summary
+                .lock()
+                .map_err(|_| "Writer summary unavailable")?
+                .session_id
+                .clone(),
+            None => registry.next_id()?,
+        },
     };
     let reporter = registry.reporter.clone();
     let report_token = reporter
@@ -8639,6 +8691,7 @@ pub(crate) fn launch_with_replay_and_tools(
         .group_label(&group_id)
         .unwrap_or_else(|| label.clone());
     let summary = AgentSessionSummary {
+        writer_released: false,
         session_id: session_id.clone(),
         group_id,
         group_label,
@@ -8684,6 +8737,7 @@ pub(crate) fn launch_with_replay_and_tools(
     .then(|| Mutex::new(HermesActivity::default()));
     let entry = Arc::new(AgentSessionEntry {
         state_sink: Arc::downgrade(&sink),
+        handoff: Mutex::new(handoff::Handoff::new(request.clone(), &registry)),
         summary: Mutex::new(summary.clone()),
         report_token,
         writer: Mutex::new(writer),
@@ -8721,7 +8775,10 @@ pub(crate) fn launch_with_replay_and_tools(
                 .is_some_and(|seed| !seed.trim().is_empty()),
             ..AgentInputControl::default()
         }),
-        mcp_grant_epoch: AtomicU64::new(0),
+        mcp_grant_epoch: previous
+            .as_ref()
+            .map(|old| old.mcp_grant_epoch.clone())
+            .unwrap_or_else(|| Arc::new(AtomicU64::new(0))),
         desktop_input_ticket: AtomicU64::new(0),
         mcp_input_profile_invalidated: AtomicBool::new(!seed_preserves_codex_input_profile(
             request.seed_input.as_deref(),
@@ -8747,7 +8804,44 @@ pub(crate) fn launch_with_replay_and_tools(
         _proxy_catalog: proxy_catalog,
         staged_images: Mutex::new(StagedAgentImages::default()),
     });
-    if let Err(error) = registry.insert(&summary, Arc::clone(&entry)) {
+    if let Some(old) = previous.as_ref() {
+        if old.stopping.load(Ordering::Acquire)
+            || !registry
+                .get(&session_id)
+                .is_ok_and(|current| Arc::ptr_eq(&current, old))
+        {
+            let _ = terminate_agent_entry(entry.as_ref());
+            return Err(MCP_SESSION_GONE.into());
+        }
+        let old_output = old.output.lock().map_err(|_| "Writer output unavailable")?;
+        *entry
+            .output
+            .lock()
+            .map_err(|_| "Writer output unavailable")? = OutputBuffer {
+            bytes: old_output.bytes.clone(),
+            start_offset: old_output.start_offset,
+            end_offset: old_output.end_offset,
+        };
+    }
+    let insertion = if let Some(old) = previous.as_ref() {
+        let mut sessions = registry
+            .sessions
+            .lock()
+            .map_err(|_| "Writer registry unavailable")?;
+        if old.stopping.load(Ordering::Acquire)
+            || !sessions
+                .get(&session_id)
+                .is_some_and(|current| Arc::ptr_eq(current, old))
+        {
+            Err(MCP_SESSION_GONE.to_owned())
+        } else {
+            sessions.insert(session_id.clone(), entry.clone());
+            Ok(())
+        }
+    } else {
+        registry.insert(&summary, Arc::clone(&entry))
+    };
+    if let Err(error) = insertion {
         let _ = terminate_agent_entry(entry.as_ref());
         return Err(error);
     }
@@ -8784,6 +8878,12 @@ pub(crate) fn launch_with_replay_and_tools(
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(count) => {
+                    if !reader_registry
+                        .get(&reader_id)
+                        .is_ok_and(|current| Arc::ptr_eq(&current, &reader_entry))
+                    {
+                        break;
+                    }
                     let bytes = &buffer[..count];
                     #[cfg(windows)]
                     let filtered = {
@@ -8881,12 +8981,18 @@ pub(crate) fn launch_with_replay_and_tools(
     // this session. Quiet alone still uses the existing conservative timeout.
     let watchdog_id = session_id.clone();
     let watchdog_registry = Arc::clone(&registry);
+    let watchdog_entry = Arc::downgrade(&entry);
     std::thread::spawn(move || loop {
         std::thread::sleep(LIFECYCLE_CHECK_INTERVAL);
-        if watchdog_registry.get(&watchdog_id).is_err() {
+        if !watchdog_entry.upgrade().is_some_and(|old| {
+            watchdog_registry
+                .get(&watchdog_id)
+                .is_ok_and(|current| Arc::ptr_eq(&old, &current))
+        }) {
             return;
         }
         watchdog_registry.refresh_observed_lifecycle(&watchdog_id);
+        watchdog_registry.maybe_release_writer(&watchdog_id);
     });
 
     if let Some(seed) = request
@@ -8933,8 +9039,29 @@ pub(crate) fn launch_with_replay_and_tools(
     let tools_cleanup = tools.is_some();
     let wait_id = session_id;
     let wait_registry = Arc::clone(&registry);
+    let wait_entry = entry.clone();
     std::thread::spawn(move || {
-        let reason = match child.wait() {
+        let exit = child.wait();
+        if let Ok(mut h) = wait_entry.handoff.lock() {
+            if h.phase == handoff::Phase::Releasing
+                && exit.as_ref().is_ok_and(|status| status.success())
+            {
+                h.phase = handoff::Phase::Released;
+                if let Ok(mut summary) = wait_entry.summary.lock() {
+                    summary.writer_released = true;
+                    summary.process_id = None;
+                    sink.writer(&summary);
+                }
+                return;
+            }
+        }
+        if !wait_registry
+            .get(&wait_id)
+            .is_ok_and(|current| Arc::ptr_eq(&current, &wait_entry))
+        {
+            return;
+        }
+        let reason = match exit {
             Ok(status) => format!("Process exited: {status:?}"),
             Err(error) => format!("Process wait failed: {error}"),
         };
@@ -9124,6 +9251,11 @@ pub fn send(
     encoded: &str,
 ) -> Result<(), String> {
     let bytes = decode(encoded)?;
+    if !is_terminal_status_reply(&bytes) {
+        registry.resume_writer(session_id)?;
+    } else if registry.writer_released(session_id) {
+        return Ok(());
+    }
     send_bytes(sink, registry, session_id, &bytes)
 }
 
@@ -10580,7 +10712,16 @@ fn mcp_prompt_inner(
     after_grant_snapshot: impl FnOnce(),
 ) -> Result<usize, String> {
     let bytes = mcp_prompt_payload(text)?;
+    let prior = registry.get(session_id)?;
+    let original_grant = current_mcp_grant(&prior).ok_or(MCP_NOT_CONTROLLED)?;
+    registry.resume_writer(session_id)?;
     let entry = registry.get(session_id)?;
+    if current_mcp_grant(&entry) != Some(original_grant) {
+        return Err(MCP_GRANT_CHANGED.into());
+    }
+    if registry.writer_holder(session_id).is_some() {
+        return Err("thread_locked_by_other_writer".into());
+    }
     // Remember the grant when this call enters, not after it waits behind a
     // split write. Re-granting cannot revive an already-waiting MCP request.
     let grant_epoch = current_mcp_grant(&entry).ok_or_else(|| MCP_NOT_CONTROLLED.to_string())?;

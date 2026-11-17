@@ -245,6 +245,8 @@ impl DesktopService {
                 "conversationId":summary.captured_session_id,"label":summary.group_label,
                 "definitionId":summary.definition_id,"model":summary.model,"workingDirectory":summary.working_directory,
                 "state":summary.state,"stateSource":summary.state_source,"queuedPrompts":summary.queued_prompts,
+                "writerReleased":summary.writer_released,"writerHolder":registry.writer_holder(&grant.session_id),
+                "writerAdvice":"Released writers resume automatically on prompt. If another writer holds the thread, wait or release it in that application; never retry a prompt with uncertain delivery.",
                 "promptReadiness":{"ready":blockers.is_empty(),"blockers":blockers,"snapshotOnly":true,"basis":registry.mcp_readiness_basis(&grant.session_id).map_err(|_| ServiceError::unavailable())?,"unconfirmedMs":registry.prompt_unconfirmed_ms(&grant.session_id),"lastInputKind":registry.mcp_last_input_kind(&grant.session_id),"inputProfile":registry.mcp_input_profile_diagnostic(&grant.session_id)},
                 "configuration":launch_identity(&summary),"readOutput":grant.view.scopes.fleet_read,"control":grant.view.scopes.fleet_control}))
             }
@@ -300,7 +302,7 @@ impl DesktopService {
                                 agent::MCP_NOT_CONTROLLED | agent::MCP_GRANT_CHANGED => {
                                     "not_authorized"
                                 }
-                                agent::MCP_NOT_READY | agent::MCP_QUEUE_IN_ORDER => "not_ready",
+                                agent::MCP_NOT_READY | agent::MCP_QUEUE_IN_ORDER | "thread_locked_by_other_writer" | "writer_release_pending" => "not_ready",
                                 agent::MCP_DRAFT_RECOVERY_ERROR => "unknown_outcome",
                                 agent::MCP_INPUT_PROFILE_UNSUPPORTED => "unsupported",
                                 agent::MCP_SESSION_GONE => "not_found",

@@ -6,6 +6,19 @@
  */
 
 export const zhTW = {
+  "handoff.setting": "Codex 自動放手",
+  "handoff.off": "關閉",
+  "handoff.minutes": "閒置 {minutes} 分鐘",
+  "handoff.settingHint": "確認閒置且不在前景時正常退出 Codex 終端，下次送訊息自動續接。背景服務工作階段不自動放手。",
+  "handoff.released": "已放手（可由其他應用程式接續）",
+  "handoff.locked": "這段對話正由另一個寫入者占用，請先在該應用程式放手。",
+  "handoff.holder": "占用者：{kind} · PID {pid}",
+  "handoff.unknown": "未知行程",
+  "handoff.retry": "重試",
+  "handoff.take": "接手（等待放手）",
+  "handoff.cancel": "取消等待",
+  "handoff.waiting": "正在等待占用者放手，最多兩分鐘；不會結束其他行程。",
+  "handoff.waitFailed": "無法確認可接手，或等待已逾時。沒有自動重送，請稍後重試。",
   "chat.turn.openElsewhere": "這段對話正在其他 Codex 應用程式中使用",
   "chat.turn.openElsewhere.body": "Codex 同一時間只允許一個應用程式寫入同一段對話。Codex Desktop 送出過訊息後，即使切到別的對話也可能持續占用。請重新開啟 Codex Desktop，再回到 LatticeTerm 送一次。若 LatticeTerm 工作階段頁的終端機正開著同一段對話，請先結束該工作階段。",
   "native.compaction": "內容壓縮事件",

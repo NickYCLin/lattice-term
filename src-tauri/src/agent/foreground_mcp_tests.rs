@@ -891,3 +891,75 @@ async fn finished_codex_turn_done_report_keeps_the_next_mcp_prompt_ready() {
     );
     assert!(entry.terminal_turn_started.load(Ordering::Acquire));
 }
+
+#[test]
+fn handoff_release_requires_idle_unfocused_empty_authoritative_prompt_and_timeout() {
+    for case in ["eligible", "foreground", "disabled", "working", "draft", "queue", "not_due"] {
+        let f = ForegroundFixture::new();
+        f.unreported_prompt();
+        let entry = f.registry.get(&f.id).unwrap();
+        entry.summary.lock().unwrap().state_source = AgentStateSource::Integration;
+        { let mut h = entry.handoff.lock().unwrap();
+          h.timeout = Duration::from_millis(1);
+          h.idle_since = Some(Instant::now() - Duration::from_secs(1));
+          if case == "foreground" { h.foreground_until = Some(Instant::now()); }
+          if case == "disabled" { h.timeout = Duration::ZERO; }
+          if case == "not_due" { h.timeout = Duration::from_secs(120); }
+        }
+        if case == "working" { entry.summary.lock().unwrap().state = AgentLifecycle::Working; }
+        if case == "draft" { entry.input.lock().unwrap().desktop_editing = true; }
+        if case == "queue" { entry.queued_prompts.lock().unwrap().push_back(QueuedPrompt { id:"synthetic".into(), bytes:vec![], delivery_error:None, mcp_grant_epoch:None }); }
+        f.registry.maybe_release_writer(&f.id);
+        assert_eq!(entry.handoff.lock().unwrap().phase == handoff::Phase::Releasing, case == "eligible", "{case}");
+        assert!(!f.registry.writer_released(&f.id), "sending /exit alone is not a release receipt");
+    }
+}
+
+#[tokio::test]
+async fn handoff_mcp_state_retains_conversation_and_grant_identity_when_released() {
+    let f = ForegroundFixture::new();
+    let target = f.share(true, true).await;
+    let entry = f.registry.get(&f.id).unwrap();
+    let identity = f.registry.session_identity(&f.id);
+    entry.handoff.lock().unwrap().phase = handoff::Phase::Released;
+    entry.summary.lock().unwrap().writer_released = true;
+    let state = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(state["writerReleased"], true);
+    assert_eq!(state["promptReadiness"]["basis"], "writer_released");
+    assert_eq!(state["promptReadiness"]["ready"], true);
+    assert_eq!(state["conversationId"], "00000000-0000-4000-8000-000000000001");
+    assert_eq!(identity, f.registry.session_identity(&f.id));
+    entry.handoff.lock().unwrap().phase = handoff::Phase::Releasing;
+    assert_eq!(f.registry.resume_writer(&f.id).unwrap_err(), "writer_release_pending");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn handoff_mcp_reports_a_foreign_writer_without_sending_or_stopping_it() {
+    let f = ForegroundFixture::new(); let target = f.share(true, true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let entry = f.registry.get(&f.id).unwrap();
+    entry.summary.lock().unwrap().profile_config_path = Some(dir.path().to_string_lossy().into());
+    std::fs::create_dir(dir.path().join("thread-writer-locks")).unwrap();
+    let path = dir.path().join("thread-writer-locks/00000000-0000-4000-8000-000000000001.lock");
+    std::fs::write(&path, "synthetic").unwrap();
+    let file = std::fs::File::open(&path).unwrap(); file.try_lock().unwrap();
+    let state = f.call(&target, Action::State {}).await.unwrap();
+    assert_eq!(state["promptReadiness"]["blockers"], serde_json::json!(["thread_locked_by_other_writer"]));
+    assert_eq!(state["writerHolder"]["pid"], std::process::id());
+    assert!(f.call(&target, Action::Prompt { mode:crate::mcp_desktop::DesktopPromptMode::Now, text:"never sent".into(), request_id:"locked".into() }).await.is_err());
+    assert_eq!(std::fs::read(path).unwrap(), b"synthetic");
+}
+
+#[test]
+fn handoff_reacquisition_resumes_exact_native_id_and_preserves_launch_policy_without_seed_replay() {
+    let f = ForegroundFixture::new(); let entry = f.registry.get(&f.id).unwrap();
+    let summary = entry.summary.lock().unwrap().clone();
+    let h = entry.handoff.lock().unwrap(); let request = h.resume_request(&summary).unwrap();
+    assert_eq!(request.resume_session_id, summary.captured_session_id);
+    assert_eq!(request.arguments, h.request.arguments);
+    assert_eq!(request.working_directory, h.request.working_directory);
+    assert_eq!(request.sandbox, h.request.sandbox);
+    assert_eq!(request.group_id.as_deref(), Some(summary.group_id.as_str()));
+    assert!(request.seed_input.is_none()); assert!(request.restore_existing_session);
+}

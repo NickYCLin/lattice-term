@@ -20,6 +20,7 @@ pub mod chat_tools;
 pub mod clipboard;
 pub mod cliproxy;
 mod codex_config;
+mod codex_handoff;
 mod connection_credentials;
 pub mod credentials;
 pub mod database;
@@ -2902,6 +2903,35 @@ async fn agent_disconnect(
     }
 }
 
+#[tauri::command]
+fn agent_handoff_presence(
+    registry: State<'_, Arc<AgentRegistry>>,
+    selected: Option<String>,
+    timeout_ms: u64,
+) {
+    registry.handoff_presence(selected.as_deref(), timeout_ms);
+}
+
+#[tauri::command]
+fn codex_thread_holder(
+    native_id: String,
+    profile: Option<String>,
+) -> Result<codex_handoff::WriterProbe, String> {
+    let root = profile
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|p| p.join(".codex")))
+        .ok_or("Codex home unavailable")?;
+    Ok(codex_handoff::probe(&root, &native_id))
+}
+
+#[tauri::command]
+fn agent_writer_holder(
+    registry: State<'_, Arc<AgentRegistry>>,
+    session_id: String,
+) -> Option<codex_handoff::Holder> {
+    registry.writer_holder(&session_id)
+}
+
 /// Desktop sessions plus whatever the background daemon holds, if it runs.
 #[tauri::command]
 async fn agent_sessions(
@@ -2920,6 +2950,7 @@ struct PromptReadinessView {
     blockers: Vec<&'static str>,
     basis: String,
     unconfirmed_ms: Option<u64>,
+    writer_holder: Option<codex_handoff::Holder>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reconciled: Option<bool>,
 }
@@ -2935,6 +2966,7 @@ fn prompt_readiness_view(
         blockers,
         basis: registry.mcp_readiness_basis(session_id)?.to_string(),
         unconfirmed_ms: registry.prompt_unconfirmed_ms(session_id),
+        writer_holder: registry.writer_holder(session_id),
         reconciled,
     })
 }
@@ -6644,6 +6676,9 @@ pub fn run() {
             agent_chat_stage_remote_image,
             agent_disconnect,
             agent_sessions,
+            agent_handoff_presence,
+            agent_writer_holder,
+            codex_thread_holder,
             agent_prompt_readiness,
             agent_reconcile_prompt,
             agent_rename,

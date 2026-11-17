@@ -48,6 +48,7 @@ export interface Preferences {
   chatSubmitShortcut: "enter" | "modifier-enter";
   chatWorkingSubmit: "queue" | "steer";
   chatCollapseCompletedTurns: boolean;
+  codexHandoffMinutes: number;
 }
 
 export const defaultPreferences: Preferences = {
@@ -70,6 +71,7 @@ export const defaultPreferences: Preferences = {
   chatSubmitShortcut: "enter",
   chatWorkingSubmit: "queue",
   chatCollapseCompletedTurns: false,
+  codexHandoffMinutes: 2,
 };
 
 const STORAGE_KEY = "latticeterm.preferences.v2";
@@ -126,6 +128,7 @@ export function sanitizePreferences(stored: Partial<Preferences>): Preferences {
     chatSubmitShortcut: stored.chatSubmitShortcut === "modifier-enter" ? "modifier-enter" : "enter",
     chatWorkingSubmit: stored.chatWorkingSubmit === "steer" ? "steer" : "queue",
     chatCollapseCompletedTurns: stored.chatCollapseCompletedTurns === true,
+    codexHandoffMinutes: [0, 2, 5, 10].includes(stored.codexHandoffMinutes ?? -1) ? stored.codexHandoffMinutes! : 2,
   };
 }
 

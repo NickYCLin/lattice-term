@@ -277,7 +277,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
           {accountLabel && <span className="chat-chip">{accountLabel}</span>}
           {session.model && <span className="chat-chip">{session.model}</span>}
           {live && !working && !nativePending && !attention && <span className={`session-chat__state is-${session.state}`}>
-            {t(unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
+            {t(session.writerReleased ? "handoff.released" : unconfirmed ? "sessionChat.unconfirmed" : stateLabel[session.state] ?? "agents.state.idle")}
           </span>}
         </ConversationIdentity>
         <div className="chat-composer__actions">

@@ -1,3 +1,4 @@
+import { CodexWriterHandoff } from "../components/chat/CodexWriterHandoff";
 import { BackgroundHistoryPicker } from "../components/chat/BackgroundHistoryPicker";
 import { CompactionNotice } from "../components/chat/CompactionNotice";
 import { MemorySaveButton } from "../components/chat/MemorySaveButton";
@@ -1317,6 +1318,12 @@ export function ThreadPane({
               onAnswer={answer}
               workingDirectory={thread.workingDirectory}
               threadId={thread.id}
+              nativeId={thread.nativeSessionId ?? undefined}
+              writerProfile={activeProfile?.configDirectory}
+              onRetry={async () => {
+                const previous = thread.items.slice(0, thread.items.findIndex(value => value.id === item.id)).reverse().find(value => value.type === "user");
+                if (previous?.type === "user" && !thread.runningTurnId) await chat.send(thread.id, previous.text, previous.attachments ?? [], activeProfile?.configDirectory ?? null);
+              }}
               subtask={(childId) => {
                 const child = chat.getThread(childId);
                 if (!child) return null;
@@ -1545,6 +1552,7 @@ function ChatItemView({
   onEdit,
   workingDirectory = "",
   threadId,
+  nativeId, writerProfile, onRetry,
   subtask,
 }: {
   item: ChatItem;
@@ -1561,6 +1569,9 @@ function ChatItemView({
   workingDirectory?: string;
   /** Lets pasted pictures and tool screenshots be shown from the chat's folder. */
   threadId?: string;
+  nativeId?: string;
+  writerProfile?: string | null;
+  onRetry?: () => Promise<void>;
   /** Resolves a delegated subtask for its "finished" note. */
   subtask?: (childId: string) => { title: string; result: string; open: () => void; bringBack: () => void } | null;
 }) {
@@ -1723,6 +1734,7 @@ function ChatItemView({
             {openElsewhere && <p className="chat-callout__lead">{t("chat.turn.openElsewhere.body")}</p>}
             {needsLogin && <p className="chat-callout__lead">{t("chat.turn.needsLogin.body", { assistant })}</p>}
             {item.error}
+            {openElsewhere && nativeId && onRetry && <CodexWriterHandoff nativeId={nativeId} profile={writerProfile} onRetry={onRetry} />}
           </Callout>
         );
       }
