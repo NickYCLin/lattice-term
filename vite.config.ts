@@ -28,6 +28,15 @@ export default defineConfig(async () => ({
             return "react";
           }
           if (id.includes("/node_modules/@tauri-apps/")) return "tauri";
+          if (
+            id.includes("/node_modules/pulsoicon-") ||
+            id.includes("/node_modules/motion/") ||
+            id.includes("/node_modules/framer-motion/") ||
+            id.includes("/node_modules/motion-dom/") ||
+            id.includes("/node_modules/motion-utils/")
+          ) {
+            return "pulsoicon";
+          }
         },
       },
     },

@@ -1,12 +1,132 @@
 /**
  * Icon set.
  *
- * Drawn in-house on a 16px grid with a 1.5px stroke so the whole interface
- * shares one weight, and so the repository carries no third-party icon
- * licence. Emoji are never used as functional icons.
+ * Visual defaults stay on a 16px grid with a 1.5px stroke and currentColor
+ * so the interface keeps one weight. Most glyphs come from PulsoIcon (ISC)
+ * via per-icon modules, and play only on hover or focus. The brand mark and
+ * icons without a close semantic match remain in-house. Third-party notices
+ * are in THIRD_PARTY_NOTICES.
+ *
+ * Emoji are never used as functional icons.
  */
 
-import type { ReactElement, ReactNode, SVGProps } from "react";
+import { createElement, type ComponentType, type ReactElement, type ReactNode, type SVGProps } from "react";
+import { Vault } from "pulsoicon-react/icons/vault";
+import { ClipboardList } from "pulsoicon-react/icons/clipboard-list";
+import { Bell } from "pulsoicon-react/icons/bell";
+import { Settings } from "pulsoicon-react/icons/settings";
+import { Search } from "pulsoicon-react/icons/search";
+import { Plus } from "pulsoicon-react/icons/plus";
+import { X } from "pulsoicon-react/icons/x";
+import { ChevronDown } from "pulsoicon-react/icons/chevron-down";
+import { ChevronRight } from "pulsoicon-react/icons/chevron-right";
+import { Star } from "pulsoicon-react/icons/star";
+import { PanelLeft } from "pulsoicon-react/icons/panel-left";
+import { Pencil } from "pulsoicon-react/icons/pencil";
+import { CopyPlus } from "pulsoicon-react/icons/copy-plus";
+import { Trash } from "pulsoicon-react/icons/trash";
+import { Sun } from "pulsoicon-react/icons/sun";
+import { Moon } from "pulsoicon-react/icons/moon";
+import { Shield } from "pulsoicon-react/icons/shield";
+import { Lock } from "pulsoicon-react/icons/lock";
+import { LockOpen } from "pulsoicon-react/icons/lock-open";
+import { Key } from "pulsoicon-react/icons/key";
+import { Terminal } from "pulsoicon-react/icons/terminal";
+import { Sparkles } from "pulsoicon-react/icons/sparkles";
+import { MessageSquare } from "pulsoicon-react/icons/message-square";
+import { Send } from "pulsoicon-react/icons/send";
+import { Mic } from "pulsoicon-react/icons/mic";
+import { AudioLines } from "pulsoicon-react/icons/audio-lines";
+import { Folder } from "pulsoicon-react/icons/folder";
+import { FolderOpen } from "pulsoicon-react/icons/folder-open";
+import { File } from "pulsoicon-react/icons/file";
+import { FileCode } from "pulsoicon-react/icons/file-code";
+import { FileImage } from "pulsoicon-react/icons/file-image";
+import { FileArchive } from "pulsoicon-react/icons/file-archive";
+import { FileText } from "pulsoicon-react/icons/file-text";
+import { Link } from "pulsoicon-react/icons/link";
+import { Monitor } from "pulsoicon-react/icons/monitor";
+import { Check } from "pulsoicon-react/icons/check";
+import { TriangleAlert } from "pulsoicon-react/icons/triangle-alert";
+import { Play } from "pulsoicon-react/icons/play";
+import { Tag } from "pulsoicon-react/icons/tag";
+import { Info } from "pulsoicon-react/icons/info";
+import { Waypoints } from "pulsoicon-react/icons/waypoints";
+import { Keyboard } from "pulsoicon-react/icons/keyboard";
+import { Download } from "pulsoicon-react/icons/download";
+import { Upload } from "pulsoicon-react/icons/upload";
+import { Ellipsis } from "pulsoicon-react/icons/ellipsis";
+import { Copy } from "pulsoicon-react/icons/copy";
+import { ScreenShare } from "pulsoicon-react/icons/screen-share";
+import { Camera } from "pulsoicon-react/icons/camera";
+import { CircleDot } from "pulsoicon-react/icons/circle-dot";
+import { Square } from "pulsoicon-react/icons/square";
+import { CornerDownRight } from "pulsoicon-react/icons/corner-down-right";
+import { HardDrive } from "pulsoicon-react/icons/hard-drive";
+import { Cpu } from "pulsoicon-react/icons/cpu";
+import { Database } from "pulsoicon-react/icons/database";
+import { RefreshCw } from "pulsoicon-react/icons/refresh-cw";
+import { Globe } from "pulsoicon-react/icons/globe";
+import { Palette } from "pulsoicon-react/icons/palette";
+import { Clock } from "pulsoicon-react/icons/clock";
+import { Vault as VaultData } from "pulsoicon-core/icons/vault";
+import { ClipboardList as ClipboardListData } from "pulsoicon-core/icons/clipboard-list";
+import { Bell as BellData } from "pulsoicon-core/icons/bell";
+import { Settings as SettingsData } from "pulsoicon-core/icons/settings";
+import { Search as SearchData } from "pulsoicon-core/icons/search";
+import { Plus as PlusData } from "pulsoicon-core/icons/plus";
+import { X as XData } from "pulsoicon-core/icons/x";
+import { ChevronDown as ChevronDownData } from "pulsoicon-core/icons/chevron-down";
+import { ChevronRight as ChevronRightData } from "pulsoicon-core/icons/chevron-right";
+import { Star as StarData } from "pulsoicon-core/icons/star";
+import { PanelLeft as PanelLeftData } from "pulsoicon-core/icons/panel-left";
+import { Pencil as PencilData } from "pulsoicon-core/icons/pencil";
+import { CopyPlus as CopyPlusData } from "pulsoicon-core/icons/copy-plus";
+import { Trash as TrashData } from "pulsoicon-core/icons/trash";
+import { Sun as SunData } from "pulsoicon-core/icons/sun";
+import { Moon as MoonData } from "pulsoicon-core/icons/moon";
+import { Shield as ShieldData } from "pulsoicon-core/icons/shield";
+import { Lock as LockData } from "pulsoicon-core/icons/lock";
+import { LockOpen as LockOpenData } from "pulsoicon-core/icons/lock-open";
+import { Key as KeyData } from "pulsoicon-core/icons/key";
+import { Terminal as TerminalData } from "pulsoicon-core/icons/terminal";
+import { Sparkles as SparklesData } from "pulsoicon-core/icons/sparkles";
+import { MessageSquare as MessageSquareData } from "pulsoicon-core/icons/message-square";
+import { Send as SendData } from "pulsoicon-core/icons/send";
+import { Mic as MicData } from "pulsoicon-core/icons/mic";
+import { AudioLines as AudioLinesData } from "pulsoicon-core/icons/audio-lines";
+import { Folder as FolderData } from "pulsoicon-core/icons/folder";
+import { FolderOpen as FolderOpenData } from "pulsoicon-core/icons/folder-open";
+import { File as FileData } from "pulsoicon-core/icons/file";
+import { FileCode as FileCodeData } from "pulsoicon-core/icons/file-code";
+import { FileImage as FileImageData } from "pulsoicon-core/icons/file-image";
+import { FileArchive as FileArchiveData } from "pulsoicon-core/icons/file-archive";
+import { FileText as FileTextData } from "pulsoicon-core/icons/file-text";
+import { Link as LinkData } from "pulsoicon-core/icons/link";
+import { Monitor as MonitorData } from "pulsoicon-core/icons/monitor";
+import { Check as CheckData } from "pulsoicon-core/icons/check";
+import { TriangleAlert as TriangleAlertData } from "pulsoicon-core/icons/triangle-alert";
+import { Play as PlayData } from "pulsoicon-core/icons/play";
+import { Tag as TagData } from "pulsoicon-core/icons/tag";
+import { Info as InfoData } from "pulsoicon-core/icons/info";
+import { Waypoints as WaypointsData } from "pulsoicon-core/icons/waypoints";
+import { Keyboard as KeyboardData } from "pulsoicon-core/icons/keyboard";
+import { Download as DownloadData } from "pulsoicon-core/icons/download";
+import { Upload as UploadData } from "pulsoicon-core/icons/upload";
+import { Ellipsis as EllipsisData } from "pulsoicon-core/icons/ellipsis";
+import { Copy as CopyData } from "pulsoicon-core/icons/copy";
+import { ScreenShare as ScreenShareData } from "pulsoicon-core/icons/screen-share";
+import { Camera as CameraData } from "pulsoicon-core/icons/camera";
+import { CircleDot as CircleDotData } from "pulsoicon-core/icons/circle-dot";
+import { Square as SquareData } from "pulsoicon-core/icons/square";
+import { CornerDownRight as CornerDownRightData } from "pulsoicon-core/icons/corner-down-right";
+import { HardDrive as HardDriveData } from "pulsoicon-core/icons/hard-drive";
+import { Cpu as CpuData } from "pulsoicon-core/icons/cpu";
+import { Database as DatabaseData } from "pulsoicon-core/icons/database";
+import { RefreshCw as RefreshCwData } from "pulsoicon-core/icons/refresh-cw";
+import { Globe as GlobeData } from "pulsoicon-core/icons/globe";
+import { Palette as PaletteData } from "pulsoicon-core/icons/palette";
+import { Clock as ClockData } from "pulsoicon-core/icons/clock";
 
 export type IconProps = Omit<SVGProps<SVGSVGElement>, "children"> & {
   size?: number;
@@ -38,6 +158,109 @@ function Icon({
 }
 
 type Glyph = (props: IconProps) => ReactElement;
+
+type IconSpec = {
+  nodes: ReadonlyArray<readonly [string, Record<string, unknown>, ...unknown[]]>;
+};
+
+/**
+ * Motion plays only on hover or focus of an interactive ancestor.
+ * It stays off when the system asks for reduced motion, during SSR,
+ * in jsdom unit tests, and on touch-first / iOS surfaces where there
+ * is no persistent hover.
+ */
+export function iconMotionEnabled(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  const ua =
+    (typeof navigator !== "undefined" && navigator.userAgent) ||
+    window.navigator?.userAgent ||
+    "";
+  if (/jsdom/i.test(ua)) {
+    return false;
+  }
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const hover = window.matchMedia("(hover: hover)");
+  // A stub that returns one MediaQueryList for every query is not a real browser.
+  if (reduce === hover) {
+    return false;
+  }
+  if (reduce.matches || !hover.matches) {
+    return false;
+  }
+  const nav = window.navigator;
+  if (
+    nav &&
+    (/iP(hone|ad|od)/i.test(nav.userAgent) ||
+      (nav.platform === "MacIntel" && nav.maxTouchPoints > 1))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function currentColor(props: IconProps): string {
+  const { color, stroke } = props;
+  if (typeof color === "string" && color) return color;
+  if (typeof stroke === "string" && stroke) return stroke;
+  return "currentColor";
+}
+
+function StaticPulso({
+  spec,
+  solid = false,
+  ...props
+}: IconProps & { spec: IconSpec; solid?: boolean }) {
+  const { size = 16, strokeWidth, className, style, ref: _ref, focusable: _focusable, color: _color, stroke: _stroke, ...rest } = props;
+  const strokeColor = currentColor(props);
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={solid ? strokeColor : "none"}
+      stroke={strokeColor}
+      strokeWidth={strokeWidth ?? 1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+      style={{ flexShrink: 0, overflow: "visible", ...style }}
+      {...rest}
+    >
+      {spec.nodes.map(([tag, attrs], index) => createElement(tag, { key: index, ...attrs }))}
+    </svg>
+  );
+}
+
+function pulsoIconProps(props: IconProps, extras: { solid?: boolean } = {}) {
+  const { size = 16, strokeWidth, className, style, focusable: _focusable, ref: _ref, ...rest } = props;
+  return {
+    ...rest,
+    size,
+    color: currentColor(props),
+    strokeWidth: strokeWidth ?? 1.5,
+    // Keep the glyph animatable, but only auto-play on hover/focus.
+    autoAnimated: true,
+    className,
+    style: { flexShrink: 0, overflow: "visible" as const, ...style },
+    "aria-hidden": true as const,
+    focusable: false as const,
+    ...extras,
+  };
+}
+
+function pulso(MotionComp: ComponentType<Record<string, unknown>>, spec: IconSpec, defaults?: { solid?: boolean }): Glyph {
+  const GlyphIcon = (props: IconProps) => {
+    if (!iconMotionEnabled()) {
+      return <StaticPulso spec={spec} solid={defaults?.solid} {...props} />;
+    }
+    return <MotionComp {...pulsoIconProps(props, defaults)} />;
+  };
+  return GlyphIcon;
+}
 
 export const LatticeMark = ({ size = 20, ...props }: IconProps) => (
   <svg
@@ -73,6 +296,7 @@ export const LatticeMark = ({ size = 20, ...props }: IconProps) => (
   </svg>
 );
 
+/** Unique stacked host-card glyph; PulsoIcon has no close match. */
 export const ConnectionsIcon: Glyph = (props) => (
   <Icon {...props}>
     <rect x="2" y="2.5" width="12" height="4.25" rx="1.25" />
@@ -83,6 +307,7 @@ export const ConnectionsIcon: Glyph = (props) => (
   </Icon>
 );
 
+/** Unique tunnel-arch glyph; PulsoIcon has no close match. */
 export const TunnelIcon: Glyph = (props) => (
   <Icon {...props}>
     <path d="M2.5 13.5V6a5.5 5.5 0 0 1 11 0v7.5" />
@@ -91,373 +316,70 @@ export const TunnelIcon: Glyph = (props) => (
   </Icon>
 );
 
-export const VaultIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2" y="2.5" width="12" height="11" rx="2" />
-    <circle cx="8" cy="8" r="2.25" />
-    <path d="M8 5.75v1M8 9.25v1M5.75 8h1M9.25 8h1M11.5 8h.75" />
-  </Icon>
-);
-
-export const ActivityIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2.5" y="2" width="11" height="12" rx="1.5" />
-    <circle cx="5.25" cy="5.5" r=".6" fill="currentColor" />
-    <circle cx="5.25" cy="8" r=".6" fill="currentColor" />
-    <circle cx="5.25" cy="10.5" r=".6" fill="currentColor" />
-    <path d="M7.5 5.5h3.5M7.5 8h3.5M7.5 10.5h2" />
-  </Icon>
-);
-
-export const BellIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M3.25 11.5h9.5l-1.15-1.4V6.75a3.6 3.6 0 0 0-7.2 0v3.35L3.25 11.5z" />
-    <path d="M6.5 13.25a1.75 1.75 0 0 0 3 0" />
-  </Icon>
-);
-
-export const SettingsIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8.15 1.5h-.3a1.33 1.33 0 0 0-1.33 1.33v.12a1.33 1.33 0 0 1-.67 1.16l-.28.17a1.33 1.33 0 0 1-1.34 0l-.1-.06a1.33 1.33 0 0 0-1.82.49l-.15.25a1.33 1.33 0 0 0 .49 1.82l.1.06a1.33 1.33 0 0 1 .66 1.15v.34a1.33 1.33 0 0 1-.66 1.16l-.1.06a1.33 1.33 0 0 0-.49 1.82l.15.25a1.33 1.33 0 0 0 1.82.49l.1-.06a1.33 1.33 0 0 1 1.34 0l.28.17a1.33 1.33 0 0 1 .67 1.15v.13a1.33 1.33 0 0 0 1.33 1.33h.3a1.33 1.33 0 0 0 1.33-1.33v-.12a1.33 1.33 0 0 1 .67-1.16l.28-.17a1.33 1.33 0 0 1 1.34 0l.1.06a1.33 1.33 0 0 0 1.82-.49l.15-.25a1.33 1.33 0 0 0-.49-1.82l-.1-.06a1.33 1.33 0 0 1-.66-1.16v-.33a1.33 1.33 0 0 1 .66-1.16l.1-.06a1.33 1.33 0 0 0 .49-1.82l-.15-.25a1.33 1.33 0 0 0-1.82-.49l-.1.06a1.33 1.33 0 0 1-1.34 0l-.28-.17a1.33 1.33 0 0 1-.67-1.15v-.13A1.33 1.33 0 0 0 8.15 1.5z" />
-    <circle cx="8" cy="8" r="2" />
-  </Icon>
-);
-
-export const SearchIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="7" cy="7" r="4.25" />
-    <path d="m10.25 10.25 3.5 3.5" />
-  </Icon>
-);
-
-export const PlusIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 3v10M3 8h10" />
-  </Icon>
-);
-
-export const CloseIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m3.5 3.5 9 9M12.5 3.5l-9 9" />
-  </Icon>
-);
-
-export const ChevronDownIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m4 6 4 4 4-4" />
-  </Icon>
-);
-
-export const ChevronRightIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m6 4 4 4-4 4" />
-  </Icon>
-);
+export const VaultIcon = pulso(Vault, VaultData);
+export const ActivityIcon = pulso(ClipboardList, ClipboardListData);
+export const BellIcon = pulso(Bell, BellData);
+export const SettingsIcon = pulso(Settings, SettingsData);
+export const SearchIcon = pulso(Search, SearchData);
+export const PlusIcon = pulso(Plus, PlusData);
+export const CloseIcon = pulso(X, XData);
+export const ChevronDownIcon = pulso(ChevronDown, ChevronDownData);
+export const ChevronRightIcon = pulso(ChevronRight, ChevronRightData);
 
 export const StarIcon = ({
-  size = 16,
   filled = false,
   ...props
-}: IconProps & { filled?: boolean }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 16 16"
-    fill={filled ? "currentColor" : "none"}
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-    focusable="false"
-    {...props}
-  >
-    <path d="m8 2 1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4L2.2 6.2l4-.6L8 2z" />
-  </svg>
-);
+}: IconProps & { filled?: boolean }) => {
+  if (!iconMotionEnabled()) {
+    return <StaticPulso spec={StarData} solid={filled} {...props} />;
+  }
+  const Comp = Star as ComponentType<Record<string, unknown>>;
+  return <Comp {...pulsoIconProps(props, { solid: filled })} />;
+};
 
-export const SidebarIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
-    <path d="M6 2.5v11" />
-  </Icon>
-);
+export const SidebarIcon = pulso(PanelLeft, PanelLeftData);
+export const EditIcon = pulso(Pencil, PencilData);
+export const DuplicateIcon = pulso(CopyPlus, CopyPlusData);
+export const TrashIcon = pulso(Trash, TrashData);
+export const SunIcon = pulso(Sun, SunData);
+export const MoonIcon = pulso(Moon, MoonData);
+export const ShieldIcon = pulso(Shield, ShieldData);
+export const LockIcon = pulso(Lock, LockData);
+export const UnlockIcon = pulso(LockOpen, LockOpenData);
+export const KeyIcon = pulso(Key, KeyData);
+export const TerminalIcon = pulso(Terminal, TerminalData);
+export const AgentIcon = pulso(Sparkles, SparklesData);
+export const ChatIcon = pulso(MessageSquare, MessageSquareData);
+export const SendIcon = pulso(Send, SendData);
+export const MicIcon = pulso(Mic, MicData);
+export const WaveformIcon = pulso(AudioLines, AudioLinesData);
+export const FolderIcon = pulso(Folder, FolderData);
+export const FolderOpenIcon = pulso(FolderOpen, FolderOpenData);
+export const FileIcon = pulso(File, FileData);
+export const CodeFileIcon = pulso(FileCode, FileCodeData);
+export const ImageFileIcon = pulso(FileImage, FileImageData);
+export const ArchiveFileIcon = pulso(FileArchive, FileArchiveData);
+export const DocumentFileIcon = pulso(FileText, FileTextData);
+export const LinkFileIcon = pulso(Link, LinkData);
+export const DesktopIcon = pulso(Monitor, MonitorData);
+export const CheckIcon = pulso(Check, CheckData);
+export const AlertIcon = pulso(TriangleAlert, TriangleAlertData);
+export const PlayIcon = pulso(Play, PlayData);
+export const TagIcon = pulso(Tag, TagData);
+export const InfoIcon = pulso(Info, InfoData);
+export const RoadmapIcon = pulso(Waypoints, WaypointsData);
+export const KeyboardIcon = pulso(Keyboard, KeyboardData);
+export const ImportIcon = pulso(Download, DownloadData);
+export const ExportIcon = pulso(Upload, UploadData);
+export const MoreIcon = pulso(Ellipsis, EllipsisData);
+export const CopyIcon = pulso(Copy, CopyData);
+export const ScreenShareIcon = pulso(ScreenShare, ScreenShareData);
+export const CameraIcon = pulso(Camera, CameraData);
+export const RecordIcon = pulso(CircleDot, CircleDotData);
+export const StopIcon = pulso(Square, SquareData, { solid: true });
+export const TransferIcon = pulso(CornerDownRight, CornerDownRightData);
 
-export const EditIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M3 13h2.5L13 5.5 10.5 3 3 10.5V13z" />
-    <path d="m9.5 4 2.5 2.5" />
-  </Icon>
-);
-
-export const DuplicateIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="5" y="5" width="8" height="8" rx="1.5" />
-    <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" />
-  </Icon>
-);
-
-export const TrashIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2.5 4h11M5.5 4V2.5A1.5 1.5 0 0 1 7 1h2a1.5 1.5 0 0 1 1.5 1.5V4M4 4v9a1.5 1.5 0 0 0 1.5 1.5h5A1.5 1.5 0 0 0 12 13V4" />
-  </Icon>
-);
-
-export const SunIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="8" cy="8" r="3" />
-    <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" />
-  </Icon>
-);
-
-export const MoonIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M13.2 9.8A5.5 5.5 0 1 1 6.2 2.8 4.75 4.75 0 0 0 13.2 9.8z" />
-  </Icon>
-);
-
-export const ShieldIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 2 3 4.2v4.3c0 3.2 2.5 5.3 5 6 2.5-.7 5-2.8 5-6V4.2L8 2z" />
-  </Icon>
-);
-
-export const LockIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
-    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
-  </Icon>
-);
-
-export const UnlockIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
-    <path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7" />
-  </Icon>
-);
-
-export const KeyIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="5.5" cy="8" r="3" />
-    <path d="M8.5 8H14M11.5 8V10M13.5 8v1.5" />
-  </Icon>
-);
-
-export const TerminalIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
-    <path d="m5 6 2.25 2-2.25 2M9.5 10h2" />
-  </Icon>
-);
-
-export const AgentIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M7.5 1.5c.2 2.7 1.8 4.3 4.5 4.5-2.7.2-4.3 1.8-4.5 4.5-.2-2.7-1.8-4.3-4.5-4.5 2.7-.2 4.3-1.8 4.5-4.5z" />
-    <path d="M12.5 10.5c.1 1.3.8 2 2 2.1-1.2.1-1.9.8-2 2.1-.1-1.3-.8-2-2-2.1 1.2-.1 1.9-.8 2-2.1z" />
-    <path d="M3 12.5c.1 1 .6 1.5 1.5 1.6-.9.1-1.4.6-1.5 1.6-.1-1-.6-1.5-1.5-1.6.9-.1 1.4-.6 1.5-1.6z" />
-  </Icon>
-);
-
-export const ChatIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2.5 3.5A1.5 1.5 0 0 1 4 2h8a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 12 11H7l-3 2.5V11h0A1.5 1.5 0 0 1 2.5 9.5v-6z" />
-    <path d="M5.5 5.5h5M5.5 8h3" />
-  </Icon>
-);
-
-export const SendIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M14 2 2 6.5l5.5 2 2 5.5L14 2z" />
-    <path d="M7.5 8.5 14 2" />
-  </Icon>
-);
-
-export const MicIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="5.75" y="1.75" width="4.5" height="8" rx="2.25" />
-    <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.25" />
-  </Icon>
-);
-
-export const WaveformIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2.5 6.5v3M5.25 4.5v7M8 2.5v11M10.75 4.5v7M13.5 6.5v3" />
-  </Icon>
-);
-
-export const FolderIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.5 1.5h4.9A1.5 1.5 0 0 1 14 6v6.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-8z" />
-  </Icon>
-);
-
-export const FolderOpenIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2 5.5v-1A1.5 1.5 0 0 1 3.5 3h2.6l1.5 1.5h4.9A1.5 1.5 0 0 1 14 6" />
-    <path d="M2 5.5h12l-1.1 6.4a1.5 1.5 0 0 1-1.5 1.1H3.5A1.5 1.5 0 0 1 2 11.2z" />
-  </Icon>
-);
-
-export const FileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M4 1.75h5l3 3v9.5H4z" />
-    <path d="M9 1.75v3h3" />
-  </Icon>
-);
-
-export const CodeFileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M4 1.75h5l3 3v9.5H4z" />
-    <path d="M9 1.75v3h3M7 7 5.5 8.5 7 10M9 7l1.5 1.5L9 10" />
-  </Icon>
-);
-
-export const ImageFileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M3 2.25h10v11.5H3z" />
-    <circle cx="6" cy="5.5" r="1" />
-    <path d="m4.5 12 2.4-2.6 1.5 1.4 1.4-1.6 1.7 2.8" />
-  </Icon>
-);
-
-export const ArchiveFileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M4 1.75h5l3 3v9.5H4z" />
-    <path d="M9 1.75v3h3M7.1 4h1.8M7.1 6h1.8M7.1 8h1.8M7.1 10h1.8M7.25 12h1.5" />
-  </Icon>
-);
-
-export const DocumentFileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M4 1.75h5l3 3v9.5H4z" />
-    <path d="M9 1.75v3h3M6 7h4M6 9h4M6 11h3" />
-  </Icon>
-);
-
-export const LinkFileIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m6.5 10.5-1 1a2.1 2.1 0 0 1-3-3l2-2a2.1 2.1 0 0 1 3 0" />
-    <path d="m9.5 5.5 1-1a2.1 2.1 0 0 1 3 3l-2 2a2.1 2.1 0 0 1-3 0M6 8h4" />
-  </Icon>
-);
-
-export const DesktopIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2" y="2.5" width="12" height="8.5" rx="1.5" />
-    <path d="M5.5 13.5h5M8 11v2.5" />
-  </Icon>
-);
-
-export const CheckIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m3 8.5 3.5 3.5L13 4" />
-  </Icon>
-);
-
-export const AlertIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 2.2 1.8 13h12.4L8 2.2z" />
-    <path d="M8 6.5v3M8 11.5v.01" />
-  </Icon>
-);
-
-export const PlayIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m4.5 3 8 5-8 5V3z" />
-  </Icon>
-);
-
-export const TagIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M2.5 8.5 8 3h4.5v4.5l-5.5 5.5a1.4 1.4 0 0 1-2 0l-3-3a1.4 1.4 0 0 1 0-2z" />
-    <circle cx="10" cy="5.5" r=".75" fill="currentColor" />
-  </Icon>
-);
-
-export const InfoIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="8" cy="8" r="6" />
-    <path d="M8 7v4M8 5v.01" />
-  </Icon>
-);
-
-export const RoadmapIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="4" cy="4" r="1.75" />
-    <circle cx="12" cy="12" r="1.75" />
-    <path d="M4 5.75V10a2.25 2.25 0 0 0 2.25 2.25h4" />
-  </Icon>
-);
-
-export const KeyboardIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="1.5" y="3.75" width="13" height="8.5" rx="1.5" />
-    <path d="M4.25 6.5h.01M6.75 6.5h.01M9.25 6.5h.01M11.75 6.5h.01M5 9.5h6" />
-  </Icon>
-);
-
-export const ImportIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 2.25v7.5m0 0L5.5 7.25M8 9.75l2.5-2.5" />
-    <path d="M2.75 11.25v1.25a1.5 1.5 0 0 0 1.5 1.5h7.5a1.5 1.5 0 0 0 1.5-1.5v-1.25" />
-  </Icon>
-);
-
-export const ExportIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 9.75V2.25m0 0L5.5 4.75M8 2.25l2.5 2.5" />
-    <path d="M2.75 11.25v1.25a1.5 1.5 0 0 0 1.5 1.5h7.5a1.5 1.5 0 0 0 1.5-1.5v-1.25" />
-  </Icon>
-);
-
-export const MoreIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="3.25" cy="8" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none" />
-    <circle cx="12.75" cy="8" r="0.9" fill="currentColor" stroke="none" />
-  </Icon>
-);
-
-export const CopyIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" />
-    <path d="M3.5 10.5V3.5A1.5 1.5 0 0 1 5 2h7" />
-  </Icon>
-);
-
-export const ScreenShareIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="2" y="2.5" width="12" height="9" rx="1.5" />
-    <path d="M5.5 14h5M8 11.5V14" />
-  </Icon>
-);
-
-export const CameraIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M5.25 4.25 6.1 2.8h3.8l.85 1.45h1.75A1.5 1.5 0 0 1 14 5.75v6A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5V5.75a1.5 1.5 0 0 1 1.5-1.5z" />
-    <circle cx="8" cy="8.5" r="2.5" />
-  </Icon>
-);
-
-export const RecordIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="8" cy="8" r="5.5" />
-    <circle cx="8" cy="8" r="2.75" fill="currentColor" stroke="none" />
-  </Icon>
-);
-
-export const StopIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="3.25" y="3.25" width="9.5" height="9.5" rx="1.25" fill="currentColor" stroke="none" />
-  </Icon>
-);
-
-export const TransferIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="m4.5 4.5 7 7M11.5 4.5v7h-7" />
-  </Icon>
-);
-
+/** RAM module glyph; MemoryStick is a USB stick and is not a match. */
 export const MemoryIcon: Glyph = (props) => (
   <Icon {...props}>
     <rect x="1.75" y="4.75" width="12.5" height="6.5" rx="1.25" />
@@ -465,54 +387,10 @@ export const MemoryIcon: Glyph = (props) => (
   </Icon>
 );
 
-export const DiskIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <ellipse cx="8" cy="4.25" rx="5.25" ry="2.25" />
-    <path d="M2.75 4.25v7.5c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25v-7.5" />
-    <path d="M2.75 8c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25" />
-  </Icon>
-);
-
-export const CpuIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.25" />
-    <path d="M6.5 1.75v2.5M9.5 1.75v2.5M6.5 11.75v2.5M9.5 11.75v2.5M1.75 6.5h2.5M1.75 9.5h2.5M11.75 6.5h2.5M11.75 9.5h2.5" />
-  </Icon>
-);
-
-export const DatabaseIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <ellipse cx="8" cy="4.25" rx="5.25" ry="2.25" />
-    <path d="M2.75 4.25v7.5c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25v-7.5" />
-    <path d="M2.75 8c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25" />
-  </Icon>
-);
-
-export const RefreshIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M13.25 8a5.25 5.25 0 1 1-1.6-3.77" />
-    <path d="M13.25 2.5V5h-2.5" />
-  </Icon>
-);
-
-export const GlobeIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="8" cy="8" r="6.25" />
-    <path d="M1.9 6.25h12.2M1.9 9.75h12.2" />
-    <path d="M8 1.75c1.8 2 2.7 4.1 2.7 6.25S9.8 12.25 8 14.25c-1.8-2-2.7-4.1-2.7-6.25S6.2 3.75 8 1.75z" />
-  </Icon>
-);
-
-export const PaletteIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <path d="M8 1.75a6.25 6.25 0 0 0 0 12.5c.9 0 1.35-.6 1.35-1.25 0-.7-.5-1.05-.5-1.65 0-.5.4-.9.95-.9h1.2a3.25 3.25 0 0 0 3.25-3.25c0-3-2.8-5.45-6.25-5.45z" />
-    <path d="M5 7.25h.01M7.25 4.75h.01M10.25 5.75h.01" />
-  </Icon>
-);
-
-export const ClockIcon: Glyph = (props) => (
-  <Icon {...props}>
-    <circle cx="8" cy="8" r="6.25" />
-    <path d="M8 4.5V8l2.25 1.5" />
-  </Icon>
-);
+export const DiskIcon = pulso(HardDrive, HardDriveData);
+export const CpuIcon = pulso(Cpu, CpuData);
+export const DatabaseIcon = pulso(Database, DatabaseData);
+export const RefreshIcon = pulso(RefreshCw, RefreshCwData);
+export const GlobeIcon = pulso(Globe, GlobeData);
+export const PaletteIcon = pulso(Palette, PaletteData);
+export const ClockIcon = pulso(Clock, ClockData);

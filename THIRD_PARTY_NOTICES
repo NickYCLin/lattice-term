@@ -1,0 +1,367 @@
+# 第三方授權聲明
+
+LatticeTerm 桌面核心以 MPL-2.0 授權，見根目錄 `LICENSE`。下列套件另外帶入圖示與動畫執行期，散佈應用程式時須一併保留其授權聲明。
+
+- `pulsoicon-react` 與 `pulsoicon-core`（ISC，CityPulso）。部分圖形源自 Lucide、Tabler Icons、Iconoir、Phosphor 等，細節見下方完整 LICENSE。
+- `motion` 與 `framer-motion`（MIT，Matt Perry / Motion）。
+
+---
+
+## pulsoicon-react / pulsoicon-core
+
+來源：https://github.com/CityPulso/PulsoIcon  
+套件：`pulsoicon-react`、`pulsoicon-core`
+
+ISC License
+
+Copyright (c) 2026 CityPulso
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+THIRD-PARTY NOTICES
+
+PulsoIcon's animations, runtime code, and the icons and brand drawings made for
+this set are covered by the ISC license above. The shapes (SVG path data) of
+some icons are based on, or were drawn after, other open icon sets. Each such icon
+names its source in a comment at the top of its file. Their licenses follow:
+
+  1. Lucide (ISC): the Lucide icons (icons without a source comment that are
+     also in Lucide), with some icons derived from Feather (MIT)
+  2. Hugeicons (MIT): five adapted icons, listed below
+  3. Iconoir (MIT): icons marked "Adapted from Iconoir"
+  4. Tabler Icons (MIT): icons marked "Adapted from Tabler Icons", and solid
+     shapes marked "Solid from Tabler Icons"
+  5. Phosphor Icons (MIT): icons marked "Drawn after Phosphor Icons", and solid
+     shapes marked "Solid from Phosphor Icons"
+  6. Simple Icons (CC0 1.0): brand icons marked "Drawn after Simple Icons", with
+     the logos whose owners use other terms listed by name
+
+If you distribute PulsoIcon, or software that includes it (for example an app
+or a website bundle), keep this whole file with it, for instance in your
+third-party or open-source licenses notice. Brand names and logos remain
+trademarks of their owners.
+
+---
+
+The shapes (SVG path data) of the Lucide icons in PulsoIcon are based on
+Lucide, used under the
+following license:
+
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The following PulsoIcon icons are adapted from Hugeicons (free set) and
+re-stroked for this set:
+
+brand-apple-intelligence, brand-microsoft-copilot, brand-perplexity, clap, stretching
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2025 Hugeicons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The following PulsoIcon icons are adapted from Iconoir: brand-apple-swift, and every icon
+whose source file starts with the comment "Adapted from Iconoir" (Iconoir 7.12, regular set),
+animated for this set.
+
+The MIT License (MIT) (for the icons described above)
+
+Copyright (c) 2021 Luca Burgio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The PulsoIcon icons whose source file starts with the comment
+"Adapted from Tabler Icons" use shapes from Tabler Icons (outline set, 3.50.0),
+animated for this set. The solid shapes of the icons with the comment
+"Solid from Tabler Icons" are taken from Tabler Icons (filled set, 3.50.0).
+
+The MIT License (MIT) (for the icons described above)
+
+Copyright (c) 2020-2026 Paweł Kuna
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+The PulsoIcon icons whose source file starts with the comment "Drawn after Phosphor Icons"
+were redrawn as line icons after the corresponding Phosphor Icons (regular weight) and
+animated for this set. The solid shapes of the icons with the comment
+"Solid from Phosphor Icons" are taken from Phosphor Icons (fill weight, core 2.1.1),
+scaled to the 24-unit grid.
+
+The MIT License (MIT) (for the icons described above)
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+---
+
+The PulsoIcon icons whose source file starts with the comment "Drawn after Simple Icons"
+are line drawings made for this set after the brand icons collected by Simple Icons
+(https://simpleicons.org). The Simple Icons data is released under CC0 1.0 Universal; brand
+names and logos remain trademarks of their owners. The following of these icons were drawn after
+logos that their owners license under other terms, as recorded by Simple Icons:
+
+- brand-30-seconds-of-code: 30 seconds of code, CC-BY-4.0, source https://github.com/Chalarangelo/30-seconds-of-code/blob/44c0ba94857a7796026c6795c47e964126876d5a/logo/logo-resources/logo.svg
+- brand-ab-download-manager: AB Download Manager, Apache-2.0, source https://abdownloadmanager.com
+- brand-aiohttp: AIOHTTP, Apache-2.0, source https://github.com/aio-libs/aiohttp/blob/fb5fe72b1bca3b899af579d376f5fe45745410e4/docs/aiohttp-plain.svg
+- brand-ajv: Ajv, MIT, source https://github.com/ajv-validator/ajv/blob/95b15b683dfb60f63c5129b0426629b968d53af8/docs/.vuepress/public/img/ajv.svg
+- brand-apache-airflow: Apache Airflow, Apache-2.0, source https://apache.org/logos
+- brand-apache-ant: Apache Ant, Apache-2.0, source https://apache.org/logos
+- brand-apache-arrow: Apache Arrow, Apache-2.0, source https://arrow.apache.org/visual_identity
+- brand-apache-avro: Apache Avro, Apache-2.0, source https://apache.org/logos
+- brand-apache-cassandra: Apache Cassandra, Apache-2.0, source https://www.apache.org/logos
+- brand-apache-cloudstack: Apache CloudStack, Apache-2.0, source https://apache.org/logos
+- brand-apache-cordova: Apache Cordova, Apache-2.0, source https://cordova.apache.org/artwork
+- brand-apache-couchdb: Apache CouchDB, Apache-2.0, source https://apache.org/logos
+- brand-apache-dolphinscheduler: Apache DolphinScheduler, Apache-2.0, source https://apache.org/logos
+- brand-apache-doris: Apache Doris, Apache-2.0, source https://apache.org/logos
+- brand-apache-druid: Apache Druid, Apache-2.0, source https://apache.org/logos
+- brand-apache-echarts: Apache ECharts, Apache-2.0, source https://apache.org/logos
+- brand-apache-flink: Apache Flink, Apache-2.0, source https://apache.org/logos
+- brand-apache-freemarker: Apache FreeMarker, Apache-2.0, source https://www.apache.org/logos
+- brand-apache-groovy: Apache Groovy, Apache-2.0, source https://apache.org/logos
+- brand-apache-guacamole: Apache Guacamole, Apache-2.0, source https://apache.org/logos
+- brand-apache-hadoop: Apache Hadoop, Apache-2.0, source https://apache.org/logos
+- brand-apache-hbase: Apache HBase, Apache-2.0, source https://apache.org/logos
+- brand-apache-hive: Apache Hive, Apache-2.0, source https://apache.org/logos
+- brand-apache-jmeter: Apache JMeter, Apache-2.0, source https://apache.org/logos
+- brand-apache-kafka: Apache Kafka, Apache-2.0, source https://apache.org/logos
+- brand-apache-kylin: Apache Kylin, Apache-2.0, source https://apache.org/logos
+- brand-apache-lucene: Apache Lucene, Apache-2.0, source https://apache.org/logos
+- brand-apache-maven: Apache Maven, Apache-2.0, source https://apache.org/logos
+- brand-apache-netbeans-ide: Apache NetBeans IDE, Apache-2.0, source https://apache.org/logos
+- brand-apache-nifi: Apache NiFi, Apache-2.0, source https://apache.org/logos
+- brand-apache-openoffice: Apache OpenOffice, Apache-2.0, source https://apache.org/logos
+- brand-apache-parquet: Apache Parquet, Apache-2.0, source https://apache.org/logos
+- brand-apache-pdfbox: Apache PDFBox, Apache-2.0, source https://apache.org/logos
+- brand-apache-pulsar: Apache Pulsar, Apache-2.0, source https://apache.org/logos
+- brand-apache-rocketmq: Apache RocketMQ, Apache-2.0, source https://apache.org/logos
+- brand-apache-solr: Apache Solr, Apache-2.0, source https://apache.org/logos
+- brand-apache-spark: Apache Spark, Apache-2.0, source https://apache.org/logos
+- brand-apache-storm: Apache Storm, Apache-2.0, source https://apache.org/logos
+- brand-apache-superset: Apache Superset, Apache-2.0, source https://apache.org/logos
+- brand-apache-tomcat: Apache Tomcat, Apache-2.0, source https://apache.org/logos
+- brand-apache: Apache, Apache-2.0, source https://www.apache.org/foundation/press/kit
+- brand-authelia: Authelia, Apache-2.0, source https://github.com/authelia/authelia/blob/8316cd4eb7a6f0778c8f480c61ad76a88416fc3a/docs/static/images/branding/logo.svg
+- brand-conventional-commits: Conventional Commits, MIT, source https://www.conventionalcommits.org
+- brand-development-containers: Development Containers, CC-BY-4.0, source https://github.com/microsoft/fluentui-system-icons/blob/3e1e525f4499a22d46039ef54e9b9a86b809bc66/assets/Cube/SVG/ic_fluent_cube_24_regular.svg
+- brand-exercism: Exercism, CC-BY-3.0, source https://github.com/exercism/website-icons/blob/2ad12baa465acfaa74efc5da27a6a12f8b05e3d0/exercism/logo-icon.svg
+- brand-flatpak: Flatpak, CC-BY-3.0, source https://flatpak.org/press
+- brand-fluentd: Fluentd, Apache-2.0, source https://docs.fluentd.org/quickstart/logo
+- brand-gin: Gin, CC-BY-4.0, source https://github.com/gin-gonic/logo/blob/eecb3150aa7ce5a77b97fd834276b2b6958eaa9d/wb.svg
+- brand-gleam: Gleam, Apache-2.0, source https://gleam.run
+- brand-gnu-bash: GNU Bash, MIT, source https://github.com/odb/official-bash-logo/tree/61eff022f2dad3c7468f5deb4f06652d15f2c143
+- brand-godot-engine: Godot Engine, CC-BY-4.0, source https://godotengine.org/press
+- brand-gradle-play-publisher: Gradle Play Publisher, MIT, source https://github.com/Triple-T/gradle-play-publisher/blob/df4eadf1ca6b5bad50e21be0b21816722ed50342/assets/logo.svg
+- brand-have-i-been-pwned: Have I Been Pwned, BSD-3-Clause, source https://github.com/HaveIBeenPwned/Branding/blob/d5a5d3c252a461c6c7e2ae60942fc80e50d2755d/Logos/Icon/Icon.svg
+- brand-iconify: Iconify, MIT, source https://iconify.design
+- brand-jabber: Jabber, CC-BY-2.5, source https://commons.wikimedia.org/wiki/File:Jabber-bulb.svg
+- brand-jekyll: Jekyll, CC-BY-4.0, source https://github.com/jekyll/brand/blob/8302ad3ecf045054a095020729a8d2cc7005faf8/jekyll-logo-black.svg
+- brand-jhipster: JHipster, Apache-2.0, source https://github.com/jhipster/jhipster-artwork/blob/1085d85ab6d819b9ef7f6cc710ec8a4977b95e90/logos/JHipster%20bowtie.svg
+- brand-kando: Kando, CC-BY-4.0, source https://github.com/kando-menu/design/blob/6506e2656f791b710b49a4774e7ebeaf419a1236/icons/source/blossom_tiny.svg
+- brand-material-design-icons: Material Design Icons, Apache-2.0, source https://materialdesignicons.com/icon/vector-square
+- brand-nano-stores: Nano Stores, MIT, source https://github.com/nanostores/nanostores/blob/7fb5cd871fa00f484ebc866fdf330b56cab2aa20/img/logo-auto.svg
+- brand-nixos: NixOS, CC-BY-4.0, source https://brand.nixos.org/logos/nixos-logomark-black-flat-minimal.svg
+- brand-ocaml: OCaml, Unlicense, source https://ocaml.org/logo
+- brand-omarchy: Omarchy, MIT, source https://omarchy.org
+- brand-openjdk: OpenJDK, BSD-3-Clause, source https://hg.openjdk.java.net/duke/duke/file/ca00f100dafc/vector/Agent.svg
+- brand-opentelemetry: OpenTelemetry, CC-BY-4.0, source https://cncf-branding.netlify.app/projects/opentelemetry/
+- brand-packagist: Packagist, MIT, source https://github.com/composer/packagist/issues/1147#issuecomment-747951608
+- brand-pelican: Pelican, CC-BY-4.0, source https://blog.getpelican.com/pages/gratitude.html
+- brand-phosphor-icons: Phosphor Icons, MIT, source https://phosphoricons.com
+- brand-purescript: PureScript, CC-BY-4.0, source https://github.com/purescript/logo/tree/1e7a57affdaeaf88ff594c08bd2b5a78fe2ed13c
+- brand-radiant-earth: Radiant Earth, CC-BY-4.0, source https://radiant.earth
+- brand-rocksdb: RocksDB, CC-BY-4.0, source https://github.com/facebook/rocksdb/blob/9ed96703d11a1cf4af0e1c1db0e4a6057a8e5d42/docs/static/logo.svg
+- brand-rook: Rook, Apache-2.0, source https://github.com/rook/artwork/blob/d252db9f43753e6abf64db0ce12d38916a5de464/logo/Rook_Icon.svg
+- brand-root: ROOT, CC-BY-4.0, source https://root.cern/assets/images/logos/svg/ROOT.svg
+- brand-salt-project: Salt Project, Apache-2.0, source https://saltproject.io
+- brand-sanity: Sanity, MIT, source https://github.com/sanity-io/logos/blob/e298a1ac2757c83910fe08b496a115bc9aef06bd/src/sanityMonogram.tsx
+- brand-setuptools: Setuptools, MIT, source https://github.com/pypa/setuptools/blob/c3f486f0f7ebf8fa141dfd7314cbcaba7370db0b/docs/images/logo.svg
+- brand-solidity: Solidity, CC-BY-4.0, source https://docs.soliditylang.org/en/v0.8.6/brand-guide.html
+- brand-sphinx: Sphinx, BSD-3-Clause, source https://github.com/sphinx-doc/sphinx/blob/ed84d63e6f2c4fd43b97fc43ee8be4156a13af9e/doc/_static/favicon.svg
+- brand-sqlalchemy: SQLAlchemy, MIT, source https://commons.wikimedia.org/wiki/File:SQLAlchemy.svg
+- brand-typeorm: TypeORM, MIT, source https://github.com/typeorm/typeorm/blob/e7649d2746f907ff36b1efb600402dedd5f5a499/resources/logo_big.png
+- brand-umami: Umami, MIT, source https://github.com/umami-software/umami/blob/3572df0a09503f357a06fe7f816295ba2c878325/assets/logo.svg
+- brand-vuetify: Vuetify, MIT, source https://vuetifyjs.com/resources/brand-kit
+- brand-webgpu: WebGPU, CC-BY-4.0, source https://www.w3.org/2023/02/webgpu-logos.html
+- brand-zod: Zod, MIT, source https://github.com/colinhacks/zod/blob/ff89187172ac6aa4a6264592980d1628ee785242/logo/Logo%20White.ai
+
+---
+
+## motion / framer-motion
+
+來源：https://github.com/motiondivision/motion  
+套件：`motion`、`framer-motion`
+
+The MIT License (MIT)
+
+Copyright (c) 2024 [Motion](https://motion.dev) B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+### framer-motion
+
+The MIT License (MIT)
+
+Copyright (c) 2018 Framer B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

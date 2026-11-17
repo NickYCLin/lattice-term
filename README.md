@@ -136,6 +136,6 @@ Lattice Remote 的單一終端分享不等於遠端多 Agent 編排。SSH 與 [R
 回報問題時，請附上版本、操作步驟，以及預期與實際結果；截圖先移除帳號、私有主機與憑證資訊。
 安全漏洞請依 [安全性政策](SECURITY.md) 私下通報。
 
-[MPL-2.0 授權](LICENSE) · [商標與名稱規範](TRADEMARKS.md)
+[MPL-2.0 授權](LICENSE) · [第三方授權](THIRD_PARTY_NOTICES) · [商標與名稱規範](TRADEMARKS.md)
 
 Lattice Remote also offers an independently authorised cmd / PowerShell command panel for Windows sharing hosts. See [command controls and limits](docs/REMOTE_COMMANDS.zh-TW.md).
