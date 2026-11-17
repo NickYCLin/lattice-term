@@ -2430,7 +2430,7 @@ export function SessionsView({
                             aria-label={memberStatusLabel}
                           />
                         )}
-                        <AgentIcon size={12} />
+                        <AgentIcon size={12} pulse={memberStatus} />
                         <span className="cli-switch__identity">
                           <span className="truncate">{sessionCliLabel(member)}</span>
                           <span

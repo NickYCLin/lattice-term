@@ -3,14 +3,32 @@
  *
  * Visual defaults stay on a 16px grid with a 1.5px stroke and currentColor
  * so the interface keeps one weight. Most glyphs come from PulsoIcon (ISC)
- * via per-icon modules, and play only on hover or focus. The brand mark and
+ * via per-icon modules. Hover/focus still plays on desktop; taps, tab
+ * selection, and status changes play once (≤600ms, never looping). The brand mark and
  * icons without a close semantic match remain in-house. Third-party notices
  * are in THIRD_PARTY_NOTICES.
  *
  * Emoji are never used as functional icons.
  */
 
-import { createElement, type ComponentType, type ReactElement, type ReactNode, type SVGProps } from "react";
+import { createElement, useRef, type ComponentType, type ReactElement, type ReactNode, type SVGProps } from "react";
+import {
+  iconHoverEnabled,
+  iconRuntimeEnabled,
+  useIconAnimation,
+  useIconPlayback,
+  useIconPressPulse,
+} from "./iconPulse";
+
+export {
+  ICON_PULSE_MS,
+  iconHoverEnabled,
+  iconMotionEnabled,
+  iconPrefersReducedMotion,
+  iconRuntimeEnabled,
+  useIconPulse,
+  useIconPulseWhen,
+} from "./iconPulse";
 import { Vault } from "pulsoicon-react/icons/vault";
 import { ClipboardList } from "pulsoicon-react/icons/clipboard-list";
 import { Bell } from "pulsoicon-react/icons/bell";
@@ -130,11 +148,17 @@ import { Clock as ClockData } from "pulsoicon-core/icons/clock";
 
 export type IconProps = Omit<SVGProps<SVGSVGElement>, "children"> & {
   size?: number;
+  /** Truthy changes play the motion once. Use pulseOnMount to also play on first paint. */
+  pulse?: number | string | boolean;
+  /** When true, a truthy `pulse` also plays after the icon first mounts. */
+  pulseOnMount?: boolean;
 };
 
 function Icon({
   size = 16,
   children,
+  pulse: _pulse,
+  pulseOnMount: _pulseOnMount,
   ...props
 }: IconProps & { children?: ReactNode }) {
   return (
@@ -163,43 +187,6 @@ type IconSpec = {
   nodes: ReadonlyArray<readonly [string, Record<string, unknown>, ...unknown[]]>;
 };
 
-/**
- * Motion plays only on hover or focus of an interactive ancestor.
- * It stays off when the system asks for reduced motion, during SSR,
- * in jsdom unit tests, and on touch-first / iOS surfaces where there
- * is no persistent hover.
- */
-export function iconMotionEnabled(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  const ua =
-    (typeof navigator !== "undefined" && navigator.userAgent) ||
-    window.navigator?.userAgent ||
-    "";
-  if (/jsdom/i.test(ua)) {
-    return false;
-  }
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const hover = window.matchMedia("(hover: hover)");
-  // A stub that returns one MediaQueryList for every query is not a real browser.
-  if (reduce === hover) {
-    return false;
-  }
-  if (reduce.matches || !hover.matches) {
-    return false;
-  }
-  const nav = window.navigator;
-  if (
-    nav &&
-    (/iP(hone|ad|od)/i.test(nav.userAgent) ||
-      (nav.platform === "MacIntel" && nav.maxTouchPoints > 1))
-  ) {
-    return false;
-  }
-  return true;
-}
-
 function currentColor(props: IconProps): string {
   const { color, stroke } = props;
   if (typeof color === "string" && color) return color;
@@ -212,7 +199,7 @@ function StaticPulso({
   solid = false,
   ...props
 }: IconProps & { spec: IconSpec; solid?: boolean }) {
-  const { size = 16, strokeWidth, className, style, ref: _ref, focusable: _focusable, color: _color, stroke: _stroke, ...rest } = props;
+  const { size = 16, strokeWidth, className, style, ref: _ref, focusable: _focusable, color: _color, stroke: _stroke, pulse: _pulse, pulseOnMount: _pulseOnMount, ...rest } = props;
   const strokeColor = currentColor(props);
   return (
     <svg
@@ -236,14 +223,22 @@ function StaticPulso({
 }
 
 function pulsoIconProps(props: IconProps, extras: { solid?: boolean } = {}) {
-  const { size = 16, strokeWidth, className, style, focusable: _focusable, ref: _ref, ...rest } = props;
+  const {
+    size = 16,
+    strokeWidth,
+    className,
+    style,
+    focusable: _focusable,
+    ref: _ref,
+    pulse: _pulse,
+    pulseOnMount: _pulseOnMount,
+    ...rest
+  } = props;
   return {
     ...rest,
     size,
     color: currentColor(props),
     strokeWidth: strokeWidth ?? 1.5,
-    // Keep the glyph animatable, but only auto-play on hover/focus.
-    autoAnimated: true,
     className,
     style: { flexShrink: 0, overflow: "visible" as const, ...style },
     "aria-hidden": true as const,
@@ -252,17 +247,52 @@ function pulsoIconProps(props: IconProps, extras: { solid?: boolean } = {}) {
   };
 }
 
+type PulseHandle = { startAnimation?: () => void; stopAnimation?: () => void };
+
+function PulsoGlyph({
+  MotionComp,
+  spec,
+  solid,
+  ...props
+}: IconProps & {
+  MotionComp: ComponentType<Record<string, unknown>>;
+  spec: IconSpec;
+  solid?: boolean;
+}) {
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const handleRef = useRef<PulseHandle | null>(null);
+  const runtime = iconRuntimeEnabled();
+  const hover = iconHoverEnabled();
+  const press = useIconPressPulse(wrapRef, runtime && !hover);
+  const playback = useIconPlayback(props.pulse, {
+    enabled: runtime,
+    pulseOnMount: props.pulseOnMount,
+  });
+  useIconAnimation(handleRef, press + playback, runtime);
+
+  if (!runtime) {
+    return <StaticPulso spec={spec} solid={solid} {...props} />;
+  }
+
+  return (
+    <span ref={wrapRef} data-icon="" style={{ display: "contents" }}>
+      <MotionComp
+        {...pulsoIconProps(props, { solid })}
+        ref={handleRef}
+        autoAnimated={hover}
+      />
+    </span>
+  );
+}
+
 function pulso(MotionComp: ComponentType<Record<string, unknown>>, spec: IconSpec, defaults?: { solid?: boolean }): Glyph {
-  const GlyphIcon = (props: IconProps) => {
-    if (!iconMotionEnabled()) {
-      return <StaticPulso spec={spec} solid={defaults?.solid} {...props} />;
-    }
-    return <MotionComp {...pulsoIconProps(props, defaults)} />;
-  };
+  const GlyphIcon = (props: IconProps) => (
+    <PulsoGlyph MotionComp={MotionComp} spec={spec} solid={defaults?.solid} {...props} />
+  );
   return GlyphIcon;
 }
 
-export const LatticeMark = ({ size = 20, ...props }: IconProps) => (
+export const LatticeMark = ({ size = 20, pulse: _pulse, pulseOnMount: _pulseOnMount, ...props }: IconProps) => (
   <svg
     width={size}
     height={size}
@@ -329,13 +359,9 @@ export const ChevronRightIcon = pulso(ChevronRight, ChevronRightData);
 export const StarIcon = ({
   filled = false,
   ...props
-}: IconProps & { filled?: boolean }) => {
-  if (!iconMotionEnabled()) {
-    return <StaticPulso spec={StarData} solid={filled} {...props} />;
-  }
-  const Comp = Star as ComponentType<Record<string, unknown>>;
-  return <Comp {...pulsoIconProps(props, { solid: filled })} />;
-};
+}: IconProps & { filled?: boolean }) => (
+  <PulsoGlyph MotionComp={Star as ComponentType<Record<string, unknown>>} spec={StarData} solid={filled} {...props} />
+);
 
 export const SidebarIcon = pulso(PanelLeft, PanelLeftData);
 export const EditIcon = pulso(Pencil, PencilData);

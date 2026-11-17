@@ -20,7 +20,7 @@
   animation: surface-arrive var(--duration) var(--ease);
 }
 
-.rail__item.is-active > svg {
+.rail__item.is-active svg {
   animation: icon-settle var(--duration-slow) var(--ease);
 }
 .theme-option__check {

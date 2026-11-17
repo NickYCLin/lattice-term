@@ -36,7 +36,7 @@ import type { AgentApi, AgentLifecycle, AgentSessionSummary } from "../../app/us
 import { useI18n } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/messages/zh-TW";
 import {
-  AlertIcon, CloseIcon, FileIcon, ImageFileIcon, ShieldIcon, TerminalIcon,
+  AlertIcon, CheckIcon, CloseIcon, FileIcon, ImageFileIcon, RefreshIcon, ShieldIcon, TerminalIcon,
 } from "../icons";
 import { readStoredPreferences } from "../../app/preferences";
 import { shouldSubmitChatInput } from "../../app/chatInputPreferences";
@@ -358,7 +358,9 @@ export function SessionConversationPane({ session, agents, displayName, conversa
         <SessionPromptQueue sessionId={session.sessionId} queue={queue} />
         {(working || nativePending) && (
           <p className="session-chat__activity" role="status">
-            <span className="session-chat__spinner" aria-hidden="true" />
+            <span className="session-chat__spinner" aria-hidden="true">
+              <RefreshIcon size={16} pulse={nativePending ? "pending" : "working"} pulseOnMount />
+            </span>
             {nativePending ? t("sessionChat.nativePending") : session.queuedPrompts > 0
               ? t("sessionChat.workingQueued", { count: session.queuedPrompts })
               : t("sessionChat.working")}
@@ -387,6 +389,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
           </div>
         ) : attention && (
           <div className="session-chat__activity is-attention" role="status">
+            <AlertIcon size={14} pulse={1} pulseOnMount />
             <span>{t("sessionChat.attention")}</span>
           </div>
         )}
@@ -394,7 +397,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
     </div>
     <form className="chat-composer session-composer" onSubmit={submit}>
       <div className="session-composer__notices">
-        {conversation.sendError && conversation.sendError !== SESSION_PROMPT_NOT_READY && <p role="alert">{conversation.sendError}</p>}
+        {conversation.sendError && conversation.sendError !== SESSION_PROMPT_NOT_READY && <p role="alert"><AlertIcon size={12} pulse={conversation.sendError} pulseOnMount />{conversation.sendError}</p>}
         {conversation.answerError && <p role="alert">{conversation.answerError === "answered-elsewhere"
           ? t("sessionChat.permission.gone")
           : t("sessionChat.permission.failed", { detail: conversation.answerError })}</p>}
@@ -404,7 +407,7 @@ export function SessionConversationPane({ session, agents, displayName, conversa
           <p>{t("sessionChat.queued", { count: queuedCount })}</p>
           {!working && session.stateSource === "heuristic" && <p>{t("sessionChat.queuedWaiting")}</p>}
         </div>}
-        {conversation.queued === 0 && queuedCount === 0 && !working && !nativePending && !unconfirmed && <p role="status">{t("sessionChat.accepted")}</p>}
+        {conversation.queued === 0 && queuedCount === 0 && !working && !nativePending && !unconfirmed && <p role="status"><CheckIcon size={12} pulse={1} pulseOnMount />{t("sessionChat.accepted")}</p>}
         {notice && <p role="status">{notice}</p>}
       </div>
       <ConversationComposerFrame workingDirectory={session.workingDirectory}>

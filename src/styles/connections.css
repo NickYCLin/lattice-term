@@ -2039,8 +2039,8 @@
   font-weight: 650;
 }
 
-.session-tree__folder-select > svg,
-.session-tree__project-select > svg {
+.session-tree__folder-select svg,
+.session-tree__project-select svg {
   flex-shrink: 0;
   min-width: 13px;
   min-height: 13px;
@@ -2310,11 +2310,11 @@
   line-height: 1;
 }
 
-.session-tree__session.status-working .session-tree__session-select > svg {
+.session-tree__session.status-working .session-tree__session-select svg {
   color: var(--info);
 }
 
-.session-tree__session.status-done .session-tree__session-select > svg {
+.session-tree__session.status-done .session-tree__session-select svg {
   color: var(--ok);
 }
 

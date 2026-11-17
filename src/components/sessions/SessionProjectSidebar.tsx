@@ -613,7 +613,7 @@ export function SessionProjectSidebar({
           onClick={() => onSelect(session.sessionId)}
           title={`${session.label} · ${t("terminal.projects.dragHint")}`}
         >
-          <Glyph size={12} />
+          <Glyph size={12} pulse={session.status} />
           <span className="session-tree__session-identity">
             <span className="truncate">{session.label}</span>
             {session.detail && (

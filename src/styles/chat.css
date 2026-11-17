@@ -2604,13 +2604,12 @@ button.chat-diff__line.is-commentable:focus-visible {
 
 .session-chat__spinner {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 1rem;
   height: 1rem;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
   color: var(--accent);
-  animation: session-chat-spin 0.8s linear infinite;
 }
 
 @keyframes session-chat-spin {

@@ -72,7 +72,7 @@ describe("session chat output disclosure", () => {
   it("keeps delivery and queue notices in a separate centered composer region", () => {
     conversation.queued = 0;
     const delivered = render("done", "codex", { stateSource: "integration" });
-    expect(delivered).toMatch(/session-composer__notices"><p role="status">訊息已送出[^<]*<\/p><\/div><div class="session-composer__frame">/);
+    expect(delivered).toMatch(/session-composer__notices"><p role="status">(?:<svg[\s\S]*?<\/svg>)?訊息已送出[^<]*<\/p><\/div><div class="session-composer__frame">/);
     const queued = render("done", "codex", { stateSource: "integration", queuedPrompts: 2 });
     expect(queued).toMatch(/session-composer__notices"><div role="status"><p>還有 2 則訊息排隊/);
     conversation.queued = null;
