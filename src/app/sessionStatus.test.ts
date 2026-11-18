@@ -59,3 +59,24 @@ describe("agent group sidebar status", () => {
     ])).toBe(false);
   });
 });
+
+it("does not show a completed check after the agent process has ended", () => {
+  expect(
+    agentGroupSidebarStatus([{ state: "done", closedReason: "User exited", processId: null }]),
+  ).toBe("ended");
+  expect(
+    agentGroupSidebarStatus([{ state: "done", processId: null, writerReleased: true }]),
+  ).toBe("ended");
+  expect(
+    agentGroupSidebarStatus([{ state: "done", processId: 9, writerReleased: false }]),
+  ).toBe("done");
+  expect(
+    agentGroupSidebarStatus([
+      { state: "working", processId: 3 },
+      { state: "done", processId: null, writerReleased: true },
+    ]),
+  ).toBe("working");
+  expect(
+    agentGroupSidebarStatus([{ state: "working", processId: null, writerReleased: true }]),
+  ).toBe("ended");
+});

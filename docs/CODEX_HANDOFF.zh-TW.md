@@ -13,22 +13,20 @@
   客戶端情況都會卸載 writer，因此沒有將 unsubscribe 當成釋放鎖的充分收據。
   沒有使用未確認存在的 `thread/close`。
 - [TUI slash_command.rs](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/tui/src/slash_command.rs)：
-  `Exit` 與 `Quit` 是正常退出命令。本分支只對自己的已驗證空白 TUI 送 `/exit`。
+  `Exit` 與 `Quit` 是正常退出命令。不再對空白 TUI 自動送 `/exit`；使用者仍可自己輸入該指令結束。
 
 內建對話沿用既有每輪完成後關閉自有 app-server stdin 的機制；沒有改動 Desktop。
 
 ## 放手與取回
 
-預設兩分鐘，可設 0（關閉）或 5／10 分鐘。前端回報目前實際前景的工作階段；
-前景紀錄在失聯時保守保留，不因 heartbeat 消失便當作背景。只有 desktop-owned
-Codex PTY 符合 idle/done、正式完成證據、靜止且空白提示、無人類輸入／核准／
-待送訊息時才計時。背景 daemon 工作階段目前排除，避免缺少前景／設定同步時誤放手。
+自動對閒置 TUI 送 `/exit` 的行為已移除：會把側欄留在完成狀態，終端卻變成死輸入。程序若自行結束，會保留同一 conversation，並提供「重新啟動並接續」；非使用者主動退出時，下一次輸入會自動續接。
 
-在輸入鎖內送 `/exit`，不送 interrupt，不用 kill fallback。
-只在子行程成功退出後標示 `writerReleased`，保留 conversation/group/session ID。
-下一次 GUI 真正輸入或 MCP prompt 會以原啟動政策 resume；等待可輸入畫面後才送出。
+LatticeTerm 不再對閒置 TUI 自動送 `/exit`。子行程結束且仍有 native conversation ID 時，
+會標示 `writerReleased`、保留 conversation/group/session ID，並讓側欄顯示「已結束」。
+若結束不是使用者主動的 `/exit` 或 `/quit`，下一次 GUI 輸入或 MCP prompt 會以原啟動政策
+自動 resume；使用者主動退出則提供「重新啟動並接續」，不自動重開。
 保留輸出 offset、授權 epoch 與分享 identity；停止／撤權不會因重建程序而復活。
-已放手程序的舊 PID 不再用於終止操作。
+已結束程序的舊 PID 不再用於終止操作。
 
 ## 占用者與接手
 

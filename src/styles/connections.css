@@ -2310,6 +2310,33 @@
   line-height: 1;
 }
 
+.session-tree__status.status-ended,
+.session-projects__status-guide .status-ended {
+  color: var(--text-muted);
+}
+
+.session-tree__status.status-ended > span,
+.session-projects__status-guide .status-ended,
+.cli-switch__status.status-ended {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  box-shadow: none;
+}
+
+.session-tree__status.status-ended > span::after,
+.session-projects__status-guide .status-ended::after,
+.cli-switch__status.status-ended::after {
+  content: "×";
+  color: currentColor;
+  font-size: 0.45rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.session-tree__session.status-ended .session-tree__session-select svg {
+  color: var(--text-muted);
+}
+
 .session-tree__session.status-working .session-tree__session-select svg {
   color: var(--info);
 }

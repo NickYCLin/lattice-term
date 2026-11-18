@@ -910,8 +910,8 @@ fn handoff_release_requires_idle_unfocused_empty_authoritative_prompt_and_timeou
         if case == "draft" { entry.input.lock().unwrap().desktop_editing = true; }
         if case == "queue" { entry.queued_prompts.lock().unwrap().push_back(QueuedPrompt { id:"synthetic".into(), bytes:vec![], delivery_error:None, mcp_grant_epoch:None }); }
         f.registry.maybe_release_writer(&f.id);
-        assert_eq!(entry.handoff.lock().unwrap().phase == handoff::Phase::Releasing, case == "eligible", "{case}");
-        assert!(!f.registry.writer_released(&f.id), "sending /exit alone is not a release receipt");
+        assert_eq!(entry.handoff.lock().unwrap().phase, handoff::Phase::Held, "{case}");
+        assert!(!f.registry.writer_released(&f.id), "idle writer parking must not send /exit or release");
     }
 }
 

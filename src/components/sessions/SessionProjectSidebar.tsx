@@ -101,6 +101,7 @@ const statusKeys: Record<Exclude<SessionSidebarStatus, "connected">, MessageKey>
   attention: "terminal.projects.status.attention",
   idle: "terminal.projects.status.idle",
   done: "terminal.projects.status.done",
+  ended: "terminal.projects.status.ended",
   saved: "terminal.projects.status.saved",
 };
 
@@ -943,6 +944,10 @@ export function SessionProjectSidebar({
             <span>
               <i className="status-done" aria-hidden="true" />
               {t("terminal.projects.statusGuideDone")}
+            </span>
+            <span>
+              <i className="status-ended" aria-hidden="true" />
+              {t("terminal.projects.statusGuideEnded")}
             </span>
             <span>
               <i className="status-saved" aria-hidden="true" />

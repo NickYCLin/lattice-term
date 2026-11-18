@@ -1352,3 +1352,13 @@
   border: 1px solid var(--line);
   font-weight: 700;
 }
+
+.agent-terminal-pane__resume {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}

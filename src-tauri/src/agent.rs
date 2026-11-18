@@ -1061,6 +1061,8 @@ struct AgentSessionEntry {
     #[cfg(all(windows, test))]
     codex_input_profile_test_supported: AtomicBool,
     stopping: AtomicBool,
+    /// Set when the user submitted /exit or /quit, so a later resume is explicit.
+    user_requested_exit: AtomicBool,
     report_token: Option<String>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -8792,6 +8794,7 @@ fn launch_reusing(
         #[cfg(all(windows, test))]
         codex_input_profile_test_supported: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
+        user_requested_exit: AtomicBool::new(false),
         last_output_at: Mutex::new(launched_at),
         prompt_ready_at: Mutex::new(None),
         mcp_interrupt_at: Mutex::new(None),
@@ -9042,23 +9045,36 @@ fn launch_reusing(
     let wait_entry = entry.clone();
     std::thread::spawn(move || {
         let exit = child.wait();
-        if let Ok(mut h) = wait_entry.handoff.lock() {
-            if h.phase == handoff::Phase::Releasing
-                && exit.as_ref().is_ok_and(|status| status.success())
-            {
-                h.phase = handoff::Phase::Released;
-                if let Ok(mut summary) = wait_entry.summary.lock() {
-                    summary.writer_released = true;
-                    summary.process_id = None;
-                    sink.writer(&summary);
-                }
-                return;
-            }
-        }
         if !wait_registry
             .get(&wait_id)
             .is_ok_and(|current| Arc::ptr_eq(&current, &wait_entry))
         {
+            return;
+        }
+        let captured = wait_entry
+            .summary
+            .lock()
+            .ok()
+            .and_then(|summary| summary.captured_session_id.clone());
+        let user_exit = wait_entry
+            .user_requested_exit
+            .load(std::sync::atomic::Ordering::Acquire)
+            || output_looks_like_user_exit(&wait_entry);
+        if captured.is_some() {
+            if let Ok(mut h) = wait_entry.handoff.lock() {
+                h.phase = handoff::Phase::Released;
+            }
+            if let Ok(mut summary) = wait_entry.summary.lock() {
+                summary.writer_released = true;
+                summary.process_id = None;
+                summary.state = AgentLifecycle::Done;
+                sink.writer(&summary);
+            }
+            // Keep the session so the same conversation can be resumed in place.
+            // A deliberate /exit still tells the UI it ended, without auto-resume.
+            if user_exit {
+                sink.closed(&wait_id, "User exited");
+            }
             return;
         }
         let reason = match exit {
@@ -9321,6 +9337,68 @@ pub fn send_desktop_escape(
     Ok(())
 }
 
+fn is_cli_shutdown_command(bytes: &[u8]) -> bool {
+    is_cli_shutdown_line(&String::from_utf8_lossy(bytes))
+}
+
+fn is_cli_shutdown_line(text: &str) -> bool {
+    let line = text.trim().trim_end_matches(['\r', '\n']);
+    let command = line
+        .rsplit(['›', '>', '❯', '$'])
+        .next()
+        .unwrap_or(line)
+        .trim();
+    command.eq_ignore_ascii_case("/exit") || command.eq_ignore_ascii_case("/quit")
+}
+
+fn output_looks_like_user_exit(entry: &AgentSessionEntry) -> bool {
+    let Ok(output) = entry.output.lock() else {
+        return false;
+    };
+    let visible = strip_ansi_text(&String::from_utf8_lossy(&output.tail()));
+    visible
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .is_some_and(is_cli_shutdown_line)
+}
+
+fn strip_ansi_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            out.push(ch);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                while let Some(next) = chars.next() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                while let Some(next) = chars.next() {
+                    if next == '\u{0007}' {
+                        break;
+                    }
+                    if next == '\u{1b}' && matches!(chars.peek(), Some('\\')) {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn send_bytes(
     sink: &dyn AgentSink,
     registry: &AgentRegistry,
@@ -9328,6 +9406,11 @@ fn send_bytes(
     bytes: &[u8],
 ) -> Result<(), String> {
     let entry = registry.get(session_id)?;
+    if is_cli_shutdown_command(bytes) {
+        entry
+            .user_requested_exit
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
     let ticket = next_desktop_input_ticket(&entry, bytes)?;
     let mut input = entry.input.lock().map_err(|error| error.to_string())?;
     if rejects_interrupted_desktop_input(&input, ticket, bytes) {
@@ -19312,5 +19395,27 @@ notify = ["notify.exe", "turn-ended"]"#,
     mod desktop_chat_queue_tests {
         use super::*;
         include!("agent/desktop_chat_queue_tests.rs");
+    }
+}
+
+#[cfg(test)]
+mod shutdown_command_tests {
+    use super::{is_cli_shutdown_command, is_cli_shutdown_line, strip_ansi_text};
+
+    #[test]
+    fn is_cli_shutdown_line_detects_prompt_prefixed_exit() {
+        assert!(is_cli_shutdown_line("› /exit"));
+        assert!(is_cli_shutdown_line("> /exit"));
+        assert!(is_cli_shutdown_line("/quit\r\n"));
+        assert!(is_cli_shutdown_command(b"/exit\r"));
+        assert!(!is_cli_shutdown_line("please do not /exit yet"));
+        assert!(!is_cli_shutdown_line("exit"));
+    }
+
+    #[test]
+    fn strip_ansi_text_keeps_visible_exit_command() {
+        let raw = "\u{1b}[31m› /exit\u{1b}[0m";
+        assert_eq!(strip_ansi_text(raw).trim(), "› /exit");
+        assert!(is_cli_shutdown_line(&strip_ansi_text(raw)));
     }
 }

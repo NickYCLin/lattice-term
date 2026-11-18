@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { agentSessionHasEnded, resumeAgentSessionRequest } from "../../app/agentSessionResume";
 import type { AgentApi } from "../../app/useAgentSessions";
 import type { ThemeId } from "../../app/themes";
 import { useI18n } from "../../i18n/context";
@@ -21,6 +22,8 @@ export function AgentTerminalPane({
   const [imageRevision, setImageRevision] = useState(0);
   const [imageReference, setImageReference] = useState<TerminalImageReference>();
   const [openImagesRevision, setOpenImagesRevision] = useState(0);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const io = useMemo<PtyTerminalIo>(
     () => ({
       send: (data) => agents.send(sessionId, data),
@@ -42,8 +45,29 @@ export function AgentTerminalPane({
     }),
     [agents, sessionId],
   );
+  const session = agents.sessions.find((item) => item.sessionId === sessionId);
+  const canResume = !!session && agentSessionHasEnded(session) && !!resumeAgentSessionRequest(session);
   return (
     <div className="agent-terminal-pane">
+      {canResume && (
+        <div className="agent-terminal-pane__resume">
+          <button
+            type="button"
+            className="button button--sm"
+            disabled={resuming}
+            onClick={() => {
+              setResumeError(null);
+              setResuming(true);
+              void agents.resumeContinue(sessionId).catch((reason) => {
+                setResumeError(reason instanceof Error ? reason.message : String(reason));
+              }).finally(() => setResuming(false));
+            }}
+          >
+            {t("terminal.resumeContinue")}
+          </button>
+          {resumeError && <p className="muted" role="alert">{resumeError}</p>}
+        </div>
+      )}
       <AgentSessionImages key={sessionId} sessionId={sessionId} active={active} revision={imageRevision} openRevision={openImagesRevision} reference={imageReference} />
       <PtyTerminal
       ioKey={sessionId}

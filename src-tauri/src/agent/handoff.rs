@@ -1,7 +1,7 @@
 //! Cooperative TUI writer parking. Never signals another process.
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Phase {
     Held,
     Releasing,
@@ -112,21 +112,10 @@ impl AgentRegistry {
         {
             return;
         }
-        // The input lock and a verified empty prompt exclude drafts and turns.
-        // /exit uses Codex's normal shutdown; no interrupt/kill fallback.
-        h.phase = Phase::Releasing;
-        drop(summary);
-        if entry.writer.lock().is_ok_and(|mut writer| {
-            writer
-                .write_all(b"/exit\r")
-                .and_then(|_| writer.flush())
-                .is_ok()
-        }) {
-            // Only the child's successful exit marks it Released.
-        } else {
-            h.phase = Phase::Held;
-            h.idle_since = None;
-        }
+        // Automatic /exit left a live conversation looking finished in the
+        // sidebar while the visible terminal was dead. Writer parking must
+        // never end a process the user did not ask to stop.
+        h.idle_since = None;
     }
     pub(crate) fn resume_writer(&self, id: &str) -> Result<(), String> {
         let entry = self.get(id)?;

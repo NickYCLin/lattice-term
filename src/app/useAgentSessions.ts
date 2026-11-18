@@ -8,6 +8,7 @@ import {
   type SessionClosedNotice,
 } from "./sessionSnapshot";
 import { FALLBACK_CATALOG_SOURCE } from "./agentNames";
+import { agentSessionEndedByUser, agentSessionHasEnded, resumeAgentSessionRequest } from "./agentSessionResume";
 
 export type AgentLifecycle = "working" | "needsAttention" | "idle" | "done";
 export type AgentStateSource = "heuristic" | "integration";
@@ -732,6 +733,7 @@ export interface AgentApi {
   deletePlan: (id: string) => Promise<boolean>;
   restorePlans: (planIds: string[]) => Promise<AgentRestoreOutcome[]>;
   send: (sessionId: string, data: string) => Promise<void>;
+  resumeContinue: (sessionId: string) => Promise<AgentSessionSummary>;
   sendEscape?: (sessionId: string) => Promise<void>;
   /** Writes a clipboard image to a temp file and returns its path, or null. */
   pasteClipboardImage: (sessionId: string) => Promise<string | null>;
@@ -1526,12 +1528,28 @@ export function useAgentSessions(): AgentApi {
     }
   }, []);
 
+  const resumeContinue = useCallback(async (sessionId: string) => {
+    const session = sessionsRef.current.find((item) => item.sessionId === sessionId);
+    const request = session ? resumeAgentSessionRequest(session) : null;
+    const launchSession = launchRef.current;
+    if (!session || !request || !launchSession) {
+      throw new Error("This agent session cannot be resumed.");
+    }
+    return launchSession(request);
+  }, []);
+
   const send = useCallback(async (sessionId: string, data: string) => {
-    if (
-      sessionsRef.current.some(
-        (session) => session.sessionId === sessionId && session.closedReason,
-      )
-    ) {
+    const session = sessionsRef.current.find((item) => item.sessionId === sessionId);
+    if (session && agentSessionEndedByUser(session)) {
+      throw new Error("This agent session has already ended.");
+    }
+    if (session && agentSessionHasEnded(session) && session.closedReason) {
+      // Registry entry was removed; relaunch then drop this keystroke.
+      // In-place resumes (writerReleased, no closed event) go through agent_send.
+      await resumeContinue(sessionId);
+      return;
+    }
+    if (session?.closedReason) {
       throw new Error("This agent session has already ended.");
     }
     const { invoke } = await core();
@@ -1539,7 +1557,7 @@ export function useAgentSessions(): AgentApi {
       sessionId,
       data: encodeAgentPayload(new TextEncoder().encode(data)),
     });
-  }, []);
+  }, [resumeContinue]);
 
   const sendEscape = useCallback(async (sessionId: string) => {
     const { invoke } = await core();
@@ -1795,6 +1813,7 @@ export function useAgentSessions(): AgentApi {
     deletePlan,
     restorePlans,
     send,
+    resumeContinue,
     sendEscape,
     pasteClipboardImage,
     exportTranscript,

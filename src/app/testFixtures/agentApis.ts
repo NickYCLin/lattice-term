@@ -88,6 +88,7 @@ export function fakeAgentApi(overrides: Partial<AgentApi> = {}): AgentApi {
     deletePlan: vi.fn(async () => true),
     restorePlans: vi.fn(async () => []),
     send: vi.fn(async () => {}),
+    resumeContinue: vi.fn(async () => fakeSession()),
     pasteClipboardImage: vi.fn(async () => null),
     exportTranscript: vi.fn(async () => null),
     importMemoryHandoff: vi.fn(async () => false),
