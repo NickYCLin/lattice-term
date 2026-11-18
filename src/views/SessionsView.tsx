@@ -1,3 +1,4 @@
+import { preserveTerminalButtonFocus } from "../components/terminal/terminalPointerFocus";
 import { mergeDirectoryProjectLayout } from "../app/projectDirectoryLayout";
 import { useProjectDirectoryIdentity } from "../app/useProjectDirectoryIdentity";
 import { projectDirectoryKey, localProjectId as directoryProjectId, disambiguateProjectLabels, type ProjectDirectoryKey } from "../app/projectDirectory";
@@ -2073,7 +2074,7 @@ export function SessionsView({
           )}
           {projectSidebar}
           <section className="terminal-project-workspace">
-            <header className="session-header session-header--empty">
+            <header className="session-header session-header--empty" onPointerDown={preserveTerminalButtonFocus}>
               <button
                 type="button"
                 className="icon-button icon-button--sm session-header__tree-toggle"
@@ -2220,7 +2221,7 @@ export function SessionsView({
                     ? TransferIcon
                     : ScreenShareIcon;
             return (
-              <header className="session-header">
+              <header className="session-header" onPointerDown={preserveTerminalButtonFocus}>
                 <button
                   type="button"
                   className="icon-button icon-button--sm session-header__tree-toggle"

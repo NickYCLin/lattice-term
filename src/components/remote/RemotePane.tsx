@@ -1,3 +1,4 @@
+import { preserveTerminalButtonFocus } from "../terminal/terminalPointerFocus";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, WheelEvent } from "react";
 import type { RemoteApi, RemoteInput, RemoteSessionSummary } from "../../app/useRemoteSessions";
@@ -282,7 +283,7 @@ export function RemotePane({
 
   return (
     <div className="remote-pane">
-      <div className="remote-toolbar">
+      <div className="remote-toolbar" onPointerDown={preserveTerminalButtonFocus}>
         <span className="remote-toolbar__identity" title={session.agentName}>
           {session.terminal ? (
             <TerminalIcon size={14} />

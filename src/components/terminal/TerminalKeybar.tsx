@@ -1,3 +1,4 @@
+import { preserveTerminalButtonFocus } from "./terminalPointerFocus";
 import { useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n/context";
 import type { Terminal } from "@xterm/xterm";
@@ -21,9 +22,13 @@ export function useTerminalControlKey() {
 }
 
 /** Focus from the tap itself, even if an earlier programmatic focus did not show iOS's keyboard. */
-export function openTerminalKeyboard(terminal: Pick<Terminal, "blur" | "focus"> | null) {
-  terminal?.blur();
-  terminal?.focus();
+export function openTerminalKeyboard(terminal: Pick<Terminal, "blur" | "focus" | "textarea"> | null) {
+  if (!terminal) return;
+  // A first tap must focus directly. Only cycle an already-focused input,
+  // whose keyboard may have been dismissed without changing DOM focus.
+  const textarea = terminal.textarea;
+  if (textarea && textarea.ownerDocument.activeElement === textarea) terminal.blur();
+  terminal.focus();
 }
 
 const keys = [
@@ -56,10 +61,15 @@ export function TerminalKeybar({
   children?: ReactNode;
 }) {
   const { t } = useI18n();
+  const keyboardButton = useRef<HTMLButtonElement>(null);
   return (
     <div className="terminal-keybar" role="toolbar" aria-label={t("terminal.keybar.label")}
-      onPointerDown={(event) => event.preventDefault()}>
-      <button type="button" className="terminal-keybar__key terminal-keybar__keyboard"
+      onPointerDown={event => {
+        // Keep the native pointer gesture intact for iOS keyboard activation.
+        const button = (event.target as Element | null)?.closest?.("button");
+        if (button !== keyboardButton.current) preserveTerminalButtonFocus(event);
+      }}>
+      <button ref={keyboardButton} type="button" className="terminal-keybar__key terminal-keybar__keyboard"
         disabled={disabled} aria-label={t("terminal.keybar.openKeyboard")} onClick={onToggleKeyboard}>
         <KeyboardIcon size={18} />
       </button>

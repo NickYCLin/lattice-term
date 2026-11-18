@@ -1,3 +1,4 @@
+import { preserveTerminalButtonFocus } from "../terminal/terminalPointerFocus";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
@@ -61,11 +62,11 @@ function RemoteCliWorkspace({ session, theme, active }: { session: RemoteSession
     return () => { stopped = true; clearTimeout(timer); };
   }, [active, session.sessionId, session.cli, selected, generation]);
   return <section ref={pane} className="remote-cli-pane" aria-label={t("remote.cli.title")}>
-    <header className="remote-pane-header">
+    <header className="remote-pane-header" onPointerDown={preserveTerminalButtonFocus}>
       {selected ? <button className="button button--secondary button--sm" onClick={() => setSelected(null)}>{t("remote.cli.back")}</button> : <strong>{t("remote.cli.title")}</strong>}
       <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(false); refresh(value => value + 1); }}><RefreshIcon size={15} /></button>
     </header>
-    {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={`${selected.id}-${generation}`} connection={session} selected={selected} theme={theme} /> : <>
+    {!session.cli ? <p>{t("remote.cli.disabled")}</p> : selected ? active && <RemoteCliTerminal key={selected.id} connection={session} selected={selected} theme={theme} refreshRevision={generation} /> : <>
       <div className="remote-cli-tools">
         <input type="search" className="input remote-cli-search" aria-label={t("remote.cli.search")}
           placeholder={t("remote.cli.search")} value={query} onChange={event => { listScroll.current = 0; setQuery(event.currentTarget.value); }} />
@@ -105,13 +106,15 @@ function RemoteCliWorkspace({ session, theme, active }: { session: RemoteSession
   </section>;
 }
 
-function RemoteCliTerminal({ connection, selected, theme }: { connection: RemoteSessionSummary; selected: RemoteCliSession; theme: ThemeId }) {
+function RemoteCliTerminal({ connection, selected, theme, refreshRevision }: { connection: RemoteSessionSummary; selected: RemoteCliSession; theme: ThemeId; refreshRevision: number }) {
   const { t } = useI18n();
   const [problem, setProblem] = useState(false);
   const [ready, setReady] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const terminal = useRef<Terminal | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const restartReplay = useRef<(() => void) | null>(null);
+  const lastRefresh = useRef(refreshRevision);
   const [image, setImage] = useState<{ state: "uploading"; percent: number } | { state: "sent" | "failed" | "unreadable" } | null>(null);
   const channel = useMemo(() => new RemoteCliChannel(selected.id, operation => requestRemoteCli(connection.sessionId, operation), () => setProblem(true)), [connection.sessionId, selected.id]);
   const uploadEpoch = useRef(0);
@@ -130,27 +133,43 @@ function RemoteCliTerminal({ connection, selected, theme }: { connection: Remote
     terminalResize: async (_id: string, cols: number, rows: number) => { channel.resize(cols, rows); },
     onTerminalData: (_id: string, listener: (bytes: Uint8Array) => void) => {
       channel.resume();
-      let stopped = false, cursor = 0, polled = Date.now();
+      let stopped = false, cursor = 0, polled = Date.now(), revision = 0;
       let timer: ReturnType<typeof setTimeout>;
-      async function poll() {
+      async function poll(expected = revision) {
         try {
           if (Date.now() - polled > 3000) channel.reclaimSize();
           const output = await requestRemoteCli<RemoteCliOutput>(connection.sessionId, { kind: "cliRead", sessionId: selected.id, cursor });
           polled = Date.now();
-          if (stopped) return;
+          if (stopped || expected !== revision) return;
           if (output.sessionId !== selected.id || output.nextCursor < output.cursor || output.cursor < cursor && !output.truncated) throw new Error("Invalid terminal cursor");
           if (output.truncated) { listener(new TextEncoder().encode("\x1bc")); setTruncated(true); }
           const bytes = Uint8Array.from(atob(output.base64), char => char.charCodeAt(0));
           if (bytes.length) listener(bytes);
           cursor = output.nextCursor;
           if (cursor >= output.endOffset) setReady(true);
-          timer = setTimeout(() => { void poll(); }, cursor < output.endOffset ? 0 : 200);
-        } catch { if (!stopped) { channel.stop(); setProblem(true); } }
+          timer = setTimeout(() => { void poll(expected); }, cursor < output.endOffset ? 0 : 200);
+        } catch { if (!stopped && expected === revision) { channel.stop(); setProblem(true); } }
       }
+      const restart = () => {
+        revision++; clearTimeout(timer); cursor = 0; polled = Date.now();
+        channel.resume(); setProblem(false); setReady(false); setTruncated(false);
+        listener(new TextEncoder().encode("\x1bc"));
+        void poll();
+      };
+      restartReplay.current = restart;
       void poll();
-      return () => { stopped = true; clearTimeout(timer); channel.stop(); };
+      return () => { stopped = true; clearTimeout(timer); channel.stop(); if (restartReplay.current === restart) restartReplay.current = null; };
     },
   }) as unknown as RemoteApi, [channel, connection.sessionId, selected.id]);
+  useEffect(() => {
+    if (lastRefresh.current === refreshRevision) return;
+    lastRefresh.current = refreshRevision;
+    // Flush queued typing before replaying; preserve xterm's textarea/focus.
+    uploadEpoch.current++; uploadPending.current = false; setImage(null);
+    let cancelled = false;
+    void channel.settle().then(() => { if (!cancelled && uploadMounted.current) restartReplay.current?.(); });
+    return () => { cancelled = true; };
+  }, [refreshRevision, channel]);
   // Keep the terminal mounted while initial output arrives, but intercept input
   // until caught up. Toggling viewOnly would rebuild xterm and restart replay.
   const card = remoteCliCard(selected, t("terminal.model.pending"));

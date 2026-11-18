@@ -1,3 +1,4 @@
+import { preserveTerminalButtonFocus } from "../terminal/terminalPointerFocus";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { stripAgentMetadata } from "../../app/chatMarkdown";
 import { displayPath } from "../../app/displayPath";
@@ -131,7 +132,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
   const heading = current ? remoteThreadCard(current.thread, t("remote.chat.untitled"), t("terminal.model.pending")) : null;
   const visibleThreads = filterRemoteThreads(threads, query, activity);
   return <section className="remote-chat-pane" hidden={hidden} aria-label={t("remote.chat.title")}>
-    <header className="remote-pane-header">
+    <header className="remote-pane-header" onPointerDown={preserveTerminalButtonFocus}>
       {selected ? <button className="button button--secondary button--sm" disabled={busy} onClick={() => { setSelected(null); setPage(null); setBefore(null); setProblem(null); }}>{t("remote.chat.sessions")}</button> : <strong>{t("remote.chat.title")}</strong>}
       {selected && current && <button className="button button--secondary button--sm remote-pane-header__new" disabled={busy} title={t("remote.chat.new")} aria-label={t("remote.chat.new")} onClick={() => { void act({ kind: "create", templateId: selected }); }}><PlusIcon size={14} />{t("remote.chat.newShort")}</button>}
       <button className="button button--secondary button--sm remote-pane-header__icon" aria-label={t("remote.chat.refresh")} title={t("remote.chat.refresh")} onClick={() => { setProblem(null); setBefore(null); setRefresh(value => value + 1); }}><RefreshIcon size={15} /></button>
@@ -190,7 +191,7 @@ export function RemoteChatPane({ sessionId, hidden }: { sessionId: string; hidde
         {uploading && <p role="status" className="muted remote-chat-uploading">{t("remote.chat.uploading", { current: uploading.index + 1, count: images.length, percent: uploading.percent })}</p>}
         <div className="remote-chat-card">
           <textarea className="remote-chat-card__input" aria-label={t("remote.chat.message")} placeholder={t("remote.chat.message")} rows={2} maxLength={16384} value={draft} onChange={e => setDrafts(value => ({ ...value, [selected]: e.target.value }))} />
-          <div className="remote-chat-card__toolbar">
+          <div className="remote-chat-card__toolbar" onPointerDown={preserveTerminalButtonFocus}>
             <input ref={picker} type="file" accept="image/*" multiple hidden onChange={event => { void pick(event.target.files); event.target.value = ""; }} />
             {!current.thread.runningTurnId && <button type="button" className="remote-chat-card__icon remote-chat-attach" disabled={busy || images.length >= MAX_IMAGES} title={t("remote.chat.attachImage")} aria-label={t("remote.chat.attachImage")} onClick={() => picker.current?.click()}><ImageFileIcon size={18} /></button>}
             <span role="status" className="remote-chat-status"><ActivityPill activity={remoteThreadActivity(current.thread)} /></span>
