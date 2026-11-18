@@ -10,7 +10,7 @@ import { TerminalPane } from "./TerminalPane";
 
 const mocks = vi.hoisted(() => ({ terminals: [] as any[] }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class {
-  textarea = Object.assign(new EventTarget(), { value: "", setAttribute() {} });
+  textarea = Object.assign(new EventTarget(), { value: "", ownerDocument: document, setAttribute() {} });
   options: Record<string, unknown>;
   keyHandler: (event: KeyboardEvent) => boolean = () => true;
   dataHandler: (data: string) => void = () => {};
@@ -22,8 +22,8 @@ vi.mock("@xterm/xterm", () => ({ Terminal: class {
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) { this.keyHandler = handler; }
   input(data: string) { this.dataHandler(data); }
   write() {}
-  focus() {}
-  blur() {}
+  focus = vi.fn(() => Object.assign(document, { activeElement: this.textarea }));
+  blur = vi.fn(() => Object.assign(document, { activeElement: null }));
   dispose() {}
 } }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
@@ -102,6 +102,40 @@ describe.each(["ssh", "remote"])("%s mobile terminal", kind => {
     const home = allNodes(container).find(node => node.tagName === "BUTTON" && node.textContent === "Home")!;
     await act(async () => props(home).onClick());
     expect(send).toHaveBeenLastCalledWith("mobile-terminal", "\x1b[H");
+  });
+
+  it("routes every rendered helper key through the terminal transport and preserves pointer focus", async () => {
+    const terminal = await render(kind);
+    terminal.focus();
+    const toolbar = allNodes(container).find(node => props(node)?.role === "toolbar")!;
+    const expected = new Map([
+      ["空白", " "], ["Enter", "\r"], ["Esc", "\x1b"], ["Tab", "\t"],
+      ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["←", "\x1b[D"], ["→", "\x1b[C"],
+      ["Home", "\x1b[H"], ["End", "\x1b[F"], ["PgUp", "\x1b[5~"], ["PgDn", "\x1b[6~"], ["Del", "\x1b[3~"], ["|", "|"], ["-", "-"], ["~", "~"],
+    ]);
+    expect(allNodes(toolbar).filter(node => node.tagName === "BUTTON")).toHaveLength(expected.size + 2);
+    for (const [label, sequence] of expected) {
+      const button = allNodes(toolbar).find(node => node.tagName === "BUTTON" && node.textContent === label)!;
+      const preventDefault = vi.fn();
+      props(toolbar).onPointerDown({ target: { closest: () => button }, preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      await act(async () => props(button).onClick());
+      expect(send).toHaveBeenLastCalledWith("mobile-terminal", sequence);
+      expect(document.activeElement).toBe(terminal.textarea);
+    }
+    const keyboard = allNodes(toolbar).find(node => props(node)?.["aria-label"] === "開啟鍵盤")!;
+    for (const focused of [false, true]) {
+      Object.assign(document, { activeElement: focused ? terminal.textarea : null });
+      terminal.blur.mockClear(); terminal.focus.mockClear();
+      const preventDefault = vi.fn();
+      props(toolbar).onPointerDown({ target: { closest: () => keyboard }, preventDefault });
+      expect(preventDefault).not.toHaveBeenCalled();
+      // A direct click invokes focus before returning, without a timer/effect.
+      props(keyboard).onClick();
+      expect(terminal.blur).toHaveBeenCalledTimes(focused ? 1 : 0);
+      expect(terminal.focus).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(terminal.textarea);
+    }
   });
 
   it("cancels pending mobile input when the terminal unmounts", async () => {

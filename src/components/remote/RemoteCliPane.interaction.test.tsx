@@ -3,18 +3,20 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { RemoteCliPane } from "./RemoteCliPane";
+import { TerminalKeybar } from "../terminal/TerminalKeybar";
 import type { RemoteApi, RemoteSessionSummary } from "../../app/useRemoteSessions";
 import type { RemoteCliOperation } from "../../app/remoteCli";
-const { invoke, readImage, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), readImage: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null, inputDisabled: false } }));
-vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote, toolbarActions, inputDisabled }: { session: RemoteSessionSummary; remote: RemoteApi; toolbarActions?: import("react").ReactNode; inputDisabled?: boolean }) => {
+const { invoke, readImage, rendered } = vi.hoisted(() => ({ invoke: vi.fn(), readImage: vi.fn(), rendered: { text: "", remote: null as RemoteApi | null, inputDisabled: false, mounts: 0, focus: vi.fn() } }));
+vi.mock("./RemoteTerminalView", () => ({ RemoteTerminalView: ({ session, remote, toolbarActions, inputDisabled, terminalRef }: { session: RemoteSessionSummary; remote: RemoteApi; toolbarActions?: import("react").ReactNode; inputDisabled?: boolean; terminalRef?: { current: unknown } }) => {
+  if (terminalRef) terminalRef.current = { modes: { bracketedPasteMode: false }, focus: rendered.focus };
   rendered.remote = remote;
   rendered.inputDisabled = !!inputDisabled;
-  useEffect(() => remote.onTerminalData(session.sessionId, bytes => { rendered.text += new TextDecoder().decode(bytes); }), [session.sessionId]);
-  return <div data-input-disabled={inputDisabled}>Test terminal{toolbarActions}</div>;
+  useEffect(() => { rendered.mounts++; return remote.onTerminalData(session.sessionId, bytes => { rendered.text += new TextDecoder().decode(bytes); }); }, [session.sessionId]);
+  return <div data-input-disabled={inputDisabled}>Test terminal<TerminalKeybar ctrlArmed={false} onToggleCtrl={() => {}} onToggleKeyboard={() => {}} onInput={data => { void remote.terminalInput(session.sessionId, data); }} disabled={inputDisabled}>{toolbarActions}</TerminalKeybar></div>;
 } }));
 const IMAGE = "A".repeat(16 * 1024) + "QUJD";
 vi.mock("./remoteImage", () => ({ readRemoteImage: readImage }));
-beforeEach(() => { readImage.mockImplementation(async () => ({ key: "image", preview: "", data: IMAGE, bytes: IMAGE.length / 4 * 3 })); });
+beforeEach(() => { rendered.text = ""; rendered.mounts = 0; readImage.mockImplementation(async () => ({ key: "image", preview: "", data: IMAGE, bytes: IMAGE.length / 4 * 3 })); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); });
 class HostNode {
   nodeType = 1;
@@ -280,4 +282,67 @@ it("lists existing CLIs, replays output and sends ordered input in StrictMode", 
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(operations).toHaveLength(listCount);
   } finally { await act(async () => { root.unmount(); }); }
+});
+
+
+it("keeps inserted image/Ctrl+C actions and refresh/back controls pointer-focus safe", async () => {
+  const test = await uploadHarness();
+  const nativeProps = (node: HostNode) => reactProps(node) as unknown as Record<string, any>;
+  const protectedTap = (node: HostNode) => {
+    const preventDefault = vi.fn();
+    for (let parent: HostNode | null = node; parent; parent = parent.parentNode) {
+      nativeProps(parent)?.onPointerDown?.({ target: { closest: () => node }, preventDefault });
+    }
+    expect(preventDefault).toHaveBeenCalledOnce();
+  };
+  try {
+    const interrupt = allNodes(test.container).find(n => n.tagName === "BUTTON" && n.textContent === "Ctrl+C")!;
+    protectedTap(interrupt);
+    await act(async () => { nativeProps(interrupt).onClick(); await vi.advanceTimersByTimeAsync(35); });
+    expect(test.operations.filter(op => op.kind === "cliInput")).toEqual([expect.objectContaining({ data: "\x03" })]);
+    expect(rendered.focus).toHaveBeenCalledOnce();
+    const attach = allNodes(test.container).find(n => n.attributes["aria-label"] === "傳圖片給 CLI")!;
+    const file = allNodes(test.container).find(n => n.tagName === "INPUT" && nativeProps(n).type === "file")!;
+    const choose = vi.fn(); Object.assign(file, { click: choose });
+    protectedTap(attach); await act(async () => nativeProps(attach).onClick());
+    expect(choose).toHaveBeenCalledOnce();
+    await test.pick(); expect(test.operations.some(op => op.kind === "cliAttach")).toBe(true);
+    expect(test.operations.filter(op => op.kind === "cliInput")).toHaveLength(1);
+    const mounts = rendered.mounts;
+    const refresh = allNodes(test.container).find(n => n.attributes["aria-label"] === "重新整理")!;
+    const reads = test.operations.filter(op => op.kind === "cliRead").length;
+    protectedTap(refresh); await act(async () => { nativeProps(refresh).onClick(); await vi.advanceTimersByTimeAsync(5); });
+    expect(rendered.mounts).toBe(mounts);
+    expect(test.operations.filter(op => op.kind === "cliRead").length).toBeGreaterThan(reads);
+    expect(rendered.text).toContain("\x1bc");
+    const back = allNodes(test.container).find(n => n.tagName === "BUTTON" && n.textContent === "返回清單")!;
+    protectedTap(back); await act(async () => nativeProps(back).onClick());
+    expect(allNodes(test.container).some(n => n.attributes.class?.includes("remote-cli-card"))).toBe(true);
+    expect(test.container.textContent).not.toContain("Test terminal");
+  } finally { await act(async () => test.root.unmount()); }
+});
+
+it("ignores an older in-flight output response after refreshing without remounting xterm", async () => {
+  const test = await uploadHarness();
+  const original = invoke.getMockImplementation()!;
+  let finish!: (value: unknown) => void;
+  let delayed = true;
+  invoke.mockImplementation(async (command, args) => {
+    const operation = args.request.operation;
+    if (operation.kind !== "cliRead") return original(command, args);
+    if (delayed) { delayed = false; return new Promise(resolve => { finish = resolve; }); }
+    return { id: args.request.id, error: null, value: { sessionId: operation.sessionId, cursor: operation.cursor,
+      nextCursor: 5, endOffset: 5, truncated: false, base64: operation.cursor === 0 ? btoa("FRESH") : "" } };
+  });
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    expect(finish).toBeDefined();
+    const mounts = rendered.mounts;
+    const refresh = allNodes(test.container).find(n => n.attributes["aria-label"] === "重新整理")!;
+    await act(async () => { reactProps(refresh).onClick(); await vi.advanceTimersByTimeAsync(1); });
+    await act(async () => { finish({ id: "old", error: null, value: { sessionId: "image-session", cursor: 0, nextCursor: 3, endOffset: 3, truncated: false, base64: btoa("OLD") } }); });
+    expect(rendered.text).toContain("FRESH"); expect(rendered.text).not.toContain("OLD");
+    expect(rendered.mounts).toBe(mounts);
+    expect(rendered.inputDisabled).toBe(false);
+  } finally { await act(async () => test.root.unmount()); }
 });

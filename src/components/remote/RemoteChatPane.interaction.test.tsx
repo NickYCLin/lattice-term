@@ -92,3 +92,48 @@ it("sends uploaded images once and clears the completed draft", async () => {
     expect(allNodes(host).some(node => node.tagName === "IMG")).toBe(false);
   } finally { await act(async () => root.unmount()); }
 });
+
+it("routes every chat header action and image picker without stealing pointer focus", async () => {
+  vi.useFakeTimers();
+  const host = installHostDom(), root = createRoot(host as unknown as Element);
+  const original = { id: "header-thread", title: "Header fixture", agent: "codex", directory: "/synthetic", runningTurnId: null, updatedAt: 1 };
+  const copy = { ...original, id: "header-copy" };
+  const operations: Array<Record<string, any>> = [];
+  invoke.mockImplementation(async (_command, { request }) => {
+    const op = request.operation; operations.push(op);
+    return { id: request.id, error: null, value: op.kind === "list" ? [original] : op.kind === "create" ? copy : { thread: op.threadId === copy.id ? copy : original, items: [], before: null } };
+  });
+  const buttons = () => allNodes(host).filter(n => n.tagName === "BUTTON");
+  const protect = (button: ReturnType<typeof buttons>[number], parent: ReturnType<typeof buttons>[number]) => {
+    const preventDefault = vi.fn(); props(parent).onPointerDown({ target: { closest: () => button }, preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+  };
+  try {
+    await act(async () => root.render(<I18nProvider locale="zh-TW"><RemoteChatPane sessionId="synthetic-host" hidden={false} /></I18nProvider>));
+    await act(async () => props(buttons().find(n => n.textContent.includes(original.title))!).onClick());
+    const header = () => allNodes(host).find(n => props(n)?.className === "remote-pane-header")!;
+    expect(allNodes(header()).filter(n => n.tagName === "BUTTON")).toHaveLength(3);
+    const area = allNodes(host).find(n => n.tagName === "TEXTAREA")!;
+    Object.assign(document, { activeElement: area });
+    await act(async () => props(area).onChange({ target: { value: "unsent fixture draft" } }));
+    const refresh = buttons().find(n => props(n)["aria-label"] === "重新整理")!;
+    protect(refresh, header()); const reads = operations.filter(op => op.kind === "read").length;
+    await act(async () => props(refresh).onClick());
+    expect(operations.filter(op => op.kind === "read").length).toBeGreaterThan(reads);
+    expect(allNodes(host).find(n => n.tagName === "TEXTAREA")).toBe(area);
+    expect(document.activeElement).toBe(area); expect(props(area).value).toBe("unsent fixture draft");
+    const image = buttons().find(n => props(n)["aria-label"] === "圖片")!;
+    const picker = allNodes(host).find(n => n.tagName === "INPUT" && props(n).type === "file")!;
+    const choose = vi.fn(); Object.assign(picker, { click: choose });
+    protect(image, allNodes(host).find(n => props(n)?.className === "remote-chat-card__toolbar")!);
+    await act(async () => props(image).onClick()); expect(choose).toHaveBeenCalledOnce();
+    const create = buttons().find(n => props(n)["aria-label"] === "以相同設定開新對話")!;
+    protect(create, header()); await act(async () => props(create).onClick());
+    expect(operations).toContainEqual({ kind: "create", templateId: original.id });
+    const back = allNodes(header()).find(n => n.tagName === "BUTTON" && n.textContent === "返回清單")!;
+    protect(back, header()); await act(async () => props(back).onClick());
+    expect(host.textContent).toContain(original.title);
+    expect(allNodes(host).some(n => n.tagName === "TEXTAREA")).toBe(false);
+    expect(operations.some(op => op.kind === "send" || op.kind === "steer")).toBe(false);
+  } finally { await act(async () => root.unmount()); }
+});
